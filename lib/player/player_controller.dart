@@ -476,10 +476,22 @@ class PlayerController extends ChangeNotifier {
       // restores the old value and the delayed save persists that stale value.
       if (_settingsSaveTimer != null) await _persistSettings();
       if (!_accepts(operation)) return;
-      await _restoreSettings(operation);
-      if (!_accepts(operation)) return;
       onStage?.call('catalog metadata');
-      final loadedItem = await client.getItem(itemId);
+      late EmbyItem loadedItem;
+      EmbyUser? loadedUser;
+      await Future.wait<void>([
+        _restoreSettings(operation),
+        client.getItem(itemId).then<void>((value) {
+          loadedItem = value;
+        }),
+        () async {
+          try {
+            loadedUser = await client.getUser();
+          } on EmbyException {
+            // Optional user preferences must not block an otherwise playable item.
+          }
+        }(),
+      ], eagerError: true);
       if (!_accepts(operation)) {
         return;
       }
@@ -499,14 +511,7 @@ class PlayerController extends ChangeNotifier {
         episodeSeasonId = null;
         _resetEpisodeWindow();
       }
-      try {
-        final loadedUser = await client.getUser();
-        if (!_accepts(operation)) return;
-        user = loadedUser;
-      } on EmbyException {
-        if (!_accepts(operation)) return;
-        user = null;
-      }
+      user = loadedUser;
       _catalogRuntime = durationFromTicks(item!.runTimeTicks ?? 0);
       duration = _catalogRuntime;
       _applyRememberedPreference();

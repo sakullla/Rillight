@@ -833,6 +833,93 @@ void main() {
   });
 
   group('session_read_ahead_test.dart', () {
+    for (final concurrency in [2, 4]) {
+      test(
+        '$concurrency parallel ranges publish past a stalled lane within bounded workspace',
+        () async {
+          const mib = 1024 * 1024;
+          final chunk = concurrency == 2 ? 8 * mib : 6 * mib;
+          final root = await Directory.systemTemp.createTemp(
+            'rillight-parallel-',
+          );
+          final cache = await SessionByteCache.open(
+            root: root,
+            memoryLimitBytes: 8 * mib,
+            diskLimitBytes: 64 * mib,
+          );
+          final release = Completer<void>();
+          final ranges = <(int, int)>[];
+          var reservations = 0;
+          var peak = 0;
+          final ahead = SessionReadAhead(
+            cache: cache,
+            resource: 'parallel',
+            generation: 1,
+            total: 24 * mib,
+            aheadBytes: 24 * mib,
+            maxConcurrentTransfers: concurrency,
+            reserveWorkspace: () {
+              reservations++;
+              if (reservations > peak) peak = reservations;
+              return true;
+            },
+            releaseWorkspace: () => reservations--,
+            fetch: (start, end) async {
+              ranges.add((start, end));
+              return ReadAheadTransfer(
+                (() async* {
+                  for (var offset = start; offset <= end; offset += 64 * 1024) {
+                    final length = (end - offset + 1).clamp(0, 64 * 1024);
+                    yield Uint8List(length)
+                      ..fillRange(0, length, offset ~/ mib);
+                    if (offset == 0) await release.future;
+                  }
+                })(),
+                () {
+                  if (start == 0 && !release.isCompleted) release.complete();
+                },
+              );
+            },
+          );
+          final reader = StreamIterator(ahead.read(0, 24 * mib - 1));
+          try {
+            expect(await reader.moveNext(), true);
+            await until(
+              () =>
+                  ahead.diagnostics['readAheadPublishedBytes'] ==
+                  24 * mib - chunk,
+            );
+            expect(release.isCompleted, false);
+            final later = await ahead
+                .read(chunk, chunk + 31)
+                .expand((bytes) => bytes)
+                .toList();
+            expect(later, List.filled(32, chunk ~/ mib));
+            expect(ranges, [
+              for (var start = 0; start < 24 * mib; start += chunk)
+                (start, start + chunk - 1),
+            ]);
+            expect(peak, concurrency);
+            expect(
+              cache.diagnostics['pendingPeakBytes'],
+              lessThanOrEqualTo(cache.pendingLimitBytes),
+            );
+            ahead.stop();
+            await reader.cancel();
+            await ahead.close();
+            expect(reservations, 0);
+            expect(ahead.failed, false);
+          } finally {
+            if (!release.isCompleted) release.complete();
+            await reader.cancel();
+            await ahead.close();
+            await cache.close();
+            await root.delete(recursive: true);
+          }
+        },
+      );
+    }
+
     test(
       'consumed reclamation preserves initialization upcoming bytes and active leases',
       () async {
@@ -965,6 +1052,71 @@ void main() {
         }
       },
     );
+    for (final targetMiB in [8, 40]) {
+      test('seek to $targetMiB MiB preempts a stalled old download', () async {
+        const mib = 1024 * 1024;
+        final cache = await SessionByteCache.open(memoryLimitBytes: 8 * mib);
+        final releases = <Completer<void>>[];
+        final starts = <int>[];
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'seek',
+          generation: 1,
+          total: 192 * mib,
+          aheadBytes: 64 * mib,
+          fetch: (start, end) async {
+            starts.add(start);
+            final release = Completer<void>();
+            releases.add(release);
+            return ReadAheadTransfer(
+              (() async* {
+                yield Uint8List(64 * 1024)
+                  ..fillRange(0, 64 * 1024, start == 0 ? 1 : 7);
+                await release.future;
+              })(),
+              () {
+                if (!release.isCompleted) release.complete();
+              },
+            );
+          },
+        );
+        final old = StreamIterator(ahead.read(0, 192 * mib - 1));
+        final seek = StreamIterator(
+          ahead.read(targetMiB * mib, targetMiB * mib + 64 * 1024 - 1),
+        );
+        Future<void>? oldPending;
+        try {
+          expect(await old.moveNext(), true);
+          // The old downstream can still be awaiting bytes when native seek
+          // opens its replacement. It must not steal the producer position.
+          oldPending = old.moveNext().then<void>(
+            (_) {},
+            onError: (Object _) {},
+          );
+          await Future<void>.delayed(Duration.zero);
+          expect(
+            await seek.moveNext().timeout(const Duration(seconds: 2)),
+            true,
+          );
+          expect(seek.current.every((byte) => byte == 7), true);
+          expect(starts.take(2), [0, targetMiB * mib]);
+          expect(await seek.moveNext(), false);
+          await oldPending.timeout(const Duration(seconds: 2));
+          expect(old.current.every((byte) => byte == 7), true);
+          expect(starts.take(3), [0, targetMiB * mib, 64 * 1024]);
+        } finally {
+          ahead.stop();
+          for (final release in releases) {
+            if (!release.isCompleted) release.complete();
+          }
+          await oldPending;
+          await old.cancel();
+          await seek.cancel();
+          await ahead.close();
+          await cache.close();
+        }
+      });
+    }
     test(
       'a cancelled track read retains its validated partial block',
       () async {
@@ -1007,6 +1159,52 @@ void main() {
           expect(retained?.bytes, hasLength(size));
           expect(retained!.bytes.every((byte) => byte == 7), isTrue);
           expect(ahead.failed, isFalse);
+        } finally {
+          await ahead.close();
+          await cache.close();
+        }
+      },
+    );
+    test(
+      'transient exhaustion resumes automatically and retains its prefix',
+      () async {
+        const size = 64 * 1024;
+        final cache = await SessionByteCache.open(memoryLimitBytes: 4 * size);
+        var attempts = 0;
+        final starts = <int>[];
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'retry',
+          generation: 1,
+          total: 2 * size,
+          aheadBytes: 2 * size,
+          fetch: (start, end) async {
+            starts.add(start);
+            final attempt = ++attempts;
+            return ReadAheadTransfer(
+              (() async* {
+                if (attempt == 1) {
+                  yield Uint8List(size)..fillRange(0, size, 7);
+                  throw const ReadAheadRetryLater();
+                }
+                yield Uint8List(end - start + 1)
+                  ..fillRange(0, end - start + 1, 7);
+              })(),
+              () {},
+            );
+          },
+        );
+        try {
+          final bytes = await ahead
+              .read(0, 2 * size - 1)
+              .expand((bytes) => bytes)
+              .toList()
+              .timeout(const Duration(seconds: 5));
+          expect(bytes, List.filled(2 * size, 7));
+          expect(starts, [0, size]);
+          expect(ahead.failed, false);
+          expect(ahead.diagnostics['readAheadTemporaryFailures'], 1);
+          expect(cache.diagnostics['invalidations'], 0);
         } finally {
           await ahead.close();
           await cache.close();

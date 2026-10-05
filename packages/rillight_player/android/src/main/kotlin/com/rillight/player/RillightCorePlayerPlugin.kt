@@ -197,7 +197,9 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 "aac" to has("aac"),
                 "ac3" to has("ac3"),
                 "eac3" to has("eac3"),
-                "truehd" to has("truehd")))
+                "truehd" to has("truehd"),
+                "ass" to has("ass"),
+                "ssa" to has("ssa")))
             return
         }
         if (call.method in setOf("setSystemBrightness", "getSystemBrightness",

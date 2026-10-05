@@ -7,6 +7,187 @@ import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
 
 void main() {
+  test('initialization bytes count toward the rolling window budget', () async {
+    final fixture = await _SlowHls.open(
+      sessionBuffering: true,
+      readAheadBytes: 32 * 1024,
+      initialization: true,
+    );
+    try {
+      final segments = await fixture.playlist();
+      await fixture.start(segments.first);
+      await fixture.nextEntered.future.timeout(const Duration(seconds: 2));
+      await fixture.waitPrefetch();
+      expect(fixture.counts['/init.mp4'], 1);
+      expect(fixture.counts['/b.ts'], 1);
+      expect(fixture.counts['/c.ts'], isNull);
+      expect(
+        fixture.proxy.diagnostics['segmentPrefetchDownloadedBytes'],
+        32768,
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test('healthy high latency prefetch survives foreground handoff', () async {
+    final fixture = await _SlowHls.open(holdNext: true);
+    try {
+      final segments = await fixture.playlist();
+      await fixture.start(segments.first);
+      await fixture.nextEntered.future.timeout(const Duration(seconds: 2));
+      final demand = fixture.read(segments[1]);
+      // Explicitly model 250 ms header latency, beyond the old 100 ms cutoff.
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      fixture.nextReleased.complete();
+      expect(await demand.timeout(const Duration(seconds: 2)), 16 * 1024);
+      expect(fixture.counts['/b.ts'], 1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test(
+    'new demand for an active owner is retained until its job finishes',
+    () async {
+      final fixture = await _SlowHls.open(
+        sessionBuffering: true,
+        holdNext: true,
+      );
+      try {
+        final segments = await fixture.playlist();
+        await fixture.start(segments.first);
+        await fixture.nextEntered.future.timeout(const Duration(seconds: 2));
+        expect(await fixture.read(segments[5]), 16 * 1024);
+        expect(fixture.proxy.diagnostics['segmentPrefetchPending'], 1);
+        fixture.nextReleased.complete();
+        await fixture.waitPrefetch();
+        expect(fixture.counts['/g.ts'], 1);
+        expect(fixture.counts['/c.ts'], isNull);
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  test('buffering warms a bounded VOD window before decoder demand', () async {
+    final fixture = await _SlowHls.open(sessionBuffering: true);
+    try {
+      final segments = await fixture.playlist();
+      final first = await fixture.start(segments.first);
+      await fixture.nextEntered.future;
+      await fixture.waitPrefetch();
+      expect(fixture.currentReleased.isCompleted, isFalse);
+      for (final name in ['b', 'c', 'd', 'e']) {
+        expect(fixture.counts['/$name.ts'], 1);
+      }
+      expect(fixture.counts['/f.ts'], isNull);
+      expect(await fixture.read(segments[1]), 16 * 1024);
+      await fixture.waitRequested('/f.ts');
+      await fixture.waitPrefetch();
+      expect(fixture.counts['/b.ts'], 1);
+      expect(fixture.counts['/f.ts'], 1);
+      expect(fixture.counts['/g.ts'], isNull);
+      fixture.currentReleased.complete();
+      await first.done;
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test('rolling prefetch obeys its byte budget', () async {
+    final fixture = await _SlowHls.open(
+      sessionBuffering: true,
+      readAheadBytes: 32 * 1024,
+    );
+    try {
+      final segments = await fixture.playlist();
+      await fixture.start(segments.first);
+      await fixture.nextEntered.future;
+      await fixture.waitPrefetch();
+      expect(fixture.counts['/b.ts'], 1);
+      expect(fixture.counts['/c.ts'], 1);
+      expect(fixture.counts['/d.ts'], isNull);
+      expect(
+        fixture.proxy.diagnostics['segmentPrefetchDownloadedBytes'],
+        32768,
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test('uncacheable segments do not extend speculative window', () async {
+    final fixture = await _SlowHls.open(
+      sessionBuffering: true,
+      cacheable: false,
+    );
+    try {
+      final segments = await fixture.playlist();
+      await fixture.start(segments.first);
+      await fixture.nextEntered.future;
+      await fixture.waitPrefetch();
+      expect(fixture.counts['/b.ts'], 1);
+      expect(fixture.counts['/c.ts'], isNull);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  test(
+    'pause cancels the rolling window and seek starts at new demand',
+    () async {
+      final fixture = await _SlowHls.open(
+        sessionBuffering: true,
+        holdNext: true,
+      );
+      try {
+        final segments = await fixture.playlist();
+        await fixture.start(segments.first);
+        await fixture.nextEntered.future;
+        fixture.proxy.setPlaybackActive(false);
+        fixture.nextReleased.complete();
+        await fixture.waitPrefetch();
+        expect(fixture.counts['/c.ts'], isNull);
+        fixture.proxy.cancelPendingReads();
+        fixture.proxy.setPlaybackActive(true);
+        expect(await fixture.read(segments[5]), 16 * 1024);
+        await fixture.waitRequested('/g.ts');
+        await fixture.waitPrefetch();
+        expect(fixture.counts['/c.ts'], isNull);
+        expect(fixture.counts['/g.ts'], 1);
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
+    '403 disables rolling speculation while foreground remains playable',
+    () async {
+      final fixture = await _SlowHls.open(
+        sessionBuffering: true,
+        nextFailures: 1,
+        failureStatus: 403,
+      );
+      try {
+        final segments = await fixture.playlist();
+        final first = await fixture.start(segments.first);
+        await fixture.nextEntered.future;
+        await fixture.waitPrefetch();
+        expect(fixture.counts['/c.ts'], isNull);
+        fixture.currentReleased.complete();
+        await first.done;
+        expect(await fixture.read(segments[1]), 16 * 1024);
+        await fixture.waitPrefetch();
+        expect(fixture.counts['/c.ts'], isNull);
+        expect(fixture.proxy.diagnostics['serialUpstream'], isTrue);
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
   test(
     'foreground reuses a next segment that finishes during bounded handoff',
     () async {
@@ -16,7 +197,12 @@ void main() {
         final first = await fixture.start(segments[0]);
         await fixture.nextEntered.future.timeout(const Duration(seconds: 1));
         final demand = fixture.read(segments[1]);
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while (fixture.proxy.diagnostics['segmentPrefetchHandoffs'] == 0 &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+        expect(fixture.proxy.diagnostics['segmentPrefetchHandoffs'], 1);
         fixture.nextReleased.complete();
         expect(await demand.timeout(const Duration(seconds: 1)), 16 * 1024);
         expect(fixture.counts['/b.ts'], 1);
@@ -35,9 +221,12 @@ void main() {
       try {
         final segments = await fixture.playlist();
         final first = await fixture.start(segments[0]);
-        await fixture.nextEntered.future.timeout(const Duration(seconds: 1));
+        await fixture.nextEntered.future.timeout(const Duration(seconds: 3));
+        // The handoff includes its 500 ms header grace and real loopback I/O.
+        // Leave scheduling room in the full suite; the held origin response
+        // below must still be bypassed without releasing its gate.
         expect(
-          await fixture.read(segments[1]).timeout(const Duration(seconds: 1)),
+          await fixture.read(segments[1]).timeout(const Duration(seconds: 3)),
           16 * 1024,
         );
         expect(fixture.nextReleased.isCompleted, isFalse);
@@ -334,12 +523,23 @@ void main() {
 }
 
 class _SlowHls {
-  _SlowHls(this.server, this.proxy, this.holdNext, this.nextFailures);
+  _SlowHls(
+    this.server,
+    this.proxy,
+    this.holdNext,
+    this.nextFailures,
+    this.failureStatus,
+    this.cacheable,
+    this.initialization,
+  );
   final HttpServer server;
   final PlaybackHttpProxy proxy;
   final client = HttpClient();
   final bool holdNext;
   int nextFailures;
+  final int failureStatus;
+  final bool cacheable;
+  final bool initialization;
   final counts = <String, int>{};
   final currentReleased = Completer<void>();
   final nextReleased = Completer<void>();
@@ -348,13 +548,30 @@ class _SlowHls {
   static Future<_SlowHls> open({
     bool holdNext = false,
     int nextFailures = 0,
+    bool sessionBuffering = false,
+    int readAheadBytes = 1024 * 1024,
+    bool cacheable = true,
+    int failureStatus = 503,
+    bool initialization = false,
   }) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final cache = await SessionByteCache.open(
       memoryLimitBytes: 2 * 1024 * 1024,
     );
-    final proxy = await PlaybackHttpProxy.create(cache: cache);
-    final fixture = _SlowHls(server, proxy, holdNext, nextFailures);
+    final proxy = await PlaybackHttpProxy.create(
+      cache: cache,
+      sessionBuffering: sessionBuffering,
+      readAheadBytes: readAheadBytes,
+    );
+    final fixture = _SlowHls(
+      server,
+      proxy,
+      holdNext,
+      nextFailures,
+      failureStatus,
+      cacheable,
+      initialization,
+    );
     server.listen(fixture.serve);
     return fixture;
   }
@@ -369,20 +586,24 @@ class _SlowHls {
           'vnd.apple.mpegurl',
         );
         request.response.write(
-          '#EXTM3U\n#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts\n#EXTINF:2,\nc.ts\n#EXT-X-ENDLIST\n',
+          '#EXTM3U\n${initialization ? '#EXT-X-MAP:URI="init.mp4"\n' : ''}${['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((s) => '#EXTINF:2,\n$s.ts\n').join()}#EXT-X-ENDLIST\n',
         );
       } else {
         if (path == '/b.ts') {
           if (!nextEntered.isCompleted) nextEntered.complete();
           if (nextFailures-- > 0) {
-            request.response.statusCode = 503;
+            request.response.statusCode = failureStatus;
             await request.response.close();
             return;
           }
           if (holdNext && counts[path] == 1) await nextReleased.future;
         }
-        request.response.headers.set('etag', '"$path"');
-        request.response.headers.set('cache-control', 'max-age=120');
+        if (cacheable) {
+          request.response.headers.set('etag', '"$path"');
+          request.response.headers.set('cache-control', 'max-age=120');
+        } else {
+          request.response.headers.set('vary', '*');
+        }
         final length = path == '/a.ts' ? 64 * 1024 : 16 * 1024;
         request.response.contentLength = length;
         if (request.headers.value('range') != null) {
@@ -455,6 +676,14 @@ class _SlowHls {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     expect(proxy.diagnostics['segmentPrefetchActive'], isFalse);
+  }
+
+  Future<void> waitRequested(String path) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 4));
+    while (!counts.containsKey(path) && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+    expect(counts.containsKey(path), isTrue, reason: 'request for $path');
   }
 
   Future<void> close() async {

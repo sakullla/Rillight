@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:win32/win32.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_process_protocol.dart';
@@ -208,12 +209,28 @@ class WindowsPlayerProcessControl extends DesktopPlayerProcessControl {
   Future<void> terminate(int pid) async {
     final child = _children[pid];
     if (child == null || !child.isAlive) return;
-    child.terminate();
+    WindowsException? terminationError;
+    StackTrace? terminationStack;
+    try {
+      child.terminate();
+    } on WindowsException catch (error, stack) {
+      if (error.hr != ERROR_ACCESS_DENIED.toHRESULT()) rethrow;
+      // Windows can deny TerminateProcess while a concurrent normal exit is
+      // still completing. Confirm the original handle's exit asynchronously;
+      // never treat a termination failure alone as proof that the child exited.
+      terminationError = error;
+      terminationStack = stack;
+    }
     final deadline = DateTime.now().add(const Duration(seconds: 2));
     while (child.isAlive && DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(pollInterval);
     }
-    if (child.isAlive) throw StateError('Player process did not terminate');
+    if (child.isAlive) {
+      if (terminationError != null) {
+        Error.throwWithStackTrace(terminationError, terminationStack!);
+      }
+      throw StateError('Player process did not terminate');
+    }
   }
 
   @override

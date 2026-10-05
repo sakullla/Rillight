@@ -1,3 +1,11 @@
+add_executable(rillight_h264_access_unit_test h264_access_unit_test.cpp)
+if(MSVC)
+  target_compile_options(rillight_h264_access_unit_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_h264_access_unit_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_h264_access_unit COMMAND rillight_h264_access_unit_test)
+
 add_executable(rillight_android_surface_copy_test android_surface_copy_test.cpp)
 if(MSVC)
   target_compile_options(rillight_android_surface_copy_test PRIVATE /W4 /WX /UNDEBUG)

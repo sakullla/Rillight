@@ -1,0 +1,8 @@
+name: rillight
+publish_to: none
+environment:
+  sdk: ^3.13.3
+dependencies:
+  cryptography: 2.9.0
+  ffi: 2.2.0
+  win32: 6.0.1

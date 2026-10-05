@@ -9,6 +9,8 @@ Map<String, dynamic> androidDeviceProfile({
   bool ac3 = false,
   bool eac3 = false,
   bool truehd = false,
+  bool ass = false,
+  bool ssa = false,
   int maxStreamingBitrate = 20000000,
 }) {
   final video = [if (h264) 'h264', if (hevc) 'hevc'];
@@ -48,7 +50,12 @@ Map<String, dynamic> androidDeviceProfile({
     'SubtitleProfiles': [
       for (final format in ['srt', 'subrip', 'vtt', 'webvtt'])
         {'Format': format, 'Method': 'External'},
-      for (final format in ['ass', 'ssa', 'pgs', 'pgssub', 'dvdsub', 'dvbsub'])
+      // The owned core renders these locally with libass. Advertising Encode
+      // for a verified decoder forces otherwise direct MKV playback through
+      // server-side video transcoding merely because an ASS track is selected.
+      {'Format': 'ass', 'Method': ass ? 'Embed' : 'Encode'},
+      {'Format': 'ssa', 'Method': ssa ? 'Embed' : 'Encode'},
+      for (final format in ['pgs', 'pgssub', 'dvdsub', 'dvbsub'])
         {'Format': format, 'Method': 'Encode'},
     ],
   };
@@ -63,6 +70,8 @@ Map<String, dynamic> ownedCoreDeviceProfile({
   bool ac3 = false,
   bool eac3 = false,
   bool truehd = false,
+  bool ass = false,
+  bool ssa = false,
   int maxStreamingBitrate = kCoreMaxStreamingBitrate,
 }) => {
   ...androidDeviceProfile(
@@ -72,6 +81,8 @@ Map<String, dynamic> ownedCoreDeviceProfile({
     ac3: ac3,
     eac3: eac3,
     truehd: truehd,
+    ass: ass,
+    ssa: ssa,
     maxStreamingBitrate: maxStreamingBitrate,
   ),
   'Name': 'Rillight owned FFmpeg core',
