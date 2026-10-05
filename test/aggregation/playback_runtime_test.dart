@@ -520,6 +520,60 @@ void main() {
   );
 
   test(
+    'backup management checks never reopen or reassign source-owned playback',
+    () async {
+      await setup();
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await controller.togglePlay();
+      final original = controller.activeOrigin;
+      final originalClient = controller.client;
+      final originalUrl = backend.openedUrl;
+      final opens = backend.openCount;
+      final credentials = await auth.sources.credentials.read('a');
+      final permit = auth.sources.permit(account, libraryId: 'library');
+      for (final target in ['mirror', 'wrong']) {
+        final result = await auth.sources.check('a', lineId: target);
+        expect(
+          result.status,
+          target == 'mirror'
+              ? ManualCheckStatus.available
+              : ManualCheckStatus.identityMismatch,
+        );
+        expect(controller.activeOrigin, same(original));
+        expect(controller.client, same(originalClient));
+        expect(controller.activeLineId, 'line');
+        expect(controller.pendingLineId, isNull);
+        expect(controller.activeMediaSourceId, 'v');
+        expect(controller.position, const Duration(seconds: 12));
+        expect(backend.isPlaying, isFalse);
+        expect(backend.openCount, opens);
+        expect(backend.openedUrl, originalUrl);
+        expect(permit.isValid, isTrue);
+        expect(
+          (await auth.sources.credentials.read('a'))?.accessToken,
+          credentials?.accessToken,
+        );
+        expect(
+          auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+          'line',
+        );
+      }
+      await controller.togglePlay();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
+      await _eventually(
+        () => controller.position == const Duration(seconds: 13),
+      );
+      expect(controller.activeOrigin, same(original));
+      expect(backend.isPlaying, isTrue);
+      await controller.close();
+      expect(reports.last.itemId, 'movie');
+      expect(reports.last.positionTicks, 13 * kEmbyTicksPerSecond);
+    },
+  );
+
+  test(
     'line identity failure keeps current source and credentials; mirror preserves pause and position',
     () async {
       await setup();

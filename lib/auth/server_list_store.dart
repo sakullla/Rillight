@@ -5,7 +5,16 @@ import 'dart:math';
 enum AccessRegion { ordinary, private }
 
 class ServerLine {
-  const ServerLine({required this.id, required this.address, this.nickname});
+  const ServerLine({
+    required this.id,
+    required this.address,
+    this.nickname,
+    this.checkStatus = 'unknown',
+    this.checkedAt,
+  });
+
+  final String checkStatus;
+  final DateTime? checkedAt;
 
   final String? nickname;
 
@@ -24,6 +33,8 @@ class ServerLine {
     'id': id,
     'address': address,
     if (nickname != null) 'nickname': nickname,
+    'checkStatus': checkStatus,
+    'checkedAt': checkedAt?.toIso8601String(),
   };
 
   factory ServerLine.fromJson(Map<String, dynamic> json) {
@@ -34,14 +45,30 @@ class ServerLine {
       id: id.isNotEmpty ? id : 'line-$address',
       address: address,
       nickname: json['nickname']?.toString(),
+      checkStatus: json['checkStatus']?.toString() ?? 'unknown',
+      checkedAt: DateTime.tryParse(json['checkedAt']?.toString() ?? ''),
     );
   }
 
-  ServerLine copyWith({String? id, String? address, String? nickname}) {
+  ServerLine copyWith({
+    String? id,
+    String? address,
+    String? nickname,
+    String? checkStatus,
+    DateTime? checkedAt,
+  }) {
     return ServerLine(
       id: id ?? this.id,
       address: address ?? this.address,
       nickname: nickname ?? this.nickname,
+      checkStatus:
+          checkStatus ??
+          (address != null && address != this.address
+              ? 'unknown'
+              : this.checkStatus),
+      checkedAt:
+          checkedAt ??
+          (address != null && address != this.address ? null : this.checkedAt),
     );
   }
 }

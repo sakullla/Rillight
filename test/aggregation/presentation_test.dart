@@ -365,6 +365,120 @@ void main() {
     PresentationEnvironment.tv,
   ]) {
     testWidgets(
+      '${environment.presentation.name} real management checks backup line without changing active source',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        await tester.runAsync(f.open);
+        addTearDown(f.close);
+        final backup = FakeEmbyServer(
+          serverId: 'a',
+          serverName: '备用线路',
+          baseUrl: Uri.parse('http://backup.test'),
+        );
+        backup.issuedTokens.addAll(f.a.issuedTokens);
+        f.adapter.add(backup);
+        late SavedServer saved;
+        late SourceSession session;
+        await tester.runAsync(() async {
+          await f.auth.addLine(f.aId, backup.baseUrl.toString());
+          saved = f.auth.sources
+              .project(AccessRegion.ordinary)
+              .firstWhere((s) => s.id == f.aId);
+          await f.auth.sources.renameLine(f.aId, saved.lines.last.id, '备用线路');
+          session = await f.auth.sources.authenticate(f.aId);
+        });
+        final permit = f.auth.sources.permit(
+          session.account,
+          libraryId: 'view-movies',
+        );
+        final activeClient = f.auth.client;
+        final activeUrl = activeClient.baseUrl;
+        tester.view.physicalSize = environment.isTv
+            ? const Size(1920, 1080)
+            : environment.isDesktop
+            ? const Size(1024, 768)
+            : const Size(360, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final app = f.app(environment);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        if (environment.isDesktop) {
+          await tester.tap(find.byKey(const Key('app-shell-aggregation')));
+        } else if (environment.isTv) {
+          await tester.tap(find.byKey(const ValueKey('tv-nav-1')));
+        } else {
+          await tester.tap(find.byType(NavigationDestination).at(1));
+        }
+        await _settle(tester);
+        await tester.tap(
+          find.byKey(const Key('aggregation-source-management')),
+        );
+        await _settle(tester);
+        expect(find.byType(SourceManagement), findsOneWidget);
+        final check = find.byKey(
+          Key('source-line-check-${f.aId}-${saved.lines.last.id}'),
+        );
+        await tester.scrollUntilVisible(
+          check,
+          120,
+          scrollable: find
+              .descendant(
+                of: find.byType(SourceManagement),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await _settle(tester);
+        if (environment.isTv) {
+          final focus = find
+              .descendant(of: check, matching: find.byType(Focus))
+              .first;
+          Focus.of(
+            tester.element(
+              find
+                  .descendant(of: focus, matching: find.byType(Semantics))
+                  .first,
+            ),
+          ).requestFocus();
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        } else {
+          await tester.tap(check);
+        }
+        await _settle(tester);
+        final updated = f.auth.sources
+            .project(AccessRegion.ordinary)
+            .firstWhere((s) => s.id == f.aId);
+        expect(updated.lines.last.checkStatus, 'available');
+        expect(updated.lines.last.checkedAt, isNotNull);
+        final tile = find.ancestor(of: check, matching: find.byType(ListTile));
+        expect(
+          find.descendant(
+            of: tile,
+            matching: find.textContaining('available · '),
+          ),
+          findsOneWidget,
+        );
+        expect(updated.activeLineId, saved.activeLineId);
+        expect(permit.isValid, isTrue);
+        expect(session.client.hasSession, isTrue);
+        expect(f.auth.client, same(activeClient));
+        expect(f.auth.client.baseUrl, activeUrl);
+        expect(
+          backup.requests.any((r) => r.contains('/System/Info/Public')),
+          isTrue,
+        );
+        expect(backup.requests.any((r) => r.contains('/Users/')), isTrue);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+    testWidgets(
       '${environment.presentation.name} real management opens anonymous PIN gate and cancels without widening scope',
       (tester) async {
         isolateImageCache();

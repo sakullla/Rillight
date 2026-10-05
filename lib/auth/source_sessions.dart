@@ -628,38 +628,42 @@ class SourceSessionRegistry {
         serverId: info.id,
       );
       guard();
-      final previous = await credentials.read(id);
-      guard();
-      _credentialChanges.add(id);
-      _invalidate(id);
-      _sessions.remove(id)?.client.clearSession();
-      try {
-        await credentials.write(
-          id,
-          StoredCredentials(
-            accessToken: result.accessToken,
-            userId: result.user.id,
-            username: username,
-          ),
-        );
-        if ((_scopes[id] ?? 0) != scope + 1 ||
-            _allowed(id).region != server.region ||
-            _authAttempts[id] != attempt ||
-            !access.allows(server.region) ||
-            (server.region == AccessRegion.private &&
-                generation != access.generation)) {
-          throw StateError('Login revoked');
+      // Credential IO and rollback share the ordinary/configuration writer.
+      await _enqueue(() async {
+        guard();
+        final previous = await credentials.read(id);
+        guard();
+        _credentialChanges.add(id);
+        _invalidate(id);
+        _sessions.remove(id)?.client.clearSession();
+        try {
+          await credentials.write(
+            id,
+            StoredCredentials(
+              accessToken: result.accessToken,
+              userId: result.user.id,
+              username: username,
+            ),
+          );
+          if ((_scopes[id] ?? 0) != scope + 1 ||
+              _allowed(id).region != server.region ||
+              _authAttempts[id] != attempt ||
+              !access.allows(server.region) ||
+              (server.region == AccessRegion.private &&
+                  generation != access.generation)) {
+            throw StateError('Login revoked');
+          }
+        } catch (_) {
+          if (previous == null) {
+            await credentials.delete(id);
+          } else {
+            await credentials.write(id, previous);
+          }
+          rethrow;
+        } finally {
+          _credentialChanges.remove(id);
         }
-      } catch (_) {
-        if (previous == null) {
-          await credentials.delete(id);
-        } else {
-          await credentials.write(id, previous);
-        }
-        rethrow;
-      } finally {
-        _credentialChanges.remove(id);
-      }
+      });
     } finally {
       client.clearSession();
     }
@@ -798,9 +802,15 @@ class SourceSessionRegistry {
 
   Future<ManualCheckResult> check(
     String id, {
+    String? lineId,
     Duration timeout = const Duration(seconds: 10),
   }) async {
     final server = _allowed(id);
+    final line = lineId == null
+        ? server.activeLine
+        : server.lines.where((line) => line.id == lineId).firstOrNull;
+    if (line == null) throw StateError('Unknown check line');
+    final checkKey = jsonEncode([id, line.id]);
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
@@ -808,12 +818,12 @@ class SourceSessionRegistry {
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Check client must be independent');
     }
-    final attempt = (_checkAttempts[id] ?? 0) + 1;
-    _checkAttempts[id] = attempt;
+    final attempt = (_checkAttempts[checkKey] ?? 0) + 1;
+    _checkAttempts[checkKey] = attempt;
     var finished = false;
     void guard() {
       _requireCurrent(server, scope, generation);
-      if (finished || _checkAttempts[id] != attempt) {
+      if (finished || _checkAttempts[checkKey] != attempt) {
         throw StateError('Check superseded');
       }
     }
@@ -821,7 +831,7 @@ class SourceSessionRegistry {
     var status = ManualCheckStatus.unknown;
     try {
       status = await (() async {
-        final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+        final info = await client.getPublicInfo(Uri.parse(line.address));
         guard();
         if (info.id != (server.verifiedServerId ?? id)) {
           return ManualCheckStatus.identityMismatch;
@@ -830,7 +840,7 @@ class SourceSessionRegistry {
         guard();
         if (stored == null) return ManualCheckStatus.needsLogin;
         client.attachSession(
-          baseUrl: Uri.parse(server.baseUrl),
+          baseUrl: Uri.parse(line.address),
           accessToken: stored.accessToken,
           userId: stored.userId,
           userAgent: server.userAgent,
@@ -855,7 +865,9 @@ class SourceSessionRegistry {
       finished = true;
       client.clearSession();
     }
-    if (_checkAttempts[id] != attempt) throw StateError('Check superseded');
+    if (_checkAttempts[checkKey] != attempt) {
+      throw StateError('Check superseded');
+    }
     if ((_scopes[id] ?? 0) != scope ||
         _allowed(id).region != server.region ||
         (server.region == AccessRegion.private &&
@@ -865,10 +877,26 @@ class SourceSessionRegistry {
     final result = ManualCheckResult(status, DateTime.now());
     await _update(id, (current) {
       _requireCurrent(server, scope, generation);
-      if (_checkAttempts[id] != attempt) throw StateError('Check superseded');
+      if (_checkAttempts[checkKey] != attempt) {
+        throw StateError('Check superseded');
+      }
+      final target = current.lines.where((l) => l.id == line.id).firstOrNull;
+      if (target == null || target.address != line.address) {
+        throw StateError('Check target changed');
+      }
       return current.copyWith(
-        checkStatus: status.name,
-        checkedAt: result.checkedAt,
+        lines: current.lines
+            .map(
+              (l) => l.id == line.id
+                  ? l.copyWith(
+                      checkStatus: status.name,
+                      checkedAt: result.checkedAt,
+                    )
+                  : l,
+            )
+            .toList(),
+        checkStatus: lineId == null ? status.name : current.checkStatus,
+        checkedAt: lineId == null ? result.checkedAt : current.checkedAt,
       );
     });
     return result;
@@ -1032,11 +1060,18 @@ class SourceSessionRegistry {
       if (edit == null) {
         if (!old.containsKey(line.id)) result[line.id] = line.toJson();
       } else {
-        result[line.id] = _mergeDelta(
+        final merged = _mergeDelta(
           line.toJson(),
           old[line.id]?.toJson() ?? {},
           edit.toJson(),
         );
+        final sameTarget = merged['address'] == line.address;
+        // Ordinary editors may rename/reorder, not overwrite check facts.
+        merged['checkStatus'] = sameTarget ? line.checkStatus : 'unknown';
+        merged['checkedAt'] = sameTarget
+            ? line.checkedAt?.toIso8601String()
+            : null;
+        result[line.id] = merged;
       }
     }
     for (final line in edits.values) {

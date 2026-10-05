@@ -345,6 +345,9 @@ class _SourceManagementState extends State<SourceManagement> {
                 for (final line in servers[index].lines)
                   ListTile(
                     title: Text(line.nickname ?? line.hostLabel),
+                    subtitle: Text(
+                      '${line.checkStatus} · ${line.checkedAt?.toLocal().toString() ?? '—'}',
+                    ),
                     leading: IconButton(
                       icon: const Icon(Icons.arrow_upward),
                       onPressed: _busy || servers[index].lines.first == line
@@ -362,27 +365,47 @@ class _SourceManagementState extends State<SourceManagement> {
                               );
                             }),
                     ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      tooltip: l.sourceRenameLine,
-                      onPressed: _busy
-                          ? null
-                          : () async {
-                              final value = await _text(
-                                l.sourceRenameLine,
-                                line.nickname ?? '',
-                                servers[index].id,
-                              );
-                              if (value != null && mounted) {
-                                await _act(
-                                  () => registry.renameLine(
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          key: Key(
+                            'source-line-check-${servers[index].id}-${line.id}',
+                          ),
+                          icon: const Icon(Icons.network_check),
+                          tooltip: l.sourceManualCheck,
+                          onPressed: _busy
+                              ? null
+                              : () => _act(() async {
+                                  await registry.check(
                                     servers[index].id,
-                                    line.id,
-                                    value,
-                                  ),
-                                );
-                              }
-                            },
+                                    lineId: line.id,
+                                  );
+                                }),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined),
+                          tooltip: l.sourceRenameLine,
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  final value = await _text(
+                                    l.sourceRenameLine,
+                                    line.nickname ?? '',
+                                    servers[index].id,
+                                  );
+                                  if (value != null && mounted) {
+                                    await _act(
+                                      () => registry.renameLine(
+                                        servers[index].id,
+                                        line.id,
+                                        value,
+                                      ),
+                                    );
+                                  }
+                                },
+                        ),
+                      ],
                     ),
                   ),
                 const Divider(),

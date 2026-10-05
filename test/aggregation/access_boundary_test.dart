@@ -24,6 +24,7 @@ class TestClient extends EmbyClient {
         ),
       );
   Completer<void>? gate;
+  final List<Uri> publicUrls = [];
   String? identity;
   Completer<void>? loginGate;
   Completer<void>? logoutGate;
@@ -62,6 +63,7 @@ class TestClient extends EmbyClient {
   Completer<void>? userStarted;
   @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
+    publicUrls.add(baseUrl);
     await gate?.future;
     return PublicServerInfo(
       id: identity ?? baseUrl.host,
@@ -162,6 +164,350 @@ Future<SourceSessionRegistry> registry(
 }
 
 void main() {
+  late PinVerifier verifier;
+  setUpAll(() async {
+    verifier = await PinVerifier.create('1234');
+  });
+  for (final operation in ['delete', 'replace', 'migrate', 'lock']) {
+    test(
+      'management credential.write gate serializes $operation without revival',
+      () async {
+        final access = RegionAccessController(verifier: verifier);
+        await access.unlock('1234');
+        final credentials = GatedCredentials({
+          'a': const StoredCredentials(
+            accessToken: 'old',
+            userId: 'old',
+            username: 'old',
+          ),
+        });
+        final r = SourceSessionRegistry(
+          access: access,
+          store: MemoryServerListStore(
+            ServerListSnapshot(
+              servers: [
+                server(
+                  'a',
+                  region: operation == 'lock'
+                      ? AccessRegion.private
+                      : AccessRegion.ordinary,
+                ),
+              ],
+            ),
+          ),
+          credentials: credentials,
+          createClient: TestClient.new,
+        );
+        await r.load();
+        addTearDown(r.dispose);
+        Object? loginFailure;
+        final login = r.login('a', 'new', 'secret').catchError((Object error) {
+          loginFailure = error;
+        });
+        await credentials.started.future;
+        Future<void>? competing;
+        var committed = false;
+        if (operation == 'delete' || operation == 'replace') {
+          final ticket = await r.beginOrdinaryCredentials('a');
+          competing = r
+              .commitOrdinaryCredentials(
+                ticket,
+                operation == 'delete'
+                    ? null
+                    : const StoredCredentials(
+                        accessToken: 'latest',
+                        userId: 'latest',
+                        username: 'latest',
+                      ),
+              )
+              .then((_) {
+                committed = true;
+              });
+          await Future<void>.delayed(Duration.zero);
+          // Observe the ordering as well as the final credential value below.
+        } else if (operation == 'migrate') {
+          competing = r.move('a', AccessRegion.private);
+        } else {
+          await access.lock();
+        }
+        final committedBeforeRelease = committed;
+        credentials.release.complete();
+        await login;
+        await competing;
+        expect(
+          (await credentials.read('a'))?.accessToken,
+          operation == 'delete'
+              ? null
+              : operation == 'replace'
+              ? 'latest'
+              : 'old',
+        );
+        expect(committedBeforeRelease, isFalse);
+        expect(
+          loginFailure,
+          operation == 'lock' || operation == 'migrate' ? isStateError : isNull,
+        );
+      },
+    );
+  }
+
+  test(
+    'management write gate makes actual Auth logout wait then delete permanently',
+    () async {
+      final credentials = GatedCredentials({
+        'a': const StoredCredentials(
+          accessToken: 'old',
+          userId: 'old',
+          username: 'old',
+        ),
+      });
+      final r = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: MemoryServerListStore(
+          ServerListSnapshot(servers: [server('a')], lastServerId: 'a'),
+        ),
+        credentials: credentials,
+        createClient: TestClient.new,
+      );
+      await r.load();
+      final client = TestClient()..logoutStarted = Completer<void>();
+      final auth = AuthController(
+        client: client,
+        credentials: credentials,
+        servers: r.store,
+        sources: r,
+      );
+      addTearDown(auth.dispose);
+      await auth.restore();
+      expect(auth.session, isNotNull);
+      final management = r.login('a', 'new', 'secret');
+      await credentials.started.future;
+      var loggedOut = false;
+      final logout = auth.logout().then((_) => loggedOut = true);
+      await client.logoutStarted!.future;
+      await Future<void>.delayed(Duration.zero);
+      expect(loggedOut, isFalse);
+      credentials.release.complete();
+      await management;
+      await logout;
+      expect(loggedOut, isTrue);
+      expect(await credentials.read('a'), isNull);
+      expect(auth.session, isNull);
+      expect(client.hasSession, isFalse);
+    },
+  );
+
+  test(
+    'queued private login rechecks generation before credential IO',
+    () async {
+      final access = RegionAccessController(verifier: verifier);
+      await access.unlock('1234');
+      final credentials = GatedCredentials({
+        for (final id in ['a', 'b'])
+          id: const StoredCredentials(
+            accessToken: 'old',
+            userId: 'old',
+            username: 'old',
+          ),
+      });
+      final r = SourceSessionRegistry(
+        access: access,
+        store: MemoryServerListStore(
+          ServerListSnapshot(
+            servers: [
+              server('a', region: AccessRegion.private),
+              server('b'),
+            ],
+          ),
+        ),
+        credentials: credentials,
+        createClient: TestClient.new,
+      );
+      await r.load();
+      addTearDown(r.dispose);
+      final ticket = await r.beginOrdinaryCredentials('b');
+      final blocking = r.commitOrdinaryCredentials(
+        ticket,
+        const StoredCredentials(
+          accessToken: 'b-new',
+          userId: 'b-new',
+          username: 'b-new',
+        ),
+      );
+      await credentials.started.future;
+      final login = r.login('a', 'new', 'secret');
+      final rejected = expectLater(login, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      await access.lock();
+      credentials.release.complete();
+      await blocking;
+      await rejected;
+      expect((await credentials.read('a'))?.accessToken, 'old');
+      expect((await credentials.read('b'))?.accessToken, 'b-new');
+    },
+  );
+
+  test(
+    'parallel management logins preserve every service in FileCredentialStore',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        't7-credentials-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final credentials = FileCredentialStore(
+        File('${directory.path}/credentials.json'),
+      );
+      final r = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: MemoryServerListStore(
+          ServerListSnapshot(servers: [server('a'), server('b')]),
+        ),
+        credentials: credentials,
+        createClient: TestClient.new,
+      );
+      await r.load();
+      addTearDown(r.dispose);
+      await Future.wait([
+        r.login('a', 'alice', 'secret'),
+        r.login('b', 'bob', 'secret'),
+      ]);
+      expect((await credentials.read('a'))?.username, 'alice');
+      expect((await credentials.read('b'))?.username, 'bob');
+    },
+  );
+
+  for (final expected in ManualCheckStatus.values.where(
+    (s) => [
+      ManualCheckStatus.available,
+      ManualCheckStatus.timeout,
+      ManualCheckStatus.identityMismatch,
+      ManualCheckStatus.needsLogin,
+    ].contains(s),
+  )) {
+    test(
+      'explicit backup line check $expected preserves active source permit',
+      () async {
+        final checking = TestClient();
+        if (expected == ManualCheckStatus.timeout) {
+          checking.gate = Completer<void>();
+        }
+        if (expected == ManualCheckStatus.identityMismatch) {
+          checking.identity = 'wrong';
+        }
+        if (expected == ManualCheckStatus.needsLogin) checking.expired = true;
+        var forCheck = false;
+        final r = SourceSessionRegistry(
+          access: RegionAccessController(),
+          store: MemoryServerListStore(
+            ServerListSnapshot(servers: [server('a')]),
+          ),
+          credentials: MemoryCredentialStore({
+            'a': const StoredCredentials(
+              accessToken: 'old',
+              userId: 'user-a',
+              username: 'alice',
+            ),
+          }),
+          createClient: () => forCheck ? checking : TestClient(),
+        );
+        await r.load();
+        addTearDown(r.dispose);
+        final session = await r.authenticate('a');
+        final permit = r.permit(session.account);
+        forCheck = true;
+        final result = await r.check(
+          'a',
+          lineId: 'two',
+          timeout: const Duration(milliseconds: 5),
+        );
+        expect(result.status, expected);
+        expect(checking.publicUrls, [Uri.parse('https://a/emby')]);
+        final saved = (await r.store.load()).servers.single;
+        expect(saved.activeLineId, 'one');
+        expect(saved.lines.first.checkStatus, 'unknown');
+        expect(saved.lines.last.checkStatus, expected.name);
+        expect(saved.lines.last.checkedAt, result.checkedAt);
+        expect(saved.checkStatus, 'unknown');
+        expect(permit.isValid, isTrue);
+        expect(session.client.hasSession, isTrue);
+        expect(
+          checking.userRequests,
+          expected == ManualCheckStatus.available ||
+                  expected == ManualCheckStatus.needsLogin
+              ? 1
+              : 0,
+        );
+        checking.gate?.complete();
+        await Future<void>.delayed(Duration.zero);
+      },
+    );
+  }
+
+  test(
+    'parallel target checks retain independent per-line status and time',
+    () async {
+      final first = TestClient()..gate = Completer<void>();
+      final second = TestClient()..identity = 'wrong';
+      final clients = [first, second];
+      final r = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: MemoryServerListStore(
+          ServerListSnapshot(servers: [server('a')]),
+        ),
+        credentials: MemoryCredentialStore({
+          'a': const StoredCredentials(
+            accessToken: 'old',
+            userId: 'old',
+            username: 'old',
+          ),
+        }),
+        createClient: () => clients.removeAt(0),
+      );
+      await r.load();
+      addTearDown(r.dispose);
+      final pending = r.check('a', lineId: 'one');
+      final backup = await r.check('a', lineId: 'two');
+      first.gate!.complete();
+      final active = await pending;
+      final saved = (await r.store.load()).servers.single;
+      expect(saved.activeLineId, 'one');
+      expect(saved.lines.first.checkStatus, 'available');
+      expect(saved.lines.first.checkedAt, active.checkedAt);
+      expect(saved.lines.last.checkStatus, 'identityMismatch');
+      expect(saved.lines.last.checkedAt, backup.checkedAt);
+      expect(
+        SavedServer.fromJson(saved.toJson()).lines.last.checkedAt,
+        backup.checkedAt,
+      );
+    },
+  );
+
+  test(
+    'ordinary stale line editor preserves checks until the target address changes',
+    () async {
+      final r = await registry(RegionAccessController(), [server('a')], []);
+      final auth = AuthController(
+        client: TestClient(),
+        credentials: r.credentials,
+        servers: r.store,
+        sources: r,
+      );
+      addTearDown(auth.dispose);
+      await r.renameLine('a', 'two', '备用');
+      await auth.restore();
+      final result = await r.check('a', lineId: 'two');
+      await auth.renameServer('a', '重命名服务');
+      var line = (await r.store.load()).servers.single.lines.last;
+      expect(line.checkStatus, 'available');
+      expect(line.checkedAt, result.checkedAt);
+      expect(await auth.updateLineAddress('a', 'two', 'https://a/new'), isTrue);
+      line = (await r.store.load()).servers.single.lines.last;
+      expect(line.checkStatus, 'unknown');
+      expect(line.checkedAt, isNull);
+      expect(line.nickname, '备用');
+    },
+  );
+
   test(
     'management independent login replaces only target identity and discovery never broadens scope',
     () async {
@@ -210,10 +556,6 @@ void main() {
       expect((await sources.credentials.read('b'))!.userId, 'user-b');
     },
   );
-  late PinVerifier verifier;
-  setUpAll(() async {
-    verifier = await PinVerifier.create('1234');
-  });
   test(
     'salted versioned PIN, persisted startup locked and wrong PIN throttled',
     () async {
@@ -408,14 +750,60 @@ void main() {
     );
     addTearDown(r.dispose);
     await r.load();
-    final check = r.check('secret');
+    final check = r.check('secret', lineId: 'two');
     final rejected = expectLater(check, throwsStateError);
     await access.lock();
     gate.complete();
     await rejected;
     expect(client.userRequests, 0);
     expect(client.hasSession, false);
+    expect((await r.store.load()).servers.single.lines.last.checkedAt, isNull);
+    await expectLater(r.check('secret', lineId: 'two'), throwsStateError);
+    expect(client.publicUrls, hasLength(1));
   });
+  test(
+    'backup check user response after private lock cannot publish status',
+    () async {
+      final access = RegionAccessController(verifier: verifier);
+      await access.unlock('1234');
+      final client = TestClient()
+        ..userGate = Completer<void>()
+        ..userStarted = Completer<void>();
+      final credentials = MemoryCredentialStore({
+        'secret': const StoredCredentials(
+          accessToken: 'old',
+          userId: 'old',
+          username: 'old',
+        ),
+      });
+      final r = SourceSessionRegistry(
+        access: access,
+        store: MemoryServerListStore(
+          ServerListSnapshot(
+            servers: [server('secret', region: AccessRegion.private)],
+          ),
+        ),
+        credentials: credentials,
+        createClient: () => client,
+      );
+      await r.load();
+      addTearDown(r.dispose);
+      final check = r.check('secret', lineId: 'two');
+      final rejected = expectLater(check, throwsStateError);
+      await client.userStarted!.future;
+      await access.lock();
+      client.userGate!.complete();
+      await rejected;
+      expect(
+        (await r.store.load()).servers.single.lines.last.checkedAt,
+        isNull,
+      );
+      expect((await credentials.read('secret'))?.accessToken, 'old');
+      expect(client.hasSession, isFalse);
+      expect(r.project(AccessRegion.private), isEmpty);
+    },
+  );
+
   test(
     'ordinary Auth compatibility cannot leak private or overwrite managed scope',
     () async {
