@@ -28,10 +28,12 @@ class TvPlayerPage extends StatefulWidget {
     required this.itemId,
     this.mediaSourceId,
     this.sourceRequest,
+    this.routeLeaseKey,
     this.autoResume = true,
   });
   final String itemId;
   final PlayerOpenRequest? sourceRequest;
+  final Object? routeLeaseKey;
   final String? mediaSourceId;
   final bool autoResume;
   @override
@@ -72,6 +74,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     final created = PlayerController(
       runtime: bindings.runtime,
       openRequest: widget.sourceRequest,
+      routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
       itemId: widget.itemId,
       backend: bindings.createBackend?.call() ?? RillightVideoBackend(),

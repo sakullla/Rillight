@@ -3,6 +3,7 @@ import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/router.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/player/phone_orientation.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -51,6 +52,7 @@ class _Client extends EmbyClient {
         ),
       );
   final List<PlaybackReport> reports;
+  final progressReports = <PlaybackReport>[];
   bool failProgress = false;
   bool failStopped = false;
   int playbackRequests = 0;
@@ -135,6 +137,7 @@ class _Client extends EmbyClient {
   Future<void> reportPlaying(PlaybackReport report) async {}
   @override
   Future<void> reportProgress(PlaybackReport report) async {
+    progressReports.add(report);
     if (failProgress) throw StateError('synthetic report failure');
   }
 
@@ -377,6 +380,259 @@ void main() {
     }
 
     addTearDown(cleanup);
+  }
+
+  test(
+    'current private snapshot recovers Stopped and failed report retries',
+    () async {
+      await setup(private: true);
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 17));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      final snapshot = (await snapshots.read())!;
+      expect(runtime.canRecoverSnapshot(snapshot), isTrue);
+      final client = controller.client as _Client;
+      client.failStopped = true;
+      await expectLater(runtime.recoverSnapshot(snapshot), throwsStateError);
+      expect(runtime.canRecoverSnapshot(snapshot), isTrue);
+      client.failStopped = false;
+      expect(await runtime.recoverSnapshot(snapshot), isTrue);
+      expect(reports.last.positionTicks, 17 * kEmbyTicksPerSecond);
+      expect(reports.last.playSessionId, snapshot.playSessionId);
+      final recoveryStore = MemoryPlaybackSessionSnapshotStore();
+      await recoveryStore.write(snapshot);
+      client.failStopped = true;
+      await expectLater(
+        recoverAndroidSession(auth.client, recoveryStore, runtime: runtime),
+        throwsStateError,
+      );
+      expect(await recoveryStore.read(), isNotNull);
+      client.failStopped = false;
+      expect(
+        await recoverAndroidSession(
+          auth.client,
+          recoveryStore,
+          runtime: runtime,
+        ),
+        isTrue,
+      );
+      expect(await recoveryStore.read(), isNull);
+      final beforeInvalid = reports.length;
+      for (final edit in [
+        {'userId': 'wrong'},
+        {'libraryId': 'wrong'},
+      ]) {
+        final invalid = PlaybackSessionSnapshot.fromJson({
+          ...snapshot.toJson(),
+          ...edit,
+        })!;
+        expect(await runtime.recoverSnapshot(invalid), isFalse);
+      }
+      expect(reports.length, beforeInvalid);
+      await auth.regionAccess.lock();
+      final count = reports.length;
+      expect(await runtime.recoverSnapshot(snapshot), isFalse);
+      await auth.regionAccess.unlock('1234');
+      expect(await runtime.recoverSnapshot(snapshot), isFalse);
+      expect(reports.length, count);
+    },
+  );
+
+  for (final environment in [
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    for (final sameId in [true, false]) {
+      testWidgets(
+        '${environment.presentation.name} mounted manual B lease survives startup A migration sameId=$sameId',
+        (tester) async {
+          final messenger =
+              TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+          messenger.setMockMethodCallHandler(
+            const MethodChannel('rillight/android_core'),
+            (_) async => null,
+          );
+          addTearDown(
+            () => messenger.setMockMethodCallHandler(
+              const MethodChannel('rillight/android_core'),
+              null,
+            ),
+          );
+          await setup(widgetTester: tester);
+          await auth.restore();
+          await tester.runAsync(() async {
+            await auth.regionAccess.setPin('1234', '1234', (_) async {});
+            await auth.regionAccess.unlock('1234');
+          });
+          final router = createAppRouter(auth: auth, environment: environment);
+          backend = _Backend();
+          controller.dispose();
+          final request = PlayerOpenRequest(
+            itemId: 'movie',
+            source: SourceReference(account: account, itemId: 'movie'),
+            libraryId: 'library',
+            regionGeneration: runtime.registry.permit(account).regionGeneration,
+          );
+          tester.view.physicalSize = environment.isTv
+              ? const Size(1920, 1080)
+              : const Size(412, 915);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          await tester.pumpWidget(
+            RillightApp(
+              auth: auth,
+              router: router,
+              environment: environment,
+              playerBindings: PlayerBindings(
+                runtime: runtime,
+                createBackend: () => backend,
+                progressInterval: const Duration(milliseconds: 30),
+                settingsStore: MemoryPlayerSettingsStore(),
+                snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+              ),
+            ),
+          );
+          Future<void> drain() async {
+            for (var i = 0; i < 30; i++) {
+              await tester.pump(const Duration(milliseconds: 50));
+              await tester.runAsync(
+                () => Future<void>.delayed(const Duration(milliseconds: 10)),
+              );
+            }
+          }
+
+          router.go(
+            '/item/movie',
+            extra: PlayerHostOpenItemCommand(
+              itemId: 'movie',
+              source: request.source,
+              libraryId: 'library',
+              regionGeneration: request.regionGeneration,
+            ),
+          );
+          await drain();
+          router.push('/play/movie', extra: request);
+          await drain();
+          final c = environment.isTv
+              ? tester
+                    .state<TvPlayerPageState>(find.byType(TvPlayerPage))
+                    .controller!
+              : tester
+                    .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+                    .controller!;
+          expect(c.origin!.source.account, account);
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 10),
+          );
+          await drain();
+          final b = (await runtime.registry.authenticate('b')).account;
+          final targetId = sameId ? 'movie' : 'movie-b';
+          final reference = SourceReference(account: b, itemId: targetId);
+          final item = await runtime.registry
+              .permit(b, libraryId: 'library')
+              .dispatch((client) => client.getItem(targetId));
+          await tester.runAsync(() async {
+            await c.switchConfirmedSource(
+              SourceComparison(
+                QueryItem(reference, 'library', item),
+                const MatchDecision(
+                  MatchKind.confirmed,
+                  MatchReason.commonProvider,
+                ),
+              ),
+              'v2',
+            );
+            unawaited(
+              c.confirmMediaSourceSwitch(SwitchResumeChoice.currentPosition),
+            );
+          });
+          await drain();
+          expect(
+            c.origin!.source.account,
+            b,
+            reason: '${c.error} / ${c.trackFailure}',
+          );
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 11),
+          );
+          await drain();
+          expect(c.activeOrigin!.source.account, b);
+          await tester.runAsync(
+            () => runtime.registry.move('a', AccessRegion.private),
+          );
+          await drain();
+          expect(c.permissionRevoked, isFalse);
+          expect(router.state.uri.path, '/play/movie');
+          expect(
+            (router.state.extra as PlayerOpenRequest).source!.account,
+            account,
+          );
+          expect(
+            runtime.mountedPlayerOrigin(router.state.pageKey)!.source.account,
+            b,
+          );
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 12),
+          );
+          await drain();
+          expect(c.position, const Duration(seconds: 12));
+          expect(
+            runtime.history
+                .records(AccessRegion.ordinary)
+                .single
+                .source
+                .account,
+            b,
+          );
+          expect(
+            runtime.history.records(AccessRegion.ordinary).single.positionTicks,
+            12 * kEmbyTicksPerSecond,
+          );
+          expect(c.client.baseUrl!.host, 'b');
+          final bClient = c.client as _Client;
+          expect(
+            bClient.progressReports.last.playSessionId,
+            'play-b-$targetId',
+          );
+          expect(
+            bClient.progressReports.last.positionTicks,
+            12 * kEmbyTicksPerSecond,
+          );
+          final progressCount = bClient.progressReports.length;
+          await tester.runAsync(
+            () => runtime.registry.configureScope(
+              'b',
+              participates: false,
+              libraryIds: {},
+            ),
+          );
+          backend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 99),
+          );
+          await drain();
+          expect(c.permissionRevoked, isTrue);
+          expect(c.activeOrigin, isNull);
+          expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
+          expect(bClient.progressReports.length, progressCount);
+          expect(find.byType(MobilePlayerPage), findsNothing);
+          expect(find.byType(TvPlayerPage), findsNothing);
+          expect(runtime.hasMountedPlayer(c.routeLeaseKey!), isFalse);
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.runAsync(() async {
+            await controller.disposeAsync();
+            await runtime.history.close();
+          });
+          router.dispose();
+        },
+        tags: ['integration'],
+      );
+    }
   }
 
   for (final failTarget in [false, true]) {
@@ -1161,6 +1417,38 @@ void main() {
     await host.open(controller.openRequest!);
     return host;
   }
+
+  test('desktop crash reconciles current unlocked private snapshot', () async {
+    await setup(private: true);
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 14));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    final saved = (await snapshots.read())!;
+    final store = MemoryPlaybackSessionSnapshotStore();
+    await store.write(saved);
+    final ipc = _IpcControl();
+    final host = DesktopPlayerWindowHost(
+      auth: auth,
+      runtime: runtime,
+      processControl: ipc,
+      snapshotStoreForPid: (_) => store,
+      watchInterval: const Duration(milliseconds: 5),
+      closeTimeout: const Duration(milliseconds: 50),
+    );
+    addTearDown(() async {
+      await host.close();
+      host.dispose();
+    });
+    await host.open(controller.openRequest!);
+    final before = reports.length;
+    ipc.exit(ipc.lastPid);
+    await _eventually(() => reports.length > before);
+    await _eventually(() => host.current == null);
+    expect(await store.read(), isNull);
+    expect(reports.last.playSessionId, saved.playSessionId);
+    expect(reports.last.positionTicks, saved.positionTicks);
+  });
 
   for (final environment in [
     PresentationEnvironment.phone,

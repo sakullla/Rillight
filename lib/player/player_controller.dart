@@ -151,6 +151,7 @@ class PlayerController extends ChangeNotifier {
     this.switchDispatcher,
     this.reportOutcomeSink,
     this.openRequest,
+    this.routeLeaseKey,
     this.nextPrefixFetch,
     PlaybackSessionSnapshotStore? snapshotStore,
   }) : snapshotStore =
@@ -164,6 +165,12 @@ class PlayerController extends ChangeNotifier {
     maxStreamingBitrate =
         openRequest?.maxStreamingBitrate ?? maxStreamingBitrate;
     activeMediaSourceId = _scopedPlayback ? null : preferredMediaSourceId;
+    if (routeLeaseKey != null) {
+      runtime?.mountPlayer(
+        routeLeaseKey!,
+        () => _disposed || _revoked ? null : origin,
+      );
+    }
     runtime?.registry.access.addRevocationHook(_revokeSource);
     runtime?.registry.access.addCleanupHook(_closeRevokedSource);
     runtime?.registry.access.addTerminationHook(_terminateRevokedSource);
@@ -183,6 +190,7 @@ class PlayerController extends ChangeNotifier {
   final PlaybackReportOutcomeSink? reportOutcomeSink;
   bool get _scopedPlayback => runtime != null || observationSink != null;
   final PlayerOpenRequest? openRequest;
+  final Object? routeLeaseKey;
   PlaybackOrigin? origin;
   PlaybackOrigin? activeOrigin;
   String? activeLineId;
@@ -4992,6 +5000,7 @@ class PlayerController extends ChangeNotifier {
     // emissions before starting synchronous portions of resource retirement;
     // explicit disposeAsync still publishes stopped state while mounted.
     _disposed = true;
+    if (routeLeaseKey != null) runtime?.unmountPlayer(routeLeaseKey!);
     unawaited(_disposing ??= _disposeResources(reportStopped: false));
     runtime?.registry.access.removeRevocationHook(_revokeSource);
     runtime?.registry.access.removeCleanupHook(_closeRevokedSource);

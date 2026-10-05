@@ -63,7 +63,19 @@ GoRouter createAppRouter({
         playerState = router.state;
       }
       final request = playerState.extra;
-      if (playerState.uri.path.startsWith('/play/') &&
+      final runtime = context
+          .getInheritedWidgetOfExactType<PlayerScope>()
+          ?.bindings
+          .runtime;
+      final mountedPlayer =
+          runtime?.hasMountedPlayer(playerState.pageKey) == true;
+      if (playerState.uri.path.startsWith('/play/') && mountedPlayer) {
+        // Immutable extra is startup intent, not ownership after switching.
+        // Only this mounted controller's actual runtime lease counts.
+        authorizedPlayer =
+            runtime!.mountedPlayerOrigin(playerState.pageKey)?.permit.isValid ==
+            true;
+      } else if (playerState.uri.path.startsWith('/play/') &&
           request is PlayerOpenRequest &&
           request.source != null &&
           request.source!.itemId == request.itemId &&
@@ -154,6 +166,7 @@ GoRouter createAppRouter({
                   child: Theme(
                     data: AppTheme.dark(),
                     child: MobilePlayerPage(
+                      routeLeaseKey: state.pageKey,
                       sourceRequest: request,
                       itemId: state.pathParameters['itemId']!,
                       mediaSourceId: request?.mediaSourceId,
@@ -287,6 +300,7 @@ GoRouter createAppRouter({
                 return Theme(
                   data: AppTheme.dark(),
                   child: TvPlayerPage(
+                    routeLeaseKey: state.pageKey,
                     sourceRequest: request,
                     itemId: state.pathParameters['itemId']!,
                     mediaSourceId: request?.mediaSourceId,

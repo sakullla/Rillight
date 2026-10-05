@@ -37,6 +37,7 @@ class MobilePlayerPage extends StatefulWidget {
     required this.itemId,
     this.mediaSourceId,
     this.sourceRequest,
+    this.routeLeaseKey,
     this.autoResume = true,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -48,6 +49,7 @@ class MobilePlayerPage extends StatefulWidget {
   });
   final String itemId;
   final PlayerOpenRequest? sourceRequest;
+  final Object? routeLeaseKey;
   final String? mediaSourceId;
   final bool autoResume;
 
@@ -306,6 +308,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     final created = PlayerController(
       runtime: bindings.runtime,
       openRequest: widget.sourceRequest,
+      routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
       itemId: widget.itemId,
       backend: bindings.createBackend?.call() ?? RillightVideoBackend(),

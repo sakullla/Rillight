@@ -10,6 +10,7 @@ import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
@@ -211,6 +212,10 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         // Replace the whole deep stack and clear route extras, not just pixels.
         final router = GoRouter.maybeOf(context);
         final revokedUri = router?.routerDelegate.currentConfiguration.uri;
+        final runtime = context
+            .getInheritedWidgetOfExactType<PlayerScope>()
+            ?.bindings
+            .runtime;
         // Redact the invalid lease immediately in build, then replace history
         // after that frame. Mutating the Navigator while source revocation
         // is notifying its mounted subtree races its render/semantics teardown.
@@ -223,6 +228,17 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
           // Imperative push keeps the base URI/extra on currentConfiguration;
           // the top player's lease lives in its own match instead.
           final topExtra = router.state.extra;
+          if (router.state.uri.path.startsWith('/play/') &&
+              topExtra is PlayerOpenRequest &&
+              runtime
+                      ?.mountedPlayerOrigin(router.state.pageKey)
+                      ?.permit
+                      .isValid ==
+                  true) {
+            // This covered detail's startup source can have been replaced by
+            // an explicit manual switch. It cannot clear the actual lease.
+            return;
+          }
           final topSource = switch (topExtra) {
             PlayerHostOpenItemCommand(:final source) => source,
             PlayerOpenRequest(:final source) => source,

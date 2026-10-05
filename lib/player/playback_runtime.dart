@@ -35,6 +35,20 @@ class PlaybackRuntime {
   final HistoryWriter history;
   SourceSessionRegistry get registry => auth.sources;
 
+  // Navigator page keys bind a mounted route instance, not decoded intent.
+  // Imperative routes retain their page key across extra-codec refreshes.
+  final Map<Object, PlaybackOrigin? Function()> _mountedPlayers = {};
+
+  void mountPlayer(Object request, PlaybackOrigin? Function() origin) =>
+      _mountedPlayers[request] = origin;
+
+  void unmountPlayer(Object request) => _mountedPlayers.remove(request);
+
+  bool hasMountedPlayer(Object request) => _mountedPlayers.containsKey(request);
+
+  PlaybackOrigin? mountedPlayerOrigin(Object request) =>
+      _mountedPlayers[request]?.call();
+
   static Future<PlaybackRuntime> production(AuthController auth) async {
     final root =
         Platform.environment['RILLIGHT_VALIDATION_DATA_DIR'] ??
@@ -383,6 +397,7 @@ class PlaybackRuntime {
         itemId: snapshot.itemId,
         source: source,
         libraryId: library,
+        regionGeneration: snapshot.regionGeneration,
       ),
     );
     if (origin.client.baseUrl != Uri.parse(snapshot.baseUrl)) {
