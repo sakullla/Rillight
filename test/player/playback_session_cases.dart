@@ -18,6 +18,7 @@ import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -367,6 +368,58 @@ void main() {
         client.reports.where((e) => e.$1 == 'Playing').single.$2.itemId,
         'episode-friends-s1e1',
       );
+    },
+  );
+
+  test(
+    'switching during initial native open preserves explicit paused intent',
+    () async {
+      await controller.disposeAsync();
+      controller.dispose();
+      backend = _ControlledBackend()..openGate = Completer<void>();
+      controller = PlayerController(
+        client: client,
+        itemId: 'movie-up',
+        backend: backend,
+        window: PlayerWindow(),
+        settingsStore: settings,
+        snapshotStore: snapshots,
+        openRequest: const PlayerOpenRequest(
+          itemId: 'movie-up',
+          startPaused: true,
+        ),
+      );
+      final starting = controller.start();
+      await _until(() => backend.openStarted);
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      await starting;
+      expect(controller.item?.id, 'episode-friends-s1e1');
+      expect(controller.loading, isFalse);
+      expect(controller.isPlaying, isFalse);
+      await controller.togglePlay();
+      expect(controller.isPlaying, isTrue);
+    },
+  );
+
+  test(
+    'a second loading episode switch preserves pause then explicit resume',
+    () async {
+      await controller.start();
+      await controller.togglePlay();
+      expect(controller.isPlaying, isFalse);
+      backend.openStarted = false;
+      backend.openGate = Completer<void>();
+      final switching = controller.playEpisode(episode('episode-friends-s1e1'));
+      await _until(() => backend.openStarted);
+      await controller.playEpisode(episode('episode-friends-s1e2'));
+      await switching;
+      expect(controller.item?.id, 'episode-friends-s1e2');
+      expect(controller.loading, isFalse);
+      expect(controller.isPlaying, isFalse);
+      await controller.togglePlay();
+      expect(controller.isPlaying, isTrue);
+      await controller.playEpisode(episode('episode-friends-s1e1'));
+      expect(controller.isPlaying, isTrue);
     },
   );
 

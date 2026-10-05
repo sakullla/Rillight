@@ -155,6 +155,7 @@ class PlayerController extends ChangeNotifier {
   }) : snapshotStore =
            snapshotStore ??
            FilePlaybackSessionSnapshotStore.forCurrentProcess() {
+    _pauseIntent = openRequest?.startPaused ?? false;
     startTimeTicks ??= openRequest?.startTimeTicks;
     preferredMediaSourceId ??= openRequest?.mediaSourceId;
     preferredAudioStreamIndex ??= openRequest?.audioStreamIndex;
@@ -246,6 +247,10 @@ class PlayerController extends ChangeNotifier {
   bool loading = true;
   bool controlsVisible = true;
   bool isPlaying = false;
+
+  // Native loading/stop events are observations, not a user pause request.
+  // Keep the requested state while no ready playback state is available.
+  bool _pauseIntent = false;
   bool disconnected = false;
   String? disconnectDetail;
 
@@ -539,6 +544,9 @@ class PlayerController extends ChangeNotifier {
       await stopped;
     }
     if (!_accepts(operation)) return;
+    _pauseIntent =
+        startPaused ??
+        (openRequest?.itemId == itemId && openRequest?.startPaused == true);
     state.phase = PlaybackPhase.loading;
     state.buffering = false;
     isPlaying = false;
@@ -698,6 +706,7 @@ class PlayerController extends ChangeNotifier {
       // may update the backend optimistically before its state event arrives,
       // so toggling the backend's own flag can issue the opposite command.
       final resume = !isPlaying;
+      _pauseIntent = !resume;
       if (resume) {
         _userPausedPrefix = false;
       } else {
@@ -1729,7 +1738,10 @@ class PlayerController extends ChangeNotifier {
     bool finishCurrent = false,
   }) async {
     final actual = origin;
-    final paused = !isPlaying && !playbackEnded && !_handlingCompleted;
+    final paused =
+        !playbackEnded &&
+        !_handlingCompleted &&
+        (loading ? _pauseIntent : !isPlaying);
     if (runtime == null && switchDispatcher != null) {
       await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
       if (_disposed || _revoked) return;
@@ -1781,6 +1793,7 @@ class PlayerController extends ChangeNotifier {
       sessionId: operation.id,
       unknownReason: 'preparing',
     );
+    _pauseIntent = paused;
     isPlaying = false;
     loading = true;
     state.phase = PlaybackPhase.loading;
@@ -3136,6 +3149,7 @@ class PlayerController extends ChangeNotifier {
     bool strictTracks = false,
   }) async {
     if (!_accepts(operation)) return;
+    _pauseIntent = startPaused;
     loading = true;
     state.phase = PlaybackPhase.loading;
     state.buffering = false;
