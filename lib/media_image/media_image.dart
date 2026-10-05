@@ -20,6 +20,8 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/playback_runtime.dart';
 
@@ -33,8 +35,29 @@ String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
   origin.source.account.userId,
   origin.libraryId,
   origin.permit.regionGeneration,
+  origin.permit.sessionRevision,
+  origin.permit.scopeRevision,
   origin.client.baseUrl.toString(),
 ]);
+
+/// Cache policy is a consumer of the existing source permit, not an authority.
+/// Private bytes never enter the disk store (including probes and lazy writes).
+class MediaImageSourcePolicy {
+  MediaImageSourcePolicy(PlaybackOrigin origin)
+    : scope = _detailImageScope(origin),
+      permit = origin.permit;
+
+  final String scope;
+  final OperationPermit permit;
+  bool _revoked = false;
+  bool get isValid => !_revoked && permit.isValid;
+  bool get allowsDisk => permit.account.region != AccessRegion.private;
+
+  void revoke() {
+    _revoked = true;
+    MediaImageCache.instance._revokeScope(scope);
+  }
+}
 
 /// Flutter [ImageCache] 解码图条目上限。与 [MediaImageCache] 的 JPEG 字节层
 /// 分开计数,两边都按低配内存留余量,避免空闲时各吃 256 MiB。
@@ -348,10 +371,13 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   /// Protected artwork is scoped to both the server and authenticated user.
+  MediaImageSourcePolicy? get _sourcePolicy =>
+      DetailSourceScope.imagePolicyOf(context);
+
   String? get _accountScope {
-    final origin = DetailSourceScope.maybeOf(context);
-    if (origin != null) {
-      return origin.permit.isValid ? _detailImageScope(origin) : null;
+    final policy = _sourcePolicy;
+    if (policy != null) {
+      return policy.isValid ? policy.scope : null;
     }
     return mediaImageAccountScope(AuthScope.maybeOf(context));
   }
@@ -681,6 +707,7 @@ class _MediaImageState extends State<MediaImage> {
     final serverId = _accountScope;
     if (serverId == null) return null;
     final bytes = await MediaImageCache.instance._readDiskCache(
+      policy: _sourcePolicy,
       serverId: serverId,
       itemId: candidate.itemId,
       type: candidate.type,
@@ -736,6 +763,7 @@ class _MediaImageState extends State<MediaImage> {
       if (!valid()) return null;
       CancelToken? token;
       final bytes = await MediaImageCache.instance.load(
+        policy: _sourcePolicy,
         serverId: serverId,
         itemId: candidate.itemId,
         type: candidate.type,
@@ -851,6 +879,7 @@ class _MediaImageState extends State<MediaImage> {
         cacheKey: loaded.cacheKey,
         bytes: loaded.bytes,
         targetWidth: _requestMaxWidth,
+        policy: _sourcePolicy,
       ),
       width: width,
       height: height,
@@ -918,11 +947,13 @@ class _MediaMemoryImage extends ImageProvider<_MediaMemoryImage> {
     required this.cacheKey,
     required this.bytes,
     this.targetWidth,
+    this.policy,
   });
 
   final String cacheKey;
   final Uint8List bytes;
   final int? targetWidth;
+  final MediaImageSourcePolicy? policy;
 
   @override
   Future<_MediaMemoryImage> obtainKey(ImageConfiguration configuration) {
@@ -934,6 +965,7 @@ class _MediaMemoryImage extends ImageProvider<_MediaMemoryImage> {
     _MediaMemoryImage key,
     ImageDecoderCallback decode,
   ) {
+    MediaImageCache.instance._trackDecoded(key);
     return MultiFrameImageStreamCompleter(
       codec: _loadAsync(key, decode),
       scale: 1,
@@ -947,16 +979,23 @@ class _MediaMemoryImage extends ImageProvider<_MediaMemoryImage> {
   ) async {
     await _DecodeGate.acquire();
     try {
+      if (key.policy?.isValid == false) {
+        throw StateError('Image source revoked');
+      }
       final buffer = await ui.ImmutableBuffer.fromUint8List(key.bytes);
       final target = key.targetWidth;
-      if (target == null || target <= 0) {
-        return await decode(buffer);
+      final codec = target == null || target <= 0
+          ? await decode(buffer)
+          : await ui.instantiateImageCodecFromBuffer(
+              buffer,
+              targetWidth: target,
+              allowUpscaling: false,
+            );
+      if (key.policy?.isValid == false) {
+        codec.dispose();
+        throw StateError('Image source revoked');
       }
-      return await ui.instantiateImageCodecFromBuffer(
-        buffer,
-        targetWidth: target,
-        allowUpscaling: false,
-      );
+      return codec;
     } finally {
       _DecodeGate.release();
     }
@@ -986,14 +1025,14 @@ Future<Uint8List?> loadChapterImage(
   final auth = AuthScope.of(context);
   final origin = DetailSourceScope.maybeOf(context);
   final client = DetailSourceScope.clientOf(context);
-  final scope = origin == null
-      ? mediaImageAccountScope(auth)
-      : _detailImageScope(origin);
+  final policy = DetailSourceScope.imagePolicyOf(context);
+  final scope = origin == null ? mediaImageAccountScope(auth) : policy?.scope;
   bool valid() => origin != null
-      ? origin.permit.isValid
+      ? policy?.isValid == true
       : mediaImageAccountScope(auth) == scope;
   if (scope == null || !valid()) return null;
   final bytes = await MediaImageCache.instance.load(
+    policy: policy,
     serverId: scope,
     itemId: itemId,
     type: 'Chapter',
@@ -1022,7 +1061,18 @@ Future<Uint8List?> loadChapterImage(
       }
     },
   );
-  return valid() ? bytes : null;
+  if (!valid()) return null;
+  if (bytes != null && policy != null) {
+    final references = MediaImageCache.instance._chapterBytes.putIfAbsent(
+      policy.scope,
+      () => [],
+    );
+    references.removeWhere((entry) => entry.target == null);
+    if (!references.any((entry) => identical(entry.target, bytes))) {
+      references.add(WeakReference(bytes));
+    }
+  }
+  return bytes;
 }
 
 class _PosterLoadTurn {
@@ -1117,6 +1167,45 @@ class MediaImageCache {
   int _bytesTotal = 0;
   final Map<String, DateTime> _misses = {};
   final Map<String, _ImageFetchRequest> _inflight = {};
+  final Map<String, MediaImageSourcePolicy> _policies = {};
+  final Map<String, _MediaMemoryImage> _decoded = {};
+  final Map<String, List<WeakReference<Uint8List>>> _chapterBytes = {};
+  final Set<String> _revokedKeys = {};
+
+  void _trackDecoded(_MediaMemoryImage image) {
+    if (image.policy == null) return;
+    _decoded[image.cacheKey] = _MediaMemoryImage(
+      cacheKey: image.cacheKey,
+      bytes: Uint8List(0),
+    );
+  }
+
+  void _revokeScope(String scope) {
+    final keys = _policies.entries
+        .where((entry) => entry.value.scope == scope)
+        .map((entry) => entry.key)
+        .toList();
+    for (final reference
+        in _chapterBytes.remove(scope) ?? const <WeakReference<Uint8List>>[]) {
+      final bytes = reference.target;
+      if (bytes != null) {
+        PaintingBinding.instance.imageCache.evict(MemoryImage(bytes));
+      }
+    }
+    for (final key in keys) {
+      _revokedKeys.add(key);
+      final bytes = _bytes.remove(key);
+      if (bytes != null) _bytesTotal -= bytes.length;
+      _misses.remove(key);
+      _pendingDiskWrites.remove(key);
+      _MediaImageState._validated.remove(key);
+      final decoded = _decoded.remove(key);
+      if (decoded != null) PaintingBinding.instance.imageCache.evict(decoded);
+      _policies.remove(key);
+    }
+    _cancelStaleFetches();
+  }
+
   int _cacheGeneration = 0;
   int _activeFetches = 0;
   final List<_ImageFetchRequest> _waiters = [];
@@ -1331,6 +1420,7 @@ class MediaImageCache {
 
   /// 只读内存和磁盘,不发网络,也不等滚动空闲。
   Future<Uint8List?> _readDiskCache({
+    MediaImageSourcePolicy? policy,
     required String serverId,
     required String itemId,
     required String type,
@@ -1346,6 +1436,10 @@ class MediaImageCache {
       variant: variant,
       maxWidth: maxWidth,
     );
+    if (policy != null) {
+      if (!policy.isValid) return null;
+      _policies[cacheKey] = policy;
+    }
     final cached = _touch(cacheKey);
     if (cached != null && cached.isNotEmpty) {
       return cached;
@@ -1360,10 +1454,13 @@ class MediaImageCache {
     )) {
       return null;
     }
+    if (policy?.allowsDisk == false) return null;
     if (!_diskResolved) {
       await _ensureDiskStore();
     }
+    if (policy?.isValid == false) return null;
     final disk = await _readDisk(cacheKey);
+    if (policy?.isValid == false) return null;
     if (disk != null && disk.isNotEmpty) {
       _storeBytes(cacheKey, disk);
       return disk;
@@ -1410,6 +1507,7 @@ class MediaImageCache {
   }
 
   Future<Uint8List?> load({
+    MediaImageSourcePolicy? policy,
     required String serverId,
     required String itemId,
     required String type,
@@ -1429,6 +1527,14 @@ class MediaImageCache {
       variant: variant,
       maxWidth: maxWidth,
     );
+    if (policy != null) {
+      if (!policy.isValid || policy.scope != serverId) {
+        return Future<Uint8List?>.value(null);
+      }
+      _policies[cacheKey] = policy;
+    }
+    bool valid() => policy?.isValid != false && (isCurrent?.call() ?? true);
+    if (!valid()) return Future<Uint8List?>.value(null);
     final cached = _touch(cacheKey);
     if (cached != null) {
       return Future<Uint8List?>.value(cached);
@@ -1440,7 +1546,7 @@ class MediaImageCache {
       }
       _misses.remove(cacheKey);
     }
-    final consumer = _ImageFetchConsumer(fetch, onAbort, isCurrent, inViewport);
+    final consumer = _ImageFetchConsumer(fetch, onAbort, valid, inViewport);
     final existing = _inflight[cacheKey];
     if (existing != null) {
       existing.consumers.add(consumer);
@@ -1448,7 +1554,7 @@ class MediaImageCache {
     }
     final request = _ImageFetchRequest(consumer);
     _inflight[cacheKey] = request;
-    request.result = _loadRequest(cacheKey, request, _cacheGeneration);
+    request.result = _loadRequest(cacheKey, request, _cacheGeneration, policy);
     return request.result;
   }
 
@@ -1456,18 +1562,23 @@ class MediaImageCache {
     String cacheKey,
     _ImageFetchRequest request,
     int generation,
+    MediaImageSourcePolicy? policy,
   ) async {
-    bool current() => generation == _cacheGeneration && request.isCurrent;
+    bool current() =>
+        generation == _cacheGeneration &&
+        policy?.isValid != false &&
+        request.isCurrent;
+    final allowsDisk = policy?.allowsDisk != false;
     try {
       // Disk reads do not consume a network slot.
-      if (_diskResolved) {
+      if (allowsDisk && _diskResolved) {
         final disk = await _readDisk(cacheKey);
         if (!current()) return null;
         if (disk != null && disk.isNotEmpty) {
           _storeBytes(cacheKey, disk);
           return disk;
         }
-      } else {
+      } else if (allowsDisk) {
         unawaited(_ensureDiskStore());
       }
       if (!current() || !await _acquire(request)) return null;
@@ -1499,6 +1610,7 @@ class MediaImageCache {
       if (bytes != null && bytes.isNotEmpty) {
         final loaded = bytes;
         _storeBytes(cacheKey, loaded);
+        if (!allowsDisk) return loaded;
         if (_diskResolved) {
           unawaited(_writeDisk(cacheKey, loaded));
         } else {
@@ -1548,7 +1660,7 @@ class MediaImageCache {
     _pendingDiskWrites.remove(cacheKey);
     _recordMiss(cacheKey);
     final store = _diskStore;
-    if (store != null) {
+    if (store != null && _policies[cacheKey]?.allowsDisk != false) {
       unawaited(
         store
             .remove(cacheKey)
@@ -1632,11 +1744,18 @@ class MediaImageCache {
 
   Future<void> _writeDiskNow(String cacheKey, Uint8List bytes) async {
     final store = _diskStore;
-    if (store == null || _misses.containsKey(cacheKey)) return;
+    if (store == null ||
+        _misses.containsKey(cacheKey) ||
+        _revokedKeys.contains(cacheKey) ||
+        _policies[cacheKey]?.isValid == false) {
+      return;
+    }
     try {
       await store.write(cacheKey, bytes).timeout(_diskIoTimeout);
       // Decode rejection may have arrived while this write was in flight.
-      if (_misses.containsKey(cacheKey)) {
+      if (_misses.containsKey(cacheKey) ||
+          _revokedKeys.contains(cacheKey) ||
+          _policies[cacheKey]?.isValid == false) {
         await store.remove(cacheKey).timeout(_diskIoTimeout);
       }
     } catch (_) {
@@ -1729,6 +1848,9 @@ class MediaImageCache {
   /// 仅清空进程内内存层,保留磁盘层(模拟应用重启)。
   void clearMemory() {
     _bytes.clear();
+    _policies.clear();
+    _decoded.clear();
+    _chapterBytes.clear();
     _bytesTotal = 0;
     _misses.clear();
     _cacheGeneration++;

@@ -4,6 +4,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
@@ -14,10 +15,15 @@ class DetailSourceScope extends InheritedWidget {
     super.key,
     required this.origin,
     required this.cache,
+    required this.imagePolicy,
     required super.child,
   });
   final PlaybackOrigin origin;
   final CatalogCache cache;
+  final MediaImageSourcePolicy imagePolicy;
+  static MediaImageSourcePolicy? imagePolicyOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<DetailSourceScope>()
+      ?.imagePolicy;
   static CatalogCache cacheOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<DetailSourceScope>()?.cache ??
       CatalogScope.of(context).cache;
@@ -68,6 +74,7 @@ class SourceDetailGate extends StatefulWidget {
 
 class _SourceDetailGateState extends State<SourceDetailGate> {
   PlaybackOrigin? _origin;
+  MediaImageSourcePolicy? _imagePolicy;
   // Sessionless source-local cache: no writes into selected Auth's namespace,
   // and no persistent private detail projection surviving revocation.
   final _cache = CatalogCache();
@@ -120,23 +127,28 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         permit: permit,
         client: client,
       );
+      _imagePolicy = MediaImageSourcePolicy(_origin!);
     } catch (_) {}
     if (mounted) setState(() {});
   }
 
   void _revoked(String serverId) {
     if (_origin?.source.account.configuredServerId == serverId) {
+      _imagePolicy?.revoke();
       _origin = null;
       _changed();
     }
   }
 
   void _changed() {
+    if (_imagePolicy?.isValid == false) _imagePolicy?.revoke();
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    // No gate may leave private bytes behind without a revocation listener.
+    if (_imagePolicy?.allowsDisk == false) _imagePolicy?.revoke();
     widget.auth.removeListener(_changed);
     widget.auth.sources.removeSourceRevocation(_revoked);
     widget.auth.regionAccess.removeListener(_changed);
@@ -153,6 +165,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
     return DetailSourceScope(
       origin: origin,
       cache: _cache,
+      imagePolicy: _imagePolicy!,
       child: widget.child,
     );
   }

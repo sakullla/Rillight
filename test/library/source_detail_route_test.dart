@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -5,9 +6,12 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -23,10 +27,19 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_host_command.dart';
 
 class _ImageDisk implements MediaImageDiskStore {
+  final reads = <String>[];
+  final writes = <String>[];
   @override
-  Future<Uint8List?> read(String key) async => null;
+  Future<Uint8List?> read(String key) async {
+    reads.add(key);
+    return null;
+  }
+
   @override
-  Future<void> write(String key, Uint8List bytes) async {}
+  Future<void> write(String key, Uint8List bytes) async {
+    writes.add(key);
+  }
+
   @override
   Future<void> remove(String key) async {}
   @override
@@ -35,6 +48,7 @@ class _ImageDisk implements MediaImageDiskStore {
 
 class _Transport implements HttpClientAdapter {
   final requests = <RequestOptions>[];
+  Completer<void>? imageBarrier;
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
@@ -45,9 +59,10 @@ class _Transport implements HttpClientAdapter {
     final host = options.uri.host;
     final path = options.uri.path;
     if (path.contains('/Images/')) {
+      await imageBarrier?.future;
       return ResponseBody.fromBytes(
         base64Decode(
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aO1sAAAAASUVORK5CYII=',
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
         ),
         200,
         headers: {
@@ -91,6 +106,346 @@ class _Transport implements HttpClientAdapter {
 }
 
 void main() {
+  testWidgets(
+    'private B gate keeps poster and chapters off disk and evicts only B on lock',
+    (tester) async {
+      final cache = MediaImageCache.instance;
+      final disk = _ImageDisk();
+      cache.clearMemory();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      cache.debugSetDiskStore(disk);
+      addTearDown(() {
+        cache.clearMemory();
+        cache.debugSetDiskStore(null);
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+      });
+      final transport = _Transport();
+      EmbyClient client() => EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'test',
+          deviceId: 'private-images',
+          version: '1',
+        ),
+        dio: Dio()..httpClientAdapter = transport,
+      );
+      final access = RegionAccessController();
+      await tester.runAsync(() async {
+        await access.setPin('1234', '1234', (_) async {});
+        expect(await access.unlock('1234'), isTrue);
+      });
+      final store = MemoryServerListStore(
+        ServerListSnapshot(
+          lastServerId: 'a',
+          servers: [
+            for (final server in ['a', 'b'])
+              SavedServer(
+                id: server,
+                name: server,
+                username: 'synthetic',
+                region: server == 'b'
+                    ? AccessRegion.private
+                    : AccessRegion.ordinary,
+                libraryIds: const ['library'],
+                scopeKnown: true,
+                lines: [ServerLine(id: 'line', address: 'https://$server')],
+              ),
+          ],
+        ),
+      );
+      final credentials = MemoryCredentialStore({
+        for (final server in ['a', 'b'])
+          server: StoredCredentials(
+            accessToken: 'token-$server',
+            userId: 'user-$server',
+            username: 'synthetic',
+          ),
+      });
+      final registry = SourceSessionRegistry(
+        access: access,
+        store: store,
+        credentials: credentials,
+        createClient: client,
+      );
+      await tester.runAsync(registry.load);
+      final b = (await tester.runAsync(
+        () => registry.authenticate('b'),
+      ))!.account;
+      final auth = AuthController(
+        client: client(),
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      await tester.runAsync(auth.restore);
+      final permit = registry.permit(b, libraryId: 'library');
+      late BuildContext detailContext;
+      final showLatePoster = ValueNotifier(false);
+      addTearDown(showLatePoster.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: AuthScope(
+            controller: auth,
+            child: SourceDetailGate(
+              auth: auth,
+              itemId: 'movie',
+              command: PlayerHostOpenItemCommand(
+                itemId: 'movie',
+                source: SourceReference(account: b, itemId: 'movie'),
+                libraryId: 'library',
+                regionGeneration: permit.regionGeneration,
+              ),
+              child: Builder(
+                builder: (context) {
+                  detailContext = context;
+                  return Column(
+                    children: [
+                      const MediaImage(
+                        item: EmbyItem(
+                          id: 'movie',
+                          name: 'private poster',
+                          type: 'Movie',
+                          primaryImageTag: 'poster',
+                        ),
+                        width: 100,
+                        height: 100,
+                        maxWidth: 100,
+                      ),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: showLatePoster,
+                        builder: (_, show, _) => show
+                            ? const MediaImage(
+                                item: EmbyItem(
+                                  id: 'late-poster',
+                                  name: 'late private poster',
+                                  type: 'Movie',
+                                  primaryImageTag: 'late',
+                                ),
+                                width: 100,
+                                height: 100,
+                                maxWidth: 100,
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(DetailSourceScope), findsOneWidget);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsOneWidget);
+      final chapter = (await tester.runAsync(
+        () => loadChapterImage(
+          detailContext,
+          itemId: 'movie',
+          index: 0,
+          tag: 'chapter',
+        ),
+      ))!;
+      // Populate Flutter's chapter decode cache just as Image.memory consumers do.
+      await tester.runAsync(
+        () => precacheImage(MemoryImage(chapter), detailContext),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        disk.reads,
+        isEmpty,
+        reason: 'private probes and load must never read disk',
+      );
+      expect(
+        disk.writes,
+        isEmpty,
+        reason: 'private posters and chapters must never write disk',
+      );
+      final scope = jsonEncode([
+        b.region.name,
+        b.configuredServerId,
+        b.verifiedServerId,
+        b.userId,
+        'library',
+        permit.regionGeneration,
+        permit.sessionRevision,
+        permit.scopeRevision,
+        tester
+            .widget<DetailSourceScope>(find.byType(DetailSourceScope))
+            .origin
+            .client
+            .baseUrl
+            .toString(),
+      ]);
+      expect(
+        cache.peek(
+          serverId: scope,
+          itemId: 'movie',
+          type: 'Chapter',
+          variant: '0',
+          tag: 'chapter',
+          maxWidth: 160,
+        ),
+        same(chapter),
+      );
+      final ordinary = Uint8List.fromList(chapter);
+      await tester.runAsync(() async {
+        await cache.load(
+          serverId: 'ordinary-A',
+          itemId: 'movie',
+          type: 'Primary',
+          maxWidth: 100,
+          fetch: () async => ordinary,
+        );
+        await precacheImage(MemoryImage(ordinary), detailContext);
+      });
+      final ordinaryWrites = disk.writes.length;
+      final ordinaryReads = disk.reads.length;
+      transport.imageBarrier = Completer<void>();
+      showLatePoster.value = true;
+      await tester.pumpAndSettle();
+      // The new poster needs a post-layout turn before its real async transport.
+      for (var frame = 0; frame < 4; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
+      final lateChapters = <Future<Uint8List?>>[];
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        for (var index = 1; index <= 9; index++) {
+          lateChapters.add(
+            loadChapterImage(
+              detailContext,
+              itemId: 'movie',
+              index: index,
+              tag: 'late',
+            ),
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      expect(
+        transport.requests.where(
+          (r) => r.uri.path.contains('/Items/late-poster/Images/'),
+        ),
+        isNotEmpty,
+      );
+      expect(
+        transport.requests.where(
+          (r) => r.uri.path.endsWith('/Images/Chapter/9'),
+        ),
+        isEmpty,
+        reason: 'request is queued behind the eight network slots',
+      );
+      final dispatchedBeforeLock = transport.requests.length;
+      expect(
+        transport.requests.where(
+          (r) => r.uri.host == 'b' && r.uri.path.contains('/Images/Chapter/1'),
+        ),
+        isNotEmpty,
+      );
+      await access.lock();
+      await tester.pumpAndSettle();
+      expect(find.byType(DetailSourceScope), findsNothing);
+      expect(find.byType(Image), findsNothing);
+      expect(
+        cache.peek(
+          serverId: scope,
+          itemId: 'movie',
+          type: 'Chapter',
+          variant: '0',
+          tag: 'chapter',
+          maxWidth: 160,
+        ),
+        isNull,
+      );
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(MemoryImage(chapter)),
+        isFalse,
+      );
+      expect(
+        PaintingBinding.instance.imageCache.containsKey(MemoryImage(ordinary)),
+        isTrue,
+      );
+      expect(
+        cache.peek(
+          serverId: 'ordinary-A',
+          itemId: 'movie',
+          type: 'Primary',
+          maxWidth: 100,
+        ),
+        same(ordinary),
+      );
+      expect(
+        PaintingBinding.instance.imageCache.currentSize,
+        1,
+        reason: 'only the ordinary decoded image survives',
+      );
+      expect(
+        cache.peek(
+          serverId: scope,
+          itemId: 'movie',
+          type: 'Primary',
+          tag: 'poster',
+          maxWidth: 100,
+        ),
+        isNull,
+      );
+      transport.imageBarrier!.complete();
+      expect(
+        await tester.runAsync(() => Future.wait(lateChapters)),
+        everyElement(isNull),
+      );
+      await tester.pumpAndSettle();
+      expect(disk.writes.length, ordinaryWrites);
+      expect(disk.reads.length, ordinaryReads);
+      expect(
+        transport.requests.length,
+        dispatchedBeforeLock,
+        reason:
+            'revoked queued chapters never dispatch, and in-flight responses never retry',
+      );
+      expect(
+        cache.peek(
+          serverId: scope,
+          itemId: 'late-poster',
+          type: 'Primary',
+          tag: 'late',
+          maxWidth: 100,
+        ),
+        isNull,
+      );
+      expect(
+        cache.peek(
+          serverId: scope,
+          itemId: 'movie',
+          type: 'Chapter',
+          variant: '1',
+          tag: 'late',
+          maxWidth: 160,
+        ),
+        isNull,
+      );
+      expect(auth.session!.server.id, 'a');
+      await tester.pumpWidget(const SizedBox.shrink());
+      auth.dispose();
+    },
+    tags: ['integration'],
+  );
+
   for (final environment in [
     PresentationEnvironment.desktop,
     PresentationEnvironment.phone,
