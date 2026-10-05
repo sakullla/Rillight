@@ -7,21 +7,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
-import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'dart:async';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/home/tv_section_prefs.dart';
-import 'package:rillight/home/tv_shelf_page.dart';
+import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 void main() {
   setUp(() {
@@ -39,21 +39,29 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: const EmbyDeviceInfo(
-          clientName: 'test',
-          deviceName: 'tv',
-          deviceId: 'tv-widget',
-          version: '1',
-        ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+    final auth = SyntheticSourceAuth(
+      adapter: FakeEmbyAdapter([server]),
+      device: const EmbyDeviceInfo(
+        clientName: 'test',
+        deviceName: 'tv',
+        deviceId: 'tv-widget',
+        version: '1',
       ),
+      libraryIds: {
+        'view-movies',
+        'view-tv',
+        'view-mixed',
+        'view-untyped',
+        'view-music',
+        'view-photos',
+      },
     );
+    final runtime = (await tester.runAsync(auth.runtime))!;
     final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.tv,
       playerBindings: PlayerBindings(
+        runtime: runtime,
         createBackend: () => FakeVideoBackend(),
         snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         settingsStore: MemoryPlayerSettingsStore(),
@@ -69,6 +77,15 @@ void main() {
       disposed = true;
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
+      var closed = false;
+      unawaited(runtime.history.close().then((_) => closed = true));
+      for (var frame = 0; frame < 60 && !closed; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      expect(closed, isTrue, reason: 'History teardown exceeded six seconds');
       auth.dispose();
     }
 
@@ -642,10 +659,11 @@ void main() {
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(TvShelfPage), findsOneWidget);
+      expect(find.byType(AggregationPage), findsOneWidget);
+      expect(app.router.state.uri.path, '/shelf/resume');
       app.router.pop();
       await tester.pumpAndSettle();
-      expect(find.byType(TvShelfPage), findsNothing);
+      expect(find.byType(AggregationPage), findsNothing);
 
       final homeScroll = find
           .descendant(

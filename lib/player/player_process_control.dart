@@ -31,6 +31,12 @@ abstract interface class PlayerHistoryProcessControl {
   Future<void> replySwitchCommand(int pid, Map<String, dynamic> receipt);
 }
 
+/// Safety revocation must not queue behind a catalogue or preflight RPC.
+abstract interface class PlayerUrgentLockProcessControl {
+  Future<Map<String, dynamic>?> consumeLockCommand(int pid);
+  Future<void> replyLockCommand(int pid, Map<String, dynamic> receipt);
+}
+
 class PlayerProcessStartupException implements Exception {
   PlayerProcessStartupException(this.pid, this.cause);
   final int pid;
@@ -52,7 +58,10 @@ PlayerProcessControl createPlayerProcessControl({String? operatingSystem}) {
 /// A spawn becomes usable only after the actual child entry point acknowledges
 /// its window and close handler. Failed or superseded launches are terminated.
 abstract class DesktopPlayerProcessControl
-    implements PlayerProcessControl, PlayerHistoryProcessControl {
+    implements
+        PlayerProcessControl,
+        PlayerHistoryProcessControl,
+        PlayerUrgentLockProcessControl {
   DesktopPlayerProcessControl({
     this.pollInterval = const Duration(milliseconds: 100),
     this.startupTimeout = const Duration(seconds: 20),
@@ -61,6 +70,7 @@ abstract class DesktopPlayerProcessControl
   final Duration pollInterval;
   final Duration startupTimeout;
   final Map<int, PlayerProcessProtocol> _endpoints = {};
+  final Map<int, Future<void>> _releases = {};
   int _generation = 0;
 
   Future<int> launch(String executable, String payloadPath);
@@ -177,6 +187,15 @@ abstract class DesktopPlayerProcessControl
   });
 
   @override
+  Future<Map<String, dynamic>?> consumeLockCommand(int pid) async =>
+      _endpoints[pid]?.read('lock-request');
+
+  @override
+  Future<void> replyLockCommand(int pid, Map<String, dynamic> receipt) async {
+    await _endpoints[pid]?.write('lock-reply', receipt);
+  }
+
+  @override
   Future<Map<String, dynamic>?> consumeSwitchCommand(int pid) async =>
       _endpoints[pid]?.read('switch-request');
   @override
@@ -197,7 +216,17 @@ abstract class DesktopPlayerProcessControl
   }
 
   @override
-  Future<void> release(int pid) async {
+  Future<void> release(int pid) {
+    // Urgent revocation and ordinary window shutdown can retire the same
+    // helper concurrently. Share cleanup rather than racing directory delete.
+    return _releases.putIfAbsent(pid, () {
+      return _releaseEndpoint(pid).whenComplete(() {
+        _releases.remove(pid);
+      });
+    });
+  }
+
+  Future<void> _releaseEndpoint(int pid) async {
     final endpoint = _endpoints[pid];
     if (endpoint == null) return;
     final keepSnapshot = await snapshotStore(pid).read() != null;
@@ -265,8 +294,10 @@ class WindowsPlayerProcessControl extends DesktopPlayerProcessControl {
     }
     // Keep the original handle until snapshot/mailbox cleanup completes.
     await super.release(pid);
-    child?.close();
-    if (identical(_children[pid], child)) _children.remove(pid);
+    if (child != null && identical(_children[pid], child)) {
+      _children.remove(pid);
+      child.close();
+    }
   }
 }
 

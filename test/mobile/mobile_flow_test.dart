@@ -179,6 +179,12 @@ void main() {
         tester.widget<AppBar>(find.byType(AppBar)).forceMaterialTransparency;
     expect(transparent(), isTrue);
     final home = position('mobile-home-scroll');
+    // No pump between jumps: the final notification must supersede the first,
+    // even though it equals the currently rendered transparent state.
+    home.jumpTo(100);
+    home.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(transparent(), isTrue);
     home.jumpTo(100);
     await tester.pumpAndSettle();
     expect(transparent(), isFalse);

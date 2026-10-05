@@ -10,6 +10,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 
@@ -60,6 +61,88 @@ void main() {
           .state<PlayerPageState>(find.byType(PlayerPage))
           .controller!;
       await tester.runAsync(() => launch.protocol!.write('ready'));
+      Future<void> advance() async {
+        await tester.pump(const Duration(milliseconds: 80));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
+
+      Future<void> menuAction(Map<String, dynamic> message) async {
+        controller.onUserActivity();
+        await advance();
+        if (find.byType(SourceSwitchMenu).evaluate().isEmpty) {
+          await tester.tap(find.byKey(const Key('player-manual-switch')));
+          await advance();
+        }
+        expect(find.byType(SourceSwitchMenu), findsOneWidget);
+        if (message['action'] == 'open-lock') return;
+        if (message['action'] == 'lock') {
+          final lock = find.byKey(const Key('player-lock-private'));
+          for (var frame = 0; frame < 120; frame++) {
+            if (lock.evaluate().isNotEmpty &&
+                tester.widget<FilledButton>(lock).onPressed != null) {
+              break;
+            }
+            await advance();
+          }
+          expect(lock, findsOneWidget);
+          expect(tester.widget<FilledButton>(lock).onPressed, isNotNull);
+          await tester.ensureVisible(lock);
+          await tester.tap(lock);
+          return;
+        }
+        final targetId = message['targetId'] as String;
+        final target = find.byWidgetPredicate(
+          (widget) =>
+              widget is ListTile &&
+              widget.key is ValueKey<String> &&
+              (widget.key as ValueKey<String>).value.startsWith(
+                'switch-host-target-',
+              ) &&
+              (widget.key as ValueKey<String>).value.contains(targetId),
+        );
+        for (var frame = 0; frame < 120 && target.evaluate().isEmpty; frame++) {
+          await advance();
+        }
+        expect(target, findsOneWidget);
+        final key =
+            (tester.widget<ListTile>(target).key as ValueKey<String>).value;
+        await tester.ensureVisible(target);
+        await tester.tap(target);
+        for (
+          var frame = 0;
+          frame < 120 && controller.switchConfirmation == null;
+          frame++
+        ) {
+          await advance();
+        }
+        expect(controller.switchConfirmation, isNotNull);
+        if (controller.switchConfirmation!.audioNeedsChoice) {
+          await tester.ensureVisible(find.byType(CheckboxListTile).first);
+          await tester.tap(find.byType(CheckboxListTile).first);
+        }
+        if (controller.switchConfirmation!.subtitleNeedsChoice) {
+          await tester.ensureVisible(find.byType(CheckboxListTile).last);
+          await tester.tap(find.byType(CheckboxListTile).last);
+        }
+        await advance();
+        await tester.ensureVisible(find.text('从头播放'));
+        await tester.tap(find.text('从头播放'));
+        await tester.runAsync(
+          () =>
+              File(
+                '${launch.protocol!.directory.path}/synthetic-menu-receipt.json',
+              ).writeAsString(
+                jsonEncode({
+                  'targetKey': key,
+                  'itemId': controller.itemId,
+                  'version': controller.activeMediaSourceId,
+                }),
+              ),
+        );
+      }
+
       var observed = false;
       var framesAfterObservation = 0;
       final deadline = DateTime.now().add(const Duration(seconds: 60));
@@ -89,6 +172,17 @@ void main() {
           await file.delete();
           return result;
         });
+        final menu = await tester.runAsync(() async {
+          final file = File(
+            '${launch.protocol!.directory.path}/synthetic-menu.json',
+          );
+          if (!await file.exists()) return null;
+          final result =
+              jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+          await file.delete();
+          return result;
+        });
+        if (menu != null) await menuAction(menu);
         if (message != null) {
           backend.emitEvent(
             VideoEventKind.position,

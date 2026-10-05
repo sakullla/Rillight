@@ -136,6 +136,9 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
         _enterPane(index);
       }
     });
+    // Selecting the already focused tab need not rebuild. Its deferred enter
+    // must still get a frame, including when called during another callback.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override

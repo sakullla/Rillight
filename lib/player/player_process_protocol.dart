@@ -64,6 +64,8 @@ class PlayerProcessProtocol {
       'revoke',
       'switch-request',
       'switch-reply',
+      'lock-request',
+      'lock-reply',
     }.contains(kind)) {
       throw ArgumentError.value(kind, 'kind');
     }

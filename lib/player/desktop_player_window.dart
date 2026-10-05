@@ -258,6 +258,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   var _requestRevision = 0;
   int _activeRevision = 0;
   bool _watchBusy = false;
+  bool _urgentLockBusy = false;
   String? _authIdentity;
   String get _currentAuthIdentity =>
       '${auth.client.baseUrl}|${auth.client.userId}|${auth.client.accessToken}';
@@ -472,7 +473,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     _watch?.cancel();
     final epoch = _epoch;
     _watch = Timer.periodic(watchInterval, (timer) {
-      if (_watchBusy || _disposed) return;
+      if (_disposed) return;
+      // This mailbox bypasses a potentially stalled catalogue/preflight watch.
+      if (!_urgentLockBusy) unawaited(_consumeUrgentLock(pid));
+      if (_watchBusy) return;
       _watchBusy = true;
       unawaited(() async {
         try {
@@ -676,6 +680,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             ),
             work: origin.work,
             libraryId: origin.libraryId,
+            regionGeneration: origin.permit.regionGeneration,
           ),
         );
         final info = await actual.permit.dispatch(
@@ -777,6 +782,53 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     });
   }
 
+  Future<void> _consumeUrgentLock(int pid) async {
+    final control = _control;
+    if (_urgentLockBusy || control is! PlayerUrgentLockProcessControl) return;
+    final ipc = control as PlayerUrgentLockProcessControl;
+    _urgentLockBusy = true;
+    try {
+      final command = await ipc.consumeLockCommand(pid);
+      if (command == null) return;
+      final actual = _origin;
+      final sequence = command['sequence'];
+      var accepted = false;
+      try {
+        if (actual == null ||
+            runtime == null ||
+            pid != _pid ||
+            command['pid'] != pid ||
+            sequence is! int ||
+            sequence <= _lastSwitchCommand ||
+            _privateRevoked ||
+            command['action'] != 'lock' ||
+            actual.source.account.region != AccessRegion.private ||
+            command['generation'] != actual.permit.regionGeneration ||
+            command['source'] is! Map ||
+            decodeSource(
+                  Map<String, dynamic>.from(command['source'] as Map),
+                ).account !=
+                actual.source.account) {
+          throw StateError('Stale or unauthorized private lock');
+        }
+        actual.permit.requireValid();
+        _lastSwitchCommand = sequence;
+        accepted = true;
+      } catch (_) {
+        // Invalid ordinary/cross-account/old-generation RPC cannot lock.
+      }
+      await ipc.replyLockCommand(pid, {
+        'sequence': sequence,
+        'accepted': accepted,
+      });
+      if (accepted) await auth.regionAccess.lock();
+    } catch (_) {
+      // Revocation may remove the endpoint while this read/reply is in flight.
+    } finally {
+      _urgentLockBusy = false;
+    }
+  }
+
   Future<void> _consumeSwitchCommand(int pid) async {
     final control = _control;
     final actual = _origin;
@@ -846,6 +898,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                 ),
                 work: actual.work,
                 libraryId: actual.libraryId,
+                regionGeneration: actual.permit.regionGeneration,
               ),
             );
             final currentDto = await current.permit.dispatch(
@@ -914,6 +967,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                     source: targetRef,
                     work: candidate.source.reference.item,
                     libraryId: candidate.source.libraryId,
+                    regionGeneration: actual.permit.regionGeneration,
                   ),
                 );
                 final info = await target.permit.dispatch(
@@ -963,6 +1017,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               ),
               work: actual.work,
               libraryId: actual.libraryId,
+              regionGeneration: actual.permit.regionGeneration,
             ),
           );
           actual.permit.requireValid();
@@ -977,6 +1032,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               ),
               work: actual.work,
               libraryId: actual.libraryId,
+              regionGeneration: actual.permit.regionGeneration,
             ),
           );
           final old = PlaybackOrigin(
@@ -1002,6 +1058,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                       Map<String, dynamic>.from(command['work'] as Map),
                     ),
                     libraryId: command['library'] as String,
+                    regionGeneration: actual.permit.regionGeneration,
                   ),
                 );
           if (line == null) {
@@ -1431,7 +1488,8 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       throw StateError('Playback IPC unavailable');
     }
     final sequence = ++_ipcSequence;
-    await endpoint.write('switch-request', {
+    final urgentLock = command['action'] == 'lock';
+    await endpoint.write(urgentLock ? 'lock-request' : 'switch-request', {
       ...command,
       'source': encodeSource(source),
       'generation': _launch.regionGeneration,
@@ -1439,7 +1497,9 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     });
     final deadline = DateTime.now().add(const Duration(seconds: 30));
     while (DateTime.now().isBefore(deadline) && _closing == null) {
-      final reply = await endpoint.read('switch-reply');
+      final reply = await endpoint.read(
+        urgentLock ? 'lock-reply' : 'switch-reply',
+      );
       if (reply?['sequence'] == sequence) {
         if (reply?['accepted'] != true) throw StateError('${reply?['error']}');
         return reply!;

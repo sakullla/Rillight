@@ -75,7 +75,22 @@ void main() {
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
-      await tester.runAsync(runtime.history.close);
+      // History operations queued during playback belong to the fake-async
+      // zone. Awaiting close inside runAsync strands those continuations.
+      // Drain both fake frames and real adapter IO with a bounded budget.
+      var historyClosed = false;
+      unawaited(runtime.history.close().then((_) => historyClosed = true));
+      for (var frame = 0; frame < 60 && !historyClosed; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      expect(
+        historyClosed,
+        isTrue,
+        reason: 'History teardown exceeded six seconds',
+      );
       auth.dispose();
     });
     return app;

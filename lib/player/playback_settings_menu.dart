@@ -414,8 +414,14 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               MediaSourceMenuTile(view: source.presentation),
               source.id == c.resolved?.mediaSource.id,
               enabled
-                  ? () =>
-                        unawaited(_apply(() => c.switchMediaSource(source.id)))
+                  ? () => unawaited(
+                      _apply(() async {
+                        await c.switchMediaSource(source.id);
+                        if (context.mounted && c.switchConfirmation != null) {
+                          await showSourceSwitchMenu(context, c);
+                        }
+                      }),
+                    )
                   : null,
             ),
         ];

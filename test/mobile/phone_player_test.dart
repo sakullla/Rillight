@@ -22,6 +22,7 @@ import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/phone_orientation.dart';
@@ -1182,6 +1183,31 @@ void main() {
       );
       await tester.pump();
       expect(current.canSwitchMediaSource, isTrue);
+      for (var frame = 0; frame < 40 && current.loading; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      expect(current.loading, isFalse);
+      expect(backend.isPlaying, isTrue);
+      // A successful open is pending; establish the original actual source
+      // with a backend viewing receipt before testing cancellation ownership.
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 1));
+      for (
+        var frame = 0;
+        frame < 40 && current.activeMediaSourceId == null;
+        frame++
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+      }
+      expect(current.activeMediaSourceId, 'movie-inception');
+      await tester.tap(find.byKey(const Key('mobile-player-toggle')));
+      await tester.pump();
+      expect(backend.isPlaying, isFalse);
       expect(find.text('来源'), findsNothing);
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pumpAndSettle();
@@ -1205,19 +1231,99 @@ void main() {
       await tester.pump();
       expect(find.text('来源'), findsOneWidget);
       expect(find.text('另一个版本'), findsOneWidget);
+      Future<void> acceptRequiredConfirmation({bool cancel = false}) async {
+        for (var frame = 0; frame < 40; frame++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          if (find.byType(SourceSwitchMenu).evaluate().isNotEmpty) {
+            break;
+          }
+          if (current.pendingMediaSourceId != null && current.isRecovering) {
+            return;
+          }
+        }
+        expect(
+          find.byType(SourceSwitchMenu),
+          findsOneWidget,
+          reason:
+              'confirmation=${current.switchConfirmation} active=${current.activeMediaSourceId} pending=${current.pendingMediaSourceId} phase=${current.state.phase} track=${current.trackFailure}',
+        );
+        final plan = current.switchConfirmation!;
+        expect(plan.paused, isTrue);
+        if (cancel) {
+          final cancelButton = find.descendant(
+            of: find.byType(SourceSwitchMenu),
+            matching: find.byKey(const Key('source-switch-close')),
+          );
+          await tester.tap(cancelButton);
+          await tester.pumpAndSettle();
+          return;
+        }
+        if (plan.audioNeedsChoice) {
+          await tester.ensureVisible(find.byType(CheckboxListTile).first);
+          await tester.tap(find.byType(CheckboxListTile).first);
+        }
+        if (plan.subtitleNeedsChoice) {
+          await tester.ensureVisible(find.byType(CheckboxListTile).last);
+          await tester.tap(find.byType(CheckboxListTile).last);
+        }
+        await tester.pump();
+        await tester.ensureVisible(find.text('从头播放'));
+        await tester.tap(find.text('从头播放'));
+        await tester.pump();
+      }
+
+      Future<void> closeConfirmation() async {
+        if (find.byType(SourceSwitchMenu).evaluate().isEmpty) return;
+        final cancel = find.descendant(
+          of: find.byType(SourceSwitchMenu),
+          matching: find.byKey(const Key('source-switch-close')),
+        );
+        await tester.tap(cancel);
+        await tester.pumpAndSettle();
+      }
+
       final alternate = find.byKey(const Key('mobile-source-alternate'));
       expect(alternate, findsOneWidget);
       await tester.ensureVisible(alternate);
+      await tester.pump();
       final originalId = current.resolved!.mediaSource.id;
+      final opensBeforeCancelledStage = backend.openCount;
       await tester.tap(alternate);
+      await acceptRequiredConfirmation(cancel: true);
+      expect(current.activeMediaSourceId, originalId);
+      expect(current.pendingMediaSourceId, isNull);
+      expect(backend.openCount, opensBeforeCancelledStage);
+      expect(backend.isPlaying, isFalse);
+      await tester.ensureVisible(alternate);
+      await tester.pump();
+      await tester.tap(alternate);
+      await acceptRequiredConfirmation();
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
         if (!current.loading && current.activeMediaSourceId == 'alternate') {
           break;
         }
       }
-      expect(current.activeMediaSourceId, 'alternate');
+      expect(
+        current.activeMediaSourceId,
+        'alternate',
+        reason:
+            'phase=${current.state.phase} failure=${current.loadFailure} track=${current.trackFailure} detail=${current.disconnectDetail}',
+      );
       expect(current.pendingMediaSourceId, isNull);
+      expect(
+        backend.isPlaying,
+        isFalse,
+        reason:
+            'Explicit version confirmation preserves the original user pause intent',
+      );
+      await closeConfirmation();
       expect(find.text('正在切换来源…'), findsNothing);
       await tester.tap(find.widgetWithText(TextButton, '返回'));
       await tester.pump();
@@ -1234,8 +1340,9 @@ void main() {
       backend.failNext = true;
       final original = find.byKey(ValueKey('mobile-source-$originalId'));
       await tester.ensureVisible(original);
-      await tester.tap(original);
       await tester.pump();
+      await tester.tap(original);
+      await acceptRequiredConfirmation();
       expect(current.pendingMediaSourceId, originalId);
       expect(current.activeMediaSourceId, 'alternate');
       expect(find.text('正在切换来源…'), findsOneWidget);
@@ -1252,10 +1359,14 @@ void main() {
       gate.complete();
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
         if (!current.isRecovering) break;
       }
       expect(current.activeMediaSourceId, 'alternate');
       expect(current.error, isNull);
+      await closeConfirmation();
       expect(find.text('来源切换失败，原来源已恢复'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, '返回'));
       await tester.pump();

@@ -8,7 +8,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/router.dart';
+import 'package:rillight/app/app.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -30,6 +30,7 @@ import 'package:rillight/media_image/media_image.dart';
 import '../../integration_test/mobile_performance.dart' as probe;
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: 'test',
@@ -447,11 +448,17 @@ void main() {
   ) async {
     await _pumpSurface(tester, width: 360, height: 800);
     final server = FakeEmbyServer();
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-      ),
+    final auth = SyntheticSourceAuth(
+      adapter: FakeEmbyAdapter([server]),
+      device: _device,
+      libraryIds: {
+        'view-movies',
+        'view-tv',
+        'view-music',
+        'view-photos',
+        'view-mixed',
+        'view-untyped',
+      },
     );
     addTearDown(auth.dispose);
     await tester.runAsync(() async {
@@ -461,23 +468,13 @@ void main() {
         password: 'correct-horse',
       );
     });
-    final router = createAppRouter(
+    final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.phone,
     );
+    final router = app.router;
     addTearDown(router.dispose);
-    await tester.pumpWidget(
-      AuthScope(
-        controller: auth,
-        child: MaterialApp.router(
-          theme: AppTheme.dark(),
-          locale: const Locale('zh'),
-          supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          routerConfig: router,
-        ),
-      ),
-    );
+    await tester.pumpWidget(app);
     await _settle(tester);
     final scroll = _homeScroll(tester);
     scroll.jumpTo(220);
@@ -495,7 +492,8 @@ void main() {
     addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await tester.pump();
     router.push('/item/movie-inception');
-    await tester.pump();
+    // The source gate still resolves membership even with animations disabled.
+    await _settle(tester);
     final route = ModalRoute.of(tester.element(find.byType(MobileDetailPage)))!;
     expect(route.transitionDuration, Duration.zero);
     expect(route.animation!.isCompleted, isTrue);

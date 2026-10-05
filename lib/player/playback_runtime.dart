@@ -85,6 +85,11 @@ class PlaybackRuntime {
     if (source.itemId != request.itemId || library == null || library.isEmpty) {
       throw ArgumentError('Source and library must belong to playback item');
     }
+    // Reject old decoded private intent before authentication/acquisition IO.
+    if (source.account.region == AccessRegion.private &&
+        request.regionGeneration != registry.access.generation) {
+      throw StateError('Private playback route generation was revoked');
+    }
     final account = await registry.acquireAccount(
       source.account.configuredServerId,
       region: source.account.region,
@@ -92,6 +97,12 @@ class PlaybackRuntime {
     );
     if (account != source.account) throw StateError('Playback account changed');
     final permit = registry.permit(account, libraryId: library);
+    // A decoded route is still only a value reference. Unlocking must not
+    // reacquire the authority of a pre-lock private playback intent.
+    if (account.region == AccessRegion.private &&
+        request.regionGeneration != permit.regionGeneration) {
+      throw StateError('Private playback route generation was revoked');
+    }
     final item = await permit.dispatch((c) => c.getItem(source!.itemId));
     // A library id supplied by a route/IPC message is not membership proof.
     var ancestor = item;

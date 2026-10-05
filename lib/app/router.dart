@@ -29,6 +29,7 @@ import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'source_route_extra_codec.dart';
 
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
@@ -42,21 +43,64 @@ GoRouter createAppRouter({
   required AuthController auth,
   PresentationEnvironment environment = PresentationEnvironment.desktop,
 }) {
-  return GoRouter(
+  late final GoRouter router;
+  router = GoRouter(
     initialLocation: AppRoutes.home,
+    extraCodec: const SourceRouteExtraCodec(),
     observers: [_ConnectFlowObserver(auth)],
     refreshListenable: Listenable.merge([auth, auth.regionAccess]),
     redirect: (context, state) {
       final loggedIn = auth.isLoggedIn;
       final onConnect = state.matchedLocation == AppRoutes.connect;
-      if (!loggedIn && !onConnect) {
+      var authorizedPlayer = false;
+      var playerState = state;
+      final committed = router.routerDelegate.currentConfiguration;
+      if (committed.isNotEmpty &&
+          committed.uri == state.uri &&
+          router.state.uri.path.startsWith('/play/')) {
+        // A pushed player has its own match/extra. Refreshing selected Auth
+        // reparses the base detail URI, not that independent top route.
+        playerState = router.state;
+      }
+      final request = playerState.extra;
+      if (playerState.uri.path.startsWith('/play/') &&
+          request is PlayerOpenRequest &&
+          request.source != null &&
+          request.source!.itemId == request.itemId &&
+          request.libraryId != null &&
+          request.libraryId!.isNotEmpty) {
+        try {
+          // Selected Auth owns catalog chrome, not an independent actual-source
+          // player. Losing B must not destroy A's still-authorized playback.
+          // Runtime still proves item ancestry; unknown/legacy routes get no
+          // exception to login and revoked A permits cannot use this path.
+          final permit = auth.sources.permit(
+            request.source!.account,
+            libraryId: request.libraryId,
+          );
+          authorizedPlayer =
+              permit.isValid &&
+              (request.source!.account.region != AccessRegion.private ||
+                  request.regionGeneration == permit.regionGeneration);
+        } catch (_) {
+          // Invalid account/scope is not an alternate authentication fallback.
+        }
+      }
+      if (!loggedIn && !onConnect && !authorizedPlayer) {
         return AppRoutes.connect;
+      }
+      if (playerState.uri.path.startsWith('/play/') &&
+          request is PlayerOpenRequest &&
+          request.source != null &&
+          !authorizedPlayer) {
+        return environment.isDesktop ? AppRoutes.aggregation : AppRoutes.home;
       }
       if (loggedIn && onConnect && state.uri.queryParameters['add'] != '1') {
         return AppRoutes.home;
       }
       final command = state.extra;
-      if (command is PlayerHostOpenItemCommand &&
+      if (!authorizedPlayer &&
+          command is PlayerHostOpenItemCommand &&
           command.source != null &&
           (AppRoutes.isItem(state.uri.path) ||
               state.uri.path.startsWith('/shelf/'))) {
@@ -333,6 +377,7 @@ GoRouter createAppRouter({
         ),
     ],
   );
+  return router;
 }
 
 Widget _shelfAggregation(AuthController auth, GoRouterState state) {

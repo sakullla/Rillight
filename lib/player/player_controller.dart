@@ -1795,6 +1795,7 @@ class PlayerController extends ChangeNotifier {
           ),
           work: actual.work,
           libraryId: actual.libraryId,
+          regionGeneration: actual.permit.regionGeneration,
         ),
       );
       if (_disposed || _revoked || !identical(origin, actual)) return;
@@ -2677,6 +2678,9 @@ class PlayerController extends ChangeNotifier {
         work: candidate.source.reference.item,
         libraryId: candidate.source.libraryId,
         mediaSourceId: version,
+        regionGeneration: runtime!.registry
+            .permit(reference.account, libraryId: candidate.source.libraryId)
+            .regionGeneration,
       ),
     );
     await runtime!.requireEquivalent(

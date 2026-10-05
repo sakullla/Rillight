@@ -44,6 +44,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   AuthController? _auth;
   Object? _identity;
   bool _closing = false;
+  bool _revocationExitScheduled = false;
   bool _focusedFailure = false;
   bool _focusedEnd = false;
   double? _seek;
@@ -91,6 +92,17 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   void _playerChanged() {
     final c = controller!;
     if (_closing) return;
+    if (c.permissionRevoked) {
+      if (!_revocationExitScheduled) {
+        _revocationExitScheduled = true;
+        final router = GoRouter.maybeOf(context);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) router?.go('/', extra: null);
+        });
+        WidgetsBinding.instance.ensureVisualUpdate();
+      }
+      return;
+    }
     final ended =
         c.playbackEnded && c.nextEpisode == null && !c.loading && !_failed;
     if (ended) {
@@ -447,7 +459,18 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                         c.activeMediaSourceId == source.id,
                                     onPressed: c.loading
                                         ? null
-                                        : () => c.switchMediaSource(source.id),
+                                        : () async {
+                                            await c.switchMediaSource(
+                                              source.id,
+                                            );
+                                            if (context.mounted &&
+                                                c.switchConfirmation != null) {
+                                              await showSourceSwitchMenu(
+                                                context,
+                                                c,
+                                              );
+                                            }
+                                          },
                                     child: _choiceLabel(
                                       source.name ?? source.id,
                                       selected:
@@ -747,6 +770,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
               ListenableBuilder(
                 listenable: c,
                 builder: (context, _) {
+                  if (c.permissionRevoked) {
+                    // Cover stale texture and semantics until the owned
+                    // revocation cleanup exits this actual-source route.
+                    return const ColoredBox(color: Colors.black);
+                  }
                   if (c.playbackEnded &&
                       c.nextEpisode == null &&
                       !c.loading &&
@@ -956,65 +984,92 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     const SizedBox(height: 12),
                                     _timeline(c),
                                     const SizedBox(height: 16),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        _action(
-                                          'tv-player-toggle',
-                                          c.isPlaying
-                                              ? Icons.pause_rounded
-                                              : Icons.play_arrow_rounded,
-                                          c.isPlaying ? l.pause : l.play,
-                                          ready ? c.togglePlay : null,
-                                          focusNode: _playFocus,
-                                        ),
-                                        if (c.canSwitchAudioTrack ||
-                                            c.canConfigureSubtitles)
-                                          _action(
-                                            'tv-player-tracks',
-                                            Icons.subtitles_outlined,
-                                            c.canSwitchAudioTrack
-                                                ? l.mobileTracks
-                                                : l.subtitleTrack,
-                                            ready
-                                                ? () => _panel(_TvPanel.tracks)
-                                                : null,
+                                    LayoutBuilder(
+                                      builder: (context, constraints) =>
+                                          SingleChildScrollView(
+                                            scrollDirection: Axis.horizontal,
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                minWidth: constraints.maxWidth,
+                                              ),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment
+                                                        .spaceBetween,
+                                                children: [
+                                                  _action(
+                                                    'tv-player-toggle',
+                                                    c.isPlaying
+                                                        ? Icons.pause_rounded
+                                                        : Icons
+                                                              .play_arrow_rounded,
+                                                    c.isPlaying
+                                                        ? l.pause
+                                                        : l.play,
+                                                    ready ? c.togglePlay : null,
+                                                    focusNode: _playFocus,
+                                                  ),
+                                                  if (c.canSwitchAudioTrack ||
+                                                      c.canConfigureSubtitles)
+                                                    _action(
+                                                      'tv-player-tracks',
+                                                      Icons.subtitles_outlined,
+                                                      c.canSwitchAudioTrack
+                                                          ? l.mobileTracks
+                                                          : l.subtitleTrack,
+                                                      ready
+                                                          ? () => _panel(
+                                                              _TvPanel.tracks,
+                                                            )
+                                                          : null,
+                                                    ),
+                                                  if (c.canSwitchQuality)
+                                                    _action(
+                                                      'tv-player-quality',
+                                                      Icons
+                                                          .high_quality_outlined,
+                                                      l.quality,
+                                                      ready
+                                                          ? () => _panel(
+                                                              _TvPanel.quality,
+                                                            )
+                                                          : null,
+                                                    ),
+                                                  SourceSwitchButton(
+                                                    controller: c,
+                                                  ),
+                                                  if (c.canSwitchMediaSource)
+                                                    _action(
+                                                      'tv-player-source',
+                                                      Icons
+                                                          .video_library_outlined,
+                                                      l.mediaSource,
+                                                      ready
+                                                          ? () => _panel(
+                                                              _TvPanel.source,
+                                                            )
+                                                          : null,
+                                                    ),
+                                                  _action(
+                                                    'tv-player-skip',
+                                                    Icons.fast_forward_rounded,
+                                                    l.playerSkipSettings,
+                                                    () => _panel(_TvPanel.skip),
+                                                  ),
+                                                  _action(
+                                                    'tv-player-speed',
+                                                    Icons.speed_rounded,
+                                                    '${c.playbackRate}x',
+                                                    ready
+                                                        ? () => _panel(
+                                                            _TvPanel.speed,
+                                                          )
+                                                        : null,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                           ),
-                                        if (c.canSwitchQuality)
-                                          _action(
-                                            'tv-player-quality',
-                                            Icons.high_quality_outlined,
-                                            l.quality,
-                                            ready
-                                                ? () => _panel(_TvPanel.quality)
-                                                : null,
-                                          ),
-                                        SourceSwitchButton(controller: c),
-                                        if (c.canSwitchMediaSource)
-                                          _action(
-                                            'tv-player-source',
-                                            Icons.video_library_outlined,
-                                            l.mediaSource,
-                                            ready
-                                                ? () => _panel(_TvPanel.source)
-                                                : null,
-                                          ),
-                                        _action(
-                                          'tv-player-skip',
-                                          Icons.fast_forward_rounded,
-                                          l.playerSkipSettings,
-                                          () => _panel(_TvPanel.skip),
-                                        ),
-                                        _action(
-                                          'tv-player-speed',
-                                          Icons.speed_rounded,
-                                          '${c.playbackRate}x',
-                                          ready
-                                              ? () => _panel(_TvPanel.speed)
-                                              : null,
-                                        ),
-                                      ],
                                     ),
                                   ],
                                 ),

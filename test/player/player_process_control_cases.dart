@@ -50,6 +50,24 @@ void main() {
     expect(control.activations, [42]);
   });
 
+  test('concurrent shutdown paths share endpoint cleanup', () async {
+    final control = _ControlledProcess();
+    addTearDown(control.clean);
+    final spawning = control.spawn(executable: 'test', arguments: '{}');
+    await _until(() => control.endpoint != null);
+    await control.ready();
+    final child = await spawning;
+    final directory = control.endpoint!.directory;
+    await control.kill(child);
+    await Future.wait([
+      control.release(child),
+      control.release(child),
+      control.release(child),
+    ]);
+    expect(control.activePids, isEmpty);
+    expect(await directory.exists(), isFalse);
+  });
+
   test(
     'cancellation during activation still retires the ready child',
     () async {
@@ -93,7 +111,7 @@ void main() {
       expect(await control.requestClose(pid, Duration.zero), isTrue);
       await control.kill(pid);
       expect(original.closeCount, 0);
-      await control.release(pid);
+      await Future.wait([control.release(pid), control.release(pid)]);
       await control.release(pid);
       expect(original.closeCount, 1);
       expect(original.terminateCount, 0);

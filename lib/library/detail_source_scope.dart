@@ -11,6 +11,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_host_command.dart';
+import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 
 /// A detail subtree owns a source lease, never another authentication authority.
@@ -209,6 +210,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
             true;
         // Replace the whole deep stack and clear route extras, not just pixels.
         final router = GoRouter.maybeOf(context);
+        final revokedUri = router?.routerDelegate.currentConfiguration.uri;
         // Redact the invalid lease immediately in build, then replace history
         // after that frame. Mutating the Navigator while source revocation
         // is notifying its mounted subtree races its render/semantics teardown.
@@ -216,7 +218,46 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
           // Overlay revocation can pop this detail before the frame completes.
           // The invalid deep stack still must be replaced, even if its gate
           // has already unmounted; otherwise unlocking restores private data.
-          router?.go(desktop ? '/aggregation' : '/', extra: null);
+          if (router == null) return;
+          final current = router.routerDelegate.currentConfiguration;
+          // Imperative push keeps the base URI/extra on currentConfiguration;
+          // the top player's lease lives in its own match instead.
+          final topExtra = router.state.extra;
+          final topSource = switch (topExtra) {
+            PlayerHostOpenItemCommand(:final source) => source,
+            PlayerOpenRequest(:final source) => source,
+            _ => null,
+          };
+          if (topSource != null &&
+              topSource.account != command!.source!.account) {
+            return;
+          }
+          // go() publishes intent before its async parser updates the delegate.
+          // Protect that intent too, not only the previously committed stack.
+          final information = router.routeInformationProvider.value;
+          final informationState = information.state;
+          final extra = informationState is RouteInformationState
+              ? informationState.extra
+              : current.extra;
+          final currentSource = switch (extra) {
+            PlayerHostOpenItemCommand(:final source) => source,
+            PlayerOpenRequest(:final source) => source,
+            _ => null,
+          };
+          // A covered detail owns only its revoked source, not a newer route
+          // or an independently authorized player on top of it. An overlay
+          // pop may already have returned to the anonymous private root;
+          // that old deep stack still needs clearing after the gate unmounts.
+          if (currentSource != null &&
+              currentSource.account != command!.source!.account) {
+            return;
+          }
+          if (currentSource == null &&
+              information.uri != revokedUri &&
+              information.uri.path != '/private') {
+            return;
+          }
+          router.go(desktop ? '/aggregation' : '/', extra: null);
         });
       }
     }

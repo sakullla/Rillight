@@ -51,6 +51,19 @@ void main() {
     },
   );
 
+  test('urgent lock mailbox is isolated and path kinds are closed', () async {
+    await first.write('lock-request', {'sequence': 7, 'action': 'lock'});
+    expect(await second.read('lock-request'), isNull);
+    expect((await first.read('lock-request'))?['sequence'], 7);
+    expect(await first.read('lock-request'), isNull);
+    await File('${first.directory.path}/lock-request.json').writeAsString(
+      jsonEncode({'sessionId': second.sessionId, 'pid': pid, 'action': 'lock'}),
+    );
+    expect(await first.read('lock-request'), isNull);
+    await expectLater(first.write('../lock-request'), throwsArgumentError);
+    await expectLater(first.read('../lock-request'), throwsArgumentError);
+  });
+
   test('heartbeat write succeeds while the previous file is open', () async {
     await first.heartbeat();
     final file = File('${first.directory.path}/heartbeat.json');

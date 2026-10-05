@@ -25,6 +25,8 @@ class MobileShell extends StatefulWidget {
 class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   int _index = 0;
   bool _homeCovered = false;
+  bool? _pendingHomeCovered;
+  bool _homeCoverScheduled = false;
   bool _recovering = false, _recoveryFailed = false, _initialized = false;
   @override
   void initState() {
@@ -155,11 +157,21 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
               return false;
             }
             final covered = notification.metrics.pixels > 24;
-            if (covered != _homeCovered) {
+            // Record even a return to the currently rendered value: multiple
+            // jumps in one frame must not commit an earlier covered offset.
+            _pendingHomeCovered = covered;
+            if (!_homeCoverScheduled) {
+              _homeCoverScheduled = true;
               // Restoring a scroll offset can notify during viewport layout.
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted && _index == 0 && covered != _homeCovered) {
-                  setState(() => _homeCovered = covered);
+                _homeCoverScheduled = false;
+                final latest = _pendingHomeCovered;
+                _pendingHomeCovered = null;
+                if (mounted &&
+                    _index == 0 &&
+                    latest != null &&
+                    latest != _homeCovered) {
+                  setState(() => _homeCovered = latest);
                 }
               });
             }

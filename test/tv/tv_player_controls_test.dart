@@ -21,6 +21,7 @@ import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/tv_player_page.dart';
+import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -238,6 +239,21 @@ void main() {
     expect(focused(tester, 'tv-player-toggle'), isTrue);
     for (final entry in ['tracks', 'quality', 'source', 'skip', 'speed']) {
       await key(tester, LogicalKeyboardKey.arrowRight);
+      if (entry == 'source') {
+        // Manual cross-source switching now has its own action between quality
+        // and the local media-version panel. Exercise rather than skip it.
+        expect(find.byKey(const Key('player-manual-switch')), findsOneWidget);
+        final manualFocus = FocusManager.instance.primaryFocus;
+        await key(tester, LogicalKeyboardKey.select);
+        expect(find.byType(SourceSwitchMenu), findsOneWidget);
+        expect(c.controlsPinned, isTrue);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        expect(find.byType(SourceSwitchMenu), findsNothing);
+        expect(FocusManager.instance.primaryFocus, same(manualFocus));
+        expect(c.controlsPinned, isFalse);
+        await key(tester, LogicalKeyboardKey.arrowRight);
+      }
       expect(focused(tester, 'tv-player-$entry'), isTrue);
       final origin = FocusManager.instance.primaryFocus;
       await key(tester, LogicalKeyboardKey.select);

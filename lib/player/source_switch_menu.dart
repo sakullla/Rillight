@@ -51,6 +51,7 @@ class _SourceSwitchMenuState extends State<SourceSwitchMenu> {
   Map<String, dynamic>? _hostCatalogue;
   final Map<SourceReference, List<PlaybackMediaSource>> _episodeVersions = {};
   bool _busy = false;
+  bool _locking = false;
   String? _error;
   int? _audio, _subtitle;
   bool _defaultAudio = false, _subtitleOff = false;
@@ -125,6 +126,7 @@ class _SourceSwitchMenuState extends State<SourceSwitchMenu> {
                 source: candidate.source.reference,
                 work: candidate.source.reference.item,
                 libraryId: candidate.source.libraryId,
+                regionGeneration: origin.permit.regionGeneration,
               ),
             );
             final info = await target.permit.dispatch(
@@ -193,6 +195,7 @@ class _SourceSwitchMenuState extends State<SourceSwitchMenu> {
           source: result.lookup.source!.reference,
           work: candidate.source.reference.item,
           libraryId: candidate.source.libraryId,
+          regionGeneration: origin.permit.regionGeneration,
         ),
       );
       final info = await target.permit.dispatch(
@@ -216,6 +219,24 @@ class _SourceSwitchMenuState extends State<SourceSwitchMenu> {
       if (mounted) _error = AppLocalizations.of(context).sourceOperationFailed;
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _lock() async {
+    if (_locking) return;
+    setState(() => _locking = true);
+    try {
+      // Safety revocation is independent of catalogue/preflight activity.
+      // It must cancel in-flight work, not wait for that work to enable UI.
+      await c.lockPrivateRegion();
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _error = AppLocalizations.of(context).sourceOperationFailed,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _locking = false);
     }
   }
 
@@ -478,10 +499,11 @@ class _SourceSwitchMenuState extends State<SourceSwitchMenu> {
               AccessRegion.private)
             FilledButton(
               key: const Key('player-lock-private'),
-              onPressed: _busy ? null : () => _act(c.lockPrivateRegion),
+              onPressed: _locking ? null : _lock,
               child: Text(l.privateLock),
             ),
           TextButton(
+            key: const Key('source-switch-close'),
             onPressed: () async {
               if (c.switchConfirmation != null) {
                 await c.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);

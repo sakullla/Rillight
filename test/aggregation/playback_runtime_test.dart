@@ -360,6 +360,7 @@ void main() {
       openRequest: PlayerOpenRequest(
         itemId: itemId,
         libraryId: 'library',
+        regionGeneration: registry.permit(account).regionGeneration,
         source: SourceReference(account: account, itemId: itemId),
       ),
     );

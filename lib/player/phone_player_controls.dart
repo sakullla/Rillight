@@ -916,9 +916,15 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               title: Text(source.name ?? source.id),
                               onTap: c.loading
                                   ? null
-                                  : () {
+                                  : () async {
                                       attemptedSourceId = source.id;
-                                      unawaited(c.switchMediaSource(source.id));
+                                      await c.switchMediaSource(source.id);
+                                      // The legacy local version entry must not
+                                      // leave T5's staged confirmation invisible.
+                                      if (c.switchConfirmation != null &&
+                                          context.mounted) {
+                                        await showSourceSwitchMenu(context, c);
+                                      }
                                     },
                             ),
                         ],
