@@ -68,9 +68,32 @@ static_assert(static_cast<uint32_t>(AUDCLNT_E_UNSUPPORTED_FORMAT) ==
               0x88890008u);
 static_assert(static_cast<uint32_t>(AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED) ==
               0x8889000Eu);
+static_assert(static_cast<uint32_t>(AUDCLNT_E_DEVICE_INVALIDATED) ==
+              0x88890004u);
+static_assert(static_cast<uint32_t>(AUDCLNT_E_ENDPOINT_CREATE_FAILED) ==
+              0x8889000Fu);
 static_assert(static_cast<uint32_t>(E_INVALIDARG) == 0x80070057u);
 static_assert(S_OK == 0);
 static_assert(S_FALSE == 1);
+
+rillight_windows::ExclusiveProbe ProbeFromStep(
+    rillight_windows::ExclusiveStep step) {
+  switch (step) {
+    case rillight_windows::ExclusiveStep::kUnsupported:
+      return rillight_windows::ExclusiveProbe::kUnsupported;
+    case rillight_windows::ExclusiveStep::kEndpointLost:
+      return rillight_windows::ExclusiveProbe::kEndpointLost;
+    case rillight_windows::ExclusiveStep::kDeviceInUse:
+      return rillight_windows::ExclusiveProbe::kDeviceInUse;
+    case rillight_windows::ExclusiveStep::kContinue:
+      return rillight_windows::ExclusiveProbe::kAccepted;
+  }
+  return rillight_windows::ExclusiveProbe::kDeviceInUse;
+}
+
+rillight_windows::ExclusiveProbe FailedProbe(HRESULT hr) {
+  return ProbeFromStep(rillight_windows::ClassifyExclusiveCall(hr));
+}
 
 rillight_windows::ExclusiveProbe ProbeExclusive(IMMDevice* device,
                                                 bool truehd) {
@@ -78,34 +101,36 @@ rillight_windows::ExclusiveProbe ProbeExclusive(IMMDevice* device,
   const HRESULT activated = device->Activate(
       __uuidof(IAudioClient), CLSCTX_ALL, nullptr,
       reinterpret_cast<void**>(client.GetAddressOf()));
-  if (rillight_windows::ClassifyExclusiveCall(activated) !=
-      rillight_windows::ExclusiveStep::kContinue) {
-    return rillight_windows::ExclusiveProbe::kDeviceInUse;
-  }
+  const auto activation = rillight_windows::ClassifyExclusiveCall(activated);
+  if (activation != rillight_windows::ExclusiveStep::kContinue)
+    return ProbeFromStep(activation);
   const IecWave format = MakeIecFormat(truehd);
   const HRESULT supported = client->IsFormatSupported(
       AUDCLNT_SHAREMODE_EXCLUSIVE,
       reinterpret_cast<const WAVEFORMATEX*>(&format), nullptr);
   const auto support = rillight_windows::ClassifyExclusiveCall(supported);
-  if (support == rillight_windows::ExclusiveStep::kUnsupported)
-    return rillight_windows::ExclusiveProbe::kUnsupported;
   if (support != rillight_windows::ExclusiveStep::kContinue)
-    return rillight_windows::ExclusiveProbe::kDeviceInUse;
+    return ProbeFromStep(support);
   HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-  if (!event) return rillight_windows::ExclusiveProbe::kDeviceInUse;
+  if (!event) return rillight_windows::ExclusiveProbe::kUnsupported;
   const REFERENCE_TIME period = truehd ? 200000 : 320000;
   const HRESULT started = client->Initialize(
       AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, period,
       period, reinterpret_cast<const WAVEFORMATEX*>(&format), nullptr);
-  auto verdict = rillight_windows::ExclusiveProbe::kDeviceInUse;
   const auto init = rillight_windows::ClassifyExclusiveCall(started);
-  if (init == rillight_windows::ExclusiveStep::kUnsupported) {
-    verdict = rillight_windows::ExclusiveProbe::kUnsupported;
-  } else if (init == rillight_windows::ExclusiveStep::kContinue) {
+  rillight_windows::ExclusiveProbe verdict =
+      rillight_windows::ExclusiveProbe::kUnsupported;
+  if (init != rillight_windows::ExclusiveStep::kContinue) {
+    verdict = ProbeFromStep(init);
+  } else {
     UINT32 frames = 0;
-    if (FAILED(client->SetEventHandle(event)) ||
-        FAILED(client->GetBufferSize(&frames))) {
-      verdict = rillight_windows::ExclusiveProbe::kUnsupported;
+    const HRESULT event_hr = client->SetEventHandle(event);
+    const HRESULT size_hr =
+        SUCCEEDED(event_hr) ? client->GetBufferSize(&frames) : S_OK;
+    if (FAILED(event_hr)) {
+      verdict = FailedProbe(event_hr);
+    } else if (FAILED(size_hr)) {
+      verdict = FailedProbe(size_hr);
     } else {
       const int expected = truehd ? RillightIec61937Mux::kTrueHdPeriod
                                   : RillightIec61937Mux::kEac3Period;
@@ -127,9 +152,15 @@ rillight_windows::RouteObservation ProbeOpenDevice(IMMDevice* device) {
   const HRESULT activated = device->Activate(
       __uuidof(IAudioClient), CLSCTX_ALL, nullptr,
       reinterpret_cast<void**>(client.GetAddressOf()));
-  if (rillight_windows::ClassifyExclusiveCall(activated) !=
-      rillight_windows::ExclusiveStep::kContinue) {
-    result.device_in_use = true;
+  const auto activation = rillight_windows::ClassifyExclusiveCall(activated);
+  if (activation == rillight_windows::ExclusiveStep::kEndpointLost) {
+    result.endpoint_lost = true;
+    return result;
+  }
+  if (activation == rillight_windows::ExclusiveStep::kDeviceInUse) return result;
+  if (activation != rillight_windows::ExclusiveStep::kContinue) {
+    result.eac3 = rillight_windows::ExclusiveProbe::kUnsupported;
+    result.truehd = rillight_windows::ExclusiveProbe::kUnsupported;
     return result;
   }
   WAVEFORMATEX* mix = nullptr;
@@ -152,23 +183,46 @@ rillight_windows::RouteObservation ProbeOpenDevice(IMMDevice* device) {
     if (result.truehd == rillight_windows::ExclusiveProbe::kDeviceInUse)
       result.truehd = ProbeExclusive(device, true);
   }
-  result.device_in_use =
-      result.eac3 == rillight_windows::ExclusiveProbe::kDeviceInUse ||
-      result.truehd == rillight_windows::ExclusiveProbe::kDeviceInUse;
+  if (result.eac3 == rillight_windows::ExclusiveProbe::kEndpointLost ||
+      result.truehd == rillight_windows::ExclusiveProbe::kEndpointLost) {
+    result.endpoint_lost = true;
+  }
   return result;
 }
 
+// Refreshes the default endpoint once after DEVICE_INVALIDATED or
+// ENDPOINT_CREATE_FAILED. A second loss is published as PCM, not the old route.
+rillight_windows::RouteObservation ProbeDefaultRoute(
+    IMMDeviceEnumerator* enumerator, ComPtr<IMMDevice>* device) {
+  ComPtr<IMMDevice> current;
+  if (!enumerator ||
+      FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
+                                                 &current))) {
+    return {};
+  }
+  auto observed = ProbeOpenDevice(current.Get());
+  if (observed.endpoint_lost) {
+    ComPtr<IMMDevice> refreshed;
+    if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
+                                                   &refreshed))) {
+      return {};
+    }
+    current = refreshed;
+    observed = rillight_windows::RouteAfterEndpointLoss(
+        ProbeOpenDevice(current.Get()));
+  }
+  if (device) *device = current;
+  return observed;
+}
+
 rillight_windows::RouteObservation ProbeDevice() {
-  rillight_windows::RouteObservation missing;
   ComPtr<IMMDeviceEnumerator> enumerator;
   if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                               IID_PPV_ARGS(&enumerator)))) {
-    return missing;
+    return {};
   }
   ComPtr<IMMDevice> device;
-  if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device)))
-    return missing;
-  return ProbeOpenDevice(device.Get());
+  return ProbeDefaultRoute(enumerator.Get(), &device);
 }
 
 class OutputDeviceEvents : public IMMNotificationClient {
@@ -309,9 +363,7 @@ rillight_windows::ExclusiveProbe OpenExclusive(IMMDevice* device, int kind,
   const auto activation = rillight_windows::ClassifyExclusiveCall(activated);
   if (activation != rillight_windows::ExclusiveStep::kContinue) {
     endpoint->Close();
-    return activation == rillight_windows::ExclusiveStep::kDeviceInUse
-               ? rillight_windows::ExclusiveProbe::kDeviceInUse
-               : rillight_windows::ExclusiveProbe::kUnsupported;
+    return ProbeFromStep(activation);
   }
   const IecWave format = MakeIecFormat(truehd);
   const REFERENCE_TIME period = truehd ? 200000 : 320000;
@@ -319,14 +371,24 @@ rillight_windows::ExclusiveProbe OpenExclusive(IMMDevice* device, int kind,
       AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, period,
       period, reinterpret_cast<const WAVEFORMATEX*>(&format), nullptr);
   const auto init = rillight_windows::ClassifyExclusiveCall(started);
-  if (init != rillight_windows::ExclusiveStep::kContinue ||
-      FAILED(endpoint->client->SetEventHandle(endpoint->event)) ||
-      FAILED(endpoint->client->GetBufferSize(&endpoint->capacity)) ||
-      FAILED(endpoint->client->GetService(IID_PPV_ARGS(&endpoint->render)))) {
+  if (init != rillight_windows::ExclusiveStep::kContinue) {
     endpoint->Close();
-    return init == rillight_windows::ExclusiveStep::kDeviceInUse
-               ? rillight_windows::ExclusiveProbe::kDeviceInUse
-               : rillight_windows::ExclusiveProbe::kUnsupported;
+    return ProbeFromStep(init);
+  }
+  const HRESULT event_hr = endpoint->client->SetEventHandle(endpoint->event);
+  const HRESULT size_hr = SUCCEEDED(event_hr)
+                              ? endpoint->client->GetBufferSize(&endpoint->capacity)
+                              : S_OK;
+  const HRESULT service_hr =
+      SUCCEEDED(event_hr) && SUCCEEDED(size_hr)
+          ? endpoint->client->GetService(IID_PPV_ARGS(&endpoint->render))
+          : S_OK;
+  if (FAILED(event_hr) || FAILED(size_hr) || FAILED(service_hr)) {
+    const HRESULT failed = FAILED(event_hr)   ? event_hr
+                           : FAILED(size_hr) ? size_hr
+                                             : service_hr;
+    endpoint->Close();
+    return FailedProbe(failed);
   }
   const int expected = truehd ? RillightIec61937Mux::kTrueHdPeriod
                               : RillightIec61937Mux::kEac3Period;
@@ -480,6 +542,7 @@ void AudioOutput::Run() {
     bool audio_clock_started = false;
     rillight_windows::AudioHandoffPolicy handoff_policy;
     bool running = false;
+    int exclusive_stalls = 0;
     uint32_t seen_generation = route_at_start;
     auto retire_route = [&] {
       if (running && endpoint.client) endpoint.client->Stop();
@@ -521,6 +584,7 @@ void AudioOutput::Run() {
         burst.clear();
         burst_pts = -1;
         burst_samples = 0;
+        exclusive_stalls = 0;
         session = state.session_id;
         timeline = state.timeline_version;
       }
@@ -528,18 +592,11 @@ void AudioOutput::Run() {
       if (generation != seen_generation) {
         seen_generation = generation;
         // IsFormatSupported/Initialize return DEVICE_IN_USE while this
-        // process still holds the endpoint. Release first, and do not publish
-        // that failure as a rejected compressed format.
+        // process still holds the endpoint. Release first, then probe.
         retire_route();
-        ComPtr<IMMDevice> current;
-        rillight_windows::RouteObservation observed;
-        if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
-                                                       &current))) {
-          observed.endpoint_present = false;
-        } else {
-          device = current;
-          observed = ProbeOpenDevice(device.Get());
-        }
+        exclusive_stalls = 0;
+        const rillight_windows::RouteObservation observed =
+            ProbeDefaultRoute(enumerator.Get(), &device);
         const rillight_windows::RouteCommit commit =
             rillight_windows::DecideAudioRoute(
                 max_pcm_channels_, accepted_passthrough_, observed);
@@ -588,6 +645,11 @@ void AudioOutput::Run() {
         if (pending) api_->release_frame(pending);
         pending = nullptr;
         pending_ = false;
+        device_padding_ = 0;
+        exclusive_stalls = 0;
+        if (device) {
+          OpenShared(device.Get(), std::max(2, max_pcm_channels_), &endpoint);
+        }
       };
       if (pending && pending->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {
         const int kind = pending->audio_codec_id;
@@ -606,15 +668,42 @@ void AudioOutput::Run() {
         } else if (!endpoint.exclusive || endpoint.kind != kind) {
           if (running && endpoint.client) endpoint.client->Stop();
           running = false;
-          const auto opened = OpenExclusive(device.Get(), kind, &endpoint);
-          if (opened == rillight_windows::ExclusiveProbe::kUnsupported) {
-            fail_passthrough(kind);
-          } else if (opened != rillight_windows::ExclusiveProbe::kAccepted) {
-            // Keep the compressed frame and the accept bit. Packing it now
-            // would leave a burst with no exclusive stream to retry.
+          auto opened = OpenExclusive(device.Get(), kind, &endpoint);
+          auto action = rillight_windows::DecideExclusiveOpen(
+              opened, exclusive_stalls);
+          if (action == rillight_windows::ExclusiveOpenAction::kRefresh) {
+            const rillight_windows::RouteObservation observed =
+                ProbeDefaultRoute(enumerator.Get(), &device);
+            const rillight_windows::RouteCommit commit =
+                rillight_windows::DecideAudioRoute(
+                    max_pcm_channels_, accepted_passthrough_, observed);
+            if (commit.publish) {
+              max_pcm_channels_ = commit.max_pcm_channels;
+              accepted_passthrough_ = commit.accepted_passthrough;
+              PublishSink();
+            }
+            if ((accepted_passthrough_ & bit) == 0 || !device) {
+              action = rillight_windows::ExclusiveOpenAction::kUsePcm;
+            } else {
+              opened = OpenExclusive(device.Get(), kind, &endpoint);
+              action = opened == rillight_windows::ExclusiveProbe::kEndpointLost
+                           ? rillight_windows::ExclusiveOpenAction::kUsePcm
+                           : rillight_windows::DecideExclusiveOpen(
+                                 opened, exclusive_stalls);
+            }
+          }
+          if (action == rillight_windows::ExclusiveOpenAction::kRetry) {
+            // A single busy endpoint is not rejection. Stop after the limit
+            // instead of holding compressed frames with no PCM fallback.
+            ++exclusive_stalls;
             device_padding_ = 0;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
+          }
+          if (action != rillight_windows::ExclusiveOpenAction::kPlay) {
+            fail_passthrough(kind);
+          } else {
+            exclusive_stalls = 0;
           }
         }
         if (pending && pending->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {

@@ -55,24 +55,33 @@ int main() {
          ExclusiveStep::kUnsupported);
   assert(ClassifyExclusiveCall(static_cast<int32_t>(E_INVALIDARG)) ==
          ExclusiveStep::kUnsupported);
-  // Not a format rejection: do not clear an accept bit for this HRESULT.
+  static_assert(static_cast<uint32_t>(AUDCLNT_E_DEVICE_INVALIDATED) ==
+                0x88890004u);
+  static_assert(static_cast<uint32_t>(AUDCLNT_E_ENDPOINT_CREATE_FAILED) ==
+                0x8889000Fu);
+  // Endpoint loss is not DEVICE_IN_USE and must not keep the old route.
   assert(ClassifyExclusiveCall(
              static_cast<int32_t>(AUDCLNT_E_ENDPOINT_CREATE_FAILED)) ==
-         ExclusiveStep::kDeviceInUse);
+         ExclusiveStep::kEndpointLost);
   assert(ClassifyExclusiveCall(
              static_cast<int32_t>(AUDCLNT_E_DEVICE_INVALIDATED)) ==
-         ExclusiveStep::kDeviceInUse);
+         ExclusiveStep::kEndpointLost);
+  // Only DEVICE_IN_USE keeps an accept bit. E_FAIL does not.
+  assert(ClassifyExclusiveCall(static_cast<int32_t>(0x80004005)) ==
+         ExclusiveStep::kUnsupported);
 
   const uint32_t both = RILLIGHT_CORE_AUDIO_ACCEPT_EAC3 |
                         RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD;
-  rillight_windows::RouteObservation busy;
-  busy.endpoint_present = true;
-  busy.device_in_use = true;
-  busy.mix_known = true;
-  busy.mix_channels = 2;
-  busy.eac3 = ExclusiveProbe::kUnsupported;
-  busy.truehd = ExclusiveProbe::kUnsupported;
-  expect_kept(rillight_windows::DecideAudioRoute(6, both, busy), 6, both);
+  rillight_windows::RouteObservation busy_stereo;
+  busy_stereo.endpoint_present = true;
+  busy_stereo.mix_known = true;
+  busy_stereo.mix_channels = 2;
+  busy_stereo.eac3 = ExclusiveProbe::kDeviceInUse;
+  busy_stereo.truehd = ExclusiveProbe::kDeviceInUse;
+  const auto busy = rillight_windows::DecideAudioRoute(6, both, busy_stereo);
+  assert(busy.publish);
+  assert(busy.max_pcm_channels == 2);
+  assert(busy.accepted_passthrough == both);
 
   rillight_windows::RouteObservation one_busy;
   one_busy.endpoint_present = true;
@@ -80,9 +89,11 @@ int main() {
   one_busy.mix_channels = 2;
   one_busy.eac3 = ExclusiveProbe::kDeviceInUse;
   one_busy.truehd = ExclusiveProbe::kUnsupported;
-  expect_kept(rillight_windows::DecideAudioRoute(
-                  6, RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD, one_busy),
-              6, RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD);
+  const auto dropped = rillight_windows::DecideAudioRoute(
+      6, RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD, one_busy);
+  assert(dropped.publish);
+  assert(dropped.max_pcm_channels == 2);
+  assert(dropped.accepted_passthrough == 0);
 
   rillight_windows::RouteObservation truehd_only;
   truehd_only.endpoint_present = true;
@@ -135,5 +146,89 @@ int main() {
   assert(unplugged.max_pcm_channels == 2);
   assert(unplugged.accepted_passthrough == 0);
   expect_kept(rillight_windows::DecideAudioRoute(2, 0, gone), 2, 0);
+
+  rillight_windows::RouteObservation rejected;
+  rejected.endpoint_present = true;
+  rejected.eac3 = ExclusiveProbe::kUnsupported;
+  rejected.truehd = ExclusiveProbe::kUnsupported;
+  const auto cleared = rillight_windows::DecideAudioRoute(6, both, rejected);
+  assert(cleared.publish);
+  assert(cleared.max_pcm_channels == 6);
+  assert(cleared.accepted_passthrough == 0);
+
+  rillight_windows::RouteObservation unread_probe;
+  unread_probe.endpoint_present = true;
+  unread_probe.mix_known = true;
+  unread_probe.mix_channels = 6;
+  unread_probe.truehd = ExclusiveProbe::kUnsupported;
+  const auto unprobed = rillight_windows::DecideAudioRoute(6, both, unread_probe);
+  assert(unprobed.publish);
+  assert(unprobed.max_pcm_channels == 6);
+  assert(unprobed.accepted_passthrough == RILLIGHT_CORE_AUDIO_ACCEPT_EAC3);
+
+  rillight_windows::RouteObservation invalidated;
+  invalidated.endpoint_present = true;
+  invalidated.endpoint_lost = true;
+  invalidated.mix_known = true;
+  invalidated.mix_channels = 2;
+  invalidated.eac3 = ExclusiveProbe::kAccepted;
+  invalidated.truehd = ExclusiveProbe::kDeviceInUse;
+  const auto lost = rillight_windows::DecideAudioRoute(6, both, invalidated);
+  assert(lost.publish);
+  assert(lost.max_pcm_channels == 2);
+  assert(lost.accepted_passthrough == 0);
+
+  rillight_windows::RouteObservation lost_unread;
+  lost_unread.endpoint_present = true;
+  lost_unread.endpoint_lost = true;
+  const auto lost_stereo =
+      rillight_windows::DecideAudioRoute(6, both, lost_unread);
+  assert(lost_stereo.publish);
+  assert(lost_stereo.max_pcm_channels == 2);
+  assert(lost_stereo.accepted_passthrough == 0);
+
+  rillight_windows::RouteObservation still_lost;
+  still_lost.endpoint_present = true;
+  still_lost.endpoint_lost = true;
+  still_lost.mix_known = true;
+  still_lost.mix_channels = 2;
+  still_lost.truehd = ExclusiveProbe::kAccepted;
+  const auto after_loss = rillight_windows::RouteAfterEndpointLoss(still_lost);
+  assert(after_loss.endpoint_present);
+  assert(!after_loss.endpoint_lost);
+  assert(after_loss.mix_channels == 2);
+  assert(after_loss.eac3 == ExclusiveProbe::kUnsupported);
+  assert(after_loss.truehd == ExclusiveProbe::kUnsupported);
+  const auto published =
+      rillight_windows::DecideAudioRoute(6, both, after_loss);
+  assert(published.publish);
+  assert(published.max_pcm_channels == 2);
+  assert(published.accepted_passthrough == 0);
+
+  rillight_windows::RouteObservation healthy;
+  healthy.endpoint_present = true;
+  healthy.mix_known = true;
+  healthy.mix_channels = 6;
+  healthy.truehd = ExclusiveProbe::kAccepted;
+  assert(rillight_windows::RouteAfterEndpointLoss(healthy).truehd ==
+         ExclusiveProbe::kAccepted);
+  assert(!rillight_windows::RouteAfterEndpointLoss({}).endpoint_present);
+
+  using rillight_windows::DecideExclusiveOpen;
+  using rillight_windows::ExclusiveOpenAction;
+  assert(DecideExclusiveOpen(ExclusiveProbe::kAccepted, 4) ==
+         ExclusiveOpenAction::kPlay);
+  assert(DecideExclusiveOpen(ExclusiveProbe::kUnsupported, 0) ==
+         ExclusiveOpenAction::kUsePcm);
+  assert(DecideExclusiveOpen(ExclusiveProbe::kEndpointLost, 0) ==
+         ExclusiveOpenAction::kRefresh);
+  assert(DecideExclusiveOpen(ExclusiveProbe::kDeviceInUse, 0) ==
+         ExclusiveOpenAction::kRetry);
+  assert(DecideExclusiveOpen(ExclusiveProbe::kDeviceInUse, 1) ==
+         ExclusiveOpenAction::kRetry);
+  assert(DecideExclusiveOpen(ExclusiveProbe::kDeviceInUse, 2) ==
+         ExclusiveOpenAction::kUsePcm);
+  assert(DecideExclusiveOpen(ExclusiveProbe::kUnprobed, 2) ==
+         ExclusiveOpenAction::kUsePcm);
   return 0;
 }
