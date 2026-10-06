@@ -463,6 +463,12 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ],
               ),
+            if (c.playbackLineFailure != null)
+              Text(
+                l.playbackLineFailed(c.playbackLineFailure!),
+                key: const Key('playback-line-failure'),
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
             if (c.trackFailure != null)
               Row(
                 children: [
@@ -844,7 +850,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (section == null) ...[
-                          SourceSwitchButton(controller: c),
+                          SourceSwitchButton(
+                            controller: c,
+                            surface: PlaybackLineSurface.sheet,
+                          ),
                           for (final entry in <String, (IconData, String)>{
                             'speed': (Icons.speed, l.playbackRate),
                             if (c.canSwitchAudioTrack ||

@@ -208,6 +208,24 @@ abstract class AppLocalizations {
   /// **'手动切换'**
   String get switchManual;
 
+  /// No description provided for @playbackLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路'**
+  String get playbackLine;
+
+  /// No description provided for @playbackLineInUse.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在使用'**
+  String get playbackLineInUse;
+
+  /// No description provided for @playbackLineFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路切换失败，已继续使用原来的线路：{reason}'**
+  String playbackLineFailed(String reason);
+
   /// No description provided for @switchLine.
   ///
   /// In zh, this message translates to:

@@ -113,7 +113,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       builder: (context, menu, _) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SourceSwitchButton(controller: widget.controller),
+          PlaybackLineButton(controller: widget.controller),
           IconButton(
             key: PlayerKeys.more,
             focusNode: _buttonFocus,

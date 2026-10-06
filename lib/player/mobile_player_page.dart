@@ -305,11 +305,14 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _bars = widget.systemBars ?? PhoneSystemBars();
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
+    final matched = serverMatchingPlayback(auth, auth.client.baseUrl);
     final created = PlayerController(
       runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
+      playbackLineSnapshot: matched?.lines ?? const [],
+      verifiedPlaybackServerId: matched?.verifiedServerId,
       itemId: widget.itemId,
       backend: bindings.createBackend?.call() ?? RillightVideoBackend(),
       window: bindings.window ?? PlayerWindow(),
@@ -477,10 +480,32 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       if (!current!.origin!.permit.isValid) unawaited(_close());
       return;
     }
-    if (_identity !=
-        (auth.client.baseUrl, auth.client.userId, auth.client.accessToken)) {
-      unawaited(_close());
+    final next = (
+      auth.client.baseUrl,
+      auth.client.userId,
+      auth.client.accessToken,
+    );
+    final previous = _identity;
+    final sameAccount =
+        previous is (Uri?, String?, String?) &&
+        next.$2 == previous.$2 &&
+        next.$3 == previous.$3;
+    final keepLine =
+        sameAccount &&
+        (next.$1 == (previous as (Uri?, String?, String?)).$1 ||
+            (current?.isConfiguredPlaybackUrl(next.$1) ?? false));
+    if (keepLine) {
+      _identity = next;
+      final matched = serverMatchingPlayback(auth, next.$1);
+      if (current != null && matched != null) {
+        current.bindPlaybackLineSnapshot(
+          matched.lines,
+          verifiedServerId: matched.verifiedServerId,
+        );
+      }
+      return;
     }
+    unawaited(_close());
   }
 
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {

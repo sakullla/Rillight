@@ -13,6 +13,7 @@ import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
@@ -95,6 +96,8 @@ class PlayerPage extends StatefulWidget {
     this.onClosed,
     this.onOpenItem,
     this.onOpenItemDetail,
+    this.playbackLines,
+    this.verifiedPlaybackServerId,
   });
 
   final String itemId;
@@ -112,6 +115,8 @@ class PlayerPage extends StatefulWidget {
     PlayerHostOpenItemCommand? command,
   })?
   onOpenItemDetail;
+  final List<ServerLine>? playbackLines;
+  final String? verifiedPlaybackServerId;
 
   @override
   State<PlayerPage> createState() => PlayerPageState();
@@ -163,8 +168,15 @@ class PlayerPageState extends State<PlayerPage> {
       return;
     }
     final bindings = PlayerScope.of(context);
+    final auth = AuthScope.of(context);
+    final matched = widget.playbackLines == null
+        ? serverMatchingPlayback(auth, auth.client.baseUrl)
+        : null;
     final created = PlayerController(
-      client: AuthScope.of(context).client,
+      client: auth.client,
+      playbackLineSnapshot: widget.playbackLines ?? matched?.lines ?? const [],
+      verifiedPlaybackServerId:
+          widget.verifiedPlaybackServerId ?? matched?.verifiedServerId,
       runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       observationSink: bindings.observationSink,
       switchDispatcher: bindings.switchDispatcher,
@@ -757,6 +769,14 @@ class PlayerPageState extends State<PlayerPage> {
                             l10n,
                             current.subtitleNotice!,
                           ),
+                        ),
+                      if (current.playbackLineFailure != null)
+                        _Banner(
+                          key: const ValueKey('playback-line-failure'),
+                          text: l10n.playbackLineFailed(
+                            current.playbackLineFailure!,
+                          ),
+                          onDismiss: current.dismissPlaybackLineFailure,
                         ),
                       if (current.trackFailure != null)
                         _Banner(

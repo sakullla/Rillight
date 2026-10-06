@@ -20,8 +20,8 @@ import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
-import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/source_switch_menu.dart';
+import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -33,6 +33,7 @@ void main() {
     bool reducedMotion = false,
     Size size = const Size(960, 540),
     String itemId = 'movie-inception',
+    String? extraLine,
   }) async {
     final server = FakeEmbyServer();
     final auth = AuthController.memory(
@@ -53,6 +54,10 @@ void main() {
         password: 'correct-horse',
       ),
     );
+    if (extraLine != null) {
+      final line = extraLine;
+      await tester.runAsync(() => auth.addLine(auth.session!.server.id, line));
+    }
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -237,23 +242,10 @@ void main() {
     await tester.pumpAndSettle();
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focused(tester, 'tv-player-toggle'), isTrue);
+    expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+    expect(find.text('手动切换'), findsNothing);
     for (final entry in ['tracks', 'quality', 'source', 'skip', 'speed']) {
       await key(tester, LogicalKeyboardKey.arrowRight);
-      if (entry == 'source') {
-        // Manual cross-source switching now has its own action between quality
-        // and the local media-version panel. Exercise rather than skip it.
-        expect(find.byKey(const Key('player-manual-switch')), findsOneWidget);
-        final manualFocus = FocusManager.instance.primaryFocus;
-        await key(tester, LogicalKeyboardKey.select);
-        expect(find.byType(SourceSwitchMenu), findsOneWidget);
-        expect(c.controlsPinned, isTrue);
-        await tester.binding.handlePopRoute();
-        await tester.pumpAndSettle();
-        expect(find.byType(SourceSwitchMenu), findsNothing);
-        expect(FocusManager.instance.primaryFocus, same(manualFocus));
-        expect(c.controlsPinned, isFalse);
-        await key(tester, LogicalKeyboardKey.arrowRight);
-      }
       expect(focused(tester, 'tv-player-$entry'), isTrue);
       final origin = FocusManager.instance.primaryFocus;
       await key(tester, LogicalKeyboardKey.select);
@@ -308,6 +300,40 @@ void main() {
     expect(c.controlsVisible, isFalse);
     await key(tester, LogicalKeyboardKey.select);
     expect(c.isPlaying, isFalse);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
+
+  testWidgets('TV line list shows only this server and the line in use', (
+    tester,
+  ) async {
+    final c = await start(
+      tester,
+      FakeVideoBackend(),
+      reducedMotion: true,
+      extraLine: 'https://mirror.example:8443',
+    );
+    expect(c.playbackLines, hasLength(2));
+    c.onUserActivity();
+    await tester.pumpAndSettle();
+    expect(find.text('手动切换'), findsNothing);
+    expect(find.text('立即锁定'), findsNothing);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    var found = false;
+    for (var step = 0; step < 6; step++) {
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      if (focused(tester, 'player-playback-lines')) {
+        found = true;
+        break;
+      }
+    }
+    expect(found, isTrue);
+    await key(tester, LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(PlaybackLineMenu), findsOneWidget);
+    expect(find.text('正在使用'), findsOneWidget);
+    expect(find.text('mirror.example:8443'), findsOneWidget);
+    expect(find.text('手动切换'), findsNothing);
     expect(tester.takeException(), isNull);
     await finish(tester);
   }, tags: ['integration']);

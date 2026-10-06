@@ -33,6 +33,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -656,89 +657,61 @@ void main() {
     }
   }
 
-  for (final failTarget in [false, true]) {
-    testWidgets(
-      'actual manual menu timeline confirmation ${failTarget ? 'failure and permitted recovery' : 'cancel keeps old then confirms target'}',
-      (tester) async {
-        await tester.runAsync(() async {
-          await setup(widgetTester: tester);
-          await controller.start();
-          backend.emitEvent(
-            VideoEventKind.position,
-            const Duration(seconds: 9),
-          );
-          await _eventually(() => controller.activeMediaSourceId == 'v');
-        });
-        await tester.pumpWidget(
-          MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(body: SourceSwitchButton(controller: controller)),
-          ),
-        );
-        await tester.tap(find.byKey(const Key('player-manual-switch')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(ListTile, 'v2'));
-        await tester.pumpAndSettle();
-        expect(
-          controller.switchConfirmation,
-          isNotNull,
-          reason: controller.trackFailure,
-        );
-        await tester.scrollUntilVisible(find.text('目标时间轴可能不同；请选择续播或从头播放'), 200);
-        expect(find.text('目标时间轴可能不同；请选择续播或从头播放'), findsOneWidget);
-        expect(controller.activeMediaSourceId, 'v');
-        await tester.ensureVisible(find.text('取消').first);
-        await tester.tap(find.text('取消').first);
-        await tester.pumpAndSettle();
-        expect(controller.switchConfirmation, isNull);
-        expect(controller.activeMediaSourceId, 'v');
-        await tester.scrollUntilVisible(
-          find.widgetWithText(ListTile, 'v2'),
-          -200,
-        );
-        await tester.tap(find.widgetWithText(ListTile, 'v2'));
-        await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('尝试当前位置'), 200);
-        backend.failNextOpen = failTarget;
-        await tester.tap(find.text('尝试当前位置'));
-        for (var i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 50));
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 10)),
-          );
-        }
-        if (failTarget) {
-          expect(controller.trackFailure, isNotNull);
-          expect(find.text(controller.trackFailure!), findsOneWidget);
-          expect(controller.resolved!.mediaSource.id, 'v');
-          expect(controller.origin!.source.account, account);
-        }
-        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+  testWidgets(
+    'playback line menu lists only this server and keeps the saved line',
+    (tester) async {
+      await tester.runAsync(() async {
+        await setup(widgetTester: tester);
+        await controller.start();
+        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
+        await _eventually(() => controller.activeMediaSourceId == 'v');
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(body: SourceSwitchButton(controller: controller)),
+        ),
+      );
+      expect(find.text('手动切换'), findsNothing);
+      expect(find.text('立即锁定'), findsNothing);
+      expect(find.byKey(const Key('player-playback-lines')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('player-playback-lines')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('playback-line-line')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('playback-line-mirror')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('playback-line-wrong')), findsOneWidget);
+      expect(find.text('正在使用'), findsOneWidget);
+      expect(find.text('v2'), findsNothing);
+      expect(find.text('连接线路（同一服务）'), findsNothing);
+      expect(find.text('跨服务来源（已确认作品）'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('playback-line-line')));
+      await tester.pumpAndSettle();
+      expect(controller.client.baseUrl?.host, 'a');
+      await tester.tap(find.byKey(const Key('player-playback-lines')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('playback-line-mirror')));
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
         await tester.runAsync(
-          () => _eventually(
-            () => controller.activeMediaSourceId == (failTarget ? 'v' : 'v2'),
-          ),
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
         );
-        await tester.pump();
-        expect(
-          runtime.history
-              .records(AccessRegion.ordinary)
-              .any(
-                (record) =>
-                    record.source.mediaSourceId == (failTarget ? 'v' : 'v2') &&
-                    record.positionTicks == 100000000,
-              ),
-          isTrue,
-        );
-        await tester.tap(find.text('取消').last);
-        await tester.pumpAndSettle();
-        controller.dispose();
-        await tester.pump(const Duration(seconds: 6));
-        await tester.pumpWidget(const SizedBox.shrink());
-      },
-    );
-  }
+        if (controller.client.baseUrl?.host == 'mirror') break;
+      }
+      expect(controller.client.baseUrl?.host, 'mirror');
+      expect(backend.openedStart, const Duration(seconds: 9));
+      expect(
+        auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+        'line',
+      );
+      controller.dispose();
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   test(
     'Playing and native open do not commit history; real advancement does, even if progress fails',
@@ -872,8 +845,70 @@ void main() {
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
       await _eventually(() => controller.activeLineId == 'mirror');
       expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
+      expect(
+        auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+        'line',
+      );
+      final remembered = runtime.preference(
+        controller.origin!,
+        controller.item!,
+        controller.mediaSources,
+      );
+      expect(remembered.preference?.lineId, isNot('mirror'));
     },
   );
+
+  test('line open failure continues on the original line', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await controller.togglePlay();
+    final original = controller.client;
+    backend.failNextOpen = true;
+    await controller.switchLine('mirror');
+    expect(controller.playbackLineFailure, isNotNull);
+    expect(controller.state.phase, isNot(PlaybackPhase.failed));
+    expect(controller.client, same(original));
+    expect(controller.client.baseUrl?.host, 'a');
+    expect(backend.openedStart, const Duration(seconds: 12));
+    expect(
+      auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+      'line',
+    );
+  });
+
+  test('playback line label uses a nickname, otherwise host and port', () {
+    expect(
+      playbackLineLabel(
+        const ServerLine(
+          id: 'home',
+          address: 'https://play.example:443',
+          nickname: '家里',
+        ),
+      ),
+      '家里',
+    );
+    expect(
+      playbackLineLabel(
+        const ServerLine(id: 'plain', address: 'https://play.example:8443'),
+      ),
+      'play.example:8443',
+    );
+    expect(
+      playbackLineLabel(
+        const ServerLine(id: 'https', address: 'https://play.example:443'),
+      ),
+      const ServerLine(
+        id: 'https',
+        address: 'https://play.example:443',
+      ).hostLabel,
+    );
+    expect(
+      playbackLineLabel(const ServerLine(id: 'raw', address: 'not a uri')),
+      'not a uri',
+    );
+  });
 
   test(
     'lock freezes latest real position, clears presentation and rejects snapshots after unlock',

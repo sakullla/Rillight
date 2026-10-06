@@ -19,6 +19,16 @@
   "sourceOperationFailed": "操作失败或访问已撤销；未自动切换来源，请重新检查",
   "sourceRenameLine": "线路昵称",
   "switchManual": "手动切换",
+  "playbackLine": "线路",
+  "playbackLineInUse": "正在使用",
+  "playbackLineFailed": "线路切换失败，已继续使用原来的线路：{reason}",
+  "@playbackLineFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "switchLine": "连接线路（同一服务）",
   "switchVersion": "来源版本（当前条目）",
   "switchCrossSource": "跨服务来源（已确认作品）",

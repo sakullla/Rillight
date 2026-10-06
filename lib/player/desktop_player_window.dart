@@ -55,6 +55,8 @@ class PlayerWindowLaunch {
     this.protocol,
     this.regionGeneration,
     this.preparedStartup = false,
+    this.lines = const [],
+    this.verifiedServerId,
   });
 
   final PlayerOpenRequest request;
@@ -66,6 +68,8 @@ class PlayerWindowLaunch {
   final PlayerProcessProtocol? protocol;
   final int? regionGeneration;
   final bool preparedStartup;
+  final List<ServerLine> lines;
+  final String? verifiedServerId;
 
   factory PlayerWindowLaunch.fromAuth({
     required AuthController auth,
@@ -79,6 +83,7 @@ class PlayerWindowLaunch {
     if (baseUrl == null || token == null || token.isEmpty || userId == null) {
       throw StateError('没有可用的登录会话，无法打开播放窗口');
     }
+    final matched = serverMatchingPlayback(auth, baseUrl);
     return PlayerWindowLaunch(
       request: request,
       baseUrl: baseUrl.toString(),
@@ -87,6 +92,8 @@ class PlayerWindowLaunch {
       device: client.device,
       userAgent: client.customUserAgent,
       preparedStartup: preparedStartup,
+      lines: matched?.lines ?? const [],
+      verifiedServerId: matched?.verifiedServerId,
     );
   }
 
@@ -132,6 +139,11 @@ class PlayerWindowLaunch {
       userId: json['userId'] as String? ?? '',
       userAgent: json['userAgent'] as String?,
       preparedStartup: json['preparedStartup'] == true,
+      verifiedServerId: json['verifiedServerId'] as String?,
+      lines: [
+        for (final item in json['lines'] as List? ?? const [])
+          if (item is Map) ServerLine.fromJson(Map<String, dynamic>.from(item)),
+      ],
       protocol: json['processSessionId'] == null
           ? null
           : PlayerProcessProtocol.fromJson(json),
@@ -169,6 +181,8 @@ class PlayerWindowLaunch {
       'baseUrl': baseUrl,
       'accessToken': accessToken,
       'userId': userId,
+      if (verifiedServerId != null) 'verifiedServerId': verifiedServerId,
+      if (lines.isNotEmpty) 'lines': [for (final line in lines) line.toJson()],
       if (userAgent != null) 'userAgent': userAgent,
       'clientName': device.clientName,
       'deviceName': device.deviceName,
@@ -397,6 +411,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           device: origin.client.device,
           userAgent: origin.client.customUserAgent,
           regionGeneration: origin.permit.regionGeneration,
+          lines: lines,
+          verifiedServerId: origin.source.account.verifiedServerId,
         );
       } else {
         launch = PlayerWindowLaunch.fromAuth(
@@ -1803,6 +1819,8 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             key: _playerKey,
             itemId: request.itemId,
             sourceRequest: request,
+            playbackLines: _launch.lines,
+            verifiedPlaybackServerId: _launch.verifiedServerId,
             autoResume: request.autoResume,
             mediaSourceId: request.mediaSourceId,
             audioStreamIndex: request.audioStreamIndex,
@@ -1827,13 +1845,15 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                     libraryId: request.libraryId,
                     regionGeneration: _launch.regionGeneration,
                   ),
-                  baseUrl: _launch.baseUrl,
-                  accessToken: _launch.accessToken,
-                  userId: _launch.userId,
+                  baseUrl: _auth.client.baseUrl?.toString() ?? _launch.baseUrl,
+                  accessToken: _auth.client.accessToken ?? _launch.accessToken,
+                  userId: _auth.client.userId ?? _launch.userId,
                   device: _launch.device,
-                  userAgent: _launch.userAgent,
+                  userAgent: _auth.client.customUserAgent ?? _launch.userAgent,
                   protocol: _launch.protocol,
                   regionGeneration: _launch.regionGeneration,
+                  lines: _launch.lines,
+                  verifiedServerId: _launch.verifiedServerId,
                 ),
               );
             },

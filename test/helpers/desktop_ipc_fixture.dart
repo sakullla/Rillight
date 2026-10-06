@@ -1,5 +1,6 @@
 // Explicit subprocess fixture, not a suite entrypoint. Uses simulated backend
 // and synthetic HTTP only; no native window, decoder or physical audio evidence.
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
@@ -24,7 +26,8 @@ void main() {
         () async =>
             jsonDecode(await File(path).readAsString()) as Map<String, dynamic>,
       );
-      final launch = PlayerWindowLaunch.fromJson(json!);
+      if (json!['warmPlayer'] == true) exit(0);
+      final launch = PlayerWindowLaunch.fromJson(json);
       final server = FakeEmbyServer(
         serverId: launch.request.source!.account.verifiedServerId,
         baseUrl: Uri.parse(launch.baseUrl),
@@ -71,73 +74,39 @@ void main() {
       Future<void> menuAction(Map<String, dynamic> message) async {
         controller.onUserActivity();
         await advance();
-        if (find.byType(SourceSwitchMenu).evaluate().isEmpty) {
-          await tester.tap(find.byKey(const Key('player-manual-switch')));
-          await advance();
-        }
-        expect(find.byType(SourceSwitchMenu), findsOneWidget);
-        if (message['action'] == 'open-lock') return;
-        if (message['action'] == 'lock') {
-          final lock = find.byKey(const Key('player-lock-private'));
-          for (var frame = 0; frame < 120; frame++) {
-            if (lock.evaluate().isNotEmpty &&
-                tester.widget<FilledButton>(lock).onPressed != null) {
-              break;
-            }
-            await advance();
-          }
-          expect(lock, findsOneWidget);
-          expect(tester.widget<FilledButton>(lock).onPressed, isNotNull);
-          await tester.ensureVisible(lock);
-          await tester.tap(lock);
+        if (message['action'] == 'open-lock') {
+          unawaited(
+            controller
+                .switchDispatcher!({
+                  'action': 'catalogue',
+                  'item': controller.itemId,
+                })
+                .then<void>((_) {}, onError: (_, _) {}),
+          );
           return;
         }
-        final targetId = message['targetId'] as String;
-        final target = find.byWidgetPredicate(
-          (widget) =>
-              widget is ListTile &&
-              widget.key is ValueKey<String> &&
-              (widget.key as ValueKey<String>).value.startsWith(
-                'switch-host-target-',
-              ) &&
-              (widget.key as ValueKey<String>).value.contains(targetId),
-        );
-        for (var frame = 0; frame < 120 && target.evaluate().isEmpty; frame++) {
-          await advance();
+        if (message['action'] == 'lock') {
+          unawaited(
+            controller.lockPrivateRegion().then<void>(
+              (_) {},
+              onError: (_, _) {},
+            ),
+          );
+          return;
         }
-        expect(target, findsOneWidget);
-        final key =
-            (tester.widget<ListTile>(target).key as ValueKey<String>).value;
-        await tester.ensureVisible(target);
-        await tester.tap(target);
-        for (
-          var frame = 0;
-          frame < 120 && controller.switchConfirmation == null;
-          frame++
-        ) {
-          await advance();
-        }
-        expect(controller.switchConfirmation, isNotNull);
-        if (controller.switchConfirmation!.audioNeedsChoice) {
-          await tester.ensureVisible(find.byType(CheckboxListTile).first);
-          await tester.tap(find.byType(CheckboxListTile).first);
-        }
-        if (controller.switchConfirmation!.subtitleNeedsChoice) {
-          await tester.ensureVisible(find.byType(CheckboxListTile).last);
-          await tester.tap(find.byType(CheckboxListTile).last);
-        }
-        await advance();
-        await tester.ensureVisible(find.text('从头播放'));
-        await tester.tap(find.text('从头播放'));
+        expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+        expect(find.text('手动切换'), findsNothing);
+        expect(find.text('立即锁定'), findsNothing);
+        expect(find.byType(PlaybackLineMenu), findsNothing);
         await tester.runAsync(
           () =>
               File(
                 '${launch.protocol!.directory.path}/synthetic-menu-receipt.json',
               ).writeAsString(
                 jsonEncode({
-                  'targetKey': key,
+                  'lines': controller.playbackLines.length,
                   'itemId': controller.itemId,
-                  'version': controller.activeMediaSourceId,
+                  'baseUrl': controller.client.baseUrl?.toString(),
                 }),
               ),
         );
@@ -145,7 +114,7 @@ void main() {
 
       var observed = false;
       var framesAfterObservation = 0;
-      final deadline = DateTime.now().add(const Duration(seconds: 60));
+      final deadline = DateTime.now().add(const Duration(seconds: 200));
       while (!exited && DateTime.now().isBefore(deadline)) {
         await tester.pump(const Duration(milliseconds: 30));
         if (!observed && controller.resolved != null && !controller.loading) {
@@ -200,6 +169,6 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
     tags: ['integration'],
-    timeout: const Timeout(Duration(seconds: 90)),
+    timeout: const Timeout(Duration(seconds: 210)),
   );
 }

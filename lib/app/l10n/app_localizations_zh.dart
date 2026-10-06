@@ -67,6 +67,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get switchManual => '手动切换';
 
   @override
+  String get playbackLine => '线路';
+
+  @override
+  String get playbackLineInUse => '正在使用';
+
+  @override
+  String playbackLineFailed(String reason) {
+    return '线路切换失败，已继续使用原来的线路：$reason';
+  }
+
+  @override
   String get switchLine => '连接线路（同一服务）';
 
   @override

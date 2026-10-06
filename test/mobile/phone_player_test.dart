@@ -127,10 +127,14 @@ void main() {
     Size size = const Size(800, 360),
     Duration? mediaDuration,
     bool lightApp = false,
+    Future<void> Function(AuthController auth)? prepareAuth,
   }) async {
     final server = FakeEmbyServer();
     prepare?.call(server);
     final auth = await tester.runAsync(() => login(server));
+    if (prepareAuth != null) {
+      await tester.runAsync(() => prepareAuth(auth!));
+    }
     final video = backend ?? FakeVideoBackend();
     if (mediaDuration != null) video.duration = mediaDuration;
     addTearDown(auth!.dispose);
@@ -1238,7 +1242,7 @@ void main() {
       final originalId = current.resolved!.mediaSource.id;
       final opensBeforeSwitch = backend.openCount;
       await tester.tap(alternate);
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       expect(current.switchConfirmation, isNull);
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 20));
@@ -1263,7 +1267,7 @@ void main() {
         reason:
             'Direct version switching preserves the original user pause intent',
       );
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       expect(find.text('正在切换来源…'), findsNothing);
       await tester.tap(find.widgetWithText(TextButton, '返回'));
       await tester.pump();
@@ -1307,7 +1311,7 @@ void main() {
       }
       expect(current.activeMediaSourceId, 'alternate');
       expect(current.error, isNull);
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       expect(find.text('来源切换失败，原来源已恢复'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, '返回'));
       await tester.pump();
@@ -2066,6 +2070,44 @@ void main() {
     }
     expect(current.error, isNull);
     expect(backend.attempts, 2);
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
+  testWidgets('phone line sheet lists only this server', (tester) async {
+    final backend = FakeVideoBackend();
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      prepareAuth: (auth) async {
+        final server = auth.session!.server;
+        expect(
+          await auth.addLine(server.id, 'https://mirror.example:8443'),
+          isTrue,
+        );
+      },
+    );
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 4));
+    await tester.pump();
+    expect(find.text('手动切换'), findsNothing);
+    expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('线路'), findsOneWidget);
+    expect(find.text('立即锁定'), findsNothing);
+    await tester.tap(find.byKey(const Key('player-playback-lines')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(PlaybackLineMenu), findsOneWidget);
+    expect(find.text('正在使用'), findsOneWidget);
+    expect(find.text('mirror.example:8443'), findsOneWidget);
+    expect(current.playbackLines, hasLength(2));
+    expect(current.client.baseUrl?.host, isNot('mirror.example'));
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 400));
     await closePlayer(tester);
   }, tags: ['integration']);
 }

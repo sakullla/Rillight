@@ -29,8 +29,11 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/player_host_command.dart';
-import 'package:rillight/aggregation/query/aggregation_query.dart'
-    show SourceReference;
+import 'package:rillight/aggregation/identity/media_identity.dart';
+import 'package:rillight/aggregation/query/aggregation_query.dart';
+import 'package:rillight/aggregation/query/same_source_query.dart';
+import 'package:rillight/library/episode_mapping_dialog.dart';
+import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -296,6 +299,28 @@ Future<void> _settle(WidgetTester tester) async {
   }
 }
 
+Future<void> _drive(WidgetTester tester, Future<void> work) async {
+  var finished = false;
+  Object? failure;
+  unawaited(
+    work.then(
+      (_) => finished = true,
+      onError: (Object error) {
+        failure = error;
+        finished = true;
+      },
+    ),
+  );
+  for (var frame = 0; frame < 80 && !finished; frame++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+  if (failure != null) throw failure!;
+  if (!finished) throw StateError('playback switch did not finish');
+}
+
 Future<void> _finishRevocation(
   WidgetTester tester,
   Future<void> transaction,
@@ -360,6 +385,118 @@ Future<Uint8List> _png(Color color) async {
   image.dispose();
   picture.dispose();
   return data!.buffer.asUint8List();
+}
+
+Future<void> _confirmSwitch(PlayerController controller) async {
+  final plan = controller.switchConfirmation;
+  if (plan == null) return;
+  await controller.confirmMediaSourceSwitch(
+    SwitchResumeChoice.beginning,
+    acceptDefaultAudio: plan.audioNeedsChoice,
+    turnSubtitlesOff: plan.subtitleNeedsChoice,
+  );
+}
+
+Future<SameSourceQueryController> _comparisons(
+  PlayerController controller,
+) async {
+  final origin = controller.origin!;
+  final runtime = controller.runtime!;
+  final dto = await origin.permit.dispatch(
+    (client) => client.getItem(origin.work.itemId),
+  );
+  final comparison = SameSourceQueryController(
+    registry: runtime.registry,
+    history: runtime.history,
+  );
+  await comparison.start(
+    origin: QueryItem(origin.work, origin.libraryId, dto),
+    scope: QueryScope(region: origin.source.account.region),
+  );
+  return comparison;
+}
+
+Future<void> _switchConfirmedServer(
+  PlayerController controller,
+  String serverId,
+) async {
+  final origin = controller.origin!;
+  final runtime = controller.runtime!;
+  final comparison = await _comparisons(controller);
+  try {
+    final candidate = comparison.comparisons.firstWhere(
+      (item) =>
+          item.decision.confirmed &&
+          item.source.reference.account.configuredServerId == serverId,
+    );
+    final target = await runtime.resolve(
+      PlayerOpenRequest(
+        itemId: candidate.source.reference.itemId,
+        source: candidate.source.reference,
+        work: candidate.source.reference.item,
+        libraryId: candidate.source.libraryId,
+        regionGeneration: origin.permit.regionGeneration,
+      ),
+    );
+    final info = await target.permit.dispatch(
+      (client) => client.getPlaybackInfo(itemId: target.source.itemId),
+    );
+    await controller.switchConfirmedSource(
+      candidate,
+      info.mediaSources.first.id,
+    );
+    await _confirmSwitch(controller);
+  } finally {
+    comparison.dispose();
+  }
+}
+
+Future<void> _switchMappedEpisode(
+  PlayerController controller,
+  String serverId,
+) async {
+  final origin = controller.origin!;
+  final runtime = controller.runtime!;
+  final item = controller.item!;
+  final comparison = await _comparisons(controller);
+  try {
+    final candidate = comparison.comparisons.firstWhere(
+      (entry) =>
+          entry.decision.confirmed &&
+          entry.source.reference.account.configuredServerId == serverId,
+    );
+    await comparison.lookupEpisode(
+      target: candidate.source,
+      episode: withConfirmedEpisodeMapping(
+        EpisodeSource.fromEmby(origin.source, item),
+      ),
+      verifiedNumberingScheme: userConfirmedEpisodeNumbering,
+    );
+    final result = comparison.episodes
+        .where((entry) => entry.target == candidate.source.reference)
+        .first;
+    final reference = result.lookup.source!.reference;
+    final target = await runtime.resolve(
+      PlayerOpenRequest(
+        itemId: reference.itemId,
+        source: reference,
+        work: candidate.source.reference.item,
+        libraryId: candidate.source.libraryId,
+        regionGeneration: origin.permit.regionGeneration,
+      ),
+    );
+    final info = await target.permit.dispatch(
+      (client) => client.getPlaybackInfo(itemId: target.source.itemId),
+    );
+    await controller.switchConfirmedSource(
+      candidate,
+      info.mediaSources.first.id,
+      episode: result,
+    );
+    await _confirmSwitch(controller);
+  } finally {
+    comparison.dispose();
+  }
 }
 
 void main() {
@@ -599,7 +736,7 @@ void main() {
     );
   }
   testWidgets(
-    'desktop actual helper menu file IPC switches B to A viewing receipt then migration busy private lock rejects old writer token',
+    'desktop helper hides lines on one server then private lock rejects a stale writer',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
@@ -692,38 +829,34 @@ void main() {
         lessThan(positions.indexOf(110000000)),
         reason: 'positions=$positions\n${control.output}',
       );
-      // Drive the actual SourceSwitchMenu in the isolated Flutter helper. Its
-      // controller sends real file RPC; the main process retains one writer.
+      // A one-line server hides 线路. The helper must not offer another server,
+      // a version, or a timeline confirmation.
       await tester.runAsync(
         () => File(
           '${control.protocols[pid]!.directory.path}/synthetic-menu.json',
-        ).writeAsString(jsonEncode({'action': 'switch', 'targetId': f.aId})),
+        ).writeAsString(jsonEncode({'action': 'lines'})),
       );
-      for (var i = 0; i < 1200; i++) {
+      Map<String, dynamic>? lineReceipt;
+      for (var i = 0; i < 400 && lineReceipt == null; i++) {
         await tester.pump(const Duration(milliseconds: 30));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 30)),
-        );
-        if (f.history
-            .records(AccessRegion.ordinary)
-            .any(
-              (r) =>
-                  r.source.account.configuredServerId == f.aId &&
-                  r.positionTicks == 70000000,
-            )) {
-          break;
-        }
+        lineReceipt = await tester.runAsync<Map<String, dynamic>?>(() async {
+          final file = File(
+            '${control.protocols[pid]!.directory.path}/synthetic-menu-receipt.json',
+          );
+          if (!await file.exists()) return null;
+          final result =
+              jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+          await file.delete();
+          return result;
+        });
       }
+      expect(lineReceipt, isNotNull, reason: control.output.toString());
+      expect(lineReceipt!['lines'], lessThan(2));
       expect(
         host.current?.source?.account.configuredServerId,
-        f.aId,
+        f.bId,
         reason: control.output.toString(),
       );
-      final targetRecord = f.history.records(AccessRegion.ordinary).first;
-      expect(targetRecord.source.account.configuredServerId, f.aId);
-      expect(targetRecord.source.itemId, 'shared-id');
-      expect(targetRecord.source.mediaSourceId, 'shared-id');
-      expect(targetRecord.positionTicks, 70000000);
       expect(
         f.history
             .records(AccessRegion.ordinary)
@@ -734,6 +867,23 @@ void main() {
             ),
         isTrue,
       );
+      expect(
+        f.history
+            .records(AccessRegion.ordinary)
+            .every((r) => r.source.account.configuredServerId != f.aId),
+        isTrue,
+      );
+      late Future<void> closingPlayback;
+      await tester.runAsync(() async {
+        closingPlayback = host.close();
+      });
+      for (var i = 0; i < 120 && host.current != null; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+      }
+      await tester.runAsync(() => closingPlayback);
       await tester.runAsync(() async {
         await f.auth.setPrivatePin('1234', '1234');
         await f.auth.regionAccess.unlock('1234');
@@ -1020,40 +1170,10 @@ void main() {
             .configuredServerId,
         f.bId,
       );
-      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      expect(find.text('手动切换'), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
+      await _drive(tester, _switchConfirmedServer(c, f.aId));
       await _settle(tester);
-      await tester.ensureVisible(find.byKey(const Key('player-manual-switch')));
-      await tester.tap(find.byKey(const Key('player-manual-switch')));
-      await _settle(tester);
-      expect(find.byType(SourceSwitchMenu), findsOneWidget);
-      final target = find.byWidgetPredicate(
-        (w) =>
-            w is ListTile &&
-            w.key is ValueKey<String> &&
-            (w.key as ValueKey<String>).value.startsWith(
-              'switch-target-${f.aId}-',
-            ),
-      );
-      await tester.ensureVisible(target);
-      await tester.tap(target);
-      await _settle(tester);
-      if (c.switchConfirmation != null) {
-        if (c.switchConfirmation!.audioNeedsChoice) {
-          final choice = find.byType(CheckboxListTile).first;
-          await tester.ensureVisible(choice);
-          await tester.tap(choice);
-          await _settle(tester);
-        }
-        if (c.switchConfirmation!.subtitleNeedsChoice) {
-          final choice = find.byType(CheckboxListTile).last;
-          await tester.ensureVisible(choice);
-          await tester.tap(choice);
-          await _settle(tester);
-        }
-        await tester.ensureVisible(find.text('从头播放'));
-        await tester.tap(find.text('从头播放'));
-        await _settle(tester);
-      }
       // Opening a target is pending, not proof of viewing. The actual backend
       // observation commits active provenance and the sole writer's record.
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 11));
@@ -1076,8 +1196,6 @@ void main() {
         isTrue,
       );
       // Changing the selected ordinary account must not retarget playback A.
-      await tester.tap(find.text('取消').last);
-      await _settle(tester);
       await tester.runAsync(() => f.auth.switchTo(f.bId));
       await _settle(tester);
       expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -1098,7 +1216,7 @@ void main() {
       debugPrint('T7 phone: A membership revoked');
       await _settle(tester);
       expect(backend.isPlaying, isFalse);
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       debugPrint('T7 phone: entering private A');
       app.router.go('/private');
       await _settle(tester);
@@ -1109,21 +1227,18 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-detail-play')));
       await _settle(tester);
       expect(backend.isPlaying, isTrue);
-      await tester.tap(find.byKey(const Key('mobile-player-more')));
-      await _settle(tester);
-      await tester.ensureVisible(find.byKey(const Key('player-manual-switch')));
-      await tester.tap(find.byKey(const Key('player-manual-switch')));
-      await _settle(tester);
+      expect(find.byKey(const Key('player-lock-private')), findsNothing);
       debugPrint('T7 phone: locking actual private player');
-      await tester.runAsync(
-        () => tester.tap(find.byKey(const Key('player-lock-private'))),
-      );
+      final privatePlayer = tester
+          .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+          .controller!;
+      await tester.runAsync(privatePlayer.lockPrivateRegion);
       debugPrint('T7 phone: lock tap dispatched');
       await _settle(tester);
       debugPrint('T7 phone: lock frame settled');
       expect(f.auth.regionAccess.allows(AccessRegion.private), isFalse);
       expect(backend.isPlaying, isFalse);
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
       await _settle(tester);
       debugPrint('T7 phone: rejected late frame');
@@ -2254,41 +2369,28 @@ void main() {
               .configuredServerId,
           f.bId,
         );
-        if (!environment.isTv) {
-          await tester.tap(find.byKey(const Key('mobile-player-more')));
-          await _settle(tester);
-        }
-        await tester.ensureVisible(
-          find.byKey(const Key('player-manual-switch')),
-        );
-        await tester.pump();
-        await tester.tap(find.byKey(const Key('player-manual-switch')));
-        await _settle(tester);
+        expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+        expect(find.byKey(const Key('player-lock-private')), findsNothing);
+        expect(find.text('手动切换'), findsNothing);
+        final c = environment.isTv
+            ? tester
+                  .state<TvPlayerPageState>(find.byType(TvPlayerPage))
+                  .controller!
+            : tester
+                  .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+                  .controller!;
         adapter.blockedAuthority = f.b.baseUrl.authority;
         adapter.blockedSuffix = '/PlaybackInfo';
-        final version = find.byKey(
-          const ValueKey('switch-version-private-alternate'),
-        );
-        await tester.ensureVisible(version);
-        await tester.pump();
-        await tester.tap(version);
-        await _settle(tester);
+        final switching = c.switchMediaSource('private-alternate');
+        for (var frame = 0; frame < 40 && !adapter.entered; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
         expect(adapter.entered, isTrue);
         expect(adapter.gate.isCompleted, isFalse);
-        expect(
-          find.descendant(
-            of: find.byType(SourceSwitchMenu),
-            matching: find.byType(LinearProgressIndicator),
-          ),
-          findsOneWidget,
-        );
-        final lock = find.byKey(const Key('player-lock-private'));
-        expect(
-          tester.widget<FilledButton>(lock).onPressed,
-          isNotNull,
-          reason: 'Safety lock must not depend on completing catalogue IO',
-        );
-        await tester.tap(lock);
+        unawaited(c.lockPrivateRegion());
         for (
           var frame = 0;
           frame < 100 && f.auth.regionAccess.state != PrivateAccessState.locked;
@@ -2308,9 +2410,10 @@ void main() {
         expect(backend.isPlaying, isFalse);
         // Revocation removes the redacted imperative dialog on the next frame.
         await _settle(tester);
-        expect(find.byType(SourceSwitchMenu), findsNothing);
+        expect(find.byType(PlaybackLineMenu), findsNothing);
         expect(adapter.gate.isCompleted, isFalse);
         adapter.gate.complete();
+        await _drive(tester, switching);
         await _settle(tester);
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
         await _settle(tester);
@@ -2431,43 +2534,10 @@ void main() {
                   .controller!;
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
         await _settle(tester);
-        if (!environment.isTv) {
-          await tester.tap(find.byKey(const Key('mobile-player-more')));
-          await _settle(tester);
-        }
-        await tester.ensureVisible(
-          find.byKey(const Key('player-manual-switch')),
-        );
-        await tester.tap(find.byKey(const Key('player-manual-switch')));
+        expect(find.text('手动切换'), findsNothing);
+        expect(find.byType(PlaybackLineMenu), findsNothing);
+        await _drive(tester, _switchMappedEpisode(c, f.bId));
         await _settle(tester);
-        expect(find.byType(SourceSwitchMenu), findsOneWidget);
-        final mapping = find.byKey(ValueKey('switch-episode-map-${f.bId}'));
-        await tester.ensureVisible(mapping);
-        await tester.tap(mapping);
-        await _settle(tester);
-        await tester.tap(find.byKey(const Key('episode-mapping-confirm')));
-        await _settle(tester);
-        final version = find.byKey(
-          ValueKey('switch-target-${f.bId}-episode-b-2'),
-        );
-        expect(version, findsOneWidget);
-        await tester.ensureVisible(version);
-        await tester.tap(version);
-        await _settle(tester);
-        if (c.switchConfirmation != null) {
-          if (c.switchConfirmation!.audioNeedsChoice) {
-            await tester.ensureVisible(find.byType(CheckboxListTile).first);
-            await tester.tap(find.byType(CheckboxListTile).first);
-          }
-          if (c.switchConfirmation!.subtitleNeedsChoice) {
-            await tester.ensureVisible(find.byType(CheckboxListTile).last);
-            await tester.tap(find.byType(CheckboxListTile).last);
-          }
-          await _settle(tester);
-          await tester.ensureVisible(find.text('从头播放'));
-          await tester.tap(find.text('从头播放'));
-          await _settle(tester);
-        }
         expect(c.origin!.source.itemId, 'episode-b-2');
         expect(c.origin!.source.account.configuredServerId, f.bId);
         expect(
