@@ -191,13 +191,15 @@ rillight_windows::RouteObservation ProbeOpenDevice(IMMDevice* device) {
 }
 
 // Refreshes the default endpoint once after DEVICE_INVALIDATED or
-// ENDPOINT_CREATE_FAILED. A second loss is published as PCM, not the old route.
+// ENDPOINT_CREATE_FAILED. A second loss stays endpoint_lost and clears
+// *device so the caller cannot Initialize that IMMDevice.
 rillight_windows::RouteObservation ProbeDefaultRoute(
     IMMDeviceEnumerator* enumerator, ComPtr<IMMDevice>* device) {
   ComPtr<IMMDevice> current;
   if (!enumerator ||
       FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
                                                  &current))) {
+    if (device) device->Reset();
     return {};
   }
   auto observed = ProbeOpenDevice(current.Get());
@@ -205,13 +207,17 @@ rillight_windows::RouteObservation ProbeDefaultRoute(
     ComPtr<IMMDevice> refreshed;
     if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
                                                    &refreshed))) {
+      if (device) device->Reset();
       return {};
     }
     current = refreshed;
     observed = rillight_windows::RouteAfterEndpointLoss(
         ProbeOpenDevice(current.Get()));
   }
-  if (device) *device = current;
+  if (device) {
+    if (rillight_windows::SharedInitializeAllowed(observed)) *device = current;
+    else device->Reset();
+  }
   return observed;
 }
 
@@ -316,13 +322,25 @@ struct WasapiEndpoint {
   ~WasapiEndpoint() { Close(); }
 };
 
-void OpenShared(IMMDevice* device, int channels, WasapiEndpoint* endpoint) {
+// DEVICE_INVALIDATED, ENDPOINT_CREATE_FAILED, and DEVICE_IN_USE close the
+// client and return. They must not throw out of the audio thread.
+rillight_windows::SharedInitResult OpenShared(IMMDevice* device, int channels,
+                                              WasapiEndpoint* endpoint) {
   endpoint->Close();
+  if (!device || channels < 1)
+    return rillight_windows::SharedInitResult::kWaitForGeneration;
   endpoint->event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-  if (!endpoint->event) throw std::runtime_error("WASAPI event creation failed");
-  Check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                         reinterpret_cast<void**>(endpoint->client.GetAddressOf())),
-        "WASAPI client unavailable");
+  if (!endpoint->event) return rillight_windows::SharedInitResult::kFatal;
+  auto finish = [&](HRESULT hr) {
+    const auto result =
+        rillight_windows::ClassifySharedInit(static_cast<int32_t>(hr));
+    if (result != rillight_windows::SharedInitResult::kReady) endpoint->Close();
+    return result;
+  };
+  const HRESULT activated = device->Activate(
+      __uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+      reinterpret_cast<void**>(endpoint->client.GetAddressOf()));
+  if (FAILED(activated)) return finish(activated);
   WAVEFORMATEX format{};
   format.wFormatTag = WAVE_FORMAT_PCM;
   format.nChannels = static_cast<WORD>(channels);
@@ -330,25 +348,26 @@ void OpenShared(IMMDevice* device, int channels, WasapiEndpoint* endpoint) {
   format.wBitsPerSample = 16;
   format.nBlockAlign = static_cast<WORD>(channels * 2);
   format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
-  Check(endpoint->client->Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
-                AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
-                AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-            1200000, 0, &format, nullptr),
-        "WASAPI PCM output initialization failed");
-  Check(endpoint->client->SetEventHandle(endpoint->event),
-        "WASAPI event registration failed");
-  Check(endpoint->client->GetBufferSize(&endpoint->capacity),
-        "WASAPI buffer size unavailable");
+  const HRESULT initialized = endpoint->client->Initialize(
+      AUDCLNT_SHAREMODE_SHARED,
+      AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
+          AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+      1200000, 0, &format, nullptr);
+  if (FAILED(initialized)) return finish(initialized);
+  const HRESULT event_hr = endpoint->client->SetEventHandle(endpoint->event);
+  if (FAILED(event_hr)) return finish(event_hr);
+  const HRESULT size_hr = endpoint->client->GetBufferSize(&endpoint->capacity);
+  if (FAILED(size_hr)) return finish(size_hr);
   REFERENCE_TIME ticks = 0;
   if (FAILED(endpoint->client->GetStreamLatency(&ticks))) ticks = 0;
+  const HRESULT service_hr =
+      endpoint->client->GetService(IID_PPV_ARGS(&endpoint->render));
+  if (FAILED(service_hr)) return finish(service_hr);
   endpoint->latency_us = std::max<int64_t>(0, ticks / 10);
-  Check(endpoint->client->GetService(IID_PPV_ARGS(&endpoint->render)),
-        "WASAPI render service unavailable");
   endpoint->channels = channels;
   endpoint->block_align = format.nBlockAlign;
   endpoint->rate = 48000;
+  return rillight_windows::SharedInitResult::kReady;
 }
 
 rillight_windows::ExclusiveProbe OpenExclusive(IMMDevice* device, int kind,
@@ -544,6 +563,9 @@ void AudioOutput::Run() {
     bool running = false;
     int exclusive_stalls = 0;
     uint32_t seen_generation = route_at_start;
+    // Non-zero while the last probe was endpoint_lost. Shared Initialize
+    // waits until a newer default-device generation is actually openable.
+    uint32_t awaiting_generation = 0;
     auto retire_route = [&] {
       if (running && endpoint.client) endpoint.client->Stop();
       running = false;
@@ -561,16 +583,146 @@ void AudioOutput::Run() {
       handed_off_audio_clock = false;
       audio_clock_started = false;
     };
+    auto publish_route = [&](int channels, uint32_t accept) {
+      if (channels == max_pcm_channels_ && accept == accepted_passthrough_)
+        return;
+      max_pcm_channels_ = channels;
+      accepted_passthrough_ = accept;
+      PublishSink();
+    };
+    auto drop_compressed = [&] {
+      mux.reset();
+      burst.clear();
+      burst_pts = -1;
+      burst_samples = 0;
+      exclusive_stalls = 0;
+      if (pending && pending->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {
+        api_->release_frame(pending);
+        pending = nullptr;
+        pending_ = false;
+      }
+    };
+    // A lost probe publishes stereo PCM and does not adopt that mix. A live
+    // probe publishes the negotiated route, including passthrough when the
+    // replacement receiver still accepts it.
+    auto apply_probed_route =
+        [&](const rillight_windows::RouteObservation& observed) {
+          if (!rillight_windows::SharedInitializeAllowed(observed)) {
+            device.Reset();
+            awaiting_generation = device_generation_.load();
+            publish_route(2, 0);
+            return;
+          }
+          awaiting_generation = 0;
+          const rillight_windows::RouteCommit commit =
+              rillight_windows::DecideAudioRoute(
+                  max_pcm_channels_, accepted_passthrough_, observed);
+          if (commit.publish) {
+            max_pcm_channels_ = commit.max_pcm_channels;
+            accepted_passthrough_ = commit.accepted_passthrough;
+            PublishSink();
+          }
+        };
+    auto open_shared = [&](int channels) {
+      if (!device || awaiting_generation != 0) {
+        if (endpoint.client) endpoint.Close();
+        running = false;
+        if (awaiting_generation == 0)
+          awaiting_generation = device_generation_.load();
+        return rillight_windows::SharedInitResult::kWaitForGeneration;
+      }
+      const auto opened = OpenShared(device.Get(), channels, &endpoint);
+      if (opened == rillight_windows::SharedInitResult::kWaitForGeneration) {
+        device.Reset();
+        awaiting_generation = device_generation_.load();
+        drop_compressed();
+        publish_route(2, 0);
+      } else if (opened == rillight_windows::SharedInitResult::kFatal) {
+        throw std::runtime_error("WASAPI PCM output initialization failed");
+      }
+      return opened;
+    };
+    auto fail_passthrough = [&](int kind) {
+      const uint32_t bit = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
+                               ? RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD
+                               : RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
+      ForgetPassthrough(bit);
+      drop_compressed();
+      if (running && endpoint.client) endpoint.client->Stop();
+      running = false;
+      endpoint.Close();
+      if (pending) api_->release_frame(pending);
+      pending = nullptr;
+      pending_ = false;
+      device_padding_ = 0;
+      exclusive_stalls = 0;
+      open_shared(std::max(2, max_pcm_channels_));
+    };
+    auto on_endpoint_lost = [&] {
+      if (running && endpoint.client) endpoint.client->Stop();
+      running = false;
+      endpoint.Close();
+      device_padding_ = 0;
+      drop_compressed();
+      if (pending) {
+        api_->release_frame(pending);
+        pending = nullptr;
+        pending_ = false;
+      }
+      submitted_media_end = -1;
+      audio_clock_started = false;
+      handed_off_audio_clock = false;
+      offset = 0;
+      // Clear passthrough before probing so the snapshot cannot stay
+      // passthrough while this endpoint is gone.
+      publish_route(2, 0);
+      apply_probed_route(ProbeDefaultRoute(enumerator.Get(), &device));
+    };
+    // True when the audio thread must abandon this client and keep running.
+    auto client_failed = [&](HRESULT hr, const char* message) -> bool {
+      const auto fault = rillight_windows::ClassifyClientFault(
+          static_cast<int32_t>(hr));
+      if (fault == rillight_windows::ClientFault::kNone) return false;
+      if (!rillight_windows::AudioThreadContinues(fault))
+        throw std::runtime_error(message);
+      const bool exclusive = endpoint.exclusive;
+      const int kind = endpoint.kind;
+      running = false;
+      endpoint.Close();
+      device_padding_ = 0;
+      if (fault == rillight_windows::ClientFault::kLost) {
+        on_endpoint_lost();
+      } else {
+        // The unsent period cannot be committed on a client we just closed.
+        burst.clear();
+        burst_pts = -1;
+        burst_samples = 0;
+        if (exclusive && kind != 0) {
+          ++exclusive_stalls;
+          if (exclusive_stalls >= rillight_windows::kExclusiveOpenAttemptLimit)
+            fail_passthrough(kind);
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      return true;
+    };
     while (!stopped_) {
       RillightCoreSnapshot state{};
       state.struct_size = sizeof(state);
       if (api_->snapshot(core_, &state) != 0) break;
       if (state.session_id != session || state.timeline_version != timeline) {
-        if (running && endpoint.client)
-          Check(endpoint.client->Stop(), "WASAPI stop failed");
-        running = false;
-        if (endpoint.client)
-          Check(endpoint.client->Reset(), "WASAPI timeline reset failed");
+        bool client_replaced = false;
+        if (running && endpoint.client) {
+          const HRESULT hr = endpoint.client->Stop();
+          client_replaced = client_failed(hr, "WASAPI stop failed");
+          if (!client_replaced) running = false;
+        } else {
+          running = false;
+        }
+        if (endpoint.client && !client_replaced) {
+          const HRESULT hr = endpoint.client->Reset();
+          client_failed(hr, "WASAPI timeline reset failed");
+        }
         if (pending) api_->release_frame(pending);
         pending = nullptr;
         pending_ = false;
@@ -595,28 +747,23 @@ void AudioOutput::Run() {
         // process still holds the endpoint. Release first, then probe.
         retire_route();
         exclusive_stalls = 0;
-        const rillight_windows::RouteObservation observed =
-            ProbeDefaultRoute(enumerator.Get(), &device);
-        const rillight_windows::RouteCommit commit =
-            rillight_windows::DecideAudioRoute(
-                max_pcm_channels_, accepted_passthrough_, observed);
-        if (commit.publish) {
-          max_pcm_channels_ = commit.max_pcm_channels;
-          accepted_passthrough_ = commit.accepted_passthrough;
-          PublishSink();
-        }
+        apply_probed_route(ProbeDefaultRoute(enumerator.Get(), &device));
       }
       if (!Active(state)) {
-        if (running && endpoint.client)
-          Check(endpoint.client->Stop(), "WASAPI pause failed");
-        running = false;
+        if (running && endpoint.client) {
+          const HRESULT hr = endpoint.client->Stop();
+          if (!client_failed(hr, "WASAPI pause failed")) running = false;
+        } else {
+          running = false;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         continue;
       }
       UINT32 padding = 0;
-      if (endpoint.client)
-        Check(endpoint.client->GetCurrentPadding(&padding),
-              "WASAPI padding unavailable");
+      if (endpoint.client) {
+        const HRESULT padding_hr = endpoint.client->GetCurrentPadding(&padding);
+        if (client_failed(padding_hr, "WASAPI padding unavailable")) continue;
+      }
       device_padding_ = padding;
       const bool device_room =
           !endpoint.client || endpoint.capacity > padding;
@@ -628,29 +775,6 @@ void AudioOutput::Run() {
       }
       bool waiting_future_audio = false;
       bool wrote_audio = false;
-      auto fail_passthrough = [&](int kind) {
-        const uint32_t bit = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
-                                 ? RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD
-                                 : RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
-        ForgetPassthrough(bit);
-        mux.reset();
-        burst.clear();
-        burst_pts = -1;
-        burst_samples = 0;
-        if (endpoint.exclusive) {
-          if (running) endpoint.client->Stop();
-          running = false;
-          endpoint.Close();
-        }
-        if (pending) api_->release_frame(pending);
-        pending = nullptr;
-        pending_ = false;
-        device_padding_ = 0;
-        exclusive_stalls = 0;
-        if (device) {
-          OpenShared(device.Get(), std::max(2, max_pcm_channels_), &endpoint);
-        }
-      };
       if (pending && pending->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {
         const int kind = pending->audio_codec_id;
         const uint32_t bit = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
@@ -665,6 +789,8 @@ void AudioOutput::Run() {
           api_->release_frame(pending);
           pending = nullptr;
           pending_ = false;
+        } else if (!device) {
+          fail_passthrough(kind);
         } else if (!endpoint.exclusive || endpoint.kind != kind) {
           if (running && endpoint.client) endpoint.client->Stop();
           running = false;
@@ -672,16 +798,7 @@ void AudioOutput::Run() {
           auto action = rillight_windows::DecideExclusiveOpen(
               opened, exclusive_stalls);
           if (action == rillight_windows::ExclusiveOpenAction::kRefresh) {
-            const rillight_windows::RouteObservation observed =
-                ProbeDefaultRoute(enumerator.Get(), &device);
-            const rillight_windows::RouteCommit commit =
-                rillight_windows::DecideAudioRoute(
-                    max_pcm_channels_, accepted_passthrough_, observed);
-            if (commit.publish) {
-              max_pcm_channels_ = commit.max_pcm_channels;
-              accepted_passthrough_ = commit.accepted_passthrough;
-              PublishSink();
-            }
+            apply_probed_route(ProbeDefaultRoute(enumerator.Get(), &device));
             if ((accepted_passthrough_ & bit) == 0 || !device) {
               action = rillight_windows::ExclusiveOpenAction::kUsePcm;
             } else {
@@ -728,14 +845,18 @@ void AudioOutput::Run() {
       if (!burst.empty() && endpoint.exclusive && endpoint.client) {
         const UINT32 period_frames = static_cast<UINT32>(
             endpoint.period_bytes / endpoint.block_align);
-        if (endpoint.capacity >= padding + period_frames &&
+        if (endpoint.render &&
+            endpoint.capacity >= padding + period_frames &&
             static_cast<int>(burst.size()) == endpoint.period_bytes) {
           BYTE* output = nullptr;
-          Check(endpoint.render->GetBuffer(period_frames, &output),
-                "WASAPI buffer unavailable");
+          const HRESULT buffer_hr =
+              endpoint.render->GetBuffer(period_frames, &output);
+          if (client_failed(buffer_hr, "WASAPI buffer unavailable")) continue;
           std::memcpy(output, burst.data(), burst.size());
-          Check(endpoint.render->ReleaseBuffer(period_frames, 0),
-                "WASAPI buffer commit failed");
+          const HRESULT release_hr =
+              endpoint.render->ReleaseBuffer(period_frames, 0);
+          if (client_failed(release_hr, "WASAPI buffer commit failed"))
+            continue;
           device_padding_ = padding + period_frames;
           wrote_audio = true;
           if (burst_pts >= 0) {
@@ -764,7 +885,11 @@ void AudioOutput::Run() {
               endpoint.channels != pending->channels) {
             if (running && endpoint.client) endpoint.client->Stop();
             running = false;
-            OpenShared(device.Get(), pending->channels, &endpoint);
+            const auto opened = open_shared(pending->channels);
+            if (opened != rillight_windows::SharedInitResult::kReady) {
+              std::this_thread::sleep_for(std::chrono::milliseconds(20));
+              continue;
+            }
             padding = 0;
             device_padding_ = 0;
           }
@@ -794,15 +919,19 @@ void AudioOutput::Run() {
               const UINT32 count = std::min<UINT32>(
                   endpoint.capacity - padding,
                   static_cast<UINT32>(pending->sample_count - offset));
-              if (count > 0) {
+              if (count > 0 && endpoint.render) {
                 BYTE* output = nullptr;
-                Check(endpoint.render->GetBuffer(count, &output),
-                      "WASAPI buffer unavailable");
+                const HRESULT buffer_hr =
+                    endpoint.render->GetBuffer(count, &output);
+                if (client_failed(buffer_hr, "WASAPI buffer unavailable"))
+                  continue;
                 std::memcpy(output,
                             pending->data + static_cast<size_t>(offset) * stride,
                             static_cast<size_t>(count) * stride);
-                Check(endpoint.render->ReleaseBuffer(count, 0),
-                      "WASAPI buffer commit failed");
+                const HRESULT release_hr =
+                    endpoint.render->ReleaseBuffer(count, 0);
+                if (client_failed(release_hr, "WASAPI buffer commit failed"))
+                  continue;
                 offset += static_cast<int>(count);
                 wrote_audio = true;
                 device_padding_ = padding + count;
@@ -821,7 +950,8 @@ void AudioOutput::Run() {
         }
       }
       if (!running && endpoint.client && device_padding_ > 0) {
-        Check(endpoint.client->Start(), "WASAPI playback start failed");
+        const HRESULT hr = endpoint.client->Start();
+        if (client_failed(hr, "WASAPI playback start failed")) continue;
         running = true;
       }
       if (submitted_media_end >= 0) {
@@ -845,11 +975,20 @@ void AudioOutput::Run() {
                                         queued_media_us) == 0) {
             audio_clock_started = true;
           } else if (!audio_clock_started && endpoint.client) {
-            if (running) Check(endpoint.client->Stop(), "WASAPI realign stop failed");
-            running = false;
-            Check(endpoint.client->Reset(), "WASAPI realign reset failed");
-            device_padding_ = 0;
-            submitted_media_end = -1;
+            bool client_replaced = false;
+            if (running) {
+              const HRESULT hr = endpoint.client->Stop();
+              client_replaced = client_failed(hr, "WASAPI realign stop failed");
+              if (!client_replaced) running = false;
+            }
+            if (endpoint.client && !client_replaced) {
+              const HRESULT hr = endpoint.client->Reset();
+              client_replaced = client_failed(hr, "WASAPI realign reset failed");
+            }
+            if (!client_replaced) {
+              device_padding_ = 0;
+              submitted_media_end = -1;
+            }
           }
         }
       }

@@ -194,16 +194,50 @@ int main() {
   still_lost.mix_channels = 2;
   still_lost.truehd = ExclusiveProbe::kAccepted;
   const auto after_loss = rillight_windows::RouteAfterEndpointLoss(still_lost);
+  // A second loss stays lost. Do not rewrite it into a device Initialize
+  // can open; the snapshot is stereo with passthrough cleared.
   assert(after_loss.endpoint_present);
-  assert(!after_loss.endpoint_lost);
+  assert(after_loss.endpoint_lost);
   assert(after_loss.mix_channels == 2);
-  assert(after_loss.eac3 == ExclusiveProbe::kUnsupported);
-  assert(after_loss.truehd == ExclusiveProbe::kUnsupported);
+  assert(after_loss.truehd == ExclusiveProbe::kAccepted);
+  assert(!rillight_windows::SharedInitializeAllowed(after_loss));
   const auto published =
       rillight_windows::DecideAudioRoute(6, both, after_loss);
   assert(published.publish);
   assert(published.max_pcm_channels == 2);
   assert(published.accepted_passthrough == 0);
+  assert(rillight_windows::ClassifyClientFault(
+             static_cast<int32_t>(AUDCLNT_E_DEVICE_INVALIDATED)) ==
+         rillight_windows::ClientFault::kLost);
+  assert(rillight_windows::ClassifyClientFault(
+             static_cast<int32_t>(AUDCLNT_E_ENDPOINT_CREATE_FAILED)) ==
+         rillight_windows::ClientFault::kLost);
+  assert(rillight_windows::ClassifyClientFault(
+             static_cast<int32_t>(AUDCLNT_E_DEVICE_IN_USE)) ==
+         rillight_windows::ClientFault::kBusy);
+  assert(rillight_windows::ClassifyClientFault(S_OK) ==
+         rillight_windows::ClientFault::kNone);
+  assert(rillight_windows::ClassifyClientFault(static_cast<int32_t>(0x80004005)) ==
+         rillight_windows::ClientFault::kFatal);
+  assert(rillight_windows::AudioThreadContinues(
+      rillight_windows::ClientFault::kLost));
+  assert(rillight_windows::AudioThreadContinues(
+      rillight_windows::ClientFault::kBusy));
+  assert(!rillight_windows::AudioThreadContinues(
+      rillight_windows::ClientFault::kFatal));
+  assert(rillight_windows::ClassifySharedInit(
+             static_cast<int32_t>(AUDCLNT_E_DEVICE_INVALIDATED)) ==
+         rillight_windows::SharedInitResult::kWaitForGeneration);
+  assert(rillight_windows::ClassifySharedInit(
+             static_cast<int32_t>(AUDCLNT_E_ENDPOINT_CREATE_FAILED)) ==
+         rillight_windows::SharedInitResult::kWaitForGeneration);
+  assert(rillight_windows::ClassifySharedInit(
+             static_cast<int32_t>(AUDCLNT_E_DEVICE_IN_USE)) ==
+         rillight_windows::SharedInitResult::kRetry);
+  assert(rillight_windows::ClassifySharedInit(S_OK) ==
+         rillight_windows::SharedInitResult::kReady);
+  assert(rillight_windows::ClassifySharedInit(static_cast<int32_t>(0x80004005)) ==
+         rillight_windows::SharedInitResult::kFatal);
 
   rillight_windows::RouteObservation healthy;
   healthy.endpoint_present = true;
@@ -212,7 +246,10 @@ int main() {
   healthy.truehd = ExclusiveProbe::kAccepted;
   assert(rillight_windows::RouteAfterEndpointLoss(healthy).truehd ==
          ExclusiveProbe::kAccepted);
+  assert(rillight_windows::SharedInitializeAllowed(
+      rillight_windows::RouteAfterEndpointLoss(healthy)));
   assert(!rillight_windows::RouteAfterEndpointLoss({}).endpoint_present);
+  assert(!rillight_windows::SharedInitializeAllowed({}));
 
   using rillight_windows::DecideExclusiveOpen;
   using rillight_windows::ExclusiveOpenAction;

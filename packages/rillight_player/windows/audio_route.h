@@ -134,19 +134,59 @@ inline RouteCommit DecideAudioRoute(int previous_channels,
   return commit_of(channels, accept);
 }
 
-// A second probe that is still lost is not the previous device. Publish its
-// mix, or stereo when the mix was never read, and do not keep passthrough.
+// A second probe that is still lost is not a device shared mode can open.
+// Keep endpoint_lost so the caller waits for a new default-device generation
+// instead of Initialize on this IMMDevice. A live probe is unchanged.
 inline RouteObservation RouteAfterEndpointLoss(const RouteObservation& refreshed) {
-  if (refreshed.endpoint_present && !refreshed.endpoint_lost) return refreshed;
   if (!refreshed.endpoint_present) return {};
-  RouteObservation current;
-  current.endpoint_present = true;
-  current.mix_known = true;
-  current.mix_channels =
-      refreshed.mix_known ? PcmChannelTarget(refreshed.mix_channels) : 2;
-  current.eac3 = ExclusiveProbe::kUnsupported;
-  current.truehd = ExclusiveProbe::kUnsupported;
-  return current;
+  return refreshed;
+}
+
+// Live GetCurrentPadding / GetBuffer / ReleaseBuffer and shared Initialize.
+// DEVICE_IN_USE and endpoint loss stay in the audio thread. Anything else
+// is a real failure and may leave the thread.
+enum class ClientFault : int {
+  kNone = 0,
+  kBusy = 1,
+  kLost = 2,
+  kFatal = 3,
+};
+
+enum class SharedInitResult : int {
+  kReady = 0,
+  kRetry = 1,
+  kWaitForGeneration = 2,
+  kFatal = 3,
+};
+
+inline ClientFault ClassifyClientFault(int32_t hr) {
+  if (hr >= 0) return ClientFault::kNone;
+  if (static_cast<uint32_t>(hr) == 0x8889000Au) return ClientFault::kBusy;
+  if (ExclusiveEndpointLost(hr)) return ClientFault::kLost;
+  return ClientFault::kFatal;
+}
+
+inline bool AudioThreadContinues(ClientFault fault) {
+  return fault != ClientFault::kFatal;
+}
+
+// endpoint_lost is not an openable endpoint, even if a mix format was seen.
+inline bool SharedInitializeAllowed(const RouteObservation& observed) {
+  return observed.endpoint_present && !observed.endpoint_lost;
+}
+
+inline SharedInitResult ClassifySharedInit(int32_t hr) {
+  switch (ClassifyClientFault(hr)) {
+    case ClientFault::kNone:
+      return SharedInitResult::kReady;
+    case ClientFault::kBusy:
+      return SharedInitResult::kRetry;
+    case ClientFault::kLost:
+      return SharedInitResult::kWaitForGeneration;
+    case ClientFault::kFatal:
+    default:
+      return SharedInitResult::kFatal;
+  }
 }
 
 inline ExclusiveOpenAction DecideExclusiveOpen(ExclusiveProbe opened,
