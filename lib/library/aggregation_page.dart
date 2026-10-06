@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../aggregation/query/aggregation_query.dart';
+import '../aggregation/view/server_sections.dart';
 import '../aggregation/query/same_source_query.dart';
 import '../aggregation/history/history_models.dart'
     show RemoteWatch, ResumeKind;
@@ -14,7 +15,15 @@ import '../auth/source_management.dart';
 
 import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
+import '../app/routes.dart';
 import '../app/tv_widgets.dart';
+import '../app/widgets/app_empty_view.dart';
+import '../auth/auth_controller.dart';
+import '../auth/server_list_store.dart';
+import '../auth/source_sessions.dart';
+import '../emby/emby_client.dart';
+import '../emby/emby_errors.dart';
+import '../home/media_shelf.dart';
 import '../search/search_action.dart';
 import '../media_image/media_image.dart';
 import '../player/playback_runtime.dart';
@@ -23,6 +32,8 @@ import '../player/player_host_command.dart';
 import '../player/player_window_host.dart';
 import 'detail_source_scope.dart';
 import 'episode_mapping_dialog.dart';
+import 'poster_card.dart';
+import 'server_library_page.dart';
 
 /// A route-local projection. Keeping this State mounted on push preserves the
 /// authorized query, filters, cursors, and scroll position when detail returns.
@@ -140,9 +151,20 @@ class _AggregationPageState extends State<AggregationPage> {
     if (widget.search) _start();
   }
 
+  bool get _usesNewExperience =>
+      widget.region == AccessRegion.ordinary &&
+      (widget.search ||
+          (widget.sourceCommand == null &&
+              widget.legacyLibraryId == null &&
+              !widget.legacySelected &&
+              widget.initialGenre.isEmpty &&
+              widget.initialType == null &&
+              widget.initialMode == QueryMode.browse));
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_usesNewExperience) return;
     final runtime = PlayerScope.of(context).runtime;
     if (_query == null && runtime != null) {
       _query = AggregationQueryController(
@@ -313,6 +335,11 @@ class _AggregationPageState extends State<AggregationPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_usesNewExperience) {
+      return widget.search
+          ? _AggregationSearch(focusNode: widget.searchFocusNode)
+          : const _AggregationBrowse();
+    }
     final l = AppLocalizations.of(context);
     final query = _query;
     final servers = AuthScope.of(context).sources.project(widget.region);
@@ -1365,4 +1392,516 @@ class _ComparisonDialog extends StatelessWidget {
       );
     },
   );
+}
+
+enum _AggregationSegment { continueWatching, favorites, libraries }
+
+class _AggregationBrowse extends StatefulWidget {
+  const _AggregationBrowse();
+
+  @override
+  State<_AggregationBrowse> createState() => _AggregationBrowseState();
+}
+
+class _AggregationBrowseState extends State<_AggregationBrowse> {
+  ServerSectionsLoader? _loader;
+  var _started = false;
+  var _segment = _AggregationSegment.continueWatching;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = AuthScope.of(context);
+    if (_loader == null || !identical(_loader!.registry, auth.sources)) {
+      _loader?.removeListener(_onLoader);
+      _loader?.dispose();
+      _loader = ServerSectionsLoader(registry: auth.sources)
+        ..addListener(_onLoader);
+      _started = false;
+    }
+    if (_started) return;
+    _started = true;
+    final loader = _loader!;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) loader.load();
+    });
+  }
+
+  void _onLoader() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _loader?.removeListener(_onLoader);
+    _loader?.dispose();
+    super.dispose();
+  }
+
+  ServerSectionSlice _slice(ServerSections section) => switch (_segment) {
+    _AggregationSegment.continueWatching => section.continueWatching,
+    _AggregationSegment.favorites => section.favorites,
+    _AggregationSegment.libraries => section.libraries,
+  };
+
+  void _open(ServerSections section, EmbyItem item) {
+    if (_segment == _AggregationSegment.libraries) {
+      final current = AuthScope.of(context).session?.server.id;
+      if (current == section.serverId) {
+        context.push(AppRoutes.library(item.id));
+      } else {
+        context.push(
+          '/server/${Uri.encodeComponent(section.serverId)}/library/${Uri.encodeComponent(item.id)}',
+        );
+      }
+      return;
+    }
+    final account = section.account;
+    if (account == null) return;
+    openServerItem(context, account: account, item: item);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final loader = _loader;
+    final servers = loader?.servers ?? const <ServerSections>[];
+    final desktop = PresentationScope.of(context).isDesktop;
+    final rows = [
+      for (final section in servers)
+        if (_slice(section).items.isNotEmpty ||
+            _slice(section).error != null ||
+            _slice(section).loading)
+          section,
+    ];
+    return Material(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, desktop ? 64 : 12, 16, 12),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  key: const Key('aggregation-segment-continue'),
+                  label: Text(l.resumePlay),
+                  selected: _segment == _AggregationSegment.continueWatching,
+                  onSelected: (_) => setState(
+                    () => _segment = _AggregationSegment.continueWatching,
+                  ),
+                ),
+                ChoiceChip(
+                  key: const Key('aggregation-segment-favorites'),
+                  label: Text(l.filterFavorite),
+                  selected: _segment == _AggregationSegment.favorites,
+                  onSelected: (_) =>
+                      setState(() => _segment = _AggregationSegment.favorites),
+                ),
+                ChoiceChip(
+                  key: const Key('aggregation-segment-libraries'),
+                  label: const Text('媒体库'),
+                  selected: _segment == _AggregationSegment.libraries,
+                  onSelected: (_) =>
+                      setState(() => _segment = _AggregationSegment.libraries),
+                ),
+              ],
+            ),
+          ),
+          Expanded(child: _body(context, loader, servers, rows)),
+        ],
+      ),
+    );
+  }
+
+  Widget _body(
+    BuildContext context,
+    ServerSectionsLoader? loader,
+    List<ServerSections> servers,
+    List<ServerSections> rows,
+  ) {
+    final l = AppLocalizations.of(context);
+    if (loader == null || (loader.loading && servers.isEmpty)) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (servers.isEmpty) {
+      return AppEmptyView(
+        message: '没有已登录的服务器',
+        actionLabel: l.addServer,
+        onAction: () => context.push('${AppRoutes.connect}?add=1'),
+      );
+    }
+    if (rows.isEmpty) {
+      return AppEmptyView(message: l.aggregationEmpty);
+    }
+    final captioned = _segment == _AggregationSegment.continueWatching;
+    return ListView(
+      key: const PageStorageKey('aggregation'),
+      children: [
+        for (final section in rows)
+          MediaShelf(
+            key: ValueKey('aggregation-server-${section.serverId}'),
+            shelfId: 'aggregation-${section.serverId}-$_segment',
+            title: section.serverName,
+            items: _slice(section).items,
+            loading: _slice(section).loading,
+            error: _slice(section).error,
+            onRetry: _slice(section).error == null
+                ? null
+                : () => loader.retry(section.serverId),
+            onTap: (item) => _open(section, item),
+            extent: captioned ? _continueExtent(context) : null,
+            itemBuilder: captioned
+                ? (context, item) => _continueCard(context, section, item)
+                : null,
+          ),
+      ],
+    );
+  }
+
+  double _continueExtent(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context).width;
+    final image = MediaShelf.posterWidthFor(screen) * 1.5;
+    final labels = MediaShelf.posterLabelExtentFor(
+      context,
+      showProgress: false,
+    );
+    final caption = MediaShelf.lineHeightOf(
+      context,
+      Theme.of(context).textTheme.bodySmall,
+    );
+    // 货架内部还要留出悬停余量，字幕行必须算进总高度。
+    return ((image + labels + caption) * MediaShelf.hoverScale + 48)
+        .ceilToDouble();
+  }
+
+  Widget _continueCard(
+    BuildContext context,
+    ServerSections section,
+    EmbyItem item,
+  ) {
+    final width = MediaShelf.posterWidthFor(MediaQuery.sizeOf(context).width);
+    final caption = aggregationContinueCaption(item);
+    return SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          PosterCard(
+            item: item,
+            width: width,
+            onTap: () => _open(section, item),
+          ),
+          if (caption != null)
+            Text(
+              caption,
+              key: ValueKey(
+                'aggregation-caption-${section.serverId}-${item.id}',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchHit {
+  const _SearchHit({
+    required this.serverId,
+    required this.serverName,
+    this.account,
+    this.items = const [],
+    this.error,
+    this.loading = false,
+  });
+
+  final String serverId;
+  final String serverName;
+  final SourceAccount? account;
+  final List<EmbyItem> items;
+  final EmbyException? error;
+  final bool loading;
+
+  _SearchHit copyWith({
+    SourceAccount? account,
+    List<EmbyItem>? items,
+    EmbyException? error,
+    bool clearError = false,
+    bool? loading,
+  }) {
+    return _SearchHit(
+      serverId: serverId,
+      serverName: serverName,
+      account: account ?? this.account,
+      items: items ?? this.items,
+      error: clearError ? null : error ?? this.error,
+      loading: loading ?? this.loading,
+    );
+  }
+}
+
+class _AggregationSearch extends StatefulWidget {
+  const _AggregationSearch({this.focusNode});
+
+  final FocusNode? focusNode;
+
+  @override
+  State<_AggregationSearch> createState() => _AggregationSearchState();
+}
+
+class _AggregationSearchState extends State<_AggregationSearch> {
+  final _keyword = TextEditingController();
+  AuthController? _auth;
+  List<_SearchHit> _rows = const [];
+  String _term = '';
+  bool _searching = false;
+  int _generation = 0;
+  final Map<String, int> _attempt = {};
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = AuthScope.of(context);
+    if (!identical(_auth, auth)) {
+      _auth?.removeListener(_serversChanged);
+      _auth = auth..addListener(_serversChanged);
+    }
+  }
+
+  void _serversChanged() {
+    if (_term.isEmpty || !mounted) return;
+    final ids = AuthScope.of(
+      context,
+    ).sources.project(AccessRegion.ordinary).map((server) => server.id).toSet();
+    final next = [
+      for (final row in _rows)
+        if (ids.contains(row.serverId)) row,
+    ];
+    if (next.length == _rows.length) return;
+    setState(() => _rows = next);
+  }
+
+  @override
+  void dispose() {
+    _auth?.removeListener(_serversChanged);
+    _keyword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final term = _keyword.text.trim();
+    if (term.isEmpty) {
+      setState(() {
+        _term = '';
+        _rows = const [];
+        _searching = false;
+        _generation++;
+      });
+      return;
+    }
+    await _run(term);
+  }
+
+  Future<void> _run(String term) async {
+    final generation = ++_generation;
+    final registry = AuthScope.of(context).sources;
+    await registry.load();
+    if (!mounted || generation != _generation) return;
+    final targets = registry.project(AccessRegion.ordinary);
+    _attempt
+      ..clear()
+      ..addEntries(targets.map((server) => MapEntry(server.id, 0)));
+    setState(() {
+      _term = term;
+      _searching = true;
+      _rows = const [];
+    });
+    await Future.wait(
+      targets.map((server) => _publish(server, term, generation, 0)),
+    );
+    if (!mounted || generation != _generation) return;
+    setState(() => _searching = false);
+  }
+
+  Future<void> _retry(String serverId) async {
+    final term = _term;
+    if (term.isEmpty) return;
+    final generation = _generation;
+    final server = AuthScope.of(context).sources
+        .project(AccessRegion.ordinary)
+        .where((item) => item.id == serverId)
+        .firstOrNull;
+    if (server == null) return;
+    final attempt = (_attempt[serverId] ?? 0) + 1;
+    _attempt[serverId] = attempt;
+    setState(() {
+      _rows = [
+        for (final row in _rows)
+          if (row.serverId == serverId)
+            row.copyWith(loading: true, clearError: true)
+          else
+            row,
+      ];
+    });
+    await _publish(server, term, generation, attempt);
+  }
+
+  Future<void> _publish(
+    SavedServer server,
+    String term,
+    int generation,
+    int attempt,
+  ) async {
+    final hit = await _query(server, term);
+    if (!mounted ||
+        generation != _generation ||
+        _attempt[server.id] != attempt) {
+      return;
+    }
+    final next = [
+      for (final row in _rows)
+        if (row.serverId != server.id) row,
+    ];
+    if (hit != null) next.add(hit);
+    final order = AuthScope.of(
+      context,
+    ).sources.project(AccessRegion.ordinary).map((item) => item.id).toList();
+    final byId = {for (final row in next) row.serverId: row};
+    setState(() {
+      _rows = [
+        for (final id in order)
+          if (byId.containsKey(id)) byId[id]!,
+      ];
+    });
+  }
+
+  Future<_SearchHit?> _query(SavedServer server, String term) async {
+    final registry = AuthScope.of(context).sources;
+    try {
+      final session = await registry.authenticate(server.id);
+      final page = await session.client.queryItems(
+        searchTerm: term,
+        includeItemTypes: 'Movie,Series',
+        recursive: true,
+        limit: aggregationRowLimit,
+        fields: EmbyClient.gridFields,
+      );
+      final items = [
+        for (final item in page.items)
+          if (item.isMovieOrSeries) item,
+      ];
+      if (items.isEmpty) return null;
+      return _SearchHit(
+        serverId: server.id,
+        serverName: server.displayName,
+        account: session.account,
+        items: items,
+      );
+    } on StateError catch (error) {
+      if (error.message == 'Login required') return null;
+      return _SearchHit(
+        serverId: server.id,
+        serverName: server.displayName,
+        error: EmbyException(EmbyFailureKind.unknown, cause: error),
+      );
+    } catch (error) {
+      return _SearchHit(
+        serverId: server.id,
+        serverName: server.displayName,
+        error: error is EmbyException
+            ? error
+            : EmbyException(EmbyFailureKind.unknown, cause: error),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final tv = PresentationScope.of(context).isTv;
+    final visible = [
+      for (final row in _rows)
+        if (row.items.isNotEmpty || row.error != null || row.loading) row,
+    ];
+    return Material(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: tv
+                ? TvInput(
+                    key: const Key('aggregation-keyword'),
+                    autofocus: true,
+                    label: l.searchHint,
+                    controller: _keyword,
+                    onSubmitted: _submit,
+                  )
+                : TextField(
+                    key: const Key('aggregation-keyword'),
+                    focusNode: widget.focusNode,
+                    controller: _keyword,
+                    autofocus: widget.focusNode == null,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      labelText: l.searchHint,
+                      suffixIcon: IconButton(
+                        tooltip: l.search,
+                        onPressed: _submit,
+                        icon: const Icon(Icons.search),
+                      ),
+                    ),
+                    onSubmitted: (_) => _submit(),
+                  ),
+          ),
+          Expanded(child: _results(context, visible)),
+        ],
+      ),
+    );
+  }
+
+  Widget _results(BuildContext context, List<_SearchHit> visible) {
+    final l = AppLocalizations.of(context);
+    if (_term.isEmpty) {
+      return AppEmptyView(message: l.searchEmptyQuery);
+    }
+    if (_searching && visible.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (visible.isEmpty) {
+      return AppEmptyView(message: l.searchNoResults);
+    }
+    final failed = visible.where((row) => row.error != null).length;
+    return ListView(
+      key: const PageStorageKey('aggregation-search'),
+      children: [
+        if (failed > 0 && failed < visible.length)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(l.aggregationPartialFailure),
+          ),
+        if (failed == visible.length && visible.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(l.aggregationAllFailed),
+          ),
+        for (final row in visible)
+          MediaShelf(
+            key: ValueKey('aggregation-search-${row.serverId}'),
+            shelfId: 'aggregation-search-${row.serverId}',
+            title: row.serverName,
+            items: row.items,
+            loading: row.loading,
+            error: row.error,
+            onRetry: row.error == null ? null : () => _retry(row.serverId),
+            onTap: (item) {
+              final account = row.account;
+              if (account == null) return;
+              openServerItem(context, account: account, item: item);
+            },
+          ),
+      ],
+    );
+  }
 }

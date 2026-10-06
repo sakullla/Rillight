@@ -17,6 +17,7 @@ import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
@@ -320,6 +321,34 @@ Future<void> _finishRevocation(
   if (failure != null) throw failure!;
 }
 
+Future<void> _openOwnedDetail(
+  WidgetTester tester,
+  _Fixture f,
+  RillightApp app, {
+  required String serverId,
+  required String itemId,
+  String libraryId = 'view-movies',
+}) async {
+  final account = await tester.runAsync(
+    () => f.auth.sources.acquireAccount(
+      serverId,
+      region: AccessRegion.ordinary,
+      libraryId: libraryId,
+    ),
+  );
+  final permit = f.auth.sources.permit(account!, libraryId: libraryId);
+  app.router.go(
+    '/item/$itemId',
+    extra: PlayerHostOpenItemCommand(
+      itemId: itemId,
+      source: SourceReference(account: account, itemId: itemId),
+      libraryId: libraryId,
+      regionGeneration: permit.regionGeneration,
+    ),
+  );
+  await _settle(tester);
+}
+
 Future<Uint8List> _png(Color color) async {
   final recorder = ui.PictureRecorder();
   Canvas(
@@ -347,12 +376,13 @@ void main() {
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final album = find.byType(DetailAlbumStrip);
       await tester.ensureVisible(album);
       await _settle(tester);
@@ -448,9 +478,11 @@ void main() {
           await tester.tap(find.byType(NavigationDestination).at(1));
         }
         await _settle(tester);
-        await tester.tap(
+        expect(
           find.byKey(const Key('aggregation-source-management')),
+          findsNothing,
         );
+        showSourceManagement(tester.element(find.byType(AggregationPage)));
         await _settle(tester);
         expect(find.byType(SourceManagement), findsOneWidget);
         final check = find.byKey(
@@ -498,8 +530,13 @@ void main() {
           findsOneWidget,
         );
         expect(updated.activeLineId, saved.activeLineId);
-        expect(permit.isValid, isTrue);
-        expect(session.client.hasSession, isTrue);
+        expect(
+          f.auth.sources
+              .permit(session.account, libraryId: 'view-movies')
+              .isValid,
+          isTrue,
+        );
+        expect(session.account.configuredServerId, f.aId);
         expect(f.auth.client, same(activeClient));
         expect(f.auth.client.baseUrl, activeUrl);
         expect(
@@ -607,12 +644,13 @@ void main() {
       await _settle(tester);
       await tester.tap(find.text('聚合').first);
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final play = find.widgetWithText(FilledButton, '播放').first;
       await tester.ensureVisible(play);
       await tester.tap(play);
@@ -890,19 +928,13 @@ void main() {
       });
       await tester.pumpWidget(app);
       await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      final cardFocus = FocusManager.instance.primaryFocus;
-      for (var frame = 0; frame < 8; frame++) {
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(FocusManager.instance.primaryFocus, same(cardFocus));
-      }
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       expect(find.byType(TvDetailPage), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await _settle(tester);
@@ -964,14 +996,13 @@ void main() {
       });
       await tester.pumpWidget(app);
       await _settle(tester);
-      await tester.tap(find.byType(NavigationDestination).at(1));
-      await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       await tester.ensureVisible(find.byKey(const Key('mobile-detail-play')));
       await tester.tap(find.byKey(const Key('mobile-detail-play')));
       await _settle(tester);
@@ -1124,12 +1155,13 @@ void main() {
       await _settle(tester);
       await tester.tap(find.byType(NavigationDestination).at(1));
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final play = find.byKey(const Key('mobile-detail-play'));
       await tester.ensureVisible(play);
       await tester.pump();
@@ -1246,12 +1278,13 @@ void main() {
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final album = find.byType(DetailAlbumStrip);
       await tester.ensureVisible(album);
       await _settle(tester);
@@ -1375,75 +1408,21 @@ void main() {
         control!.context!.findAncestorWidgetOfExactType<AggregationPage>(),
         isNotNull,
       );
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _settle(tester);
+      expect(find.text('继续播放'), findsWidgets);
+      expect(find.text('收藏'), findsWidgets);
+      expect(find.text('媒体库'), findsWidgets);
       expect(
-        find.byType(ItemDetailPage),
+        find.byKey(const Key('aggregation-source-management')),
         findsNothing,
-      ); // TV uses its own detail tree.
-      expect(find.byType(DetailSourceScope), findsWidgets);
-      app.router.pop();
-      await _settle(tester);
-      expect(FocusManager.instance.primaryFocus, same(control));
-      for (var i = 0; i < 8; i++) {
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(FocusManager.instance.primaryFocus, same(control));
-      }
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      final compareNode = FocusManager.instance.primaryFocus;
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _settle(tester);
-      expect(find.byType(Dialog), findsOneWidget);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await _settle(tester);
-      expect(find.byType(Dialog), findsNothing);
-      expect(FocusManager.instance.primaryFocus, same(compareNode));
-      for (var i = 0; i < 6; i++) {
-        if (FocusManager.instance.primaryFocus?.context
-                ?.findAncestorWidgetOfExactType<FilterChip>() !=
-            null) {
-          break;
-        }
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-        await _settle(tester);
-      }
-      final chip = FocusManager.instance.primaryFocus?.context
-          ?.findAncestorWidgetOfExactType<FilterChip>();
-      expect(chip, isNotNull);
-      for (var i = 0; i < 3; i++) {
-        if (FocusManager.instance.primaryFocus?.context
-                ?.findAncestorWidgetOfExactType<FilterChip>()
-                ?.key ==
-            ValueKey('aggregation-source-${f.bId}')) {
-          break;
-        }
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await _settle(tester);
-      }
-      expect(
-        FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<FilterChip>()
-            ?.key,
-        ValueKey('aggregation-source-${f.bId}'),
       );
-      final chipNode = FocusManager.instance.primaryFocus;
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      expect(find.byKey(const Key('aggregation-private-entry')), findsNothing);
+      expect(find.text('查找同源'), findsNothing);
+      expect(find.byType(FilterChip), findsNothing);
+      await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
       await _settle(tester);
-      for (var i = 0; i < 8; i++) {
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(FocusManager.instance.primaryFocus, same(chipNode));
-      }
-      expect(
-        tester
-            .widget<FilterChip>(
-              find.byKey(ValueKey('aggregation-source-${f.bId}')),
-            )
-            .selected,
-        isFalse,
-      );
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.byType(ItemDetailPage), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -1477,16 +1456,23 @@ void main() {
       expect(input, findsNothing);
       await openSearch();
       await tester.enterText(input, '合成');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.byType(FilterChip), findsNothing);
+      expect(find.text('媒体库范围'), findsNothing);
       await tester.ensureVisible(find.text('合成作品').last);
       await tester.pump();
       await tester.tap(find.text('合成作品').last);
       await _settle(tester);
       expect(input, findsNothing);
       expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(f.auth.session!.server.id, f.aId);
       app.router.pop();
       await _settle(tester);
-      expect(find.text('查找同源 · 2'), findsOneWidget);
+      expect(find.text('继续播放'), findsWidgets);
+      expect(find.text('查找同源'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -1635,12 +1621,13 @@ void main() {
     PresentationEnvironment.tv,
   ]) {
     testWidgets(
-      '${environment.presentation.name} real entry merges allowed sources, filters first, and keeps successful sibling on retry',
+      '${environment.presentation.name} real entry shows server rows and retries only the failed server',
       (tester) async {
         isolateImageCache();
         final f = _Fixture();
         await tester.runAsync(f.open);
         addTearDown(f.close);
+        f.b.viewsStatus = 503;
         tester.view.physicalSize = environment.isTv
             ? const Size(1920, 1080)
             : environment.isDesktop
@@ -1661,60 +1648,45 @@ void main() {
         }
         await _settle(tester);
         expect(find.byType(AggregationPage), findsOneWidget);
-        expect(find.text('查找同源 · 2'), findsOneWidget);
-        final bFilter = find.byKey(ValueKey('aggregation-source-${f.bId}'));
-        if (environment.isTv) {
-          final focus = find
-              .descendant(of: bFilter, matching: find.byType(Focus))
-              .first;
-          Focus.of(
-            tester.element(
-              find
-                  .descendant(of: focus, matching: find.byType(Semantics))
-                  .first,
-            ),
-          ).requestFocus();
-          await tester.pump();
-          await tester.sendKeyEvent(LogicalKeyboardKey.select);
-        } else {
-          await tester.tap(bFilter);
-        }
-        await _settle(tester);
-        expect(find.text('查找同源 · 1'), findsOneWidget);
-        await tester.tap(find.byKey(ValueKey('aggregation-source-${f.aId}')));
-        await _settle(tester);
-        expect(find.text('未选择可参与的服务或媒体库'), findsOneWidget);
-        f.b.itemsStatus = 503;
-        await tester.tap(find.widgetWithText(FilterChip, '全部普通来源'));
-        await _settle(tester);
-        expect(find.text('部分来源失败，已保留成功结果'), findsOneWidget);
-        expect(find.textContaining('已加载作品: 1'), findsOneWidget);
-        f.b.itemsStatus = null;
-        await tester.ensureVisible(find.text('重试此来源'));
-        await tester.pump();
-        await tester.tap(find.text('重试此来源'));
-        await _settle(tester);
-        await tester.scrollUntilVisible(
-          find.text('查找同源 · 2'),
-          120,
-          scrollable: find
-              .descendant(
-                of: find.byType(AggregationPage),
-                matching: find.byType(Scrollable),
-              )
-              .first,
+        expect(find.text('继续播放'), findsWidgets);
+        expect(find.text('收藏'), findsWidgets);
+        expect(find.text('媒体库'), findsWidgets);
+        expect(
+          find.byKey(const Key('aggregation-source-management')),
+          findsNothing,
         );
-        expect(find.text('查找同源 · 2'), findsOneWidget);
-        await tester.ensureVisible(find.text('查找同源 · 2'));
-        await tester.pump();
-        await tester.tap(find.text('查找同源 · 2'));
+        expect(
+          find.byKey(const Key('aggregation-private-entry')),
+          findsNothing,
+        );
+        expect(find.text('查找同源'), findsNothing);
+        expect(find.text('媒体库范围'), findsNothing);
+        expect(find.byType(FilterChip), findsNothing);
+        await tester.tap(
+          find.byKey(const Key('aggregation-segment-libraries')),
+        );
         await _settle(tester);
-        expect(find.byType(AlertDialog), findsOneWidget);
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        expect(find.text('来源 A'), findsOneWidget);
+        expect(find.text('来源 B'), findsOneWidget);
+        expect(find.text('电影'), findsWidgets);
+        expect(find.text('重试'), findsOneWidget);
+        f.b.viewsStatus = null;
+        await tester.tap(find.text('重试'));
         await _settle(tester);
-        expect(find.byType(AlertDialog), findsNothing);
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        expect(FocusManager.instance.primaryFocus, isNotNull);
+        expect(find.text('来源 A'), findsOneWidget);
+        expect(find.text('来源 B'), findsOneWidget);
+        expect(find.text('重试'), findsNothing);
+        final selected = f.auth.session!.server.id;
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+            matching: find.text('电影'),
+          ),
+        );
+        await _settle(tester);
+        expect(find.byType(ServerLibraryPage), findsOneWidget);
+        expect(f.auth.session!.server.id, selected);
+        expect(find.text('合成作品'), findsWidgets);
         app.router.go('/library/view-movies');
         await _settle(tester);
         expect(find.byType(AggregationPage), findsNothing);
@@ -1762,34 +1734,34 @@ void main() {
           snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         ),
       );
+      f.a.items.first.playbackPositionTicks = 150000000;
+      f.a.items.first.productionYear = 2010;
+      f.b.items.first.playbackPositionTicks = 350000000;
+      f.b.items.first.productionYear = 2011;
       await tester.pumpWidget(app);
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.tap(find.widgetWithText(ChoiceChip, '继续观看'));
-      await _settle(tester);
-      final resume = find.byTooltip('从本机记录的实际来源继续');
-      expect(resume, findsNothing);
-      await tester.runAsync(
-        () => f.history.observe(
-          session: session,
-          eventSequence: 1,
-          positionTicks: 170000000,
-          actuallyPlaying: true,
-          timeline: const WatchTimeline(durationTicks: 600000000),
-        ),
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.text('2010'), findsOneWidget);
+      expect(find.text('2011'), findsOneWidget);
+      expect(find.byTooltip('从本机记录的实际来源继续'), findsNothing);
+      final poster = find.descendant(
+        of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+        matching: find.text('合成作品'),
       );
-      await _settle(tester);
-      expect(resume, findsOneWidget);
-      await tester.ensureVisible(resume);
+      await tester.ensureVisible(poster);
       await tester.pump();
-      await tester.tap(resume);
+      await tester.tap(poster);
       await _settle(tester);
-      expect(host.current!.source, source);
-      expect(host.current!.work, source.item);
-      expect(host.current!.libraryId, 'view-movies');
-      expect(host.current!.startTimeTicks, 170000000);
-      expect(host.current!.mediaSourceId, 'recorded-version');
+      expect(
+        DetailSourceScope.maybeOf(
+          tester.element(find.byType(ItemDetailPage)),
+        )!.source.account.configuredServerId,
+        f.bId,
+      );
+      expect(host.current, isNull);
       expect(f.auth.session!.server.id, f.aId);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -1806,24 +1778,25 @@ void main() {
       await tester.runAsync(f.open);
       addTearDown(f.close);
       f.a.items.first.playbackPositionTicks = 150000000;
+      f.a.items.first.productionYear = 1999;
       f.b.items.first.playbackPositionTicks = 350000000;
+      f.b.items.first.productionYear = 2001;
       f.b.items.first.overview = 'B续播来源';
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.tap(find.widgetWithText(ChoiceChip, '继续观看'));
-      await _settle(tester);
-      await tester.ensureVisible(find.text('合成作品'));
+      expect(find.text('1999'), findsOneWidget);
+      expect(find.text('2001'), findsOneWidget);
+      expect(find.textContaining('不取最大进度'), findsNothing);
+      final poster = find.descendant(
+        of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+        matching: find.text('合成作品'),
+      );
+      await tester.ensureVisible(poster);
       await tester.pump();
-      await tester.tap(find.text('合成作品'));
-      await _settle(tester);
-      expect(find.textContaining('不取最大进度'), findsOneWidget);
-      expect(find.text('来源 A · 15s'), findsOneWidget);
-      expect(find.text('来源 B · 35s'), findsOneWidget);
-      expect(find.byType(ItemDetailPage), findsNothing);
-      await tester.tap(find.text('来源 B · 35s'));
+      await tester.tap(poster);
       await _settle(tester);
       expect(find.text('B续播来源'), findsOneWidget);
       expect(
@@ -1983,24 +1956,19 @@ void main() {
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/aggregation');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      expect(find.textContaining('已确认来源'), findsOneWidget);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       expect(find.text('B实际来源正文'), findsOneWidget);
       final origin = DetailSourceScope.maybeOf(
         tester.element(find.byType(ItemDetailPage)),
       );
       expect(origin!.source.account.configuredServerId, f.bId);
       expect(f.auth.session!.server.id, f.aId);
-      app.router.pop();
-      await _settle(tester);
-      expect(find.text('查找同源 · 2'), findsOneWidget);
       app.router.go('/item/shared-id');
       await _settle(tester);
       expect(
@@ -2032,11 +2000,14 @@ void main() {
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/aggregation');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 1').first);
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 1').first);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '查找同源'));
       await _settle(tester);
       expect(find.textContaining('待辨认候选'), findsOneWidget);
       expect(find.textContaining('已确认来源'), findsNothing);
@@ -2888,15 +2859,31 @@ void main() {
       await _settle(tester);
       app.router.go('/search');
       await _settle(tester);
+      expect(find.text('输入片名后搜索'), findsOneWidget);
+      expect(find.byType(FilterChip), findsNothing);
+      expect(find.text('媒体库范围'), findsNothing);
+      expect(find.byKey(const Key('aggregation-year')), findsNothing);
+      expect(find.byKey(const Key('aggregation-genre')), findsNothing);
+      await tester.enterText(find.byKey(const Key('aggregation-keyword')), ' ');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      expect(
+        f.a.requests.where((request) => request.contains('SearchTerm=')),
+        isEmpty,
+      );
+      expect(
+        f.b.requests.where((request) => request.contains('SearchTerm=')),
+        isEmpty,
+      );
+      expect(find.text('输入片名后搜索'), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('aggregation-keyword')),
         '合成',
       );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
-      expect(find.text('查找同源 · 1'), findsOneWidget);
-      await tester.tap(find.widgetWithText(FilterChip, '全部普通来源'));
-      await _settle(tester);
-      expect(find.text('查找同源 · 2'), findsOneWidget);
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
       await tester.runAsync(() async {
         await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
         await f.auth.regionAccess.unlock('1234');
@@ -2911,18 +2898,13 @@ void main() {
             .widget<TextField>(find.byKey(const Key('aggregation-keyword')))
             .controller!
             .text,
-        isEmpty,
-      );
-      expect(find.text('查找同源 · 2'), findsNothing);
-      await tester.enterText(
-        find.byKey(const Key('aggregation-keyword')),
         '合成',
       );
-      await _settle(tester);
-      expect(find.text('查找同源 · 1'), findsOneWidget);
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsNothing);
       await tester.runAsync(() => f.auth.regionAccess.lock());
       await _settle(tester);
-      expect(find.text('查找同源 · 1'), findsOneWidget);
+      expect(find.text('来源 A'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();

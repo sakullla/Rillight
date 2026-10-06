@@ -19,6 +19,7 @@ import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
+import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/home/tv_shelf_page.dart';
@@ -224,6 +225,17 @@ GoRouter createAppRouter({
               ),
             ),
             GoRoute(
+              path: '/server/:serverId/library/:viewId',
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: ServerLibraryPage(
+                  serverId: state.pathParameters['serverId']!,
+                  viewId: state.pathParameters['viewId']!,
+                ),
+              ),
+            ),
+            GoRoute(
               path: '/item/:itemId',
               pageBuilder: (context, state) => PhoneMotion.detailPage(
                 context: context,
@@ -279,6 +291,13 @@ GoRouter createAppRouter({
               path: '/library/:viewId',
               builder: (context, state) =>
                   TvLibraryPage(viewId: state.pathParameters['viewId']!),
+            ),
+            GoRoute(
+              path: '/server/:serverId/library/:viewId',
+              builder: (context, state) => ServerLibraryPage(
+                serverId: state.pathParameters['serverId']!,
+                viewId: state.pathParameters['viewId']!,
+              ),
             ),
             GoRoute(
               path: '/shelf/:source',
@@ -347,6 +366,16 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) => _desktopPage(
                 state,
                 LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
+              ),
+            ),
+            GoRoute(
+              path: '/server/:serverId/library/:viewId',
+              pageBuilder: (context, state) => _desktopPage(
+                state,
+                ServerLibraryPage(
+                  serverId: state.pathParameters['serverId']!,
+                  viewId: state.pathParameters['viewId']!,
+                ),
               ),
             ),
             GoRoute(

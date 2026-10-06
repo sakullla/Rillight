@@ -54,14 +54,18 @@ class OperationPermit {
     this.sessionRevision,
     this.scopeRevision,
     this.regionGeneration,
-    this.libraryId,
-  );
+    this.libraryId, {
+    this.sessionOnly = false,
+  });
   final SourceSessionRegistry _owner;
   final SourceAccount account;
   final int sessionRevision;
   final int scopeRevision;
   final int regionGeneration;
   final String? libraryId;
+
+  /// 聚合视界打开条目时只要求该服务器会话有效，不要求库范围已勾选。
+  final bool sessionOnly;
   bool get isValid => _owner.accepts(this);
   void requireValid() {
     if (!isValid) throw StateError('Source permission revoked');
@@ -755,15 +759,22 @@ class SourceSessionRegistry {
     }
   }
 
-  OperationPermit permit(SourceAccount account, {String? libraryId}) {
+  OperationPermit permit(
+    SourceAccount account, {
+    String? libraryId,
+    bool sessionOnly = false,
+  }) {
     final server = _allowed(account.configuredServerId);
     final session = _sessions[server.id];
+    final blockedByScope =
+        !sessionOnly &&
+        (!server.participates ||
+            !server.scopeKnown ||
+            server.libraryIds.isEmpty ||
+            (libraryId != null && !server.libraryIds.contains(libraryId)));
     if (_credentialChanges.contains(server.id) ||
         session?.account != account ||
-        !server.participates ||
-        !server.scopeKnown ||
-        server.libraryIds.isEmpty ||
-        (libraryId != null && !server.libraryIds.contains(libraryId))) {
+        blockedByScope) {
       throw StateError('Source outside allowed scope');
     }
     return OperationPermit._(
@@ -773,6 +784,7 @@ class SourceSessionRegistry {
       _scopes[server.id] ?? 0,
       access.generation,
       libraryId,
+      sessionOnly: sessionOnly,
     );
   }
 
@@ -781,20 +793,23 @@ class SourceSessionRegistry {
     try {
       final server = _allowed(permit.account.configuredServerId);
       final session = _sessions[server.id];
+      final libraryOk =
+          permit.sessionOnly ||
+          (server.participates &&
+              server.scopeKnown &&
+              server.libraryIds.isNotEmpty &&
+              (permit.libraryId == null ||
+                  server.libraryIds.contains(permit.libraryId)));
       return !_credentialChanges.contains(server.id) &&
           server.region == permit.account.region &&
-          server.participates &&
-          server.scopeKnown &&
-          server.libraryIds.isNotEmpty &&
+          libraryOk &&
           session?.account == permit.account &&
           session?.client.hasSession == true &&
           session?.client.userId == permit.account.userId &&
           session?.revision == permit.sessionRevision &&
           (_scopes[server.id] ?? 0) == permit.scopeRevision &&
           (server.region != AccessRegion.private ||
-              access.generation == permit.regionGeneration) &&
-          (permit.libraryId == null ||
-              server.libraryIds.contains(permit.libraryId));
+              access.generation == permit.regionGeneration);
     } on StateError {
       return false;
     }

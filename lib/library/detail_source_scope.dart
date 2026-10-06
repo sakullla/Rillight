@@ -5,6 +5,7 @@ import 'aggregation_page.dart';
 import '../app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -120,7 +121,21 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       }
       final account = command.source!.account;
       final registry = widget.auth.sources;
-      final permit = registry.permit(account, libraryId: command.libraryId);
+      OperationPermit permit;
+      try {
+        permit = registry.permit(account, libraryId: command.libraryId);
+      } on StateError {
+        // 未勾选媒体库范围时，已登录会话仍可打开该服务器上的条目。
+        try {
+          permit = registry.permit(
+            account,
+            libraryId: command.libraryId,
+            sessionOnly: true,
+          );
+        } on StateError {
+          return;
+        }
+      }
       if (command.libraryId == null ||
           command.regionGeneration != permit.regionGeneration) {
         return;
