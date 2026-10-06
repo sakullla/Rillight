@@ -10,6 +10,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/search/search_action.dart';
@@ -26,10 +27,11 @@ void openServerItem(
       ? item.parentId!
       : item.id;
   final source = SourceReference(account: account, itemId: item.id);
+  final location = _serverItemLocation(item.id);
   try {
     final permit = _openPermit(registry, account, libraryId);
     context.push(
-      AppRoutes.item(item.id),
+      location,
       extra: PlayerHostOpenItemCommand(
         itemId: item.id,
         source: source,
@@ -39,10 +41,20 @@ void openServerItem(
     );
   } on StateError {
     context.push(
-      AppRoutes.item(item.id),
+      location,
       extra: PlayerHostOpenItemCommand(itemId: item.id, source: source),
     );
   }
+}
+
+/// 聚合和搜索打开的详情不进入同源比对。查询留在路由上，刷新后仍然生效。
+String _serverItemLocation(String itemId) {
+  final base = Uri.parse(AppRoutes.item(itemId));
+  return base
+      .replace(
+        queryParameters: {...base.queryParameters, 'showComparison': '0'},
+      )
+      .toString();
 }
 
 OperationPermit _openPermit(
@@ -152,19 +164,24 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
-      body: ShelfClientOverride(
-        client: client,
-        child: ShelfItemOpen(
-          onOpen: (item) =>
-              openServerItem(context, account: account, item: item),
-          child: ShelfGridPage(
-            key: ValueKey((widget.serverId, widget.viewId)),
-            source: 'items',
-            parentId: widget.viewId,
-            includeItemTypes: _includeItemTypes,
-            recursive: true,
-            title: _title,
-            showTitle: true,
+      body: scopeServerPosters(
+        account: account,
+        serverId: widget.serverId,
+        libraryId: widget.viewId,
+        child: ShelfClientOverride(
+          client: client,
+          child: ShelfItemOpen(
+            onOpen: (item) =>
+                openServerItem(context, account: account, item: item),
+            child: ShelfGridPage(
+              key: ValueKey((widget.serverId, widget.viewId)),
+              source: 'items',
+              parentId: widget.viewId,
+              includeItemTypes: _includeItemTypes,
+              recursive: true,
+              title: _title,
+              showTitle: true,
+            ),
           ),
         ),
       ),

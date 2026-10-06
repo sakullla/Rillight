@@ -1540,21 +1540,25 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
       key: const PageStorageKey('aggregation'),
       children: [
         for (final section in rows)
-          MediaShelf(
-            key: ValueKey('aggregation-server-${section.serverId}'),
-            shelfId: 'aggregation-${section.serverId}-$_segment',
-            title: section.serverName,
-            items: _slice(section).items,
-            loading: _slice(section).loading,
-            error: _slice(section).error,
-            onRetry: _slice(section).error == null
-                ? null
-                : () => loader.retry(section.serverId),
-            onTap: (item) => _open(section, item),
-            extent: captioned ? _continueExtent(context) : null,
-            itemBuilder: captioned
-                ? (context, item) => _continueCard(context, section, item)
-                : null,
+          scopeServerPosters(
+            account: section.account,
+            serverId: section.serverId,
+            child: MediaShelf(
+              key: ValueKey('aggregation-server-${section.serverId}'),
+              shelfId: 'aggregation-${section.serverId}-$_segment',
+              title: section.serverName,
+              items: _slice(section).items,
+              loading: _slice(section).loading,
+              error: _slice(section).error,
+              onRetry: _slice(section).error == null
+                  ? null
+                  : () => loader.retry(section.serverId),
+              onTap: (item) => _open(section, item),
+              extent: captioned ? _continueExtent(context) : null,
+              itemBuilder: captioned
+                  ? (context, item) => _continueCard(context, section, item)
+                  : null,
+            ),
           ),
       ],
     );
@@ -1887,19 +1891,23 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             child: Text(l.aggregationAllFailed),
           ),
         for (final row in visible)
-          MediaShelf(
-            key: ValueKey('aggregation-search-${row.serverId}'),
-            shelfId: 'aggregation-search-${row.serverId}',
-            title: row.serverName,
-            items: row.items,
-            loading: row.loading,
-            error: row.error,
-            onRetry: row.error == null ? null : () => _retry(row.serverId),
-            onTap: (item) {
-              final account = row.account;
-              if (account == null) return;
-              openServerItem(context, account: account, item: item);
-            },
+          scopeServerPosters(
+            account: row.account,
+            serverId: row.serverId,
+            child: MediaShelf(
+              key: ValueKey('aggregation-search-${row.serverId}'),
+              shelfId: 'aggregation-search-${row.serverId}',
+              title: row.serverName,
+              items: row.items,
+              loading: row.loading,
+              error: row.error,
+              onRetry: row.error == null ? null : () => _retry(row.serverId),
+              onTap: (item) {
+                final account = row.account;
+                if (account == null) return;
+                openServerItem(context, account: account, item: item);
+              },
+            ),
           ),
       ],
     );

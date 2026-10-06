@@ -2911,4 +2911,204 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets(
+    'each server poster uses that session and opened details hide comparison',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      f.a.items.first
+        ..playbackPositionTicks = 100
+        ..primaryImageTag = 'a-poster';
+      f.b.items.first
+        ..playbackPositionTicks = 200
+        ..primaryImageTag = 'b-poster';
+      for (final view in f.a.views) {
+        if (view.id == 'view-movies') view.primaryImageTag = 'a-library';
+      }
+      for (final view in f.b.views) {
+        if (view.id == 'view-movies') view.primaryImageTag = 'b-library';
+      }
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isFalse,
+      );
+      app.router.go('/aggregation');
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-server-${f.aId}'), f.aId);
+      expect(_posterServer(tester, 'aggregation-server-${f.bId}'), f.bId);
+      expect(
+        f.a.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-server-${f.bId}'), f.bId);
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/view-movies/Images/'),
+        ),
+        isTrue,
+      );
+      app.router.go(
+        '/server/${Uri.encodeComponent(f.bId)}/library/view-movies',
+      );
+      await _settle(tester);
+      expect(find.byType(ServerLibraryPage), findsOneWidget);
+      final gridImage = find.descendant(
+        of: find.byType(ServerLibraryPage),
+        matching: find.byType(MediaImage),
+      );
+      expect(gridImage, findsWidgets);
+      expect(
+        DetailSourceScope.maybeOf(
+          tester.element(gridImage.first),
+        )!.source.account.configuredServerId,
+        f.bId,
+      );
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      app.router.go('/search');
+      await _settle(tester);
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        '合成',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-search-${f.bId}'), f.bId);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-search-${f.bId}')),
+          matching: find.text('合成作品'),
+        ),
+      );
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(app.router.state.uri.queryParameters['showComparison'], '0');
+      expect(
+        tester
+            .widget<SourceDetailGate>(find.byType(SourceDetailGate))
+            .showComparison,
+        isFalse,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'unscoped server detail stays open after auth and region notifications',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(() => f.open(configure: false));
+      addTearDown(f.close);
+      f.b.items.first
+        ..playbackPositionTicks = 200
+        ..primaryImageTag = 'b-poster';
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      final homeImages = f.a.requests
+          .where((request) => request.contains('/Items/shared-id/Images/'))
+          .length;
+      app.router.go('/aggregation');
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-server-${f.bId}'), f.bId);
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      expect(
+        f.a.requests
+            .where((request) => request.contains('/Items/shared-id/Images/'))
+            .length,
+        homeImages,
+      );
+      await tester.ensureVisible(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+          matching: find.text('合成作品'),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+          matching: find.text('合成作品'),
+        ),
+      );
+      await _settle(tester);
+      expect(
+        find.byType(ItemDetailPage),
+        findsOneWidget,
+        reason: app.router.state.uri.toString(),
+      );
+      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(
+        DetailSourceScope.maybeOf(
+          tester.element(find.byType(ItemDetailPage)),
+        )!.source.account.configuredServerId,
+        f.bId,
+      );
+      await tester.runAsync(() => f.auth.selectSavedServer(f.aId));
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(app.router.state.uri.path, '/item/shared-id');
+      await tester.runAsync(() => f.auth.setPrivatePin('1234', '1234'));
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(app.router.state.uri.path, '/item/shared-id');
+      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(f.auth.session!.server.id, f.aId);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+}
+
+String _posterServer(WidgetTester tester, String shelfKey) {
+  final image = find.descendant(
+    of: find.byKey(ValueKey(shelfKey)),
+    matching: find.byType(MediaImage),
+  );
+  expect(image, findsWidgets);
+  return DetailSourceScope.maybeOf(
+    tester.element(image.first),
+  )!.source.account.configuredServerId;
 }

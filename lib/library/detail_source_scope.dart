@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/presentation_environment.dart';
@@ -119,24 +121,9 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
           command.source!.itemId != widget.itemId) {
         return;
       }
-      final account = command.source!.account;
-      final registry = widget.auth.sources;
-      OperationPermit permit;
-      try {
-        permit = registry.permit(account, libraryId: command.libraryId);
-      } on StateError {
-        // 未勾选媒体库范围时，已登录会话仍可打开该服务器上的条目。
-        try {
-          permit = registry.permit(
-            account,
-            libraryId: command.libraryId,
-            sessionOnly: true,
-          );
-        } on StateError {
-          return;
-        }
-      }
-      if (command.libraryId == null ||
+      final permit = _permitFor(command);
+      if (permit == null ||
+          command.libraryId == null ||
           command.regionGeneration != permit.regionGeneration) {
         return;
       }
@@ -182,19 +169,10 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   void _changed() {
     if (_imagePolicy?.isValid == false) _imagePolicy?.revoke();
     final command = widget.command;
-    if (mounted && command?.source != null) {
-      var valid = false;
-      try {
-        final permit = widget.auth.sources.permit(
-          command!.source!.account,
-          libraryId: command.libraryId,
-        );
-        valid =
-            permit.isValid &&
-            command.regionGeneration == permit.regionGeneration;
-      } catch (_) {
-        /* An unavailable account is not a legacy fallback. */
-      }
+    final account = command?.source?.account;
+    if (mounted && command != null && account != null) {
+      // 与 _resolve 相同：范围许可失败时，仍有效的 sessionOnly 许可继续视为有效。
+      final valid = _permitStillAllows(command);
       if (!valid) {
         final desktop =
             context
@@ -237,8 +215,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
             PlayerOpenRequest(:final source) => source,
             _ => null,
           };
-          if (topSource != null &&
-              topSource.account != command!.source!.account) {
+          if (topSource != null && topSource.account != account) {
             return;
           }
           // go() publishes intent before its async parser updates the delegate.
@@ -257,8 +234,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
           // or an independently authorized player on top of it. An overlay
           // pop may already have returned to the anonymous private root;
           // that old deep stack still needs clearing after the gate unmounts.
-          if (currentSource != null &&
-              currentSource.account != command!.source!.account) {
+          if (currentSource != null && currentSource.account != account) {
             return;
           }
           if (currentSource == null &&
@@ -271,6 +247,24 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       }
     }
     if (mounted) setState(() {});
+  }
+
+  /// 范围未勾选时改用 sessionOnly。打开详情和之后的有效性检查都走这里。
+  OperationPermit? _permitFor(PlayerHostOpenItemCommand command) {
+    final account = command.source?.account;
+    if (account == null) return null;
+    return permitForAccount(
+      widget.auth.sources,
+      account,
+      libraryId: command.libraryId,
+    );
+  }
+
+  bool _permitStillAllows(PlayerHostOpenItemCommand command) {
+    final permit = _permitFor(command);
+    return permit != null &&
+        permit.isValid &&
+        command.regionGeneration == permit.regionGeneration;
   }
 
   @override
@@ -324,5 +318,136 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         ],
       ),
     );
+  }
+}
+
+/// 范围许可失败时改用仍有效的会话许可。详情门的打开和后续检查共用这一规则。
+OperationPermit? permitForAccount(
+  SourceSessionRegistry registry,
+  SourceAccount account, {
+  String? libraryId,
+}) {
+  try {
+    return registry.permit(account, libraryId: libraryId);
+  } on StateError {
+    try {
+      return registry.permit(account, libraryId: libraryId, sessionOnly: true);
+    } on StateError {
+      return null;
+    }
+  }
+}
+
+/// 在海报之前挂上该服务器会话。没有账号时保持原来的子树。
+Widget scopeServerPosters({
+  required SourceAccount? account,
+  required String serverId,
+  String? libraryId,
+  required Widget child,
+}) {
+  if (account == null) return child;
+  return ServerSessionImages(
+    key: ValueKey((serverId, libraryId)),
+    account: account,
+    libraryId: libraryId,
+    child: child,
+  );
+}
+
+/// 横排和片库网格的海报请求走这台服务器的会话，缓存键带上该服务器。
+class ServerSessionImages extends StatefulWidget {
+  const ServerSessionImages({
+    super.key,
+    required this.account,
+    required this.child,
+    this.libraryId,
+  });
+
+  final SourceAccount account;
+  final String? libraryId;
+  final Widget child;
+
+  @override
+  State<ServerSessionImages> createState() => _ServerSessionImagesState();
+}
+
+class _ServerSessionImagesState extends State<ServerSessionImages> {
+  final _cache = CatalogCache();
+  PlaybackOrigin? _origin;
+  MediaImageSourcePolicy? _imagePolicy;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _rebind(AuthScope.of(context).sources);
+  }
+
+  @override
+  void didUpdateWidget(ServerSessionImages oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final auth = context.getInheritedWidgetOfExactType<AuthScope>()?.notifier;
+    if (auth == null) return;
+    _rebind(auth.sources);
+  }
+
+  void _rebind(SourceSessionRegistry registry) {
+    if (_origin?.permit.isValid == true && _imagePolicy?.isValid == true) {
+      return;
+    }
+    _bind(registry);
+  }
+
+  void _bind(SourceSessionRegistry registry) {
+    final permit = permitForAccount(
+      registry,
+      widget.account,
+      libraryId: widget.libraryId,
+    );
+    if (permit == null || !permit.isValid) return;
+    EmbyClient? client;
+    final pending = permit.dispatch((raw) async {
+      client = raw.withRequestGuard(permit.requireValid);
+      return client!;
+    });
+    unawaited(pending.then<void>((_) {}, onError: (Object _, StackTrace _) {}));
+    if (client == null || !permit.isValid) return;
+    final libraryId = widget.libraryId ?? widget.account.configuredServerId;
+    final source = SourceReference(account: widget.account, itemId: libraryId);
+    final origin = PlaybackOrigin(
+      source: source,
+      work: source,
+      libraryId: libraryId,
+      permit: permit,
+      client: client!,
+    );
+    _origin = origin;
+    _imagePolicy = MediaImageSourcePolicy(origin);
+  }
+
+  @override
+  void dispose() {
+    if (_imagePolicy?.allowsDisk == false) _imagePolicy?.revoke();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final origin = _origin;
+    final policy = _imagePolicy;
+    // 许可失效后仍留下范围，海报停在占位，横排标题和重试不被拆掉。
+    if (origin != null && policy != null) {
+      return DetailSourceScope(
+        origin: origin,
+        cache: _cache,
+        imagePolicy: policy,
+        child: widget.child,
+      );
+    }
+    // 当前首页服务器解析失败时仍用首页会话，其它服务器不回落到首页的图。
+    final selected = AuthScope.maybeOf(context)?.session?.server.id;
+    if (selected != null && selected == widget.account.configuredServerId) {
+      return widget.child;
+    }
+    return const SizedBox.shrink();
   }
 }

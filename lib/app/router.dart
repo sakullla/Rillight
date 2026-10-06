@@ -123,18 +123,14 @@ GoRouter createAppRouter({
           command.source != null &&
           (AppRoutes.isItem(state.uri.path) ||
               state.uri.path.startsWith('/shelf/'))) {
-        try {
-          final permit = auth.sources.permit(
-            command.source!.account,
-            libraryId: command.libraryId,
-          );
-          if (!permit.isValid ||
-              command.regionGeneration != permit.regionGeneration) {
-            return environment.isDesktop
-                ? AppRoutes.aggregation
-                : AppRoutes.home;
-          }
-        } catch (_) {
+        final permit = permitForAccount(
+          auth.sources,
+          command.source!.account,
+          libraryId: command.libraryId,
+        );
+        if (permit == null ||
+            !permit.isValid ||
+            command.regionGeneration != permit.regionGeneration) {
           return environment.isDesktop ? AppRoutes.aggregation : AppRoutes.home;
         }
       }
@@ -508,6 +504,7 @@ Widget _sourceDetail(AuthController auth, GoRouterState state, Widget child) {
     auth: auth,
     itemId: state.pathParameters['itemId']!,
     command: command,
+    showComparison: state.uri.queryParameters['showComparison'] != '0',
     child: child,
   );
 }
