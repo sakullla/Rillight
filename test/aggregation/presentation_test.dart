@@ -116,6 +116,9 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
         'test/helpers/desktop_ipc_fixture.dart',
       ],
       environment: {'RILLIGHT_TEST_LAUNCH': payloadPath},
+      // Flutter is a .bat entrypoint on Windows; direct CreateProcess cannot
+      // resolve it as an executable without the command shell.
+      runInShell: Platform.isWindows,
     );
     child.stdout.transform(utf8.decoder).listen(output.write);
     child.stderr.transform(utf8.decoder).listen(output.write);
