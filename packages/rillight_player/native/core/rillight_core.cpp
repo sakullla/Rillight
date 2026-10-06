@@ -3,6 +3,7 @@
 #include "video_buffer_pool.h"
 #include "video_frame_cost.h"
 #include "dovi_profile.h"
+#include "dovi_enhancement.h"
 #include "h264_access_unit.h"
 #include "portable_color_pipeline.h"
 #if defined(__ANDROID__)
@@ -25,6 +26,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -296,8 +298,58 @@ struct PendingPackets {
   void Clear() { for (auto* packet : values) av_packet_free(&packet); values.clear(); }
 };
 
+struct EnhancementDecoder {
+  AVCodecContext* context = nullptr;
+  AVRational time_base{1, 1000000};
+  std::deque<AVFrame*> frames;
+  std::mutex mutex;
+  int nal_length_size = 0;
+  std::atomic<bool> enabled{false};
+  bool dual = false;
+  bool flushed = false;
+
+  ~EnhancementDecoder() { Reset(); }
+  void Reset() {
+    std::lock_guard lock(mutex);
+    ClearFrames();
+    avcodec_free_context(&context);
+    enabled = false;
+    dual = false;
+    flushed = false;
+  }
+  void Configure(bool profile7_el, bool dual_stream, int nal_length, AVRational base_time) {
+    std::lock_guard lock(mutex);
+    enabled = profile7_el;
+    dual = dual_stream && context != nullptr;
+    nal_length_size = nal_length;
+    if (!dual) time_base = base_time.num > 0 && base_time.den > 0 ? base_time : AVRational{1, 1000000};
+    flushed = false;
+  }
+  bool OpenDual(AVFormatContext* format, int index);
+  void Flush() {
+    std::lock_guard lock(mutex);
+    ClearFrames();
+    flushed = false;
+    if (context) avcodec_flush_buffers(context);
+  }
+  void Feed(AVPacket* packet);
+  AVFrame* Take(int64_t pts_us);
+
+ private:
+  void ClearFrames() {
+    for (auto*& frame : frames) av_frame_free(&frame);
+    frames.clear();
+  }
+  bool EnsureOpen();
+  bool ReceiveOne();
+  void ReceiveAll() {
+    while (ReceiveOne()) {}
+  }
+};
+
 struct VideoScale {
   PortableColorPipeline portable_color_pipeline;
+  EnhancementDecoder enhancement;
 #if defined(_WIN32)
   WindowsColorPipeline color_pipeline;
 #endif
@@ -1767,6 +1819,160 @@ Decoder make_decoder(AVFormatContext *format, int index,
   return result;
 }
 
+bool EnhancementDecoder::OpenDual(AVFormatContext* format, int index) {
+  Decoder opened = make_decoder(format, index, RILLIGHT_CORE_HW_NONE);
+  if (!opened.context || !format || index < 0) {
+    avcodec_free_context(&opened.context);
+    return false;
+  }
+  std::lock_guard lock(mutex);
+  avcodec_free_context(&context);
+  context = opened.context;
+  opened.context = nullptr;
+  time_base = format->streams[index]->time_base;
+  dual = true;
+  enabled = true;
+  flushed = false;
+  return true;
+}
+
+bool EnhancementDecoder::EnsureOpen() {
+  if (context) return true;
+  if (dual) return false;
+  const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
+  if (!codec) return false;
+  AVCodecContext* created = avcodec_alloc_context3(codec);
+  if (!created) return false;
+  created->pkt_timebase = time_base;
+  if (avcodec_open2(created, codec, nullptr) < 0) {
+    avcodec_free_context(&created);
+    return false;
+  }
+  context = created;
+  return true;
+}
+
+bool EnhancementDecoder::ReceiveOne() {
+  if (!context) return false;
+  AVFrame* decoded = av_frame_alloc();
+  if (!decoded) return false;
+  const int result = avcodec_receive_frame(context, decoded);
+  if (result < 0) {
+    av_frame_free(&decoded);
+    return false;
+  }
+  if (frames.size() >= 8) {
+    av_frame_free(&frames.front());
+    frames.pop_front();
+  }
+  frames.push_back(decoded);
+  return true;
+}
+
+void EnhancementDecoder::Feed(AVPacket* packet) {
+  std::lock_guard lock(mutex);
+  if (!enabled) {
+    av_packet_free(&packet);
+    return;
+  }
+  if (!packet) {
+    if (context && !flushed) {
+      avcodec_send_packet(context, nullptr);
+      flushed = true;
+      ReceiveAll();
+    }
+    return;
+  }
+  if (!EnsureOpen()) {
+    av_packet_free(&packet);
+    return;
+  }
+  flushed = false;
+  for (;;) {
+    const int result = avcodec_send_packet(context, packet);
+    if (result == AVERROR(EAGAIN)) {
+      if (!ReceiveOne()) {
+        av_packet_free(&packet);
+        return;
+      }
+      continue;
+    }
+    av_packet_free(&packet);
+    if (result >= 0) ReceiveAll();
+    return;
+  }
+}
+
+AVFrame* EnhancementDecoder::Take(int64_t pts_us) {
+  std::lock_guard lock(mutex);
+  if (!enabled || frames.empty()) return nullptr;
+  auto release_until = [&](size_t index) {
+    AVFrame* found = frames[index];
+    for (size_t i = 0; i < index; ++i) av_frame_free(&frames[i]);
+    frames.erase(frames.begin(), frames.begin() + static_cast<std::ptrdiff_t>(index) + 1);
+    return found;
+  };
+  auto stamp_us = [&](const AVFrame* frame) {
+    int64_t stamp = frame->best_effort_timestamp;
+    if (stamp == AV_NOPTS_VALUE) stamp = frame->pts;
+    if (stamp == AV_NOPTS_VALUE || time_base.num <= 0 || time_base.den <= 0)
+      return static_cast<int64_t>(AV_NOPTS_VALUE);
+    return av_rescale_q(stamp, time_base, AVRational{1, 1000000});
+  };
+  if (pts_us >= 0) {
+    size_t best = frames.size();
+    int64_t best_delta = 0;
+    for (size_t i = 0; i < frames.size(); ++i) {
+      const int64_t stamp = stamp_us(frames[i]);
+      if (stamp == AV_NOPTS_VALUE) continue;
+      const int64_t delta = stamp > pts_us ? stamp - pts_us : pts_us - stamp;
+      if (delta <= 2000 && (best == frames.size() || delta < best_delta)) {
+        best = i;
+        best_delta = delta;
+      }
+    }
+    if (best < frames.size()) return release_until(best);
+    while (!frames.empty()) {
+      const int64_t stamp = stamp_us(frames.front());
+      if (stamp != AV_NOPTS_VALUE && stamp + 2000 < pts_us) {
+        av_frame_free(&frames.front());
+        frames.pop_front();
+        continue;
+      }
+      break;
+    }
+    if (!frames.empty() && stamp_us(frames.front()) == AV_NOPTS_VALUE)
+      return release_until(0);
+    return nullptr;
+  }
+  return release_until(0);
+}
+
+int find_fel_stream(AVFormatContext* format, int base) {
+  if (!format || base < 0 || base >= static_cast<int>(format->nb_streams)) return -1;
+  const auto* parameters = format->streams[base]->codecpar;
+  const auto* side = av_packet_side_data_get(parameters->coded_side_data,
+      parameters->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
+  if (!side || !side->data || side->size < sizeof(AVDOVIDecoderConfigurationRecord)) return -1;
+  const auto* record = reinterpret_cast<const AVDOVIDecoderConfigurationRecord*>(side->data);
+  if (record->dv_profile != 7 || !record->el_present_flag) return -1;
+  int candidate = -1;
+  for (unsigned index = 0; index < format->nb_streams; ++index) {
+    if (static_cast<int>(index) == base) continue;
+    const auto* stream = format->streams[index];
+    const auto* codec = stream->codecpar;
+    if (codec->codec_type != AVMEDIA_TYPE_VIDEO || codec->codec_id != AV_CODEC_ID_HEVC)
+      continue;
+    if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) continue;
+    if (codec->width <= 0 || codec->height <= 0 ||
+        codec->width > parameters->width || codec->height > parameters->height)
+      continue;
+    if (candidate >= 0) return -1;
+    candidate = static_cast<int>(index);
+  }
+  return candidate;
+}
+
 int restore_dovi_configuration(AVFormatContext* format, int index,
                                PendingPackets* pending) {
   if (index < 0) return 0;
@@ -1963,9 +2169,19 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     }
   };
   std::unique_ptr<AVFrame, AvFrameDeleter> composed;
+  std::unique_ptr<AVFrame, AvFrameDeleter> downloaded;
   int composed_ok = 0;
-  if (residual && enhancement && rpu_usable) {
-    composed.reset(av_frame_clone(frame));
+  const AVFrame* compose_base = frame;
+  if (residual && enhancement && rpu_usable && frame->hw_frames_ctx) {
+    downloaded.reset(av_frame_alloc());
+    if (!downloaded || av_hwframe_transfer_data(downloaded.get(), frame, 0) < 0 ||
+        av_frame_copy_props(downloaded.get(), frame) < 0)
+      downloaded.reset();
+    else
+      compose_base = downloaded.get();
+  }
+  if (residual && enhancement && rpu_usable && compose_base && !compose_base->hw_frames_ctx) {
+    composed.reset(rillight_color::CopyFrameForCompose(compose_base));
     if (composed && rillight_color::ComposeFelResidual(composed.get(), enhancement))
       composed_ok = 1;
     else
@@ -2487,6 +2703,12 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
           (core->state == RILLIGHT_CORE_PLAYING && core->first_video &&
            pts + 100000 < clock)));
   }
+  struct EnhancementRelease {
+    AVFrame* frame = nullptr;
+    ~EnhancementRelease() { av_frame_free(&frame); }
+  } enhancement_frame;
+  if (scale->enhancement.enabled)
+    enhancement_frame.frame = scale->enhancement.Take(pts);
   if (discard) {
 #if defined(__ANDROID__) && !defined(NDEBUG)
     core->trace_discarded++;
@@ -2576,7 +2798,7 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     int convert_error = 0;
     output = convert_video(decoded, pts, session, timeline,
         format->streams[stream_index], scale, output_width, output_height,
-        gpu_video, hdr_video, macos_edr, nullptr, &convert_error);
+        gpu_video, hdr_video, macos_edr, enhancement_frame.frame, &convert_error);
     if (!output && convert_error < 0) return convert_error;
     decoded_with_hardware = output != nullptr;
   }
@@ -2618,7 +2840,7 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   if (!output) output = convert_video(picture, pts, session, timeline,
                                format->streams[stream_index], scale,
                                output_width, output_height, gpu_video, hdr_video,
-                               macos_edr, nullptr, &convert_error);
+                               macos_edr, enhancement_frame.frame, &convert_error);
   if (!output) return convert_error < 0 ? convert_error : AVERROR(EINVAL);
   if (decoded_with_hardware) {
     std::lock_guard lock(core->mutex);
@@ -2736,6 +2958,39 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
   } trace_reset{trace_video ? &core->trace_video_stage : nullptr};
   if (trace_video) core->trace_video_stage = 1;
 #endif
+  if (scale && decoder.stream == video_index && scale->enhancement.enabled &&
+      !scale->enhancement.dual) {
+    if (!packet) {
+      scale->enhancement.Feed(nullptr);
+    } else if (packet->data && packet->size > 0) {
+      std::vector<uint8_t> enhancement_bytes;
+      const int nal_length = scale->enhancement.nal_length_size;
+      bool enhancement_framed = false;
+      if (nal_length > 0) {
+        enhancement_framed = rillight_dovi::ExtractInterleavedEnhancement(
+            packet->data, static_cast<size_t>(packet->size), nal_length,
+            &enhancement_bytes);
+      }
+      if (!enhancement_framed) {
+        enhancement_framed = rillight_dovi::ExtractInterleavedEnhancement(
+            packet->data, static_cast<size_t>(packet->size), 0, &enhancement_bytes);
+      }
+      if (enhancement_framed &&
+          !enhancement_bytes.empty() &&
+          enhancement_bytes.size() <= static_cast<size_t>(std::numeric_limits<int>::max())) {
+        AVPacket* enhancement_packet = av_packet_alloc();
+        if (enhancement_packet &&
+            av_new_packet(enhancement_packet, static_cast<int>(enhancement_bytes.size())) >= 0) {
+          std::memcpy(enhancement_packet->data, enhancement_bytes.data(), enhancement_bytes.size());
+          enhancement_packet->pts = packet->pts;
+          enhancement_packet->duration = packet->duration;
+          scale->enhancement.Feed(enhancement_packet);
+        } else {
+          av_packet_free(&enhancement_packet);
+        }
+      }
+    }
+  }
   int result = avcodec_send_packet(decoder.context, packet);
   if (non_picture_error(result)) return 0;
   bool submitted = result != AVERROR(EAGAIN);
@@ -3152,6 +3407,10 @@ void run(RillightCoreImpl *core, uint64_t session) {
   AVFormatContext *format = avformat_alloc_context();
   Source *main_source = nullptr;
   Decoder video, audio, subtitle;
+  int enhancement_index = -1;
+  bool fel_required = false;
+  int fel_nal_length = 0;
+  AVRational fel_time_base{1, 1000000};
   VideoScale scale;
   PendingPackets pending_packets;
   VideoConvertLane conversion_lane(core);
@@ -3286,6 +3545,28 @@ void run(RillightCoreImpl *core, uint64_t session) {
       result = AVERROR_DECODER_NOT_FOUND;
       goto finish;
     }
+    if (video.stream >= 0) {
+      const auto* parameters = format->streams[video.stream]->codecpar;
+      const auto* dovi = av_packet_side_data_get(parameters->coded_side_data,
+          parameters->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
+      const auto* record = dovi && dovi->data &&
+              dovi->size >= sizeof(AVDOVIDecoderConfigurationRecord)
+          ? reinterpret_cast<const AVDOVIDecoderConfigurationRecord*>(dovi->data)
+          : nullptr;
+      fel_required = record && record->dv_profile == 7 && record->el_present_flag != 0;
+      fel_nal_length = rillight_dovi::HevcNalLengthSize(parameters->extradata,
+                                                       parameters->extradata_size);
+      fel_time_base = format->streams[video.stream]->time_base;
+      if (fel_required && !video.android_native_dolby) {
+        enhancement_index = find_fel_stream(format, video.stream);
+        if (enhancement_index >= 0 &&
+            !scale.enhancement.OpenDual(format, enhancement_index))
+          enhancement_index = -1;
+      }
+      scale.enhancement.Configure(fel_required && !video.android_native_dolby,
+                                  enhancement_index >= 0, fel_nal_length,
+                                  fel_time_base);
+    }
     std::lock_guard lock(core->mutex);
     core->dolby_vision_profile = opened_dovi_profile;
     core->dolby_vision_compatibility = opened_dovi_compatibility;
@@ -3338,6 +3619,13 @@ void run(RillightCoreImpl *core, uint64_t session) {
                                &subtitle_cues, &ass, session, timeline, &subtitle_mutex);
   })) { result = AVERROR(ENOMEM); goto finish; }
   if (!video_lane.Start([&](const AVPacket *packet, uint64_t timeline) {
+      if (packet && enhancement_index >= 0 &&
+          packet->stream_index == enhancement_index) {
+        AVPacket* copy = av_packet_clone(packet);
+        if (!copy) return AVERROR(ENOMEM);
+        scale.enhancement.Feed(copy);
+        return 0;
+      }
 
       int result = decode_packet(core, format, video, packet, video.stream,
                              &scale, &audio_filter, &subtitle_cues, &ass,
@@ -3364,6 +3652,17 @@ void run(RillightCoreImpl *core, uint64_t session) {
               if (track.stream_index == video.stream)
                 track.actual_hardware = RILLIGHT_CORE_HW_NONE;
             }
+          }
+          scale.enhancement.Flush();
+          if (fel_required && !video.android_native_dolby) {
+            if (enhancement_index < 0) {
+              enhancement_index = find_fel_stream(format, video.stream);
+              if (enhancement_index >= 0 &&
+                  !scale.enhancement.OpenDual(format, enhancement_index))
+                enhancement_index = -1;
+            }
+            scale.enhancement.Configure(true, enhancement_index >= 0,
+                                        fel_nal_length, fel_time_base);
           }
           result = decode_packet(core, format, video, packet, video.stream,
                                  &scale, &audio_filter, &subtitle_cues, &ass,
@@ -3557,6 +3856,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         }
         avcodec_flush_buffers(video.context);
       }
+      scale.enhancement.Flush();
       if (audio.context) avcodec_flush_buffers(audio.context);
       if (subtitle.context) avcodec_flush_buffers(subtitle.context);
       close_audio_filter(&audio_filter);
@@ -3771,7 +4071,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
       break;
     }
     if (result < 0) { av_packet_free(&packet); break; }
-    if (packet->stream_index == video.stream)
+    if (packet->stream_index == video.stream ||
+        (enhancement_index >= 0 && packet->stream_index == enhancement_index))
       result = video_lane.Push(packet, timeline);
     else if (packet->stream_index == audio.stream)
       result = audio_lane.Push(packet, timeline);
