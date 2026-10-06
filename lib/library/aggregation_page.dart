@@ -1823,40 +1823,49 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final tv = PresentationScope.of(context).isTv;
+    final presentation = PresentationScope.of(context);
+    final tv = presentation.isTv;
     final visible = [
       for (final row in _rows)
         if (row.items.isNotEmpty || row.error != null || row.loading) row,
     ];
+    final field = tv
+        ? TvInput(
+            key: const Key('aggregation-keyword'),
+            autofocus: true,
+            label: l.searchHint,
+            controller: _keyword,
+            onSubmitted: _submit,
+          )
+        : TextField(
+            key: const Key('aggregation-keyword'),
+            focusNode: widget.focusNode,
+            controller: _keyword,
+            autofocus: widget.focusNode == null,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              labelText: l.searchHint,
+              suffixIcon: IconButton(
+                tooltip: l.search,
+                onPressed: _submit,
+                icon: const Icon(Icons.search),
+              ),
+            ),
+            onSubmitted: (_) => _submit(),
+          );
     return Material(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: tv
-                ? TvInput(
-                    key: const Key('aggregation-keyword'),
-                    autofocus: true,
-                    label: l.searchHint,
-                    controller: _keyword,
-                    onSubmitted: _submit,
-                  )
-                : TextField(
-                    key: const Key('aggregation-keyword'),
-                    focusNode: widget.focusNode,
-                    controller: _keyword,
-                    autofocus: widget.focusNode == null,
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      labelText: l.searchHint,
-                      suffixIcon: IconButton(
-                        tooltip: l.search,
-                        onPressed: _submit,
-                        icon: const Icon(Icons.search),
-                      ),
-                    ),
-                    onSubmitted: (_) => _submit(),
+            child: presentation.isDesktop
+                ? field
+                : Row(
+                    children: [
+                      BackButton(onPressed: () => context.pop()),
+                      Expanded(child: field),
+                    ],
                   ),
           ),
           Expanded(child: _results(context, visible)),
