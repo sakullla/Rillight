@@ -9,6 +9,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/player/player_startup.dart';
 
 typedef PlaybackObservationSink =
@@ -46,6 +47,8 @@ class PlayerBindings {
     this.switchDispatcher,
     this.reportOutcomeSink,
     this.startupData,
+    this.playbackLineSnapshot,
+    this.verifiedPlaybackServerId,
   });
 
   final VideoBackend Function()? createBackend;
@@ -57,6 +60,11 @@ class PlayerBindings {
   final PlaybackSwitchDispatcher? switchDispatcher;
   final PlaybackReportOutcomeSink? reportOutcomeSink;
   final Future<PlayerStartupData?>? startupData;
+
+  /// Desktop playback process reads this snapshot. Null means the page
+  /// resolves lines from the signed-in server list.
+  final List<ServerLine>? playbackLineSnapshot;
+  final String? verifiedPlaybackServerId;
 
   /// 会话快照存储;为 null 时 [PlayerController] 使用当前进程 pid 命名的
   /// `FilePlaybackSessionSnapshotStore`,测试注入
