@@ -2296,6 +2296,8 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
 #if defined(_WIN32)
     // The scRGB shader reshapes base planes only. A composed FEL frame is the
     // portable reshape-then-NLQ result, stored as FP16 scRGB for the HDR host.
+    // Upload waits until that copy is visible to the other D3D11 device.
+    // A failed wait or upload stays a base-layer fallback and is not FEL.
     // Falling through to 8-bit Render would mark the same frame as SDR.
     if (gpu_video && hdr_video && fel_source) {
       const int half_stride = width * 8;

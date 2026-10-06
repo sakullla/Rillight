@@ -344,6 +344,27 @@ struct WindowsColorPipeline::Impl {
     Check(device->CreateUnorderedAccessView(image.Get(), nullptr, &view));
   }
 
+  // Legacy MISC_SHARED has no keyed mutex. The HDR host samples the texture
+  // on another device, so the copy must finish on this context first.
+  bool WaitForGpu() {
+    if (!gpu_complete) {
+      D3D11_QUERY_DESC query_desc{D3D11_QUERY_EVENT, 0};
+      Check(device->CreateQuery(&query_desc, &gpu_complete));
+    }
+    context->End(gpu_complete.Get());
+    context->Flush();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    HRESULT result;
+    while ((result = context->GetData(gpu_complete.Get(), nullptr, 0,
+                                       D3D11_ASYNC_GETDATA_DONOTFLUSH)) == S_FALSE) {
+      if (std::chrono::steady_clock::now() >= deadline) return false;
+      std::this_thread::yield();
+    }
+    Check(result);
+    Check(device->GetDeviceRemovedReason());
+    return true;
+  }
+
   void CreateOutput(int width, int height) {
     if (output_width == width && output_height == height) return;
     output.Reset(); staging.Reset(); target.Reset();
@@ -476,19 +497,7 @@ struct WindowsColorPipeline::Impl {
     context->CSSetSamplers(0, 1, &empty_sampler);
     context->CSSetShader(nullptr, nullptr, 0);
     if (gpu) {
-      if (!gpu_complete) {
-        D3D11_QUERY_DESC query_desc{D3D11_QUERY_EVENT, 0};
-        Check(device->CreateQuery(&query_desc, &gpu_complete));
-      }
-      context->End(gpu_complete.Get()); context->Flush();
-      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-      HRESULT result;
-      while ((result = context->GetData(gpu_complete.Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH)) == S_FALSE) {
-        if (std::chrono::steady_clock::now() >= deadline) return false;
-        std::this_thread::yield();
-      }
-      Check(result);
-      Check(device->GetDeviceRemovedReason());
+      if (!WaitForGpu()) return false;
       *gpu = gpu_output.Detach();
       return true;
     }
@@ -560,6 +569,7 @@ void* WindowsColorPipeline::UploadScRgbHalf(const uint16_t* rgba, int width, int
     impl_->AllocateOutput(width, height, image, view, DXGI_FORMAT_R16G16B16A16_FLOAT);
     impl_->context->UpdateSubresource(image.Get(), 0, nullptr, scrgb.data(),
                                       static_cast<UINT>(width * 8), 0);
+    if (!impl_->WaitForGpu()) return nullptr;
     return image.Detach();
   } catch (const std::exception&) {
     return nullptr;

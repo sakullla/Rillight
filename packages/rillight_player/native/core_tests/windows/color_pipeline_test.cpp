@@ -3,6 +3,7 @@
 #include "../color_pipeline_fixtures.h"
 #include "../../core/portable_color_pipeline.h"
 #include <d3d11.h>
+#include <dxgi.h>
 #include <wrl/client.h>
 #include <cstring>
 
@@ -35,10 +36,9 @@ float HalfFloat(uint16_t value) {
   return value & 0x8000 ? -result : result;
 }
 
-std::vector<float> TextureLinearPixels(ID3D11Texture2D* texture) {
+std::vector<float> MappedLinearPixels(ID3D11Device* device, ID3D11DeviceContext* context,
+                                    ID3D11Texture2D* texture) {
   using Microsoft::WRL::ComPtr;
-  ComPtr<ID3D11Device> device; texture->GetDevice(&device);
-  ComPtr<ID3D11DeviceContext> context; device->GetImmediateContext(&context);
   D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
   assert(desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
   const int width = desc.Width, height = desc.Height;
@@ -56,6 +56,35 @@ std::vector<float> TextureLinearPixels(ID3D11Texture2D* texture) {
   }
   context->Unmap(staging.Get(), 0);
   return pixels;
+}
+
+std::vector<float> TextureLinearPixels(ID3D11Texture2D* texture) {
+  using Microsoft::WRL::ComPtr;
+  ComPtr<ID3D11Device> device; texture->GetDevice(&device);
+  ComPtr<ID3D11DeviceContext> context; device->GetImmediateContext(&context);
+  return MappedLinearPixels(device.Get(), context.Get(), texture);
+}
+
+// Read through a second device before any producer Map. A same-device Map
+// would hide a missing flush, and this path is what the HDR host uses.
+std::vector<float> SharedTextureLinearPixels(ID3D11Texture2D* texture) {
+  using Microsoft::WRL::ComPtr;
+  D3D11_TEXTURE2D_DESC produced{}; texture->GetDesc(&produced);
+  assert(produced.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+  assert((produced.MiscFlags & D3D11_RESOURCE_MISC_SHARED) != 0);
+  assert((produced.MiscFlags & D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX) == 0);
+  ComPtr<IDXGIResource> resource;
+  assert(SUCCEEDED(texture->QueryInterface(IID_PPV_ARGS(&resource))));
+  HANDLE handle = nullptr;
+  assert(SUCCEEDED(resource->GetSharedHandle(&handle)) && handle);
+  const D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
+  ComPtr<ID3D11Device> device;
+  ComPtr<ID3D11DeviceContext> context;
+  assert(SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
+      &level, 1, D3D11_SDK_VERSION, &device, nullptr, &context)));
+  ComPtr<ID3D11Texture2D> imported;
+  assert(SUCCEEDED(device->OpenSharedResource(handle, IID_PPV_ARGS(&imported))));
+  return MappedLinearPixels(device.Get(), context.Get(), imported.Get());
 }
 
 double PqNits(double code) {
@@ -156,8 +185,12 @@ void CheckFelStaysScRgb() {
   D3D11_TEXTURE2D_DESC desc{};
   fel_texture->GetDesc(&desc);
   assert(desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+  const auto base_shared = SharedTextureLinearPixels(base_texture.Get());
+  const auto fel_shared = SharedTextureLinearPixels(fel_texture.Get());
   const auto base_pixels = TextureLinearPixels(base_texture.Get());
   const auto fel_pixels = TextureLinearPixels(fel_texture.Get());
+  assert(base_shared == base_pixels);
+  assert(fel_shared == fel_pixels);
   bool differed = false;
   for (size_t i = 0; i < fel_pixels.size() && i < base_pixels.size(); ++i)
     if (std::fabs(fel_pixels[i] - base_pixels[i]) > 0.001f) differed = true;

@@ -29,9 +29,11 @@ range; it does not add the residual back into base-layer codes. The Windows
 scRGB shader does not sample the enhancement layer. On an active HDR display
 the portable mapper's reshape-then-NLQ samples are uploaded as an
 R16G16B16A16_FLOAT scRGB texture (1.0 is 80 nits, converted from the 203-nit
-extended-linear buffer). That frame stays HDR. It is not 8-bit SDR and it is
-not native Dolby. A failed composition is a base-layer fallback and is not
-labeled FEL. Profile 5
+extended-linear buffer). The upload ends the same completion query, flushes,
+and waits before that legacy shared texture is returned; there is no keyed
+mutex. A failed wait or composition is a base-layer fallback and is not
+labeled FEL. A completed upload stays HDR. It is not 8-bit SDR and it is
+not native Dolby. Profile 5
 without a usable RPU is unsupported and is not displayed as HDR10 or YUV.
 macOS EDR and the Linux SDR map are not native Dolby Vision.
 
