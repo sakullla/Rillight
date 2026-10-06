@@ -211,8 +211,13 @@ class _IpcControl extends FakePlayerProcessControl
   Future<int> spawn({
     required String executable,
     required String arguments,
+    Future<Map<String, dynamic>>? startup,
   }) async {
-    final pid = await super.spawn(executable: executable, arguments: arguments);
+    final pid = await super.spawn(
+      executable: executable,
+      arguments: arguments,
+      startup: startup,
+    );
     final failure = startupFailure;
     startupFailure = null;
     if (failure != null) {
