@@ -103,6 +103,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get switchRestore => '恢复原来源（需仍有访问许可）';
 
   @override
+  String get desktopSourceSwitchFailed => '来源切换失败：目标播放窗口未能启动或就绪。未自动恢复或切换来源。';
+
+  @override
+  String get desktopSourceRestoreUnavailable => '原来源访问许可已失效，无法恢复。';
+
+  @override
+  String get desktopSourceRestoreFailed => '原来源恢复失败，请检查来源后重试。';
+
+  @override
   String get aggregation => '聚合';
 
   @override

@@ -206,6 +206,22 @@ class _IpcControl extends FakePlayerProcessControl
   Map<String, dynamic>? receipt;
   Map<String, dynamic>? switchReply;
   bool revoked = false;
+  Object? startupFailure;
+  @override
+  Future<int> spawn({
+    required String executable,
+    required String arguments,
+  }) async {
+    final pid = await super.spawn(executable: executable, arguments: arguments);
+    final failure = startupFailure;
+    startupFailure = null;
+    if (failure != null) {
+      alive.remove(pid);
+      throw PlayerProcessStartupException(pid, failure);
+    }
+    return pid;
+  }
+
   PlayerHostOpenItemCommand? openDetail;
   @override
   Future<PlayerHostOpenItemCommand?> consumeOpenItem(int pid) async {
@@ -1813,6 +1829,180 @@ void main() {
       expect(launch.request.audioStreamIndex, 1);
       expect(launch.request.maxStreamingBitrate, 80000000);
       expect(host.current?.source?.account, account);
+    },
+  );
+
+  for (final failure in [
+    'spawn threw',
+    'exited before ready',
+    'ready timeout',
+  ]) {
+    for (final revokeOriginal in [false, true]) {
+      testWidgets(
+        'desktop main window exposes explicit saved-state recovery after $failure revoke=$revokeOriginal',
+        (tester) async {
+          await setup(widgetTester: tester);
+          final ipc = _IpcControl();
+          late DesktopPlayerWindowHost host;
+          await tester.runAsync(() async {
+            host = await desktop(ipc);
+          });
+          final router = GoRouter(
+            routes: [
+              GoRoute(
+                path: '/',
+                builder: (_, _) => const Scaffold(body: Text('main window')),
+              ),
+            ],
+          );
+          await tester.pumpWidget(
+            RillightApp(
+              auth: auth,
+              router: router,
+              playerBindings: PlayerBindings(
+                runtime: runtime,
+                windowHost: host,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final originalPid = ipc.lastPid;
+          await tester.runAsync(() async {
+            final b = (await runtime.registry.authenticate('b')).account;
+            final envelope = {
+              'pid': originalPid,
+              'source': encodeSource(controller.openRequest!.source!),
+              'generation': host.current!.regionGeneration,
+            };
+            ipc.command = {
+              ...envelope,
+              'sequence': 1,
+              'action': 'inspect',
+              'target': encodeSource(
+                SourceReference(account: b, itemId: 'movie-b'),
+              ),
+              'work': encodeSource(
+                SourceReference(account: b, itemId: 'movie-b'),
+              ),
+              'library': 'library',
+              'targetVersion': 'v2',
+              'item': 'movie',
+              'version': 'v',
+              'position': 17 * kEmbyTicksPerSecond,
+              'paused': true,
+              'bitrate': 80000000,
+              'audio': 1,
+            };
+            await _eventually(() => ipc.switchReply != null);
+            expect(ipc.switchReply!['accepted'], isTrue);
+            expect(ipc.alive, contains(originalPid));
+            ipc.startupFailure = failure;
+            ipc.command = {
+              ...envelope,
+              'sequence': 2,
+              'action': 'confirm',
+              'choice': 'currentPosition',
+            };
+            await _eventually(() => host.switchFailure != null);
+            expect(ipc.alive, isEmpty);
+            expect(host.current, isNull);
+          });
+          await tester.pumpAndSettle();
+          expect(find.textContaining('来源切换失败'), findsOneWidget);
+          expect(find.text('播放进度未能同步'), findsNothing);
+          final button = find.byKey(const Key('desktop-restore-original'));
+          expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+          if (revokeOriginal) {
+            await tester.runAsync(
+              () => runtime.registry.configureScope(
+                'a',
+                participates: false,
+                libraryIds: {'library'},
+              ),
+            );
+            await tester.pumpAndSettle();
+            expect(find.text('原来源访问许可已失效，无法恢复。'), findsOneWidget);
+            expect(tester.widget<FilledButton>(button).onPressed, isNull);
+            await tester.runAsync(() async {
+              await expectLater(host.restoreOriginalSource(), throwsStateError);
+            });
+            expect(ipc.spawnedArguments, hasLength(2));
+          } else {
+            await tester.runAsync(() async {
+              await tester.tap(button);
+              await _eventually(() => host.current != null);
+            });
+            await tester.pumpAndSettle();
+            final restored = PlayerWindowLaunch.fromArguments(
+              ipc.spawnedArguments.last,
+            );
+            expect(Uri.parse(restored.baseUrl).host, 'a');
+            expect(restored.request.startTimeTicks, 17 * kEmbyTicksPerSecond);
+            expect(restored.request.startPaused, isTrue);
+            expect(restored.request.audioStreamIndex, 1);
+            expect(restored.request.subtitleOff, isTrue);
+            expect(restored.request.maxStreamingBitrate, 80000000);
+            expect(restored.request.mediaSourceId, 'v');
+            expect(find.textContaining('来源切换失败'), findsNothing);
+            expect(reports, isEmpty);
+          }
+          await tester.runAsync(() => host.close());
+          await tester.pumpWidget(const SizedBox.shrink());
+          router.dispose();
+        },
+        tags: ['integration'],
+      );
+    }
+  }
+
+  test(
+    'desktop lock redacts a saved failed-switch transaction and late startup error',
+    () async {
+      await setup(private: true);
+      final ipc = _IpcControl();
+      final host = await desktop(ipc);
+      final envelope = {
+        'pid': ipc.lastPid,
+        'source': encodeSource(controller.openRequest!.source!),
+        'generation': host.current!.regionGeneration,
+      };
+      ipc.command = {
+        ...envelope,
+        'sequence': 1,
+        'action': 'inspect',
+        'line': 'mirror',
+        'item': 'movie',
+        'version': 'v',
+        'position': 10 * kEmbyTicksPerSecond,
+        'paused': true,
+        'bitrate': 80000000,
+        'audio': 1,
+      };
+      await _eventually(() => ipc.switchReply != null);
+      expect(ipc.switchReply!['accepted'], isTrue);
+      ipc.spawnHold = Completer<void>();
+      ipc.startupFailure = 'late ready timeout';
+      ipc.command = {
+        ...envelope,
+        'sequence': 2,
+        'action': 'confirm',
+        'choice': 'currentPosition',
+      };
+      await _eventually(() => ipc.spawnedArguments.length == 2);
+      final locking = auth.regionAccess.lock(
+        budget: const Duration(milliseconds: 100),
+      );
+      expect(host.switchFailure, isNull);
+      expect(host.canRestoreOriginal, isFalse);
+      ipc.spawnHold!.complete();
+      await locking;
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(host.switchFailure, isNull);
+      expect(host.current, isNull);
+      await auth.regionAccess.unlock('1234');
+      await expectLater(host.restoreOriginalSource(), throwsStateError);
+      expect(ipc.spawnedArguments, hasLength(2));
+      expect(reports, isEmpty);
     },
   );
 

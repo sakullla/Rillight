@@ -46,6 +46,13 @@ abstract class PlayerWindowHost extends ChangeNotifier {
   /// 宿主产生的、需在主窗口展示的提示;缺省没有。
   Stream<PlayerHostNotice> get notices => const Stream.empty();
 
+  /// A failed manual source transaction remains actionable in the main window.
+  String? get switchFailure => null;
+  bool get canRestoreOriginal => false;
+  Future<void> restoreOriginalSource() async {
+    throw StateError('Original source unavailable');
+  }
+
   Future<void> open(PlayerOpenRequest request);
   Future<void> close();
 

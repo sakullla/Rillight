@@ -349,7 +349,56 @@ class _PlayerWindowLayer extends StatelessWidget {
       builder: (context, _) {
         final request = host.current;
         if (!host.embedsPlayerInCaller || request == null) {
-          return child;
+          if (host.switchFailure == null) return child;
+          final l10n = AppLocalizations.of(context);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              child,
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: SafeArea(
+                  child: Material(
+                    elevation: 8,
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(l10n.desktopSourceSwitchFailed),
+                          if (!host.canRestoreOriginal)
+                            Text(l10n.desktopSourceRestoreUnavailable),
+                          FilledButton(
+                            key: const Key('desktop-restore-original'),
+                            onPressed: !host.canRestoreOriginal
+                                ? null
+                                : () async {
+                                    try {
+                                      await host.restoreOriginalSource();
+                                    } catch (_) {
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.maybeOf(
+                                        context,
+                                      )?.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            l10n.desktopSourceRestoreFailed,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                            child: Text(l10n.switchRestore),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
         }
         return Stack(
           fit: StackFit.expand,

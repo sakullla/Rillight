@@ -226,6 +226,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   })?
   _pendingSwitch;
   ({PlaybackOrigin origin, PlayerOpenRequest request})? _restoreSwitch;
+  @override
   String? switchFailure;
   bool _saveSwitchPreference = false;
 
@@ -277,7 +278,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   Stream<PlayerHostNotice> get notices => _notices.stream;
 
   @override
-  Future<void> open(PlayerOpenRequest request) => _openWithOrigin(request);
+  Future<void> open(PlayerOpenRequest request) {
+    _pendingSwitch = null;
+    _restoreSwitch = null;
+    switchFailure = null;
+    return _openWithOrigin(request);
+  }
 
   Future<void> _openWithOrigin(
     PlayerOpenRequest request, {
@@ -417,15 +423,29 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     });
   }
 
+  @override
   bool get canRestoreOriginal =>
       _restoreSwitch?.origin.permit.isValid == true && !_privateRevoked;
+  @override
   Future<void> restoreOriginalSource() async {
     final original = _restoreSwitch;
     if (original == null || !canRestoreOriginal) {
       throw StateError('Original source unavailable');
     }
-    await _openWithOrigin(original.request, prepared: original.origin);
-    switchFailure = null;
+    original.origin.permit.requireValid();
+    try {
+      await _openWithOrigin(original.request, prepared: original.origin);
+      if (!identical(_restoreSwitch, original) || _privateRevoked) return;
+      switchFailure = null;
+      _restoreSwitch = null;
+      notifyListeners();
+    } catch (error) {
+      if (identical(_restoreSwitch, original) && !_privateRevoked) {
+        switchFailure = '$error';
+        notifyListeners();
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -1186,17 +1206,25 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       // Let the helper receive its receipt before asking it to close. It drains
       // its last observation/Stopped before the main process launches target.
       final run = commit;
+      final transaction = _restoreSwitch;
       unawaited(
         Future<void>.delayed(const Duration(milliseconds: 100), () async {
           try {
             if (_pid != pid || _privateRevoked || _disposed) return;
             actual.permit.requireValid();
             await run();
+            if (!identical(_restoreSwitch, transaction) || _privateRevoked) {
+              return;
+            }
             _saveSwitchPreference = true;
             switchFailure = null;
           } catch (error) {
+            if (_disposed ||
+                _privateRevoked ||
+                !identical(_restoreSwitch, transaction)) {
+              return;
+            }
             switchFailure = '$error';
-            _notify(PlayerHostNotice.progressSyncFailed);
             notifyListeners();
           }
         }),
@@ -1208,6 +1236,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     SourceAccount? account,
     String serverId,
   ) async {
+    _invalidateOriginal(serverId);
     if (_origin?.source.account.configuredServerId != serverId) return;
     _revokeWindow();
     try {
@@ -1220,11 +1249,28 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   void _revokePrivate() {
+    if (_restoreSwitch?.origin.source.account.region == AccessRegion.private) {
+      _restoreSwitch = null;
+      switchFailure = null;
+      notifyListeners();
+    }
     if (_origin?.source.account.region != AccessRegion.private) return;
     _revokeWindow();
   }
 
+  void _invalidateOriginal(String serverId) {
+    if (_restoreSwitch?.origin.source.account.configuredServerId != serverId) {
+      return;
+    }
+    final private =
+        _restoreSwitch!.origin.source.account.region == AccessRegion.private;
+    _restoreSwitch = null;
+    if (private) switchFailure = null;
+    notifyListeners();
+  }
+
   void _sourceRevoked(String serverId) {
+    _invalidateOriginal(serverId);
     if (_origin?.source.account.configuredServerId != serverId) return;
     _revokeWindow();
     unawaited(

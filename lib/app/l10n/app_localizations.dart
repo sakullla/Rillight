@@ -280,6 +280,24 @@ abstract class AppLocalizations {
   /// **'恢复原来源（需仍有访问许可）'**
   String get switchRestore;
 
+  /// No description provided for @desktopSourceSwitchFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'来源切换失败：目标播放窗口未能启动或就绪。未自动恢复或切换来源。'**
+  String get desktopSourceSwitchFailed;
+
+  /// No description provided for @desktopSourceRestoreUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'原来源访问许可已失效，无法恢复。'**
+  String get desktopSourceRestoreUnavailable;
+
+  /// No description provided for @desktopSourceRestoreFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'原来源恢复失败，请检查来源后重试。'**
+  String get desktopSourceRestoreFailed;
+
   /// No description provided for @aggregation.
   ///
   /// In zh, this message translates to:
