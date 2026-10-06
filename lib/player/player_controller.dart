@@ -3351,6 +3351,13 @@ class PlayerController extends ChangeNotifier {
       await disposeAsync().timeout(disposeTimeout);
     } catch (_) {
       // mpv stop/dispose can hang on a live stream; the window must still close.
+      // Future.timeout does not cancel dispose, so a hung stop never reaches
+      // the restore inside _disposeResources.
+    } finally {
+      // A finished dispose already restored and cleared this record. A second
+      // call then leaves the session alone, including an independent runtime
+      // client that never stored one.
+      _restoreSharedPlaybackClient();
     }
     try {
       if (window.isFullScreen) await window.setFullScreen(false);

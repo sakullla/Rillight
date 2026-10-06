@@ -170,9 +170,18 @@ class _Backend extends FakeVideoBackend {
   bool stopEntered = false;
   bool failStop = false;
   bool failDispose = false;
+  Duration? hangStop;
+  bool stopFinished = false;
   @override
   Future<void> stop() async {
     stopEntered = true;
+    stopFinished = false;
+    final hang = hangStop;
+    if (hang != null) {
+      hangStop = null;
+      await Future<void>.delayed(hang);
+    }
+    stopFinished = true;
     await stopGate?.future;
     if (failStop) {
       failStop = false;
@@ -952,6 +961,54 @@ void main() {
           } catch (_) {}
           playing.dispose();
         }
+      }
+    },
+  );
+
+  test(
+    'in-process line switch restores the shared address when close stop hangs',
+    () async {
+      final reports = <PlaybackReport>[];
+      final client = _Client(reports);
+      client.attachSession(
+        baseUrl: Uri.parse('https://a'),
+        accessToken: 'token',
+        userId: 'user',
+        userAgent: 'Rillight',
+      );
+      final video = _Backend();
+      final playing = PlayerController(
+        client: client,
+        itemId: 'movie',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        progressInterval: const Duration(milliseconds: 30),
+        disposeTimeout: const Duration(milliseconds: 50),
+        playbackLineSnapshot: const [
+          ServerLine(id: 'line', address: 'https://a'),
+          ServerLine(id: 'mirror', address: 'https://mirror'),
+        ],
+        verifiedPlaybackServerId: 'a',
+      );
+      try {
+        await playing.start();
+        await playing.switchLine('mirror');
+        expect(client.baseUrl?.host, 'mirror');
+        video.hangStop = const Duration(seconds: 5);
+        await playing.close();
+        expect(video.stopFinished, isFalse);
+        expect(client.baseUrl?.host, 'a');
+        expect(client.accessToken, 'token');
+        expect(client.userId, 'user');
+        expect(client.customUserAgent, 'Rillight');
+        await Future<void>.delayed(const Duration(seconds: 5));
+      } finally {
+        try {
+          await playing.disposeAsync();
+        } catch (_) {}
+        playing.dispose();
       }
     },
   );
