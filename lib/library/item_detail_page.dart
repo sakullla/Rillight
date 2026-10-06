@@ -845,7 +845,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       return;
     }
     context.push(
-      AppRoutes.item(id),
+      DetailSourceScope.itemLocation(context, id),
       extra: DetailSourceScope.command(context, id),
     );
   }
@@ -1487,7 +1487,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                           error: _similarError,
                           onRetry: _load,
                           onTap: (similar) => context.push(
-                            AppRoutes.item(similar.id),
+                            DetailSourceScope.itemLocation(context, similar.id),
                             extra: DetailSourceScope.command(
                               context,
                               similar.id,
@@ -2173,7 +2173,11 @@ class _SeriesLink extends StatelessWidget {
       child: TextButton.icon(
         key: CatalogKeys.seriesLink,
         onPressed: () => context.push(
-          AppRoutes.item(seriesId!, seasonId: seasonId),
+          DetailSourceScope.itemLocation(
+            context,
+            seriesId!,
+            seasonId: seasonId,
+          ),
           extra: DetailSourceScope.command(
             context,
             seriesId!,

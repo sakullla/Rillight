@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/presentation_environment.dart';
+import '../app/routes.dart';
 import 'aggregation_page.dart';
 import '../app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -61,6 +62,23 @@ class DetailSourceScope extends InheritedWidget {
       source: SourceReference(account: origin.source.account, itemId: id),
       libraryId: origin.libraryId,
       regionGeneration: origin.permit.regionGeneration,
+    );
+  }
+
+  /// 聚合或搜索入口写入 showComparison=0 后，后续 /item 继续带上该查询。
+  static String itemLocation(
+    BuildContext context,
+    String itemId, {
+    String? seasonId,
+    String? episodeId,
+  }) {
+    final hideComparison =
+        GoRouterState.of(context).uri.queryParameters['showComparison'] == '0';
+    return AppRoutes.item(
+      itemId,
+      seasonId: seasonId,
+      episodeId: episodeId,
+      showComparison: !hideComparison,
     );
   }
 }

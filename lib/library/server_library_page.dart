@@ -48,14 +48,8 @@ void openServerItem(
 }
 
 /// 聚合和搜索打开的详情不进入同源比对。查询留在路由上，刷新后仍然生效。
-String _serverItemLocation(String itemId) {
-  final base = Uri.parse(AppRoutes.item(itemId));
-  return base
-      .replace(
-        queryParameters: {...base.queryParameters, 'showComparison': '0'},
-      )
-      .toString();
-}
+String _serverItemLocation(String itemId) =>
+    AppRoutes.item(itemId, showComparison: false);
 
 OperationPermit _openPermit(
   SourceSessionRegistry registry,

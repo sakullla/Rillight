@@ -307,7 +307,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 
   void _openItem(String itemId) {
     context.push(
-      AppRoutes.item(itemId),
+      DetailSourceScope.itemLocation(context, itemId),
       extra: DetailSourceScope.command(context, itemId),
     );
   }
@@ -318,7 +318,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       return;
     }
     context.push(
-      AppRoutes.item(
+      DetailSourceScope.itemLocation(
+        context,
         seriesId,
         seasonId: episode.seasonId ?? episode.parentId,
         episodeId: episode.id,

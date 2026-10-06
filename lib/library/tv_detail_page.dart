@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -385,7 +384,8 @@ class _TvBackdropHeader extends StatelessWidget {
                     key: CatalogKeys.seriesLink,
                     pill: true,
                     onPressed: () => context.push(
-                      AppRoutes.item(
+                      DetailSourceScope.itemLocation(
+                        context,
                         item.seriesId!,
                         seasonId: item.seasonId ?? item.parentId,
                       ),
@@ -474,7 +474,7 @@ class _TvEpisodeTile extends StatelessWidget {
       focusNode: focusNode,
       selected: current,
       onPressed: () => context.push(
-        AppRoutes.item(episode.id),
+        DetailSourceScope.itemLocation(context, episode.id),
         extra: DetailSourceScope.command(context, episode.id),
       ),
       child: Row(
