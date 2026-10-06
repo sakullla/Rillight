@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaCodecList
@@ -91,6 +93,16 @@ internal class CorePlayback(
     private var sinkChannels = 2
     private var sinkAccept = 0
     private var sinkAtmos = false
+    @Volatile private var pendingRoute: AudioSinkCapability? = null
+    private var deviceCallbackRegistered = false
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+            refreshAudioRoute()
+        }
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+            refreshAudioRoute()
+        }
+    }
     @Volatile private var lastPresentedUs = -1L
     @Volatile var session = ""
         private set
@@ -105,7 +117,10 @@ internal class CorePlayback(
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-                handler.post { interruption("headphones") }
+                handler.post {
+                    refreshAudioRoute()
+                    interruption("headphones")
+                }
         }
     }
 
@@ -252,6 +267,7 @@ internal class CorePlayback(
                 }
                 val active = Running(handle, revision)
                 running = active
+                registerRouteWatcher()
                 if (desiredPaused) {
                     CoreNative.play(handle, false, operation.incrementAndGet())
                 } else if (!requestFocus()) {
@@ -305,9 +321,8 @@ internal class CorePlayback(
                     val rate = (args["value"] as? Number)?.toDouble() ?: Double.NaN
                     require(rate.isFinite() && rate in .5..3.0)
                     val previous = CoreNative.snapshot(handle)?.getOrNull(16)?.div(1000.0) ?: 1.0
-                    audioOutput?.setSpeed(rate.toFloat())
                     val code = CoreNative.speed(handle, rate, operation.incrementAndGet())
-                    if (code != 0) audioOutput?.setSpeed(previous.toFloat())
+                    audioOutput?.setSpeed((if (code == 0) rate else previous).toFloat())
                     code
                 }
                 "volume" -> {
@@ -380,6 +395,7 @@ internal class CorePlayback(
     fun stop(result: MethodChannel.Result? = null) {
         val stoppedSession = session
         generation.incrementAndGet()
+        unregisterRouteWatcher()
         val previous = running
         previous?.alive?.set(false)
         wakeOutput()
@@ -471,6 +487,7 @@ internal class CorePlayback(
         var pendingOffset = 0
         var timeline = -1L
         var audioClockActive = false
+        var sampledRoute = emptySet<Int>()
         try {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
             while (active.alive.get() && generation.get() == active.generation) {
@@ -487,9 +504,31 @@ internal class CorePlayback(
                 if (snap[6] >= 0 && snap[11] == 1L && audio == null) {
                     audio = CoreAudioOutput()
                     audio.setVolume(volume)
+                    audio.setRouteListener { handler.post { refreshAudioRoute() } }
                     synchronized(outputLock) { audioOutput = audio }
                 }
                 synchronized(outputLock) {
+                    val routed = audio?.routedDeviceIds().orEmpty()
+                    if (routed.isNotEmpty() && routed != sampledRoute) {
+                        sampledRoute = routed
+                        pendingRoute = try {
+                            probeAudioSink(context, routed)
+                        } catch (_: RuntimeException) {
+                            AudioSinkCapability(2, 0, false)
+                        }
+                    }
+                    val requested = pendingRoute
+                    if (requested != null &&
+                        (requested.channels != sinkChannels || requested.accept != sinkAccept ||
+                            requested.atmos != sinkAtmos)) {
+                        sinkChannels = requested.channels
+                        sinkAccept = requested.accept
+                        sinkAtmos = requested.atmos
+                        CoreNative.configureAudioSink(active.handle, sinkChannels, sinkAccept, sinkAtmos)
+                        audio?.flush()
+                        pending = null
+                        pendingOffset = 0
+                    }
                     val audible = !desiredPaused && snap[0] in 3L..6L
                     if (audible) audio?.play() else audio?.pause()
                     if (audible && audio != null) {
@@ -512,12 +551,28 @@ internal class CorePlayback(
                                     // PCM carries source-time samples. AudioTrack applies
                                     // tempo; multiplying this clock by rate counts it twice.
                                     val written = audio.write(frame, pendingOffset, 1.0)
-                                    if (written < 0) {
-                                        sinkAccept = 0
-                                        sinkAtmos = false
-                                        CoreNative.configureAudioSink(active.handle, sinkChannels, 0, false)
+                                    if (written == AUDIO_WRITE_DROP) {
                                         pending = null
                                         pendingOffset = 0
+                                        audio.flush()
+                                    } else if (written == AUDIO_WRITE_REJECT) {
+                                        val bit = if (frame.codec == 2) 2 else 1
+                                        sinkAccept = sinkAccept and bit.inv()
+                                        if (sinkAccept and 1 == 0) sinkAtmos = false
+                                        val channels = try {
+                                            probeAudioSink(context, audio.routedDeviceIds()).channels
+                                        } catch (_: RuntimeException) {
+                                            2
+                                        }
+                                        sinkChannels = channels
+                                        val next = AudioSinkCapability(sinkChannels, sinkAccept, sinkAtmos)
+                                        pendingRoute = next
+                                        CoreNative.configureAudioSink(active.handle, sinkChannels, sinkAccept, sinkAtmos)
+                                        audio.flush()
+                                        pending = null
+                                        pendingOffset = 0
+                                    } else if (written < 0) {
+                                        throw IllegalStateException("AudioTrack write failed: $written")
                                     } else {
                                         if (written > 0) audioReady = true
                                         pendingOffset += written
@@ -814,6 +869,29 @@ internal class CorePlayback(
             "effectiveDenoise" to (snap?.getOrNull(31)?.toInt() ?: 0),
             "requestedSharpen" to (snap?.getOrNull(32)?.toInt() ?: 0),
             "effectiveSharpen" to (snap?.getOrNull(33)?.toInt() ?: 0))
+    }
+
+    private fun refreshAudioRoute() {
+        val routed = synchronized(outputLock) { audioOutput?.routedDeviceIds().orEmpty() }
+        val probed = try {
+            probeAudioSink(context, routed)
+        } catch (_: RuntimeException) {
+            AudioSinkCapability(2, 0, false)
+        }
+        pendingRoute = probed
+        wakeOutput()
+    }
+
+    private fun registerRouteWatcher() {
+        if (deviceCallbackRegistered) return
+        audioManager.registerAudioDeviceCallback(deviceCallback, handler)
+        deviceCallbackRegistered = true
+    }
+
+    private fun unregisterRouteWatcher() {
+        if (!deviceCallbackRegistered) return
+        audioManager.unregisterAudioDeviceCallback(deviceCallback)
+        deviceCallbackRegistered = false
     }
 
     private fun configureProbedAudioSink(handle: Long): Boolean {

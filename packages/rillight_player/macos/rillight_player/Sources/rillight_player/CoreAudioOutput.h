@@ -12,10 +12,14 @@
 
 namespace rillight_macos {
 
-inline int DefaultOutputChannelTarget() {
-  AudioObjectPropertyAddress device_address{
+inline AudioObjectPropertyAddress DefaultOutputDeviceAddress() {
+  return AudioObjectPropertyAddress{
       kAudioHardwarePropertyDefaultOutputDevice,
       kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+}
+
+inline int DefaultOutputChannelTarget() {
+  const AudioObjectPropertyAddress device_address = DefaultOutputDeviceAddress();
   AudioDeviceID device = kAudioObjectUnknown;
   UInt32 size = sizeof(device);
   if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &device_address, 0,

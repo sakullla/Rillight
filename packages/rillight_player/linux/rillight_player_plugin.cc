@@ -144,28 +144,49 @@ struct Surface : std::enable_shared_from_this<Surface> {
     auto audio_ready = audio_configured.get_future();
     audio_worker = std::thread([this, configured = std::move(audio_configured)]() mutable {
       int configured_channels = 2;
+      uint32_t configured_accept = 0;
       try {
-        uint32_t accept = 0;
-        if (!rillight_linux::ProbeDefaultSink(&configured_channels, &accept)) {
+        if (!rillight_linux::ProbeDefaultSink(&configured_channels,
+                                             &configured_accept)) {
           configured_channels = 2;
-          accept = 0;
+          configured_accept = 0;
         }
         RillightCoreAudioSink sink{};
         sink.struct_size = sizeof(sink);
         sink.max_pcm_channels = configured_channels;
-        sink.accepted_passthrough = accept;
+        sink.accepted_passthrough = configured_accept;
         sink.reports_atmos = 0;
         if (rillight_core_configure_audio_sink(core, &sink) != 0) {
           sink.max_pcm_channels = 2;
           sink.accepted_passthrough = 0;
           configured_channels = 2;
+          configured_accept = 0;
           rillight_core_configure_audio_sink(core, &sink);
         }
       } catch (...) {
         configured_channels = 2;
+        configured_accept = 0;
       }
       configured.set_value();
       std::unique_ptr<rillight_linux::PulseOutput> audio;
+      int applied_route = 0;
+      auto publish_sink = [&](int channels, uint32_t accept_bits) {
+        configured_channels = channels;
+        configured_accept = accept_bits;
+        RillightCoreAudioSink sink{};
+        sink.struct_size = sizeof(sink);
+        sink.max_pcm_channels = configured_channels;
+        sink.accepted_passthrough = configured_accept;
+        sink.reports_atmos = 0;
+        rillight_core_configure_audio_sink(core, &sink);
+      };
+      auto reject_passthrough = [&](int kind) {
+        const uint32_t bit = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
+                                 ? RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD
+                                 : RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
+        publish_sink(configured_channels, configured_accept & ~bit);
+        if (audio) audio->AbandonPassthrough();
+      };
       RillightCoreFrame* pending_audio = nullptr;
       int pending_offset = 0;
       int64_t audio_end_pts = -1;
@@ -249,6 +270,37 @@ struct Surface : std::enable_shared_from_this<Surface> {
             audio_failed = stopped = true;
             break;
           }
+          const int route = audio->route_generation();
+          if (route != 0 && route != applied_route) {
+            applied_route = route;
+            int channels = configured_channels;
+            uint32_t accept = configured_accept;
+            audio->copy_route(&channels, &accept);
+            if (channels != configured_channels || accept != configured_accept) {
+              publish_sink(channels, accept);
+              if (pending_audio) {
+                rillight_core_release_frame(pending_audio);
+                pending_audio = nullptr;
+                pending_offset = 0;
+              }
+              const int kind = audio->current_passthrough_kind();
+              const uint32_t bit = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
+                                       ? RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD
+                                       : RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
+              if (kind != 0 && (configured_accept & bit) == 0)
+                audio->AbandonPassthrough();
+              else audio->Flush();
+            }
+          }
+          if (audio->passthrough_rejected()) {
+            reject_passthrough(audio->rejected_passthrough_kind());
+            if (pending_audio &&
+                pending_audio->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {
+              rillight_core_release_frame(pending_audio);
+              pending_audio = nullptr;
+              pending_offset = 0;
+            }
+          }
           const int64_t delay = audio->Latency();
           if (audio_end_pts >= 0 && delay >= 0 &&
               (snapshot.state == RILLIGHT_CORE_PLAYING ||
@@ -287,13 +339,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
             if (compressed) {
               if (!audio->EnsurePassthrough(frame->audio_codec_id) &&
                   audio->passthrough_rejected()) {
-                RillightCoreAudioSink sink{};
-                sink.struct_size = sizeof(sink);
-                sink.max_pcm_channels = configured_channels;
-                sink.accepted_passthrough = 0;
-                sink.reports_atmos = 0;
-                rillight_core_configure_audio_sink(core, &sink);
-                audio->AbandonPassthrough();
+                reject_passthrough(frame->audio_codec_id);
                 rillight_core_release_frame(frame);
                 pending_audio = nullptr;
                 continue;
@@ -328,13 +374,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
                   frame->audio_codec_id, frame->data,
                   static_cast<size_t>(frame->data_size));
               if (audio->passthrough_rejected()) {
-                RillightCoreAudioSink sink{};
-                sink.struct_size = sizeof(sink);
-                sink.max_pcm_channels = configured_channels;
-                sink.accepted_passthrough = 0;
-                sink.reports_atmos = 0;
-                rillight_core_configure_audio_sink(core, &sink);
-                audio->AbandonPassthrough();
+                reject_passthrough(frame->audio_codec_id);
                 rillight_core_release_frame(frame);
                 pending_audio = nullptr;
                 continue;

@@ -104,15 +104,8 @@ struct SinkProbe {
   uint32_t accept = 0;
 };
 
-SinkProbe ProbeDevice() {
+SinkProbe ProbeOpenDevice(IMMDevice* device) {
   SinkProbe result;
-  ComPtr<IMMDeviceEnumerator> enumerator;
-  Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                         IID_PPV_ARGS(&enumerator)),
-        "WASAPI device enumerator unavailable");
-  ComPtr<IMMDevice> device;
-  Check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device),
-        "WASAPI default output unavailable");
   ComPtr<IAudioClient> client;
   Check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                          reinterpret_cast<void**>(client.GetAddressOf())),
@@ -122,12 +115,82 @@ SinkProbe ProbeDevice() {
     result.max_pcm = PcmChannelTarget(mix->nChannels);
     CoTaskMemFree(mix);
   }
-  if (ExclusiveAccepted(device.Get(), false))
+  if (ExclusiveAccepted(device, false))
     result.accept |= RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
-  if (ExclusiveAccepted(device.Get(), true))
+  if (ExclusiveAccepted(device, true))
     result.accept |= RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD;
   return result;
 }
+
+SinkProbe ProbeDevice() {
+  ComPtr<IMMDeviceEnumerator> enumerator;
+  Check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                         IID_PPV_ARGS(&enumerator)),
+        "WASAPI device enumerator unavailable");
+  ComPtr<IMMDevice> device;
+  Check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device),
+        "WASAPI default output unavailable");
+  return ProbeOpenDevice(device.Get());
+}
+
+class OutputDeviceEvents : public IMMNotificationClient {
+ public:
+  explicit OutputDeviceEvents(std::atomic<uint32_t>* generation)
+      : generation_(generation) {}
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override {
+    if (!object) return E_POINTER;
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IMMNotificationClient)) {
+      *object = static_cast<IMMNotificationClient*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *object = nullptr;
+    return E_NOINTERFACE;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override {
+    return static_cast<ULONG>(InterlockedIncrement(&refs_));
+  }
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG left = static_cast<ULONG>(InterlockedDecrement(&refs_));
+    if (left == 0) delete this;
+    return left;
+  }
+  HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override {
+    Bump();
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override {
+    Bump();
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role,
+                                                   LPCWSTR) override {
+    if (flow == eRender && (role == eConsole || role == eMultimedia)) Bump();
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR,
+                                                   const PROPERTYKEY) override {
+    return S_OK;
+  }
+
+ private:
+  void Bump() {
+    if (generation_) generation_->fetch_add(1);
+  }
+  std::atomic<uint32_t>* generation_ = nullptr;
+  LONG refs_ = 1;
+};
+
+struct NotificationRegistration {
+  IMMDeviceEnumerator* enumerator = nullptr;
+  OutputDeviceEvents* events = nullptr;
+  ~NotificationRegistration() {
+    if (enumerator && events)
+      enumerator->UnregisterEndpointNotificationCallback(events);
+    if (events) events->Release();
+  }
+};
 
 struct WasapiEndpoint {
   ComPtr<IAudioClient> client;
@@ -288,14 +351,18 @@ std::string AudioOutput::error() const {
   return error_;
 }
 
-void AudioOutput::ForgetPassthrough(uint32_t kind_bit) {
-  accepted_passthrough_ &= ~kind_bit;
+void AudioOutput::PublishSink() {
   RillightCoreAudioSink sink{};
   sink.struct_size = sizeof(sink);
   sink.max_pcm_channels = max_pcm_channels_;
   sink.accepted_passthrough = accepted_passthrough_;
   sink.reports_atmos = 0;
   api_->configure_audio_sink(core_, &sink);
+}
+
+void AudioOutput::ForgetPassthrough(uint32_t kind_bit) {
+  accepted_passthrough_ &= ~kind_bit;
+  PublishSink();
 }
 
 void AudioOutput::Run() {
@@ -339,6 +406,16 @@ void AudioOutput::Run() {
     ComPtr<IMMDevice> device;
     Check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device),
           "WASAPI default output unavailable");
+    NotificationRegistration notifications;
+    notifications.events = new OutputDeviceEvents(&device_generation_);
+    if (FAILED(enumerator->RegisterEndpointNotificationCallback(
+            notifications.events))) {
+      notifications.events->Release();
+      notifications.events = nullptr;
+    } else {
+      notifications.enumerator = enumerator.Get();
+    }
+    const uint32_t route_at_start = device_generation_.load();
     WasapiEndpoint endpoint;
     RillightIec61937Mux mux;
     std::vector<uint8_t> burst;
@@ -353,6 +430,24 @@ void AudioOutput::Run() {
     bool audio_clock_started = false;
     rillight_windows::AudioHandoffPolicy handoff_policy;
     bool running = false;
+    uint32_t seen_generation = route_at_start;
+    auto retire_route = [&] {
+      if (running && endpoint.client) endpoint.client->Stop();
+      running = false;
+      endpoint.Close();
+      mux.reset();
+      burst.clear();
+      burst_pts = -1;
+      burst_samples = 0;
+      if (pending) api_->release_frame(pending);
+      pending = nullptr;
+      pending_ = false;
+      device_padding_ = 0;
+      offset = 0;
+      submitted_media_end = -1;
+      handed_off_audio_clock = false;
+      audio_clock_started = false;
+    };
     while (!stopped_) {
       RillightCoreSnapshot state{};
       state.struct_size = sizeof(state);
@@ -378,6 +473,28 @@ void AudioOutput::Run() {
         burst_samples = 0;
         session = state.session_id;
         timeline = state.timeline_version;
+      }
+      const uint32_t generation = device_generation_.load();
+      if (generation != seen_generation) {
+        seen_generation = generation;
+        ComPtr<IMMDevice> current;
+        if (FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole,
+                                                       &current))) {
+          max_pcm_channels_ = 2;
+          accepted_passthrough_ = 0;
+        } else {
+          device = current;
+          try {
+            const SinkProbe probe = ProbeOpenDevice(device.Get());
+            max_pcm_channels_ = probe.max_pcm;
+            accepted_passthrough_ = probe.accept;
+          } catch (...) {
+            max_pcm_channels_ = 2;
+            accepted_passthrough_ = 0;
+          }
+        }
+        PublishSink();
+        retire_route();
       }
       if (!Active(state)) {
         if (running && endpoint.client)

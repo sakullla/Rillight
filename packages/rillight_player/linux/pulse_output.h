@@ -136,8 +136,13 @@ class PulseOutput {
       error_ = "PulseAudio connection unavailable";
   }
   ~PulseOutput() {
+    alive_ = false;
     CloseStream();
-    if (context_) { pa_context_disconnect(context_); pa_context_unref(context_); }
+    if (context_) {
+      pa_context_set_subscribe_callback(context_, nullptr, nullptr);
+      pa_context_disconnect(context_);
+      pa_context_unref(context_);
+    }
     if (loop_) pa_mainloop_free(loop_);
   }
   bool Pump() {
@@ -159,15 +164,32 @@ class PulseOutput {
       }
       return true;
     }
+    PollRoute();
     if (!stream_) return true;
     const auto stream_state = pa_stream_get_state(stream_);
     if (stream_state == PA_STREAM_FAILED || stream_state == PA_STREAM_TERMINATED) {
-      error_ = std::string("PulseAudio stream: ") +
-               pa_strerror(pa_context_errno(context_));
-      return false;
+      // A compressed format the sink will not keep is not a dead audio thread.
+      // PCM follows the new default sink instead of stopping the surface.
+      if (passthrough_kind_ != 0) {
+        RejectPassthrough(passthrough_kind_);
+        return true;
+      }
+      if (++pcm_failures_ > 3) {
+        error_ = std::string("PulseAudio stream: ") +
+                 pa_strerror(pa_context_errno(context_));
+        CloseStream();
+        return false;
+      }
+      CloseStream();
+      error_.clear();
+      return true;
     }
     if (stream_state != PA_STREAM_READY) {
       if (now - started_ > std::chrono::seconds(5)) {
+        if (passthrough_kind_ != 0) {
+          RejectPassthrough(passthrough_kind_);
+          return true;
+        }
         error_ = "PulseAudio stream timed out";
         return false;
       }
@@ -206,8 +228,16 @@ class PulseOutput {
     return Ensure(2, kind);
   }
   bool passthrough_rejected() const { return passthrough_rejected_; }
+  int rejected_passthrough_kind() const { return rejected_kind_; }
+  int current_passthrough_kind() const { return passthrough_kind_; }
+  int route_generation() const { return route_generation_; }
+  void copy_route(int *channels, uint32_t *accept) const {
+    if (channels) *channels = route_channels_;
+    if (accept) *accept = route_accept_;
+  }
   void AbandonPassthrough() {
     passthrough_rejected_ = false;
+    rejected_kind_ = 0;
     if (error_ == "IEC 61937 burst does not fit") error_.clear();
     mux_.reset();
     burst_.clear();
@@ -220,7 +250,8 @@ class PulseOutput {
         Latency() < 0) return 0;
     const size_t writable = pa_stream_writable_size(stream_);
     if (writable == static_cast<size_t>(-1)) {
-      error_ = "PulseAudio writable size failed"; return 0;
+      NoteWriteFailure("PulseAudio writable size failed");
+      return 0;
     }
     const size_t quantum = size_t{1920} *
                            static_cast<size_t>(std::max(channels_, 2)) / 2;
@@ -229,10 +260,11 @@ class PulseOutput {
     if (chunk == 0) return 0;
     if (pa_stream_write(stream_, data, chunk, nullptr, 0,
                         PA_SEEK_RELATIVE) < 0) {
-      error_ = std::string("PulseAudio write: ") +
-               pa_strerror(pa_context_errno(context_));
+      NoteWriteFailure(std::string("PulseAudio write: ") +
+                       pa_strerror(pa_context_errno(context_)));
       return 0;
     }
+    pcm_failures_ = 0;
     return chunk;
   }
   // Returns the consumed compressed size, 0 when the device needs another
@@ -249,8 +281,7 @@ class PulseOutput {
                              : mux_.push_eac3(data, static_cast<int>(size),
                                               &produced);
       if (packed < 0) {
-        passthrough_rejected_ = true;
-        error_ = "IEC 61937 burst does not fit";
+        RejectPassthrough(kind);
         return size_t(-1);
       }
       held_packet_ = data;
@@ -324,7 +355,7 @@ class PulseOutput {
       pa_format_info_free(info);
     }
     if (!stream_) {
-      error_ = "PulseAudio stream unavailable";
+      NoteWriteFailure("PulseAudio stream unavailable");
       return false;
     }
     pa_buffer_attr attributes{};
@@ -341,25 +372,106 @@ class PulseOutput {
         PA_STREAM_INTERPOLATE_TIMING);
     if (pa_stream_connect_playback(stream_, nullptr, &attributes, flags,
                                    nullptr, nullptr) < 0) {
-      error_ = std::string("PulseAudio stream: ") +
-               pa_strerror(pa_context_errno(context_));
+      NoteWriteFailure(std::string("PulseAudio stream: ") +
+                       pa_strerror(pa_context_errno(context_)));
       return false;
     }
     return true;
+  }
+  void RejectPassthrough(int kind) {
+    if (kind != RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
+        kind != RILLIGHT_CORE_PASSTHROUGH_TRUEHD)
+      kind = passthrough_kind_ != 0 ? passthrough_kind_
+                                    : RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC;
+    rejected_kind_ = kind;
+    passthrough_rejected_ = true;
+    mux_.reset();
+    burst_.clear();
+    burst_offset_ = 0;
+    held_packet_ = nullptr;
+    CloseStream();
+  }
+  void NoteWriteFailure(const std::string &message) {
+    if (passthrough_kind_ != 0) {
+      RejectPassthrough(passthrough_kind_);
+      return;
+    }
+    error_ = message;
+  }
+  void PollRoute() {
+    if (!alive_ || !context_ || pa_context_get_state(context_) != PA_CONTEXT_READY)
+      return;
+    if (!subscribed_) {
+      pa_context_set_subscribe_callback(
+          context_,
+          [](pa_context *, pa_subscription_event_type_t, uint32_t, void *opaque) {
+            static_cast<PulseOutput *>(opaque)->route_dirty_ = true;
+          },
+          this);
+      if (auto *operation = pa_context_subscribe(
+              context_,
+              static_cast<pa_subscription_mask_t>(PA_SUBSCRIPTION_MASK_SERVER |
+                                                  PA_SUBSCRIPTION_MASK_SINK),
+              nullptr, nullptr))
+        pa_operation_unref(operation);
+      subscribed_ = true;
+      route_dirty_ = true;
+    }
+    if (!route_dirty_ || route_querying_) return;
+    route_dirty_ = false;
+    route_querying_ = true;
+    pa_operation *server = pa_context_get_server_info(
+        context_,
+        [](pa_context *context, const pa_server_info *info, void *opaque) {
+          auto *self = static_cast<PulseOutput *>(opaque);
+          if (!self->alive_ || !info || !info->default_sink_name) {
+            self->route_querying_ = false;
+            return;
+          }
+          pa_operation *sink = pa_context_get_sink_info_by_name(
+              context, info->default_sink_name,
+              [](pa_context *, const pa_sink_info *info, int eol, void *opaque) {
+                auto *self = static_cast<PulseOutput *>(opaque);
+                if (eol > 0 || !info || !self->alive_) {
+                  self->route_querying_ = false;
+                  return;
+                }
+                uint32_t accept = 0;
+                if (info->formats) {
+                  for (uint8_t index = 0; index < info->n_formats; ++index) {
+                    const pa_encoding_t encoding =
+                        pa_format_info_get_encoding(info->formats[index]);
+                    if (encoding == PA_ENCODING_EAC3_IEC61937)
+                      accept |= RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
+                    if (encoding == PA_ENCODING_TRUEHD_IEC61937)
+                      accept |= RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD;
+                  }
+                }
+                self->route_channels_ = PcmChannelTarget(info->channel_map.channels);
+                self->route_accept_ = accept;
+                self->route_generation_ += 1;
+              },
+              self);
+          if (!sink) self->route_querying_ = false;
+          else pa_operation_unref(sink);
+        },
+        this);
+    if (!server) route_querying_ = false;
+    else pa_operation_unref(server);
   }
   bool FlushBurst() {
     while (burst_offset_ < burst_.size()) {
       const size_t writable = pa_stream_writable_size(stream_);
       if (writable == static_cast<size_t>(-1)) {
-        error_ = "PulseAudio writable size failed";
+        NoteWriteFailure("PulseAudio writable size failed");
         return false;
       }
       const size_t chunk = std::min(burst_.size() - burst_offset_, writable);
       if (chunk == 0) return false;
       if (pa_stream_write(stream_, burst_.data() + burst_offset_, chunk,
                           nullptr, 0, PA_SEEK_RELATIVE) < 0) {
-        error_ = std::string("PulseAudio write: ") +
-                 pa_strerror(pa_context_errno(context_));
+        NoteWriteFailure(std::string("PulseAudio write: ") +
+                         pa_strerror(pa_context_errno(context_)));
         return false;
       }
       burst_offset_ += chunk;
@@ -398,7 +510,16 @@ class PulseOutput {
   int channels_ = 0;
   int stride_ = 4;
   int passthrough_kind_ = 0;
+  int rejected_kind_ = 0;
+  int pcm_failures_ = 0;
   bool passthrough_rejected_ = false;
+  bool alive_ = true;
+  bool subscribed_ = false;
+  bool route_dirty_ = false;
+  bool route_querying_ = false;
+  int route_generation_ = 0;
+  int route_channels_ = 2;
+  uint32_t route_accept_ = 0;
   RillightIec61937Mux mux_;
   std::vector<uint8_t> burst_;
   size_t burst_offset_ = 0;

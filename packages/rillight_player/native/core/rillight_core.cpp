@@ -1238,6 +1238,35 @@ void clear_queue(std::deque<RillightCoreFrame *> &queue, size_t &bytes) {
   bytes = 0;
 }
 
+void drop_passthrough_frames(RillightCoreImpl *core) {
+  std::deque<RillightCoreFrame *> kept;
+  size_t bytes = 0;
+  while (!core->audio.empty()) {
+    auto *frame = core->audio.front();
+    core->audio.pop_front();
+    if (frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {
+      rillight_core_release_frame(frame);
+      continue;
+    }
+    kept.push_back(frame);
+    bytes += static_cast<size_t>(std::max(frame->data_size, 0));
+  }
+  core->audio.swap(kept);
+  core->audio_bytes = bytes;
+}
+
+bool unity_speed(double speed) { return speed > 0.999 && speed < 1.001; }
+
+bool passthrough_still_wanted(const RillightCoreImpl *core,
+                              const RillightCoreFrame *frame) {
+  if (!unity_speed(core->speed)) return false;
+  if (frame->audio_codec_id == RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC)
+    return (core->sink_accept & RILLIGHT_CORE_AUDIO_ACCEPT_EAC3) != 0;
+  if (frame->audio_codec_id == RILLIGHT_CORE_PASSTHROUGH_TRUEHD)
+    return (core->sink_accept & RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD) != 0;
+  return false;
+}
+
 void reset_frames(RillightCoreImpl *core) {
   rillight_core_release_frame(core->displayed_clean);
   core->displayed_clean = nullptr;
@@ -2269,6 +2298,20 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
     rillight_core_release_frame(frame);
     return 0;
   }
+  // The packet was classified before this wait. Speed or the sink may have
+  // changed; the caller decodes PCM instead of leaving a compressed frame.
+  if (audio && frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH &&
+      !passthrough_still_wanted(core, frame)) {
+    lock.unlock();
+    rillight_core_release_frame(frame);
+    return AVERROR(EAGAIN);
+  }
+  if (audio && frame->type == RILLIGHT_CORE_AUDIO_S16 &&
+      frame->channels > core->sink_max_channels) {
+    lock.unlock();
+    rillight_core_release_frame(frame);
+    return 0;
+  }
   bytes += frame->data_size;
   queue.push_back(frame);
   if (!audio) core->first_video = true;
@@ -2497,7 +2540,7 @@ int packet_passthrough_kind(const AVCodecParameters *parameters,
                             double speed) {
   if (!parameters || !packet || !packet->data || packet->size <= 0)
     return RILLIGHT_CORE_PASSTHROUGH_NONE;
-  if (!(speed > 0.999 && speed < 1.001)) return RILLIGHT_CORE_PASSTHROUGH_NONE;
+  if (!unity_speed(speed)) return RILLIGHT_CORE_PASSTHROUGH_NONE;
   if (parameters->codec_id == AV_CODEC_ID_TRUEHD &&
       (accept & RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD) != 0)
     return RILLIGHT_CORE_PASSTHROUGH_TRUEHD;
@@ -3217,16 +3260,24 @@ void run(RillightCoreImpl *core, uint64_t session) {
       // A stereo source stays PCM even when the packet itself is JOC or
       // TrueHD. Rejected passthrough must decode instead of failing the lane.
       const bool want = negotiated.passthrough != 0;
-      if (want != passthrough_mode) {
-        if (audio.context) avcodec_flush_buffers(audio.context);
-        close_audio_filter(&audio_filter);
-        passthrough_mode = want;
-      }
       if (want) {
+        if (!passthrough_mode) {
+          if (audio.context) avcodec_flush_buffers(audio.context);
+          close_audio_filter(&audio_filter);
+          passthrough_mode = true;
+        }
         auto *output = passthrough_frame(
             packet, format->streams[audio.stream], kind, view, session, timeline);
         if (!output) return AVERROR(ENOMEM);
-        return enqueue(core, output, video.stream, timeline);
+        const int queued = enqueue(core, output, video.stream, timeline);
+        // EAGAIN means speed left 1 or the sink dropped this format while the
+        // access unit was being packed. Decode that same packet as PCM.
+        if (queued != AVERROR(EAGAIN)) return queued;
+      }
+      if (passthrough_mode) {
+        if (audio.context) avcodec_flush_buffers(audio.context);
+        close_audio_filter(&audio_filter);
+        passthrough_mode = false;
       }
       int result = decode_packet(core, format, audio, packet, video.stream,
           &scale, &audio_filter, &subtitle_cues, &ass,
@@ -3776,10 +3827,15 @@ int rillight_core_configure_audio_sink(RillightCore *pointer,
   auto *core = impl(pointer);
   std::lock_guard lock(core->mutex);
   if (core->state == RILLIGHT_CORE_CLOSING) return -1;
+  const bool changed = core->sink_max_channels != sink->max_pcm_channels ||
+                       core->sink_accept != sink->accepted_passthrough ||
+                       core->sink_atmos != sink->reports_atmos;
   core->sink_max_channels = sink->max_pcm_channels;
   core->sink_accept = sink->accepted_passthrough;
   core->sink_atmos = sink->reports_atmos;
   core->sink_generation++;
+  if (changed) clear_queue(core->audio, core->audio_bytes);
+  core->wake.notify_all();
   return 0;
 }
 
@@ -4263,8 +4319,9 @@ int rillight_core_set_speed(RillightCore *pointer, double speed,
   core->base_position = playback_position(core);
   core->requested_speed = speed;
   if (core->external_audio_speed) {
-    // The sink changes the rate of unmodified PCM already in its queue.
-    // Re-anchor clock interpolation without seeking or retiring video/RPU.
+    // PCM already queued stays: AudioTrack retimes it. Compressed access
+    // units cannot change rate, so drop them and let the next packet decode.
+    if (!unity_speed(speed)) drop_passthrough_frames(core);
     core->speed = speed;
     core->base_time = Clock::now();
     core->wake.notify_all();

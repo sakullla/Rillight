@@ -20,6 +20,12 @@
 
 using Clock = std::chrono::steady_clock;
 
+static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
+    const AudioObjectPropertyAddress *, void *client) {
+  if (client) static_cast<std::atomic<bool> *>(client)->store(true);
+  return noErr;
+}
+
 @interface RillightSurface : NSObject <FlutterTexture> {
  @public
   RillightCore* core;  // Owned by Dart; Dart destroys it after dispose returns.
@@ -91,6 +97,9 @@ using Clock = std::chrono::steady_clock;
   Clock::time_point _lastPresent;
   int _hardwareStream;
   int _hardwareTicks;
+  int _pcmChannels;
+  bool _routeListener;
+  std::atomic<bool> _routeChanged;
 }
 
 - (rillight_macos::EdrPresentationStats)presentationStats {
@@ -118,6 +127,9 @@ using Clock = std::chrono::steady_clock;
     _havePresent = false;
     _hardwareStream = -2;
     _hardwareTicks = 0;
+    _pcmChannels = 2;
+    _routeListener = false;
+    _routeChanged.store(false);
     _audioEndPts = -1;
     _audioSpeed = 1.0;
   }
@@ -151,7 +163,16 @@ using Clock = std::chrono::steady_clock;
     sink.max_pcm_channels = rillight_macos::DefaultOutputChannelTarget();
     sink.accepted_passthrough = 0;
     sink.reports_atmos = 0;
+    _pcmChannels = sink.max_pcm_channels;
     rillight_core_configure_audio_sink(self->core, &sink);
+    if (!_routeListener) {
+      const AudioObjectPropertyAddress address =
+          rillight_macos::DefaultOutputDeviceAddress();
+      if (AudioObjectAddPropertyListener(
+              kAudioObjectSystemObject, &address, RillightDefaultOutputChanged,
+              &_routeChanged) == noErr)
+        _routeListener = true;
+    }
     double headroom = 1;
     if (rillight_macos::CreateEdrSurface(&self->_edr, self->flutterView,
                                          &headroom) &&
@@ -340,6 +361,23 @@ using Clock = std::chrono::steady_clock;
       snapshot.abi_version != RILLIGHT_CORE_ABI_VERSION) {
     [self setFailure:@"Core snapshot unavailable"];
     return;
+  }
+  if (_routeChanged.exchange(false)) {
+    const int channels = rillight_macos::DefaultOutputChannelTarget();
+    if (channels != _pcmChannels) {
+      _pcmChannels = channels;
+      RillightCoreAudioSink sink{};
+      sink.struct_size = sizeof(sink);
+      sink.max_pcm_channels = channels;
+      sink.accepted_passthrough = 0;
+      sink.reports_atmos = 0;
+      rillight_core_configure_audio_sink(core, &sink);
+      if (_audio) _audio->Reset();
+      _audio.reset();
+      [self releaseAudio];
+      _audioEndPts = -1;
+      _audioClockStarted = _audioHandedOff = false;
+    }
   }
   if (snapshot.session_id != _audioSession || snapshot.timeline_version != _audioTimeline) {
     if (_audio) _audio->Reset();
@@ -595,6 +633,14 @@ using Clock = std::chrono::steady_clock;
   // Platform thread. Queue unregister without waiting for Impeller's raster
   // callback; Dart fences remaining copyPixelBuffer work with a picture snapshot.
   stopped.store(true);
+  if (_routeListener) {
+    const AudioObjectPropertyAddress address =
+        rillight_macos::DefaultOutputDeviceAddress();
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &address,
+                                      RillightDefaultOutputChanged,
+                                      &_routeChanged);
+    _routeListener = false;
+  }
   if (detached.exchange(true)) return YES;
   dispatch_sync(_queue, ^{
     if (self->_timer) {

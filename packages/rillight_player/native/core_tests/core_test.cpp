@@ -501,6 +501,21 @@ void audio_output_contract() {
                             &burst) == -1);
   uint8_t tiny[8]{};
   assert(mux.push_truehd(tiny, 8, &burst) == -1);
+  uint8_t early[16]{};
+  RillightIec61937Mux presync;
+  assert(presync.push_truehd(early, 16, &burst) == 0);
+  presync.reset();
+  for (int index = 0; index < 128; ++index)
+    assert(presync.push_truehd(early, 16, &burst) == 0);
+  assert(presync.push_truehd(early, 16, &burst) == -1);
+  uint8_t major[16]{};
+  major[4] = 0xf8;
+  major[5] = 0x72;
+  major[6] = 0x6f;
+  major[7] = 0xba;
+  RillightIec61937Mux after_seek;
+  assert(after_seek.push_truehd(early, 16, &burst) == 0);
+  assert(after_seek.push_truehd(major, 16, &burst) == 0);
   auto six = make_pcm_wav(6, 4800);
   play_channel_count(six, 6, 6, RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL);
   play_channel_count(six, 2, 2, RILLIGHT_CORE_AUDIO_DELIVERY_PCM_DOWNMIX);

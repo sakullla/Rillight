@@ -4,9 +4,13 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioRouting
 import android.media.AudioTrack
 import android.media.PlaybackParams
 import android.os.Build
+
+internal const val AUDIO_WRITE_REJECT = -2
+internal const val AUDIO_WRITE_DROP = -3
 
 internal data class AudioSinkCapability(
     val channels: Int,
@@ -14,28 +18,70 @@ internal data class AudioSinkCapability(
     val atmos: Boolean,
 )
 
-/** Passthrough is claimed only when API 29 can open the compressed encoding. */
-internal fun probeAudioSink(context: Context): AudioSinkCapability {
-    val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    var channels = 2
-    var accept = 0
-    var atmos = false
-    for (device in manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
-        val count = device.channelCounts.maxOrNull() ?: 0
-        if (count >= 8) channels = maxOf(channels, 8)
-        else if (count >= 6) channels = maxOf(channels, 6)
-        if (Build.VERSION.SDK_INT < 29) continue
-        if (device.encodings.contains(AudioFormat.ENCODING_E_AC3_JOC) &&
-            directPlayback(AudioFormat.ENCODING_E_AC3_JOC)) {
-            accept = accept or 1
-            atmos = true
+internal data class RouteDevice(
+    val id: Int,
+    val maxChannels: Int,
+    val encodings: Set<Int>,
+)
+
+/**
+ * Only devices on the current media route count. An unknown route stays stereo
+ * so a disconnected HDMI receiver cannot keep a downmix from happening.
+ * Several devices on one route use the smallest layout and the shared formats.
+ */
+internal fun routeCapability(
+    outputs: List<RouteDevice>,
+    routedIds: Set<Int>,
+    eac3Encoding: Int,
+    trueHdEncoding: Int,
+    direct: (Int) -> Boolean,
+): AudioSinkCapability {
+    val selected = outputs.filter { it.id in routedIds }
+    if (routedIds.isEmpty() || selected.isEmpty()) return AudioSinkCapability(2, 0, false)
+    var channels = 8
+    var accept = 3
+    var atmos = true
+    for (device in selected) {
+        val target = when {
+            device.maxChannels >= 8 -> 8
+            device.maxChannels >= 6 -> 6
+            else -> 2
         }
-        if (device.encodings.contains(AudioFormat.ENCODING_DOLBY_TRUEHD) &&
-            directPlayback(AudioFormat.ENCODING_DOLBY_TRUEHD)) {
-            accept = accept or 2
+        channels = minOf(channels, target)
+        var deviceAccept = 0
+        var deviceAtmos = false
+        if (eac3Encoding in device.encodings && direct(eac3Encoding)) {
+            deviceAccept = deviceAccept or 1
+            deviceAtmos = true
         }
+        if (trueHdEncoding in device.encodings && direct(trueHdEncoding))
+            deviceAccept = deviceAccept or 2
+        accept = accept and deviceAccept
+        atmos = atmos && deviceAtmos
     }
-    return AudioSinkCapability(channels, accept, atmos)
+    if (accept and 1 == 0) atmos = false
+    return AudioSinkCapability(channels.coerceAtLeast(2), accept, atmos)
+}
+
+/** Passthrough is claimed only when API 29 can open the compressed encoding. */
+internal fun probeAudioSink(context: Context, routedDeviceIds: Set<Int> = emptySet()): AudioSinkCapability {
+    val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+        .build()
+    val routed = when {
+        routedDeviceIds.isNotEmpty() -> routedDeviceIds
+        Build.VERSION.SDK_INT >= 31 ->
+            manager.getAudioDevicesForAttributes(attributes).map { it.id }.toSet()
+        else -> emptySet()
+    }
+    val outputs = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { device ->
+        RouteDevice(device.id, device.channelCounts.maxOrNull() ?: 0, device.encodings.toSet())
+    }
+    val eac3 = if (Build.VERSION.SDK_INT >= 28) AudioFormat.ENCODING_E_AC3_JOC else -1
+    val trueHd = if (Build.VERSION.SDK_INT >= 25) AudioFormat.ENCODING_DOLBY_TRUEHD else -1
+    return routeCapability(outputs, routed, eac3, trueHd, ::directPlayback)
 }
 
 private fun directPlayback(encoding: Int): Boolean {
@@ -70,6 +116,15 @@ internal class CoreAudioOutput {
     private var encoding = AudioFormat.ENCODING_PCM_16BIT
     private var passthrough = false
     private var bytesPerFrame = 4
+    private var onRoute: (() -> Unit)? = null
+
+    fun setRouteListener(listener: (() -> Unit)?) { onRoute = listener }
+
+    fun routedDeviceIds(): Set<Int> {
+        if (Build.VERSION.SDK_INT < 24) return emptySet()
+        val id = track?.routedDevice?.id ?: return emptySet()
+        return setOf(id)
+    }
 
     fun matches(frame: CoreAudioFrame): Boolean {
         val track = track ?: return false
@@ -107,12 +162,15 @@ internal class CoreAudioOutput {
 
     fun setSpeed(value: Float) {
         require(value.isFinite() && value in .5f..3f)
+        val changed = value != playbackSpeed
+        playbackSpeed = value
+        // Compressed AudioTrack data stays at 1x. Drop it as soon as speed leaves 1
+        // so the next PCM frame can open at the requested rate.
         if (passthrough) {
-            playbackSpeed = value
+            if (changed && !unitySpeed(value)) flush()
             return
         }
-        if (track != null && value == playbackSpeed) return
-        playbackSpeed = value
+        if (!changed) return
         val active = track ?: return
         val wasPlaying = active.playState == AudioTrack.PLAYSTATE_PLAYING
         try {
@@ -139,8 +197,9 @@ internal class CoreAudioOutput {
 
     /** Nonblocking so stop/seek can retire the timeline without waiting for a full device buffer. */
     fun write(frame: CoreAudioFrame, offset: Int, playbackSpeed: Double): Int {
+        if (frame.passthrough && !unitySpeed(this.playbackSpeed)) return AUDIO_WRITE_DROP
         if (!ensure(frame)) {
-            if (frame.passthrough) return -2
+            if (frame.passthrough) return AUDIO_WRITE_REJECT
             throw IllegalStateException("AudioTrack does not support the PCM layout")
         }
         val track = track ?: return 0
@@ -235,7 +294,17 @@ internal class CoreAudioOutput {
             setSpeed(speed)
         }
         if (wantPlay) created.play()
+        watchRoute(created)
     }
+
+    private fun watchRoute(created: AudioTrack) {
+        if (Build.VERSION.SDK_INT < 24) return
+        created.addOnRoutingChangedListener(AudioRouting.OnRoutingChangedListener {
+            onRoute?.invoke()
+        }, null)
+    }
+
+    private fun unitySpeed(value: Float) = value > 0.999f && value < 1.001f
 
     private fun pcmChannels(frame: CoreAudioFrame): Int {
         val count = if (frame.channels > 0) frame.channels else 2

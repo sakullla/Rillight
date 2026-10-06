@@ -50,6 +50,7 @@ struct RillightIec61937Mux {
   int mat_filled = 0;
   int truehd_samples = 0;
   int truehd_prev_size = 0;
+  int truehd_presync = 0;
   uint16_t truehd_prev_time = 0;
   bool truehd_have_time = false;
 
@@ -61,7 +62,7 @@ struct RillightIec61937Mux {
     mat[0].clear();
     mat[1].clear();
     mat_index = mat_filled = 0;
-    truehd_samples = truehd_prev_size = 0;
+    truehd_samples = truehd_prev_size = truehd_presync = 0;
     truehd_prev_time = 0;
     truehd_have_time = false;
   }
@@ -85,6 +86,9 @@ struct RillightIec61937Mux {
     return packed ? 1 : -1;
   }
 
+  // 0 waits for another access unit. The first frames after a seek often
+  // are not a major sync; that is not a rejected receiver. -1 is only an
+  // access unit that cannot fit, or 128 frames with no major sync at all.
   int push_truehd(const uint8_t *data, int size, std::vector<uint8_t> *burst) {
     if (!data || size < 10 || !burst) return -1;
     for (auto &buffer : mat) {
@@ -97,10 +101,14 @@ struct RillightIec61937Mux {
       int rate_bits = -1;
       if (data[7] == 0xba) rate_bits = data[8] >> 4;
       else if (data[7] == 0xbb) rate_bits = data[9] >> 4;
-      if (rate_bits < 0) return -1;
-      truehd_samples = 40 << (rate_bits & 3);
+      if (rate_bits >= 0) truehd_samples = 40 << (rate_bits & 3);
     }
-    if (truehd_samples <= 0) return -1;
+    if (truehd_samples <= 0) {
+      // TrueHD repeats a major sync at least every 128 access units.
+      if (++truehd_presync > 128) return -1;
+      return 0;
+    }
+    truehd_presync = 0;
 
     static const uint8_t mat_start[20] = {
         0x07, 0x9E, 0x00, 0x03, 0x84, 0x01, 0x01, 0x01, 0x80, 0x00,

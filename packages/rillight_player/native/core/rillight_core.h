@@ -300,8 +300,10 @@ RILLIGHT_CORE_API int rillight_core_configure_hardware(
 /* Device PCM capacity and compressed formats the sink can actually open.
  * max_pcm_channels is 1..8. accepted_passthrough is EAC3 and/or TRUEHD.
  * reports_atmos must be 0 or 1 and is copied to the snapshot only while a
- * compressed passthrough frame is produced. Allowed outside CLOSING; the next
- * audio frame adopts it. macOS callers pass accepted_passthrough 0. */
+ * compressed passthrough frame is produced. Allowed outside CLOSING. A changed
+ * channel count or accept mask drops queued audio; the sink flushes its device
+ * buffer and the next decoded frame follows the new route. macOS callers pass
+ * accepted_passthrough 0. */
 typedef struct RillightCoreAudioSink {
   uint32_t struct_size;
   int max_pcm_channels;
@@ -312,8 +314,10 @@ RILLIGHT_CORE_API int rillight_core_configure_audio_sink(
     RillightCore *core, const RillightCoreAudioSink *sink);
 /* Idle only. When enabled, PCM remains at source rate and the sink must apply
  * playback_speed with pitch preservation. Audio delay reports remain in media
- * time (PCM samples / sample_rate); rate changes keep queues and the timeline.
- * Disabled by default: other sinks retain the core's atempo/seek behavior. */
+ * time (PCM samples / sample_rate). Rate changes keep the timeline and queued
+ * PCM. Leaving speed 1 drops queued passthrough so the sink can open PCM;
+ * passthrough resumes only after speed returns to 1 and the sink still accepts
+ * that format. Disabled by default: other sinks retain atempo and seek. */
 RILLIGHT_CORE_API int rillight_core_configure_external_audio_speed(
     RillightCore *core, int enabled);
 /* Bound RGBA conversion to the physical output viewport without changing the
