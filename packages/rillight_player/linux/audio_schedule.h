@@ -16,10 +16,11 @@ inline int StartOffset(const RillightCoreFrame& frame, int64_t position_us,
                        double speed) {
   if (frame.pts_us < 0 || position_us <= frame.pts_us ||
       speed <= 0 || frame.sample_count <= 0) return 0;
+  const int stride = rillight_core_pcm_bytes_per_frame(&frame);
   const double samples = (position_us - frame.pts_us) * 48000.0 /
                          (1000000.0 * speed);
-  if (samples >= frame.sample_count) return frame.sample_count * 4;
-  return std::max(0, static_cast<int>(std::ceil(samples))) * 4;
+  if (samples >= frame.sample_count) return frame.sample_count * stride;
+  return std::max(0, static_cast<int>(std::ceil(samples))) * stride;
 }
 
 class AudioStartupGate {

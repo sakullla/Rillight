@@ -119,8 +119,25 @@ class _CoreSnapshot {
     this.playbackSpeed,
     this.externalSubtitlePending,
     this.timelineVersion,
-    this.sessionId,
-  );
+    this.sessionId, {
+    this.dolbyVisionProfile = -1,
+    this.videoOutputKind = 0,
+    this.audioDelivery = 0,
+    this.audioChannels = 0,
+    this.audioLayout = 0,
+    this.audioAtmos = 0,
+    this.audioCodecId = 0,
+    this.requestedInterpolation = 0,
+    this.effectiveInterpolation = 0,
+    this.requestedAnime4k = 0,
+    this.effectiveAnime4k = 0,
+    this.requestedSuperResolution = 0,
+    this.effectiveSuperResolution = 0,
+    this.requestedDenoise = 0,
+    this.effectiveDenoise = 0,
+    this.requestedSharpen = 0,
+    this.effectiveSharpen = 0,
+  });
   final int state;
   final int ffmpegError;
   final int videoStreamIndex;
@@ -134,6 +151,23 @@ class _CoreSnapshot {
   final int externalSubtitlePending;
   final int timelineVersion;
   final int sessionId;
+  final int dolbyVisionProfile;
+  final int videoOutputKind;
+  final int audioDelivery;
+  final int audioChannels;
+  final int audioLayout;
+  final int audioAtmos;
+  final int audioCodecId;
+  final int requestedInterpolation;
+  final int effectiveInterpolation;
+  final int requestedAnime4k;
+  final int effectiveAnime4k;
+  final int requestedSuperResolution;
+  final int effectiveSuperResolution;
+  final int requestedDenoise;
+  final int effectiveDenoise;
+  final int requestedSharpen;
+  final int effectiveSharpen;
 }
 
 abstract class CorePlayer {
@@ -502,6 +536,23 @@ class DesktopCorePlayer
         value.externalSubtitlePending,
         value.timelineVersion,
         value.sessionId,
+        dolbyVisionProfile: value.dolbyVisionProfile,
+        videoOutputKind: value.videoOutputKind,
+        audioDelivery: value.audioDelivery,
+        audioChannels: value.audioChannels,
+        audioLayout: value.audioLayout,
+        audioAtmos: value.audioAtmos,
+        audioCodecId: value.audioCodecId,
+        requestedInterpolation: value.requestedInterpolation,
+        effectiveInterpolation: value.effectiveInterpolation,
+        requestedAnime4k: value.requestedAnime4k,
+        effectiveAnime4k: value.effectiveAnime4k,
+        requestedSuperResolution: value.requestedSuperResolution,
+        effectiveSuperResolution: value.effectiveSuperResolution,
+        requestedDenoise: value.requestedDenoise,
+        effectiveDenoise: value.effectiveDenoise,
+        requestedSharpen: value.requestedSharpen,
+        effectiveSharpen: value.effectiveSharpen,
       );
     } finally {
       calloc.free(pointer);
@@ -626,6 +677,23 @@ class DesktopCorePlayer
         ))
           if (!mapped.containsKey(item.index)) item.index,
       ],
+      'dolbyVisionProfile': snapshot.dolbyVisionProfile,
+      'videoOutputKind': snapshot.videoOutputKind,
+      'audioDelivery': snapshot.audioDelivery,
+      'audioChannels': snapshot.audioChannels,
+      'audioLayout': snapshot.audioLayout,
+      'audioAtmos': snapshot.audioAtmos,
+      'audioCodecId': snapshot.audioCodecId,
+      'requestedInterpolation': snapshot.requestedInterpolation,
+      'effectiveInterpolation': snapshot.effectiveInterpolation,
+      'requestedAnime4k': snapshot.requestedAnime4k,
+      'effectiveAnime4k': snapshot.effectiveAnime4k,
+      'requestedSuperResolution': snapshot.requestedSuperResolution,
+      'effectiveSuperResolution': snapshot.effectiveSuperResolution,
+      'requestedDenoise': snapshot.requestedDenoise,
+      'effectiveDenoise': snapshot.effectiveDenoise,
+      'requestedSharpen': snapshot.requestedSharpen,
+      'effectiveSharpen': snapshot.effectiveSharpen,
     };
   }
 

@@ -1,3 +1,5 @@
+#include "../core/audio_contract.h"
+#include "../core/iec61937_pack.h"
 #include "../core/rillight_core.h"
 
 #include <algorithm>
@@ -314,6 +316,211 @@ void overlap_cancel_media_io(void *opaque) {
   media->wake.notify_all();
 }
 
+void *bytes_open(void *opaque, const char *, int) {
+  auto *bytes = static_cast<Bytes *>(opaque);
+  auto *copy = new Bytes(*bytes);
+  copy->offset = 0;
+  return copy;
+}
+
+Bytes make_pcm_wav(int channels, uint32_t samples) {
+  Bytes bytes;
+  auto &data = bytes.data;
+  const uint32_t payload = samples * static_cast<uint32_t>(channels) * 2;
+  data.insert(data.end(), {'R', 'I', 'F', 'F'});
+  append32(data, 36 + payload);
+  data.insert(data.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+  append32(data, 16);
+  append16(data, 1);
+  append16(data, static_cast<uint16_t>(channels));
+  append32(data, 48000);
+  append32(data, 48000 * static_cast<uint32_t>(channels) * 2);
+  append16(data, static_cast<uint16_t>(channels * 2));
+  append16(data, 16);
+  data.insert(data.end(), {'d', 'a', 't', 'a'});
+  append32(data, payload);
+  for (uint32_t index = 0; index < samples; ++index) {
+    for (int channel = 0; channel < channels; ++channel)
+      append16(data, static_cast<uint16_t>((index % 80) * 400 + channel));
+  }
+  return bytes;
+}
+
+struct BitWriter {
+  std::vector<uint8_t> bytes;
+  int bit = 0;
+  void put(int count, int value) {
+    for (int index = count - 1; index >= 0; --index) {
+      const int position = bit++;
+      if (bytes.size() <= static_cast<size_t>(position / 8)) bytes.push_back(0);
+      if ((value >> index) & 1)
+        bytes[position / 8] |= static_cast<uint8_t>(1u << (7 - (position & 7)));
+    }
+  }
+};
+
+std::vector<uint8_t> joc_frame(int joc_bit) {
+  BitWriter writer;
+  writer.put(16, 0x0B77);
+  writer.put(2, 0);
+  writer.put(3, 0);
+  writer.put(11, 31);
+  writer.put(2, 0);
+  writer.put(2, 3);
+  writer.put(3, 7);
+  writer.put(1, 0);
+  writer.put(5, 16);
+  writer.put(5, 0);
+  writer.put(1, 0);
+  writer.put(1, 0);
+  writer.put(1, 0);
+  writer.put(1, 1);
+  writer.put(6, 0);
+  writer.put(7, 0);
+  writer.put(1, joc_bit);
+  writer.put(8, 0);
+  while (writer.bytes.size() < 64) writer.bytes.push_back(0);
+  return writer.bytes;
+}
+
+void expect_contract(int source, int kind, int device, uint32_t accept,
+                     int atmos, double speed, int delivery, int channels) {
+  const auto contract = rillight_audio_contract(source, kind, device, accept,
+                                                atmos, speed);
+  assert(contract.delivery == delivery);
+  assert(contract.channels == channels);
+  assert(contract.atmos == 0 || delivery == RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH);
+  if (delivery != RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH) assert(contract.atmos == 0);
+}
+
+RillightCoreSnapshot snapshot(RillightCore *core);
+
+void play_channel_count(Bytes wav, int device_channels, int expect_channels,
+                        int expect_delivery) {
+  RillightCoreIo io{&wav, bytes_open, read, seek, close, nullptr,
+                    cancel_media_io};
+  auto *core = rillight_core_create(&io);
+  assert(core);
+  auto before = snapshot(core);
+  assert(before.dolby_vision_profile == RILLIGHT_CORE_DOVI_PROFILE_UNKNOWN);
+  assert(before.video_output_kind == RILLIGHT_CORE_VIDEO_OUT_UNKNOWN);
+  assert(before.requested_interpolation == 0 && before.effective_sharpen == 0);
+  RillightCoreAudioSink sink{};
+  sink.struct_size = sizeof(sink);
+  sink.max_pcm_channels = device_channels;
+  assert(rillight_core_configure_audio_sink(core, &sink) == 0);
+  assert(rillight_core_open(core, "layout.wav", 1) == 0);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool matched = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16)) {
+      assert(frame->type == RILLIGHT_CORE_AUDIO_S16);
+      assert(frame->sample_rate == 48000);
+      assert(frame->channels == expect_channels);
+      assert(frame->audio_delivery == expect_delivery);
+      assert(frame->audio_atmos == 0);
+      assert(frame->audio_codec_id == 0);
+      assert(frame->data_size == frame->sample_count * expect_channels * 2);
+      const auto state = snapshot(core);
+      assert(state.audio_channels == expect_channels);
+      assert(state.audio_delivery == expect_delivery);
+      assert(state.audio_atmos == 0);
+      assert(state.video_output_kind == 0);
+      assert(state.dolby_vision_profile == RILLIGHT_CORE_DOVI_PROFILE_NONE);
+      assert(state.requested_anime4k == 0 && state.effective_denoise == 0);
+      rillight_core_release_frame(frame);
+      matched = true;
+      break;
+    }
+    assert(snapshot(core).state != RILLIGHT_CORE_FAILED);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  assert(matched);
+  rillight_core_destroy(core);
+}
+
+void audio_output_contract() {
+  const auto joc = joc_frame(1);
+  const auto plain = joc_frame(0);
+  assert(rillight_eac3_frame_is_joc(joc.data(), static_cast<int>(joc.size())));
+  assert(!rillight_eac3_frame_is_joc(plain.data(), static_cast<int>(plain.size())));
+  assert(!rillight_eac3_frame_is_joc(joc.data(), 4));
+  expect_contract(2, RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC, 8,
+                  RILLIGHT_CORE_AUDIO_ACCEPT_EAC3 | RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD,
+                  1, 1.0, RILLIGHT_CORE_AUDIO_DELIVERY_PCM_STEREO, 2);
+  expect_contract(6, RILLIGHT_CORE_PASSTHROUGH_NONE, 6, 0, 1, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL, 6);
+  expect_contract(6, RILLIGHT_CORE_PASSTHROUGH_NONE, 8, 0, 0, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL, 6);
+  expect_contract(8, RILLIGHT_CORE_PASSTHROUGH_NONE, 6, 0, 0, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL, 6);
+  expect_contract(6, RILLIGHT_CORE_PASSTHROUGH_NONE, 2, 0, 1, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_DOWNMIX, 2);
+  expect_contract(4, RILLIGHT_CORE_PASSTHROUGH_NONE, 8, 0, 0, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_DOWNMIX, 2);
+  expect_contract(6, RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC, 2,
+                  RILLIGHT_CORE_AUDIO_ACCEPT_EAC3, 1, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH, 6);
+  expect_contract(8, RILLIGHT_CORE_PASSTHROUGH_TRUEHD, 8,
+                  RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD, 0, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH, 8);
+  expect_contract(6, RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC, 6,
+                  RILLIGHT_CORE_AUDIO_ACCEPT_EAC3, 1, 1.25,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL, 6);
+  expect_contract(6, RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC, 6, 0, 1, 1.0,
+                  RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL, 6);
+  const auto fast = rillight_audio_contract(
+      6, RILLIGHT_CORE_PASSTHROUGH_TRUEHD, 8, RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD,
+      1, 1.001);
+  assert(fast.delivery != RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH);
+  const auto atmos = rillight_audio_contract(
+      6, RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC, 6, RILLIGHT_CORE_AUDIO_ACCEPT_EAC3,
+      1, 1.0);
+  assert(atmos.atmos == 1 && atmos.passthrough == 1);
+  RillightIec61937Mux mux;
+  std::vector<uint8_t> access(32, 0);
+  access[4] = 0x30;
+  access[5] = static_cast<uint8_t>(16 << 3);
+  std::vector<uint8_t> burst;
+  assert(mux.push_eac3(access.data(), static_cast<int>(access.size()), &burst) == 1);
+  assert(burst.size() == static_cast<size_t>(RillightIec61937Mux::kEac3Period));
+  assert(burst[0] == 0x72 && burst[1] == 0xF8 && burst[2] == 0x1F &&
+         burst[3] == 0x4E && burst[4] == 0x15 && burst[6] == 32);
+  RillightIec61937Mux repeat;
+  access[4] = 0x00;
+  for (int index = 0; index < 5; ++index)
+    assert(repeat.push_eac3(access.data(), static_cast<int>(access.size()),
+                            &burst) == 0);
+  assert(repeat.push_eac3(access.data(), static_cast<int>(access.size()),
+                          &burst) == 1);
+  std::vector<uint8_t> huge(RillightIec61937Mux::kEac3Period, 0);
+  huge[4] = 0x30;
+  huge[5] = static_cast<uint8_t>(16 << 3);
+  RillightIec61937Mux overflow;
+  assert(overflow.push_eac3(huge.data(), static_cast<int>(huge.size()),
+                            &burst) == -1);
+  uint8_t tiny[8]{};
+  assert(mux.push_truehd(tiny, 8, &burst) == -1);
+  auto six = make_pcm_wav(6, 4800);
+  play_channel_count(six, 6, 6, RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL);
+  play_channel_count(six, 2, 2, RILLIGHT_CORE_AUDIO_DELIVERY_PCM_DOWNMIX);
+  RillightCoreIo io{&six, bytes_open, read, seek, close, nullptr,
+                    cancel_media_io};
+  auto *rejected = rillight_core_create(&io);
+  assert(rejected);
+  RillightCoreAudioSink bad{};
+  bad.struct_size = sizeof(bad);
+  bad.max_pcm_channels = 0;
+  assert(rillight_core_configure_audio_sink(rejected, &bad) == -1);
+  bad.max_pcm_channels = 6;
+  bad.accepted_passthrough = 4u;
+  assert(rillight_core_configure_audio_sink(rejected, &bad) == -1);
+  bad.accepted_passthrough = 0;
+  bad.reports_atmos = 2;
+  assert(rillight_core_configure_audio_sink(rejected, &bad) == -1);
+  rillight_core_destroy(rejected);
+}
+
 RillightCoreSnapshot snapshot(RillightCore *core) {
   RillightCoreSnapshot value{};
   value.struct_size = sizeof(value);
@@ -346,6 +553,7 @@ bool wait_for(RillightCore *core, Predicate predicate,
 #endif
 RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile, int compatibility);
 RILLIGHT_DOVI_TEST_API uint8_t rillight_tonemap_channel(int transfer, uint8_t code);
+extern "C" RILLIGHT_DOVI_TEST_API int rillight_core_has_decoder(const char *name);
 
 int main() {
   assert(rillight_dovi_base_rejected(-1, 0) == 0);
@@ -365,6 +573,10 @@ int main() {
   assert(rillight_tonemap_channel(16, 100) == 109);
   assert(rillight_tonemap_channel(18, 80) == 114);
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
+  assert(rillight_core_has_decoder("ac3") == 1);
+  assert(rillight_core_has_decoder("eac3") == 1);
+  assert(rillight_core_has_decoder("truehd") == 1);
+  audio_output_contract();
   const char *versions = rillight_core_ffmpeg_versions();
   assert(versions && std::strstr(versions, "avformat=") != nullptr);
   std::printf("loaded FFmpeg libraries: %s\n", versions);

@@ -115,6 +115,27 @@ void main() {
     expect(transcoding['AudioCodec'], 'aac');
   });
 
+  test(
+    'Dolby direct play does not turn the AAC transcode profile into Atmos',
+    () {
+      final profile = ownedCoreDeviceProfile(
+        h264: true,
+        aac: true,
+        ac3: true,
+        eac3: true,
+        truehd: true,
+      );
+      final transcoding = Map<String, dynamic>.from(
+        (profile['TranscodingProfiles'] as List).first as Map,
+      );
+      expect(transcoding['AudioCodec'], 'aac');
+      expect(transcoding['AudioCodec'].toString().contains('ac3'), isFalse);
+      expect(transcoding['AudioCodec'].toString().contains('truehd'), isFalse);
+      expect(transcoding['AudioCodec'].toString().contains('atmos'), isFalse);
+      expect(transcoding['MaxAudioChannels'], '2');
+    },
+  );
+
   test('verified ASS and SSA support avoids forced subtitle burn-in', () {
     for (final build in [androidDeviceProfile, ownedCoreDeviceProfile]) {
       final profile = build(h264: true, aac: true, ass: true, ssa: true);

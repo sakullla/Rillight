@@ -123,6 +123,7 @@ def build_abi(
         "--disable-asm", "--enable-pic", "--enable-avfilter",
         "--enable-swresample", "--enable-swscale", "--enable-jni",
         "--enable-mediacodec",
+        "--enable-decoder=ac3", "--enable-decoder=eac3", "--enable-decoder=truehd",
     ]
     script = "\n".join([
         "set -euo pipefail",

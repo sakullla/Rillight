@@ -48,6 +48,40 @@ final class NativeCoreSnapshot extends Struct {
   external int allowSoftwareFallback;
   @Int32()
   external int externalSubtitlePending;
+  @Int32()
+  external int dolbyVisionProfile;
+  @Int32()
+  external int videoOutputKind;
+  @Int32()
+  external int audioDelivery;
+  @Int32()
+  external int audioChannels;
+  @Int32()
+  external int audioLayout;
+  @Int32()
+  external int audioAtmos;
+  @Int32()
+  external int audioCodecId;
+  @Int32()
+  external int requestedInterpolation;
+  @Int32()
+  external int effectiveInterpolation;
+  @Int32()
+  external int requestedAnime4k;
+  @Int32()
+  external int effectiveAnime4k;
+  @Int32()
+  external int requestedSuperResolution;
+  @Int32()
+  external int effectiveSuperResolution;
+  @Int32()
+  external int requestedDenoise;
+  @Int32()
+  external int effectiveDenoise;
+  @Int32()
+  external int requestedSharpen;
+  @Int32()
+  external int effectiveSharpen;
 }
 
 final class NativeCoreTrack extends Struct {
@@ -110,10 +144,10 @@ class CoreBindings {
   CoreBindings({String? libraryPath})
     : libraryPath = libraryPath ?? defaultLibraryPath,
       _library = DynamicLibrary.open(libraryPath ?? defaultLibraryPath) {
-    if (abiVersion() != 9) {
+    if (abiVersion() != 10) {
       throw StateError('Unsupported Rillight core ABI ${abiVersion()}');
     }
-    // ABI 9 is incomplete without its required presentation entry point.
+    // ABI 10 is incomplete without its required presentation entry point.
     setSubtitlePresentation;
   }
 

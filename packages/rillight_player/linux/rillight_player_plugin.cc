@@ -12,6 +12,7 @@
 #include <cstdarg>
 #include <condition_variable>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -139,7 +140,31 @@ struct Surface : std::enable_shared_from_this<Surface> {
     Notify();
   }
   void Start(std::function<void(std::string)> ready) {
-    audio_worker = std::thread([this] {
+    std::promise<void> audio_configured;
+    auto audio_ready = audio_configured.get_future();
+    audio_worker = std::thread([this, configured = std::move(audio_configured)]() mutable {
+      int configured_channels = 2;
+      try {
+        uint32_t accept = 0;
+        if (!rillight_linux::ProbeDefaultSink(&configured_channels, &accept)) {
+          configured_channels = 2;
+          accept = 0;
+        }
+        RillightCoreAudioSink sink{};
+        sink.struct_size = sizeof(sink);
+        sink.max_pcm_channels = configured_channels;
+        sink.accepted_passthrough = accept;
+        sink.reports_atmos = 0;
+        if (rillight_core_configure_audio_sink(core, &sink) != 0) {
+          sink.max_pcm_channels = 2;
+          sink.accepted_passthrough = 0;
+          configured_channels = 2;
+          rillight_core_configure_audio_sink(core, &sink);
+        }
+      } catch (...) {
+        configured_channels = 2;
+      }
+      configured.set_value();
       std::unique_ptr<rillight_linux::PulseOutput> audio;
       RillightCoreFrame* pending_audio = nullptr;
       int pending_offset = 0;
@@ -243,17 +268,42 @@ struct Surface : std::enable_shared_from_this<Surface> {
             }
             if (!pending_audio) break;
             auto* frame = pending_audio;
+            const bool compressed =
+                frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH;
+            const int stride = compressed
+                                   ? 1
+                                   : rillight_core_pcm_bytes_per_frame(frame);
             if (frame->session_id != snapshot.session_id ||
                 frame->timeline_version != snapshot.timeline_version ||
-                frame->sample_rate != 48000 || frame->channels != 2 ||
-                frame->data_size != frame->sample_count * 4) {
+                !frame->data || frame->data_size <= 0 ||
+                (!compressed && (frame->sample_rate != 48000 ||
+                                 frame->channels < 1 ||
+                                 frame->data_size !=
+                                     frame->sample_count * stride))) {
               rillight_core_release_frame(frame);
               pending_audio = nullptr;
               continue;
             }
+            if (compressed) {
+              if (!audio->EnsurePassthrough(frame->audio_codec_id) &&
+                  audio->passthrough_rejected()) {
+                RillightCoreAudioSink sink{};
+                sink.struct_size = sizeof(sink);
+                sink.max_pcm_channels = configured_channels;
+                sink.accepted_passthrough = 0;
+                sink.reports_atmos = 0;
+                rillight_core_configure_audio_sink(core, &sink);
+                audio->AbandonPassthrough();
+                rillight_core_release_frame(frame);
+                pending_audio = nullptr;
+                continue;
+              }
+            } else if (!audio->EnsurePcm(frame->channels)) {
+              if (!audio->error().empty()) break;
+              break;
+            }
+            if (audio->Latency() < 0) break;
             if (!audio_clock_started && frame->pts_us >= 0) {
-              const int64_t device_delay = audio->Latency();
-              if (device_delay < 0) break;
               RillightCoreSnapshot current{};
               current.struct_size = sizeof(current);
               if (rillight_core_snapshot(core, &current) != 0 ||
@@ -261,35 +311,70 @@ struct Surface : std::enable_shared_from_this<Surface> {
                   current.timeline_version != snapshot.timeline_version)
                 break;
               if (frame->pts_us > current.position_us + 50000) break;
-              pending_offset = std::max(pending_offset,
-                  rillight_linux::StartOffset(*frame, current.position_us,
-                                              current.playback_speed));
-              if (pending_offset >= frame->data_size) {
+              if (!compressed) {
+                pending_offset = std::max(pending_offset,
+                    rillight_linux::StartOffset(*frame, current.position_us,
+                                                current.playback_speed));
+                if (pending_offset >= frame->data_size) {
+                  rillight_core_release_frame(frame);
+                  pending_audio = nullptr;
+                  continue;
+                }
+              }
+            }
+            const int before = pending_offset;
+            if (compressed) {
+              const size_t written = audio->WriteCompressed(
+                  frame->audio_codec_id, frame->data,
+                  static_cast<size_t>(frame->data_size));
+              if (audio->passthrough_rejected()) {
+                RillightCoreAudioSink sink{};
+                sink.struct_size = sizeof(sink);
+                sink.max_pcm_channels = configured_channels;
+                sink.accepted_passthrough = 0;
+                sink.reports_atmos = 0;
+                rillight_core_configure_audio_sink(core, &sink);
+                audio->AbandonPassthrough();
                 rillight_core_release_frame(frame);
                 pending_audio = nullptr;
                 continue;
               }
+              if (!written) break;
+              pending_offset = frame->data_size;
+              if (frame->pts_us >= 0) {
+                const int samples = frame->sample_count > 0
+                                        ? frame->sample_count : 1536;
+                const int64_t end_pts = frame->pts_us + static_cast<int64_t>(
+                    samples * 1000000.0 / 48000.0 * snapshot.playback_speed);
+                audio_end_pts = end_pts;
+                audio_speed = snapshot.playback_speed;
+                if (first_audio_write == std::chrono::steady_clock::time_point{})
+                  first_audio_write = std::chrono::steady_clock::now();
+                const int64_t delay = audio->Latency();
+                if (delay >= 0) report_audio_clock(end_pts, delay, audio_speed);
+              }
+            } else {
+              pending_offset = rillight_linux::DrainPcm(
+                  frame->data, frame->data_size, pending_offset,
+                  [&](const uint8_t* data, size_t bytes) {
+                    return audio->Write(data, bytes);
+                  },
+                  [&](int sent) {
+                    const int64_t delay = audio->Latency();
+                    if (frame->pts_us < 0) return;
+                    const int64_t end_pts = frame->pts_us +
+                        static_cast<int64_t>(sent / static_cast<double>(stride) /
+                                             48000.0 * 1000000.0 *
+                                             snapshot.playback_speed);
+                    audio_end_pts = end_pts;
+                    audio_speed = snapshot.playback_speed;
+                    if (first_audio_write ==
+                        std::chrono::steady_clock::time_point{})
+                      first_audio_write = std::chrono::steady_clock::now();
+                    if (delay >= 0)
+                      report_audio_clock(end_pts, delay, audio_speed);
+                  }, audio_byte_budget);
             }
-            const int before = pending_offset;
-            pending_offset = rillight_linux::DrainPcm(
-                frame->data, frame->data_size, pending_offset,
-                [&](const uint8_t* data, size_t bytes) {
-                  return audio->Write(data, bytes);
-                },
-                [&](int sent) {
-                  const int64_t delay = audio->Latency();
-                  if (frame->pts_us < 0) return;
-                  const int64_t end_pts = frame->pts_us +
-                      static_cast<int64_t>(sent / 4.0 / 48000.0 *
-                                           1000000.0 * snapshot.playback_speed);
-                  audio_end_pts = end_pts;
-                  audio_speed = snapshot.playback_speed;
-                  if (first_audio_write ==
-                      std::chrono::steady_clock::time_point{})
-                    first_audio_write = std::chrono::steady_clock::now();
-                  if (delay >= 0)
-                    report_audio_clock(end_pts, delay, audio_speed);
-                }, audio_byte_budget);
             audio_byte_budget -= pending_offset - before;
             audio_progress |= pending_offset > before;
             if (!audio->error().empty()) {
@@ -346,6 +431,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
       if (pending_audio) rillight_core_release_frame(pending_audio);
       audio.reset();
     });
+    audio_ready.wait();
     worker = std::thread([this, ready] {
       RillightCoreFrame* last_video = nullptr;
       uint64_t last_session = 0, last_timeline = 0;

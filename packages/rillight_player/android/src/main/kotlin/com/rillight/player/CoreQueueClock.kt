@@ -24,12 +24,22 @@ internal class CoreQueueClock {
     }
 
     fun submitted(framePtsUs: Long, frameBytesWritten: Int, newBytes: Int,
-                  playbackSpeed: Double) {
-        require(frameBytesWritten >= 0 && newBytes >= 0 && newBytes % 4 == 0)
-        submitted += newBytes / 4
+                  playbackSpeed: Double, bytesPerFrame: Int = 4) {
+        require(frameBytesWritten >= 0 && newBytes >= 0 && bytesPerFrame > 0 &&
+            newBytes % bytesPerFrame == 0)
+        submitted += newBytes / bytesPerFrame
         speed = playbackSpeed
         endPtsUs = framePtsUs +
-            (frameBytesWritten.toDouble() / 4 / 48_000 * 1_000_000 * speed).toLong()
+            (frameBytesWritten.toDouble() / bytesPerFrame / 48_000 * 1_000_000 * speed).toLong()
+    }
+
+    /** One compressed access unit is timed from its sample count, not its byte size. */
+    fun submittedAccessUnit(framePtsUs: Long, sampleCount: Int, playbackSpeed: Double) {
+        require(sampleCount > 0)
+        submitted += sampleCount
+        speed = playbackSpeed
+        endPtsUs = framePtsUs +
+            (sampleCount.toDouble() / 48_000 * 1_000_000 * speed).toLong()
     }
 
     fun snapshot(headPosition: Long): Pair<Long, Long>? {

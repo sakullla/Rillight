@@ -88,6 +88,9 @@ internal class CorePlayback(
     private val debugDiagnostics = (context.applicationInfo.flags and
         android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
     @Volatile private var volume = 1f
+    private var sinkChannels = 2
+    private var sinkAccept = 0
+    private var sinkAtmos = false
     @Volatile private var lastPresentedUs = -1L
     @Volatile var session = ""
         private set
@@ -229,6 +232,7 @@ internal class CorePlayback(
                     CoreNative.outputSurface(handle, target, doviProfiles) == 0 &&
                     CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
                     CoreNative.configureExternalAudioSpeed(handle, true) == 0 &&
+                    configureProbedAudioSink(handle) &&
                     CoreNative.open(handle, address, initialStartUs, operation.incrementAndGet()) == 0 &&
                     (!desiredPaused || CoreNative.play(handle, false, operation.incrementAndGet()) == 0)
             } catch (error: Throwable) {
@@ -508,10 +512,18 @@ internal class CorePlayback(
                                     // PCM carries source-time samples. AudioTrack applies
                                     // tempo; multiplying this clock by rate counts it twice.
                                     val written = audio.write(frame, pendingOffset, 1.0)
-                                    if (written > 0) audioReady = true
-                                    pendingOffset += written
-                                    if (pendingOffset >= frame.bytes.size) {
-                                        pending = null; pendingOffset = 0
+                                    if (written < 0) {
+                                        sinkAccept = 0
+                                        sinkAtmos = false
+                                        CoreNative.configureAudioSink(active.handle, sinkChannels, 0, false)
+                                        pending = null
+                                        pendingOffset = 0
+                                    } else {
+                                        if (written > 0) audioReady = true
+                                        pendingOffset += written
+                                        if (pendingOffset >= frame.bytes.size) {
+                                            pending = null; pendingOffset = 0
+                                        }
                                     }
                                 }
                             }
@@ -784,7 +796,41 @@ internal class CorePlayback(
             "videoTrackId" to containerIds?.getOrNull(0)?.takeIf { it > 0 },
             "audioTrackId" to containerIds?.getOrNull(1)?.takeIf { it > 0 },
             // Decoder actually used for the video track; 0 means software or no video.
-            "actualHardware" to actualHardware)
+            "actualHardware" to actualHardware,
+            "dolbyVisionProfile" to (snap?.getOrNull(17)?.toInt() ?: -1),
+            "videoOutputKind" to (snap?.getOrNull(18)?.toInt() ?: 0),
+            "audioDelivery" to (snap?.getOrNull(19)?.toInt() ?: 0),
+            "audioChannels" to (snap?.getOrNull(20)?.toInt() ?: 0),
+            "audioLayout" to (snap?.getOrNull(21)?.toInt() ?: 0),
+            "audioAtmos" to (snap?.getOrNull(22)?.toInt() ?: 0),
+            "audioCodecId" to (snap?.getOrNull(23)?.toInt() ?: 0),
+            "requestedInterpolation" to (snap?.getOrNull(24)?.toInt() ?: 0),
+            "effectiveInterpolation" to (snap?.getOrNull(25)?.toInt() ?: 0),
+            "requestedAnime4k" to (snap?.getOrNull(26)?.toInt() ?: 0),
+            "effectiveAnime4k" to (snap?.getOrNull(27)?.toInt() ?: 0),
+            "requestedSuperResolution" to (snap?.getOrNull(28)?.toInt() ?: 0),
+            "effectiveSuperResolution" to (snap?.getOrNull(29)?.toInt() ?: 0),
+            "requestedDenoise" to (snap?.getOrNull(30)?.toInt() ?: 0),
+            "effectiveDenoise" to (snap?.getOrNull(31)?.toInt() ?: 0),
+            "requestedSharpen" to (snap?.getOrNull(32)?.toInt() ?: 0),
+            "effectiveSharpen" to (snap?.getOrNull(33)?.toInt() ?: 0))
+    }
+
+    private fun configureProbedAudioSink(handle: Long): Boolean {
+        val probed = try {
+            probeAudioSink(context)
+        } catch (error: RuntimeException) {
+            AudioSinkCapability(2, 0, false)
+        }
+        sinkChannels = probed.channels
+        sinkAccept = probed.accept
+        sinkAtmos = probed.atmos
+        if (CoreNative.configureAudioSink(handle, sinkChannels, sinkAccept, sinkAtmos) == 0)
+            return true
+        sinkChannels = 2
+        sinkAccept = 0
+        sinkAtmos = false
+        return CoreNative.configureAudioSink(handle, 2, 0, false) == 0
     }
 
     private fun requestFocus(): Boolean {

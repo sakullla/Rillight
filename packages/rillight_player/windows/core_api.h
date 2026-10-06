@@ -23,6 +23,8 @@ class CoreApi {
       abi_version = Resolve<decltype(abi_version)>("rillight_core_abi_version");
       configure_hardware = Resolve<decltype(configure_hardware)>(
           "rillight_core_configure_hardware");
+      configure_audio_sink = Resolve<decltype(configure_audio_sink)>(
+          "rillight_core_configure_audio_sink");
       set_video_output_size = Resolve<decltype(set_video_output_size)>(
           "rillight_core_set_video_output_size");
       configure_gpu_video = Resolve<decltype(configure_gpu_video)>("rillight_core_configure_gpu_video");
@@ -57,6 +59,7 @@ class CoreApi {
 
   decltype(&rillight_core_abi_version) abi_version = nullptr;
   decltype(&rillight_core_configure_hardware) configure_hardware = nullptr;
+  decltype(&rillight_core_configure_audio_sink) configure_audio_sink = nullptr;
   decltype(&rillight_core_set_video_output_size) set_video_output_size = nullptr;
   decltype(&rillight_core_configure_gpu_video) configure_gpu_video = nullptr;
   decltype(&rillight_core_configure_hdr_video) configure_hdr_video = nullptr;

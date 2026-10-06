@@ -339,6 +339,17 @@ Java_com_rillight_player_CoreNative_configureExternalAudioSpeed(
       bridge(handle)->core, enabled == JNI_TRUE) : -1;
 }
 JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_configureAudioSink(
+    JNIEnv *, jobject, jlong handle, jint channels, jint accepted, jboolean atmos) {
+  if (!handle) return -1;
+  RillightCoreAudioSink sink{};
+  sink.struct_size = sizeof(sink);
+  sink.max_pcm_channels = channels;
+  sink.accepted_passthrough = static_cast<uint32_t>(accepted);
+  sink.reports_atmos = atmos == JNI_TRUE ? 1 : 0;
+  return rillight_core_configure_audio_sink(bridge(handle)->core, &sink);
+}
+JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_selectAudio(JNIEnv *, jobject, jlong handle,
                                                jint stream, jlong operation) {
   if (!handle) return -1;
@@ -368,7 +379,7 @@ Java_com_rillight_player_CoreNative_addSubtitle(JNIEnv *env, jobject,
 
 // state, session, operation, timeline, error, video, audio, subtitle,
 // duration, position, firstVideo, firstAudio, EOF, queuedVideo, queuedAudio,
-// externalPending, speed * 1000.
+// externalPending, speed * 1000, then the ABI 10 output fields in header order.
 JNIEXPORT jlongArray JNICALL
 Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle) {
   if (!handle) return nullptr;
@@ -383,7 +394,14 @@ Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle)
       s.subtitle_stream_index, s.duration_us, s.position_us,
       s.first_video_frame_ready, s.first_audio_frame_ready, s.source_eof,
       s.queued_video_frames, s.queued_audio_frames,
-      s.external_subtitle_pending, static_cast<jlong>(s.playback_speed * 1000)};
+      s.external_subtitle_pending, static_cast<jlong>(s.playback_speed * 1000),
+      s.dolby_vision_profile, s.video_output_kind, s.audio_delivery,
+      s.audio_channels, s.audio_layout, s.audio_atmos, s.audio_codec_id,
+      s.requested_interpolation, s.effective_interpolation,
+      s.requested_anime4k, s.effective_anime4k,
+      s.requested_super_resolution, s.effective_super_resolution,
+      s.requested_denoise, s.effective_denoise,
+      s.requested_sharpen, s.effective_sharpen};
   return numbers(env, values, sizeof(values) / sizeof(values[0]));
 }
 
@@ -459,11 +477,14 @@ Java_com_rillight_player_CoreNative_takeAudio(JNIEnv *env, jobject,
   if (bytes) env->SetByteArrayRegion(bytes, 0, frame->data_size,
                                     reinterpret_cast<const jbyte *>(frame->data));
   jclass cls = env->FindClass("com/rillight/player/CoreAudioFrame");
-  jmethodID ctor = cls ? env->GetMethodID(cls, "<init>", "(JJJ[B)V") : nullptr;
+  jmethodID ctor = cls ? env->GetMethodID(cls, "<init>", "(JJJ[BIIIZI)V") : nullptr;
   jobject result = bytes && ctor ? env->NewObject(cls, ctor,
       static_cast<jlong>(frame->session_id),
       static_cast<jlong>(frame->timeline_version),
-      static_cast<jlong>(frame->pts_us), bytes) : nullptr;
+      static_cast<jlong>(frame->pts_us), bytes,
+      frame->channels, frame->sample_count, frame->audio_delivery,
+      frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH ? JNI_TRUE : JNI_FALSE,
+      frame->audio_codec_id) : nullptr;
   if (cls) env->DeleteLocalRef(cls);
   if (bytes) env->DeleteLocalRef(bytes);
   rillight_core_release_frame(frame);

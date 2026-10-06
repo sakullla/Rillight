@@ -36,6 +36,7 @@ FFMPEG_CONFIGURE = [
     "--disable-avdevice", "--enable-network", "--disable-autodetect",
     "--enable-pic", "--enable-avfilter", "--enable-swresample", "--enable-swscale",
     "--enable-videotoolbox", "--enable-libdav1d",
+    "--enable-decoder=ac3", "--enable-decoder=eac3", "--enable-decoder=truehd",
 ]
 
 

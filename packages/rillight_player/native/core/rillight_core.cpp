@@ -1,4 +1,5 @@
 #include "rillight_core.h"
+#include "audio_contract.h"
 #include "video_buffer_pool.h"
 #include "video_frame_cost.h"
 #include "dovi_profile.h"
@@ -330,6 +331,10 @@ struct AudioFilter {
   int64_t media_anchor = AV_NOPTS_VALUE;
   int64_t output_anchor = AV_NOPTS_VALUE;
   int64_t next_media_pts = AV_NOPTS_VALUE;
+  int output_channels = 2;
+  int output_layout = RILLIGHT_CORE_CH_LAYOUT_STEREO;
+  int output_delivery = RILLIGHT_CORE_AUDIO_DELIVERY_PCM_STEREO;
+  uint64_t sink_generation = 0;
 };
 
 struct SubtitleBitmap {
@@ -907,6 +912,27 @@ struct RillightCoreImpl {
   size_t embedded_stream_count = 0;
 #endif
   double speed = 1.0;
+  int sink_max_channels = 2;
+  uint32_t sink_accept = 0;
+  int sink_atmos = 0;
+  uint64_t sink_generation = 0;
+  int dolby_vision_profile = RILLIGHT_CORE_DOVI_PROFILE_UNKNOWN;
+  int video_output_kind = RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;
+  int audio_delivery = RILLIGHT_CORE_AUDIO_DELIVERY_NONE;
+  int audio_channels = 0;
+  int audio_layout = RILLIGHT_CORE_CH_LAYOUT_NONE;
+  int audio_atmos = 0;
+  int audio_codec_id = 0;
+  int requested_interpolation = 0;
+  int effective_interpolation = 0;
+  int requested_anime4k = 0;
+  int effective_anime4k = 0;
+  int requested_super_resolution = 0;
+  int effective_super_resolution = 0;
+  int requested_denoise = 0;
+  int effective_denoise = 0;
+  int requested_sharpen = 0;
+  int effective_sharpen = 0;
   double volume = 1.0;
   bool external_audio_speed = false;
   double requested_speed = 1.0;
@@ -2080,9 +2106,15 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
 }
 
 int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
-                         double speed, int64_t media_pts) {
+                         double speed, int64_t media_pts,
+                         const RillightAudioContract &contract,
+                         uint64_t sink_generation) {
+  if (!contract.ffmpeg_layout || contract.channels < 1) return AVERROR(EINVAL);
   if (filter->graph && filter->input_rate == frame->sample_rate &&
       filter->input_format == frame->format && filter->speed == speed &&
+      filter->output_channels == contract.channels &&
+      filter->output_layout == contract.layout &&
+      filter->sink_generation == sink_generation &&
       av_channel_layout_compare(&filter->input_layout, &frame->ch_layout) == 0)
     return 0;
   close_audio_filter(filter);
@@ -2124,9 +2156,12 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
         second_arg.c_str(), nullptr, filter->graph);
     if (result < 0) return result;
   }
+  char format_args[160] = {};
+  std::snprintf(format_args, sizeof(format_args),
+                "sample_fmts=s16:sample_rates=48000:channel_layouts=%s",
+                contract.ffmpeg_layout);
   result = avfilter_graph_create_filter(
-      &format, avfilter_get_by_name("aformat"), "format",
-      "sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
+      &format, avfilter_get_by_name("aformat"), "format", format_args,
       nullptr, filter->graph);
   if (result < 0) return result;
   result = avfilter_graph_create_filter(
@@ -2153,6 +2188,10 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
   filter->input_rate = frame->sample_rate;
   filter->input_format = static_cast<AVSampleFormat>(frame->format);
   filter->speed = speed;
+  filter->output_channels = contract.channels;
+  filter->output_layout = contract.layout;
+  filter->output_delivery = contract.delivery;
+  filter->sink_generation = sink_generation;
   filter->media_anchor = media_pts;
   filter->output_anchor = AV_NOPTS_VALUE;
   filter->next_media_pts = media_pts;
@@ -2162,9 +2201,9 @@ int prepare_audio_filter(AudioFilter *filter, const AVFrame *frame,
 RillightCoreFrame *convert_audio(const AVFrame *frame, AudioFilter *filter,
                                  uint64_t session, uint64_t timeline) {
   if (frame->format != AV_SAMPLE_FMT_S16 || frame->sample_rate != 48000 ||
-      frame->ch_layout.nb_channels != 2 || frame->nb_samples <= 0 ||
-      frame->nb_samples > 480000) return nullptr;
-  const int bytes = frame->nb_samples * 4;
+      frame->ch_layout.nb_channels != filter->output_channels ||
+      frame->nb_samples <= 0 || frame->nb_samples > 480000) return nullptr;
+  const int bytes = frame->nb_samples * filter->output_channels * 2;
   auto *output = new (std::nothrow) RillightCoreFrame{};
   if (!output) return nullptr;
   output->data = new (std::nothrow) uint8_t[bytes];
@@ -2192,7 +2231,11 @@ RillightCoreFrame *convert_audio(const AVFrame *frame, AudioFilter *filter,
   output->timeline_version = timeline;
   output->pts_us = pts == AV_NOPTS_VALUE ? -1 : pts;
   output->sample_rate = 48000;
-  output->channels = 2;
+  output->channels = filter->output_channels;
+  output->channel_layout = filter->output_layout;
+  output->audio_delivery = filter->output_delivery;
+  output->audio_codec_id = 0;
+  output->audio_atmos = 0;
   output->sample_count = frame->nb_samples;
   output->data_size = bytes;
   return output;
@@ -2202,21 +2245,21 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
              int video_index, uint64_t timeline) {
   if (!frame) return 0;
   std::unique_lock lock(core->mutex);
-  auto &queue = frame->type != RILLIGHT_CORE_AUDIO_S16 ? core->video : core->audio;
-  auto &bytes = frame->type != RILLIGHT_CORE_AUDIO_S16 ? core->video_bytes : core->audio_bytes;
+  const bool audio = rillight_core_frame_is_audio(frame->type);
+  auto &queue = audio ? core->audio : core->video;
+  auto &bytes = audio ? core->audio_bytes : core->video_bytes;
   if ((core->state == RILLIGHT_CORE_RECOVERING ||
        core->state == RILLIGHT_CORE_OPENING) && frame->pts_us != -1 &&
-      frame->pts_us + (frame->type != RILLIGHT_CORE_AUDIO_S16 ? 5000 : 20000) <
+      frame->pts_us + (audio ? 20000 : 5000) <
           core->base_position) {
     lock.unlock();
     rillight_core_release_frame(frame);
     return 0;
   }
-  const auto max_count = frame->type != RILLIGHT_CORE_AUDIO_S16
-                             ? kMaxVideoFrames : kMaxAudioFrames;
-  const auto max_bytes = frame->type != RILLIGHT_CORE_AUDIO_S16
-                             ? kMaxVideoBytes * ((core->hdr_video || core->macos_edr) ? 2 : 1)
-                             : kMaxAudioBytes;
+  const auto max_count = audio ? kMaxAudioFrames : kMaxVideoFrames;
+  const auto max_bytes = audio
+                             ? kMaxAudioBytes
+                             : kMaxVideoBytes * ((core->hdr_video || core->macos_edr) ? 2 : 1);
   core->wake.wait(lock, [&] {
     return core->stop || core->decode_abort || core->timeline != timeline ||
            (queue.size() < max_count && bytes + frame->data_size <= max_bytes);
@@ -2228,8 +2271,16 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
   }
   bytes += frame->data_size;
   queue.push_back(frame);
-  if (frame->type != RILLIGHT_CORE_AUDIO_S16) core->first_video = true;
-  if (frame->type == RILLIGHT_CORE_AUDIO_S16) core->first_audio = true;
+  if (!audio) core->first_video = true;
+  if (audio) {
+    core->first_audio = true;
+    core->audio_delivery = frame->audio_delivery;
+    core->audio_channels = frame->channels;
+    core->audio_layout = frame->channel_layout;
+    core->audio_atmos = frame->audio_delivery == RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH
+                            ? frame->audio_atmos : 0;
+    core->audio_codec_id = frame->audio_codec_id;
+  }
   if ((video_index >= 0 && core->first_video) ||
       (video_index < 0 && core->first_audio)) {
     if (core->state == RILLIGHT_CORE_OPENING ||
@@ -2427,6 +2478,82 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
 
 using VideoSink = std::function<int(AVFrame *, int, uint32_t, uint64_t)>;
 
+struct AudioSinkView {
+  int max_channels;
+  uint32_t accept;
+  int atmos;
+  double speed;
+  uint64_t generation;
+};
+
+AudioSinkView audio_sink_view(RillightCoreImpl *core) {
+  std::lock_guard lock(core->mutex);
+  return {core->sink_max_channels, core->sink_accept, core->sink_atmos,
+          core->speed, core->sink_generation};
+}
+
+int packet_passthrough_kind(const AVCodecParameters *parameters,
+                            const AVPacket *packet, uint32_t accept,
+                            double speed) {
+  if (!parameters || !packet || !packet->data || packet->size <= 0)
+    return RILLIGHT_CORE_PASSTHROUGH_NONE;
+  if (!(speed > 0.999 && speed < 1.001)) return RILLIGHT_CORE_PASSTHROUGH_NONE;
+  if (parameters->codec_id == AV_CODEC_ID_TRUEHD &&
+      (accept & RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD) != 0)
+    return RILLIGHT_CORE_PASSTHROUGH_TRUEHD;
+  if (parameters->codec_id == AV_CODEC_ID_EAC3 &&
+      (accept & RILLIGHT_CORE_AUDIO_ACCEPT_EAC3) != 0 &&
+      (parameters->profile == AV_PROFILE_EAC3_DDP_ATMOS ||
+       rillight_eac3_frame_is_joc(packet->data, packet->size)))
+    return RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC;
+  return RILLIGHT_CORE_PASSTHROUGH_NONE;
+}
+
+RillightCoreFrame *passthrough_frame(const AVPacket *packet,
+                                     const AVStream *stream, int kind,
+                                     const AudioSinkView &view,
+                                     uint64_t session, uint64_t timeline) {
+  if (!packet || packet->size <= 0 || !stream || !stream->codecpar)
+    return nullptr;
+  const auto contract = rillight_audio_contract(
+      stream->codecpar->ch_layout.nb_channels, kind, view.max_channels,
+      view.accept, view.atmos, view.speed);
+  if (!contract.passthrough) return nullptr;
+  auto *output = new (std::nothrow) RillightCoreFrame{};
+  if (!output) return nullptr;
+  output->data = new (std::nothrow) uint8_t[packet->size];
+  if (!output->data) {
+    delete output;
+    return nullptr;
+  }
+  std::memcpy(output->data, packet->data, static_cast<size_t>(packet->size));
+  int64_t pts = -1;
+  if (packet->pts != AV_NOPTS_VALUE)
+    pts = av_rescale_q(packet->pts, stream->time_base, AVRational{1, 1000000});
+  const int sample_rate = stream->codecpar->sample_rate > 0
+                              ? stream->codecpar->sample_rate : 48000;
+  int sample_count = 0;
+  if (packet->duration > 0 && sample_rate > 0) {
+    const int64_t scaled = av_rescale_q(packet->duration, stream->time_base,
+                                        AVRational{1, sample_rate});
+    if (scaled > 0 && scaled <= 480000) sample_count = static_cast<int>(scaled);
+  }
+  output->struct_size = sizeof(*output);
+  output->type = RILLIGHT_CORE_AUDIO_PASSTHROUGH;
+  output->session_id = session;
+  output->timeline_version = timeline;
+  output->pts_us = pts;
+  output->sample_rate = sample_rate;
+  output->channels = contract.channels;
+  output->channel_layout = contract.layout;
+  output->audio_codec_id = kind;
+  output->audio_delivery = contract.delivery;
+  output->audio_atmos = contract.atmos;
+  output->sample_count = sample_count;
+  output->data_size = packet->size;
+  return output;
+}
+
 int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
                   Decoder &decoder, const AVPacket *packet, int video_index,
                   VideoScale *scale, AudioFilter *audio_filter,
@@ -2500,7 +2627,20 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
       // while the video clock runs ahead and discards all following pictures.
       const int64_t audio_pts = decoded->best_effort_timestamp == AV_NOPTS_VALUE
                                     ? AV_NOPTS_VALUE : pts;
-      result = prepare_audio_filter(audio_filter, decoded, speed, audio_pts);
+      int max_channels = 2;
+      int reports_atmos = 0;
+      uint64_t generation = 0;
+      {
+        std::lock_guard lock(core->mutex);
+        max_channels = core->sink_max_channels;
+        reports_atmos = core->sink_atmos;
+        generation = core->sink_generation;
+      }
+      const auto contract = rillight_audio_contract(
+          decoded->ch_layout.nb_channels, RILLIGHT_CORE_PASSTHROUGH_NONE,
+          max_channels, 0, reports_atmos, speed);
+      result = prepare_audio_filter(audio_filter, decoded, speed, audio_pts,
+                                    contract, generation);
       decoded->pts = audio_pts == AV_NOPTS_VALUE ? AV_NOPTS_VALUE :
           av_rescale_q(audio_pts, AVRational{1, 1000000},
                        AVRational{1, decoded->sample_rate});
@@ -2880,6 +3020,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
   };
   DecodeLane video_lane(core, 16u * 1024u * 1024u, RILLIGHT_CORE_VIDEO_RGBA);
   DecodeLane audio_lane(core, 4u * 1024u * 1024u, RILLIGHT_CORE_AUDIO_S16);
+  bool passthrough_mode = false;
   DecodeLane subtitle_lane(core, 2u * 1024u * 1024u, 0);
   int result = AVERROR(ENOMEM);
   bool ended = false;
@@ -2925,6 +3066,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       result = restore_dovi_configuration(format, vi, &pending_packets);
     }
     if (result < 0) goto finish;
+    int opened_dovi_profile = RILLIGHT_CORE_DOVI_PROFILE_NONE;
     if (vi >= 0) {
       const auto *parameters = format->streams[vi]->codecpar;
       const auto *dovi = av_packet_side_data_get(
@@ -2934,6 +3076,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
           dovi->size >= sizeof(AVDOVIDecoderConfigurationRecord)) {
         const auto *record =
             reinterpret_cast<const AVDOVIDecoderConfigurationRecord *>(dovi->data);
+        opened_dovi_profile = record->dv_profile > 0
+            ? record->dv_profile : RILLIGHT_CORE_DOVI_PROFILE_NONE;
         bool unsupported = rillight_dovi_base_rejected(record->dv_profile,
                                         record->dv_bl_signal_compatibility_id) != 0;
         if (record->dv_profile == 5 && !record->el_present_flag)
@@ -2979,6 +3123,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       goto finish;
     }
     std::lock_guard lock(core->mutex);
+    core->dolby_vision_profile = opened_dovi_profile;
     core->video_index = video.stream;
     core->android_color_buffers = video.android_color_buffers;
     const AVRational rate = video.stream >= 0
@@ -3061,6 +3206,28 @@ void run(RillightCoreImpl *core, uint64_t session) {
 
       return result;
     }) || !audio_lane.Start([&](const AVPacket *packet, uint64_t timeline) {
+      const AVCodecParameters *parameters = audio.stream >= 0
+          ? format->streams[audio.stream]->codecpar : nullptr;
+      const AudioSinkView view = audio_sink_view(core);
+      const int kind = packet_passthrough_kind(parameters, packet, view.accept,
+                                               view.speed);
+      const auto negotiated = rillight_audio_contract(
+          parameters ? parameters->ch_layout.nb_channels : 0, kind,
+          view.max_channels, view.accept, view.atmos, view.speed);
+      // A stereo source stays PCM even when the packet itself is JOC or
+      // TrueHD. Rejected passthrough must decode instead of failing the lane.
+      const bool want = negotiated.passthrough != 0;
+      if (want != passthrough_mode) {
+        if (audio.context) avcodec_flush_buffers(audio.context);
+        close_audio_filter(&audio_filter);
+        passthrough_mode = want;
+      }
+      if (want) {
+        auto *output = passthrough_frame(
+            packet, format->streams[audio.stream], kind, view, session, timeline);
+        if (!output) return AVERROR(ENOMEM);
+        return enqueue(core, output, video.stream, timeline);
+      }
       int result = decode_packet(core, format, audio, packet, video.stream,
           &scale, &audio_filter, &subtitle_cues, &ass,
           core->external_audio_speed ? 1.0 : core->speed, session, timeline);
@@ -3596,6 +3763,24 @@ RillightCore *rillight_core_create_loopback(void) {
   auto *core = rillight_core_create(&io);
   if (core) impl(core)->owned_loopback = std::move(owner);
   return core;
+}
+
+int rillight_core_configure_audio_sink(RillightCore *pointer,
+                                        const RillightCoreAudioSink *sink) {
+  if (!pointer || !sink || sink->struct_size != sizeof(*sink)) return -1;
+  if (sink->max_pcm_channels < 1 || sink->max_pcm_channels > 8) return -1;
+  if (sink->reports_atmos != 0 && sink->reports_atmos != 1) return -1;
+  const uint32_t known = RILLIGHT_CORE_AUDIO_ACCEPT_EAC3 |
+                         RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD;
+  if ((sink->accepted_passthrough & ~known) != 0) return -1;
+  auto *core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->state == RILLIGHT_CORE_CLOSING) return -1;
+  core->sink_max_channels = sink->max_pcm_channels;
+  core->sink_accept = sink->accepted_passthrough;
+  core->sink_atmos = sink->reports_atmos;
+  core->sink_generation++;
+  return 0;
 }
 
 int rillight_core_configure_external_audio_speed(RillightCore* pointer,
@@ -4209,6 +4394,23 @@ int rillight_core_snapshot(RillightCore *pointer,
   snapshot->preferred_hardware = core->hardware_preference;
   snapshot->allow_software_fallback = core->allow_software_fallback;
   snapshot->external_subtitle_pending = core->external_subtitle_pending;
+  snapshot->dolby_vision_profile = core->dolby_vision_profile;
+  snapshot->video_output_kind = core->video_output_kind;
+  snapshot->audio_delivery = core->audio_delivery;
+  snapshot->audio_channels = core->audio_channels;
+  snapshot->audio_layout = core->audio_layout;
+  snapshot->audio_atmos = core->audio_atmos;
+  snapshot->audio_codec_id = core->audio_codec_id;
+  snapshot->requested_interpolation = core->requested_interpolation;
+  snapshot->effective_interpolation = core->effective_interpolation;
+  snapshot->requested_anime4k = core->requested_anime4k;
+  snapshot->effective_anime4k = core->effective_anime4k;
+  snapshot->requested_super_resolution = core->requested_super_resolution;
+  snapshot->effective_super_resolution = core->effective_super_resolution;
+  snapshot->requested_denoise = core->requested_denoise;
+  snapshot->effective_denoise = core->effective_denoise;
+  snapshot->requested_sharpen = core->requested_sharpen;
+  snapshot->effective_sharpen = core->effective_sharpen;
 #if defined(__ANDROID__) && !defined(NDEBUG)
   const auto trace_now = Clock::now();
   if (trace_now - core->trace_last_log >= std::chrono::seconds(2)) {
@@ -4327,15 +4529,15 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   if (!pointer) return nullptr;
   auto *core = impl(pointer);
   std::lock_guard lock(core->mutex);
-  if (type != RILLIGHT_CORE_VIDEO_RGBA && type != RILLIGHT_CORE_VIDEO_D3D11 &&
-      type != RILLIGHT_CORE_VIDEO_MEDIACODEC && type != RILLIGHT_CORE_VIDEO_ANDROID_P010 &&
-      type != RILLIGHT_CORE_AUDIO_S16)
+  const bool audio = rillight_core_frame_is_audio(type);
+  if (!audio && type != RILLIGHT_CORE_VIDEO_RGBA && type != RILLIGHT_CORE_VIDEO_D3D11 &&
+      type != RILLIGHT_CORE_VIDEO_MEDIACODEC && type != RILLIGHT_CORE_VIDEO_ANDROID_P010)
     return nullptr;
-  if (type == RILLIGHT_CORE_AUDIO_S16 &&
+  if (audio &&
       core->state == RILLIGHT_CORE_RECOVERING && core->video_index >= 0 &&
       !core->first_video)
     return nullptr;
-  if (type != RILLIGHT_CORE_AUDIO_S16 && core->subtitle_redraw && core->displayed_clean) {
+  if (!audio && core->subtitle_redraw && core->displayed_clean) {
     auto *redraw = core->subtitle_preview;
     if (type == RILLIGHT_CORE_VIDEO_RGBA && redraw &&
         redraw->type != RILLIGHT_CORE_VIDEO_RGBA &&
@@ -4344,10 +4546,10 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
     core->subtitle_redraw = false;
     return redraw;
   }
-  auto &queue = type != RILLIGHT_CORE_AUDIO_S16 ? core->video : core->audio;
-  auto &bytes = type != RILLIGHT_CORE_AUDIO_S16 ? core->video_bytes : core->audio_bytes;
+  auto &queue = audio ? core->audio : core->video;
+  auto &bytes = audio ? core->audio_bytes : core->video_bytes;
   if (queue.empty()) {
-    if (type != RILLIGHT_CORE_AUDIO_S16 && core->first_video &&
+    if (!audio && core->first_video &&
         core->audio_index >= 0 &&
         (core->audio_clock_active || core->audio_clock_handed_off) &&
         core->state == RILLIGHT_CORE_PLAYING && !core->eof &&
@@ -4363,7 +4565,7 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
     }
     return nullptr;
   }
-  if (type != RILLIGHT_CORE_AUDIO_S16 && queue.front()->pts_us >= 0) {
+  if (!audio && queue.front()->pts_us >= 0) {
     const int64_t clock_us = playback_position(core);
     while (queue.size() > 1 && queue[1]->pts_us >= 0 &&
            queue[1]->pts_us + 100000 < clock_us) {
@@ -4382,7 +4584,7 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   auto *frame = queue.front();
   queue.pop_front();
   bytes -= frame->data_size;
-  if (type == RILLIGHT_CORE_AUDIO_S16 && core->volume != 1.0) {
+  if (frame->type == RILLIGHT_CORE_AUDIO_S16 && core->volume != 1.0) {
     auto *samples = reinterpret_cast<int16_t *>(frame->data);
     const int count = frame->data_size / sizeof(int16_t);
     for (int index = 0; index < count; ++index) {
@@ -4390,7 +4592,7 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
       samples[index] = static_cast<int16_t>(std::clamp(value, -32768.0, 32767.0));
     }
   }
-  if (type != RILLIGHT_CORE_AUDIO_S16) {
+  if (!audio) {
     core->paused_video_frame_emitted = true;
     rillight_core_release_frame(core->displayed_clean);
     core->displayed_clean = nullptr;
@@ -4410,7 +4612,7 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
 
 void rillight_core_release_frame(RillightCoreFrame *frame) {
   if (!frame) return;
-  if (frame->type != RILLIGHT_CORE_AUDIO_S16) {
+  if (!rillight_core_frame_is_audio(frame->type)) {
     auto *video = static_cast<VideoOutputFrame *>(frame);
     if (video->data) video->buffers->Recycle(video->data, video->data_size);
     delete video;

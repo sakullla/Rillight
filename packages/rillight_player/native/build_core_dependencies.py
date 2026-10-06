@@ -141,6 +141,7 @@ def main() -> int:
         "--enable-network", "--enable-pic", "--enable-avfilter",
         "--enable-swresample", "--enable-swscale", "--enable-vaapi",
         "--enable-libdrm", "--enable-libdav1d",
+        "--enable-decoder=ac3", "--enable-decoder=eac3", "--enable-decoder=truehd",
     ]
     run(configure, build)
     run(["make", f"-j{args.jobs}"], build)

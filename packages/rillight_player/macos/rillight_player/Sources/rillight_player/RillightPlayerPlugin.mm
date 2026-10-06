@@ -146,6 +146,12 @@ using Clock = std::chrono::steady_clock;
       });
       return;
     }
+    RillightCoreAudioSink sink{};
+    sink.struct_size = sizeof(sink);
+    sink.max_pcm_channels = rillight_macos::DefaultOutputChannelTarget();
+    sink.accepted_passthrough = 0;
+    sink.reports_atmos = 0;
+    rillight_core_configure_audio_sink(self->core, &sink);
     double headroom = 1;
     if (rillight_macos::CreateEdrSurface(&self->_edr, self->flutterView,
                                          &headroom) &&
@@ -344,10 +350,6 @@ using Clock = std::chrono::steady_clock;
     _audioClockStarted = _audioHandedOff = _audioPaused = false;
     _audioGapSince = _audioStartupSince = _firstAudioWriteSince = {};
   }
-  if (snapshot.audio_stream_index >= 0 && !_audio &&
-      snapshot.state == RILLIGHT_CORE_PLAYING) {
-    _audio = std::make_unique<rillight_macos::CoreAudioOutput>();
-  }
   if (_audio && !_audio->error().empty()) {
     [self setFailure:[NSString stringWithUTF8String:_audio->error().c_str()]];
     return;
@@ -366,7 +368,7 @@ using Clock = std::chrono::steady_clock;
     [self reportAudio:snapshot delay:_audio->DelayUs()];
 
   bool waitingFutureAudio = false;
-  if (_audio && snapshot.state == RILLIGHT_CORE_PLAYING) {
+  if (snapshot.state == RILLIGHT_CORE_PLAYING) {
     for (int attempts = 0; attempts < 8; ++attempts) {
       if (!_pendingAudio) {
         _pendingAudio = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
@@ -374,15 +376,22 @@ using Clock = std::chrono::steady_clock;
       }
       if (!_pendingAudio) break;
       auto* frame = _pendingAudio;
-      if (frame->session_id != snapshot.session_id ||
+      const int stride = rillight_core_pcm_bytes_per_frame(frame);
+      if (frame->type != RILLIGHT_CORE_AUDIO_S16 ||
+          frame->session_id != snapshot.session_id ||
           frame->timeline_version != snapshot.timeline_version ||
-          frame->sample_rate != 48000 || frame->channels != 2 ||
+          frame->sample_rate != 48000 || frame->channels < 1 ||
           frame->sample_count <= 0 ||
-          static_cast<int64_t>(frame->sample_count) * 4 != frame->data_size ||
+          static_cast<int64_t>(frame->sample_count) * stride != frame->data_size ||
           !frame->data) {
         rillight_core_release_frame(frame);
         _pendingAudio = nullptr;
         continue;
+      }
+      if (!_audio || _audio->channels() != frame->channels) {
+        if (_audio) _audio->Reset();
+        _audio = std::make_unique<rillight_macos::CoreAudioOutput>(frame->channels);
+        if (!_audio->error().empty()) break;
       }
       if (frame->pts_us >= 0 &&
           frame->pts_us > snapshot.position_us + 50000 &&
@@ -396,7 +405,7 @@ using Clock = std::chrono::steady_clock;
                               (1000000.0 * snapshot.playback_speed);
           _audioOffset = std::max(_audioOffset,
               static_cast<int>(std::min<double>(frame->sample_count,
-                                               std::ceil(late))) * 4);
+                                               std::ceil(late))) * stride);
         }
       }
       if (_audioOffset >= frame->data_size) {
@@ -417,7 +426,7 @@ using Clock = std::chrono::steady_clock;
         if (_firstAudioWriteSince == Clock::time_point{})
           _firstAudioWriteSince = Clock::now();
         _audioEndPts = frame->pts_us + static_cast<int64_t>(
-            (_audioOffset / 4.0) * 1000000.0 / 48000.0 *
+            (_audioOffset / static_cast<double>(stride)) * 1000000.0 / 48000.0 *
             snapshot.playback_speed);
         _audioSpeed = snapshot.playback_speed;
         [self reportAudio:snapshot delay:_audio->DelayUs()];

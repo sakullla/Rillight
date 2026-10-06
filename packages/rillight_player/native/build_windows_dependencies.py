@@ -116,7 +116,9 @@ def main() -> None:
                      '--disable-static', '--disable-programs', '--disable-doc',
                      '--enable-network', '--disable-autodetect', '--enable-avfilter',
                      '--enable-swresample', '--enable-swscale', '--enable-d3d11va',
-                     '--enable-dxva2', '--enable-libdav1d']
+                     '--enable-dxva2', '--enable-libdav1d',
+                     '--enable-decoder=ac3', '--enable-decoder=eac3',
+                     '--enable-decoder=truehd']
         shell(f'export PKG_CONFIG_PATH={shlex.quote(prefix_unix + "/lib/pkgconfig")}\n' +
               f'cd {shlex.quote(unix(build))}\n' +
               shlex.join([unix(work / 'ffmpeg/configure'), *configure]) + '\n' +

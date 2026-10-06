@@ -20,8 +20,11 @@ class AudioOutput {
  private:
   void Run();
   void DrainUnavailableAudio();
+  void ForgetPassthrough(uint32_t kind_bit);
   RillightCore* core_;
   std::shared_ptr<CoreApi> api_;
+  int max_pcm_channels_ = 2;
+  uint32_t accepted_passthrough_ = 0;
   std::atomic<bool> stopped_{false};
   std::atomic<bool> pending_{false};
   std::atomic<uint32_t> device_padding_{0};

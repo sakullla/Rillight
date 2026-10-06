@@ -7,6 +7,11 @@ internal class CoreAudioFrame(
     val timeline: Long,
     val ptsUs: Long,
     val bytes: ByteArray,
+    val channels: Int = 2,
+    val sampleCount: Int = 0,
+    val delivery: Int = 0,
+    val passthrough: Boolean = false,
+    val codec: Int = 0,
 )
 
 internal class CoreVideoOverlay(
@@ -24,6 +29,7 @@ internal object CoreNative {
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
     external fun configureExternalAudioSpeed(handle: Long, enabled: Boolean): Int
+    external fun configureAudioSink(handle: Long, channels: Int, accepted: Int, atmos: Boolean): Int
     external fun videoOutputSize(handle: Long, width: Int, height: Int): Int
     external fun outputSurface(handle: Long, surface: Surface?, doviProfiles: Int): Int
     external fun takeVideoOverlay(handle: Long): CoreVideoOverlay?

@@ -133,6 +133,55 @@ void main() {
     expect(resolved.streamUrl.path, contains('/Videos/movie/stream.mkv'));
   });
 
+  test('original Dolby audio is not replaced by an AAC transcode', () {
+    for (final codec in ['ac3', 'eac3', 'truehd', 'true-hd', 'atmos', 'ec-3']) {
+      final resolved = resolvePlayback(
+        info: PlaybackInfo.fromJson({
+          'PlaySessionId': 'dolby-$codec',
+          'MediaSources': [
+            {
+              'Id': 'src-dolby',
+              'SupportsDirectPlay': false,
+              'SupportsDirectStream': false,
+              'SupportsTranscoding': true,
+              'TranscodingUrl': '/videos/movie/master.m3u8',
+              'MediaStreams': [
+                {'Index': 0, 'Type': 'Video', 'Codec': 'hevc'},
+                {'Index': 1, 'Type': 'Audio', 'Codec': codec},
+              ],
+            },
+          ],
+        }),
+        baseUrl: Uri.parse(base),
+        accessToken: token,
+        itemId: 'movie',
+      );
+      expect(resolved, isNull, reason: codec);
+    }
+    final aac = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'aac-transcode',
+        'MediaSources': [
+          {
+            'Id': 'src-aac',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': false,
+            'SupportsTranscoding': true,
+            'TranscodingUrl': '/videos/movie/master.m3u8',
+            'MediaStreams': [
+              {'Index': 1, 'Type': 'Audio', 'Codec': 'aac'},
+            ],
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'movie',
+    );
+    expect(aac, isNotNull);
+    expect(aac!.playMethod, PlayMethod.transcode);
+  });
+
   test('uses transcoding URL when direct is not supported', () {
     final resolved = resolvePlayback(
       info: PlaybackInfo.fromJson({
