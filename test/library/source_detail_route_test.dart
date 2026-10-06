@@ -661,4 +661,151 @@ void main() {
       );
     }
   }
+
+  testWidgets(
+    'source detail keeps showComparison off across a related item and shows it without the query',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      MediaImageCache.instance.clearMemory();
+      MediaImageCache.instance.debugSetDiskStore(_ImageDisk());
+      addTearDown(() {
+        MediaImageCache.instance.clearMemory();
+        MediaImageCache.instance.debugSetDiskStore(null);
+      });
+      final transport = _Transport();
+      EmbyClient client() => EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'test',
+          deviceId: 'detail',
+          version: '1',
+        ),
+        dio: Dio()..httpClientAdapter = transport,
+      );
+      final store = MemoryServerListStore(
+        ServerListSnapshot(
+          lastServerId: 'a',
+          servers: [
+            for (final server in ['a', 'b'])
+              SavedServer(
+                id: server,
+                name: server,
+                username: 'synthetic',
+                libraryIds: const ['library'],
+                scopeKnown: true,
+                lines: [ServerLine(id: 'line', address: 'https://$server')],
+              ),
+          ],
+        ),
+      );
+      final credentials = MemoryCredentialStore({
+        for (final server in ['a', 'b'])
+          server: StoredCredentials(
+            accessToken: 'token-$server',
+            userId: 'user-$server',
+            username: 'synthetic',
+          ),
+      });
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: credentials,
+        createClient: client,
+      );
+      await tester.runAsync(registry.load);
+      final account = (await tester.runAsync(
+        () => registry.authenticate('b'),
+      ))!.account;
+      final auth = AuthController(
+        client: client(),
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      await tester.runAsync(auth.restore);
+      final router = createAppRouter(
+        auth: auth,
+        environment: PresentationEnvironment.desktop,
+      );
+      await tester.pumpWidget(
+        RillightApp(
+          auth: auth,
+          router: router,
+          environment: PresentationEnvironment.desktop,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final permit = registry.permit(account, libraryId: 'library');
+      PlayerHostOpenItemCommand commandFor(String itemId) =>
+          PlayerHostOpenItemCommand(
+            itemId: itemId,
+            source: SourceReference(account: account, itemId: itemId),
+            libraryId: 'library',
+            regionGeneration: permit.regionGeneration,
+          );
+      router.go(
+        AppRoutes.item('movie', showComparison: false),
+        extra: commandFor('movie'),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('查找同源'), findsNothing);
+      expect(
+        tester
+            .widget<SourceDetailGate>(find.byType(SourceDetailGate))
+            .showComparison,
+        isFalse,
+      );
+      final similar = find.byKey(CatalogKeys.item('similar'));
+      await tester.ensureVisible(similar);
+      await tester.pump();
+      await tester.tap(similar);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(router.state.uri.path, '/item/similar');
+      expect(router.state.uri.queryParameters['showComparison'], '0');
+      expect(find.text('查找同源'), findsNothing);
+      expect(
+        tester
+            .widgetList<SourceDetailGate>(find.byType(SourceDetailGate))
+            .last
+            .showComparison,
+        isFalse,
+      );
+      router.go(AppRoutes.item('movie'), extra: commandFor('movie'));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        router.state.uri.queryParameters.containsKey('showComparison'),
+        isFalse,
+      );
+      expect(find.text('查找同源'), findsOneWidget);
+      expect(
+        tester
+            .widget<SourceDetailGate>(find.byType(SourceDetailGate))
+            .showComparison,
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      auth.dispose();
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
+    },
+    tags: ['integration'],
+  );
 }
