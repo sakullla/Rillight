@@ -137,6 +137,8 @@ class _CoreSnapshot {
     this.effectiveDenoise = 0,
     this.requestedSharpen = 0,
     this.effectiveSharpen = 0,
+    this.doviReconstruction = 0,
+    this.dolbyVisionCompatibility = -1,
   });
   final int state;
   final int ffmpegError;
@@ -168,6 +170,8 @@ class _CoreSnapshot {
   final int effectiveDenoise;
   final int requestedSharpen;
   final int effectiveSharpen;
+  final int doviReconstruction;
+  final int dolbyVisionCompatibility;
 }
 
 abstract class CorePlayer {
@@ -553,6 +557,8 @@ class DesktopCorePlayer
         effectiveDenoise: value.effectiveDenoise,
         requestedSharpen: value.requestedSharpen,
         effectiveSharpen: value.effectiveSharpen,
+        doviReconstruction: value.doviReconstruction,
+        dolbyVisionCompatibility: value.dolbyVisionCompatibility,
       );
     } finally {
       calloc.free(pointer);
@@ -694,6 +700,8 @@ class DesktopCorePlayer
       'effectiveDenoise': snapshot.effectiveDenoise,
       'requestedSharpen': snapshot.requestedSharpen,
       'effectiveSharpen': snapshot.effectiveSharpen,
+      'doviReconstruction': snapshot.doviReconstruction,
+      'dolbyVisionCompatibility': snapshot.dolbyVisionCompatibility,
     };
   }
 

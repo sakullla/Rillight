@@ -813,6 +813,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
                                            : @"rgba8-on-edr-layer")
                                  : @"bgra8-srgb",
                              @"hdrOutput": @(extended && linear),
+                             @"videoOutputKind": @(hasSnapshot ? snapshot.video_output_kind : 0),
+                             @"doviReconstruction": @(hasSnapshot ? snapshot.dovi_reconstruction : 0),
                              @"sdrMapped": @(!extended),
                              @"nativeOverlay": @(extended),
                              @"edrHeadroom": @(headroom),

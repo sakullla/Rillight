@@ -12,6 +12,8 @@ class AndroidColorPipeline {
   AndroidColorPipeline();
   ~AndroidColorPipeline();
   bool Render(const AVFrame* frame, ANativeWindow* window, bool hdr_supported);
+  // True only after a successful BT.2020 PQ surface, never a Dolby HDMI signal.
+  bool HdrPresented() const;
 
  private:
   struct Impl;

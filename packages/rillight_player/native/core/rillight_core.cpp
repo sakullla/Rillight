@@ -63,6 +63,7 @@ extern "C" {
 #include <ass/ass.h>
 #endif
 }
+#include "dovi_color_metadata.h"
 
 int rillight_dovi_base_rejected(int profile, int compatibility);
 void tonemap_rgba(uint8_t *data, int stride, int width, int height,
@@ -285,6 +286,7 @@ struct Decoder {
   std::shared_ptr<HardwareFormatSelection> hw_format;
   uint32_t hardware = RILLIGHT_CORE_HW_NONE;
   bool android_color_buffers = false;
+  bool android_native_dolby = false;
   int error = 0;
 };
 
@@ -315,6 +317,7 @@ struct VideoOutputFrame : RillightCoreFrame {
   std::shared_ptr<VideoBufferPool> buffers;
   std::shared_ptr<void> gpu_texture;
   std::shared_ptr<AVFrame> codec_frame;
+  int dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
   bool subtitle_redraw = false;
   std::vector<uint8_t> subtitle_pixels;
   RillightCoreSubtitleOverlay subtitle_overlay{};
@@ -883,6 +886,7 @@ struct RillightCoreImpl {
   bool hdr_video = false;
   bool macos_edr = false;
   bool android_color_buffers = false;
+  bool android_native_dolby = false;
   double video_frame_rate = 0;
   int audio_index = -1;
   bool is_mp4_container = false;
@@ -917,6 +921,8 @@ struct RillightCoreImpl {
   int sink_atmos = 0;
   uint64_t sink_generation = 0;
   int dolby_vision_profile = RILLIGHT_CORE_DOVI_PROFILE_UNKNOWN;
+  int dolby_vision_compatibility = -1;
+  int dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
   int video_output_kind = RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;
   int audio_delivery = RILLIGHT_CORE_AUDIO_DELIVERY_NONE;
   int audio_channels = 0;
@@ -1751,6 +1757,13 @@ Decoder make_decoder(AVFormatContext *format, int index,
   result.context = context;
   result.stream = index;
   result.android_color_buffers = export_dovi;
+  if (native_dovi) {
+    uint8_t *mime = nullptr;
+    if (av_opt_get(context->priv_data, "codec_mime", 0, &mime) >= 0 && mime &&
+        std::strcmp(reinterpret_cast<const char *>(mime), "video/dolby-vision") == 0)
+      result.android_native_dolby = true;
+    av_freep(&mime);
+  }
   return result;
 }
 
@@ -1918,25 +1931,81 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  VideoScale *scale, int output_width,
                                  int output_height, bool gpu_video = false,
                                  bool hdr_video = false,
-                                 bool macos_edr = false) {
+                                 bool macos_edr = false,
+                                 const AVFrame *enhancement = nullptr,
+                                 int *convert_error = nullptr) {
   if (frame->width <= 0 || frame->height <= 0 ||
       frame->width > static_cast<int>(kMaxVideoBytes / 4))
     return nullptr;
   const AVPacketSideData *dovi = av_packet_side_data_get(
       stream->codecpar->coded_side_data, stream->codecpar->nb_coded_side_data,
       AV_PKT_DATA_DOVI_CONF);
-  bool requires_dovi = (stream->codecpar->codec_tag == MKTAG('d','v','h','1') ||
-      stream->codecpar->codec_tag == MKTAG('d','v','h','e')) &&
-      (!dovi || dovi->size < sizeof(AVDOVIDecoderConfigurationRecord));
-  if (dovi && dovi->data && dovi->size >= 8) {
-    const auto *record =
-        reinterpret_cast<const AVDOVIDecoderConfigurationRecord *>(dovi->data);
-    if (rillight_dovi_base_rejected(record->dv_profile,
-                                    record->dv_bl_signal_compatibility_id)) {
-      requires_dovi = true;
-      if (record->dv_profile != 5 || record->el_present_flag) return nullptr;
-    }
+  const bool tagged_dovi = stream->codecpar->codec_tag == MKTAG('d','v','h','1') ||
+      stream->codecpar->codec_tag == MKTAG('d','v','h','e');
+  const AVDOVIDecoderConfigurationRecord *record =
+      dovi && dovi->data && dovi->size >= sizeof(AVDOVIDecoderConfigurationRecord)
+          ? reinterpret_cast<const AVDOVIDecoderConfigurationRecord *>(dovi->data)
+          : nullptr;
+  rillight_color::Constants dovi_scratch{};
+  const bool rpu_usable = rillight_color::DoviConstants(frame, &dovi_scratch, true);
+  bool residual = false;
+  if (const auto *side = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
+      side && side->data && side->size >= sizeof(AVDOVIMetadata)) {
+    const auto *metadata = reinterpret_cast<const AVDOVIMetadata *>(side->data);
+    if (metadata->header_offset <= side->size &&
+        sizeof(AVDOVIRpuDataHeader) <= side->size - metadata->header_offset)
+      residual = av_dovi_get_header(metadata)->disable_residual_flag == 0;
   }
+  struct AvFrameDeleter {
+    void operator()(AVFrame *frame) const {
+      AVFrame *local = frame;
+      av_frame_free(&local);
+    }
+  };
+  std::unique_ptr<AVFrame, AvFrameDeleter> composed;
+  int composed_ok = 0;
+  if (residual && enhancement && rpu_usable) {
+    composed.reset(av_frame_clone(frame));
+    if (composed && rillight_color::ComposeFelResidual(composed.get(), enhancement))
+      composed_ok = 1;
+    else
+      composed.reset();
+  }
+  const int profile = record ? record->dv_profile : tagged_dovi ? 5 : -1;
+  const int compatibility = record ? record->dv_bl_signal_compatibility_id : 0;
+  const int el_present = record ? record->el_present_flag : 0;
+  DoviFrameDecision dovi_decision = dovi_frame_decision(
+      profile, compatibility, el_present, rpu_usable ? 1 : 0, residual ? 1 : 0,
+      composed_ok);
+  if (!record && tagged_dovi && !rpu_usable) {
+    dovi_decision.error = RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
+    dovi_decision.emit_picture = 0;
+    dovi_decision.use_rpu = 0;
+  }
+  if (dovi_decision.error || !dovi_decision.emit_picture) {
+    if (convert_error)
+      *convert_error = dovi_decision.error
+                           ? dovi_decision.error
+                           : RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
+    return nullptr;
+  }
+  int reconstruction = dovi_decision.reconstruction;
+  const AVFrame *picture = frame;
+  if (reconstruction == RILLIGHT_CORE_DOVI_RECON_FEL && composed) {
+    auto *side = av_frame_get_side_data(composed.get(), AV_FRAME_DATA_DOVI_METADATA);
+    if (!side || !side->data) {
+      composed.reset();
+      reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
+      dovi_decision.use_rpu = 0;
+    } else {
+      auto *metadata = reinterpret_cast<AVDOVIMetadata *>(side->data);
+      av_dovi_get_header(metadata)->disable_residual_flag = 1;
+      picture = composed.get();
+    }
+  } else {
+    composed.reset();
+  }
+  const bool base_allowed = profile == 7 || profile == 8;
   AVRational sar = frame->sample_aspect_ratio;
   if (sar.num <= 0 || sar.den <= 0) sar = stream->sample_aspect_ratio;
   if (sar.num <= 0 || sar.den <= 0)
@@ -1978,7 +2047,7 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   output->buffers = scale->buffers;
   // Borrow the planes synchronously. HDR/DV conversion keeps high precision
   // until the output-sized GPU surface is mapped to the public RGBA buffer.
-  AVFrame source = *frame;
+  AVFrame source = *picture;
   source.color_range = source_range == AVCOL_RANGE_JPEG
                            ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
   source.colorspace = source_space == AVCOL_SPC_BT709 ||
@@ -1992,8 +2061,8 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   source.color_trc = static_cast<AVColorTransferCharacteristic>(transfer);
   if (source.color_primaries == AVCOL_PRI_UNSPECIFIED)
     source.color_primaries = stream->codecpar->color_primaries;
-  const bool has_dovi = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA) != nullptr;
-  if (requires_dovi || has_dovi || transfer == AVCOL_TRC_SMPTE2084 ||
+  const bool use_rpu = dovi_decision.use_rpu != 0;
+  if (use_rpu || transfer == AVCOL_TRC_SMPTE2084 ||
       transfer == AVCOL_TRC_ARIB_STD_B67) {
     const auto render_color = [&](bool use_dovi) {
 #if defined(_WIN32)
@@ -2004,20 +2073,32 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
           scale->portable_color_pipeline.Render(&source, width, height,
               use_dovi, output->data, stride);
     };
+    const auto accept_base = [&](bool ok) {
+      if (!ok) return false;
+      if (use_rpu && reconstruction == RILLIGHT_CORE_DOVI_RECON_FEL)
+        reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
+      else if (use_rpu)
+        reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
+      return true;
+    };
 #if defined(_WIN32)
     if (gpu_video) {
       const auto render_texture = [&](bool use_dovi) {
         return hdr_video ? scale->color_pipeline.RenderScRgbTexture(&source, width, height, use_dovi) :
             scale->color_pipeline.RenderTexture(&source, width, height, use_dovi);
       };
-      void* texture = render_texture(requires_dovi || has_dovi);
-      if (!texture && has_dovi && !requires_dovi)
+      void* texture = render_texture(use_rpu);
+      bool used_base = false;
+      if (!texture && use_rpu && base_allowed) {
         texture = render_texture(false);
+        used_base = texture != nullptr;
+      }
       if (texture) {
         output->gpu_texture = std::shared_ptr<void>(texture, [](void* pointer) {
           static_cast<ID3D11Texture2D*>(pointer)->Release();
         });
         converted = true;
+        if (used_base) reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
       }
     }
 #else
@@ -2035,8 +2116,9 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
               &source, width, height, use_dovi,
               reinterpret_cast<uint16_t*>(output->data), half_stride);
         };
-        converted = render_half(requires_dovi || has_dovi);
-        if (!converted && has_dovi && !requires_dovi) converted = render_half(false);
+        converted = render_half(use_rpu);
+        if (!converted && use_rpu && base_allowed)
+          converted = accept_base(render_half(false));
         linear_half = converted;
         if (!converted) {
           output->buffers->Recycle(output->data, half_bytes);
@@ -2047,16 +2129,17 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     if (!converted) {
       output->data = output->buffers->Acquire(bytes);
       if (!output->data) { delete output; return nullptr; }
-      converted = render_color(requires_dovi || has_dovi);
+      converted = render_color(use_rpu);
     }
-    // A compatible HDR10/HLG base remains valid if an enhancement-layer RPU
-    // cannot be composed. Preserve its precision instead of quantizing before
-    // tone mapping. Profile 5 must never take this base-layer fallback.
-    if (!converted && has_dovi && !requires_dovi) converted = render_color(false);
+    // A compatible base stays valid when residual composition or RPU reshape
+    // fails. Profile 5 has no such base and must not be tone-mapped as HDR10.
+    if (!converted && use_rpu && base_allowed)
+      converted = accept_base(render_color(false));
   }
-  if (requires_dovi && !converted) {
-    output->buffers->Recycle(output->data, bytes);
+  if (!converted && profile == 5) {
+    if (output->data) output->buffers->Recycle(output->data, output->data ? bytes : 0);
     delete output;
+    if (convert_error) *convert_error = RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
     return nullptr;
   }
   if (!converted) {
@@ -2131,6 +2214,7 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
       output->has_display_matrix = 1;
     }
   }
+  output->dovi_reconstruction = reconstruction;
   return output;
 }
 
@@ -2323,6 +2407,12 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
     core->audio_atmos = frame->audio_delivery == RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH
                             ? frame->audio_atmos : 0;
     core->audio_codec_id = frame->audio_codec_id;
+  } else {
+    const auto *video_frame = static_cast<const VideoOutputFrame *>(frame);
+    core->dovi_reconstruction = video_frame->dovi_reconstruction;
+    core->video_output_kind = dovi_present_output_kind(
+        frame->type, core->hdr_video ? 1 : 0, core->macos_edr ? 1 : 0,
+        core->android_native_dolby ? 1 : 0);
   }
   if ((video_index >= 0 && core->first_video) ||
       (video_index < 0 && core->first_audio)) {
@@ -2410,9 +2500,28 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   bool decoded_with_hardware = false;
   RillightCoreFrame *output = nullptr;
 #if defined(__ANDROID__)
-  const bool android_color = hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
+  bool android_color = hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
       decoded->format == AV_PIX_FMT_P010LE &&
       av_frame_get_side_data(decoded, AV_FRAME_DATA_DOVI_METADATA);
+  if (android_color) {
+    rillight_color::Constants scratch{};
+    const bool usable = rillight_color::DoviConstants(decoded, &scratch, false);
+    const auto *parameters = format->streams[stream_index]->codecpar;
+    const auto *configuration = av_packet_side_data_get(
+        parameters->coded_side_data, parameters->nb_coded_side_data,
+        AV_PKT_DATA_DOVI_CONF);
+    const int profile = configuration && configuration->data &&
+            configuration->size >= sizeof(AVDOVIDecoderConfigurationRecord)
+        ? reinterpret_cast<const AVDOVIDecoderConfigurationRecord *>(
+              configuration->data)->dv_profile
+        : 0;
+    // The P010 shader cannot reshape a residual or a missing Profile 5 RPU.
+    // Profile 5 must fail closed; other profiles fall through to CPU reconstruction.
+    if (!usable) {
+      if (profile == 5) return RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
+      android_color = false;
+    }
+  }
   if (android_color || (hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
       decoded->format == AV_PIX_FMT_MEDIACODEC && decoded->data[3])) {
     auto* native = new (std::nothrow) VideoOutputFrame{};
@@ -2443,6 +2552,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     native->source_color_space = decoded->colorspace;
     native->source_color_primaries = decoded->color_primaries;
     native->source_color_transfer = decoded->color_trc;
+    if (android_color)
+      native->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_RPU;
     const auto* matrix = av_packet_side_data_get(
         format->streams[stream_index]->codecpar->coded_side_data,
         format->streams[stream_index]->codecpar->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX);
@@ -2462,9 +2573,11 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
       transfer == AVCOL_TRC_ARIB_STD_B67 ||
       av_frame_get_side_data(decoded, AV_FRAME_DATA_DOVI_METADATA) != nullptr;
   if (gpu_color && decoded->format == AV_PIX_FMT_D3D11 && decoded->hw_frames_ctx) {
+    int convert_error = 0;
     output = convert_video(decoded, pts, session, timeline,
         format->streams[stream_index], scale, output_width, output_height,
-        gpu_video, hdr_video, macos_edr);
+        gpu_video, hdr_video, macos_edr, nullptr, &convert_error);
+    if (!output && convert_error < 0) return convert_error;
     decoded_with_hardware = output != nullptr;
   }
 #endif
@@ -2501,11 +2614,12 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     picture = scale->downloaded;
     decoded_with_hardware = true;
   }
+  int convert_error = 0;
   if (!output) output = convert_video(picture, pts, session, timeline,
                                format->streams[stream_index], scale,
                                output_width, output_height, gpu_video, hdr_video,
-                               macos_edr);
-  if (!output) return AVERROR(EINVAL);
+                               macos_edr, nullptr, &convert_error);
+  if (!output) return convert_error < 0 ? convert_error : AVERROR(EINVAL);
   if (decoded_with_hardware) {
     std::lock_guard lock(core->mutex);
     for (auto &track : core->tracks) {
@@ -3110,6 +3224,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
     }
     if (result < 0) goto finish;
     int opened_dovi_profile = RILLIGHT_CORE_DOVI_PROFILE_NONE;
+    int opened_dovi_compatibility = -1;
     if (vi >= 0) {
       const auto *parameters = format->streams[vi]->codecpar;
       const auto *dovi = av_packet_side_data_get(
@@ -3121,12 +3236,18 @@ void run(RillightCoreImpl *core, uint64_t session) {
             reinterpret_cast<const AVDOVIDecoderConfigurationRecord *>(dovi->data);
         opened_dovi_profile = record->dv_profile > 0
             ? record->dv_profile : RILLIGHT_CORE_DOVI_PROFILE_NONE;
-        bool unsupported = rillight_dovi_base_rejected(record->dv_profile,
-                                        record->dv_bl_signal_compatibility_id) != 0;
-        if (record->dv_profile == 5 && !record->el_present_flag)
-          unsupported = false;
-        if (unsupported) {
+        opened_dovi_compatibility = record->dv_bl_signal_compatibility_id;
+        if (dovi_open_rejected(record->dv_profile,
+                               record->dv_bl_signal_compatibility_id,
+                               record->el_present_flag)) {
           result = RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
+          {
+            std::lock_guard lock(core->mutex);
+            core->dolby_vision_profile = opened_dovi_profile;
+            core->dolby_vision_compatibility = opened_dovi_compatibility;
+            core->video_output_kind = RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;
+            core->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
+          }
           goto finish;
         }
       }
@@ -3167,8 +3288,10 @@ void run(RillightCoreImpl *core, uint64_t session) {
     }
     std::lock_guard lock(core->mutex);
     core->dolby_vision_profile = opened_dovi_profile;
+    core->dolby_vision_compatibility = opened_dovi_compatibility;
     core->video_index = video.stream;
     core->android_color_buffers = video.android_color_buffers;
+    core->android_native_dolby = video.android_native_dolby;
     const AVRational rate = video.stream >= 0
         ? av_guess_frame_rate(format, format->streams[video.stream], nullptr) : AVRational{0, 1};
     const double source_frame_rate = rate.den > 0 ? av_q2d(rate) : 0;
@@ -3236,6 +3359,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
           {
             std::lock_guard lock(core->mutex);
             core->android_color_buffers = video.android_color_buffers;
+            core->android_native_dolby = video.android_native_dolby;
             for (auto &track : core->tracks) {
               if (track.stream_index == video.stream)
                 track.actual_hardware = RILLIGHT_CORE_HW_NONE;
@@ -3417,6 +3541,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         conversion_ready = false;
         std::lock_guard lock(core->mutex);
         core->android_color_buffers = video.android_color_buffers;
+        core->android_native_dolby = video.android_native_dolby;
         for (auto& track : core->tracks) {
           if (track.stream_index == stream)
             track.actual_hardware = RILLIGHT_CORE_HW_NONE;
@@ -3745,6 +3870,43 @@ RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile,
          compatibility != 6;
 }
 
+RILLIGHT_DOVI_TEST_API int rillight_dovi_open_rejected(
+    int profile, int compatibility, int el_present) {
+  return dovi_open_rejected(profile, compatibility, el_present);
+}
+
+RILLIGHT_DOVI_TEST_API int rillight_dovi_frame_error(
+    int profile, int compatibility, int el_present, int rpu_usable,
+    int residual, int composed) {
+  return dovi_frame_decision(profile, compatibility, el_present, rpu_usable,
+                             residual, composed).error;
+}
+
+RILLIGHT_DOVI_TEST_API int rillight_dovi_frame_reconstruction(
+    int profile, int compatibility, int el_present, int rpu_usable,
+    int residual, int composed) {
+  return dovi_frame_decision(profile, compatibility, el_present, rpu_usable,
+                             residual, composed).reconstruction;
+}
+
+RILLIGHT_DOVI_TEST_API int rillight_dovi_frame_emits(
+    int profile, int compatibility, int el_present, int rpu_usable,
+    int residual, int composed) {
+  return dovi_frame_decision(profile, compatibility, el_present, rpu_usable,
+                             residual, composed).emit_picture;
+}
+
+RILLIGHT_DOVI_TEST_API int rillight_present_output_kind(
+    int frame_type, int windows_scrgb, int macos_edr, int android_dolby_mime) {
+  return dovi_present_output_kind(frame_type, windows_scrgb, macos_edr,
+                                  android_dolby_mime);
+}
+
+RILLIGHT_DOVI_TEST_API int rillight_android_color_output_kind(
+    int pq_selected) {
+  return dovi_android_color_output_kind(pq_selected);
+}
+
 static const std::array<uint8_t, 256>& tonemap_lookup(int transfer) {
   static const auto tables = [] {
     std::array<std::array<uint8_t, 256>, 2> result{};
@@ -3930,16 +4092,26 @@ thread_local std::unique_ptr<AndroidColorPipeline> android_color_renderer;
 
 int rillight_core_render_android_color_frame(const RillightCoreFrame* frame,
                                             void* native_window,
-                                            int hdr_display_supported) {
+                                            int hdr_display_supported,
+                                            RillightCore* core_pointer) {
 #if defined(__ANDROID__)
   if (!frame || !native_window || frame->type != RILLIGHT_CORE_VIDEO_ANDROID_P010) return -1;
   const auto& decoded = static_cast<const VideoOutputFrame*>(frame)->codec_frame;
   if (!decoded) return -1;
   if (!android_color_renderer) android_color_renderer = std::make_unique<AndroidColorPipeline>();
-  return android_color_renderer->Render(decoded.get(), static_cast<ANativeWindow*>(native_window),
-                                        hdr_display_supported != 0) ? 0 : -1;
+  if (!android_color_renderer->Render(decoded.get(), static_cast<ANativeWindow*>(native_window),
+                                      hdr_display_supported != 0))
+    return -1;
+  if (core_pointer) {
+    auto* core = impl(core_pointer);
+    std::lock_guard lock(core->mutex);
+    core->video_output_kind = dovi_android_color_output_kind(
+        android_color_renderer->HdrPresented() ? 1 : 0);
+    core->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_RPU;
+  }
+  return 0;
 #else
-  (void)frame; (void)native_window; (void)hdr_display_supported;
+  (void)frame; (void)native_window; (void)hdr_display_supported; (void)core_pointer;
   return -1;
 #endif
 }
@@ -4085,6 +4257,11 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->video_index = core->audio_index = core->subtitle_index = -1;
     core->video_frame_rate = 0;
     core->android_color_buffers = false;
+    core->android_native_dolby = false;
+    core->dolby_vision_profile = RILLIGHT_CORE_DOVI_PROFILE_UNKNOWN;
+    core->dolby_vision_compatibility = -1;
+    core->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
+    core->video_output_kind = RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;
     core->is_mp4_container = false;
     core->video_track_id = core->audio_track_id = -1;
     core->duration = -1;
@@ -4452,6 +4629,8 @@ int rillight_core_snapshot(RillightCore *pointer,
   snapshot->allow_software_fallback = core->allow_software_fallback;
   snapshot->external_subtitle_pending = core->external_subtitle_pending;
   snapshot->dolby_vision_profile = core->dolby_vision_profile;
+  snapshot->dolby_vision_compatibility = core->dolby_vision_compatibility;
+  snapshot->dovi_reconstruction = core->dovi_reconstruction;
   snapshot->video_output_kind = core->video_output_kind;
   snapshot->audio_delivery = core->audio_delivery;
   snapshot->audio_channels = core->audio_channels;

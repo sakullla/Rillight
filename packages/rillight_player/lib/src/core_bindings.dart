@@ -82,6 +82,10 @@ final class NativeCoreSnapshot extends Struct {
   external int requestedSharpen;
   @Int32()
   external int effectiveSharpen;
+  @Int32()
+  external int doviReconstruction;
+  @Int32()
+  external int dolbyVisionCompatibility;
 }
 
 final class NativeCoreTrack extends Struct {

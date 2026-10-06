@@ -764,18 +764,47 @@ static void Handle(FlMethodChannel*, FlMethodCall* call, gpointer data) {
     }
     surface->wake.notify_all(); RespondSuccess(call);
   } else if (method == "status") {
-    std::lock_guard<std::mutex> lock(surface->mutex);
+    // Snapshot the core outside surface->mutex. The output threads take the
+    // core mutex and then this mutex; the reverse order deadlocks.
+    int64_t frames = 0;
+    std::string error;
+    uint64_t session = 0;
+    uint64_t timeline = 0;
+    uint32_t actual_hardware = 0;
+    bool has_video = false;
+    bool decoded_video = false;
+    bool audio_failed = false;
+    RillightCore* core = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(surface->mutex);
+      frames = surface->frames;
+      error = surface->error;
+      session = surface->session;
+      timeline = surface->timeline;
+      actual_hardware = surface->actual_hardware;
+      has_video = surface->has_video;
+      decoded_video = surface->decoded_video;
+      audio_failed = surface->audio_failed;
+      core = surface->core;
+    }
+    RillightCoreSnapshot snapshot{};
+    snapshot.struct_size = sizeof(snapshot);
+    const bool has_snapshot = core && rillight_core_snapshot(core, &snapshot) == 0;
     g_autoptr(FlValue) status = fl_value_new_map();
-    fl_value_set_string_take(status, "frames", fl_value_new_int(surface->frames));
-    fl_value_set_string_take(status, "error", fl_value_new_string(surface->error.c_str()));
-    fl_value_set_string_take(status, "session", fl_value_new_int(surface->session));
-    fl_value_set_string_take(status, "timeline", fl_value_new_int(surface->timeline));
-    fl_value_set_string_take(status, "actualHardware", fl_value_new_int(surface->actual_hardware));
-    const char* decoder = !surface->has_video ? "none" :
-        !surface->decoded_video ? "pending" :
-        surface->actual_hardware == RILLIGHT_CORE_HW_VAAPI ? "vaapi" : "software";
+    fl_value_set_string_take(status, "frames", fl_value_new_int(frames));
+    fl_value_set_string_take(status, "error", fl_value_new_string(error.c_str()));
+    fl_value_set_string_take(status, "session", fl_value_new_int(session));
+    fl_value_set_string_take(status, "timeline", fl_value_new_int(timeline));
+    fl_value_set_string_take(status, "actualHardware", fl_value_new_int(actual_hardware));
+    const char* decoder = !has_video ? "none" :
+        !decoded_video ? "pending" :
+        actual_hardware == RILLIGHT_CORE_HW_VAAPI ? "vaapi" : "software";
     fl_value_set_string_take(status, "decoder", fl_value_new_string(decoder));
-    fl_value_set_string_take(status, "audioFailed", fl_value_new_bool(surface->audio_failed));
+    fl_value_set_string_take(status, "audioFailed", fl_value_new_bool(audio_failed));
+    fl_value_set_string_take(status, "videoOutputKind",
+        fl_value_new_int(has_snapshot ? snapshot.video_output_kind : 0));
+    fl_value_set_string_take(status, "doviReconstruction",
+        fl_value_new_int(has_snapshot ? snapshot.dovi_reconstruction : 0));
     RespondSuccess(call, status);
   } else if (method == "detach") {
     if (surface->Detach()) { g_autoptr(FlValue) queued = fl_value_new_bool(true); RespondSuccess(call, queued); }

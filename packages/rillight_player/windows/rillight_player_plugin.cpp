@@ -177,6 +177,8 @@ class RillightPlayerPlugin : public flutter::Plugin {
             {Value("sdrWhiteNits"), Value(static_cast<double>(hdr.sdr_white_nits))},
             {Value("displayPeakNits"), Value(static_cast<double>(hdr.peak_nits))},
             {Value("outputColorSpace"), Value(surface->native_overlay_available() ? "scRGB" : "sRGB")},
+            {Value("videoOutputKind"), Value(snapshot_valid ? snapshot.video_output_kind : 0)},
+            {Value("doviReconstruction"), Value(snapshot_valid ? snapshot.dovi_reconstruction : 0)},
             {Value("frames"), Value(surface->frames())},
             {Value("acquiredFrames"), Value(surface->acquired_frames())},
             {Value("textureCallbacks"), Value(surface->texture_callbacks())},

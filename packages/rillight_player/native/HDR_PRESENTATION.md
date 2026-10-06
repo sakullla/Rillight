@@ -8,7 +8,9 @@
 | Windows, SDR display or unavailable HDR host | BGRA8888/sRGB Flutter texture with explicit SDR tone mapping for HDR/Dolby Vision. |
 | macOS, screen EDR headroom above 1 | RGBA16Float extended-linear CAMetalLayer behind transparent Flutter. 1.0 is 203-nit SDR white. PQ/HLG/supported Dolby Vision skip 8-bit quantization. Subtitles stay an sRGB plane blended in linear light. |
 | macOS, no EDR headroom or Metal layer unavailable | 8-bit BGRA/sRGB Flutter texture. HDR/Dolby Vision uses the portable SDR tone map. `sdrMapped` stays true. |
-| Linux, Android phone/TV | RGBA8888 SDR or the Android GLES path. Neither is the macOS EDR layer. |
+| Linux | CPU RGBA SDR tone map. Not native Dolby Vision and not HDR. |
+| Android, `video/dolby-vision` actually selected | Native Dolby Vision. This is the only native Dolby output. |
+| Android, no Dolby MIME | BT.2020 PQ 10-bit when EGL creates that surface, otherwise SDR. Neither is native Dolby. |
 
 Windows selects the native route at player-surface creation. The current output
 must report active PQ/BT.2020 and at least 10 bits per component; swapchain scRGB
@@ -20,9 +22,12 @@ The swapchain uses R16G16B16A16_FLOAT and RGB_FULL_G10_NONE_P709, including afte
 resize. scRGB is linear BT.709 with an absolute 80-nit unit. HDR10/PQ, HLG and
 supported Dolby Vision RPU conversion retain absolute luminance and signed
 wide-gamut components, without SDR tone mapping or 8-bit quantization. DWM maps
-this output to the HDR display. RPU processing followed by scRGB is not Dolby
-Vision HDMI signaling or certification. Profile 7 FEL composition is not
-implemented.
+this output to the HDR display. RPU processing followed by scRGB is HDR,
+not Dolby Vision HDMI signaling or certification. Profile 7 FEL is complete
+only when the enhancement residual is composed into the base; a failed
+composition is a base-layer fallback and is not labeled FEL. Profile 5
+without a usable RPU is unsupported and is not displayed as HDR10 or YUV.
+macOS EDR and the Linux SDR map are not native Dolby Vision.
 
 CPU fallback remains SDR. Hybrid-adapter import failure disables GPU conversion;
 the native presenter can map SDR fallback frames to system SDR white. An FP16

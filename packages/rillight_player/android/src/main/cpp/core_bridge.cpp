@@ -401,7 +401,8 @@ Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle)
       s.requested_anime4k, s.effective_anime4k,
       s.requested_super_resolution, s.effective_super_resolution,
       s.requested_denoise, s.effective_denoise,
-      s.requested_sharpen, s.effective_sharpen};
+      s.requested_sharpen, s.effective_sharpen,
+      s.dovi_reconstruction, s.dolby_vision_compatibility};
   return numbers(env, values, sizeof(values) / sizeof(values[0]));
 }
 
@@ -571,7 +572,7 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
     const bool current = rillight_core_snapshot(core, &latest) == 0 &&
         latest.session_id == frame->session_id && latest.timeline_version == frame->timeline_version;
     const int rendered = !current ? -1 : frame->type == RILLIGHT_CORE_VIDEO_ANDROID_P010
-        ? rillight_core_render_android_color_frame(frame, window, hdr_supported == JNI_TRUE)
+        ? rillight_core_render_android_color_frame(frame, window, hdr_supported == JNI_TRUE, core)
         : rillight_core_render_mediacodec_frame(frame);
     ANativeWindow_release(window);
     if (rendered != 0) {

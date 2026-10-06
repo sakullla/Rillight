@@ -8,6 +8,7 @@
 extern "C" {
 #include <libavutil/dovi_meta.h>
 #include <libavutil/frame.h>
+#include <libavutil/pixdesc.h>
 }
 
 // Parsed per-frame RPU constants shared by all owned rendering backends.
@@ -26,7 +27,8 @@ struct Constants {
 };
 static_assert(sizeof(Constants) % 16 == 0);
 
-inline bool DoviConstants(const AVFrame* frame, Constants* constants) {
+inline bool DoviConstants(const AVFrame* frame, Constants* constants,
+                          bool allow_residual = false) {
   const auto* side = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
   if (!side || !side->data || side->size < sizeof(AVDOVIMetadata)) return false;
   const auto* metadata = reinterpret_cast<const AVDOVIMetadata*>(side->data);
@@ -39,7 +41,7 @@ inline bool DoviConstants(const AVFrame* frame, Constants* constants) {
   const auto* header = av_dovi_get_header(metadata);
   const auto* mapping = av_dovi_get_mapping(metadata);
   const auto* color = av_dovi_get_color(metadata);
-  if (!header->disable_residual_flag || header->bl_bit_depth < 8 ||
+  if ((!allow_residual && !header->disable_residual_flag) || header->bl_bit_depth < 8 ||
       header->bl_bit_depth > 16 || header->coef_log2_denom > 63 ||
       color->source_min_pq > 4095 || color->source_max_pq > 4095 ||
       (color->source_max_pq && color->source_min_pq > color->source_max_pq)) return false;
@@ -117,6 +119,81 @@ inline bool DoviConstants(const AVFrame* frame, Constants* constants) {
     constants->visible.w = static_cast<float>(10000.0 * std::pow(
         std::max(p - .8359375, 0.0) / std::max(18.8515625 - 18.6875 * p, 1e-9),
         1.0 / .1593017578125));
+  }
+  return true;
+}
+
+// Full-enhancement residual: the enhancement code at 1 << (bit_depth - 1) is
+// zero. The difference is added to the base and saturated. Non-zero linear
+// deadzone NLQ coefficients are not this model, so composition fails and the
+// caller must keep the compatible base instead of claiming FEL.
+inline bool ComposeFelResidual(AVFrame* base, const AVFrame* enhancement) {
+  if (!base || !enhancement || base->format != enhancement->format ||
+      base->width <= 0 || base->height <= 0 || base->width != enhancement->width ||
+      base->height != enhancement->height)
+    return false;
+  const auto format = static_cast<AVPixelFormat>(base->format);
+  const auto* description = av_pix_fmt_desc_get(format);
+  const bool packed = format == AV_PIX_FMT_P010LE || format == AV_PIX_FMT_P012LE ||
+                      format == AV_PIX_FMT_P016LE;
+  const bool planar = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_YUV420P12LE ||
+                      format == AV_PIX_FMT_YUV420P16LE;
+  if (!description || !base->data[0] || !enhancement->data[0] ||
+      description->comp[0].depth < 10 || description->comp[0].depth > 16 ||
+      (!packed && !planar))
+    return false;
+  if (const auto* side = av_frame_get_side_data(base, AV_FRAME_DATA_DOVI_METADATA);
+      side && side->data && side->size >= sizeof(AVDOVIMetadata)) {
+    const auto* metadata = reinterpret_cast<const AVDOVIMetadata*>(side->data);
+    if (metadata->mapping_offset <= side->size &&
+        sizeof(AVDOVIDataMapping) <= side->size - metadata->mapping_offset) {
+      const auto* mapping = av_dovi_get_mapping(metadata);
+      if (mapping->nlq_method_idc == AV_DOVI_NLQ_LINEAR_DZ) {
+        for (int channel = 0; channel < 3; ++channel) {
+          if (mapping->nlq[channel].linear_deadzone_slope != 0 ||
+              mapping->nlq[channel].linear_deadzone_threshold != 0)
+            return false;
+        }
+      }
+    }
+  }
+  const int depth = description->comp[0].depth;
+  const int shift = packed ? 16 - depth : 0;
+  const int neutral = 1 << (depth - 1);
+  const int maximum = (1 << depth) - 1;
+  const int chroma_width = (base->width + 1) / 2;
+  const int chroma_height = (base->height + 1) / 2;
+  const int chroma_samples = packed ? chroma_width * 2 : chroma_width;
+  const int chroma_stride = chroma_samples * 2;
+  const int planes = packed ? 1 : 2;
+  if (base->linesize[0] < base->width * 2 || enhancement->linesize[0] < base->width * 2 ||
+      !base->data[1] || !enhancement->data[1] ||
+      base->linesize[1] < chroma_stride || enhancement->linesize[1] < chroma_stride)
+    return false;
+  if (!packed && (!base->data[2] || !enhancement->data[2] ||
+                  base->linesize[2] < chroma_stride ||
+                  enhancement->linesize[2] < chroma_stride))
+    return false;
+  const auto compose = [&](uint16_t* destination, const uint16_t* residual, int count) {
+    for (int index = 0; index < count; ++index) {
+      const int base_code = destination[index] >> shift;
+      const int difference = (residual[index] >> shift) - neutral;
+      destination[index] = static_cast<uint16_t>(
+          std::clamp(base_code + difference, 0, maximum) << shift);
+    }
+  };
+  for (int y = 0; y < base->height; ++y) {
+    compose(reinterpret_cast<uint16_t*>(base->data[0] + y * base->linesize[0]),
+            reinterpret_cast<const uint16_t*>(enhancement->data[0] + y * enhancement->linesize[0]),
+            base->width);
+  }
+  for (int plane = 0; plane < planes; ++plane) {
+    for (int y = 0; y < chroma_height; ++y) {
+      compose(reinterpret_cast<uint16_t*>(base->data[1 + plane] + y * base->linesize[1 + plane]),
+              reinterpret_cast<const uint16_t*>(enhancement->data[1 + plane] +
+                                                y * enhancement->linesize[1 + plane]),
+              chroma_samples);
+    }
   }
   return true;
 }

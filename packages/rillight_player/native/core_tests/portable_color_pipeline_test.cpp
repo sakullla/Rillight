@@ -1,3 +1,5 @@
+#include "../core/dovi_color_metadata.h"
+#include "../core/dovi_profile.h"
 #include "../core/portable_color_pipeline.h"
 #include "color_pipeline_fixtures.h"
 
@@ -86,4 +88,54 @@ int main() {
   assert(pipeline.Render(invalid, 32, 24, false, pixels.data(), 32 * 4));
   Gray(pixels, 100, 200);
   av_frame_free(&invalid);
+
+  AVFrame* base = Picture(AV_PIX_FMT_YUV420P10LE, 64);
+  auto* base_metadata = Metadata(base);
+  // av_frame_clone shares the pixel buffers, so the enhancement sample is a
+  // second allocation. Composition must not change the base-only frame.
+  AVFrame* enhanced = Picture(AV_PIX_FMT_YUV420P10LE, 64);
+  assert(enhanced);
+  Metadata(enhanced);
+  AVFrame* layer = Picture(AV_PIX_FMT_YUV420P10LE, 800);
+  assert(layer);
+  const auto fallback = dovi_frame_decision(7, 6, 1, 1, 1, 0);
+  assert(fallback.reconstruction == RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK);
+  assert(fallback.reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
+  assert(fallback.emit_picture == 1 && fallback.use_rpu == 0);
+  assert(rillight_color::ComposeFelResidual(enhanced, layer));
+  assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
+  assert(reinterpret_cast<uint16_t*>(enhanced->data[0])[0] == 352);
+  const auto completed = dovi_frame_decision(7, 6, 1, 1, 1, 1);
+  assert(completed.reconstruction == RILLIGHT_CORE_DOVI_RECON_FEL);
+  assert(completed.use_rpu == 1);
+  av_dovi_get_header(base_metadata)->disable_residual_flag = 1;
+  auto* enhanced_metadata = reinterpret_cast<AVDOVIMetadata*>(
+      av_frame_get_side_data(enhanced, AV_FRAME_DATA_DOVI_METADATA)->data);
+  av_dovi_get_header(enhanced_metadata)->disable_residual_flag = 1;
+  std::vector<uint8_t> base_pixels(32 * 24 * 4);
+  std::vector<uint8_t> fel_pixels(32 * 24 * 4);
+  assert(pipeline.Render(base, 32, 24, true, base_pixels.data(), 32 * 4));
+  assert(pipeline.Render(enhanced, 32, 24, true, fel_pixels.data(), 32 * 4));
+  assert(base_pixels != fel_pixels);
+  av_dovi_get_mapping(base_metadata)->nlq[0].linear_deadzone_slope = 1;
+  AVFrame* rejected = av_frame_clone(base);
+  assert(rejected && !rillight_color::ComposeFelResidual(rejected, layer));
+  assert(dovi_frame_decision(7, 6, 1, 1, 1, 0).reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
+  const auto profile5 = dovi_frame_decision(5, 0, 0, 0, 0, 0);
+  assert(profile5.error == RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI);
+  assert(profile5.emit_picture == 0 && profile5.use_rpu == 0);
+  assert(dovi_present_output_kind(RILLIGHT_CORE_VIDEO_D3D11, 1, 0, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_HDR);
+  assert(dovi_present_output_kind(RILLIGHT_CORE_VIDEO_RGBA16F, 0, 1, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_HDR);
+  assert(dovi_present_output_kind(RILLIGHT_CORE_VIDEO_RGBA, 0, 0, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_SDR);
+  assert(dovi_present_output_kind(RILLIGHT_CORE_VIDEO_MEDIACODEC, 0, 0, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
+  assert(dovi_android_color_output_kind(1) == RILLIGHT_CORE_VIDEO_OUT_HDR);
+  assert(dovi_android_color_output_kind(0) != RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
+  av_frame_free(&rejected);
+  av_frame_free(&layer);
+  av_frame_free(&enhanced);
+  av_frame_free(&base);
 }

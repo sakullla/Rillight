@@ -316,3 +316,4 @@ bool AndroidColorPipeline::Render(const AVFrame* frame, ANativeWindow* window, b
     return false;
   }
 }
+bool AndroidColorPipeline::HdrPresented() const { return impl_ && impl_->hdr; }

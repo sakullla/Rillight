@@ -868,7 +868,9 @@ internal class CorePlayback(
             "requestedDenoise" to (snap?.getOrNull(30)?.toInt() ?: 0),
             "effectiveDenoise" to (snap?.getOrNull(31)?.toInt() ?: 0),
             "requestedSharpen" to (snap?.getOrNull(32)?.toInt() ?: 0),
-            "effectiveSharpen" to (snap?.getOrNull(33)?.toInt() ?: 0))
+            "effectiveSharpen" to (snap?.getOrNull(33)?.toInt() ?: 0),
+            "doviReconstruction" to (snap?.getOrNull(34)?.toInt() ?: 0),
+            "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1))
     }
 
     private fun refreshAudioRoute() {

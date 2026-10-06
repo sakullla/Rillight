@@ -83,8 +83,19 @@ typedef enum RillightCoreVideoOutputKind {
   RILLIGHT_CORE_VIDEO_OUT_UNKNOWN = 0,
   RILLIGHT_CORE_VIDEO_OUT_SDR = 1,
   RILLIGHT_CORE_VIDEO_OUT_HDR = 2,
+  /* Android only, and only after MediaCodec has selected video/dolby-vision.
+   * Windows scRGB, macOS EDR and SDR tone maps never use this value. */
   RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION = 3
 } RillightCoreVideoOutputKind;
+
+typedef enum RillightCoreDoviReconstruction {
+  RILLIGHT_CORE_DOVI_RECON_NONE = 0,
+  RILLIGHT_CORE_DOVI_RECON_RPU = 1,
+  RILLIGHT_CORE_DOVI_RECON_FEL = 2,
+  /* Residual was required and was not composed. The picture is the compatible
+   * base layer, not a completed FEL reconstruction. */
+  RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK = 3
+} RillightCoreDoviReconstruction;
 
 #define RILLIGHT_CORE_DOVI_PROFILE_UNKNOWN (-1)
 #define RILLIGHT_CORE_DOVI_PROFILE_NONE 0
@@ -229,7 +240,10 @@ typedef struct RillightCoreSnapshot {
   int allow_software_fallback;
   int external_subtitle_pending;
   /* dolby_vision_profile is -1 until open, then 0 or the container profile.
+   * dolby_vision_compatibility is -1 until open, then the base-layer id.
    * video_output_kind stays unknown until the presentation path fills it.
+   * It is native Dolby only for an Android video/dolby-vision decoder.
+   * dovi_reconstruction is FEL only after the enhancement layer is composed.
    * Enhancement pairs are 0 until a caller requests them. Effective values may
    * differ from requested values; this task leaves both at 0. */
   int dolby_vision_profile;
@@ -249,6 +263,8 @@ typedef struct RillightCoreSnapshot {
   int effective_denoise;
   int requested_sharpen;
   int effective_sharpen;
+  int dovi_reconstruction;
+  int dolby_vision_compatibility;
 } RillightCoreSnapshot;
 
 static inline int rillight_core_frame_is_audio(int type) {
@@ -338,8 +354,11 @@ RILLIGHT_CORE_API int rillight_core_render_mediacodec_frame(
     const RillightCoreFrame *frame);
 /* Owned GLES presentation on the caller's output thread. Release on the same
  * thread before returning the Surface. HDR requires display/EGL support. */
+/* core may be NULL. On success the core records HDR or SDR from the EGL
+ * surface that was actually created, never native Dolby Vision. */
 RILLIGHT_CORE_API int rillight_core_render_android_color_frame(
-    const RillightCoreFrame *frame, void *native_window, int hdr_display_supported);
+    const RillightCoreFrame *frame, void *native_window, int hdr_display_supported,
+    RillightCore *core);
 RILLIGHT_CORE_API void rillight_core_release_android_color_renderer(void);
 RILLIGHT_CORE_API double rillight_core_video_frame_rate(RillightCore *core);
 /* Optional Windows GPU sink, enabled while idle; disabling it is allowed

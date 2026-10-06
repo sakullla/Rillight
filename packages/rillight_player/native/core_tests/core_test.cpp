@@ -427,6 +427,8 @@ void play_channel_count(Bytes wav, int device_channels, int expect_channels,
       assert(state.audio_atmos == 0);
       assert(state.video_output_kind == 0);
       assert(state.dolby_vision_profile == RILLIGHT_CORE_DOVI_PROFILE_NONE);
+      assert(state.dolby_vision_compatibility == -1);
+      assert(state.dovi_reconstruction == RILLIGHT_CORE_DOVI_RECON_NONE);
       assert(state.requested_anime4k == 0 && state.effective_denoise == 0);
       rillight_core_release_frame(frame);
       matched = true;
@@ -567,6 +569,17 @@ bool wait_for(RillightCore *core, Predicate predicate,
 #define RILLIGHT_DOVI_TEST_API
 #endif
 RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile, int compatibility);
+RILLIGHT_DOVI_TEST_API int rillight_dovi_open_rejected(int profile, int compatibility, int el_present);
+RILLIGHT_DOVI_TEST_API int rillight_dovi_frame_error(int profile, int compatibility, int el_present,
+                                                    int rpu_usable, int residual, int composed);
+RILLIGHT_DOVI_TEST_API int rillight_dovi_frame_reconstruction(int profile, int compatibility,
+                                                             int el_present, int rpu_usable,
+                                                             int residual, int composed);
+RILLIGHT_DOVI_TEST_API int rillight_dovi_frame_emits(int profile, int compatibility, int el_present,
+                                                    int rpu_usable, int residual, int composed);
+RILLIGHT_DOVI_TEST_API int rillight_present_output_kind(int frame_type, int windows_scrgb,
+                                                       int macos_edr, int android_dolby_mime);
+RILLIGHT_DOVI_TEST_API int rillight_android_color_output_kind(int pq_selected);
 RILLIGHT_DOVI_TEST_API uint8_t rillight_tonemap_channel(int transfer, uint8_t code);
 extern "C" RILLIGHT_DOVI_TEST_API int rillight_core_has_decoder(const char *name);
 
@@ -580,6 +593,45 @@ int main() {
   assert(rillight_dovi_base_rejected(8, 4) == 0);
   assert(rillight_dovi_base_rejected(7, 6) == 0);
   assert(rillight_dovi_base_rejected(7, 0) == 1);
+  assert(rillight_dovi_open_rejected(-1, 0, 0) == 0);
+  assert(rillight_dovi_open_rejected(5, 0, 0) == 0);
+  assert(rillight_dovi_open_rejected(5, 0, 1) == 1);
+  assert(rillight_dovi_open_rejected(7, 6, 1) == 0);
+  assert(rillight_dovi_open_rejected(7, 1, 0) == 1);
+  assert(rillight_dovi_open_rejected(8, 1, 0) == 0);
+  assert(rillight_dovi_open_rejected(8, 2, 0) == 0);
+  assert(rillight_dovi_open_rejected(8, 4, 0) == 0);
+  assert(rillight_dovi_open_rejected(8, 6, 0) == 0);
+  assert(rillight_dovi_open_rejected(8, 3, 0) == 1);
+  assert(rillight_dovi_open_rejected(4, 2, 0) == 1);
+  assert(rillight_dovi_frame_error(5, 0, 0, 0, 0, 0) == RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI);
+  assert(rillight_dovi_frame_emits(5, 0, 0, 0, 0, 0) == 0);
+  assert(rillight_dovi_frame_reconstruction(5, 0, 0, 1, 0, 0) == RILLIGHT_CORE_DOVI_RECON_RPU);
+  assert(rillight_dovi_frame_reconstruction(7, 6, 1, 1, 1, 1) == RILLIGHT_CORE_DOVI_RECON_FEL);
+  assert(rillight_dovi_frame_reconstruction(7, 6, 1, 1, 1, 0) ==
+         RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK);
+  assert(rillight_dovi_frame_reconstruction(7, 6, 1, 0, 1, 1) ==
+         RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK);
+  assert(rillight_dovi_frame_reconstruction(7, 6, 1, 1, 1, 0) != RILLIGHT_CORE_DOVI_RECON_FEL);
+  assert(rillight_dovi_frame_reconstruction(8, 1, 0, 1, 0, 0) == RILLIGHT_CORE_DOVI_RECON_RPU);
+  assert(rillight_dovi_frame_reconstruction(8, 2, 0, 0, 0, 0) ==
+         RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK);
+  assert(rillight_dovi_frame_error(8, 3, 0, 1, 0, 0) == RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI);
+  assert(rillight_present_output_kind(RILLIGHT_CORE_VIDEO_D3D11, 1, 0, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_HDR);
+  assert(rillight_present_output_kind(RILLIGHT_CORE_VIDEO_RGBA16F, 0, 1, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_HDR);
+  assert(rillight_present_output_kind(RILLIGHT_CORE_VIDEO_RGBA, 0, 0, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_SDR);
+  assert(rillight_present_output_kind(RILLIGHT_CORE_VIDEO_MEDIACODEC, 0, 0, 1) ==
+         RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
+  assert(rillight_present_output_kind(RILLIGHT_CORE_VIDEO_MEDIACODEC, 0, 0, 0) ==
+         RILLIGHT_CORE_VIDEO_OUT_UNKNOWN);
+  assert(rillight_present_output_kind(RILLIGHT_CORE_VIDEO_ANDROID_P010, 0, 0, 1) !=
+         RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
+  assert(rillight_android_color_output_kind(1) == RILLIGHT_CORE_VIDEO_OUT_HDR);
+  assert(rillight_android_color_output_kind(0) == RILLIGHT_CORE_VIDEO_OUT_SDR);
+  assert(rillight_android_color_output_kind(1) != RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
   // AVCOL_TRC_BT709 = 1, SMPTE2084 = 16, ARIB_STD_B67 = 18.
   assert(rillight_tonemap_channel(1, 40) == 40);
   assert(rillight_tonemap_channel(16, 0) == 0);
