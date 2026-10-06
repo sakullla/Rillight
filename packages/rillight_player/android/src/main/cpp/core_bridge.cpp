@@ -637,6 +637,64 @@ Java_com_rillight_player_CoreNative_videoFrameRate(JNIEnv*, jobject, jlong handl
   return handle ? rillight_core_video_frame_rate(bridge(handle)->core) : 0;
 }
 
+JNIEXPORT jdouble JNICALL
+Java_com_rillight_player_CoreNative_outputFrameRate(JNIEnv*, jobject, jlong handle) {
+  return handle ? rillight_core_output_frame_rate(bridge(handle)->core) : 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_configureEnhancement(
+    JNIEnv*, jobject, jlong handle, jint interpolation, jint anime4k,
+    jint super_resolution, jint denoise, jint sharpen, jint accept_leave,
+    jint refresh_hz) {
+  if (!handle) return -1;
+  RillightCoreEnhancementRequest request{};
+  request.struct_size = sizeof(request);
+  request.interpolation = interpolation;
+  request.anime4k = anime4k;
+  request.super_resolution = super_resolution;
+  request.denoise = denoise;
+  request.sharpen = sharpen;
+  request.accept_leave_native_dolby = accept_leave;
+  request.display_refresh_hz = refresh_hz;
+  auto* owner = bridge(handle);
+  std::lock_guard lock(owner->presentation_mutex);
+  return rillight_core_configure_enhancement(owner->core, &request);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_noteFrameDeadline(
+    JNIEnv*, jobject, jlong handle, jint met, jlong monotonic_us) {
+  if (!handle) return -1;
+  auto* owner = bridge(handle);
+  std::lock_guard lock(owner->presentation_mutex);
+  return rillight_core_note_frame_deadline(owner->core, met, monotonic_us);
+}
+
+JNIEXPORT jintArray JNICALL
+Java_com_rillight_player_CoreNative_enhancementStatus(JNIEnv* env, jobject,
+                                                     jlong handle) {
+  if (!handle) return nullptr;
+  RillightCoreEnhancementStatus status{};
+  status.struct_size = sizeof(status);
+  if (rillight_core_enhancement_status(bridge(handle)->core, &status) != 0)
+    return nullptr;
+  const jint values[] = {
+      status.requested_interpolation, status.effective_interpolation,
+      status.requested_anime4k, status.effective_anime4k,
+      status.requested_super_resolution, status.effective_super_resolution,
+      status.requested_denoise, status.effective_denoise,
+      status.requested_sharpen, status.effective_sharpen,
+      status.reason_interpolation, status.reason_anime4k,
+      status.reason_super_resolution, status.reason_denoise,
+      status.reason_sharpen, status.interpolation_backend,
+      status.anime4k_backend, status.super_resolution_backend,
+      status.left_native_dolby};
+  auto* result = env->NewIntArray(19);
+  if (result) env->SetIntArrayRegion(result, 0, 19, values);
+  return result;
+}
+
 JNIEXPORT jobject JNICALL
 Java_com_rillight_player_CoreNative_takeVideoOverlay(JNIEnv* env, jobject, jlong handle) {
   if (!handle) return nullptr;

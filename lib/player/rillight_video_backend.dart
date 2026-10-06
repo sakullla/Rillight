@@ -533,6 +533,8 @@ class RillightVideoBackend extends VideoBackend
       if (_disposed || generation != _generation) return;
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
+      await _command('enhancement', settings.videoEnhancement.toCoreArgs());
+      if (_disposed || generation != _generation) return;
       _opened = true;
       _openPhase = 'opened';
       PlayerStartupTrace.record('backend.opened');
@@ -1046,6 +1048,15 @@ class RillightVideoBackend extends VideoBackend
     }
     selectedAudioIndex = result['audioIndex'] as int?;
     selectedSubtitleIndex = result['subtitleIndex'] as int?;
+  }
+
+  /// Reports one display deadline. The saved selection and sealed media URL
+  /// stay as they were; only the effective tier may drop inside the core.
+  Future<void> noteVideoFrameDeadline({
+    required bool met,
+    required int monotonicUs,
+  }) {
+    return _command('frameDeadline', {'met': met, 'monotonicUs': monotonicUs});
   }
 
   void _invalidateTrack() {

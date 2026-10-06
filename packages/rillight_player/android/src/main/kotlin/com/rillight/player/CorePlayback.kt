@@ -370,6 +370,19 @@ internal class CorePlayback(
                     if (code == 0) { beginTrack(result, -1, true, handle); return }
                     code
                 }
+                "enhancement" -> CoreNative.configureEnhancement(
+                    handle,
+                    (args["interpolation"] as? Number)?.toInt() ?: 0,
+                    (args["anime4k"] as? Number)?.toInt() ?: 0,
+                    (args["superResolution"] as? Number)?.toInt() ?: 0,
+                    (args["denoise"] as? Number)?.toInt() ?: 0,
+                    (args["sharpen"] as? Number)?.toInt() ?: 0,
+                    if (args["acceptLeaveNativeDolby"] == true) 1 else 0,
+                    (args["displayRefreshHz"] as? Number)?.toInt() ?: 0)
+                "frameDeadline" -> CoreNative.noteFrameDeadline(
+                    handle,
+                    if (args["met"] == true) 1 else 0,
+                    (args["monotonicUs"] as? Number)?.toLong() ?: -1L)
                 "subtitleUri" -> {
                     val url = args["url"] as? String
                     if (url == null || CoreIoFactory(context).open(url) == null) {
@@ -870,7 +883,27 @@ internal class CorePlayback(
             "requestedSharpen" to (snap?.getOrNull(32)?.toInt() ?: 0),
             "effectiveSharpen" to (snap?.getOrNull(33)?.toInt() ?: 0),
             "doviReconstruction" to (snap?.getOrNull(34)?.toInt() ?: 0),
-            "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1))
+            "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1)) +
+            enhancementFields(handle)
+    }
+
+    private fun enhancementFields(handle: Long?): Map<String, Any> {
+        if (handle == null) return emptyMap()
+        val status = CoreNative.enhancementStatus(handle) ?: return emptyMap()
+        fun at(index: Int) = status.getOrNull(index) ?: 0
+        return mapOf(
+            "reasonInterpolation" to at(10),
+            "reasonAnime4k" to at(11),
+            "reasonSuperResolution" to at(12),
+            "reasonDenoise" to at(13),
+            "reasonSharpen" to at(14),
+            "interpolationBackend" to at(15),
+            "anime4kBackend" to at(16),
+            "superResolutionBackend" to at(17),
+            "leftNativeDolby" to at(18),
+            "sourceFrameRate" to CoreNative.videoFrameRate(handle),
+            "outputFrameRate" to CoreNative.outputFrameRate(handle),
+        )
     }
 
     private fun refreshAudioRoute() {

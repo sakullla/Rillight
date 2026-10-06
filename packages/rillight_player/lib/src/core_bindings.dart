@@ -144,6 +144,72 @@ final class NativeSubtitlePresentation extends Struct {
   external double safeVertical;
 }
 
+final class NativeEnhancementRequest extends Struct {
+  @Uint32()
+  external int structSize;
+  @Int32()
+  external int interpolation;
+  @Int32()
+  external int anime4k;
+  @Int32()
+  external int superResolution;
+  @Int32()
+  external int denoise;
+  @Int32()
+  external int sharpen;
+  @Int32()
+  external int acceptLeaveNativeDolby;
+  @Int32()
+  external int displayRefreshHz;
+}
+
+final class NativeEnhancementStatus extends Struct {
+  @Uint32()
+  external int structSize;
+  @Int32()
+  external int requestedInterpolation;
+  @Int32()
+  external int effectiveInterpolation;
+  @Int32()
+  external int requestedAnime4k;
+  @Int32()
+  external int effectiveAnime4k;
+  @Int32()
+  external int requestedSuperResolution;
+  @Int32()
+  external int effectiveSuperResolution;
+  @Int32()
+  external int requestedDenoise;
+  @Int32()
+  external int effectiveDenoise;
+  @Int32()
+  external int requestedSharpen;
+  @Int32()
+  external int effectiveSharpen;
+  @Int32()
+  external int reasonInterpolation;
+  @Int32()
+  external int reasonAnime4k;
+  @Int32()
+  external int reasonSuperResolution;
+  @Int32()
+  external int reasonDenoise;
+  @Int32()
+  external int reasonSharpen;
+  @Int32()
+  external int interpolationBackend;
+  @Int32()
+  external int anime4kBackend;
+  @Int32()
+  external int superResolutionBackend;
+  @Int32()
+  external int leftNativeDolby;
+  @Double()
+  external double sourceFrameRate;
+  @Double()
+  external double outputFrameRate;
+}
+
 class CoreBindings {
   CoreBindings({String? libraryPath})
     : libraryPath = libraryPath ?? defaultLibraryPath,
@@ -287,4 +353,21 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Int32, Pointer<NativeCoreTrack>),
         int Function(Pointer<Void>, int, Pointer<NativeCoreTrack>)
       >('rillight_core_get_track');
+  // Resolved on first use so an older core fails the enhancement command
+  // instead of failing library construction.
+  late final configureEnhancement = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<NativeEnhancementRequest>),
+        int Function(Pointer<Void>, Pointer<NativeEnhancementRequest>)
+      >('rillight_core_configure_enhancement');
+  late final noteFrameDeadline = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Int32, Int64),
+        int Function(Pointer<Void>, int, int)
+      >('rillight_core_note_frame_deadline');
+  late final enhancementStatus = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<NativeEnhancementStatus>),
+        int Function(Pointer<Void>, Pointer<NativeEnhancementStatus>)
+      >('rillight_core_enhancement_status');
 }

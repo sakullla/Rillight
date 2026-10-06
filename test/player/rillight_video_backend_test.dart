@@ -18,6 +18,9 @@ class _CoreDriver implements CorePlayer {
   bool disposed = false;
   String? lastCommand;
   Map<String, Object?> lastArgs = const {};
+  final commands = <String>[];
+  Map<String, Object?>? enhancementArgs;
+  Map<String, Object?>? deadlineArgs;
   int actualHardware = 0;
 
   @override
@@ -46,6 +49,9 @@ class _CoreDriver implements CorePlayer {
     String method, [
     Map<String, Object?> args = const {},
   ]) async {
+    commands.add(method);
+    if (method == 'enhancement') enhancementArgs = args;
+    if (method == 'frameDeadline') deadlineArgs = args;
     lastCommand = method;
     lastArgs = args;
     return {
@@ -1062,4 +1068,88 @@ void main() {
     await backend.setSubtitleOff();
     expect(backend.selectedSubtitleIndex, isNull);
   });
+
+  test(
+    'saved enhancement is applied on open and deadlines do not rewrite it',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'rillight-enhancement-open-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/settings.json');
+      final store = FilePlayerSettingsStore(file);
+      await store.write(
+        const PlayerSettings(
+          frameInterpolation: FrameInterpolation.doubleRate,
+          anime4k: Anime4kLevel.light,
+          denoise: 40,
+          sharpen: 0,
+          acceptLeaveNativeDolby: false,
+        ),
+      );
+      final before = await file.readAsString();
+      final driver = _CoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: store,
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      addTearDown(backend.dispose);
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 41,
+          url: Uri.parse('http://127.0.0.1:1/synthetic.mp4'),
+        ),
+      );
+      final sealed = driver.request!.url;
+      expect(driver.commands, contains('enhancement'));
+      expect(driver.enhancementArgs, {
+        'interpolation': 2,
+        'anime4k': 1,
+        'superResolution': 0,
+        'denoise': 40,
+        'sharpen': 0,
+        'acceptLeaveNativeDolby': false,
+        'displayRefreshHz': 0,
+      });
+      await backend.noteVideoFrameDeadline(met: false, monotonicUs: 0);
+      await backend.noteVideoFrameDeadline(met: false, monotonicUs: 1000000);
+      expect(driver.deadlineArgs, {'met': false, 'monotonicUs': 1000000});
+      expect(driver.request!.url, sealed);
+      expect(await file.readAsString(), before);
+      final saved = await store.read();
+      expect(
+        saved.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(saved.videoEnhancement.anime4k, Anime4kLevel.light);
+      expect(saved.toJson().containsKey('effectiveInterpolation'), isFalse);
+
+      final defaults = _CoreDriver();
+      final plainCache = await Directory(
+        '${directory.path}/plain-cache',
+      ).create();
+      final plain = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: plainCache,
+        createPlayer: () async => defaults,
+      );
+      addTearDown(plain.dispose);
+      await plain.open(
+        VideoOpenRequest(
+          sessionId: 42,
+          url: Uri.parse('http://127.0.0.1:1/plain.mp4'),
+        ),
+      );
+      expect(defaults.enhancementArgs, {
+        'interpolation': 0,
+        'anime4k': 0,
+        'superResolution': 0,
+        'denoise': 0,
+        'sharpen': 0,
+        'acceptLeaveNativeDolby': false,
+        'displayRefreshHz': 0,
+      });
+    },
+  );
 }

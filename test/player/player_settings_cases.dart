@@ -304,4 +304,93 @@ void main() {
     expect(raw['volume'], 11);
     expect(raw['danmakuServer'], 'https://api.example.com');
   });
+
+  test(
+    'video enhancement defaults off and restores a saved selection',
+    () async {
+      const fresh = PlayerSettings();
+      expect(fresh.videoEnhancement.interpolation, FrameInterpolation.off);
+      expect(fresh.videoEnhancement.anime4k, Anime4kLevel.off);
+      expect(fresh.videoEnhancement.superResolution, SuperResolution.off);
+      expect(fresh.videoEnhancement.denoise, 0);
+      expect(fresh.videoEnhancement.sharpen, 0);
+      expect(fresh.videoEnhancement.acceptLeaveNativeDolby, isFalse);
+      expect(fresh.toJson().containsKey('frameInterpolation'), isFalse);
+      expect(fresh.toJson().containsKey('effectiveInterpolation'), isFalse);
+
+      const explicit = PlayerSettings(
+        frameInterpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      );
+      expect(explicit.toJson()['frameInterpolation'], 'off');
+      expect(explicit.toJson()['anime4k'], 'off');
+      expect(explicit.toJson()['superResolution'], 'off');
+      expect(explicit.toJson()['denoise'], 0);
+      expect(explicit.toJson()['sharpen'], 0);
+      expect(explicit.toJson()['acceptLeaveNativeDolby'], isFalse);
+
+      final directory = await Directory.systemTemp.createTemp(
+        'rillight-enhancement-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final store = FilePlayerSettingsStore(
+        File('${directory.path}/settings.json'),
+      );
+      await store.write(
+        const PlayerSettings(
+          frameInterpolation: FrameInterpolation.doubleRate,
+          anime4k: Anime4kLevel.light,
+          denoise: 40,
+          sharpen: 15,
+          acceptLeaveNativeDolby: true,
+        ),
+      );
+      await store.writePatch(const PlayerSettings(volume: 9));
+      final restored = await store.read();
+      expect(
+        restored.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(restored.videoEnhancement.anime4k, Anime4kLevel.light);
+      expect(restored.videoEnhancement.superResolution, SuperResolution.off);
+      expect(restored.videoEnhancement.denoise, 40);
+      expect(restored.videoEnhancement.sharpen, 15);
+      expect(restored.videoEnhancement.acceptLeaveNativeDolby, isTrue);
+      expect(restored.volume, 9);
+      expect(restored.toJson().containsKey('effectiveDenoise'), isFalse);
+
+      final conflict = PlayerSettings.fromJson(const {
+        'anime4k': 'strong',
+        'superResolution': 'x2',
+        'frameInterpolation': 'double',
+      });
+      expect(conflict.videoEnhancement.anime4k, Anime4kLevel.off);
+      expect(conflict.videoEnhancement.superResolution, SuperResolution.off);
+      expect(
+        conflict.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(conflict.toJson()['anime4k'], 'off');
+      expect(conflict.toJson()['superResolution'], 'off');
+
+      final exclusive = const PlayerSettings(
+        anime4k: Anime4kLevel.strong,
+        superResolution: SuperResolution.x2,
+      ).selectingSuperResolution(SuperResolution.x2);
+      expect(exclusive.anime4k, Anime4kLevel.off);
+      expect(exclusive.superResolution, SuperResolution.x2);
+      final anime = exclusive.selectingAnime4k(Anime4kLevel.light);
+      expect(anime.anime4k, Anime4kLevel.light);
+      expect(anime.superResolution, SuperResolution.off);
+      expect(
+        anime.videoEnhancement.toCoreArgs(),
+        containsPair('superResolution', 0),
+      );
+      expect(anime.videoEnhancement.toCoreArgs(), containsPair('anime4k', 1));
+    },
+  );
 }

@@ -4,6 +4,7 @@
 #include "video_frame_cost.h"
 #include "dovi_profile.h"
 #include "dovi_enhancement.h"
+#include "video_enhancer.h"
 #include "h264_access_unit.h"
 #include "portable_color_pipeline.h"
 #if defined(__ANDROID__)
@@ -991,6 +992,8 @@ struct RillightCoreImpl {
   int effective_denoise = 0;
   int requested_sharpen = 0;
   int effective_sharpen = 0;
+  int leave_native_dolby = 0;
+  rillight::VideoQualityEnhancer quality;
   double volume = 1.0;
   bool external_audio_speed = false;
   double requested_speed = 1.0;
@@ -1287,6 +1290,21 @@ RillightCoreImpl *impl(RillightCore *core) {
   return reinterpret_cast<RillightCoreImpl *>(core);
 }
 
+void publish_enhancement_locked(RillightCoreImpl *core) {
+  const RillightCoreEnhancementStatus status = core->quality.Status();
+  core->requested_interpolation = status.requested_interpolation;
+  core->effective_interpolation = status.effective_interpolation;
+  core->requested_anime4k = status.requested_anime4k;
+  core->effective_anime4k = status.effective_anime4k;
+  core->requested_super_resolution = status.requested_super_resolution;
+  core->effective_super_resolution = status.effective_super_resolution;
+  core->requested_denoise = status.requested_denoise;
+  core->effective_denoise = status.effective_denoise;
+  core->requested_sharpen = status.requested_sharpen;
+  core->effective_sharpen = status.effective_sharpen;
+  core->leave_native_dolby = status.left_native_dolby;
+}
+
 void clear_queue(std::deque<RillightCoreFrame *> &queue, size_t &bytes) {
   while (!queue.empty()) {
     auto *frame = queue.front();
@@ -1343,6 +1361,7 @@ void reset_frames(RillightCoreImpl *core) {
   core->audio_clock_handed_off = false;
   core->paused_video_frame_emitted = false;
   core->io_fatal_error = 0;
+  core->quality.ResetTemporal();
 }
 
 bool accept_operation(RillightCoreImpl *core, uint64_t operation) {
@@ -2652,9 +2671,24 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
   } else {
     const auto *video_frame = static_cast<const VideoOutputFrame *>(frame);
     core->dovi_reconstruction = video_frame->dovi_reconstruction;
+    if ((core->requested_interpolation || core->requested_anime4k ||
+         core->requested_super_resolution || core->requested_denoise ||
+         core->requested_sharpen) &&
+        core->state == RILLIGHT_CORE_PLAYING && core->first_video &&
+        frame->pts_us >= 0) {
+      const double fps = core->video_frame_rate > 1.0 ? core->video_frame_rate : 24.0;
+      const int64_t slack = static_cast<int64_t>(1000000.0 / fps);
+      const int64_t clock = playback_position(core);
+      const int met = frame->pts_us + slack >= clock ? 1 : 0;
+      const int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
+                              Clock::now().time_since_epoch())
+                              .count();
+      core->quality.NoteDeadline(met, now < 0 ? 0 : now);
+    }
+    publish_enhancement_locked(core);
     core->video_output_kind = dovi_present_output_kind(
         frame->type, core->hdr_video ? 1 : 0, core->macos_edr ? 1 : 0,
-        core->android_native_dolby ? 1 : 0);
+        core->android_native_dolby && !core->leave_native_dolby ? 1 : 0);
   }
   if ((video_index >= 0 && core->first_video) ||
       (video_index < 0 && core->first_audio)) {
@@ -2698,6 +2732,62 @@ int drain_audio_filter(RillightCoreImpl *core, AudioFilter *filter,
   }
   av_frame_free(&filtered);
   return result;
+}
+
+void apply_video_quality(RillightCoreImpl *core, RillightCoreFrame *output,
+                         std::vector<RillightCoreFrame *> *leading) {
+  const bool cpu = output->data &&
+                   (output->type == RILLIGHT_CORE_VIDEO_RGBA ||
+                    output->type == RILLIGHT_CORE_VIDEO_RGBA16F);
+  core->quality.SetPictureAvailable(cpu ? 1 : 0);
+  if (!cpu) return;
+  const int bpp = output->type == RILLIGHT_CORE_VIDEO_RGBA16F ? 8 : 4;
+  rillight::QualityProcessResult processed;
+  if (!core->quality.Process(output->data, output->width, output->height,
+                             output->stride, bpp, output->pts_us,
+                             output->timeline_version, nullptr, 0,
+                             kMaxVideoBytes, &processed))
+    return;
+  auto *video = static_cast<VideoOutputFrame *>(output);
+  if (processed.changed) {
+    if (processed.current.empty() || processed.current.size() > kMaxVideoBytes)
+      return;
+    uint8_t *buffer = video->buffers->Acquire(processed.current.size());
+    if (!buffer) return;
+    std::memcpy(buffer, processed.current.data(), processed.current.size());
+    video->buffers->Recycle(output->data,
+                            static_cast<size_t>(std::max(output->data_size, 0)));
+    output->data = buffer;
+    output->width = processed.width;
+    output->height = processed.height;
+    output->stride = processed.stride;
+    output->data_size = static_cast<int>(processed.current.size());
+  }
+  if (!processed.has_midpoint || processed.midpoint.empty() ||
+      processed.midpoint.size() > kMaxVideoBytes)
+    return;
+  auto *mid = new (std::nothrow) VideoOutputFrame(*video);
+  if (!mid) return;
+  mid->data = nullptr;
+  mid->data_size = 0;
+  mid->subtitle_pixels.clear();
+  mid->subtitle_overlay = {};
+  mid->subtitle_redraw = false;
+  mid->gpu_texture.reset();
+  mid->codec_frame.reset();
+  uint8_t *buffer = mid->buffers->Acquire(processed.midpoint.size());
+  if (!buffer) {
+    delete mid;
+    return;
+  }
+  std::memcpy(buffer, processed.midpoint.data(), processed.midpoint.size());
+  mid->data = buffer;
+  mid->width = processed.mid_width;
+  mid->height = processed.mid_height;
+  mid->stride = processed.mid_stride;
+  mid->data_size = static_cast<int>(processed.midpoint.size());
+  mid->pts_us = processed.mid_pts_us;
+  leading->push_back(mid);
 }
 
 int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
@@ -2875,8 +2965,17 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
         track.actual_hardware = hardware;
     }
   }
-  // Compose at presentation time: queued frames adopt the current policy,
-  // and the retained clean frame can be rerendered while playback is paused.
+  // Quality enhancement runs on the reconstructed picture only. Subtitle
+  // cues are composited later, when the frame is taken for display.
+  std::vector<RillightCoreFrame *> leading;
+  apply_video_quality(core, output, &leading);
+  for (auto *extra : leading) {
+    const int queued = enqueue(core, extra, stream_index, timeline);
+    if (queued < 0) {
+      rillight_core_release_frame(output);
+      return queued;
+    }
+  }
   (void)cues; (void)ass; (void)subtitle_mutex;
   return enqueue(core, output, stream_index, timeline);
 }
@@ -3604,6 +3703,9 @@ void run(RillightCoreImpl *core, uint64_t session) {
     const double source_frame_rate = rate.den > 0 ? av_q2d(rate) : 0;
     core->video_frame_rate = std::isfinite(source_frame_rate) && source_frame_rate > 0 &&
         source_frame_rate <= 240 ? source_frame_rate : 0;
+    core->quality.UpdatePlaybackFacts(core->android_native_dolby ? 1 : 0,
+                                      core->video_frame_rate);
+    publish_enhancement_locked(core);
     core->audio_index = audio.stream;
     const char *demuxer = format->iformat ? format->iformat->name : nullptr;
     core->is_mp4_container = demuxer &&
@@ -4456,6 +4558,44 @@ double rillight_core_video_frame_rate(RillightCore* pointer) {
   return core->video_frame_rate;
 }
 
+double rillight_core_output_frame_rate(RillightCore* pointer) {
+  if (!pointer) return 0;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  return core->quality.Status().output_frame_rate;
+}
+
+int rillight_core_configure_enhancement(
+    RillightCore* pointer, const RillightCoreEnhancementRequest* request) {
+  if (!pointer || !request) return -1;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->state == RILLIGHT_CORE_CLOSING) return -1;
+  if (core->quality.Configure(*request) != 0) return -1;
+  publish_enhancement_locked(core);
+  return 0;
+}
+
+int rillight_core_note_frame_deadline(RillightCore* pointer, int met,
+                                     int64_t monotonic_us) {
+  if (!pointer) return -1;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->state == RILLIGHT_CORE_CLOSING) return -1;
+  if (core->quality.NoteDeadline(met, monotonic_us) != 0) return -1;
+  publish_enhancement_locked(core);
+  return 0;
+}
+
+int rillight_core_enhancement_status(RillightCore* pointer,
+                                    RillightCoreEnhancementStatus* status) {
+  if (!pointer || !status || status->struct_size < sizeof(*status)) return -1;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  *status = core->quality.Status();
+  return 0;
+}
+
 int rillight_core_configure_hardware(RillightCore *pointer,
                                       RillightCoreHardware preference,
                                       int allow_software_fallback) {
@@ -4585,6 +4725,8 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->video_frame_rate = 0;
     core->android_color_buffers = false;
     core->android_native_dolby = false;
+    core->quality.ResetSession();
+    publish_enhancement_locked(core);
     core->dolby_vision_profile = RILLIGHT_CORE_DOVI_PROFILE_UNKNOWN;
     core->dolby_vision_compatibility = -1;
     core->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;

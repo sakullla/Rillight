@@ -44,7 +44,7 @@ foreach(component avformat avcodec avutil avfilter swresample swscale)
 endforeach()
 
 add_library(rillight_core SHARED core/rillight_core.cpp core/decoder_probe.cpp
-  core/portable_color_pipeline.cpp)
+  core/portable_color_pipeline.cpp core/video_enhancer.cpp)
 if(WIN32)
   target_sources(rillight_core PRIVATE core/windows_color_pipeline.cpp)
   target_link_libraries(rillight_core PRIVATE d3d11 d3dcompiler dxgi)

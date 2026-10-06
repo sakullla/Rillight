@@ -792,6 +792,31 @@ class DesktopCorePlayer
           (args['value'] as num).toDouble().clamp(0.0, 1.5),
           ++_operation,
         );
+      case 'enhancement':
+        final request = calloc<NativeEnhancementRequest>();
+        try {
+          request.ref
+            ..structSize = sizeOf<NativeEnhancementRequest>()
+            ..interpolation = (args['interpolation'] as num?)?.toInt() ?? 0
+            ..anime4k = (args['anime4k'] as num?)?.toInt() ?? 0
+            ..superResolution = (args['superResolution'] as num?)?.toInt() ?? 0
+            ..denoise = (args['denoise'] as num?)?.toInt() ?? 0
+            ..sharpen = (args['sharpen'] as num?)?.toInt() ?? 0
+            ..acceptLeaveNativeDolby = args['acceptLeaveNativeDolby'] == true
+                ? 1
+                : 0
+            ..displayRefreshHz =
+                (args['displayRefreshHz'] as num?)?.toInt() ?? 0;
+          result = _bindings.configureEnhancement(_handle, request);
+        } finally {
+          calloc.free(request);
+        }
+      case 'frameDeadline':
+        result = _bindings.noteFrameDeadline(
+          _handle,
+          args['met'] == true ? 1 : 0,
+          (args['monotonicUs'] as num?)?.toInt() ?? -1,
+        );
       default:
         throw UnsupportedError('Unknown core command $method');
     }
@@ -853,7 +878,48 @@ class DesktopCorePlayer
     } else {
       snapshot = _readSnapshot();
     }
-    return _trackResult(snapshot, _serverStreams);
+    final mapped = _trackResult(snapshot, _serverStreams);
+    if (method == 'enhancement' || method == 'frameDeadline') {
+      mapped.addAll(_readEnhancementStatus());
+    }
+    return mapped;
+  }
+
+  Map<String, Object> _readEnhancementStatus() {
+    final pointer = calloc<NativeEnhancementStatus>();
+    pointer.ref.structSize = sizeOf<NativeEnhancementStatus>();
+    try {
+      _check(
+        _bindings.enhancementStatus(_handle, pointer),
+        'enhancement status',
+      );
+      final value = pointer.ref;
+      return {
+        'requestedInterpolation': value.requestedInterpolation,
+        'effectiveInterpolation': value.effectiveInterpolation,
+        'requestedAnime4k': value.requestedAnime4k,
+        'effectiveAnime4k': value.effectiveAnime4k,
+        'requestedSuperResolution': value.requestedSuperResolution,
+        'effectiveSuperResolution': value.effectiveSuperResolution,
+        'requestedDenoise': value.requestedDenoise,
+        'effectiveDenoise': value.effectiveDenoise,
+        'requestedSharpen': value.requestedSharpen,
+        'effectiveSharpen': value.effectiveSharpen,
+        'reasonInterpolation': value.reasonInterpolation,
+        'reasonAnime4k': value.reasonAnime4k,
+        'reasonSuperResolution': value.reasonSuperResolution,
+        'reasonDenoise': value.reasonDenoise,
+        'reasonSharpen': value.reasonSharpen,
+        'interpolationBackend': value.interpolationBackend,
+        'anime4kBackend': value.anime4kBackend,
+        'superResolutionBackend': value.superResolutionBackend,
+        'leftNativeDolby': value.leftNativeDolby,
+        'sourceFrameRate': value.sourceFrameRate,
+        'outputFrameRate': value.outputFrameRate,
+      };
+    } finally {
+      calloc.free(pointer);
+    }
   }
 
   Future<_CoreSnapshot> _waitSnapshot(

@@ -55,6 +55,20 @@ internal object CoreNative {
     external fun renderVideo(handle: Long, surface: Surface, hdrDisplaySupported: Boolean): LongArray?
     external fun releaseColorRenderer()
     external fun videoFrameRate(handle: Long): Double
+    external fun outputFrameRate(handle: Long): Double
+    external fun configureEnhancement(
+        handle: Long,
+        interpolation: Int,
+        anime4k: Int,
+        superResolution: Int,
+        denoise: Int,
+        sharpen: Int,
+        acceptLeaveNativeDolby: Int,
+        displayRefreshHz: Int,
+    ): Int
+    external fun noteFrameDeadline(handle: Long, met: Int, monotonicUs: Long): Int
+    /** Nineteen status ints, matching RillightCoreEnhancementStatus after struct_size. */
+    external fun enhancementStatus(handle: Long): IntArray?
     external fun reportAudio(handle: Long, session: Long, timeline: Long, queuedEndPtsUs: Long, remainingMediaDelayUs: Long): Int
     external fun reportAudioUnavailable(handle: Long, session: Long, timeline: Long): Int
     external fun reportDrained(handle: Long, session: Long, timeline: Long): Int

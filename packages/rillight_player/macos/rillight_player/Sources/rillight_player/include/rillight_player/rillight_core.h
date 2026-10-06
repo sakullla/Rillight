@@ -244,8 +244,8 @@ typedef struct RillightCoreSnapshot {
    * video_output_kind stays unknown until the presentation path fills it.
    * It is native Dolby only for an Android video/dolby-vision decoder.
    * dovi_reconstruction is FEL only after the enhancement layer is composed.
-   * Enhancement pairs are 0 until a caller requests them. Effective values may
-   * differ from requested values; this task leaves both at 0. */
+   * Enhancement pairs stay 0 until requested. Effective values may be lower
+   * than the request; the saved request is not rewritten. */
   int dolby_vision_profile;
   int video_output_kind;
   int audio_delivery;
@@ -361,6 +361,111 @@ RILLIGHT_CORE_API int rillight_core_render_android_color_frame(
     RillightCore *core);
 RILLIGHT_CORE_API void rillight_core_release_android_color_renderer(void);
 RILLIGHT_CORE_API double rillight_core_video_frame_rate(RillightCore *core);
+/* Output cadence after interpolation. This is the source rate, or exactly
+ * twice that rate while double interpolation is effective. It does not change
+ * media duration or audio speed. */
+RILLIGHT_CORE_API double rillight_core_output_frame_rate(RillightCore *core);
+
+#define RILLIGHT_CORE_ENHANCE_REASON_OFF 0
+#define RILLIGHT_CORE_ENHANCE_REASON_ACTIVE 1
+#define RILLIGHT_CORE_ENHANCE_REASON_NATIVE_DOLBY 2
+#define RILLIGHT_CORE_ENHANCE_REASON_MODEL_UNAVAILABLE 3
+#define RILLIGHT_CORE_ENHANCE_REASON_OVERLOAD 4
+#define RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP 5
+#define RILLIGHT_CORE_ENHANCE_REASON_NO_PICTURE 6
+#define RILLIGHT_CORE_ENHANCE_REASON_CAPACITY 7
+
+#define RILLIGHT_CORE_INTERP_BACKEND_NONE 0
+#define RILLIGHT_CORE_INTERP_BACKEND_SCENE_BLEND 1
+#define RILLIGHT_CORE_INTERP_BACKEND_RIFE 2
+#define RILLIGHT_CORE_INTERP_BACKEND_VIDEOTOOLBOX 3
+#define RILLIGHT_CORE_ANIME4K_BACKEND_NONE 0
+#define RILLIGHT_CORE_ANIME4K_BACKEND_GRADIENT 1
+#define RILLIGHT_CORE_SR_BACKEND_NONE 0
+#define RILLIGHT_CORE_SR_BACKEND_REALESRGAN 1
+#define RILLIGHT_CORE_SR_BACKEND_VIDEOTOOLBOX 2
+
+/* interpolation is 0 or 2. anime4k is 0, 1 (light) or 2 (strong).
+ * super_resolution is 0 or 2. denoise and sharpen are 0..100.
+ * Anime4K and super-resolution cannot both be non-zero.
+ * accept_leave_native_dolby must be 1 before enhancement can leave a
+ * video/dolby-vision decoder. display_refresh_hz 0 means unknown. */
+typedef struct RillightCoreEnhancementRequest {
+  uint32_t struct_size;
+  int interpolation;
+  int anime4k;
+  int super_resolution;
+  int denoise;
+  int sharpen;
+  int accept_leave_native_dolby;
+  int display_refresh_hz;
+} RillightCoreEnhancementRequest;
+
+typedef struct RillightCoreEnhancementFacts {
+  uint32_t struct_size;
+  int native_dolby;
+  double source_frame_rate;
+  int picture_available;
+} RillightCoreEnhancementFacts;
+
+typedef struct RillightCoreEnhancementLoad {
+  uint32_t struct_size;
+  int drop_interpolation;
+  int drop_scale;
+  int drop_spatial;
+} RillightCoreEnhancementLoad;
+
+typedef struct RillightCoreEnhancementStatus {
+  uint32_t struct_size;
+  int requested_interpolation;
+  int effective_interpolation;
+  int requested_anime4k;
+  int effective_anime4k;
+  int requested_super_resolution;
+  int effective_super_resolution;
+  int requested_denoise;
+  int effective_denoise;
+  int requested_sharpen;
+  int effective_sharpen;
+  int reason_interpolation;
+  int reason_anime4k;
+  int reason_super_resolution;
+  int reason_denoise;
+  int reason_sharpen;
+  int interpolation_backend;
+  int anime4k_backend;
+  int super_resolution_backend;
+  int left_native_dolby;
+  double source_frame_rate;
+  double output_frame_rate;
+} RillightCoreEnhancementStatus;
+
+/* Allowed outside CLOSING. Identical requests keep an overload downgrade.
+ * A changed request restores the selected stages and still does not write the
+ * media URL, duration, or audio speed. */
+RILLIGHT_CORE_API int rillight_core_configure_enhancement(
+    RillightCore *core, const RillightCoreEnhancementRequest *request);
+/* met is 0 or 1. monotonic_us is a caller clock. One continuous second of
+ * misses drops interpolation, then upscaling, then denoise and sharpen.
+ * Requested values stay put. */
+RILLIGHT_CORE_API int rillight_core_note_frame_deadline(
+    RillightCore *core, int met, int64_t monotonic_us);
+RILLIGHT_CORE_API int rillight_core_enhancement_status(
+    RillightCore *core, RillightCoreEnhancementStatus *status);
+RILLIGHT_CORE_API int rillight_enhancement_resolve(
+    const RillightCoreEnhancementRequest *request,
+    const RillightCoreEnhancementFacts *facts,
+    const RillightCoreEnhancementLoad *load,
+    RillightCoreEnhancementStatus *status);
+/* RGBA8 only. previous may be null. Subtitle bytes are not accepted.
+ * dst and midpoint are tightly packed. midpoint_bytes is 0 on a hard cut. */
+RILLIGHT_CORE_API int rillight_enhancement_process_rgba(
+    const RillightCoreEnhancementRequest *request,
+    const RillightCoreEnhancementFacts *facts,
+    const RillightCoreEnhancementLoad *load, const uint8_t *src, int width,
+    int height, int stride, const uint8_t *previous, int previous_stride,
+    uint8_t *dst, int dst_capacity, int *out_width, int *out_height,
+    uint8_t *midpoint, int midpoint_capacity, int *midpoint_bytes);
 /* Optional Windows GPU sink, enabled while idle; disabling it is allowed
  * during playback to recover from unavailable cross-adapter sharing.
  * VIDEO_D3D11 requests
