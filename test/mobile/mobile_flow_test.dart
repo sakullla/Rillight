@@ -232,19 +232,23 @@ void main() {
     expect(transparent(), isTrue);
     await tester.tap(find.text('聚合').last);
     await tester.pumpAndSettle();
-    final aggregation = position('aggregation');
-    expect(aggregation.maxScrollExtent, greaterThan(0));
-    aggregation.jumpTo(aggregation.maxScrollExtent);
-    await tester.pumpAndSettle();
+    expect(position('aggregation').maxScrollExtent, greaterThan(24));
     await tester.tap(find.text('首页').last);
     await tester.pumpAndSettle();
     expect(transparent(), isTrue);
     // Offstage IndexedStack children still issue scroll notifications. They
     // must not change home chrome, including ballistic dimension correction.
+    // Park away from the target first: the stack keeps the offset, and jumpTo
+    // does not notify when pixels already equal the destination.
     final offstageAggregation = position('aggregation', offstage: true);
-    expect(offstageAggregation.maxScrollExtent, greaterThan(0));
-    offstageAggregation.jumpTo(offstageAggregation.maxScrollExtent);
-    expect(offstageAggregation.pixels, greaterThan(0));
+    expect(offstageAggregation.maxScrollExtent, greaterThan(24));
+    final target = offstageAggregation.maxScrollExtent;
+    offstageAggregation.jumpTo(0);
+    final parked = offstageAggregation.pixels;
+    expect(parked, isNot(target));
+    offstageAggregation.jumpTo(target);
+    expect(offstageAggregation.pixels, isNot(parked));
+    expect(offstageAggregation.pixels, greaterThan(24));
     tester.view.physicalSize = const Size(800, 360);
     await tester.pumpAndSettle();
     expect(transparent(), isTrue);
