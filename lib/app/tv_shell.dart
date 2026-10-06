@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_top_nav.dart';
@@ -8,6 +9,7 @@ import 'package:rillight/app/tv_top_nav.dart';
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
@@ -237,7 +239,16 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                                         const TvHomePage(),
                                         padded(const _TvLibraries()),
                                         padded(
-                                          const AggregationPage(search: true),
+                                          SearchRouteGuard(
+                                            canPop: true,
+                                            onPop: () {
+                                              _selectPane(0);
+                                              _home.requestFocus();
+                                            },
+                                            child: const AggregationPage(
+                                              search: true,
+                                            ),
+                                          ),
                                         ),
                                         padded(const _TvSession()),
                                       ][i],
@@ -291,6 +302,8 @@ class _TvSession extends StatelessWidget {
   static const serverDeleteCancelKey = Key('tv-server-delete-cancel');
 
   static const changePasswordKey = Key('tv-change-password');
+
+  static const privateKey = Key('tv-session-private');
 
   /// 线路切换失败时的原因行;成功或开始新的切换后随控制器清空。
   static const lineSwitchFailureKey = Key('tv-line-switch-failure');
@@ -395,6 +408,16 @@ class _TvSession extends StatelessWidget {
                         ChangePasswordDialog(auth: auth),
                   ),
             child: Text(l.changePassword),
+          ),
+          TvAction(
+            key: _TvSession.privateKey,
+            onPressed: () async {
+              if (await SessionActions.ensurePrivateAccess(context) &&
+                  context.mounted) {
+                context.push('/private');
+              }
+            },
+            child: Text(l.aggregationPrivate),
           ),
           TvAction(
             onPressed: auth.isBusy ? null : auth.logout,

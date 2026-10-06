@@ -308,4 +308,103 @@ void main() {
       isTrue,
     );
   }, tags: ['integration']);
+
+  testWidgets('TV search back returns home and settings opens private', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(960, 540);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final server = FakeEmbyServer();
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'tv',
+          deviceId: 'tv-search-private',
+          version: '1',
+        ),
+        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+      ),
+    );
+    await tester.runAsync(
+      () => auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    final app = RillightApp(
+      auth: auth,
+      environment: PresentationEnvironment.tv,
+      playerBindings: PlayerBindings(
+        createBackend: () => FakeVideoBackend(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        settingsStore: MemoryPlayerSettingsStore(),
+      ),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+      auth.dispose();
+    });
+    await tester.pumpWidget(app);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
+    await tester.pumpAndSettle();
+    final searchBack = find.descendant(
+      of: find.byWidgetPredicate(
+        (widget) => widget is AggregationPage && widget.search,
+      ),
+      matching: find.byType(BackButton),
+    );
+    expect(searchBack, findsOneWidget);
+    await tester.tap(searchBack);
+    await tester.pumpAndSettle();
+    expect(find.byType(TvHomePage), findsOneWidget);
+    expect(
+      tester.widget<TvAction>(find.byKey(const ValueKey('tv-nav-0'))).selected,
+      isTrue,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(TvHomePage), findsOneWidget);
+    expect(app.router.state.uri.path, '/');
+
+    await tester.tap(find.byKey(const ValueKey('tv-nav-3')));
+    await tester.pumpAndSettle();
+    final sessionList = find.descendant(
+      of: find.byKey(const PageStorageKey('tv-session')),
+      matching: find.byType(Scrollable),
+    );
+    for (final label in ['连接其他服务器', '修改密码', '退出登录']) {
+      await tester.scrollUntilVisible(
+        find.text(label),
+        200,
+        scrollable: sessionList,
+      );
+      expect(find.text(label), findsOneWidget);
+    }
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('tv-session-private')),
+      -200,
+      scrollable: sessionList,
+    );
+    expect(find.byKey(const Key('tv-session-private')), findsOneWidget);
+    await tester.runAsync(() async {
+      await auth.setPrivatePin('1234', '1234');
+      await auth.regionAccess.unlock('1234');
+    });
+    await tester.ensureVisible(find.byKey(const Key('tv-session-private')));
+    await tester.tap(find.byKey(const Key('tv-session-private')));
+    await tester.pumpAndSettle();
+    expect(app.router.state.uri.path, '/private');
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }

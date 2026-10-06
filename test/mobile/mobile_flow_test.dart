@@ -905,6 +905,69 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets(
+    'search page back and system back return home; mine opens private',
+    (tester) async {
+      final server = FakeEmbyServer();
+      final (app, _) = await start(tester, server);
+      await login(tester, server);
+
+      Future<void> openSearch() async {
+        await tester.tap(find.text('搜索').last);
+        await tester.pumpAndSettle();
+      }
+
+      Finder searchBack() => find.descendant(
+        of: find.byWidgetPredicate(
+          (widget) => widget is AggregationPage && widget.search,
+        ),
+        matching: find.byType(BackButton),
+      );
+
+      await openSearch();
+      expect(searchBack(), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        'Inception',
+      );
+      await tester.pump();
+      await tester.tap(searchBack());
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileShell), findsOneWidget);
+      expect(
+        find.byKey(const PageStorageKey('mobile-home-scroll')),
+        findsOneWidget,
+      );
+      expect(app.router.state.uri.path, AppRoutes.home);
+
+      await openSearch();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const PageStorageKey('mobile-home-scroll')),
+        findsOneWidget,
+      );
+      expect(app.router.state.uri.path, AppRoutes.home);
+
+      await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(PhoneMinePage.changePasswordKey), findsOneWidget);
+      expect(find.text('连接其他服务器'), findsOneWidget);
+      expect(find.text('退出登录'), findsOneWidget);
+      expect(find.byKey(PhoneMinePage.privateKey), findsOneWidget);
+      await tester.runAsync(() async {
+        await app.auth.setPrivatePin('1234', '1234');
+        await app.auth.regionAccess.unlock('1234');
+      });
+      await tester.ensureVisible(find.byKey(PhoneMinePage.privateKey));
+      await tester.tap(find.byKey(PhoneMinePage.privateKey));
+      await tester.pumpAndSettle();
+      expect(app.router.state.uri.path, '/private');
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('empty catalog and unsupported media expose recoverable states', (
     tester,
   ) async {

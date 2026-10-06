@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -44,6 +45,9 @@ class AppShell extends StatefulWidget {
 
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
   static const topBarHeight = 56.0;
+
+  /// 桌面搜索覆盖层里的返回。只关闭覆盖层，不弹出底下的路由。
+  static const searchBackKey = Key('search-overlay-back');
 
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
   static const topFadeHeight = 36.0;
@@ -153,6 +157,19 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  void _navigateBack() {
+    if (_searchOpen) {
+      _closeSearch();
+      return;
+    }
+    final router = GoRouter.of(context);
+    if (router.canPop()) {
+      router.pop();
+    } else {
+      router.go(AppRoutes.home);
+    }
+  }
+
   void _closeSearch() {
     if (!_searchOpen) {
       return;
@@ -240,6 +257,7 @@ class _AppShellState extends State<AppShell> {
                             !_immersiveTopBar(location) ||
                             _barScrolled(location),
                         searchFocus: _searchButtonFocus,
+                        onBack: _navigateBack,
                       ),
                     ),
                   ),
@@ -255,21 +273,40 @@ class _AppShellState extends State<AppShell> {
                         child: SafeArea(
                           child: Column(
                             children: [
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: IconButton(
-                                  tooltip: MaterialLocalizations.of(
-                                    context,
-                                  ).closeButtonTooltip,
-                                  key: SearchOverlay.closeKey,
-                                  onPressed: _closeSearch,
-                                  icon: const Icon(Icons.close),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  top: AppShell.topBarHeight,
+                                  right: windowChromeTrailingInset(),
+                                ),
+                                child: Row(
+                                  children: [
+                                    IconButton(
+                                      key: AppShell.searchBackKey,
+                                      tooltip: MaterialLocalizations.of(
+                                        context,
+                                      ).backButtonTooltip,
+                                      onPressed: _closeSearch,
+                                      icon: const Icon(Icons.arrow_back),
+                                    ),
+                                    const Spacer(),
+                                    IconButton(
+                                      tooltip: MaterialLocalizations.of(
+                                        context,
+                                      ).closeButtonTooltip,
+                                      key: SearchOverlay.closeKey,
+                                      onPressed: _closeSearch,
+                                      icon: const Icon(Icons.close),
+                                    ),
+                                  ],
                                 ),
                               ),
                               Expanded(
-                                child: AggregationPage(
-                                  search: true,
-                                  searchFocusNode: _searchQueryFocus,
+                                child: SearchRouteGuard(
+                                  onPop: _closeSearch,
+                                  child: AggregationPage(
+                                    search: true,
+                                    searchFocusNode: _searchQueryFocus,
+                                  ),
                                 ),
                               ),
                             ],
@@ -292,11 +329,13 @@ class _TopBar extends StatelessWidget {
     required this.location,
     required this.opaque,
     required this.searchFocus,
+    required this.onBack,
   });
 
   final String location;
   final bool opaque;
   final FocusNode searchFocus;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -402,8 +441,7 @@ class _TopBar extends StatelessWidget {
                             : MaterialLocalizations.of(
                                 context,
                               ).backButtonTooltip,
-                        onPressed: () =>
-                            canPop ? context.pop() : context.go(AppRoutes.home),
+                        onPressed: onBack,
                         icon: Icon(
                           canPop
                               ? Icons.arrow_back_rounded
@@ -449,7 +487,6 @@ class _TopBar extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           SearchAction(focusNode: searchFocus),
-                          const PrivateRegionButton(),
                           const SessionActions(),
                           const SizedBox(width: kWindowChromeActionGap),
                         ],
@@ -536,4 +573,162 @@ class _NavTextButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 搜索子树里的 [GoRouter.pop] 改走 [onPop]，不弹出当前路由。
+///
+/// 桌面搜索页里的返回因此只关闭覆盖层。手机和电视把 [canPop] 设为 true，
+/// 让页内返回出现，并在按下后回到首页。
+class SearchRouteGuard extends StatefulWidget {
+  const SearchRouteGuard({
+    super.key,
+    required this.onPop,
+    required this.child,
+    this.canPop = false,
+  });
+
+  final VoidCallback onPop;
+  final bool canPop;
+  final Widget child;
+
+  @override
+  State<SearchRouteGuard> createState() => _SearchRouteGuardState();
+}
+
+class _SearchRouteGuardState extends State<SearchRouteGuard> {
+  late final ValueNotifier<RoutingConfig> _config;
+  late final _SearchPopRouter _router;
+
+  @override
+  void initState() {
+    super.initState();
+    _config = ValueNotifier(
+      RoutingConfig(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) => const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+    _router = _SearchPopRouter(
+      host: this,
+      parent: GoRouter.of(context),
+      routingConfig: _config,
+    );
+  }
+
+  @override
+  void dispose() {
+    _router.dispose();
+    _config.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InheritedGoRouter(goRouter: _router, child: widget.child);
+  }
+}
+
+class _SearchPopRouter extends GoRouter {
+  _SearchPopRouter({
+    required this.host,
+    required GoRouter parent,
+    required ValueListenable<RoutingConfig> routingConfig,
+  }) : _parent = parent,
+       super.routingConfig(
+         routingConfig: routingConfig,
+         initialLocation: '/',
+         overridePlatformDefaultLocation: true,
+         routerNeglect: true,
+       );
+
+  final _SearchRouteGuardState host;
+  final GoRouter _parent;
+
+  @override
+  bool canPop() => host.widget.canPop;
+
+  @override
+  void pop<T extends Object?>([T? result]) => host.widget.onPop();
+
+  @override
+  GoRouterState get state => _parent.state;
+
+  @override
+  void go(String location, {Object? extra}) =>
+      _parent.go(location, extra: extra);
+
+  @override
+  Future<T?> push<T extends Object?>(String location, {Object? extra}) =>
+      _parent.push<T>(location, extra: extra);
+
+  @override
+  void goNamed(
+    String name, {
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
+    Object? extra,
+    String? fragment,
+  }) => _parent.goNamed(
+    name,
+    pathParameters: pathParameters,
+    queryParameters: queryParameters,
+    extra: extra,
+    fragment: fragment,
+  );
+
+  @override
+  Future<T?> pushNamed<T extends Object?>(
+    String name, {
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
+    Object? extra,
+  }) => _parent.pushNamed<T>(
+    name,
+    pathParameters: pathParameters,
+    queryParameters: queryParameters,
+    extra: extra,
+  );
+
+  @override
+  Future<T?> pushReplacement<T extends Object?>(
+    String location, {
+    Object? extra,
+  }) => _parent.pushReplacement<T>(location, extra: extra);
+
+  @override
+  Future<T?> pushReplacementNamed<T extends Object?>(
+    String name, {
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
+    Object? extra,
+  }) => _parent.pushReplacementNamed<T>(
+    name,
+    pathParameters: pathParameters,
+    queryParameters: queryParameters,
+    extra: extra,
+  );
+
+  @override
+  Future<T?> replace<T>(String location, {Object? extra}) =>
+      _parent.replace<T>(location, extra: extra);
+
+  @override
+  Future<T?> replaceNamed<T>(
+    String name, {
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
+    Object? extra,
+  }) => _parent.replaceNamed<T>(
+    name,
+    pathParameters: pathParameters,
+    queryParameters: queryParameters,
+    extra: extra,
+  );
+
+  @override
+  void refresh() => _parent.refresh();
 }
