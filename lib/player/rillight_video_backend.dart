@@ -276,7 +276,16 @@ class RillightVideoBackend extends VideoBackend
   Map<String, bool> _desktopDecoderProbe() {
     final cached = _desktopDecoders;
     if (cached != null) return cached;
-    const names = ['h264', 'hevc', 'aac', 'ac3', 'eac3', 'truehd'];
+    const names = [
+      'h264',
+      'hevc',
+      'aac',
+      'ac3',
+      'eac3',
+      'truehd',
+      'ass',
+      'ssa',
+    ];
     try {
       return _desktopDecoders = probeDesktopDecoders(names);
     } catch (_) {
@@ -293,7 +302,16 @@ class RillightVideoBackend extends VideoBackend
           ? await player.capabilities()
           : const <String, dynamic>{};
       probed = {
-        for (final name in ['h264', 'hevc', 'aac', 'ac3', 'eac3', 'truehd'])
+        for (final name in [
+          'h264',
+          'hevc',
+          'aac',
+          'ac3',
+          'eac3',
+          'truehd',
+          'ass',
+          'ssa',
+        ])
           name: capabilities[name] == true,
       };
     } else {
@@ -306,6 +324,8 @@ class RillightVideoBackend extends VideoBackend
       ac3: probed['ac3'] == true,
       eac3: probed['eac3'] == true,
       truehd: probed['truehd'] == true,
+      ass: probed['ass'] == true,
+      ssa: probed['ssa'] == true,
       maxStreamingBitrate: maxStreamingBitrate,
     );
   }
@@ -428,10 +448,10 @@ class RillightVideoBackend extends VideoBackend
         return;
       }
       _transport = transport;
-      // Container probes jump between the header, indexes and track samples.
-      // Optional full-window prefetch competes with those small foreground
-      // reads and is only useful once the decoder has opened the stream.
-      await transport.setPlaybackActive(false);
+      // Start the continuous download during decoder open, not after its
+      // probes have already waited for a sequence of tiny HTTP reads. The
+      // transport yields its single producer to uncached index/track probes.
+      await transport.setPlaybackActive(!request.startPaused);
       _openPhase = 'register';
       final sealed = await transport.register(request.url);
       _mediaRoute = sealed;
@@ -755,20 +775,33 @@ class RillightVideoBackend extends VideoBackend
       if (rate is num) {
         _emit(VideoEventKind.cacheSpeed, rate.toDouble(), generation);
       }
-      if (_opened &&
-          _lastOpenRequest?.dynamicSource == false &&
+      final rejectedSource =
           data['readAheadFailed'] == true &&
           (data['prefetchAuthenticationStatus'] == 403 ||
               const {
                 'producer:HttpException',
                 'producer:SocketException',
                 'producer:TimeoutException',
-              }.contains(data['readAheadBypassReason'])) &&
+              }.contains(data['readAheadBypassReason']));
+      // Transport retries preserve the scheduler now. Do not require it to
+      // become permanently failed before refreshing a stalled signed source.
+      final stalledSource =
+          ((data['readAheadNoProgressMs'] as num?) ?? 0) >= 15000 &&
+          ((data['recoveryAttempts'] as num?) ?? 0) > 0 &&
+          data['readAheadWaitingForDisk'] != true &&
+          ((data['readAheadPublicationActive'] as num?) ?? 0) == 0;
+      if (_opened &&
+          _lastOpenRequest?.dynamicSource == false &&
+          (rejectedSource || stalledSource) &&
           (_sourceRenewalRequestedAt == null ||
               DateTime.now().difference(_sourceRenewalRequestedAt!) >
                   const Duration(seconds: 30))) {
         _sourceRenewalRequestedAt = DateTime.now();
-        _emit(VideoEventKind.sourceRefreshRequired, 403, generation);
+        _emit(
+          VideoEventKind.sourceRefreshRequired,
+          rejectedSource ? 403 : 408,
+          generation,
+        );
       }
       if (generation != _generation ||
           _disposed ||

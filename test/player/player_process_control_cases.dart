@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:win32/win32.dart';
 import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/spawn_player_process.dart';
@@ -15,6 +16,47 @@ Future<void> _until(bool Function() ready) async {
 }
 
 void main() {
+  test(
+    'Windows denied termination accepts a subsequently confirmed exit',
+    () async {
+      final child = _FakeWindowsProcess(42)
+        ..exitOnTerminate = false
+        ..terminationError = WindowsException(ERROR_ACCESS_DENIED.toHRESULT());
+      final control = WindowsPlayerProcessControl(
+        pollInterval: const Duration(milliseconds: 1),
+        spawnProcess: ({required executable, required payloadPath}) => child,
+      );
+      await control.launch('test', 'unused');
+      final killing = control.kill(child.pid);
+      expect(child.terminateCount, 1);
+      await Future<void>.delayed(Duration.zero);
+      child.alive = false;
+      await killing;
+      await control.release(child.pid);
+      expect(child.closeCount, 1);
+    },
+  );
+
+  test(
+    'Windows denied termination preserves the error if the child stays alive',
+    () async {
+      final error = WindowsException(ERROR_ACCESS_DENIED.toHRESULT());
+      final child = _FakeWindowsProcess(42)
+        ..exitOnTerminate = false
+        ..terminationError = error;
+      final control = WindowsPlayerProcessControl(
+        pollInterval: const Duration(milliseconds: 10),
+        spawnProcess: ({required executable, required payloadPath}) => child,
+      );
+      await control.launch('test', 'unused');
+      await expectLater(control.kill(child.pid), throwsA(same(error)));
+      expect(child.closeCount, 0);
+      expect(control.isAlive(child.pid), isTrue);
+      child.alive = false;
+      await control.release(child.pid);
+    },
+  );
+
   test('platform factory never selects Win32 control for macOS or Linux', () {
     expect(
       createPlayerProcessControl(operatingSystem: 'windows'),
@@ -327,11 +369,13 @@ class _FakeWindowsProcess implements WindowsPlayerProcess {
   bool exitOnTerminate = true;
   int terminateCount = 0;
   int closeCount = 0;
+  Object? terminationError;
   @override
   bool get isAlive => alive;
   @override
   void terminate() {
     terminateCount++;
+    if (terminationError != null) throw terminationError!;
     if (exitOnTerminate) alive = false;
   }
 

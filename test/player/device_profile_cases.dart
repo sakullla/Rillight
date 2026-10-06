@@ -114,4 +114,29 @@ void main() {
     expect(transcoding['VideoCodec'], 'h264');
     expect(transcoding['AudioCodec'], 'aac');
   });
+
+  test('verified ASS and SSA support avoids forced subtitle burn-in', () {
+    for (final build in [androidDeviceProfile, ownedCoreDeviceProfile]) {
+      final profile = build(h264: true, aac: true, ass: true, ssa: true);
+      final subtitles = (profile['SubtitleProfiles'] as List).cast<Map>();
+      for (final format in ['ass', 'ssa']) {
+        expect(
+          subtitles.singleWhere((s) => s['Format'] == format)['Method'],
+          'Embed',
+        );
+      }
+      final absent = (build(h264: true, aac: true)['SubtitleProfiles'] as List)
+          .cast<Map>();
+      for (final format in ['ass', 'ssa']) {
+        expect(
+          absent.singleWhere((s) => s['Format'] == format)['Method'],
+          'Encode',
+        );
+      }
+      expect(
+        subtitles.singleWhere((s) => s['Format'] == 'pgs')['Method'],
+        'Encode',
+      );
+    }
+  });
 }

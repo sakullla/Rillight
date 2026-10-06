@@ -2,6 +2,7 @@
 #include "video_buffer_pool.h"
 #include "video_frame_cost.h"
 #include "dovi_profile.h"
+#include "h264_access_unit.h"
 #include "portable_color_pipeline.h"
 #if defined(__ANDROID__)
 #include "android_color_pipeline.h"
@@ -2405,7 +2406,17 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
                   uint64_t session, uint64_t timeline, std::mutex *subtitle_mutex = nullptr,
                   const VideoSink *video_sink = nullptr) {
   if (!decoder.context) return 0;
+  const auto non_picture_error = [&](int error) {
+    const auto* context = decoder.context;
+    if (error != AVERROR_INVALIDDATA || !packet || packet->size <= 0 ||
+        context->codec_id != AV_CODEC_ID_H264) return false;
+    const int nal_length = context->extradata_size >= 5 && context->extradata[0] == 1
+        ? (context->extradata[4] & 3) + 1 : 0;
+    return rillight_h264_non_picture(packet->data,
+                                    static_cast<size_t>(packet->size), nal_length);
+  };
   int result = avcodec_send_packet(decoder.context, packet);
+  if (non_picture_error(result)) return 0;
   bool submitted = result != AVERROR(EAGAIN);
   if (result < 0 && submitted) return result;
   AVFrame *decoded = av_frame_alloc();
@@ -2417,6 +2428,7 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
       // drain output, and retry rather than replacing MediaCodec in software.
       { std::lock_guard lock(core->mutex); if (core->timeline != timeline) break; }
       result = avcodec_send_packet(decoder.context, packet);
+      if (non_picture_error(result)) { result = 0; break; }
       submitted = result != AVERROR(EAGAIN);
       if (result < 0 && submitted) break;
       if (!submitted) std::this_thread::sleep_for(std::chrono::milliseconds(1));

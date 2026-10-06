@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
 import 'dart:typed_data';
@@ -17,6 +18,17 @@ class PlaybackTransportSession {
           _workerFailure = TransportWorkerFailure.fromMessage(message);
         } else if (message == null) {
           _workerExited = true;
+        }
+        final tracePath = Platform.environment['RILLIGHT_TRANSPORT_TRACE'];
+        if (tracePath != null && tracePath.isNotEmpty) {
+          try {
+            File('$tracePath.host.jsonl').writeAsStringSync(
+              '${jsonEncode({'time': DateTime.now().toUtc().toIso8601String(), ...localDiagnostics})}\n',
+              mode: FileMode.append,
+            );
+          } catch (_) {
+            // Optional local diagnostics must not affect failure handling.
+          }
         }
         if (!_closed && !_closing) {
           _closed = true;
@@ -244,7 +256,13 @@ Future<void> _serveTransport(List<Object?> arguments) async {
 
   SessionByteCache? cache;
   PlaybackHttpProxy? proxy;
+  IOSink? trace;
   try {
+    final tracePath = Platform.environment['RILLIGHT_TRANSPORT_TRACE'];
+    if (tracePath != null && tracePath.isNotEmpty) {
+      trace = File(tracePath).openWrite(mode: FileMode.append);
+      unawaited(trace.done.catchError((Object _) {}));
+    }
     cache = await SessionByteCache.open(
       root: arguments[4] == null ? null : Directory(arguments[4]! as String),
       memoryLimitBytes: arguments[5]! as int,
@@ -295,6 +313,27 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             break;
           case 'diagnostics':
             result = proxy.diagnostics;
+            // Opt-in local investigation only. Never record resource IDs,
+            // headers, URLs, credentials or exception messages.
+            trace?.writeln(
+              jsonEncode({
+                'time': DateTime.now().toUtc().toIso8601String(),
+                for (final entry in (result as Map<String, Object?>).entries)
+                  if (entry.value is num ||
+                      entry.value is bool ||
+                      const {
+                        'degradation',
+                        'streamPolicy',
+                        'readAheadBypassReason',
+                        'readAheadConcurrencyFallback',
+                        'lastUpstreamPhase',
+                        'lastUpstreamFailureKind',
+                        'lastRequestedResourceRole',
+                        'lastUpstreamResourceRole',
+                      }.contains(entry.key))
+                    entry.key: entry.value,
+              }),
+            );
             break;
           case 'seek':
             proxy.cancelPendingReads(preserveSubtitles: true);
@@ -354,6 +393,11 @@ Future<void> _serveTransport(List<Object?> arguments) async {
     await proxy?.close();
     await cache?.close();
   } finally {
+    try {
+      await trace?.close();
+    } catch (_) {
+      // Optional tracing must not affect playback shutdown.
+    }
     commands.close();
   }
 }

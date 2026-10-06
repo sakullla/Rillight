@@ -93,6 +93,18 @@ void main() {
   EmbyItem episode(String id) =>
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
 
+  test('startup loads item and resume preferences concurrently', () async {
+    final gate = client.itemGates['movie-up'] = Completer<void>();
+    final before = client.userRequests;
+    final starting = controller.start();
+    await _until(() => client.requestedItems.contains('movie-up'));
+    await _until(() => client.userRequests > before);
+    expect(backend.openCount, 0);
+    gate.complete();
+    await starting;
+    expect(backend.openCount, 1);
+  });
+
   test('network hint requires buffering and respects dismissal', () async {
     await controller.start();
     final playback = controller.resolved!;
@@ -1283,6 +1295,13 @@ class _ControlledClient extends EmbyClient {
   Completer<void>? stoppedGate;
   Completer<void>? queryGate;
   int queryCount = 0;
+  int userRequests = 0;
+
+  @override
+  Future<EmbyUser> getUser() {
+    userRequests++;
+    return super.getUser();
+  }
 
   @override
   Future<EmbyItemPage> queryItems({

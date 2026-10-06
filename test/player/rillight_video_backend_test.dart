@@ -209,6 +209,87 @@ class _RejectedAudioCoreDriver extends _CoreDriver {
 
 void main() {
   test(
+    'stalled live downloader renews its source without discarding cached bytes',
+    () async {
+      const total = 16 * 1024 * 1024;
+      final temp = await Directory.systemTemp.createTemp(
+        'rillight-source-renewal-',
+      );
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final held = <HttpResponse>[];
+      final renewedStarts = <int>[];
+      upstream.listen((request) async {
+        final match = RegExp(
+          r'^bytes=(\d+)-(\d+)$',
+        ).firstMatch(request.headers.value('range')!)!;
+        final start = int.parse(match[1]!);
+        final end = int.parse(match[2]!);
+        if (request.uri.path == '/old' && start >= 65536) {
+          held.add(request.response);
+          return;
+        }
+        if (request.uri.path == '/new') renewedStarts.add(start);
+        request.response.statusCode = 206;
+        request.response.headers.set('etag', '"same-media"');
+        request.response.headers.set(
+          'content-range',
+          'bytes $start-$end/$total',
+        );
+        request.response.contentLength = end - start + 1;
+        request.response.add(
+          Uint8List(end - start + 1)..fillRange(0, end - start + 1, 9),
+        );
+        await request.response.close();
+      });
+      final driver = _WarmHandoffCoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: temp,
+        createPlayer: () async => driver,
+      );
+      final client = HttpClient();
+      final refresh = backend.events.firstWhere(
+        (e) => e.kind == VideoEventKind.sourceRefreshRequired,
+      );
+      try {
+        await backend.open(
+          VideoOpenRequest(
+            sessionId: 72,
+            url: Uri.parse('http://127.0.0.1:${upstream.port}/old'),
+          ),
+        );
+        final request = await client.getUrl(driver.request!.url);
+        request.headers.set('range', 'bytes=0-${total - 1}');
+        final response = await request.close();
+        final delivery = response.fold<int>(0, (count, bytes) {
+          expect(bytes.every((byte) => byte == 9), isTrue);
+          return count + bytes.length;
+        });
+        final event = await refresh.timeout(const Duration(seconds: 22));
+        expect(event.value, 408);
+        expect((await backend.diagnostics())['readAheadFailed'], false);
+        await backend.refreshSourceUrl(
+          Uri.parse('http://127.0.0.1:${upstream.port}/new'),
+        );
+        expect(await delivery.timeout(const Duration(seconds: 5)), total);
+        expect(renewedStarts.first, 65536);
+        final data = await backend.diagnostics();
+        expect(data['invalidations'], 0);
+        expect(data['sourceRenewalCount'], 1);
+        expect(data['readAheadFailed'], false);
+      } finally {
+        client.close(force: true);
+        await backend.dispose();
+        for (final response in held) {
+          unawaited(response.close().catchError((Object _) => response));
+        }
+        await upstream.close(force: true);
+        await temp.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
     'subtitle presentation forwards geometry and rejects stale session',
     () async {
       final driver = _CoreDriver();
@@ -406,6 +487,7 @@ void main() {
         try {
           await reported.timeout(const Duration(seconds: 4));
           expect(driver.releaseOpen.isCompleted, isFalse);
+          expect((await backend.diagnostics())['playbackActive'], true);
           expect(receivedUa, 'Configured UA');
         } finally {
           driver.releaseOpen.complete();
