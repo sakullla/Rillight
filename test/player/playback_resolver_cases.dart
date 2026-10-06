@@ -6,6 +6,27 @@ void main() {
   const base = 'http://emby.test:8096';
   const token = 'token-1';
 
+  test('media URL resolution preserves the signed query bytes', () {
+    const query = 'path=a%20b&part=one&flag&part=two&signature=x%2By%3D';
+    for (final address in [
+      '/video.mp4?$query',
+      '$base/video.mp4?$query',
+      'https://cdn.test/video.mp4?$query',
+    ]) {
+      final uri = embyResourceUri(Uri.parse(base), address, token);
+      expect(
+        uri.query,
+        uri.host == 'cdn.test' ? query : '$query&api_key=$token',
+      );
+    }
+    final foreign = embyResourceUri(
+      Uri.parse(base),
+      'https://cdn.test/video.mp4?api_key=$token&$query',
+      token,
+    );
+    expect(foreign.query, query);
+  });
+
   test('server media URLs use the API prefix for root and mounted servers', () {
     for (final basePath in ['', '/emby', '/gateway', '/gateway/emby']) {
       final mount = basePath.startsWith('/gateway') ? '/gateway' : '';

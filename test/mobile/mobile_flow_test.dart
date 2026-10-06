@@ -519,53 +519,48 @@ void main() {
     },
     tags: ['integration'],
   );
-  testWidgets(
-    'token renewal clears revoked source routes and allows fresh detail',
-    (tester) async {
-      final server = FakeEmbyServer();
-      final (app, _) = await start(tester, server);
-      await login(tester, server);
-      unawaited(app.router.push('/item/movie-inception'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('mobile-detail-play')));
-      await tester.pumpAndSettle();
-      // 更多面板随横竖屏选择侧边或底部布局，音轨字幕功能保持。
-      await tester.tap(find.byKey(const Key('mobile-player-more')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
-      final token = app.auth.client.accessToken;
-      server.issuedTokens.clear();
-      unawaited(app.auth.client.getUser());
-      await tester.pumpAndSettle();
-      await tester.pump(const Duration(seconds: 4));
-      await tester.pumpAndSettle();
-      // 面板随会话过期的路由收起后,控制层会再排一个 4s 隐藏计时器,
-      // 需要再推进一段虚拟时间冲掉,否则 teardown 报 pending timer。
-      await tester.pump(const Duration(seconds: 4));
-      await tester.pumpAndSettle();
-      expect(app.auth.client.accessToken, isNot(token));
-      expect(find.byKey(const Key('mobile-player-options')), findsNothing);
-      expect(find.byType(MobilePlayerPage), findsNothing);
-      // Token persistence updates the registered account and invalidates the
-      // captured source lease. Do not resurrect the covered detail's old lease.
-      expect(find.byType(MobileDetailPage), findsNothing);
-      expect(app.auth.isLoggedIn, isTrue);
-      // Revocation removes deep source history, rather than leaving a stale
-      // detail gate underneath the player.
-      expect(find.byType(MobileShell), findsOneWidget);
-      expect(
-        app.router.routerDelegate.currentConfiguration.last.matchedLocation,
-        '/',
-      );
-      unawaited(app.router.push('/item/movie-inception'));
-      await tester.pumpAndSettle();
-      expect(find.byType(MobileDetailPage), findsOneWidget);
-      expect(find.byKey(const Key('mobile-detail-play')), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-    tags: ['integration'],
-  );
+  testWidgets('token renewal closes playback and reloads ordinary detail', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    final (app, _) = await start(tester, server);
+    await login(tester, server);
+    unawaited(app.router.push('/item/movie-inception'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mobile-detail-play')));
+    await tester.pumpAndSettle();
+    // 更多面板随横竖屏选择侧边或底部布局，音轨字幕功能保持。
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('mobile-player-options')), findsOneWidget);
+    final oldDetail = tester.state(
+      find.byType(MobileDetailPage, skipOffstage: false),
+    );
+    final token = app.auth.client.accessToken;
+    server.issuedTokens.clear();
+    unawaited(app.auth.client.getUser());
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    // 面板随会话过期的路由收起后,控制层会再排一个 4s 隐藏计时器,
+    // 需要再推进一段虚拟时间冲掉,否则 teardown 报 pending timer。
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(app.auth.client.accessToken, isNot(token));
+    expect(find.byKey(const Key('mobile-player-options')), findsNothing);
+    expect(find.byType(MobilePlayerPage), findsNothing);
+    // The ordinary detail follows the renewed login with a fresh controller.
+    expect(app.auth.isLoggedIn, isTrue);
+    expect(find.byType(MobileDetailPage), findsOneWidget);
+    expect(tester.state(find.byType(MobileDetailPage)), isNot(same(oldDetail)));
+    expect(
+      app.router.routerDelegate.currentConfiguration.last.matchedLocation,
+      '/item/movie-inception',
+    );
+    expect(find.byKey(const Key('mobile-detail-play')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
   testWidgets('aggregation browse failure is visible and source retryable', (
     tester,
   ) async {
@@ -814,10 +809,9 @@ void main() {
       final current = tester
           .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
           .controller!;
-      expect(current.runtime, isNotNull);
-      expect(current.origin, isNotNull);
-      expect(current.origin!.permit.isValid, isTrue);
-      expect(identical(current.client, app.auth.client), isFalse);
+      expect(current.runtime, isNull);
+      expect(current.origin, isNull);
+      expect(identical(current.client, app.auth.client), isTrue);
       unawaited(current.seekTo(const Duration(seconds: 25)));
       await tester.pumpAndSettle();
       backend.emitError('network stream interrupted');
@@ -863,6 +857,11 @@ void main() {
       expect(current.error, isNull);
       expect(find.textContaining('进度'), findsWidgets);
       server.stoppedStatus = 503;
+      // Waiting for the report also expires the controls' auto-hide timer.
+      // Reveal them before exercising the actual close button.
+      current.onUserActivity();
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('关闭').hitTestable(), findsOneWidget);
       await tester.tap(find.byTooltip('关闭'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 4));

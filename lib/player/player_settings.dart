@@ -62,6 +62,7 @@ class PlayerSeriesPreference {
     this.subtitleOff = false,
     this.maxStreamingBitrate,
     this.mediaSourceName,
+    this.mediaSourceId,
   });
 
   final int? audioStreamIndex;
@@ -73,6 +74,9 @@ class PlayerSeriesPreference {
   final bool subtitleOff;
   final int? maxStreamingBitrate;
   final String? mediaSourceName;
+
+  /// Exact source for an item preference; never carry this across episodes.
+  final String? mediaSourceId;
 
   /// Only portable intent survives attribution to a different source/episode.
   /// Track numbers are source-specific, even when a legacy series id is unique.
@@ -100,6 +104,7 @@ class PlayerSeriesPreference {
     if (maxStreamingBitrate != null) 'maxStreamingBitrate': maxStreamingBitrate,
     if (mediaSourceName != null && mediaSourceName!.isNotEmpty)
       'mediaSourceName': mediaSourceName,
+    if (mediaSourceId != null) 'mediaSourceId': mediaSourceId,
   };
 
   factory PlayerSeriesPreference.fromJson(Map<String, dynamic> json) {
@@ -113,6 +118,7 @@ class PlayerSeriesPreference {
       subtitleOff: json['subtitleOff'] == true,
       maxStreamingBitrate: _readInt(json['maxStreamingBitrate']),
       mediaSourceName: _readString(json['mediaSourceName']),
+      mediaSourceId: _readString(json['mediaSourceId']),
     );
   }
 }
@@ -132,6 +138,7 @@ class PlayerSettings {
     this.hardwareDecoder,
     this.playbackRate,
     this.seriesPreferences = const {},
+    this.itemPreferences = const {},
     this.danmakuEnabled,
     this.danmakuDisplay,
     this.danmakuServer,
@@ -165,6 +172,9 @@ class PlayerSettings {
   /// complete uniquely attributed inventory to HistoryWriter.migrateLegacy,
   /// then use that authority's scoped preferences. Global settings stay here.
   final Map<String, PlayerSeriesPreference> seriesPreferences;
+
+  /// Ordinary playback memory keyed by server, account and item identity.
+  final Map<String, PlayerSeriesPreference> itemPreferences;
 
   /// 弹幕开关；null 表示未配置，默认开启。
   final bool? danmakuEnabled;
@@ -223,6 +233,11 @@ class PlayerSettings {
         for (final entry in seriesPreferences.entries)
           entry.key: entry.value.toJson(),
       },
+    if (itemPreferences.isNotEmpty)
+      'itemPreferences': {
+        for (final entry in itemPreferences.entries)
+          entry.key: entry.value.toJson(),
+      },
     if (danmakuEnabled != null) 'danmakuEnabled': danmakuEnabled,
     if (danmakuDisplay != null) 'danmakuDisplay': danmakuDisplay!.toJson(),
     if (danmakuServer != null) 'danmakuServer': danmakuServer,
@@ -271,6 +286,7 @@ class PlayerSettings {
           ? json['skipOutroEnabled'] as bool
           : null,
       seriesPreferences: _readSeriesPreferences(json['seriesPreferences']),
+      itemPreferences: _readSeriesPreferences(json['itemPreferences']),
       danmakuEnabled: json['danmakuEnabled'] is bool
           ? json['danmakuEnabled'] as bool
           : null,

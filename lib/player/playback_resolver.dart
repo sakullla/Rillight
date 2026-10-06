@@ -270,17 +270,22 @@ Uri embyResourceUri(Uri baseUrl, String pathOrUrl, String accessToken) {
     resolved = joinEmbyApiPath(
       baseUrl,
       parsed.path,
-    ).replace(queryParameters: parsed.queryParameters);
+    ).replace(query: parsed.hasQuery ? parsed.query : null);
   }
-  final params = Map<String, String>.from(resolved.queryParameters);
   if (resolved.origin != baseUrl.origin) {
-    params.removeWhere((key, value) => value == accessToken);
-    return resolved.replace(queryParameters: params);
+    return withoutEmbyTokenValues(resolved, {
+      if (accessToken.isNotEmpty) accessToken,
+    });
   }
+  final params = resolved.queryParameters;
   if (!params.containsKey('api_key') && !params.containsKey('ApiKey')) {
-    params['api_key'] = accessToken;
+    final query = resolved.query;
+    return resolved.replace(
+      query:
+          '${query.isEmpty ? '' : '$query&'}api_key=${Uri.encodeQueryComponent(accessToken)}',
+    );
   }
-  return resolved.replace(queryParameters: params);
+  return resolved;
 }
 
 /// 自定义 UA 对所有媒体地址生效；会话凭据只发往 Emby 同源地址。

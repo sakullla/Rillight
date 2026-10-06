@@ -32,9 +32,7 @@ class PhonePlayerInteraction extends ChangeNotifier {
         controller.loading ||
         controller.error != null ||
         controller.disconnected ||
-        controller.sessionExpired ||
-        controller.progressSyncFailed ||
-        controller.trackFailure != null;
+        controller.sessionExpired;
   }
 
   void lock() {

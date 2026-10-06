@@ -214,7 +214,13 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         regionGeneration: DetailSourceScope.maybeOf(
           context,
         )?.permit.regionGeneration,
-        mediaSourceId: item.isSeries ? null : controller.mediaSourceId,
+        // The displayed first source is a default, not an explicit choice.
+        // Only pin it when the user picked one of its tracks on this page.
+        mediaSourceId:
+            !item.isSeries &&
+                (_audioStreamIndex != null || _subtitleStreamIndex != null)
+            ? controller.mediaSourceId
+            : null,
         autoResume: !fromStart && (ticks == null || ticks <= 0),
         audioStreamIndex: item.isSeries ? null : _audioStreamIndex,
         subtitleStreamIndex: item.isSeries ? null : _subtitleStreamIndex,
@@ -222,6 +228,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       ),
     );
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
+    // Choices made inside the player are now authoritative on the next open.
+    _audioStreamIndex = null;
+    _subtitleStreamIndex = null;
     await controller.load();
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     CatalogScope.of(context).reloadHomeRows();

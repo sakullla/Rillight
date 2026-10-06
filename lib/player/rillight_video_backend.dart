@@ -123,6 +123,7 @@ class RillightVideoBackend extends VideoBackend
   StreamSubscription<CorePlayerEvent>? _coreEvents;
   Timer? _diagnosticsTimer;
   bool _diagnosticsBusy = false;
+  DateTime? _lastTransportTrace;
   bool _timelineRefreshing = false;
   int _timelineRefreshGeneration = -1;
   bool _disposed = false;
@@ -151,6 +152,7 @@ class RillightVideoBackend extends VideoBackend
   bool _opened = false;
   final _openingDownloadProgress = Stopwatch();
   int _openingDownloadBytes = 0;
+  int _observedMediaHeaderTimeouts = 0;
   bool _wantsPlayback = true;
   bool _recovering = false;
   int _recoveryEpoch = 0;
@@ -405,6 +407,7 @@ class RillightVideoBackend extends VideoBackend
       ..reset()
       ..start();
     _openingDownloadBytes = 0;
+    _observedMediaHeaderTimeouts = 0;
     _lastFailure = null;
     _lastCoreEvent = null;
     _lastCoreErrorCode = null;
@@ -790,6 +793,46 @@ class RillightVideoBackend extends VideoBackend
       );
       if (generation != _generation || _disposed) return;
       _lastTransportDiagnostics = data;
+      final traceNow = DateTime.now();
+      if (_lastTransportTrace == null ||
+          traceNow.difference(_lastTransportTrace!) >=
+              const Duration(seconds: 2)) {
+        _lastTransportTrace = traceNow;
+        PlayerStartupTrace.record('backend.io', {
+          for (final key in const [
+            'upstreamBytes',
+            'upstreamBytesPerSecond',
+            'activeRequests',
+            'upstreamConnectingRequests',
+            'upstreamAwaitingHeadersRequests',
+            'recoveryAttempts',
+            'mediaHeaderTimeouts',
+            'lastRequestedRedirectCount',
+            'lastUpstreamStatus',
+            'lastMediaUpstreamStatus',
+            'lastUpstreamPhaseElapsedMs',
+            'readAheadActive',
+            'readAheadWorkerActive',
+            'readAheadReaderWaiting',
+            'readAheadReaders',
+            'readAheadNoProgressMs',
+            'readAheadFailed',
+            'readAheadWaitingForDisk',
+            'readAheadPrefetchAllowed',
+            'readAheadPositionBytes',
+            'readAheadPublishedBytes',
+            'readAheadConcurrentTransfers',
+            'readAheadForegroundAcquisitions',
+            'readAheadPublicationActive',
+            'pendingBytes',
+            'diskBytes',
+          ])
+            if (data[key] is num || data[key] is bool)
+              key: data[key] is num
+                  ? data[key] as num
+                  : (data[key] == true ? 1 : 0),
+        });
+      }
       final downloaded = (data['upstreamBytes'] as num?)?.toInt() ?? 0;
       if (!_opened && downloaded != _openingDownloadBytes) {
         _openingDownloadBytes = downloaded;
@@ -808,20 +851,33 @@ class RillightVideoBackend extends VideoBackend
                 'producer:SocketException',
                 'producer:TimeoutException',
               }.contains(data['readAheadBypassReason']));
+      final headerTimeouts =
+          (data['mediaHeaderTimeouts'] as num?)?.toInt() ?? 0;
+      final headerTimedOut = headerTimeouts > _observedMediaHeaderTimeouts;
+      _observedMediaHeaderTimeouts = headerTimeouts;
+      final awaitingResponse =
+          ((data['upstreamConnectingRequests'] as num?) ?? 0) > 0 ||
+          ((data['upstreamAwaitingHeadersRequests'] as num?) ?? 0) > 0;
+      // Do not let the 15 s renewal heuristic cancel a valid slow response.
+      // An actual transport deadline still permits renewal, even if the next
+      // retry has started between diagnostic polls.
+      final mayRenewStalledSource = !awaitingResponse || headerTimedOut;
       // Transport retries preserve the scheduler now. Do not require it to
       // become permanently failed before refreshing a stalled signed source.
       final stalledSource =
+          mayRenewStalledSource &&
           ((data['readAheadNoProgressMs'] as num?) ?? 0) >= 15000 &&
-          ((data['recoveryAttempts'] as num?) ?? 0) > 0 &&
+          (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
           data['readAheadWaitingForDisk'] != true &&
           ((data['readAheadPublicationActive'] as num?) ?? 0) == 0;
       // A source can stall before the first frame, while no read-ahead
       // scheduler exists yet. Renewal must also serve this pending open.
       final stalledOpening =
+          mayRenewStalledSource &&
           !_opened &&
           _openPhase == 'openingCore' &&
           _openingDownloadProgress.elapsed >= const Duration(seconds: 15) &&
-          ((data['recoveryAttempts'] as num?) ?? 0) > 0 &&
+          (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
           ((data['activeRequests'] as num?) ?? 0) > 0 &&
           data['readAheadWaitingForDisk'] != true;
       if ((_opened || stalledOpening) &&

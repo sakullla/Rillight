@@ -139,7 +139,8 @@ class PlayerController extends ChangeNotifier {
     this.controlsHideAfter = const Duration(seconds: 5),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
     this.seekStep = const Duration(seconds: 10),
-    this.recoveryTimeout = const Duration(seconds: 45),
+    Duration? recoveryTimeout,
+    Duration? recoveryOpenTimeout,
     this.onClose,
     this.onOpenItem,
     this.onOpenItemDetail,
@@ -157,7 +158,12 @@ class PlayerController extends ChangeNotifier {
     this.nextPrefixFetch,
     Future<PlayerStartupData?>? startupData,
     PlaybackSessionSnapshotStore? snapshotStore,
-  }) : _startupData = startupData,
+  }) : recoveryTimeout = recoveryTimeout ?? const Duration(seconds: 45),
+       recoveryOpenTimeout =
+           recoveryOpenTimeout ??
+           recoveryTimeout ??
+           const Duration(seconds: 150),
+       _startupData = startupData,
        snapshotStore =
            snapshotStore ??
            FilePlaybackSessionSnapshotStore.forCurrentProcess() {
@@ -232,6 +238,9 @@ class PlayerController extends ChangeNotifier {
 
   /// Total wall-clock budget for a retry or media-source change.
   final Duration recoveryTimeout;
+  // Opening must outlive origin header recovery and the native first-frame
+  // deadline. Stopping the old session keeps the shorter control deadline.
+  final Duration recoveryOpenTimeout;
   final VoidCallback? onClose;
   final ValueChanged<String>? onOpenItem;
 
@@ -373,6 +382,7 @@ class PlayerController extends ChangeNotifier {
   ResolvedPlayback? resolved;
   PlayerSeriesPreference? _rememberedPreference;
   Map<String, PlayerSeriesPreference> _seriesPreferences = const {};
+  Map<String, PlayerSeriesPreference> _itemPreferences = const {};
 
   // --- 剧集列表与切集(R7) ---
   bool episodeListLoading = false;
@@ -607,6 +617,7 @@ class PlayerController extends ChangeNotifier {
       if (_settingsSaveTimer != null) await _persistSettings();
       if (!_accepts(operation)) return;
       onStage?.call('catalog metadata');
+      PlayerStartupTrace.record('controller.catalog');
       late EmbyItem loadedItem;
       EmbyUser? loadedUser;
       await Future.wait<void>([
@@ -665,7 +676,8 @@ class PlayerController extends ChangeNotifier {
       final memory = _rememberedPreference;
       final memorySubtitleOff =
           (openRequest?.itemId == itemId && openRequest?.subtitleOff == true) ||
-          (memory?.subtitleOff ?? false);
+          (preferredSubtitleStreamIndex == null &&
+              (memory?.subtitleOff ?? false));
       subtitleStreamIndex = memorySubtitleOff
           ? null
           : (preferredSubtitleStreamIndex ?? memory?.subtitleStreamIndex);
@@ -717,6 +729,10 @@ class PlayerController extends ChangeNotifier {
         onStage: onStage,
       );
     } on EmbyException catch (failure) {
+      PlayerStartupTrace.record(
+        'controller.catalogFailed.${failure.kind.name}',
+        {'status': failure.statusCode ?? 0},
+      );
       if (!_accepts(operation)) {
         return;
       }
@@ -725,7 +741,10 @@ class PlayerController extends ChangeNotifier {
       loading = false;
       state.phase = PlaybackPhase.failed;
       _emit();
-    } catch (_) {
+    } catch (failure) {
+      PlayerStartupTrace.record(
+        'controller.catalogFailed.${failure.runtimeType}',
+      );
       if (!_accepts(operation)) return;
       error = PlayerErrorKind.load;
       loading = false;
@@ -1018,12 +1037,17 @@ class PlayerController extends ChangeNotifier {
     Future<void>? priorRetirement,
   }) async {
     final clock = Stopwatch()..start();
-    Duration remaining() => recoveryTimeout - clock.elapsed;
+    Duration remaining() => recoveryOpenTimeout - clock.elapsed;
+    Duration stoppingRemaining() {
+      final control = recoveryTimeout - clock.elapsed;
+      return remaining() < control ? remaining() : control;
+    }
+
     String stage = 'stop';
     try {
       if (priorRetirement != null) {
         stage = 'retire previous operation';
-        await priorRetirement.timeout(remaining());
+        await priorRetirement.timeout(stoppingRemaining());
         if (!_accepts(operation)) return;
       }
       stage = 'stop';
@@ -1033,7 +1057,7 @@ class PlayerController extends ChangeNotifier {
         ensureRetired: true,
       );
       _trackNativeRetirement(retirement);
-      await Future.wait([retirement, stopped]).timeout(remaining());
+      await Future.wait([retirement, stopped]).timeout(stoppingRemaining());
       if (!_accepts(operation)) return;
       if (previous == null) {
         stage = 'catalog metadata';
@@ -1071,6 +1095,11 @@ class PlayerController extends ChangeNotifier {
           remaining() > Duration.zero) {
         final sourceFailure = disconnectDetail ?? loadFailure?.toString();
         stage = 'restore previous source';
+        // The failed target must not consume the fallback's header/first-frame
+        // budget. Restoration is a separate bounded attempt, still owned by
+        // this operation so cancellation and a newer switch take precedence.
+        clock.reset();
+        PlayerStartupTrace.record('controller.restoringPreviousSource');
         resolved = previous;
         await _open(
           operation: operation,
@@ -1095,6 +1124,7 @@ class PlayerController extends ChangeNotifier {
       resolved = previous;
     } on TimeoutException {
       if (!_accepts(operation)) return;
+      PlayerStartupTrace.record('controller.recoveryTimeout.$stage');
       // Keep the command barrier and native handle owned until open/stop exits.
       _operations.invalidate();
       if (stage != 'stop' &&
@@ -1580,7 +1610,7 @@ class PlayerController extends ChangeNotifier {
       if (!current()) return;
       onFailure?.call();
       trackFailure = failure.toString();
-      _emit();
+      onUserActivity();
     }
   }
 
@@ -2510,6 +2540,46 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// An explicit version choice within the current item needs no aggregation
+  /// confirmation. Refresh its playback URL once, as part of the normal open.
+  Future<void> switchMediaVersion(String sourceId) async {
+    final current = resolved;
+    if (!_accepts(_operations.current) || current == null) return;
+    if (!isRecovering && sourceId == activeMediaSourceId) return;
+    final target = mediaSources.where((source) => source.id == sourceId);
+    if (target.length != 1) return;
+    final plan = PlaybackSwitchPlan.inspect(
+      original: current.mediaSource,
+      target: target.single,
+      positionTicks: ticksFromDuration(position),
+      paused: !isPlaying && !isRecovering,
+      maxStreamingBitrate: maxStreamingBitrate,
+      audioIndex: audioStreamIndex,
+      subtitleIndex: subtitleStreamIndex,
+    );
+    ++_switchInspection;
+    switchConfirmation = null;
+    _switchOriginal = null;
+    _switchTarget = null;
+    _switchTargetItem = null;
+    onUserActivity();
+    // Matching tracks carry over by language/title, never by numeric index.
+    // Missing audio uses the target default; missing subtitles are disabled.
+    // A shorter edition starts at zero; an unknown duration tries the current
+    // position, with the freshly fetched metadata checked again during open.
+    await _recover(
+      sourceId: sourceId,
+      switchPlan: plan,
+      switchStartTicks:
+          plan.targetRuntimeTicks != null &&
+              plan.positionTicks >= plan.targetRuntimeTicks!
+          ? 0
+          : plan.positionTicks,
+      switchAudio: plan.audioIndex,
+      switchSubtitle: plan.subtitleIndex,
+    );
+  }
+
   /// Preflight leaves the old native/session active. Equal runtimes are not
   /// timeline proof and indices are never carried between different versions.
   Future<void> switchMediaSource(String sourceId) async {
@@ -3173,6 +3243,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     _sourceRenewalOperation = operation.id;
+    PlayerStartupTrace.record('controller.sourceRenewal');
     try {
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
@@ -3209,7 +3280,11 @@ class PlayerController extends ChangeNotifier {
       await (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
         next.streamUrl,
       );
+      PlayerStartupTrace.record('controller.sourceRenewalReady', {
+        'urlChanged': next.streamUrl == current.streamUrl ? 0 : 1,
+      });
     } catch (_) {
+      PlayerStartupTrace.record('controller.sourceRenewalFailed');
       // Renewal is optional while cached playback continues. Normal failure
       // reporting remains available if foreground bytes cannot be recovered.
     } finally {
@@ -3380,6 +3455,7 @@ class PlayerController extends ChangeNotifier {
             requestedSourceId ??
             activeMediaSourceId ??
             preferredMediaSourceId ??
+            _rememberedPreference?.mediaSourceId ??
             preference?.selected?.source.mediaSourceId,
         requestedName: _preferredSourceName,
       );
@@ -3451,8 +3527,12 @@ class PlayerController extends ChangeNotifier {
                 audio ??
                 (strictTracks ? null : preferredAudioStreamIndex) ??
                 memory?.audioStreamIndex,
-            language: memory?.audioLanguage,
-            title: memory?.audioTitle,
+            language: preferredAudioStreamIndex == null
+                ? memory?.audioLanguage
+                : null,
+            title: preferredAudioStreamIndex == null
+                ? memory?.audioTitle
+                : null,
           ) ??
           compatibleDefaultAudio;
       final int? selectedSubtitle;
@@ -3466,8 +3546,12 @@ class PlayerController extends ChangeNotifier {
                   subtitle ??
                   (strictTracks ? null : preferredSubtitleStreamIndex) ??
                   memory?.subtitleStreamIndex,
-              language: memory?.subtitleLanguage,
-              title: memory?.subtitleTitle,
+              language: preferredSubtitleStreamIndex == null
+                  ? memory?.subtitleLanguage
+                  : null,
+              title: preferredSubtitleStreamIndex == null
+                  ? memory?.subtitleTitle
+                  : null,
             ) ??
             fallbackSubtitleStreamIndex(next.mediaSource);
       }
@@ -3486,6 +3570,24 @@ class PlayerController extends ChangeNotifier {
       Future<void>? started;
       final subtitleRevision = ++_trackRevision;
       _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
+      PlayerStartupTrace.record('controller.mediaRequest', {
+        'sameOrigin': next.streamUrl.origin == client.baseUrl!.origin ? 1 : 0,
+        'queryNeedsPreservation':
+            next.streamUrl.query ==
+                next.streamUrl
+                    .replace(queryParameters: next.streamUrl.queryParametersAll)
+                    .query
+            ? 0
+            : 1,
+        'explicitSource': requestedSourceId == null ? 0 : 1,
+        'urlSourceMatches':
+            next.streamUrl.queryParameters['MediaSourceId'] == null
+            ? -1
+            : next.streamUrl.queryParameters['MediaSourceId'] ==
+                  next.mediaSource.id
+            ? 1
+            : 0,
+      });
       onStage?.call('native open');
       await _operations.run(operation, () async {
         await backend.open(
@@ -3661,8 +3763,12 @@ class PlayerController extends ChangeNotifier {
         await _failOpen(operation, detail: failure.toString());
       }
     } on EmbyException catch (failure) {
+      PlayerStartupTrace.record('controller.openFailed.${failure.kind.name}', {
+        'status': failure.statusCode ?? 0,
+      });
       await _failOpen(operation, failure: failure);
     } catch (error) {
+      PlayerStartupTrace.record('controller.openFailed.${error.runtimeType}');
       await _failOpen(operation, detail: error.toString());
     }
   }
@@ -4849,6 +4955,9 @@ class PlayerController extends ChangeNotifier {
       _seriesPreferences = !_scopedPlayback
           ? Map.of(settings.seriesPreferences)
           : const {};
+      _itemPreferences = !_scopedPlayback
+          ? Map.of(settings.itemPreferences)
+          : const {};
       if (volume > 0) {
         _unmutedVolume = volume;
       }
@@ -4901,19 +5010,21 @@ class PlayerController extends ChangeNotifier {
         seriesPreferences: !_scopedPlayback
             ? Map.of(_seriesPreferences)
             : const {},
+        itemPreferences: !_scopedPlayback ? Map.of(_itemPreferences) : const {},
       );
       await (await _settings()).writePatch(value);
     } catch (_) {}
   }
 
-  /// start() 时按 item.seriesId 解析记忆的音轨/字幕/码率。
+  String get _itemPreferenceKey =>
+      jsonEncode([client.baseUrl?.toString(), client.userId, itemId]);
+
+  /// Prefer this item's exact selection, then use portable series memory.
   void _applyRememberedPreference() {
     _rememberedPreference = null;
     final seriesId = item?.seriesId;
-    if (seriesId == null || seriesId.isEmpty) {
-      return;
-    }
-    final preference = _seriesPreferences[seriesId];
+    final preference =
+        _itemPreferences[_itemPreferenceKey] ?? _seriesPreferences[seriesId];
     if (preference == null) {
       return;
     }
@@ -4970,10 +5081,8 @@ class PlayerController extends ChangeNotifier {
       );
       return;
     }
+    if (item == null) return;
     final seriesId = item?.seriesId;
-    if (seriesId == null || seriesId.isEmpty) {
-      return;
-    }
     final source = resolved?.mediaSource;
     final audio = audioStreamIndex == null
         ? null
@@ -4983,18 +5092,25 @@ class PlayerController extends ChangeNotifier {
         : source?.streamByIndex(subtitleStreamIndex!);
     final hasSubtitles = source?.subtitleStreams.isNotEmpty ?? false;
     _preferredSourceName = _sourceFingerprint(source) ?? _preferredSourceName;
-    _seriesPreferences = Map.of(_seriesPreferences);
-    _seriesPreferences[seriesId] = PlayerSeriesPreference(
-      audioStreamIndex: audioStreamIndex,
-      audioLanguage: audio?.language,
-      audioTitle: audio?.displayTitle ?? audio?.label,
-      subtitleStreamIndex: subtitleStreamIndex,
-      subtitleLanguage: subtitle?.language,
-      subtitleTitle: subtitle?.displayTitle ?? subtitle?.label,
-      subtitleOff: subtitleStreamIndex == null && hasSubtitles,
-      maxStreamingBitrate: maxStreamingBitrate,
-      mediaSourceName: _preferredSourceName,
-    );
+    PlayerSeriesPreference preference({bool exactSource = false}) =>
+        PlayerSeriesPreference(
+          audioStreamIndex: audioStreamIndex,
+          audioLanguage: audio?.language,
+          audioTitle: audio?.displayTitle ?? audio?.label,
+          subtitleStreamIndex: subtitleStreamIndex,
+          subtitleLanguage: subtitle?.language,
+          subtitleTitle: subtitle?.displayTitle ?? subtitle?.label,
+          subtitleOff: subtitleStreamIndex == null && hasSubtitles,
+          maxStreamingBitrate: maxStreamingBitrate,
+          mediaSourceName: _preferredSourceName,
+          mediaSourceId: exactSource ? source?.id : null,
+        );
+    final current = preference(exactSource: true);
+    _itemPreferences = {..._itemPreferences, _itemPreferenceKey: current};
+    _rememberedPreference = current;
+    if (seriesId != null && seriesId.isNotEmpty) {
+      _seriesPreferences = {..._seriesPreferences, seriesId: preference()};
+    }
     await _writeSettings();
   }
 

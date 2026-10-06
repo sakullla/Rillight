@@ -117,6 +117,7 @@ void main() {
         subtitleOff: true,
         maxStreamingBitrate: 8000000,
         mediaSourceName: '4K',
+        mediaSourceId: 'episode-specific-source',
       );
       final portable = legacy.portableIntent;
       expect(portable.audioStreamIndex, isNull);
@@ -126,6 +127,7 @@ void main() {
       expect(portable.subtitleOff, isTrue);
       expect(portable.maxStreamingBitrate, 8000000);
       expect(portable.mediaSourceName, '4K');
+      expect(portable.mediaSourceId, isNull);
       final decoded = PlayerSettings.fromJson(
         PlayerSettings(
           volume: 42,

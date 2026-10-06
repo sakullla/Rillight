@@ -84,6 +84,14 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   PlaybackOrigin? _origin;
   MediaImageSourcePolicy? _imagePolicy;
   bool _resolved = false;
+  Object get _authIdentity => (
+    widget.auth.session?.server.id,
+    widget.auth.client.baseUrl,
+    widget.auth.client.userId,
+    widget.auth.client.accessToken,
+  );
+  bool get _selectedEntry => widget.command?.source == null;
+
   // Sessionless source-local cache: no writes into selected Auth's namespace,
   // and no persistent private detail projection surviving revocation.
   final _cache = CatalogCache();
@@ -97,45 +105,15 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   }
 
   Future<void> _resolve() async {
-    var command = widget.command;
+    final command = widget.command;
     try {
-      if (command == null) {
-        // A legacy address is explicitly bound to the selected ordinary
-        // service. It cannot enter a private region or infer another service.
-        final selected = widget.auth.session?.server;
-        if (selected == null || selected.region != AccessRegion.ordinary) {
-          return;
-        }
-        final allowed = widget.auth.sources
-            .project(AccessRegion.ordinary)
-            .where(
-              (s) => s.id == selected.id && s.participates && s.scopeKnown,
-            );
-        if (allowed.length != 1 || allowed.single.libraryIds.isEmpty) return;
-        final account = await widget.auth.sources.acquireAccount(
-          selected.id,
-          region: AccessRegion.ordinary,
-          libraryId: allowed.single.libraryIds.first,
-        );
-        final permit = widget.auth.sources.permit(account);
-        var item = await permit.dispatch((c) => c.getItem(widget.itemId));
-        final visited = <String>{};
-        while (!allowed.single.libraryIds.contains(item.id)) {
-          if (!visited.add(item.id) ||
-              item.parentId == null ||
-              visited.length > 32) {
-            return;
-          }
-          item = await permit.dispatch((c) => c.getItem(item.parentId!));
-        }
-        command = PlayerHostOpenItemCommand(
-          itemId: widget.itemId,
-          source: SourceReference(account: account, itemId: widget.itemId),
-          libraryId: item.id,
-          regionGeneration: permit.regionGeneration,
-        );
+      if (_selectedEntry) {
+        // Ordinary catalog navigation uses the selected login. Aggregation
+        // participation is not permission to browse that server directly.
+        return;
       }
-      if (command.source == null ||
+      if (command == null ||
+          command.source == null ||
           command.itemId != widget.itemId ||
           command.source!.itemId != widget.itemId) {
         return;
@@ -293,6 +271,15 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   @override
   Widget build(BuildContext context) {
     final origin = _origin;
+    if (_selectedEntry &&
+        widget.auth.isLoggedIn &&
+        widget.auth.session?.server.region == AccessRegion.ordinary &&
+        (widget.command == null || widget.command!.itemId == widget.itemId)) {
+      // Renewed credentials must recreate controllers holding the old client.
+      // Ordinary navigation follows the selected session; explicit source
+      // routes below still require their original, valid source permit.
+      return KeyedSubtree(key: ValueKey(_authIdentity), child: widget.child);
+    }
     if (origin == null || !origin.permit.isValid) {
       if (!_resolved) return const Center(child: CircularProgressIndicator());
       final l = AppLocalizations.of(context);

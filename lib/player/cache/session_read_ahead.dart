@@ -56,9 +56,9 @@ class SessionReadAhead {
   static const requestBytes = 8 * 1024 * 1024; // HLS segment prefetch cap.
   static const maxRequestBytes = 32 * 1024 * 1024;
   static const parallelRequestBytes = 8 * 1024 * 1024;
-  // Cover a 15 s body-stall detection and one 20 s header retry. A shorter
-  // downstream deadline would abandon a still-recovering upstream response.
-  static const progressTimeout = Duration(seconds: 40);
+  // Cover body-stall detection (15 s), reconnect (15 s), headers (45 s)
+  // and backoff. The downstream reader must not abort this recovery early.
+  static const progressTimeout = Duration(seconds: 85);
   final SessionByteCache cache;
   final String resource;
   final int generation;
@@ -141,6 +141,7 @@ class SessionReadAhead {
     'readAheadPositionBytes': _position,
     'readAheadReaderWaiting': _readerWaiting,
     'readAheadReaders': _readers.length,
+    'readAheadForegroundAcquisitions': _foregroundAcquisitions,
     'readAheadNoProgressMs': _jobs.isEmpty
         ? 0
         : _jobs.map((job) => job.progress.elapsedMilliseconds).reduce(min),
@@ -668,7 +669,7 @@ class SessionReadAhead {
     }
   }
 
-  Stream<List<int>> read(int start, int end) async* {
+  Stream<List<int>> read(int start, int end, {Future<void>? cancelled}) async* {
     if (_closed || _failed) throw const HttpException('Read-ahead unavailable');
     // MP4 can place audio and video chunks tens of MiB apart. Replacing the
     // HTTP consumer must not cancel the continuous download each time the
@@ -676,6 +677,13 @@ class SessionReadAhead {
     if (!_producerNear(start, end)) stop(cancelReaders: false);
     final reader = ++_reader;
     _readers[reader] = (position: start, waiting: false);
+    var readerCancelled = false;
+    var readerFinished = false;
+    cancelled?.then((_) {
+      if (readerFinished) return;
+      readerCancelled = true;
+      _notify();
+    });
     final cancellation = _cancelGeneration;
     _noteReaderPosition(start);
     _active = true;
@@ -685,7 +693,10 @@ class SessionReadAhead {
       var offset = start;
       var progressDeadline = DateTime.now().add(progressTimeout);
       while (offset <= end) {
-        if (_closed || !_active || cancellation != _cancelGeneration) {
+        if (readerCancelled ||
+            _closed ||
+            !_active ||
+            cancellation != _cancelGeneration) {
           throw const ReadAheadSuperseded();
         }
         final changed = _changed.future;
@@ -722,12 +733,39 @@ class SessionReadAhead {
             CacheReadSource.memory,
           );
         }
-        if (_closed || !_active || cancellation != _cancelGeneration) {
+        if (readerCancelled ||
+            _closed ||
+            !_active ||
+            cancellation != _cancelGeneration) {
           throw const ReadAheadSuperseded();
         }
         if (hit == null) {
           if (_failed) {
             throw _failure ?? const HttpException('Read-ahead failed');
+          }
+          // A request can begin in cache and then reach a hole behind the
+          // producer for another track. Admission's cached-prefix check kept
+          // that producer alive, but it cannot deliver this earlier byte.
+          // Preempt only for the latest reader and a genuine missing byte;
+          // indexed blocks awaiting disk capacity must keep their producer.
+          if (reader == _readers.keys.last &&
+              _continuous?.canRead(offset) != true &&
+              _jobs.any((job) => job.epoch == _producerEpoch) &&
+              !_jobs.any(
+                (job) =>
+                    job.epoch == _producerEpoch &&
+                    offset >= job.start &&
+                    offset <= job.end,
+              ) &&
+              cache.firstMissingOffset(
+                    resource: resource,
+                    generation: generation,
+                    offset: offset,
+                    length: 1,
+                  ) ==
+                  offset) {
+            stop(cancelReaders: false);
+            _active = true;
           }
           _updateReader(reader, offset, waiting: true);
           // A cache index hit blocked by disk capacity is not a producer
@@ -757,6 +795,7 @@ class SessionReadAhead {
         _schedule();
       }
     } finally {
+      readerFinished = true;
       final wasLatest = _readers.isNotEmpty && reader == _readers.keys.last;
       _readers.remove(reader);
       if (wasLatest) {

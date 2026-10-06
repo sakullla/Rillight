@@ -675,9 +675,9 @@ void main() {
               .transitionType,
           SharedAxisTransitionType.vertical,
         );
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(PhoneShelfPage), findsOneWidget);
         await _homeSettle(tester);
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(PhoneShelfPage), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -1053,26 +1053,26 @@ void main() {
       router.go(AppRoutes.shelfLatestMovies);
       await _homeSettle(tester);
 
-      expect(find.byType(AggregationPage), findsOneWidget);
-      expect(find.byType(PhoneShelfPage), findsNothing);
+      expect(find.byType(AggregationPage), findsNothing);
+      expect(find.byType(PhoneShelfPage), findsOneWidget);
       expect(find.byType(ShelfGridPage), findsNothing);
       expect(find.byType(HomeHero), findsNothing);
-      expect(find.text('聚合'), findsWidgets);
+      expect(find.text('聚合'), findsNothing);
       expect(find.text('加载此来源更多'), findsNothing);
       expect(
         server.requests.where(
           (request) =>
               request.contains('IncludeItemTypes=Movie') &&
-              request.contains('Limit=50') &&
+              request.contains('Limit=60') &&
               request.contains('StartIndex=0') &&
-              request.contains('SortBy=DateCreated') &&
+              request.contains('SortBy=DateLastContentAdded') &&
               request.contains('SortOrder=Descending'),
         ),
         isNotEmpty,
       );
       final scrollable = find
           .descendant(
-            of: find.byKey(const PageStorageKey('aggregation')),
+            of: find.byType(PhoneShelfPage),
             matching: find.byType(Scrollable),
           )
           .first;
@@ -1084,7 +1084,7 @@ void main() {
       expect(find.text('冷门电影'), findsOneWidget);
       tester.state<ScrollableState>(scrollable).position.jumpTo(0);
       await _homeSettle(tester);
-      await tester.tap(find.byType(DropdownButton<bool>));
+      await tester.tap(find.byKey(const Key('phone-shelf-filter')));
       await _homeSettle(tester);
       await tester.tap(find.text('未看').last);
       await _homeSettle(tester);
@@ -1099,93 +1099,95 @@ void main() {
 
       router.go(AppRoutes.shelfLatestSeries);
       await _homeSettle(tester);
-      expect(find.byType(AggregationPage), findsOneWidget);
-      expect(find.byType(PhoneShelfPage), findsNothing);
-      expect(find.text('聚合'), findsWidgets);
+      expect(find.byType(AggregationPage), findsNothing);
+      expect(find.byType(PhoneShelfPage), findsOneWidget);
+      expect(find.text('聚合'), findsNothing);
       expect(
         server.requests.where(
           (request) =>
               request.contains('IncludeItemTypes=Series') &&
-              request.contains('Limit=50') &&
-              request.contains('SortBy=DateCreated'),
+              request.contains('Limit=60') &&
+              request.contains('SortBy=DateLastContentAdded'),
         ),
         isNotEmpty,
       );
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
 
-    // Legacy shelf routes use the real aggregation page in both environments.
-    testWidgets('desktop and phone shelf routes use source-safe aggregation', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(1280, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      tester.platformDispatcher.accessibilityFeaturesTestValue =
-          const FakeAccessibilityFeatures(disableAnimations: true);
-      addTearDown(
-        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
-      );
-      final server = FakeEmbyServer();
-      final auth = SyntheticSourceAuth(
-        adapter: FakeEmbyAdapter([server]),
-        device: _homeDevice,
-        libraryIds: server.views.map((view) => view.id).toSet(),
-      );
-      await tester.runAsync(
-        () => auth.connect(
-          address: server.baseUrl.toString(),
-          username: 'alice',
-          password: 'correct-horse',
-        ),
-      );
-      final runtime = (await tester.runAsync(auth.runtime))!;
-      final desktopApp = RillightApp(
-        auth: auth,
-        environment: PresentationEnvironment.desktop,
-        playerBindings: PlayerBindings(runtime: runtime),
-      );
-      final desktopRouter = desktopApp.router;
-      desktopRouter.go(AppRoutes.shelfResume);
-      await tester.pumpWidget(desktopApp);
-      await _homeSettle(tester);
-      expect(find.byType(AggregationPage), findsOneWidget);
-      expect(find.byType(ShelfGridPage), findsNothing);
-      expect(find.byType(PhoneShelfPage), findsNothing);
-      // Desktop routes remain independent of phone Material Motion.
-      final desktopShelfRoute = ModalRoute.of(
-        tester.element(find.byType(AggregationPage)),
-      )!;
-      expect(desktopShelfRoute.settings, isA<NoTransitionPage<void>>());
-      expect(desktopShelfRoute.transitionDuration, Duration.zero);
-      expect(desktopShelfRoute.reverseTransitionDuration, Duration.zero);
-
-      final phoneApp = RillightApp(
-        auth: auth,
-        environment: PresentationEnvironment.phone,
-        playerBindings: PlayerBindings(runtime: runtime),
-      );
-      final phoneRouter = phoneApp.router;
-      addTearDown(() async {
-        await tester.pumpWidget(const SizedBox.shrink());
-        desktopRouter.dispose();
-        phoneRouter.dispose();
-        await tester.runAsync(
-          () => runtime.history.close().timeout(const Duration(seconds: 5)),
+    // Ordinary shelves retain the platform-specific interaction tree.
+    testWidgets(
+      'desktop and phone shelf routes use their native catalog pages',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        tester.platformDispatcher.accessibilityFeaturesTestValue =
+            const FakeAccessibilityFeatures(disableAnimations: true);
+        addTearDown(
+          tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
         );
-        auth.dispose();
-        await tester.pump(const Duration(seconds: 13));
-        await tester.pump();
-      });
-      phoneRouter.go(AppRoutes.shelfLatestMovies);
-      await tester.pumpWidget(phoneApp);
-      await _homeSettle(tester);
-      expect(find.byType(AggregationPage), findsOneWidget);
-      expect(find.byType(PhoneShelfPage), findsNothing);
-      expect(find.byType(ShelfGridPage), findsNothing);
-      expect(tester.takeException(), isNull);
-    }, tags: ['integration']);
+        final server = FakeEmbyServer();
+        final auth = SyntheticSourceAuth(
+          adapter: FakeEmbyAdapter([server]),
+          device: _homeDevice,
+          libraryIds: server.views.map((view) => view.id).toSet(),
+        );
+        await tester.runAsync(
+          () => auth.connect(
+            address: server.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          ),
+        );
+        final runtime = (await tester.runAsync(auth.runtime))!;
+        final desktopApp = RillightApp(
+          auth: auth,
+          environment: PresentationEnvironment.desktop,
+          playerBindings: PlayerBindings(runtime: runtime),
+        );
+        final desktopRouter = desktopApp.router;
+        desktopRouter.go(AppRoutes.shelfResume);
+        await tester.pumpWidget(desktopApp);
+        await _homeSettle(tester);
+        expect(find.byType(AggregationPage), findsNothing);
+        expect(find.byType(ShelfGridPage), findsOneWidget);
+        expect(find.byType(PhoneShelfPage), findsNothing);
+        // Desktop routes remain independent of phone Material Motion.
+        final desktopShelfRoute = ModalRoute.of(
+          tester.element(find.byType(ShelfGridPage)),
+        )!;
+        expect(desktopShelfRoute.settings, isA<NoTransitionPage<void>>());
+        expect(desktopShelfRoute.transitionDuration, Duration.zero);
+        expect(desktopShelfRoute.reverseTransitionDuration, Duration.zero);
+
+        final phoneApp = RillightApp(
+          auth: auth,
+          environment: PresentationEnvironment.phone,
+          playerBindings: PlayerBindings(runtime: runtime),
+        );
+        final phoneRouter = phoneApp.router;
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          desktopRouter.dispose();
+          phoneRouter.dispose();
+          await tester.runAsync(
+            () => runtime.history.close().timeout(const Duration(seconds: 5)),
+          );
+          auth.dispose();
+          await tester.pump(const Duration(seconds: 13));
+          await tester.pump();
+        });
+        phoneRouter.go(AppRoutes.shelfLatestMovies);
+        await tester.pumpWidget(phoneApp);
+        await _homeSettle(tester);
+        expect(find.byType(AggregationPage), findsNothing);
+        expect(find.byType(PhoneShelfPage), findsOneWidget);
+        expect(find.byType(ShelfGridPage), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
   });
 
   group('phone_detail_test.dart', () {
@@ -1527,6 +1529,73 @@ void main() {
       expect(find.text('Inception'), findsOneWidget);
       expect(tester.takeException(), isNull);
     }, tags: ['integration']);
+
+    testWidgets(
+      'phone continue restores the source and subtitle choice made in playback',
+      (tester) async {
+        final server = FakeEmbyServer();
+        final movie = server.items.firstWhere(
+          (item) => item.id == 'movie-inception',
+        );
+        movie.mediaStreams = const [
+          FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+          FakeMediaStream(index: 1, type: 'Audio', codec: 'aac'),
+          FakeMediaStream(
+            index: 2,
+            type: 'Subtitle',
+            codec: 'subrip',
+            isDefault: true,
+            isTextSubtitleStream: true,
+          ),
+        ];
+        movie.extraSources = [
+          FakeMediaSource(
+            id: 'alternate',
+            name: 'Alternate',
+            mediaStreams: movie.mediaStreams,
+          ),
+        ];
+        final (router, _) = await start(
+          tester,
+          server,
+          width: 412,
+          height: 900,
+        );
+        await openItem(tester, router, 'movie-inception');
+        await tester.tap(find.byKey(const Key('mobile-detail-play')));
+        await tester.pumpAndSettle();
+        final first = tester
+            .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+            .controller!;
+        expect(first.subtitleStreamIndex, 2);
+        await tester.runAsync(() async {
+          await first.switchMediaVersion('alternate');
+          await first.setSubtitle(null);
+        });
+        await tester.pumpAndSettle();
+        expect(first.activeMediaSourceId, 'alternate');
+        await tester.runAsync(first.close);
+        router.pop();
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 4));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('mobile-detail-play')));
+        await tester.pumpAndSettle();
+        final second = tester
+            .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+            .controller!;
+        expect(second.activeMediaSourceId, 'alternate');
+        expect(second.subtitleStreamIndex, isNull);
+        expect(second.error, isNull);
+        await tester.runAsync(second.close);
+        router.pop();
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 4));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
 
     testWidgets(
       'chosen audio and subtitle are used when phone playback starts',
@@ -2282,10 +2351,15 @@ void main() {
           find.byKey(const Key('phone-home-library-view-movies')),
         );
         await _homeSettle(tester);
-        expect(find.byType(AggregationPage), findsOneWidget);
-        expect(find.byType(MobileLibraryPage), findsNothing);
+        expect(find.byType(AggregationPage), findsNothing);
+        expect(find.byType(MobileLibraryPage), findsOneWidget);
         expect(find.text('Inception'), findsWidgets);
-        expect(find.textContaining('view-movies'), findsWidgets);
+        expect(
+          tester
+              .widget<MobileLibraryPage>(find.byType(MobileLibraryPage))
+              .viewId,
+          'view-movies',
+        );
         router.pop();
         await _homeSettle(tester);
         expect(find.byType(AggregationPage), findsNothing);

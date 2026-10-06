@@ -14,7 +14,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/home/tv_section_prefs.dart';
-import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/home/tv_shelf_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -659,11 +659,11 @@ void main() {
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(AggregationPage), findsOneWidget);
+      expect(find.byType(TvShelfPage), findsOneWidget);
       expect(app.router.state.uri.path, '/shelf/resume');
       app.router.pop();
       await tester.pumpAndSettle();
-      expect(find.byType(AggregationPage), findsNothing);
+      expect(find.byType(TvShelfPage), findsNothing);
 
       final homeScroll = find
           .descendant(

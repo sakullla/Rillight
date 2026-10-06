@@ -23,6 +23,37 @@ const _device = EmbyDeviceInfo(
   version: '0.1.0',
 );
 
+void _addMovieSubtitles(FakeEmbyServer server) {
+  final movie = server.items.firstWhere((item) => item.id == 'movie-up');
+  movie.mediaStreams = const [
+    FakeMediaStream(index: 0, type: 'Video', codec: 'h264'),
+    FakeMediaStream(index: 1, type: 'Audio', codec: 'aac'),
+    FakeMediaStream(
+      index: 2,
+      type: 'Subtitle',
+      codec: 'subrip',
+      language: 'chi',
+      isDefault: true,
+      isTextSubtitleStream: true,
+    ),
+    FakeMediaStream(
+      index: 3,
+      type: 'Subtitle',
+      codec: 'subrip',
+      language: 'eng',
+      isTextSubtitleStream: true,
+    ),
+  ];
+  movie.extraSources = [
+    // Identical labels prove that reopening restores the exact source ID.
+    FakeMediaSource(
+      id: 'alternate',
+      name: movie.name,
+      mediaStreams: movie.mediaStreams,
+    ),
+  ];
+}
+
 class _RecoveryBackend extends FakeVideoBackend
     implements VideoBackendSourceRenewal {
   final renewedUrls = <Uri>[];
@@ -31,6 +62,7 @@ class _RecoveryBackend extends FakeVideoBackend
   Completer<void>? stopGate;
   Completer<void>? openGate;
   String? rejectedSource;
+  final openDelays = <String, Duration>{};
   bool rejectNextVolume = false;
   bool selectDefaultAudioOnOpen = false;
   int audioSelections = 0;
@@ -61,6 +93,8 @@ class _RecoveryBackend extends FakeVideoBackend
     }
     try {
       await openGate?.future;
+      final delay = openDelays[request.url.queryParameters['MediaSourceId']];
+      if (delay != null) await Future<void>.delayed(delay);
       if (request.url.queryParameters['MediaSourceId'] == rejectedSource) {
         throw StateError('Source rejected');
       }
@@ -200,6 +234,186 @@ void main() {
       controller.dispose();
     });
   });
+
+  for (final selectedSubtitle in <int?>[null, 3]) {
+    test(
+      'movie reopening restores its exact source and subtitle $selectedSubtitle',
+      () async {
+        _addMovieSubtitles(server);
+        await controller.start();
+        expect(controller.subtitleStreamIndex, 2);
+        await controller.switchMediaVersion('alternate');
+        await controller.setSubtitle(selectedSubtitle);
+        final saved = PlayerSettings.fromJson((await settings.read()).toJson());
+        expect(saved.itemPreferences.values.single.mediaSourceId, 'alternate');
+        final reopened = PlayerController(
+          client: controller.client,
+          itemId: 'movie-up',
+          backend: _RecoveryBackend(),
+          window: PlayerWindow(),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          settingsStore: MemoryPlayerSettingsStore(saved),
+        );
+        try {
+          await reopened.start();
+          expect(reopened.activeMediaSourceId, 'alternate');
+          expect(reopened.subtitleStreamIndex, selectedSubtitle);
+          expect(reopened.error, isNull);
+        } finally {
+          await reopened.disposeAsync();
+          reopened.dispose();
+        }
+      },
+    );
+  }
+
+  test(
+    'an explicit subtitle choice overrides remembered subtitle off',
+    () async {
+      _addMovieSubtitles(server);
+      await controller.start();
+      expect(controller.subtitleStreamIndex, 2);
+      await controller.setSubtitle(null);
+      final reopened = PlayerController(
+        client: controller.client,
+        itemId: 'movie-up',
+        preferredSubtitleStreamIndex: 2,
+        backend: _RecoveryBackend(),
+        window: PlayerWindow(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        settingsStore: MemoryPlayerSettingsStore(await settings.read()),
+      );
+      try {
+        await reopened.start();
+        expect(reopened.subtitleStreamIndex, 2);
+        expect(reopened.error, isNull);
+      } finally {
+        await reopened.disposeAsync();
+        reopened.dispose();
+      }
+    },
+  );
+
+  test(
+    'slow source switch uses the open budget after retiring the old session',
+    () async {
+      final freshBackend = _RecoveryBackend();
+      final fresh = PlayerController(
+        client: controller.client,
+        itemId: 'movie-up',
+        backend: freshBackend,
+        window: PlayerWindow(),
+        recoveryTimeout: const Duration(milliseconds: 40),
+        recoveryOpenTimeout: const Duration(seconds: 2),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      );
+      final gate = Completer<void>();
+      try {
+        await fresh.start();
+        freshBackend.openGate = gate;
+        final switchWork = fresh.switchMediaVersion('alternate');
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        expect(fresh.isRecovering, isTrue);
+        expect(fresh.error, isNull);
+        gate.complete();
+        await switchWork;
+        expect(fresh.activeMediaSourceId, 'alternate');
+        expect(fresh.isPlaying, isTrue);
+        expect(fresh.error, isNull);
+      } finally {
+        if (!gate.isCompleted) gate.complete();
+        await fresh.disposeAsync();
+        fresh.dispose();
+      }
+    },
+  );
+
+  test(
+    'restoring the previous source gets its own bounded open budget',
+    () async {
+      final restoringBackend = _RecoveryBackend();
+      final restoring = PlayerController(
+        client: controller.client,
+        itemId: 'movie-up',
+        backend: restoringBackend,
+        window: PlayerWindow(),
+        recoveryTimeout: const Duration(seconds: 1),
+        recoveryOpenTimeout: const Duration(milliseconds: 350),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      );
+      try {
+        await restoring.start();
+        restoringBackend.rejectedSource = 'alternate';
+        restoringBackend.openDelays.addAll({
+          'alternate': const Duration(milliseconds: 220),
+          'movie-up': const Duration(milliseconds: 220),
+        });
+        await restoring.switchMediaVersion('alternate');
+        expect(restoring.activeMediaSourceId, 'movie-up');
+        expect(restoring.isPlaying, isTrue);
+        expect(restoring.error, isNull);
+        expect(restoring.isRecovering, isFalse);
+        expect(restoring.trackFailure, contains('previous source restored'));
+        expect(restoringBackend.maxConcurrentOpens, 1);
+      } finally {
+        await restoring.disposeAsync();
+        restoring.dispose();
+      }
+    },
+  );
+
+  test(
+    'local version switches immediately at the current position without preflight',
+    () async {
+      await controller.seekTo(const Duration(seconds: 35));
+      final requests = server.requests
+          .where((r) => r.contains('/PlaybackInfo'))
+          .length;
+      final opens = backend.openCount;
+      await controller.switchMediaVersion('alternate');
+      expect(controller.switchConfirmation, isNull);
+      expect(controller.activeMediaSourceId, 'alternate');
+      expect(backend.openCount, opens + 1);
+      expect(backend.openedStart, const Duration(seconds: 35));
+      expect(
+        server.requests.where((r) => r.contains('/PlaybackInfo')).length,
+        requests + 1,
+      );
+      expect(controller.error, isNull);
+    },
+  );
+
+  test(
+    'local version uses target audio default and disables unmatched subtitles',
+    () async {
+      server.items
+          .firstWhere((item) => item.id == 'movie-up')
+          .extraSources = const [
+        FakeMediaSource(
+          id: 'alternate',
+          name: 'Alternate',
+          mediaStreams: [
+            FakeMediaStream(
+              index: 9,
+              type: 'Audio',
+              codec: 'aac',
+              isDefault: true,
+            ),
+          ],
+        ),
+      ];
+      await controller.start();
+      await controller.seekTo(const Duration(seconds: 35));
+      await controller.togglePlay();
+      await controller.switchMediaVersion('alternate');
+      expect(controller.switchConfirmation, isNull);
+      expect(controller.audioStreamIndex, 9);
+      expect(controller.subtitleStreamIndex, isNull);
+      expect(backend.openedStart, const Duration(seconds: 35));
+      expect(backend.isPlaying, isFalse);
+      expect(controller.error, isNull);
+    },
+  );
 
   test(
     'recovery keeps a confirmed audio track without selecting it again',

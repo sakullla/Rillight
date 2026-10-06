@@ -72,7 +72,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     );
     auth.addListener(_authChanged);
     final created = PlayerController(
-      runtime: bindings.runtime,
+      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
@@ -463,16 +463,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     onPressed: c.loading
                                         ? null
                                         : () async {
-                                            await c.switchMediaSource(
+                                            await c.switchMediaVersion(
                                               source.id,
                                             );
-                                            if (context.mounted &&
-                                                c.switchConfirmation != null) {
-                                              await showSourceSwitchMenu(
-                                                context,
-                                                c,
-                                              );
-                                            }
                                           },
                                     child: _choiceLabel(
                                       source.name ?? source.id,

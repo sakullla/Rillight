@@ -19,6 +19,10 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/mobile_library_page.dart';
+import 'package:rillight/library/tv_library_page.dart';
+import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
@@ -648,6 +652,7 @@ void main() {
       expect(
         positions.indexOf(70000000),
         lessThan(positions.indexOf(110000000)),
+        reason: 'positions=$positions\n${control.output}',
       );
       // Drive the actual SourceSwitchMenu in the isolated Flutter helper. Its
       // controller sends real file RPC; the main process retains one writer.
@@ -1197,8 +1202,7 @@ void main() {
       expect(find.text('零进度下一集'), findsOneWidget);
       expect(
         f.a.requests.any(
-          (r) =>
-              r.contains('/Shows/NextUp') && r.contains('ParentId=view-movies'),
+          (r) => r.contains('/Shows/NextUp') && !r.contains('ParentId='),
         ),
         isTrue,
       );
@@ -1215,7 +1219,7 @@ void main() {
           f.a.requests.any(
             (r) =>
                 r.contains('IncludeItemTypes=${pair.$2}') &&
-                r.contains('SortBy=DateCreated'),
+                r.contains('SortBy=DateLastContentAdded'),
           ),
           isTrue,
         );
@@ -1713,7 +1717,7 @@ void main() {
         expect(FocusManager.instance.primaryFocus, isNotNull);
         app.router.go('/library/view-movies');
         await _settle(tester);
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(AggregationPage), findsNothing);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
         app.router.dispose();
@@ -1835,33 +1839,110 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets(
-    'library scope navigation after expanding source libraries cannot restore panel bool as scroll offset',
-    (tester) async {
-      isolateImageCache();
-      final f = _Fixture();
-      await tester.runAsync(f.open);
-      addTearDown(f.close);
-      final app = f.app(PresentationEnvironment.desktop);
-      await tester.pumpWidget(app);
-      await _settle(tester);
-      app.router.go('/library/view-movies');
-      await _settle(tester);
-      await tester.tap(find.text('媒体库范围'));
-      await _settle(tester);
-      app.router.go('/library/view-tv');
-      await _settle(tester);
-      expect(find.text('未选择可参与的服务或媒体库'), findsOneWidget);
-      expect(find.text('查找同源 · 1'), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      app.router.dispose();
-    },
-    tags: ['integration'],
-  );
+  testWidgets('ordinary library navigation stays in the selected server', (
+    tester,
+  ) async {
+    isolateImageCache();
+    final f = _Fixture();
+    await tester.runAsync(f.open);
+    addTearDown(f.close);
+    final app = f.app(PresentationEnvironment.desktop);
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    app.router.go('/library/view-movies');
+    await _settle(tester);
+    app.router.go('/library/view-tv');
+    await _settle(tester);
+    expect(find.byType(LibraryPage), findsOneWidget);
+    expect(find.byType(AggregationPage), findsNothing);
+    expect(find.text('查找同源 · 1'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+  }, tags: ['integration']);
+
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    testWidgets(
+      'ordinary catalog and playback ignore aggregation scope ${environment.presentation.name}',
+      (tester) async {
+        isolateImageCache();
+        final f = _Fixture();
+        await tester.runAsync(() => f.open(configure: false));
+        addTearDown(f.close);
+        tester.view.physicalSize = environment.isDesktop || environment.isTv
+            ? const Size(1440, 900)
+            : const Size(412, 915);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final backend = FakeVideoBackend(
+          duration: const Duration(seconds: 120),
+        );
+        final app = f.app(environment, backend: backend);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        app.router.go('/library/view-movies');
+        await _settle(tester);
+        expect(find.byType(AggregationPage), findsNothing);
+        expect(
+          find.byType(
+            environment.isDesktop
+                ? LibraryPage
+                : environment.isTv
+                ? TvLibraryPage
+                : MobileLibraryPage,
+          ),
+          findsOneWidget,
+        );
+        for (final source in ['resume', 'latest-movies', 'nextup']) {
+          app.router.go('/shelf/$source');
+          await _settle(tester);
+          expect(find.byType(AggregationPage), findsNothing);
+          expect(tester.takeException(), isNull);
+        }
+        app.router.go('/item/shared-id');
+        await _settle(tester);
+        expect(
+          find.byType(
+            environment.isDesktop
+                ? ItemDetailPage
+                : environment.isTv
+                ? TvDetailPage
+                : MobileDetailPage,
+          ),
+          findsOneWidget,
+        );
+        if (!environment.isDesktop) {
+          app.router.push('/play/shared-id');
+          await _settle(tester);
+          expect(backend.openedUrl, isNotNull);
+          expect(backend.isPlaying, isTrue);
+        }
+        expect(
+          f.auth.sources
+              .project(AccessRegion.ordinary)
+              .every((s) => !s.scopeKnown),
+          isTrue,
+        );
+        expect(tester.takeException(), isNull);
+        if (!environment.isDesktop) {
+          app.router.pop();
+          await _settle(tester);
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
 
   testWidgets(
-    'legacy detail with unknown participating libraries refuses dispatch rather than falling back to auth',
+    'selected detail opens without configuring aggregation libraries',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
@@ -1872,12 +1953,12 @@ void main() {
       await _settle(tester);
       app.router.go('/item/shared-id');
       await _settle(tester);
-      expect(find.byType(ItemDetailPage), findsNothing);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(
         f.a.requests.where(
           (r) => r.contains('/Users/user-alice/Items/shared-id'),
         ),
-        isEmpty,
+        isNotEmpty,
       );
       expect(
         f.auth.sources
@@ -1892,7 +1973,7 @@ void main() {
   );
 
   testWidgets(
-    'comparison enters actual B detail, returning restores scope, and legacy detail resolves only allowed A',
+    'comparison retains B scope while ordinary detail uses selected A',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
@@ -1923,10 +2004,8 @@ void main() {
       app.router.go('/item/shared-id');
       await _settle(tester);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(find.byType(ItemDetailPage)),
-        )!.source.account.configuredServerId,
-        f.aId,
+        DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage))),
+        isNull,
       );
       expect(find.text('B实际来源正文'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -2003,7 +2082,24 @@ void main() {
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/item/episode');
+      final account = await tester.runAsync(
+        () => f.auth.sources.acquireAccount(
+          f.aId,
+          region: AccessRegion.ordinary,
+          libraryId: 'view-tv',
+        ),
+      );
+      app.router.go(
+        '/item/episode',
+        extra: PlayerHostOpenItemCommand(
+          itemId: 'episode',
+          source: SourceReference(account: account!, itemId: 'episode'),
+          libraryId: 'view-tv',
+          regionGeneration: f.auth.sources
+              .permit(account, libraryId: 'view-tv')
+              .regionGeneration,
+        ),
+      );
       await _settle(tester);
       await tester.tap(find.widgetWithText(FilledButton, '查找同源'));
       await _settle(tester);

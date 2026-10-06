@@ -833,7 +833,7 @@ void main() {
   });
 
   group('session_read_ahead_test.dart', () {
-    test('slow recovery can supply first bytes after 26 seconds', () async {
+    test('slow recovery can supply first bytes after 46 seconds', () async {
       final cache = await SessionByteCache.open(memoryLimitBytes: 1024 * 1024);
       var requests = 0;
       final ahead = SessionReadAhead(
@@ -847,7 +847,7 @@ void main() {
           requests++;
           return ReadAheadTransfer(
             (() async* {
-              await Future<void>.delayed(const Duration(seconds: 26));
+              await Future<void>.delayed(const Duration(seconds: 46));
               yield [1, 2, 3, 4];
             })(),
             () {},
@@ -861,7 +861,7 @@ void main() {
         await ahead.close();
         await cache.close();
       }
-    });
+    }, timeout: const Timeout(Duration(seconds: 55)));
 
     test(
       'continuous response pauses at quota and yields to foreground',
@@ -1216,6 +1216,62 @@ void main() {
         }
       },
     );
+    test(
+      'cancelled downstream wakes a waiting read without retiring prefetch',
+      () async {
+        const size = 64 * 1024;
+        final cache = await SessionByteCache.open(memoryLimitBytes: 4 * size);
+        final release = Completer<void>();
+        final cancelled = Completer<void>();
+        var fetches = 0;
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'cancel-reader',
+          generation: 1,
+          total: 16 * size,
+          aheadBytes: 16 * size,
+          fetch: (_, _) async {
+            fetches++;
+            return ReadAheadTransfer(
+              (() async* {
+                yield Uint8List(size);
+                await release.future;
+              })(),
+              () {
+                if (!release.isCompleted) release.complete();
+              },
+            );
+          },
+        );
+        final reader = StreamIterator(
+          ahead.read(0, 2 * size - 1, cancelled: cancelled.future),
+        );
+        try {
+          expect(await reader.moveNext(), isTrue);
+          final waiting = reader.moveNext();
+          await until(
+            () => ahead.diagnostics['readAheadReaderWaiting'] == true,
+          );
+          final ended = expectLater(
+            waiting.timeout(const Duration(seconds: 1)),
+            throwsA(isA<ReadAheadSuperseded>()),
+          );
+          cancelled.complete();
+          await ended;
+          expect(ahead.diagnostics['readAheadReaders'], 0);
+          expect(ahead.diagnostics['readAheadWorkerActive'], isTrue);
+          expect(ahead.failed, isFalse);
+          expect(fetches, 1);
+          expect(release.isCompleted, isFalse);
+        } finally {
+          ahead.stop();
+          if (!release.isCompleted) release.complete();
+          await reader.cancel();
+          await ahead.close();
+          await cache.close();
+        }
+      },
+    );
     for (final targetMiB in [8, 40]) {
       test('seek to $targetMiB MiB preempts a stalled old download', () async {
         const mib = 1024 * 1024;
@@ -1280,6 +1336,72 @@ void main() {
           await cache.close();
         }
       });
+    }
+    for (final continuous in [false, true]) {
+      test(
+        'cached prefix does not strand a gap behind a distant producer ($continuous)',
+        () async {
+          const size = 64 * 1024;
+          const distant = 40 * 1024 * 1024;
+          final cache = await SessionByteCache.open(
+            memoryLimitBytes: 2 * 1024 * 1024,
+          );
+          await cache.put(
+            resource: 'gap',
+            generation: 1,
+            offset: 0,
+            bytes: Uint8List(size)..fillRange(0, size, 3),
+          );
+          final releases = <Completer<void>>[];
+          final starts = <int>[];
+          final ahead = SessionReadAhead(
+            cache: cache,
+            resource: 'gap',
+            generation: 1,
+            total: 96 * 1024 * 1024,
+            aheadBytes: 64 * 1024 * 1024,
+            continuousTransfers: continuous,
+            fetch: (start, end) async {
+              starts.add(start);
+              final release = Completer<void>();
+              releases.add(release);
+              return ReadAheadTransfer(
+                (() async* {
+                  yield Uint8List(size)..fillRange(0, size, 7);
+                  await release.future;
+                })(),
+                () {
+                  if (!release.isCompleted) release.complete();
+                },
+              );
+            },
+          );
+          final far = StreamIterator(ahead.read(distant, distant + size - 1));
+          final near = StreamIterator(ahead.read(0, 2 * size - 1));
+          try {
+            expect(await far.moveNext(), isTrue);
+            expect(await far.moveNext(), isFalse);
+            expect(await near.moveNext(), isTrue);
+            expect(near.current.every((byte) => byte == 3), isTrue);
+            expect(
+              await near.moveNext().timeout(const Duration(seconds: 2)),
+              isTrue,
+            );
+            expect(near.current.every((byte) => byte == 7), isTrue);
+            expect(starts.take(2), [distant, size]);
+            expect(ahead.failed, isFalse);
+          } finally {
+            ahead.stop();
+            for (final release in releases) {
+              if (!release.isCompleted) release.complete();
+            }
+            await far.cancel();
+            await near.cancel();
+            await ahead.close();
+            await cache.close();
+          }
+        },
+      );
     }
     test(
       'a cancelled track read retains its validated partial block',

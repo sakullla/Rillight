@@ -13,6 +13,93 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CoreInputTest {
+    @Test fun fragmentedInterleavedTracksKeepTheirLoopbackResponses() {
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val release = CountDownLatch(1)
+        val server = LocalHttpServer { headers, output ->
+            requests.incrementAndGet()
+            val start = headers.getValue("range").removePrefix("bytes=").substringBefore('-').toInt()
+            replyHeader(output, 206, 256 * 1024, "bytes $start-${start + 256 * 1024 - 1}/${4 * 1024 * 1024}")
+            repeat(8) {
+                output.write(ByteArray(1024) { 7 })
+                output.flush()
+                Thread.sleep(20)
+            }
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            val positions = longArrayOf(1024 * 1024, 2 * 1024 * 1024)
+            val bytes = ByteArray(1024)
+            repeat(8) {
+                for (track in positions.indices) {
+                    input.seek(positions[track], 0)
+                    val count = input.read(bytes, bytes.size)
+                    org.junit.Assert.assertTrue(count > 0)
+                    org.junit.Assert.assertArrayEquals(ByteArray(count) { 7 }, bytes.copyOf(count))
+                    positions[track] += count
+                }
+            }
+            assertEquals(2, requests.get())
+            input.interrupt()
+            assertEquals(positions[0], input.seek(positions[0], 0))
+            org.junit.Assert.assertTrue(input.read(bytes, bytes.size) > 0)
+            assertEquals(3, requests.get())
+        } finally {
+            release.countDown()
+            input.close()
+            server.close()
+        }
+    }
+
+    @Test fun fragmentedProbeReturnsPrefixBeforeTheRequestedSizeArrives() {
+        val release = CountDownLatch(1)
+        val server = LocalHttpServer { _, output ->
+            replyHeader(output, 200, 512 * 1024)
+            output.write(ByteArray(1024) { 7 })
+            output.flush()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val bytes = ByteArray(32768)
+            val read = executor.submit<Int> { input.read(bytes, bytes.size) }
+            val count = read.get(1, TimeUnit.SECONDS)
+            org.junit.Assert.assertTrue(count in 1..1024)
+            org.junit.Assert.assertArrayEquals(ByteArray(count) { 7 }, bytes.copyOf(count))
+        } finally {
+            release.countDown()
+            input.close()
+            executor.shutdownNow()
+            server.close()
+        }
+    }
+
+    @Test fun laterReadsReturnRequestedBytesWithoutWaitingForSpeculativeWindow() {
+        val release = CountDownLatch(1)
+        val server = LocalHttpServer { _, output ->
+            replyHeader(output, 200, 512 * 1024)
+            output.write(ByteArray(2048) { 7 })
+            output.flush()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val bytes = ByteArray(1024)
+            assertEquals(1024, input.read(bytes, bytes.size))
+            val next = executor.submit<Int> { input.read(bytes, bytes.size) }
+            assertEquals(1024, next.get(1, TimeUnit.SECONDS))
+            org.junit.Assert.assertArrayEquals(ByteArray(1024) { 7 }, bytes)
+        } finally {
+            release.countDown()
+            input.close()
+            executor.shutdownNow()
+            server.close()
+        }
+    }
+
     @Test fun startupReturnsAvailableProbeWithoutFillingAReadAheadWindow() {
         val release = CountDownLatch(1)
         val server = LocalHttpServer { _, output ->
@@ -38,9 +125,9 @@ class CoreInputTest {
 
     @Test fun slowProxyRecoveryCanOutliveOneUpstreamHeaderAttempt() {
         val server = LocalHttpServer { _, output ->
-            // A 20-second origin attempt plus renewal/reconnect can still be
-            // healthy while the owned loopback response is pending.
-            Thread.sleep(26_000)
+            // A stalled body followed by legitimately slow recovery headers
+            // can outlive the old 45-second loopback deadline.
+            Thread.sleep(46_000)
             reply(output, 200, byteArrayOf(42))
         }
         val input = CoreInput("http://127.0.0.1:${server.port}/slow", null)

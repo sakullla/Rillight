@@ -206,7 +206,7 @@ void main() {
   }
 
   Future<void> closePlayer(WidgetTester tester) async {
-    final button = find.byTooltip('关闭');
+    final button = find.byKey(const Key('mobile-player-close'));
     expect(button, findsOneWidget);
     await tester.ensureVisible(button);
     await tester.tap(button);
@@ -1231,76 +1231,15 @@ void main() {
       await tester.pump();
       expect(find.text('来源'), findsOneWidget);
       expect(find.text('另一个版本'), findsOneWidget);
-      Future<void> acceptRequiredConfirmation({bool cancel = false}) async {
-        for (var frame = 0; frame < 40; frame++) {
-          await tester.pump(const Duration(milliseconds: 20));
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 10)),
-          );
-          if (find.byType(SourceSwitchMenu).evaluate().isNotEmpty) {
-            break;
-          }
-          if (current.pendingMediaSourceId != null && current.isRecovering) {
-            return;
-          }
-        }
-        expect(
-          find.byType(SourceSwitchMenu),
-          findsOneWidget,
-          reason:
-              'confirmation=${current.switchConfirmation} active=${current.activeMediaSourceId} pending=${current.pendingMediaSourceId} phase=${current.state.phase} track=${current.trackFailure}',
-        );
-        final plan = current.switchConfirmation!;
-        expect(plan.paused, isTrue);
-        if (cancel) {
-          final cancelButton = find.descendant(
-            of: find.byType(SourceSwitchMenu),
-            matching: find.byKey(const Key('source-switch-close')),
-          );
-          await tester.tap(cancelButton);
-          await tester.pumpAndSettle();
-          return;
-        }
-        if (plan.audioNeedsChoice) {
-          await tester.ensureVisible(find.byType(CheckboxListTile).first);
-          await tester.tap(find.byType(CheckboxListTile).first);
-        }
-        if (plan.subtitleNeedsChoice) {
-          await tester.ensureVisible(find.byType(CheckboxListTile).last);
-          await tester.tap(find.byType(CheckboxListTile).last);
-        }
-        await tester.pump();
-        await tester.ensureVisible(find.text('从头播放'));
-        await tester.tap(find.text('从头播放'));
-        await tester.pump();
-      }
-
-      Future<void> closeConfirmation() async {
-        if (find.byType(SourceSwitchMenu).evaluate().isEmpty) return;
-        final cancel = find.descendant(
-          of: find.byType(SourceSwitchMenu),
-          matching: find.byKey(const Key('source-switch-close')),
-        );
-        await tester.tap(cancel);
-        await tester.pumpAndSettle();
-      }
-
       final alternate = find.byKey(const Key('mobile-source-alternate'));
       expect(alternate, findsOneWidget);
       await tester.ensureVisible(alternate);
       await tester.pump();
       final originalId = current.resolved!.mediaSource.id;
-      final opensBeforeCancelledStage = backend.openCount;
+      final opensBeforeSwitch = backend.openCount;
       await tester.tap(alternate);
-      await acceptRequiredConfirmation(cancel: true);
-      expect(current.activeMediaSourceId, originalId);
-      expect(current.pendingMediaSourceId, isNull);
-      expect(backend.openCount, opensBeforeCancelledStage);
-      expect(backend.isPlaying, isFalse);
-      await tester.ensureVisible(alternate);
-      await tester.pump();
-      await tester.tap(alternate);
-      await acceptRequiredConfirmation();
+      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(current.switchConfirmation, isNull);
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 20));
         await tester.runAsync(
@@ -1317,13 +1256,14 @@ void main() {
             'phase=${current.state.phase} failure=${current.loadFailure} track=${current.trackFailure} detail=${current.disconnectDetail}',
       );
       expect(current.pendingMediaSourceId, isNull);
+      expect(backend.openCount, opensBeforeSwitch + 1);
       expect(
         backend.isPlaying,
         isFalse,
         reason:
-            'Explicit version confirmation preserves the original user pause intent',
+            'Direct version switching preserves the original user pause intent',
       );
-      await closeConfirmation();
+      expect(find.byType(SourceSwitchMenu), findsNothing);
       expect(find.text('正在切换来源…'), findsNothing);
       await tester.tap(find.widgetWithText(TextButton, '返回'));
       await tester.pump();
@@ -1342,7 +1282,8 @@ void main() {
       await tester.ensureVisible(original);
       await tester.pump();
       await tester.tap(original);
-      await acceptRequiredConfirmation();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       expect(current.pendingMediaSourceId, originalId);
       expect(current.activeMediaSourceId, 'alternate');
       expect(find.text('正在切换来源…'), findsOneWidget);
@@ -1366,7 +1307,7 @@ void main() {
       }
       expect(current.activeMediaSourceId, 'alternate');
       expect(current.error, isNull);
-      await closeConfirmation();
+      expect(find.byType(SourceSwitchMenu), findsNothing);
       expect(find.text('来源切换失败，原来源已恢复'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, '返回'));
       await tester.pump();
@@ -1856,6 +1797,21 @@ void main() {
       expect(backend.audioCalls, [1]);
       expect(backend.openCount, 1);
       expect(find.text('重试'), findsNothing);
+
+      // A nonfatal track error must not pin the timeline over the video.
+      await tester.tapAt(const Offset(400, 220));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(current.controlsVisible, isFalse);
+      expect(
+        find.byKey(const Key('mobile-player-seek')).hitTestable(),
+        findsNothing,
+      );
+      await tester.tapAt(const Offset(400, 220));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('mobile-dismiss-track-failure')));
+      await tester.pump();
+      expect(current.trackFailure, isNull);
+      expect(find.text('此轨道在当前设备上不可用'), findsNothing);
 
       final before = backend.position;
       await tester.tap(find.byKey(const Key('mobile-player-forward')));

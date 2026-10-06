@@ -1,5 +1,19 @@
 import 'package:rillight/emby/emby_errors.dart';
 
+/// Remove session token values without re-encoding a signed media query.
+/// Keep each remaining component's order, escaping and duplicate keys intact.
+Uri withoutEmbyTokenValues(Uri uri, Set<String> tokens) {
+  if (!uri.hasQuery || tokens.isEmpty) return uri;
+  final parts = uri.query.split('&');
+  final kept = parts.where((part) {
+    final equals = part.indexOf('=');
+    final value = equals < 0 ? '' : part.substring(equals + 1);
+    return !tokens.contains(Uri.decodeQueryComponent(value));
+  }).toList();
+  if (kept.length == parts.length) return uri;
+  return uri.replace(query: kept.join('&'));
+}
+
 Uri normalizeEmbyBaseUrl(String input) {
   var trimmed = input.trim();
   if (trimmed.isEmpty) {

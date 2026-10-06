@@ -22,6 +22,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/library_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/search/search_overlay.dart';
@@ -295,7 +296,7 @@ void main() {
         await revealHomeLibrary(tester, 'view-movies');
         await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(LibraryPage), findsOneWidget);
 
         bool isHomeCatalog(String request) {
           return request.contains('Items/Resume') ||
@@ -328,7 +329,7 @@ void main() {
           auth.session?.server.activeLine?.address,
           lineB.baseUrl.toString(),
         );
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(LibraryPage), findsOneWidget);
         expect(find.byType(HomePage), findsNothing);
         expect(lineB.requests.where(isHomeCatalog).length, homeBefore);
         // 失败原因以 SnackBar 可见。
@@ -368,13 +369,11 @@ void main() {
         await revealHomeLibrary(tester, 'view-movies');
         await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(LibraryPage), findsOneWidget);
         expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
         expect(find.byKey(AppShell.homeNavKey), findsNothing);
         expect(
-          GoRouter.of(
-            tester.element(find.byType(AggregationPage)),
-          ).state.uri.path,
+          GoRouter.of(tester.element(find.byType(LibraryPage))).state.uri.path,
           AppRoutes.library('view-movies'),
         );
 
@@ -382,7 +381,7 @@ void main() {
         await tester.tap(find.byTooltip('搜索'));
         await settle(tester);
         expect(searchClose, findsOneWidget);
-        expect(find.byType(AggregationPage), findsNWidgets(2));
+        expect(find.byType(AggregationPage), findsOneWidget);
         expect(
           GoRouter.of(tester.element(searchClose)).state.uri.path,
           AppRoutes.library('view-movies'),
@@ -391,7 +390,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await settle(tester);
         expect(searchClose, findsNothing);
-        expect(find.byType(AggregationPage), findsOneWidget);
+        expect(find.byType(LibraryPage), findsOneWidget);
         expect(
           tester
               .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.search))

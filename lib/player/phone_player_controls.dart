@@ -298,6 +298,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 ]
               : [
                   IconButton(
+                    key: const Key('mobile-player-close'),
                     tooltip: l.closePlayer,
                     style: _phoneChromeButton,
                     onPressed: widget.onClose,
@@ -423,7 +424,6 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     );
     final notices = [
       if (c.progressSyncFailed) l.progressSyncFailed,
-      if (c.trackFailure != null) l.mobileTrackUnavailable,
       if (c.backgroundReleased) l.mobileBackgroundPaused,
       if (c.playbackEnded) l.playbackEnded,
     ];
@@ -459,6 +459,28 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       context,
                     ).closeButtonTooltip,
                     onPressed: c.dismissNetworkSlowHint,
+                    icon: const Icon(Icons.close, size: 18),
+                  ),
+                ],
+              ),
+            if (c.trackFailure != null)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l.mobileTrackUnavailable,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('mobile-dismiss-track-failure'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).closeButtonTooltip,
+                    onPressed: c.dismissTrackFailure,
                     icon: const Icon(Icons.close, size: 18),
                   ),
                 ],
@@ -918,13 +940,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                   ? null
                                   : () async {
                                       attemptedSourceId = source.id;
-                                      await c.switchMediaSource(source.id);
-                                      // The legacy local version entry must not
-                                      // leave T5's staged confirmation invisible.
-                                      if (c.switchConfirmation != null &&
-                                          context.mounted) {
-                                        await showSourceSwitchMenu(context, c);
-                                      }
+                                      await c.switchMediaVersion(source.id);
                                     },
                             ),
                         ],

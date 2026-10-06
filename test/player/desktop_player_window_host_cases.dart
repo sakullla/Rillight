@@ -19,6 +19,8 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -94,6 +96,38 @@ void main() {
     expect(auth.isLoggedIn, isTrue);
     return auth;
   }
+
+  test(
+    'ordinary desktop playback does not require aggregation scope',
+    () async {
+      final auth = await loggedInAuth();
+      final history = await HistoryWriter.open(
+        registry: auth.sources,
+        store: MemoryHistoryStore(),
+      );
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        runtime: PlaybackRuntime(auth: auth, history: history),
+        processControl: control,
+        snapshotStoreForPid: storeFor,
+      );
+      try {
+        await host.open(const PlayerOpenRequest(itemId: 'movie-1'));
+        expect(control.spawnedArguments, hasLength(1));
+        expect(control.startupPayloads.single, isNotNull);
+        expect(host.current!.source, isNull);
+        expect(auth.session!.server.scopeKnown, isFalse);
+        await auth.logout();
+        await host.close();
+        expect(control.alive, isEmpty);
+      } finally {
+        await host.forceClose();
+        host.dispose();
+        await history.close();
+        auth.dispose();
+      }
+    },
+  );
 
   DesktopPlayerWindowHost newHost(
     AuthController auth, {

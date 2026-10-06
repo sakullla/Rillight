@@ -10,7 +10,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/synthetic_source_fixture.dart';
@@ -246,11 +246,22 @@ void main() {
     await settle(tester);
   }
 
-  Future<void> chooseType(WidgetTester tester, String label) async {
-    await tester.tap(find.byType(DropdownButton<String>).first);
+  Future<void> openFilters(WidgetTester tester) async {
+    await tester.tap(find.byKey(gridFilterMenuKey));
     await settle(tester);
-    await tester.tap(find.text(label).last);
+  }
+
+  Future<void> applyFilters(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('catalog-grid-filter-apply')));
     await settle(tester);
+  }
+
+  Future<void> chooseType(WidgetTester tester, String type) async {
+    await openFilters(tester);
+    await tester.tap(find.byKey(const Key('catalog-grid-filter-section-type')));
+    await settle(tester);
+    await tester.tap(find.byKey(gridFilterOption('type', type)));
+    await applyFilters(tester);
   }
 
   List<String> posterNames(WidgetTester tester) => tester
@@ -298,22 +309,28 @@ void main() {
     ]);
     await pumpLoggedIn(tester);
     await openLibrary(tester, 'view-movies');
-    expect(find.byType(AggregationPage), findsOneWidget);
+    expect(find.byType(ShelfGridPage), findsOneWidget);
     final before = posterNames(tester);
-    await tester.tap(find.byType(DropdownButton<bool>));
+    await openFilters(tester);
+    await tester.tap(
+      find.byKey(const Key('catalog-grid-filter-section-watch')),
+    );
     await settle(tester);
-    await tester.tap(find.text('已看').last);
+    await tester.tap(find.byKey(gridFilterOption('watch', 'IsPlayed')));
     await settle(tester);
+    // Draft choices must not dispatch or replace the underlying catalog.
+    expect(posterNames(tester), before);
+    await applyFilters(tester);
     expect(posterNames(tester), isNot(before));
     expect(server.requests.last, contains('Filters=IsPlayed'));
-    await tester.tap(find.widgetWithText(TextButton, '全部观看状态'));
+    await tester.tap(find.byKey(gridFilterClearKey));
     await settle(tester);
     expect(posterNames(tester), before);
 
     await openLibrary(tester, 'view-untyped');
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
 
-    await chooseType(tester, '电影');
+    await chooseType(tester, 'Movie');
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影']));
     expect(posterNames(tester), isNot(contains('新剧集')));
     expect(
@@ -325,16 +342,16 @@ void main() {
       isTrue,
     );
 
-    final year = find.byKey(const Key('aggregation-year'));
     final beforeYear = posterNames(tester);
-    final beforeRequests = server.requests.length;
-    await tester.enterText(year, '2025');
+    await openFilters(tester);
+    await tester.tap(find.byKey(const Key('catalog-grid-filter-section-year')));
     await settle(tester);
-    // 年份是待提交文本；输入本身不改变结果或派发请求。
+    final beforeRequests = server.requests.length;
+    await tester.tap(find.byKey(gridFilterOption('year', '2025')));
+    await settle(tester);
     expect(posterNames(tester), beforeYear);
     expect(server.requests.length, beforeRequests);
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await settle(tester);
+    await applyFilters(tester);
     expect(posterNames(tester), contains('新电影'));
     expect(posterNames(tester), isNot(contains('未分类型电影')));
     expect(
@@ -345,10 +362,8 @@ void main() {
       reason: '类型与年份组合在同一次请求中生效',
     );
 
-    await tester.enterText(year, '');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.tap(find.byKey(gridFilterClearKey));
     await settle(tester);
-    await chooseType(tester, '全部类型');
     expect(posterNames(tester), containsAll(['未分类型电影', '新电影', '新剧集', '老剧集']));
     expect(
       server.requests.lastWhere(

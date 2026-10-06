@@ -84,6 +84,9 @@ internal class CorePlayback(
     private var lastHardware: Int? = null
     private var preferredHardware = 8
     private var lastDecoderCheckMs = 0L
+    private var lastDiagnosticMs = 0L
+    private val debugDiagnostics = (context.applicationInfo.flags and
+        android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
     @Volatile private var volume = 1f
     @Volatile private var lastPresentedUs = -1L
     @Volatile var session = ""
@@ -199,9 +202,9 @@ internal class CorePlayback(
         operation.set(0)
         handler.removeCallbacks(openTimeout)
         // Include proxy body/header recovery, container probes and the first
-        // decoded frame. Keep this outside the 45 s loopback read deadline.
+        // decoded frame. Keep this outside the 90 s loopback read deadline.
         // Retirement and a new open still cancel this generation's timeout.
-        handler.postDelayed(openTimeout, 60_000)
+        handler.postDelayed(openTimeout, 120_000)
         serial.execute {
             retire(previous)
             if (generation.get() != revision) return@execute
@@ -264,6 +267,9 @@ internal class CorePlayback(
             result.error("control", "Playback is opening or closed", mapOf("sessionId" to session)); return
         }
         val handle = active.handle
+        val started = System.nanoTime()
+        if (debugDiagnostics) android.util.Log.i("RillightCommand",
+            "begin method=$method generation=${active.generation}")
         try {
             val accepted = when (method) {
                 "play" -> {
@@ -361,6 +367,9 @@ internal class CorePlayback(
             else result.success(successMap(handle))
         } catch (error: Throwable) {
             result.error("control", error.message ?: "Core command failed", mapOf("sessionId" to session))
+        } finally {
+            if (debugDiagnostics) android.util.Log.i("RillightCommand",
+                "end method=$method generation=${active.generation} ms=${(System.nanoTime() - started) / 1_000_000}")
         }
     }
 
@@ -412,6 +421,9 @@ internal class CorePlayback(
     }
 
     private fun trackFailure(message: String) {
+        if (debugDiagnostics && (pendingTrack != null || externalPending != null))
+            android.util.Log.i("RillightCommand", "track-failure generation=${generation.get()} " +
+                "subtitle=${pendingTrack?.subtitle} external=${externalPending != null}")
         handler.removeCallbacks(trackTimeout)
         pendingTrack?.result?.error("track", message, mapOf("sessionId" to session))
         pendingTrack = null
@@ -664,6 +676,13 @@ internal class CorePlayback(
         val current = CoreNative.snapshot(active.handle)
         if (current == null || current[1] != snap[1] || current[3] != snap[3]) return
         val now = android.os.SystemClock.elapsedRealtime()
+        if (debugDiagnostics && now - lastDiagnosticMs >= 2000) {
+            lastDiagnosticMs = now
+            android.util.Log.i("RillightPresent", "generation=${active.generation} timeline=${snap[3]} " +
+                "state=${snap[0]} posMs=${snap[9] / 1000} presentedMs=${lastPresentedUs / 1000} " +
+                "first=$renderedFirst surface=${surface?.isValid == true} paused=$desiredPaused " +
+                "audioReady=$audioReady hardware=$lastHardware vq=${snap[13]} aq=${snap[14]}")
+        }
         if (snap[5] >= 0 && snap[10] == 1L && now - lastDecoderCheckMs >= 1000) {
             lastDecoderCheckMs = now
             for (ordinal in 0 until CoreNative.trackCount(active.handle)) {

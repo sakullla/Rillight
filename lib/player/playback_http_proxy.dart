@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import '../emby/emby_url.dart';
+
 import 'cache/http_cache_policy.dart';
 import 'cache/hls_cache_index.dart';
 import 'cache/hls_fmp4_probe.dart';
@@ -155,7 +157,7 @@ class PlaybackHttpProxy {
   String? _lastUpstreamPhase;
   String? _lastUpstreamFailureKind;
   int? _lastUpstreamPhaseElapsedMs;
-  final _mediaHeaderDeadlines = <(String?, String), Duration>{};
+  int _mediaHeaderTimeouts = 0;
   int? _authenticationStatus;
   int? _prefetchAuthenticationStatus;
   int _inFlight = 0;
@@ -400,6 +402,7 @@ class PlaybackHttpProxy {
       'lastRequestedRedirectCount': _lastRequestedRedirectCount,
       'upstreamConnectingRequests': _upstreamPhases['connect'] ?? 0,
       'upstreamAwaitingHeadersRequests': _upstreamPhases['headers'] ?? 0,
+      'mediaHeaderTimeouts': _mediaHeaderTimeouts,
       'lastUpstreamPhase': _lastUpstreamPhase,
       'lastUpstreamFailureKind': _lastUpstreamFailureKind,
       'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
@@ -1409,11 +1412,7 @@ class PlaybackHttpProxy {
         .map((e) => e.value)
         .where((e) => e.isNotEmpty)
         .toSet();
-    final query = Map<String, List<String>>.from(url.queryParametersAll);
-    query.removeWhere((_, values) => values.any(tokens.contains));
-    return query.isEmpty
-        ? url.replace(query: '')
-        : url.replace(queryParameters: query);
+    return withoutEmbyTokenValues(url, tokens);
   }
 
   Future<(HttpClientResponse, Uri)> _fetch(
@@ -1639,45 +1638,23 @@ class PlaybackHttpProxy {
             request.headers.set(header.key, header.value);
           }
         }
-        // Learn only from this media resource at this origin. Redirects and
-        // unrelated metadata must not shorten a slow media server's deadline.
-        final timingKey = (read.resourceKey, url.origin);
-        final headerDeadline =
-            _mediaHeaderDeadlines[timingKey] ?? const Duration(seconds: 20);
-        final headerWatch = Stopwatch()..start();
+        // A fast range says nothing about the next cold range or LB node.
+        // Real media responses can take 30+ seconds to send headers and then
+        // transfer at full speed. Keep a bounded budget without learning a
+        // shorter deadline from one healthy response.
+        final media = _roles[read.resourceKey] == PlaybackResourceRole.media;
+        final headerDeadline = Duration(seconds: media ? 45 : 20);
         final response = await _observeUpstream(
           'headers',
           () => request.close().timeout(
             headerDeadline,
             onTimeout: () {
+              if (media && !read.cancelled) _mediaHeaderTimeouts++;
               request.abort();
-              // A link can become slower after the successful sample. Give
-              // the next connection more time instead of enforcing a stale
-              // short deadline forever.
-              if (_mediaHeaderDeadlines.containsKey(timingKey)) {
-                _mediaHeaderDeadlines[timingKey] = Duration(
-                  milliseconds: min(20000, headerDeadline.inMilliseconds * 2),
-                );
-              }
               throw TimeoutException('Media response timeout', headerDeadline);
             },
           ),
         );
-        if (_roles[read.resourceKey] == PlaybackResourceRole.media &&
-            response.statusCode == HttpStatus.partialContent &&
-            MediaContentRange.parse(response.headers.value('content-range')) !=
-                null) {
-          if (_mediaHeaderDeadlines.length >= 64 &&
-              !_mediaHeaderDeadlines.containsKey(timingKey)) {
-            _mediaHeaderDeadlines.remove(_mediaHeaderDeadlines.keys.first);
-          }
-          _mediaHeaderDeadlines[timingKey] = Duration(
-            milliseconds: (headerWatch.elapsedMilliseconds * 4 + 1000).clamp(
-              5000,
-              20000,
-            ),
-          );
-        }
         read.response = response;
         if (read.cancelled) read.releaseUnconsumedResponse();
         read.check();
@@ -1716,13 +1693,15 @@ class PlaybackHttpProxy {
           continue;
         }
         // A just-completed stream can still hold the origin's lease briefly.
-        // Retry a known media continuation once even when this client has only
-        // one stream. Do not publish the intermediate refusal as an auth error.
+        // This also affects the first request after switching sources: the new
+        // transport has no representation yet. Retry one foreground media GET
+        // on a fresh connection before publishing the refusal as an auth error.
         // Cache gap probes and their foreground fallback share this budget.
         if (response.statusCode == HttpStatus.forbidden &&
             (method ?? incoming.method) == 'GET' &&
             _roles[read.resourceKey] == PlaybackResourceRole.media &&
-            _representations[read.resourceKey]?.rangeSupported == true &&
+            (!read.readAheadProducer ||
+                _representations[read.resourceKey]?.rangeSupported == true) &&
             _readAhead?.hasParallelTransfers != true &&
             read.claimRefusalRetry()) {
           await _retireRejectedResponse(response, read);
@@ -1816,9 +1795,6 @@ class PlaybackHttpProxy {
       if (result == null) read.check();
       return result as bool;
     } on TimeoutException {
-      // Fast headers before a body stall do not predict the recovery request:
-      // a cold or overloaded origin may need the full header budget again.
-      _mediaHeaderDeadlines.removeWhere((key, _) => key.$1 == read.resourceKey);
       for (final request in read.requests.toList()) {
         request.abort();
       }
@@ -2984,7 +2960,11 @@ class PlaybackHttpProxy {
       output.contentLength = range.length;
       Stream<List<int>> body() async* {
         try {
-          await for (final bytes in ahead!.read(range.start, range.end)) {
+          await for (final bytes in ahead!.read(
+            range.start,
+            range.end,
+            cancelled: read.cancelledFuture,
+          )) {
             read.check();
             read.outputStarted = true;
             yield bytes;
@@ -3703,6 +3683,29 @@ class PlaybackHttpProxy {
           }
         }
         _roles[key] = PlaybackResourceRole.values[route.role];
+      }
+      final localInput = incoming.headers.value('x-rillight-input-id');
+      if (incoming.method == 'GET' &&
+          _roles[key] == PlaybackResourceRole.media &&
+          localInput != null &&
+          RegExp(r'^\d{1,20}$').hasMatch(localInput)) {
+        read.localInputId = localInput;
+        final range = incoming.headers.value('range') ?? '';
+        read.bootstrapRead = range == 'bytes=0-';
+        if (RegExp(r'^bytes=\d+-\d+$').hasMatch(range)) {
+          // Native AVIO left its unbounded bootstrap response for a bounded
+          // track/index read. A disconnected HTTP consumer can otherwise wait
+          // for bytes indefinitely and pull prefetch back to the file header.
+          // Keep other inputs and the bounded retained track readers alive.
+          for (final previous in _reads) {
+            if (!identical(previous, read) &&
+                previous.resourceKey == key &&
+                previous.localInputId == localInput &&
+                previous.bootstrapRead) {
+              previous.cancel();
+            }
+          }
+        }
       }
       if (allowRange && await _tryBufferedResponse(incoming, key, read)) return;
       if (await _serveWarmPrefix(incoming, key, url, read)) return;
@@ -5018,6 +5021,8 @@ class _ProxyRead {
   }
 
   String? resourceKey;
+  String? localInputId;
+  bool bootstrapRead = false;
   bool readAheadProducer = false;
   HttpClientResponse? response;
   bool cancelled = false;

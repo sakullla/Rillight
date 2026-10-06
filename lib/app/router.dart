@@ -16,6 +16,12 @@ import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
+import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/mobile_library_page.dart';
+import 'package:rillight/library/tv_library_page.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/home/phone_shelf_page.dart';
+import 'package:rillight/home/tv_shelf_page.dart';
 
 import 'package:rillight/home/phone_home_edit_page.dart';
 
@@ -212,9 +218,8 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
                 context: context,
                 state: state,
-                child: AggregationPage(
-                  key: ValueKey(state.uri.toString()),
-                  legacyLibraryId: state.pathParameters['viewId']!,
+                child: MobileLibraryPage(
+                  viewId: state.pathParameters['viewId']!,
                 ),
               ),
             ),
@@ -240,7 +245,7 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
                 context: context,
                 state: state,
-                child: _shelfAggregation(auth, state),
+                child: _shelfPage(auth, state, environment),
               ),
             ),
           ],
@@ -272,14 +277,12 @@ GoRouter createAppRouter({
             ),
             GoRoute(
               path: '/library/:viewId',
-              builder: (context, state) => AggregationPage(
-                key: ValueKey(state.uri.toString()),
-                legacyLibraryId: state.pathParameters['viewId']!,
-              ),
+              builder: (context, state) =>
+                  TvLibraryPage(viewId: state.pathParameters['viewId']!),
             ),
             GoRoute(
               path: '/shelf/:source',
-              builder: (context, state) => _shelfAggregation(auth, state),
+              builder: (context, state) => _shelfPage(auth, state, environment),
             ),
             GoRoute(
               path: '/item/:itemId',
@@ -343,16 +346,13 @@ GoRouter createAppRouter({
               path: '/library/:viewId',
               pageBuilder: (context, state) => _desktopPage(
                 state,
-                AggregationPage(
-                  key: ValueKey(state.uri.toString()),
-                  legacyLibraryId: state.pathParameters['viewId'] ?? '',
-                ),
+                LibraryPage(viewId: state.pathParameters['viewId'] ?? ''),
               ),
             ),
             GoRoute(
               path: '/shelf/:source',
               pageBuilder: (context, state) =>
-                  _desktopPage(state, _shelfAggregation(auth, state)),
+                  _desktopPage(state, _shelfPage(auth, state, environment)),
             ),
             GoRoute(
               path: '/item/:itemId',
@@ -394,10 +394,29 @@ GoRouter createAppRouter({
   return router;
 }
 
-Widget _shelfAggregation(AuthController auth, GoRouterState state) {
+Widget _shelfPage(
+  AuthController auth,
+  GoRouterState state,
+  PresentationEnvironment environment,
+) {
   final command = state.extra is PlayerHostOpenItemCommand
       ? state.extra as PlayerHostOpenItemCommand
       : null;
+  if (command?.source == null) {
+    if (!environment.isDesktop && !environment.isTv) {
+      return PhoneShelfPage.fromState(state);
+    }
+    if (environment.isTv) {
+      final source = state.pathParameters['source'] ?? '';
+      if (TvShelfPage.handles(source)) return TvShelfPage.fromState(state);
+      return TvLibraryPage(
+        viewId: state.uri.queryParameters['parentId'] ?? '',
+        initialGenre: state.uri.queryParameters['genre'],
+        initialType: state.uri.queryParameters['includeItemTypes'],
+      );
+    }
+    return ShelfGridPage.fromState(state);
+  }
   if (command != null &&
       (command.source == null || command.libraryId == null)) {
     return const SizedBox.shrink();

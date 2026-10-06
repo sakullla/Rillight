@@ -306,7 +306,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
     final created = PlayerController(
-      runtime: bindings.runtime,
+      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,

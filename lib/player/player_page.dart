@@ -165,7 +165,7 @@ class PlayerPageState extends State<PlayerPage> {
     final bindings = PlayerScope.of(context);
     final created = PlayerController(
       client: AuthScope.of(context).client,
-      runtime: bindings.runtime,
+      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       observationSink: bindings.observationSink,
       switchDispatcher: bindings.switchDispatcher,
       reportOutcomeSink: bindings.reportOutcomeSink,

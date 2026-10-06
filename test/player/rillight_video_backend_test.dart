@@ -218,6 +218,52 @@ void main() {
     addTearDown(() => isolatedCache.delete(recursive: true));
   });
   test(
+    'slow recovery headers do not trigger premature startup source renewal',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var requests = 0;
+      upstream.listen((request) async {
+        if (++requests == 1) {
+          request.response.statusCode = 502;
+        } else {
+          await Future<void>.delayed(const Duration(seconds: 31));
+          request.response.contentLength = 8;
+          request.response.add(List.filled(8, 9));
+        }
+        await request.response.close();
+      });
+      final driver = _PendingOpenCoreDriver()..releaseOpen.complete();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      final renewals = <VideoBackendEvent>[];
+      final subscription = backend.events.listen((event) {
+        if (event.kind == VideoEventKind.sourceRefreshRequired) {
+          renewals.add(event);
+        }
+      });
+      try {
+        await backend
+            .open(
+              VideoOpenRequest(
+                sessionId: 74,
+                url: Uri.parse('http://127.0.0.1:${upstream.port}/media'),
+              ),
+            )
+            .timeout(const Duration(seconds: 36));
+        expect(requests, 2);
+        expect(renewals, isEmpty);
+      } finally {
+        await subscription.cancel();
+        await backend.dispose();
+        await upstream.close(force: true);
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+  test(
     'stalled initial open renews its source before the core is ready',
     () async {
       final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -249,7 +295,7 @@ void main() {
       // Observe errors immediately, including during cleanup of a failing test.
       final opened = expectLater(opening, completes);
       try {
-        final event = await refresh.timeout(const Duration(seconds: 24));
+        final event = await refresh.timeout(const Duration(seconds: 50));
         expect(event.value, 408);
         expect((await backend.diagnostics())['openPhase'], 'openingCore');
         await backend.refreshSourceUrl(
@@ -269,7 +315,7 @@ void main() {
         await upstream.close(force: true);
       }
     },
-    timeout: const Timeout(Duration(seconds: 40)),
+    timeout: const Timeout(Duration(seconds: 60)),
   );
 
   test(
@@ -329,7 +375,7 @@ void main() {
           expect(bytes.every((byte) => byte == 9), isTrue);
           return count + bytes.length;
         });
-        final event = await refresh.timeout(const Duration(seconds: 22));
+        final event = await refresh.timeout(const Duration(seconds: 50));
         expect(event.value, 408);
         expect((await backend.diagnostics())['readAheadFailed'], false);
         await backend.refreshSourceUrl(
@@ -351,6 +397,7 @@ void main() {
         await temp.delete(recursive: true);
       }
     },
+    timeout: const Timeout(Duration(seconds: 60)),
   );
 
   test(

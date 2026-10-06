@@ -5,7 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -78,12 +79,12 @@ void main() {
     app.router.go('/library/view-movies');
     await tester.pumpWidget(app);
     await settle(tester);
-    expect(find.byType(AggregationPage), findsOneWidget);
+    expect(find.byType(ShelfGridPage), findsOneWidget);
   }
 
   ScrollPosition gridPosition(WidgetTester tester) {
     final scrollable = find.descendant(
-      of: find.byType(AggregationPage),
+      of: find.byType(ShelfGridPage),
       matching: find.byType(Scrollable),
     );
     return tester.state<ScrollableState>(scrollable.first).position;
@@ -94,9 +95,7 @@ void main() {
   ) async {
     await openMovieLibrary(tester);
     final position = gridPosition(tester);
-    final cards = find.byWidgetPredicate(
-      (widget) => widget.runtimeType.toString() == '_QueryCard',
-    );
+    final cards = find.byWidgetPredicate((widget) => widget is PosterCard);
     expect(cards, findsWidgets);
 
     final livePosters = cards.evaluate().toSet();
@@ -134,15 +133,15 @@ void main() {
     }).length;
     expect(firstRow, delegate.crossAxisCount);
     debugOnRebuildDirtyWidget = null;
-    // 进入来源安全详情并返回，保留同一聚合状态和滚动位置。
+    // 进入来源安全详情并返回，保留同一片库状态和滚动位置。
     final offset = position.pixels;
-    final state = tester.state(find.byType(AggregationPage));
+    final state = tester.state(find.byType(ShelfGridPage));
     await tester.tap(cards.first);
     await settle(tester);
     expect(find.byKey(CatalogKeys.back), findsOneWidget);
     await tester.tap(find.byKey(CatalogKeys.back));
     await settle(tester);
-    expect(tester.state(find.byType(AggregationPage)), same(state));
+    expect(tester.state(find.byType(ShelfGridPage)), same(state));
     expect(gridPosition(tester).pixels, closeTo(offset, 1));
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);

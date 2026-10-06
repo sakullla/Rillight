@@ -249,26 +249,22 @@ void main() {
 
       await openLibrary(tester, 'view-movies');
       expect(find.byKey(CatalogKeys.library('view-movies')), findsNothing);
-      expect(find.byType(AggregationPage), findsOneWidget);
+      expect(find.byType(ShelfGridPage), findsOneWidget);
       expect(find.text('Inception'), findsOneWidget);
-      final aggregationScroll = find
+      final libraryScroll = find
           .descendant(
-            of: find.byType(AggregationPage),
+            of: find.byType(ShelfGridPage),
             matching: find.byType(Scrollable),
           )
           .first;
       await tester.scrollUntilVisible(
         find.text('飞屋环游记'),
         250,
-        scrollable: aggregationScroll,
+        scrollable: libraryScroll,
       );
       expect(find.text('飞屋环游记'), findsOneWidget);
       final movie = find.text('Inception');
-      await tester.scrollUntilVisible(
-        movie,
-        -250,
-        scrollable: aggregationScroll,
-      );
+      await tester.scrollUntilVisible(movie, -250, scrollable: libraryScroll);
       await tester.ensureVisible(movie);
       await tester.tap(movie);
       await settle(tester);

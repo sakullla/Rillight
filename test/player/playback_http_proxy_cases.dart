@@ -23,6 +23,128 @@ Uint8List _paddedProgressiveMp4() {
 }
 
 void main() {
+  test(
+    'direct and redirected signed queries retain their original bytes',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create(
+        origin: Uri.parse('http://emby.invalid'),
+        headers: {'X-Emby-Token': 'private-token'},
+      );
+      final client = HttpClient();
+      const query = 'path=a%20b&part=one&flag&part=two&signature=x%2By%3D';
+      final received = <String>[];
+      upstream.listen((request) async {
+        received.add(request.uri.query);
+        if (request.uri.path == '/start') {
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            'location',
+            '/final?$query&api_key=private-token',
+          );
+        } else {
+          request.response.write('ok');
+        }
+        await request.response.close();
+      });
+      try {
+        final response = await (await client.getUrl(
+          proxy.register(
+            Uri.parse('http://127.0.0.1:${upstream.port}/start?$query'),
+          ),
+        )).close();
+        expect(await response.transform(utf8.decoder).join(), 'ok');
+        expect(received, [query, query]);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
+  for (final persistent in [false, true]) {
+    test(
+      'first media 403 retries serially once (persistent=$persistent)',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final proxy = await PlaybackHttpProxy.create();
+        final client = HttpClient();
+        var requests = 0;
+        final ports = <int>[];
+        server.listen((request) async {
+          ports.add(request.connectionInfo!.remotePort);
+          requests++;
+          final output = request.response;
+          if (requests == 1 || persistent) {
+            output.statusCode = HttpStatus.forbidden;
+            output.write('temporarily unavailable');
+          } else {
+            output.statusCode = HttpStatus.partialContent;
+            output.headers.set('content-range', 'bytes 0-3/4');
+            output.contentLength = 4;
+            output.add([1, 2, 3, 4]);
+          }
+          await output.close();
+        });
+        try {
+          final request = await client.getUrl(
+            proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+          );
+          request.headers.set('range', 'bytes=0-');
+          final response = await request.close();
+          final bytes = await response.expand((chunk) => chunk).toList();
+          expect(response.statusCode, persistent ? 403 : 206);
+          expect(requests, 2);
+          expect(ports.toSet(), hasLength(2));
+          if (!persistent) expect(bytes, [1, 2, 3, 4]);
+          expect(
+            proxy.diagnostics['authenticationStatus'],
+            persistent ? 403 : null,
+          );
+        } finally {
+          client.close(force: true);
+          await proxy.close();
+          await server.close(force: true);
+        }
+      },
+    );
+  }
+
+  for (final close in [false, true]) {
+    test('waiting media headers cancel promptly (close=$close)', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final accepted = Completer<void>();
+      server.listen((request) {
+        if (!accepted.isCompleted) accepted.complete();
+        // Intentionally leave headers pending until cancellation.
+      });
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(
+          proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+        );
+        final finished = request.close().then<void>(
+          (response) => response.drain<void>(),
+          onError: (Object _) {},
+        );
+        await accepted.future.timeout(const Duration(seconds: 2));
+        if (close) {
+          await proxy.close().timeout(const Duration(seconds: 2));
+        } else {
+          proxy.cancelPendingReads();
+        }
+        await finished.timeout(const Duration(seconds: 2));
+        expect(proxy.diagnostics['upstreamAwaitingHeadersRequests'], 0);
+        expect(proxy.diagnostics['mediaHeaderTimeouts'], 0);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    });
+  }
   test('body stall gives slow recovery headers their full budget', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final proxy = await PlaybackHttpProxy.create();
@@ -79,7 +201,7 @@ void main() {
       var requests = 0;
       server.listen((request) async {
         requests++;
-        await Future<void>.delayed(const Duration(seconds: 16));
+        await Future<void>.delayed(const Duration(seconds: 31));
         request.response.contentLength = 4;
         request.response.add([1, 2, 3, 4]);
         await request.response.close();
@@ -87,7 +209,7 @@ void main() {
       try {
         final response = await (await client.getUrl(
           proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
-        )).close().timeout(const Duration(seconds: 19));
+        )).close().timeout(const Duration(seconds: 35));
         expect(
           await response.fold<List<int>>(
             [],
@@ -102,6 +224,7 @@ void main() {
         await server.close(force: true);
       }
     },
+    timeout: const Timeout(Duration(seconds: 40)),
   );
 
   test(
@@ -1299,8 +1422,8 @@ void main() {
           return;
         }
         if (ports.length == 3) {
-          // The replacement is slower than the learned five-second deadline;
-          // timeout recovery must widen that deadline and let it succeed.
+          // The bounded deadline must still replace a silent connection
+          // and allow the replacement to return its headers.
           await Future<void>.delayed(const Duration(seconds: 6));
         }
         final range = MediaByteRange.resolve(
@@ -1333,13 +1456,13 @@ void main() {
 
         expect(await read(0), [7, 7, 7, 7]);
         final watch = Stopwatch()..start();
-        expect(await read(4).timeout(const Duration(seconds: 17)), [
+        expect(await read(4).timeout(const Duration(seconds: 58)), [
           7,
           7,
           7,
           7,
         ]);
-        expect(watch.elapsed, lessThan(const Duration(seconds: 17)));
+        expect(watch.elapsed, lessThan(const Duration(seconds: 58)));
         expect(ports.length, 3);
         expect(ports[2], isNot(ports[1]));
         expect(proxy.diagnostics['recoveryAttempts'], 1);
@@ -1352,6 +1475,67 @@ void main() {
         await server.close(force: true);
       }
     },
+    timeout: const Timeout(Duration(seconds: 65)),
+  );
+
+  test(
+    'fast media headers do not shorten the next slow range deadline',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final client = HttpClient();
+      final proxy = await PlaybackHttpProxy.create();
+      final ports = <int>[];
+      server.listen((request) async {
+        ports.add(request.connectionInfo!.remotePort);
+        if (ports.length == 2) {
+          await Future<void>.delayed(const Duration(seconds: 31));
+        }
+        final range = MediaByteRange.resolve(
+          request.headers.value('range'),
+          16,
+        )!;
+        request.response.statusCode = 206;
+        request.response.headers.set(
+          'content-range',
+          'bytes ${range.start}-${range.end}/16',
+        );
+        request.response.contentLength = range.length;
+        request.response.add(List<int>.filled(range.length, 7));
+        await request.response.close();
+      });
+      try {
+        final route = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/video'),
+        );
+        Future<List<int>> read(int start) async {
+          final request = await client.getUrl(route);
+          request.headers.set('range', 'bytes=$start-${start + 3}');
+          final response = await request.close();
+          expect(response.statusCode, 206);
+          return response.fold<List<int>>(
+            [],
+            (bytes, chunk) => bytes..addAll(chunk),
+          );
+        }
+
+        expect(await read(0), [7, 7, 7, 7]);
+        final watch = Stopwatch()..start();
+        expect(await read(4).timeout(const Duration(seconds: 36)), [
+          7,
+          7,
+          7,
+          7,
+        ]);
+        expect(watch.elapsed, lessThan(const Duration(seconds: 36)));
+        expect(ports.length, 2);
+        expect(proxy.diagnostics['recoveryAttempts'], 0);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 65)),
   );
 
   test('502 retry leaves the connection pinned to an unhealthy node', () async {
@@ -2090,6 +2274,67 @@ void main() {
         } finally {
           fixture.hold!.complete();
           await chunks?.cancel();
+        }
+      },
+    );
+  }
+
+  for (final sameInput in [true, false]) {
+    test(
+      'bootstrap retirement is scoped to its native input (same=$sameInput)',
+      () async {
+        const mib = 1024 * 1024;
+        final fixture = await _CacheFixture.open(
+          memoryBytes: 8 * mib,
+          disk: true,
+          sessionBuffering: true,
+          readAheadBytes: 8 * mib,
+          continuousTransfers: true,
+        );
+        fixture.binaryBody = Uint8List(8 * mib);
+        fixture.holdAfterBytes = 1024;
+        fixture.hold = Completer<void>();
+        final client = HttpClient();
+        StreamIterator<List<int>>? chunks;
+        StreamIterator<List<int>>? replacement;
+        try {
+          final request = await client.getUrl(fixture.url);
+          request.headers.set('range', 'bytes=0-');
+          request.headers.set('x-rillight-input-id', '42');
+          chunks = StreamIterator(await request.close());
+          expect(
+            await chunks.moveNext().timeout(const Duration(seconds: 2)),
+            isTrue,
+          );
+          client.close(force: true);
+          await chunks.cancel();
+          final next = await fixture.client.getUrl(fixture.url);
+          next.headers.set('range', 'bytes=0-65535');
+          next.headers.set('x-rillight-input-id', sameInput ? '42' : '43');
+          replacement = StreamIterator(await next.close());
+          expect(
+            await replacement.moveNext().timeout(const Duration(seconds: 2)),
+            isTrue,
+          );
+          final expectedReaders = sameInput ? 1 : 2;
+          final deadline = DateTime.now().add(const Duration(seconds: 2));
+          while (fixture.proxy.diagnostics['readAheadReaders'] !=
+                  expectedReaders &&
+              DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          expect(
+            fixture.proxy.diagnostics['readAheadReaders'],
+            expectedReaders,
+          );
+          expect(fixture.proxy.diagnostics['readAheadFailed'], isFalse);
+          expect(fixture.hold!.isCompleted, isFalse);
+          expect(fixture.ranges, ['bytes=0-']);
+        } finally {
+          client.close(force: true);
+          if (!fixture.hold!.isCompleted) fixture.hold!.complete();
+          await chunks?.cancel();
+          await replacement?.cancel();
         }
       },
     );

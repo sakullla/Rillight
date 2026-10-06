@@ -318,7 +318,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed || revision != _requestRevision) return;
       late PlayerWindowLaunch launch;
       PlaybackOrigin? resolvedOrigin;
-      if (runtime != null) {
+      if (runtime != null && request.source != null) {
         final origin = prepared ?? await runtime!.resolve(request);
         origin.permit.requireValid();
         if (_disposed || revision != _requestRevision) return;
@@ -417,7 +417,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       _privateRevoked = false;
       // Scoped sources keep permission-checked metadata dispatch in the
       // existing runtime path. Do not prefetch them through auth.client.
-      final preparation = _startupPreparation = runtime == null
+      final preparation = _startupPreparation = resolvedOrigin == null
           ? PlayerStartupPreparation(auth.client, request.itemId)
           : null;
       try {
@@ -443,7 +443,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         _activeRevision = revision;
         _authIdentity = _currentAuthIdentity;
         _epoch++;
-        _current = runtime == null ? request : launch.request;
+        _current = launch.request;
         notifyListeners();
         _startWatch(pid);
       } catch (error) {
@@ -662,7 +662,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (snapshot == null) {
       return;
     }
-    if (runtime != null) {
+    if (runtime != null && (snapshot.source != null || _origin != null)) {
       if (_privateRevoked ||
           snapshot.source == null ||
           snapshot.source!.account != _origin?.source.account ||
