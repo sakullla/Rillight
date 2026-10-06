@@ -42,7 +42,14 @@ void main() {
     var completed = false;
     spawning.then((_) => completed = true);
     await control.ready(processId: 999);
-    await Future<void>.delayed(const Duration(milliseconds: 5));
+    await control.waitReadyConsumed();
+    expect(completed, isFalse);
+    expect(control.activations, isEmpty);
+    final wrongSession = control.endpoint!.sessionId == '0' * 32
+        ? '1' * 32
+        : '0' * 32;
+    await control.ready(sessionId: wrongSession);
+    await control.waitReadyConsumed();
     expect(completed, isFalse);
     expect(control.activations, isEmpty);
     await control.ready();
@@ -376,10 +383,35 @@ class _ControlledProcess extends DesktopPlayerProcessControl {
     return 42;
   }
 
-  Future<void> ready({int processId = 42}) =>
-      File('${endpoint!.directory.path}/ready.json').writeAsString(
-        jsonEncode({'sessionId': endpoint!.sessionId, 'pid': processId}),
-      );
+  Future<void> ready({int processId = 42, String? sessionId}) async {
+    // Publish a complete message, as the actual child protocol does. Directly
+    // truncating ready.json can expose partial JSON to the polling host.
+    final temporary = File('${endpoint!.directory.path}/ready.json.tmp');
+    await temporary.writeAsString(
+      jsonEncode({
+        'sessionId': sessionId ?? endpoint!.sessionId,
+        'pid': processId,
+      }),
+      flush: true,
+    );
+    await temporary.rename('${endpoint!.directory.path}/ready.json');
+  }
+
+  Future<void> waitReadyConsumed() async {
+    // A delay is not an acknowledgement: read() may already hold the rejected
+    // message but still be awaiting delete(). Publishing its replacement then
+    // lets that delete remove the valid ready message. Wait for consumption so
+    // each rejection is actually exercised before publishing the next message.
+    final readyFile = File('${endpoint!.directory.path}/ready.json');
+    final deadline = DateTime.now().add(startupTimeout);
+    while (await readyFile.exists()) {
+      if (!DateTime.now().isBefore(deadline)) {
+        throw TimeoutException('Host did not consume ready', startupTimeout);
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+  }
+
   @override
   bool isAlive(int pid) => alive;
   @override
