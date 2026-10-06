@@ -73,6 +73,63 @@ inline void AppendAnnexB(std::vector<uint8_t>* out, const uint8_t* nal, size_t s
   out->insert(out->end(), nal, nal + size);
 }
 
+struct HevcBits {
+  const uint8_t* data = nullptr;
+  size_t size = 0;
+  size_t bit = 0;
+  bool ok = true;
+  int u(int count) {
+    if (!ok || count < 0 || bit + static_cast<size_t>(count) > size * 8) {
+      ok = false;
+      return 0;
+    }
+    int value = 0;
+    for (int i = 0; i < count; ++i) {
+      const size_t pos = bit++;
+      value = (value << 1) | ((data[pos / 8] >> (7 - (pos % 8))) & 1);
+    }
+    return value;
+  }
+};
+
+// Type 63 may be the original enhancement NAL with only nal_unit_type rewritten.
+// A nested NAL is handled separately. VPS is the reserved 0xFFFF word; SPS is a
+// Main or Main10 profile_tier_level. Anything else is a slice (TRAIL_R).
+inline int RestoredElNalType(const uint8_t* rbsp, size_t size) {
+  if (rbsp && size >= 4) {
+    HevcBits bits{rbsp, size};
+    bits.u(4);
+    bits.u(2);
+    const int layers = bits.u(6);
+    const int sublayers = bits.u(3);
+    bits.u(1);
+    const int reserved = bits.u(16);
+    if (bits.ok && layers <= 62 && sublayers <= 6 && reserved == 0xFFFF) return 32;
+  }
+  if (rbsp && size >= 16) {
+    HevcBits bits{rbsp, size};
+    const int vps = bits.u(4);
+    const int sublayers = bits.u(3);
+    bits.u(1);
+    const int space = bits.u(2);
+    bits.u(1);
+    const int profile = bits.u(5);
+    const int flags = bits.u(32);
+    const bool known = profile == 1 || profile == 2;
+    const bool compatible = known && ((flags >> (31 - profile)) & 1);
+    if (bits.ok && vps <= 15 && sublayers <= 6 && space == 0 && compatible) return 33;
+  }
+  return 1;
+}
+
+inline void AppendRestoredElNal(std::vector<uint8_t>* out, const uint8_t* nal, size_t size) {
+  if (!out || !nal || size < 3 || out->size() > 32u * 1024u * 1024u) return;
+  const int type = RestoredElNalType(nal + 2, size - 2);
+  std::vector<uint8_t> restored(nal, nal + size);
+  restored[0] = static_cast<uint8_t>((restored[0] & 0x81) | (type << 1));
+  AppendAnnexB(out, restored.data(), restored.size());
+}
+
 // True when the packet is well framed. *annexb is empty when the packet has
 // no wrapped enhancement NAL. False means the framing is unusable.
 inline bool ExtractInterleavedEnhancement(const uint8_t* data, size_t size,
@@ -94,7 +151,13 @@ inline bool ExtractInterleavedEnhancement(const uint8_t* data, size_t size,
       });
       return;
     }
-    AppendAnnexB(annexb, payload, payload_size);
+    if (HevcNalHeader(payload, payload_size)) {
+      AppendAnnexB(annexb, payload, payload_size);
+      return;
+    }
+    // The payload is the original RBSP. first_slice_segment_in_pic_flag lives
+    // in its high bit, so it is not itself a NAL header.
+    AppendRestoredElNal(annexb, nal, nal_size);
   });
   if (!framed) annexb->clear();
   return framed;

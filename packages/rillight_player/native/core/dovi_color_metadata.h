@@ -155,13 +155,45 @@ inline AVFrame* CopyFrameForCompose(const AVFrame* source) {
   return copy;
 }
 
-// Full-enhancement residual. With no linear-deadzone coefficients the
-// enhancement code at 1 << (bit_depth - 1) is zero and the difference is
-// saturated onto the base. Non-zero slope or threshold uses the RPU linear
-// deadzone (ETSI GS CCM 001): coefficients are divided by 2^coef_log2_denom
-// and applied to samples normalized by the full code range. Returns false,
-// leaving the caller on the base layer, when the result does not differ.
-inline bool ComposeFelResidual(AVFrame* base, const AVFrame* enhancement) {
+// Normalized enhancement residual added after RPU reshape. It is not written
+// back into base-layer codes. With no linear-deadzone coefficients the
+// enhancement code at 1 << (bit_depth - 1) is zero. Otherwise the RPU linear
+// deadzone (ETSI GS CCM 001) applies: coefficients are divided by
+// 2^coef_log2_denom and the sample is normalized by the full code range.
+struct FelResidual {
+  bool formula = false;
+  bool differs = false;
+  int depth = 0;
+  int neutral = 0;
+  int maximum = 0;
+  struct Channel {
+    double offset = 0;
+    double slope = 0;
+    double threshold = 0;
+    double limit = 0;
+  } channels[3];
+
+  double Delta(int channel, int el_code) const {
+    const double span = static_cast<double>(maximum);
+    if (span <= 0) return 0;
+    if (!formula) return (el_code - neutral) / span;
+    const int index = std::clamp(channel, 0, 2);
+    const Channel& shape = channels[index];
+    const double delta = el_code / span - shape.offset;
+    const double magnitude = std::fabs(delta);
+    double residual = 0;
+    if (magnitude > shape.threshold)
+      residual = std::copysign(shape.slope * (magnitude - shape.threshold), delta);
+    return std::clamp(residual, -shape.limit, shape.limit);
+  }
+};
+
+// False when geometry, pixel format, or NLQ cannot be composed. True with
+// differs == false leaves the caller on the base layer. Neither frame is written.
+inline bool LoadFelResidual(const AVFrame* base, const AVFrame* enhancement,
+                            FelResidual* out) {
+  if (!out) return false;
+  *out = FelResidual{};
   if (!base || !enhancement || base->format != enhancement->format ||
       base->width <= 0 || base->height <= 0 || base->width != enhancement->width ||
       base->height != enhancement->height)
@@ -178,16 +210,9 @@ inline bool ComposeFelResidual(AVFrame* base, const AVFrame* enhancement) {
     return false;
   const int depth = description->comp[0].depth;
   const int shift = packed ? 16 - depth : 0;
-  const int neutral = 1 << (depth - 1);
-  const int maximum = (1 << depth) - 1;
-  struct Channel {
-    double offset = 0;
-    double slope = 0;
-    double threshold = 0;
-    double limit = 0;
-  };
-  Channel channels[3];
-  bool formula = false;
+  out->depth = depth;
+  out->neutral = 1 << (depth - 1);
+  out->maximum = (1 << depth) - 1;
   if (const auto* side = av_frame_get_side_data(base, AV_FRAME_DATA_DOVI_METADATA);
       side && side->data && side->size >= sizeof(AVDOVIMetadata)) {
     const auto* metadata = reinterpret_cast<const AVDOVIMetadata*>(side->data);
@@ -211,13 +236,13 @@ inline bool ComposeFelResidual(AVFrame* base, const AVFrame* enhancement) {
                                 ? header->el_bit_depth : depth;
         const double el_max = static_cast<double>((1 << el_bits) - 1);
         const double scale = std::ldexp(1.0, -header->coef_log2_denom);
-        formula = true;
+        out->formula = true;
         for (int channel = 0; channel < 3; ++channel) {
           const auto& nlq = mapping->nlq[channel];
-          channels[channel] = {nlq.nlq_offset / el_max,
-                               static_cast<double>(nlq.linear_deadzone_slope) * scale,
-                               static_cast<double>(nlq.linear_deadzone_threshold) * scale,
-                               static_cast<double>(nlq.vdr_in_max) * scale};
+          out->channels[channel] = {nlq.nlq_offset / el_max,
+                                    static_cast<double>(nlq.linear_deadzone_slope) * scale,
+                                    static_cast<double>(nlq.linear_deadzone_threshold) * scale,
+                                    static_cast<double>(nlq.vdr_in_max) * scale};
         }
       }
     }
@@ -235,47 +260,23 @@ inline bool ComposeFelResidual(AVFrame* base, const AVFrame* enhancement) {
                   base->linesize[2] < chroma_stride ||
                   enhancement->linesize[2] < chroma_stride))
     return false;
-  bool changed = false;
-  const auto compose = [&](uint16_t* destination, const uint16_t* residual, int count,
-                           int channel, bool alternate) {
-    const double span = static_cast<double>(maximum);
+  const auto scan = [&](const uint16_t* residual, int count, int channel, bool alternate) {
     for (int index = 0; index < count; ++index) {
       const int which = alternate ? 1 + (index & 1) : channel;
-      const int base_code = destination[index] >> shift;
-      const int el_code = residual[index] >> shift;
-      int composed = base_code;
-      if (!formula) {
-        composed = std::clamp(base_code + (el_code - neutral), 0, maximum);
-      } else {
-        const Channel& shape = channels[which];
-        const double delta = el_code / span - shape.offset;
-        const double magnitude = std::fabs(delta);
-        double residual_value = 0;
-        if (magnitude > shape.threshold)
-          residual_value = std::copysign(shape.slope * (magnitude - shape.threshold), delta);
-        residual_value = std::clamp(residual_value, -shape.limit, shape.limit);
-        composed = std::clamp(static_cast<int>(std::lround(
-            std::clamp(base_code / span + residual_value, 0.0, 1.0) * span)), 0, maximum);
-      }
-      if (composed != base_code) {
-        changed = true;
-        destination[index] = static_cast<uint16_t>(composed << shift);
-      }
+      if (out->Delta(which, residual[index] >> shift) != 0.0) out->differs = true;
     }
   };
-  for (int y = 0; y < base->height; ++y) {
-    compose(reinterpret_cast<uint16_t*>(base->data[0] + y * base->linesize[0]),
-            reinterpret_cast<const uint16_t*>(enhancement->data[0] + y * enhancement->linesize[0]),
-            base->width, 0, false);
+  for (int y = 0; y < base->height && !out->differs; ++y) {
+    scan(reinterpret_cast<const uint16_t*>(enhancement->data[0] + y * enhancement->linesize[0]),
+         base->width, 0, false);
   }
-  for (int plane = 0; plane < planes; ++plane) {
-    for (int y = 0; y < chroma_height; ++y) {
-      compose(reinterpret_cast<uint16_t*>(base->data[1 + plane] + y * base->linesize[1 + plane]),
-              reinterpret_cast<const uint16_t*>(enhancement->data[1 + plane] +
-                                                y * enhancement->linesize[1 + plane]),
-              chroma_samples, 1 + plane, packed);
+  for (int plane = 0; plane < planes && !out->differs; ++plane) {
+    for (int y = 0; y < chroma_height && !out->differs; ++y) {
+      scan(reinterpret_cast<const uint16_t*>(enhancement->data[1 + plane] +
+                                            y * enhancement->linesize[1 + plane]),
+           chroma_samples, 1 + plane, packed);
     }
   }
-  return changed;
+  return true;
 }
 }  // namespace rillight_color

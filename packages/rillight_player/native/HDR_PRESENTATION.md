@@ -23,9 +23,12 @@ resize. scRGB is linear BT.709 with an absolute 80-nit unit. HDR10/PQ, HLG and
 supported Dolby Vision RPU conversion retain absolute luminance and signed
 wide-gamut components, without SDR tone mapping or 8-bit quantization. DWM maps
 this output to the HDR display. RPU processing followed by scRGB is HDR,
-not Dolby Vision HDMI signaling or certification. Profile 7 FEL is complete
-only when the enhancement residual is composed into the base; a failed
-composition is a base-layer fallback and is not labeled FEL. Profile 5
+not Dolby Vision HDMI signaling or certification. Profile 7 FEL reshapes the
+original base, then adds the linear-deadzone residual in that normalized
+range; it does not add the residual back into base-layer codes. The Windows
+scRGB shader does not sample the enhancement layer, so a FEL frame uses the
+portable mapper instead of scRGB. A failed composition is a base-layer
+fallback and is not labeled FEL. Profile 5
 without a usable RPU is unsupported and is not displayed as HDR10 or YUV.
 macOS EDR and the Linux SDR map are not native Dolby Vision.
 

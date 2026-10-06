@@ -2168,9 +2168,7 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
       av_frame_free(&local);
     }
   };
-  std::unique_ptr<AVFrame, AvFrameDeleter> composed;
   std::unique_ptr<AVFrame, AvFrameDeleter> downloaded;
-  int composed_ok = 0;
   const AVFrame* compose_base = frame;
   if (residual && enhancement && rpu_usable && frame->hw_frames_ctx) {
     downloaded.reset(av_frame_alloc());
@@ -2180,12 +2178,17 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     else
       compose_base = downloaded.get();
   }
-  if (residual && enhancement && rpu_usable && compose_base && !compose_base->hw_frames_ctx) {
-    composed.reset(rillight_color::CopyFrameForCompose(compose_base));
-    if (composed && rillight_color::ComposeFelResidual(composed.get(), enhancement))
-      composed_ok = 1;
-    else
-      composed.reset();
+  // Residual stays out of the base codes. The mapper reshapes the original
+  // base and adds the normalized NLQ afterwards.
+  rillight_color::FelResidual fel{};
+  const AVFrame* fel_source = nullptr;
+  int composed_ok = 0;
+  if (residual && enhancement && rpu_usable && compose_base &&
+      !compose_base->hw_frames_ctx &&
+      rillight_color::LoadFelResidual(compose_base, enhancement, &fel) &&
+      fel.differs) {
+    composed_ok = 1;
+    fel_source = enhancement;
   }
   const int profile = record ? record->dv_profile : tagged_dovi ? 5 : -1;
   const int compatibility = record ? record->dv_bl_signal_compatibility_id : 0;
@@ -2207,20 +2210,10 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   }
   int reconstruction = dovi_decision.reconstruction;
   const AVFrame *picture = frame;
-  if (reconstruction == RILLIGHT_CORE_DOVI_RECON_FEL && composed) {
-    auto *side = av_frame_get_side_data(composed.get(), AV_FRAME_DATA_DOVI_METADATA);
-    if (!side || !side->data) {
-      composed.reset();
-      reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
-      dovi_decision.use_rpu = 0;
-    } else {
-      auto *metadata = reinterpret_cast<AVDOVIMetadata *>(side->data);
-      av_dovi_get_header(metadata)->disable_residual_flag = 1;
-      picture = composed.get();
-    }
-  } else {
-    composed.reset();
-  }
+  if (reconstruction == RILLIGHT_CORE_DOVI_RECON_FEL && fel_source)
+    picture = compose_base;
+  else
+    fel_source = nullptr;
   const bool base_allowed = profile == 7 || profile == 8;
   AVRational sar = frame->sample_aspect_ratio;
   if (sar.num <= 0 || sar.den <= 0) sar = stream->sample_aspect_ratio;
@@ -2281,13 +2274,16 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   if (use_rpu || transfer == AVCOL_TRC_SMPTE2084 ||
       transfer == AVCOL_TRC_ARIB_STD_B67) {
     const auto render_color = [&](bool use_dovi) {
+      const AVFrame *fel = use_dovi && fel_source ? fel_source : nullptr;
 #if defined(_WIN32)
-      if (scale->color_pipeline.Render(&source, width, height,
+      // The D3D shader reshapes the base planes only. FEL has to take the
+      // portable path, which adds the residual after reshape.
+      if (!fel && scale->color_pipeline.Render(&source, width, height,
               use_dovi, output->data, stride)) return true;
 #endif
       return source.format != AV_PIX_FMT_D3D11 &&
           scale->portable_color_pipeline.Render(&source, width, height,
-              use_dovi, output->data, stride);
+              use_dovi, output->data, stride, fel);
     };
     const auto accept_base = [&](bool ok) {
       if (!ok) return false;
@@ -2298,7 +2294,7 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
       return true;
     };
 #if defined(_WIN32)
-    if (gpu_video) {
+    if (gpu_video && !fel_source) {
       const auto render_texture = [&](bool use_dovi) {
         return hdr_video ? scale->color_pipeline.RenderScRgbTexture(&source, width, height, use_dovi) :
             scale->color_pipeline.RenderTexture(&source, width, height, use_dovi);
@@ -2328,9 +2324,10 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
         output->data = output->buffers->Acquire(half_bytes);
         if (!output->data) { delete output; return nullptr; }
         const auto render_half = [&](bool use_dovi) {
+          const AVFrame *fel = use_dovi && fel_source ? fel_source : nullptr;
           return scale->portable_color_pipeline.RenderLinearHalf(
               &source, width, height, use_dovi,
-              reinterpret_cast<uint16_t*>(output->data), half_stride);
+              reinterpret_cast<uint16_t*>(output->data), half_stride, fel);
         };
         converted = render_half(use_rpu);
         if (!converted && use_rpu && base_allowed)

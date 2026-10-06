@@ -99,6 +99,37 @@ Pixel Multiply(const Vec4* matrix, const Pixel& value) {
           matrix[2].x * value[0] + matrix[2].y * value[1] + matrix[2].z * value[2]};
 }
 
+bool ScaleTo444(SwsContext** scaler, AVFrame** dest, const AVFrame* source,
+                int width, int height) {
+  if (!scaler || !dest || !source) return false;
+  if (!*dest || (*dest)->width != width || (*dest)->height != height) {
+    av_frame_free(dest);
+    *dest = av_frame_alloc();
+    if (!*dest) return false;
+    (*dest)->width = width;
+    (*dest)->height = height;
+    (*dest)->format = AV_PIX_FMT_YUV444P16LE;
+    if (av_frame_get_buffer(*dest, 32) < 0) {
+      av_frame_free(dest);
+      return false;
+    }
+  }
+  if (!(*dest)->data[0] || !(*dest)->data[1] || !(*dest)->data[2]) return false;
+  if (!*scaler) {
+    *scaler = sws_alloc_context();
+    if (!*scaler) return false;
+    (*scaler)->threads = 4;
+    (*scaler)->flags = SWS_BILINEAR;
+    (*scaler)->backends = SWS_BACKEND_LEGACY;
+  }
+  (*dest)->color_range = source->color_range;
+  (*dest)->colorspace = source->colorspace;
+  (*dest)->color_primaries = source->color_primaries;
+  (*dest)->color_trc = source->color_trc;
+  (*dest)->flags = source->flags;
+  return sws_scale_frame(*scaler, *dest, source) >= 0;
+}
+
 float Reshape(const Constants& parameters, int c, const Pixel& signal) {
   const auto& curve = parameters.curves[c];
   const int count = static_cast<int>(curve.bounds.x);
@@ -182,15 +213,23 @@ class RowWorkers {
 
 struct PortableColorPipeline::Impl {
   SwsContext* scaler = nullptr;
+  SwsContext* enhancement_scaler = nullptr;
   AVFrame* sampled = nullptr;
+  AVFrame* enhancement_sampled = nullptr;
   std::unique_ptr<RowWorkers> workers;
 #if defined(RILLIGHT_HAVE_MACOS_COLOR)
   MacosColorPipeline metal;
 #endif
-  ~Impl() { sws_free_context(&scaler); av_frame_free(&sampled); }
+  ~Impl() {
+    sws_free_context(&scaler);
+    sws_free_context(&enhancement_scaler);
+    av_frame_free(&sampled);
+    av_frame_free(&enhancement_sampled);
+  }
 
   bool Render(const AVFrame* frame, int width, int height, bool dovi,
-              uint8_t* rgba, int stride, uint16_t* linear_half) {
+              uint8_t* rgba, int stride, uint16_t* linear_half,
+              const AVFrame* enhancement) {
     const auto format = static_cast<AVPixelFormat>(frame->format);
     const auto* description = av_pix_fmt_desc_get(format);
     if (!description || description->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_RGB) ||
@@ -211,8 +250,15 @@ struct PortableColorPipeline::Impl {
       const auto* light = reinterpret_cast<const AVContentLightMetadata*>(side->data);
       if (light->MaxCLL >= 203 && light->MaxCLL <= 10000) parameters.visible.w = static_cast<float>(light->MaxCLL);
     }
+    rillight_color::FelResidual fel{};
+    const rillight_color::FelResidual* fel_ptr = nullptr;
     if (dovi) {
-      if (!rillight_color::DoviConstants(frame, &parameters)) return false;
+      if (!rillight_color::DoviConstants(frame, &parameters, enhancement != nullptr))
+        return false;
+      if (enhancement) {
+        if (!rillight_color::LoadFelResidual(frame, enhancement, &fel)) return false;
+        fel_ptr = &fel;
+      }
     } else {
       if (frame->color_trc != AVCOL_TRC_SMPTE2084 && frame->color_trc != AVCOL_TRC_ARIB_STD_B67) return false;
       const bool bt2020 = frame->colorspace == AVCOL_SPC_BT2020_NCL;
@@ -220,36 +266,21 @@ struct PortableColorPipeline::Impl {
       parameters.nonlinear[1] = {1, bt2020 ? -.164553f : -.187324f, bt2020 ? -.571353f : -.468124f, 0};
       parameters.nonlinear[2] = {1, bt2020 ? 1.8814f : 1.8556f, 0, 0};
     }
-    if (!sampled || sampled->width != width || sampled->height != height) {
-      av_frame_free(&sampled);
-      sampled = av_frame_alloc();
-      if (!sampled) return false;
-      sampled->width = width; sampled->height = height;
-      sampled->format = AV_PIX_FMT_YUV444P16LE;
-      if (av_frame_get_buffer(sampled, 32) < 0) return false;
-    }
-    if (!sampled->data[0] || !sampled->data[1] || !sampled->data[2]) return false;
     // Upsample/resize the YUV planes without reducing them to 8 bit or
     // interpreting Dolby Vision IPT as an ordinary YCbCr color matrix.
-    if (!scaler) {
-      scaler = sws_alloc_context();
-      if (!scaler) return false;
-      scaler->threads = 4;
-      scaler->flags = SWS_BILINEAR;
-      scaler->backends = SWS_BACKEND_LEGACY;
-    }
-    sampled->color_range = frame->color_range;
-    sampled->colorspace = frame->colorspace;
-    sampled->color_primaries = frame->color_primaries;
-    sampled->color_trc = frame->color_trc;
-    sampled->flags = frame->flags;
-    if (sws_scale_frame(scaler, sampled, frame) < 0) return false;
+    if (!ScaleTo444(&scaler, &sampled, frame, width, height)) return false;
+    if (fel_ptr &&
+        !ScaleTo444(&enhancement_scaler, &enhancement_sampled, enhancement, width, height))
+      return false;
     static const TransferTables tables;
     const int depth = description->comp[0].depth;
     const float source_maximum = static_cast<float>(((1u << depth) - 1) << (16 - depth));
+    const int el_shift = fel_ptr ? 16 - fel.depth : 0;
     const bool full = frame->color_range == AVCOL_RANGE_JPEG;
 #if defined(RILLIGHT_HAVE_MACOS_COLOR)
-    if (linear_half && metal.RenderLinearHalf(sampled, parameters, depth, full,
+    // Metal reshapes the base only. FEL has to stay on the CPU path below,
+    // which adds the normalized residual after that same reshape.
+    if (linear_half && !fel_ptr && metal.RenderLinearHalf(sampled, parameters, depth, full,
             dovi, frame->color_trc, tables.pq.data(), tables.hlg.data(),
             linear_half, stride)) return true;
 #endif
@@ -259,6 +290,17 @@ struct PortableColorPipeline::Impl {
         const auto* luma = reinterpret_cast<const uint16_t*>(sampled->data[0] + y * sampled->linesize[0]);
         const auto* u = reinterpret_cast<const uint16_t*>(sampled->data[1] + y * sampled->linesize[1]);
         const auto* v = reinterpret_cast<const uint16_t*>(sampled->data[2] + y * sampled->linesize[2]);
+        const uint16_t* el_luma = nullptr;
+        const uint16_t* el_u = nullptr;
+        const uint16_t* el_v = nullptr;
+        if (fel_ptr && enhancement_sampled) {
+          el_luma = reinterpret_cast<const uint16_t*>(
+              enhancement_sampled->data[0] + y * enhancement_sampled->linesize[0]);
+          el_u = reinterpret_cast<const uint16_t*>(
+              enhancement_sampled->data[1] + y * enhancement_sampled->linesize[1]);
+          el_v = reinterpret_cast<const uint16_t*>(
+              enhancement_sampled->data[2] + y * enhancement_sampled->linesize[2]);
+        }
         auto* row = rgba ? rgba + static_cast<ptrdiff_t>(y) * stride : nullptr;
         auto* half_row = linear_half ? reinterpret_cast<uint16_t*>(
             reinterpret_cast<uint8_t*>(linear_half) +
@@ -268,9 +310,15 @@ struct PortableColorPipeline::Impl {
           Pixel rgb;
           if (dovi) {
             for (auto& value : signal) value = std::clamp(value, 0.0f, 1.0f);
-            const Pixel shaped{Reshape(parameters, 0, signal) - parameters.offset.x,
-                Reshape(parameters, 1, signal) - parameters.offset.y,
-                Reshape(parameters, 2, signal) - parameters.offset.z};
+            const float offset[3] = {parameters.offset.x, parameters.offset.y, parameters.offset.z};
+            const uint16_t* el_row[3] = {el_luma, el_u, el_v};
+            Pixel shaped{};
+            for (int c = 0; c < 3; ++c) {
+              float value = Reshape(parameters, c, signal);
+              if (fel_ptr && el_row[c])
+                value += static_cast<float>(fel_ptr->Delta(c, el_row[c][x] >> el_shift));
+              shaped[c] = value - offset[c];
+            }
             rgb = Multiply(parameters.nonlinear, shaped);
             for (auto& value : rgb) value = Lookup(tables.pq, value);
             rgb = Multiply(parameters.linear, rgb);
@@ -324,16 +372,17 @@ struct PortableColorPipeline::Impl {
 PortableColorPipeline::PortableColorPipeline() : impl_(std::make_unique<Impl>()) {}
 PortableColorPipeline::~PortableColorPipeline() = default;
 bool PortableColorPipeline::Render(const AVFrame* frame, int width, int height, bool dovi,
-                                    uint8_t* rgba, int stride) {
+                                    uint8_t* rgba, int stride, const AVFrame* enhancement) {
   if (!frame || !rgba || width <= 0 || width > std::numeric_limits<int>::max() / 4 ||
       height <= 0 || stride < width * 4) return false;
-  try { return impl_->Render(frame, width, height, dovi, rgba, stride, nullptr); }
+  try { return impl_->Render(frame, width, height, dovi, rgba, stride, nullptr, enhancement); }
   catch (...) { return false; }
 }
 bool PortableColorPipeline::RenderLinearHalf(const AVFrame* frame, int width, int height,
-                                              bool dovi, uint16_t* rgba, int stride) {
+                                              bool dovi, uint16_t* rgba, int stride,
+                                              const AVFrame* enhancement) {
   if (!frame || !rgba || width <= 0 || width > std::numeric_limits<int>::max() / 8 ||
       height <= 0 || stride < width * 8) return false;
-  try { return impl_->Render(frame, width, height, dovi, nullptr, stride, rgba); }
+  try { return impl_->Render(frame, width, height, dovi, nullptr, stride, rgba, enhancement); }
   catch (...) { return false; }
 }

@@ -92,71 +92,111 @@ int main() {
 
   AVFrame* base = Picture(AV_PIX_FMT_YUV420P10LE, 64);
   auto* base_metadata = Metadata(base);
-  // av_frame_clone shares the pixel buffers. The playback path copies before
-  // writing, so a cloned decoder frame stays on the base sample.
+  // Non-identity reshape: 0.25 + 0.5x. coef_log2_denom 10 makes 256 and 512
+  // those coefficients. An identity curve hides add-then-reshape.
+  auto* base_header = av_dovi_get_header(base_metadata);
+  base_header->coef_log2_denom = 10;
+  base_header->el_bit_depth = 10;
+  auto* base_mapping = av_dovi_get_mapping(base_metadata);
+  for (int channel = 0; channel < 3; ++channel) {
+    auto& curve = base_mapping->curves[channel];
+    curve.poly_order[0] = 1;
+    curve.poly_coef[0][0] = 256;
+    curve.poly_coef[0][1] = 512;
+    curve.poly_coef[0][2] = 0;
+  }
+  // av_frame_clone shares the pixel buffers. Composition must not write them.
   AVFrame* alias = av_frame_clone(base);
   assert(alias && alias->data[0] == base->data[0]);
-  AVFrame* owned = rillight_color::CopyFrameForCompose(base);
-  assert(owned && owned->data[0] != base->data[0]);
   AVFrame* layer = Picture(AV_PIX_FMT_YUV420P10LE, 800);
   assert(layer);
   const auto fallback = dovi_frame_decision(7, 6, 1, 1, 1, 0);
   assert(fallback.reconstruction == RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK);
   assert(fallback.reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
   assert(fallback.emit_picture == 1 && fallback.use_rpu == 0);
-  assert(rillight_color::ComposeFelResidual(owned, layer));
-  assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
-  assert(reinterpret_cast<uint16_t*>(alias->data[0])[0] == 64);
-  assert(reinterpret_cast<uint16_t*>(owned->data[0])[0] == 352);
-  auto* owned_metadata = reinterpret_cast<AVDOVIMetadata*>(
-      av_frame_get_side_data(owned, AV_FRAME_DATA_DOVI_METADATA)->data);
-  av_dovi_get_header(owned_metadata)->disable_residual_flag = 0;
-  assert(av_dovi_get_header(base_metadata)->disable_residual_flag == 1);
   const auto completed = dovi_frame_decision(7, 6, 1, 1, 1, 1);
   assert(completed.reconstruction == RILLIGHT_CORE_DOVI_RECON_FEL);
   assert(completed.use_rpu == 1);
-  av_dovi_get_header(owned_metadata)->disable_residual_flag = 1;
-  std::vector<uint8_t> base_pixels(32 * 24 * 4);
-  std::vector<uint8_t> fel_pixels(32 * 24 * 4);
-  assert(pipeline.Render(base, 32, 24, true, base_pixels.data(), 32 * 4));
-  assert(pipeline.Render(owned, 32, 24, true, fel_pixels.data(), 32 * 4));
-  assert(base_pixels != fel_pixels);
+  auto order = [&](bool nlq) {
+    if (nlq) {
+      base_mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
+      for (int channel = 0; channel < 3; ++channel) {
+        base_mapping->nlq[channel].nlq_offset = 0;
+        base_mapping->nlq[channel].linear_deadzone_slope = 1024;
+        base_mapping->nlq[channel].linear_deadzone_threshold = 0;
+        base_mapping->nlq[channel].vdr_in_max = 1024;
+      }
+    } else {
+      base_mapping->nlq_method_idc = AV_DOVI_NLQ_NONE;
+      for (int channel = 0; channel < 3; ++channel)
+        base_mapping->nlq[channel] = AVDOVINLQParams{};
+    }
+    rillight_color::FelResidual fel;
+    assert(rillight_color::LoadFelResidual(base, layer, &fel));
+    assert(fel.differs);
+    const double expected = nlq ? 800.0 / 1023.0 : (800.0 - 512.0) / 1023.0;
+    assert(std::fabs(fel.Delta(0, 800) - expected) < 1e-9);
+    AVFrame* summed = rillight_color::CopyFrameForCompose(base);
+    assert(summed && summed->data[0] != base->data[0]);
+    const auto quantize = [&](int channel, int base_code, int el_code) {
+      const double sum = base_code / 1023.0 + fel.Delta(channel, el_code);
+      return static_cast<uint16_t>(std::clamp(static_cast<int>(std::lround(
+          std::clamp(sum, 0.0, 1.0) * 1023.0)), 0, 1023));
+    };
+    const uint16_t luma = quantize(0, 64, 800);
+    const uint16_t u = quantize(1, 512, 512);
+    const uint16_t v = quantize(2, 512, 512);
+    for (int y = 0; y < summed->height; ++y)
+      std::fill_n(reinterpret_cast<uint16_t*>(summed->data[0] + y * summed->linesize[0]),
+                  summed->width, luma);
+    for (int y = 0; y < summed->height / 2; ++y) {
+      std::fill_n(reinterpret_cast<uint16_t*>(summed->data[1] + y * summed->linesize[1]),
+                  summed->width / 2, u);
+      std::fill_n(reinterpret_cast<uint16_t*>(summed->data[2] + y * summed->linesize[2]),
+                  summed->width / 2, v);
+    }
+    std::vector<uint8_t> base_pixels(32 * 24 * 4);
+    std::vector<uint8_t> fel_pixels(32 * 24 * 4);
+    std::vector<uint8_t> summed_pixels(32 * 24 * 4);
+    base_header->disable_residual_flag = 1;
+    assert(pipeline.Render(base, 32, 24, true, base_pixels.data(), 32 * 4));
+    base_header->disable_residual_flag = 0;
+    assert(pipeline.Render(base, 32, 24, true, fel_pixels.data(), 32 * 4, layer));
+    base_header->disable_residual_flag = 1;
+    assert(pipeline.Render(summed, 32, 24, true, summed_pixels.data(), 32 * 4));
+    assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
+    assert(reinterpret_cast<uint16_t*>(alias->data[0])[0] == 64);
+    assert(fel_pixels != base_pixels);
+    assert(fel_pixels != summed_pixels);
+    av_frame_free(&summed);
+  };
+  order(false);
+  order(true);
+  base_mapping->nlq_method_idc = AV_DOVI_NLQ_NONE;
+  for (int channel = 0; channel < 3; ++channel)
+    base_mapping->nlq[channel] = AVDOVINLQParams{};
   AVFrame* neutral = Picture(AV_PIX_FMT_YUV420P10LE, 512);
-  AVFrame* unchanged = rillight_color::CopyFrameForCompose(base);
-  assert(neutral && unchanged);
-  assert(!rillight_color::ComposeFelResidual(unchanged, neutral));
-  assert(reinterpret_cast<uint16_t*>(unchanged->data[0])[0] == 64);
-  assert(dovi_frame_decision(7, 6, 1, 1, 1, 0).reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
-  AVFrame* shaped = rillight_color::CopyFrameForCompose(base);
-  assert(shaped);
-  auto* shaped_metadata = reinterpret_cast<AVDOVIMetadata*>(
-      av_frame_get_side_data(shaped, AV_FRAME_DATA_DOVI_METADATA)->data);
-  auto* shaped_header = av_dovi_get_header(shaped_metadata);
-  shaped_header->el_bit_depth = 10;
-  shaped_header->coef_log2_denom = 10;
-  auto* shaped_mapping = av_dovi_get_mapping(shaped_metadata);
-  shaped_mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
-  for (int channel = 0; channel < 3; ++channel) {
-    shaped_mapping->nlq[channel].nlq_offset = 0;
-    shaped_mapping->nlq[channel].linear_deadzone_slope = 1024;
-    shaped_mapping->nlq[channel].linear_deadzone_threshold = 0;
-    shaped_mapping->nlq[channel].vdr_in_max = 1024;
-  }
-  assert(rillight_color::ComposeFelResidual(shaped, layer));
+  rillight_color::FelResidual neutral_fel;
+  assert(neutral && rillight_color::LoadFelResidual(base, neutral, &neutral_fel));
+  assert(!neutral_fel.differs);
   assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
-  assert(reinterpret_cast<uint16_t*>(shaped->data[0])[0] == 864);
-  shaped_mapping->nlq[0].linear_deadzone_threshold = 1024;
-  shaped_mapping->nlq[1].linear_deadzone_threshold = 1024;
-  shaped_mapping->nlq[2].linear_deadzone_threshold = 1024;
-  AVFrame* deadzone = rillight_color::CopyFrameForCompose(base);
-  assert(deadzone);
-  auto* deadzone_metadata = reinterpret_cast<AVDOVIMetadata*>(
-      av_frame_get_side_data(deadzone, AV_FRAME_DATA_DOVI_METADATA)->data);
-  std::memcpy(deadzone_metadata, shaped_metadata, av_frame_get_side_data(
-      shaped, AV_FRAME_DATA_DOVI_METADATA)->size);
-  assert(!rillight_color::ComposeFelResidual(deadzone, layer));
-  assert(reinterpret_cast<uint16_t*>(deadzone->data[0])[0] == 64);
   assert(dovi_frame_decision(7, 6, 1, 1, 1, 0).reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
+  base_mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
+  for (int channel = 0; channel < 3; ++channel) {
+    base_mapping->nlq[channel].nlq_offset = 0;
+    base_mapping->nlq[channel].linear_deadzone_slope = 1024;
+    base_mapping->nlq[channel].linear_deadzone_threshold = 1024;
+    base_mapping->nlq[channel].vdr_in_max = 1024;
+  }
+  rillight_color::FelResidual deadzone;
+  assert(rillight_color::LoadFelResidual(base, layer, &deadzone));
+  assert(!deadzone.differs);
+  assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
+  assert(dovi_frame_decision(7, 6, 1, 1, 1, 0).reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
+  base_mapping->nlq_method_idc = static_cast<AVDOVINLQMethod>(-2);
+  base_mapping->nlq[0].linear_deadzone_threshold = 0;
+  rillight_color::FelResidual rejected;
+  assert(!rillight_color::LoadFelResidual(base, layer, &rejected));
   const uint8_t length_prefixed[] = {
       0, 0, 0, 4, 0x02, 0x01, 0xaa, 0xbb,
       0, 0, 0, 8, 0x7e, 0x01, 0x40, 0x01, 0x00, 0x00, 0x03, 0x00};
@@ -179,6 +219,32 @@ int main() {
   const uint8_t truncated[] = {0, 0, 0, 8, 0x7e, 0x01};
   assert(!rillight_dovi::ExtractInterleavedEnhancement(truncated, sizeof(truncated), 4, &extracted));
   assert(extracted.empty());
+  const uint8_t rewritten_slice[] = {0, 0, 0, 1, 0x7e, 0x01, 0x80, 0x11};
+  assert(rillight_dovi::ExtractInterleavedEnhancement(
+      rewritten_slice, sizeof(rewritten_slice), 0, &extracted));
+  const uint8_t expected_slice[] = {0, 0, 0, 1, 0x02, 0x01, 0x80, 0x11};
+  assert(extracted.size() == sizeof(expected_slice));
+  assert(std::memcmp(extracted.data(), expected_slice, sizeof(expected_slice)) == 0);
+  // The RBSP high bit is set, so this is not a nested NAL header.
+  const uint8_t rewritten_vps[] = {
+      0, 0, 0, 6, 0x7e, 0x01, 0x8c, 0x01, 0xff, 0xff};
+  assert(rillight_dovi::ExtractInterleavedEnhancement(
+      rewritten_vps, sizeof(rewritten_vps), 4, &extracted));
+  const uint8_t expected_vps[] = {0, 0, 0, 1, 0x40, 0x01, 0x8c, 0x01, 0xff, 0xff};
+  assert(extracted.size() == sizeof(expected_vps));
+  assert(std::memcmp(extracted.data(), expected_vps, sizeof(expected_vps)) == 0);
+  const uint8_t rewritten_sps[] = {
+      0, 0, 0, 1, 0x7e, 0x01,
+      0x81, 0x02, 0x20, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  assert(rillight_dovi::ExtractInterleavedEnhancement(
+      rewritten_sps, sizeof(rewritten_sps), 0, &extracted));
+  const uint8_t expected_sps[] = {
+      0, 0, 0, 1, 0x42, 0x01,
+      0x81, 0x02, 0x20, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  assert(extracted.size() == sizeof(expected_sps));
+  assert(std::memcmp(extracted.data(), expected_sps, sizeof(expected_sps)) == 0);
   const auto profile5 = dovi_frame_decision(5, 0, 0, 0, 0, 0);
   assert(profile5.error == RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI);
   assert(profile5.emit_picture == 0 && profile5.use_rpu == 0);
@@ -192,12 +258,8 @@ int main() {
          RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
   assert(dovi_android_color_output_kind(1) == RILLIGHT_CORE_VIDEO_OUT_HDR);
   assert(dovi_android_color_output_kind(0) != RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION);
-  av_frame_free(&deadzone);
-  av_frame_free(&shaped);
-  av_frame_free(&unchanged);
   av_frame_free(&neutral);
   av_frame_free(&layer);
-  av_frame_free(&owned);
   av_frame_free(&alias);
   av_frame_free(&base);
 }
