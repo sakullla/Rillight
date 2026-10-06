@@ -120,8 +120,55 @@ void CheckNativeHdr() {
   av_frame_free(&source);
 }
 
+void CheckFelStaysScRgb() {
+  WindowsColorPipeline windows;
+  PortableColorPipeline portable;
+  AVFrame* base = Picture(AV_PIX_FMT_YUV420P10LE, 64);
+  auto* metadata = Metadata(base);
+  auto* header = av_dovi_get_header(metadata);
+  header->coef_log2_denom = 10;
+  header->el_bit_depth = 10;
+  auto* mapping = av_dovi_get_mapping(metadata);
+  for (int channel = 0; channel < 3; ++channel) {
+    auto& curve = mapping->curves[channel];
+    curve.poly_order[0] = 1;
+    curve.poly_coef[0][0] = 256;
+    curve.poly_coef[0][1] = 512;
+    curve.poly_coef[0][2] = 0;
+  }
+  AVFrame* layer = Picture(AV_PIX_FMT_YUV420P10LE, 800);
+  constexpr int width = 32;
+  constexpr int height = 24;
+  std::vector<uint16_t> base_half(static_cast<size_t>(width) * height * 4);
+  std::vector<uint16_t> fel_half(base_half.size());
+  header->disable_residual_flag = 1;
+  assert(portable.RenderLinearHalf(base, width, height, true, base_half.data(), width * 8));
+  header->disable_residual_flag = 0;
+  assert(portable.RenderLinearHalf(base, width, height, true, fel_half.data(), width * 8, layer));
+  assert(base_half != fel_half);
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> base_texture;
+  base_texture.Attach(static_cast<ID3D11Texture2D*>(
+      windows.UploadScRgbHalf(base_half.data(), width, height, width * 8)));
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> fel_texture;
+  fel_texture.Attach(static_cast<ID3D11Texture2D*>(
+      windows.UploadScRgbHalf(fel_half.data(), width, height, width * 8)));
+  assert(base_texture && fel_texture);
+  D3D11_TEXTURE2D_DESC desc{};
+  fel_texture->GetDesc(&desc);
+  assert(desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+  const auto base_pixels = TextureLinearPixels(base_texture.Get());
+  const auto fel_pixels = TextureLinearPixels(fel_texture.Get());
+  bool differed = false;
+  for (size_t i = 0; i < fel_pixels.size() && i < base_pixels.size(); ++i)
+    if (std::fabs(fel_pixels[i] - base_pixels[i]) > 0.001f) differed = true;
+  assert(differed);
+  av_frame_free(&layer);
+  av_frame_free(&base);
+}
+
 int main() {
   CheckNativeHdr();
+  CheckFelStaysScRgb();
   // GPU output must work before any CPU render, retain old images across
   // consecutive dispatches/resizes and still allow CPU readback afterwards.
   {

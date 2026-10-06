@@ -90,35 +90,228 @@ struct HevcBits {
     }
     return value;
   }
+  uint32_t ubits(int count) {
+    uint32_t value = 0;
+    for (int i = 0; i < count; ++i) {
+      const int bit_value = u(1);
+      if (!ok) return 0;
+      value = (value << 1) | static_cast<uint32_t>(bit_value);
+    }
+    return value;
+  }
+  void skip(int count) {
+    while (ok && count > 0) {
+      const int step = count > 16 ? 16 : count;
+      u(step);
+      count -= step;
+    }
+  }
+  int ue() {
+    int zeros = 0;
+    while (ok) {
+      const int bit_value = u(1);
+      if (!ok) return 0;
+      if (bit_value) break;
+      if (++zeros > 16) {
+        ok = false;
+        return 0;
+      }
+    }
+    if (!ok) return 0;
+    const uint32_t extra = zeros ? ubits(zeros) : 0;
+    return static_cast<int>(((1u << zeros) - 1u) + extra);
+  }
+  int se() {
+    const int code = ue();
+    if (!ok) return 0;
+    return (code & 1) ? (code + 1) / 2 : -(code / 2);
+  }
 };
 
+inline std::vector<uint8_t> RbspPayload(const uint8_t* data, size_t size) {
+  std::vector<uint8_t> out;
+  if (!data || !size) return out;
+  out.reserve(size);
+  for (size_t i = 0; i < size; ++i) {
+    if (i + 2 < size && !data[i] && !data[i + 1] && data[i + 2] == 3) {
+      out.push_back(0);
+      out.push_back(0);
+      i += 2;
+      continue;
+    }
+    out.push_back(data[i]);
+  }
+  return out;
+}
+
+inline bool LooksLikeVps(const uint8_t* rbsp, size_t size) {
+  if (!rbsp || size < 4) return false;
+  HevcBits bits{rbsp, size};
+  bits.u(4);
+  bits.u(2);
+  const int layers = bits.u(6);
+  const int sublayers = bits.u(3);
+  bits.u(1);
+  const int reserved = bits.u(16);
+  return bits.ok && layers <= 62 && sublayers <= 6 && reserved == 0xFFFF;
+}
+
+// The historical short check: Main or Main10 profile_tier_level, including the
+// 16-byte fixture that is only that prefix.
+inline bool LooksLikeSpsShort(const uint8_t* rbsp, size_t size) {
+  if (!rbsp || size < 16) return false;
+  HevcBits bits{rbsp, size};
+  const int vps = bits.u(4);
+  const int sublayers = bits.u(3);
+  bits.u(1);
+  const int space = bits.u(2);
+  bits.u(1);
+  const int profile = bits.u(5);
+  const uint32_t flags = bits.ubits(32);
+  const bool known = profile == 1 || profile == 2;
+  const bool compatible =
+      known && profile <= 31 && ((flags >> (31 - profile)) & 1u);
+  return bits.ok && vps <= 15 && sublayers <= 6 && space == 0 && compatible;
+}
+
+inline bool Compatibility(uint32_t flags, int profile) {
+  return profile >= 0 && profile <= 31 && ((flags >> (31 - profile)) & 1u);
+}
+
+inline bool SkipProfileTier(HevcBits* bits) {
+  const int space = bits->u(2);
+  bits->u(1);
+  const int profile = bits->u(5);
+  const uint32_t flags = bits->ubits(32);
+  if (!bits->ok || space != 0 || profile < 1 || profile > 11) return false;
+  bits->u(4);
+  bool rext = false;
+  bool high = false;
+  for (int id = 4; id <= 11; ++id) {
+    if (profile == id || Compatibility(flags, id)) rext = true;
+  }
+  for (int id : {5, 9, 10, 11}) {
+    if (profile == id || Compatibility(flags, id)) high = true;
+  }
+  if (rext) {
+    bits->skip(9);
+    bits->skip(high ? 33 : 34);
+  } else {
+    bits->skip(44);
+  }
+  bits->u(1);
+  bits->u(8);
+  return bits->ok;
+}
+
+// A complete SPS, not only the profile prefix. max_sub_layers_minus1 must be
+// 0; that is what single-layer enhancement streams use.
+inline bool LooksLikeSps(const uint8_t* rbsp, size_t size) {
+  if (!rbsp || size < 16) return false;
+  HevcBits bits{rbsp, size};
+  const int vps = bits.u(4);
+  const int sublayers = bits.u(3);
+  bits.u(1);
+  if (!bits.ok || vps > 15 || sublayers != 0) return false;
+  if (!SkipProfileTier(&bits)) return false;
+  const int sps_id = bits.ue();
+  const int chroma = bits.ue();
+  if (chroma == 3) bits.u(1);
+  const int width = bits.ue();
+  const int height = bits.ue();
+  return bits.ok && sps_id <= 15 && chroma >= 0 && chroma <= 3 && width >= 8 &&
+         width <= 8192 && height >= 8 && height <= 8192 && (width % 2) == 0 &&
+         (height % 2) == 0;
+}
+
+// PPS with tiles, wavefront or scaling lists is left unrecognized. A match
+// must consume the RBSP exactly, including the stop bit, so slice data cannot
+// pass.
+inline bool LooksLikePps(const uint8_t* rbsp, size_t size) {
+  if (!rbsp || size < 3 || size > 128) return false;
+  HevcBits bits{rbsp, size};
+  const int pps = bits.ue();
+  const int sps = bits.ue();
+  if (!bits.ok || pps > 63 || sps > 15) return false;
+  bits.u(1);
+  bits.u(1);
+  const int extra = bits.u(3);
+  if (extra > 2) return false;
+  bits.u(1);
+  bits.u(1);
+  const int l0 = bits.ue();
+  const int l1 = bits.ue();
+  const int qp = bits.se();
+  if (!bits.ok || l0 > 15 || l1 > 15 || qp < -26 || qp > 25) return false;
+  bits.u(1);
+  bits.u(1);
+  if (bits.u(1)) {
+    const int depth = bits.ue();
+    if (depth > 6) return false;
+  }
+  bits.se();
+  bits.se();
+  bits.u(4);
+  const int tiles = bits.u(1);
+  const int wavefront = bits.u(1);
+  if (!bits.ok || tiles || wavefront) return false;
+  bits.u(1);
+  if (bits.u(1)) {
+    bits.u(1);
+    if (!bits.u(1)) {
+      bits.se();
+      bits.se();
+    }
+  }
+  if (bits.u(1)) return false;
+  bits.u(1);
+  const int merge = bits.ue();
+  if (!bits.ok || merge > 7) return false;
+  bits.u(1);
+  if (bits.u(1)) return false;
+  if (!bits.ok || bits.u(1) != 1) return false;
+  while (bits.ok && (bits.bit % 8) != 0) {
+    if (bits.u(1) != 0) return false;
+  }
+  return bits.ok && bits.bit == size * 8;
+}
+
+inline bool SliceHeader(const uint8_t* rbsp, size_t size, bool irap, int* pps,
+                        int* slice_type) {
+  if (!rbsp || !size || !pps || !slice_type) return false;
+  HevcBits bits{rbsp, size};
+  const int first = bits.u(1);
+  if (!bits.ok || !first) return false;
+  if (irap) bits.u(1);
+  const int pps_id = bits.ue();
+  const int type = bits.ue();
+  if (!bits.ok || pps_id > 63 || type > 2) return false;
+  *pps = pps_id;
+  *slice_type = type;
+  return true;
+}
+
 // Type 63 may be the original enhancement NAL with only nal_unit_type rewritten.
-// A nested NAL is handled separately. VPS is the reserved 0xFFFF word; SPS is a
-// Main or Main10 profile_tier_level. Anything else is a slice (TRAIL_R).
+// VPS is the reserved 0xFFFF word. SPS is a Main/Main10 prefix or a parsed
+// sequence set. PPS must end on its stop bit. An IRAP slice parses as an I
+// slice only when the extra no_output bit is present; otherwise the slice is
+// TRAIL_R. A nested NAL whose RBSP does not match those shapes is unchanged.
 inline int RestoredElNalType(const uint8_t* rbsp, size_t size) {
-  if (rbsp && size >= 4) {
-    HevcBits bits{rbsp, size};
-    bits.u(4);
-    bits.u(2);
-    const int layers = bits.u(6);
-    const int sublayers = bits.u(3);
-    bits.u(1);
-    const int reserved = bits.u(16);
-    if (bits.ok && layers <= 62 && sublayers <= 6 && reserved == 0xFFFF) return 32;
-  }
-  if (rbsp && size >= 16) {
-    HevcBits bits{rbsp, size};
-    const int vps = bits.u(4);
-    const int sublayers = bits.u(3);
-    bits.u(1);
-    const int space = bits.u(2);
-    bits.u(1);
-    const int profile = bits.u(5);
-    const int flags = bits.u(32);
-    const bool known = profile == 1 || profile == 2;
-    const bool compatible = known && ((flags >> (31 - profile)) & 1);
-    if (bits.ok && vps <= 15 && sublayers <= 6 && space == 0 && compatible) return 33;
-  }
+  const std::vector<uint8_t> payload = RbspPayload(rbsp, size);
+  const uint8_t* data = payload.data();
+  const size_t bytes = payload.size();
+  if (LooksLikeVps(data, bytes)) return 32;
+  if (LooksLikeSpsShort(data, bytes) || LooksLikeSps(data, bytes)) return 33;
+  if (LooksLikePps(data, bytes)) return 34;
+  int irap_pps = -1;
+  int irap_type = -1;
+  int trail_pps = -1;
+  int trail_type = -1;
+  const bool irap = SliceHeader(data, bytes, true, &irap_pps, &irap_type);
+  const bool trail = SliceHeader(data, bytes, false, &trail_pps, &trail_type);
+  if (irap && irap_type == 2 && irap_pps <= 3 &&
+      (!trail || trail_type != 2 || trail_pps != irap_pps))
+    return 20;
   return 1;
 }
 
@@ -151,13 +344,15 @@ inline bool ExtractInterleavedEnhancement(const uint8_t* data, size_t size,
       });
       return;
     }
-    if (HevcNalHeader(payload, payload_size)) {
+    // A parameter set or IRAP identified from the RBSP wins. An RBSP can share
+    // the high bit of a NAL header (a VPS starts with 0x0c) and must not be
+    // forwarded unchanged. A nested NAL that is not one of those shapes keeps
+    // the header already inside the payload.
+    const int restored = RestoredElNalType(payload, payload_size);
+    if (restored != 1 || !HevcNalHeader(payload, payload_size))
+      AppendRestoredElNal(annexb, nal, nal_size);
+    else
       AppendAnnexB(annexb, payload, payload_size);
-      return;
-    }
-    // The payload is the original RBSP. first_slice_segment_in_pic_flag lives
-    // in its high bit, so it is not itself a NAL header.
-    AppendRestoredElNal(annexb, nal, nal_size);
   });
   if (!framed) annexb->clear();
   return framed;

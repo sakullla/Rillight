@@ -30,6 +30,52 @@ void Check(HRESULT result) {
   }
 }
 
+float HalfToFloat(uint16_t half) {
+  const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
+  const uint32_t exponent = (half >> 10) & 0x1fu;
+  const uint32_t mantissa = half & 0x3ffu;
+  uint32_t bits = 0;
+  if (exponent == 0) bits = sign;
+  else if (exponent == 31) bits = sign | 0x7f800000u | (mantissa << 13);
+  else bits = sign | ((exponent + 112) << 23) | (mantissa << 13);
+  float value = 0;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+uint16_t FloatToHalf(float value) {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(bits));
+  const uint32_t sign = (bits >> 16) & 0x8000u;
+  int32_t exponent = static_cast<int32_t>((bits >> 23) & 0xff) - 127 + 15;
+  uint32_t mantissa = bits & 0x7fffffu;
+  if (((bits >> 23) & 0xff) == 0xff) {
+    return static_cast<uint16_t>(sign | 0x7c00u | (mantissa ? 0x200u : 0));
+  }
+  if (exponent <= 0) {
+    if (exponent < -10) return static_cast<uint16_t>(sign);
+    mantissa |= 0x800000u;
+    const uint32_t shift = static_cast<uint32_t>(1 - exponent);
+    uint32_t half = mantissa >> (shift + 13);
+    const uint32_t rest = mantissa & ((1u << (shift + 13)) - 1u);
+    if (rest > (1u << (shift + 12)) ||
+        (rest == (1u << (shift + 12)) && (half & 1u))) ++half;
+    return static_cast<uint16_t>(sign | half);
+  }
+  if (exponent >= 31) return static_cast<uint16_t>(sign | 0x7c00u);
+  uint32_t half = mantissa >> 13;
+  if ((mantissa & 0x1fffu) > 0x1000u ||
+      ((mantissa & 0x1fffu) == 0x1000u && (half & 1u))) {
+    ++half;
+    if (half == 0x400u) {
+      half = 0;
+      ++exponent;
+      if (exponent >= 31) return static_cast<uint16_t>(sign | 0x7c00u);
+    }
+  }
+  return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exponent) << 10) | half);
+}
+
 using rillight_color::Vec4;
 using rillight_color::Constants;
 using rillight_color::DoviConstants;
@@ -489,4 +535,33 @@ void* WindowsColorPipeline::RenderScRgbTexture(const AVFrame* frame, int width, 
   try { impl_->Render(frame, width, height, dovi, nullptr, 0, &texture, sdr_white_nits); }
   catch (const std::exception&) { return nullptr; }
   return texture;
+}
+
+void* WindowsColorPipeline::UploadScRgbHalf(const uint16_t* rgba, int width, int height,
+                                           int stride) {
+  if (!rgba || width <= 0 || height <= 0 || stride < width * 8) return nullptr;
+  try {
+    impl_->Initialize(nullptr, nullptr);
+    std::vector<uint16_t> scrgb(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+    constexpr float kEdrToScRgb = 203.0f / 80.0f;
+    for (int y = 0; y < height; ++y) {
+      const auto* row = reinterpret_cast<const uint16_t*>(
+          reinterpret_cast<const uint8_t*>(rgba) + static_cast<ptrdiff_t>(y) * stride);
+      auto* destination = scrgb.data() + static_cast<size_t>(y) * static_cast<size_t>(width) * 4;
+      for (int x = 0; x < width * 4; ++x) {
+        float value = HalfToFloat(row[x]);
+        if ((x & 3) != 3) value *= kEdrToScRgb;
+        if (!std::isfinite(value)) value = std::copysign(65504.0f, value);
+        destination[x] = FloatToHalf(value);
+      }
+    }
+    ComPtr<ID3D11Texture2D> image;
+    ComPtr<ID3D11UnorderedAccessView> view;
+    impl_->AllocateOutput(width, height, image, view, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    impl_->context->UpdateSubresource(image.Get(), 0, nullptr, scrgb.data(),
+                                      static_cast<UINT>(width * 8), 0);
+    return image.Detach();
+  } catch (const std::exception&) {
+    return nullptr;
+  }
 }

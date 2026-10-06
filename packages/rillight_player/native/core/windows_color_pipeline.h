@@ -22,6 +22,10 @@ class WindowsColorPipeline {
   // Never pass this texture to Flutter's RGBA8888/BGRA8888 sink.
   void* RenderScRgbTexture(const AVFrame* frame, int width, int height,
                           bool dolby_vision, float sdr_white_nits = 203.0f);
+  // Extended-linear RGBA16F uses 1.0 as 203 nits. The returned texture is
+  // shared immutable FP16 scRGB (1.0 = 80 nits) for the HDR host. Alpha is
+  // not scaled. Never pass this texture to Flutter's 8-bit sink.
+  void* UploadScRgbHalf(const uint16_t* rgba, int width, int height, int stride);
 
  private:
   struct Impl;

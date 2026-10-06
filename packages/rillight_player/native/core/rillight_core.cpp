@@ -2294,6 +2294,33 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
       return true;
     };
 #if defined(_WIN32)
+    // The scRGB shader reshapes base planes only. A composed FEL frame is the
+    // portable reshape-then-NLQ result, stored as FP16 scRGB for the HDR host.
+    // Falling through to 8-bit Render would mark the same frame as SDR.
+    if (gpu_video && hdr_video && fel_source) {
+      const int half_stride = width * 8;
+      const int half_bytes = half_stride * height;
+      if (half_bytes > 0 && static_cast<size_t>(half_bytes) <= kMaxVideoBytes) {
+        uint8_t* half = output->buffers->Acquire(static_cast<size_t>(half_bytes));
+        if (half && scale->portable_color_pipeline.RenderLinearHalf(
+                        &source, width, height, true,
+                        reinterpret_cast<uint16_t*>(half), half_stride, fel_source)) {
+          void* texture = scale->color_pipeline.UploadScRgbHalf(
+              reinterpret_cast<const uint16_t*>(half), width, height, half_stride);
+          if (texture) {
+            output->gpu_texture = std::shared_ptr<void>(texture, [](void* pointer) {
+              static_cast<ID3D11Texture2D*>(pointer)->Release();
+            });
+            converted = true;
+          }
+        }
+        if (half) output->buffers->Recycle(half, static_cast<size_t>(half_bytes));
+      }
+      if (!converted) {
+        reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
+        fel_source = nullptr;
+      }
+    }
     if (gpu_video && !fel_source) {
       const auto render_texture = [&](bool use_dovi) {
         return hdr_video ? scale->color_pipeline.RenderScRgbTexture(&source, width, height, use_dovi) :

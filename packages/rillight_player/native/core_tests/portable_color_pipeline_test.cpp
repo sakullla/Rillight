@@ -4,6 +4,73 @@
 #include "../core/portable_color_pipeline.h"
 #include "color_pipeline_fixtures.h"
 
+#include <limits>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+}
+
+bool HevcAnnexProducesPicture(const std::vector<uint8_t>& annexb) {
+  av_log_set_level(AV_LOG_QUIET);
+  const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
+  if (!codec) return false;
+  AVCodecContext* context = avcodec_alloc_context3(codec);
+  if (!context || avcodec_open2(context, codec, nullptr) < 0) {
+    avcodec_free_context(&context);
+    return false;
+  }
+  AVPacket* packet = av_packet_alloc();
+  AVFrame* frame = av_frame_alloc();
+  bool produced = false;
+  if (packet && frame && !annexb.empty() &&
+      annexb.size() <= static_cast<size_t>(std::numeric_limits<int>::max()) &&
+      av_new_packet(packet, static_cast<int>(annexb.size())) >= 0) {
+    std::memcpy(packet->data, annexb.data(), annexb.size());
+    if (avcodec_send_packet(context, packet) >= 0) {
+      avcodec_send_packet(context, nullptr);
+      while (avcodec_receive_frame(context, frame) >= 0) {
+        if (frame->width > 0 && frame->height > 0) produced = true;
+        av_frame_unref(frame);
+      }
+    }
+  }
+  av_frame_free(&frame);
+  av_packet_free(&packet);
+  avcodec_free_context(&context);
+  return produced;
+}
+
+std::vector<uint8_t> RewriteHevcTypes(const uint8_t* data, size_t size, int type) {
+  std::vector<uint8_t> out(data, data + size);
+  rillight_dovi::ForEachHevcNal(out.data(), out.size(), 0, [&](const uint8_t* nal, size_t nal_size) {
+    if (nal_size < 2) return;
+    const auto index = static_cast<size_t>(nal - out.data());
+    out[index] = static_cast<uint8_t>((out[index] & 0x81) | ((type & 63) << 1));
+  });
+  return out;
+}
+
+std::vector<uint8_t> WithoutNalType(const std::vector<uint8_t>& annexb, int type) {
+  std::vector<uint8_t> out;
+  rillight_dovi::ForEachHevcNal(annexb.data(), annexb.size(), 0, [&](const uint8_t* nal, size_t nal_size) {
+    if (nal_size < 2 || ((nal[0] >> 1) & 0x3f) == type) return;
+    rillight_dovi::AppendAnnexB(&out, nal, nal_size);
+  });
+  return out;
+}
+
+std::vector<uint8_t> RetypeNal(const std::vector<uint8_t>& annexb, int from, int to) {
+  std::vector<uint8_t> out;
+  rillight_dovi::ForEachHevcNal(annexb.data(), annexb.size(), 0, [&](const uint8_t* nal, size_t nal_size) {
+    if (nal_size < 2) return;
+    std::vector<uint8_t> copy(nal, nal + nal_size);
+    if (((copy[0] >> 1) & 0x3f) == from)
+      copy[0] = static_cast<uint8_t>((copy[0] & 0x81) | ((to & 63) << 1));
+    rillight_dovi::AppendAnnexB(&out, copy.data(), copy.size());
+  });
+  return out;
+}
+
 float HalfToFloat(uint16_t half) {
   const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
   const uint32_t exponent = (half >> 10) & 0x1fu;
@@ -245,6 +312,26 @@ int main() {
       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
   assert(extracted.size() == sizeof(expected_sps));
   assert(std::memcmp(extracted.data(), expected_sps, sizeof(expected_sps)) == 0);
+  // One real Main-profile access unit: VPS, SPS, PPS and IDR_N_LP. Rewriting
+  // every nal_unit_type to 63 must come back as a picture. Dropping the PPS,
+  // or labeling that IDR as TRAIL_R, must not.
+  const uint8_t hevc_access_unit[] = {
+      0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00,
+      0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e, 0xba, 0x02, 0x40,
+      0, 0, 0, 1, 0x42, 0x01, 0x01, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9f, 0xa8, 0x00,
+      0x00, 0x03, 0x00, 0x00, 0x1e, 0xa0, 0x20, 0x81, 0x05, 0x96, 0xe9, 0x29, 0x30, 0xbc,
+      0x05, 0xa0, 0x20, 0x00, 0x00, 0x03, 0x00, 0x20, 0x00, 0x00, 0x03, 0x00, 0x21,
+      0, 0, 0, 1, 0x44, 0x01, 0xc0, 0x71, 0x81, 0x12,
+      0, 0, 0, 1, 0x28, 0x01, 0xad, 0xe0, 0xd1, 0x17, 0xce, 0x73, 0x23, 0x8b, 0x80};
+  assert(HevcAnnexProducesPicture(
+      std::vector<uint8_t>(hevc_access_unit, hevc_access_unit + sizeof(hevc_access_unit))));
+  const std::vector<uint8_t> wrapped = RewriteHevcTypes(
+      hevc_access_unit, sizeof(hevc_access_unit), 63);
+  assert(rillight_dovi::ExtractInterleavedEnhancement(
+      wrapped.data(), wrapped.size(), 0, &extracted));
+  assert(HevcAnnexProducesPicture(extracted));
+  assert(!HevcAnnexProducesPicture(WithoutNalType(extracted, 34)));
+  assert(!HevcAnnexProducesPicture(RetypeNal(extracted, 20, 1)));
   const auto profile5 = dovi_frame_decision(5, 0, 0, 0, 0, 0);
   assert(profile5.error == RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI);
   assert(profile5.emit_picture == 0 && profile5.use_rpu == 0);

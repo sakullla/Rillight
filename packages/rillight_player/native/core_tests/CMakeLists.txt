@@ -75,7 +75,7 @@ add_executable(rillight_portable_color_pipeline_test
   portable_color_pipeline_test.cpp ../core/portable_color_pipeline.cpp)
 target_include_directories(rillight_portable_color_pipeline_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
 target_link_libraries(rillight_portable_color_pipeline_test PRIVATE
-  ${avutil_library} ${swscale_library} Threads::Threads)
+  ${avcodec_library} ${avutil_library} ${swscale_library} Threads::Threads)
 if(MSVC)
   target_compile_options(rillight_portable_color_pipeline_test PRIVATE /W4 /WX /UNDEBUG)
 else()
