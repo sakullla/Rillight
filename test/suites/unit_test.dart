@@ -59,6 +59,10 @@ void main() {
     caseEntrypoints['library/item_format_cases.dart']!,
   );
   group(
+    'player/capability_record_test.dart',
+    caseEntrypoints['player/capability_record_cases.dart']!,
+  );
+  group(
     'player/danmaku/dandanplay_client_test.dart',
     caseEntrypoints['player/danmaku/dandanplay_client_cases.dart']!,
   );

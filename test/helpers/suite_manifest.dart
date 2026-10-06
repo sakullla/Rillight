@@ -28,6 +28,7 @@ const caseModules = <String>[
   'home/home_page_cases.dart',
   'home/library_nav_prefs_cases.dart',
   'library/item_format_cases.dart',
+  'player/capability_record_cases.dart',
   'player/danmaku/dandanplay_client_cases.dart',
   'player/danmaku/danmaku_controller_cases.dart',
   'player/danmaku/danmaku_hash_cases.dart',

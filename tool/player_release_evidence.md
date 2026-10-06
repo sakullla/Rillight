@@ -264,3 +264,115 @@ it records Mac performance as pending. Missing other target data makes the
 check fail. Windows/Linux physical GPU/audio, Android phone and TV hardware,
 and Mac target results must be collected before claiming a five-target
 performance improvement.
+
+## Dolby Vision and realtime enhancement capability record
+
+<!-- capability-record:start -->
+
+This section records Dolby Vision and realtime-enhancement capability for the
+five playback targets. It is not a hardware pass. A first-frame callback, an
+emulator, or a single screenshot cannot be written as a physical pass.
+
+四种状态只允许：支持并验证、能力不支持、尚未验证、已失败。当前五端矩阵没有支持并验证行。支持并验证必须落到参考设备、媒体样本、操作和物理输出。构建、模拟器、首帧回调和单张截图不能记成整项通过。测量结果不能反过来改阈值。1080p24 是下列数字的片源档。4K 实时不是承诺。缺样本、缺光学测量或物理声音时保持尚未验证。未单列的片源、连接和增强组合同样尚未验证，不能用邻近行的状态填上。
+
+固定阈值。稳态窗口排除跳转或暂停后的 2 秒。理想帧间隔是 `1000 / 目标帧率` 毫秒。
+
+- 至少 95% 的呈现间隔落在理想值的 0.5 到 1.5 倍，超过 2 倍的不超过 1%。
+- 稳态视频 PTS 与音频时钟的中位绝对误差不超过 80 毫秒。
+- 跳转后 2 秒内出现时间正确的帧，且没有跳转前时间线的帧。
+- 同一片段增强开启 10 分钟，工作集比关闭时增加不超过 1.5 GiB。
+- FEL 通过只认与纯基础层有可见差别的样本。回退到基础层不算 FEL 通过。
+
+参考配置：
+
+- Windows x64 D3D11：HDR 行要一台报告 HDR10 PQ、至少 10 bit 的显示器。原生杜比记能力不支持。Atmos 在没有报告 Atmos 的接收端时记尚未验证。
+- macOS：已有记录的 MacBook Air M3 这一类机器。原生杜比记能力不支持。EDR 只在 headroom 大于 1 时记可测。HDMI Atmos 未接设备则尚未验证。
+- Linux x64：只验收 SDR 映射和协商后的 PCM。原生杜比与 HDR 记能力不支持。
+- Android 手机：已有记录的 PKM110 / Android 16。该机没有 `video/dolby-vision`，原生杜比记能力不支持。Profile 5 的 RPU 路径和实体锁屏要在本候选重测，旧通过不沿用。
+- Android TV：仓库没有具体 leanback 机器。取得设备前各行记尚未验证，不用手机结果顶替。
+
+scRGB、EDR 和 SDR 映射都是非原生杜比。只有 Android 实际选中 `video/dolby-vision` 且增强未生效时，才可能写成原生杜比；PKM110 没有该类型。
+
+| platform | capability | status | evidence |
+| --- | --- | --- | --- |
+| windows | native-dolby-vision | 能力不支持 | Windows scRGB 是非原生杜比，本轮不发原生杜比信号 |
+| windows | video-output | 尚未验证 | scRGB 是非原生杜比；需要报告 HDR10 PQ 且至少 10 bit 的显示器，本候选未测 |
+| windows | atmos-passthrough | 尚未验证 | 没有报告 Atmos 的接收端 |
+| windows | multichannel-pcm | 尚未验证 | 本候选没有物理测量 |
+| windows | profile5-rpu | 尚未验证 | 本候选没有物理测量 |
+| windows | profile7-fel | 尚未验证 | 没有与纯基础层对照的样本 |
+| windows | profile8-base-layer | 尚未验证 | 本候选没有物理测量 |
+| windows | frame-interpolation | 尚未验证 | 本候选没有物理测量 |
+| windows | anime4k | 尚未验证 | 本候选没有物理测量 |
+| windows | super-resolution | 尚未验证 | 本候选没有物理测量 |
+| windows | denoise | 尚未验证 | 本候选没有物理测量 |
+| windows | sharpen | 尚未验证 | 本候选没有物理测量 |
+| windows | frame-interval | 尚未验证 | 固定阈值尚未在本候选测量 |
+| windows | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
+| windows | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
+| macos | native-dolby-vision | 能力不支持 | macOS EDR 是非原生杜比，本轮不发原生杜比信号 |
+| macos | video-output | 尚未验证 | EDR 是非原生杜比；MacBook Air M3 这一类机器仅在 headroom 大于 1 时可测，本候选未测 |
+| macos | atmos-passthrough | 尚未验证 | HDMI Atmos 未接设备 |
+| macos | multichannel-pcm | 尚未验证 | 本候选没有物理测量 |
+| macos | profile5-rpu | 尚未验证 | 本候选没有物理测量 |
+| macos | profile7-fel | 尚未验证 | 没有与纯基础层对照的样本 |
+| macos | profile8-base-layer | 尚未验证 | 本候选没有物理测量 |
+| macos | frame-interpolation | 尚未验证 | 本候选没有物理测量 |
+| macos | anime4k | 尚未验证 | 本候选没有物理测量 |
+| macos | super-resolution | 尚未验证 | 本候选没有物理测量 |
+| macos | denoise | 尚未验证 | 本候选没有物理测量 |
+| macos | sharpen | 尚未验证 | 本候选没有物理测量 |
+| macos | frame-interval | 尚未验证 | 固定阈值尚未在本候选测量 |
+| macos | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
+| macos | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
+| linux | native-dolby-vision | 能力不支持 | 原生杜比记能力不支持；SDR 映射是非原生杜比 |
+| linux | video-output | 尚未验证 | SDR 映射是非原生杜比；物理画面尚未在本候选测量 |
+| linux | hdr-output | 能力不支持 | 不新做 HDR 合成器，HDR 记能力不支持 |
+| linux | atmos-passthrough | 尚未验证 | 本轮只验收协商后的 PCM，没有接受压缩格式的接收端记录 |
+| linux | multichannel-pcm | 尚未验证 | 只验收协商后的 PCM，本候选没有物理测量 |
+| linux | profile5-rpu | 尚未验证 | 本候选没有物理测量 |
+| linux | profile7-fel | 尚未验证 | 没有与纯基础层对照的样本 |
+| linux | profile8-base-layer | 尚未验证 | 本候选没有物理测量 |
+| linux | frame-interpolation | 尚未验证 | 本候选没有物理测量 |
+| linux | anime4k | 尚未验证 | 本候选没有物理测量 |
+| linux | super-resolution | 尚未验证 | 本候选没有物理测量 |
+| linux | denoise | 尚未验证 | 本候选没有物理测量 |
+| linux | sharpen | 尚未验证 | 本候选没有物理测量 |
+| linux | frame-interval | 尚未验证 | 固定阈值尚未在本候选测量 |
+| linux | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
+| linux | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
+| android-phone | native-dolby-vision | 能力不支持 | PKM110 / Android 16 没有 video/dolby-vision，原生杜比记能力不支持 |
+| android-phone | video-output | 尚未验证 | PKM110 没有 video/dolby-vision；PQ 或 SDR 回退不是原生杜比，旧通过不沿用 |
+| android-phone | atmos-passthrough | 尚未验证 | 本候选没有物理测量 |
+| android-phone | multichannel-pcm | 尚未验证 | 本候选没有物理测量 |
+| android-phone | profile5-rpu | 尚未验证 | Profile 5 的 RPU 路径要在本候选重测，旧通过不沿用 |
+| android-phone | profile7-fel | 尚未验证 | 没有与纯基础层对照的样本 |
+| android-phone | profile8-base-layer | 尚未验证 | 本候选没有物理测量 |
+| android-phone | frame-interpolation | 尚未验证 | 本候选没有物理测量 |
+| android-phone | anime4k | 尚未验证 | 本候选没有物理测量 |
+| android-phone | super-resolution | 尚未验证 | 本候选没有物理测量 |
+| android-phone | denoise | 尚未验证 | 本候选没有物理测量 |
+| android-phone | sharpen | 尚未验证 | 本候选没有物理测量 |
+| android-phone | frame-interval | 尚未验证 | 固定阈值尚未在本候选测量 |
+| android-phone | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
+| android-phone | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
+| android-phone | physical-lock | 尚未验证 | 实体锁屏要在本候选重测，旧记录不沿用 |
+| android-tv | native-dolby-vision | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | video-output | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | atmos-passthrough | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | multichannel-pcm | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | profile5-rpu | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | profile7-fel | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | profile8-base-layer | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | frame-interpolation | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | anime4k | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | super-resolution | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | denoise | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | sharpen | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | frame-interval | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | av-sync | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| android-tv | enhancement-working-set | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
+| historical-android-2026-10-01 | dolby-frame-interval-and-long-gop-seek | 已失败 | 2026-10-01 杜比 GPU 候选 passed=false，长 GOP 跳转和杜比帧间隔未通过；保留为历史失败，不自动成为当前候选结论 |
+
+<!-- capability-record:end -->
+
