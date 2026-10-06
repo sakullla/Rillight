@@ -265,11 +265,14 @@ class ServerSectionsLoader extends ChangeNotifier {
         }
       }(),
     ]);
-    final failure = resumeError ?? nextError;
-    if (failure != null) {
-      return ServerSectionSlice(error: _asEmby(failure));
+    final items = continueWatchingItems(resume, nextUp);
+    if (items.isEmpty) {
+      final failure = resumeError ?? nextError;
+      if (failure != null) {
+        return ServerSectionSlice(error: _asEmby(failure));
+      }
     }
-    return ServerSectionSlice(items: continueWatchingItems(resume, nextUp));
+    return ServerSectionSlice(items: items);
   }
 
   Future<ServerSectionSlice> _favorites(EmbyClient client) async {

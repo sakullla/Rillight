@@ -44,6 +44,7 @@ class _Source {
   late HttpServer server;
   final List<Uri> requests = [];
   bool failCatalog = false;
+  bool failResume = false;
   bool failFavorites = false;
   int nextUpStatus = 200;
   bool rich = true;
@@ -58,7 +59,7 @@ class _Source {
       if (path.endsWith('/System/Info/Public')) {
         data = {'Id': id, 'ServerName': name};
       } else if (path.endsWith('/Items/Resume')) {
-        code = failCatalog ? 500 : 200;
+        code = failCatalog || failResume ? 500 : 200;
         data = _page(
           rich
               ? [
@@ -484,6 +485,40 @@ void main() {
     expect(alpha.continueWatching.items.map((item) => item.id), [
       'ep-1',
       'movie-1',
+    ]);
+  });
+
+  test('NextUp 500 still keeps resume items', () async {
+    final harness = _Harness();
+    await harness.start();
+    addTearDown(harness.close);
+    harness.source('alpha').nextUpStatus = 500;
+    harness.source('beta').rich = false;
+
+    await harness.loader.load();
+
+    final alpha = harness.loader.servers.first;
+    expect(alpha.continueWatching.error, isNull);
+    expect(alpha.continueWatching.items.map((item) => item.id), [
+      'ep-1',
+      'movie-1',
+    ]);
+  });
+
+  test('resume failure still keeps next up items', () async {
+    final harness = _Harness();
+    await harness.start();
+    addTearDown(harness.close);
+    harness.source('alpha').failResume = true;
+    harness.source('beta').rich = false;
+
+    await harness.loader.load();
+
+    final alpha = harness.loader.servers.first;
+    expect(alpha.continueWatching.error, isNull);
+    expect(alpha.continueWatching.items.map((item) => item.id), [
+      'ep-9',
+      'ep-3',
     ]);
   });
 }
