@@ -542,7 +542,12 @@ int main(int argc, char** argv) {
     }
     assert(visible);
     const auto selected = snapshot(core).subtitle_stream_index;
+    const auto before_disable = snapshot(core);
     assert(rillight_core_select_subtitle(core, -1, 2) == 0);
+    const auto after_disable = snapshot(core);
+    assert(after_disable.timeline_version == before_disable.timeline_version);
+    assert(after_disable.first_video_frame_ready);
+    assert(after_disable.state != RILLIGHT_CORE_RECOVERING);
     assert(wait_for(core, [](const auto& state) {
       return state.subtitle_stream_index == -1 && state.first_video_frame_ready;
     }));
@@ -950,6 +955,17 @@ int main(int argc, char** argv) {
     assert(ink_bounds(large).height() > small_ink.height());
     assert(snapshot(core).position_us == paused.position_us);
     rillight_core_release_frame(large);
+    assert(rillight_core_select_subtitle(core, -1, 8) == 0);
+    const auto hidden = snapshot(core);
+    assert(hidden.state == RILLIGHT_CORE_PAUSED);
+    assert(hidden.timeline_version == paused.timeline_version);
+    assert(hidden.position_us == paused.position_us);
+    assert(rillight_core_select_subtitle(core, -1, 9) == 0);
+    assert(snapshot(core).timeline_version == paused.timeline_version);
+    auto *clean = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+    assert(clean && clean->pts_us == subtitle_pts);
+    assert(ink_bounds(clean).height() <= 0);
+    rillight_core_release_frame(clean);
     rillight_core_destroy(core);
   }
   // Exercise both success and rejected parse cleanup repeatedly in one

@@ -833,6 +833,119 @@ void main() {
   });
 
   group('session_read_ahead_test.dart', () {
+    test('slow recovery can supply first bytes after 26 seconds', () async {
+      final cache = await SessionByteCache.open(memoryLimitBytes: 1024 * 1024);
+      var requests = 0;
+      final ahead = SessionReadAhead(
+        cache: cache,
+        resource: 'slow-recovery',
+        generation: 1,
+        total: 4,
+        aheadBytes: 4,
+        continuousTransfers: true,
+        fetch: (start, end) async {
+          requests++;
+          return ReadAheadTransfer(
+            (() async* {
+              await Future<void>.delayed(const Duration(seconds: 26));
+              yield [1, 2, 3, 4];
+            })(),
+            () {},
+          );
+        },
+      );
+      try {
+        expect(await ahead.read(0, 3).expand((b) => b).toList(), [1, 2, 3, 4]);
+        expect(requests, 1);
+      } finally {
+        await ahead.close();
+        await cache.close();
+      }
+    });
+
+    test(
+      'continuous response pauses at quota and yields to foreground',
+      () async {
+        const mib = 1024 * 1024;
+        const total = 48 * mib;
+        final root = await Directory.systemTemp.createTemp(
+          'rillight-continuous-',
+        );
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 8 * mib,
+          diskLimitBytes: 64 * mib,
+        );
+        final ranges = <(int, int)>[];
+        var cancelled = 0;
+        var received = 0;
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'continuous',
+          generation: 1,
+          total: total,
+          aheadBytes: 8 * mib,
+          continuousTransfers: true,
+          fetch: (start, end) async {
+            ranges.add((start, end));
+            var stopped = false;
+            return ReadAheadTransfer(
+              (() async* {
+                // Deliberately cross window boundaries with a nonaligned chunk.
+                for (var offset = start; offset <= end && !stopped;) {
+                  final size = (end - offset + 1).clamp(0, 71 * 1024);
+                  received += size;
+                  yield Uint8List.fromList(
+                    List.generate(size, (i) => (offset + i) % 251),
+                  );
+                  offset += size;
+                }
+              })(),
+              () {
+                stopped = true;
+                cancelled++;
+              },
+            );
+          },
+        );
+        try {
+          await ahead.read(0, 31).drain<void>();
+          await until(
+            () => ahead.diagnostics['readAheadWorkerActive'] == false,
+          );
+          expect(ranges, [(0, total - 1)]);
+          expect(cancelled, 0);
+          expect(received, lessThan(9 * mib));
+          final hit = await ahead
+              .read(4 * mib, 4 * mib + 31)
+              .expand((b) => b)
+              .toList();
+          expect(hit, List.generate(32, (i) => (4 * mib + i) % 251));
+          await until(
+            () => ahead.diagnostics['readAheadWorkerActive'] == false,
+          );
+          expect(ranges, hasLength(1));
+          expect(received, lessThan(13 * mib));
+          final resume = await ahead.yieldToForeground();
+          expect(cancelled, 1);
+          resume();
+          ahead.stop();
+          final later = await ahead
+              .read(32 * mib, 32 * mib + 31)
+              .expand((b) => b)
+              .toList();
+          expect(later, List.generate(32, (i) => (32 * mib + i) % 251));
+          expect(ranges.last, (32 * mib, total - 1));
+          await ahead.close();
+          expect(cancelled, ranges.length);
+        } finally {
+          await ahead.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
     for (final concurrency in [2, 4]) {
       test(
         '$concurrency parallel ranges publish past a stalled lane within bounded workspace',
@@ -1047,6 +1160,57 @@ void main() {
           ahead.stop();
           await video.cancel();
           await audio.cancel();
+          await ahead.close();
+          await cache.close();
+        }
+      },
+    );
+    test(
+      'bounded track reads keep an active transfer covering a distant track',
+      () async {
+        const mib = 1024 * 1024;
+        const block = 64 * 1024;
+        final cache = await SessionByteCache.open(memoryLimitBytes: 64 * mib);
+        final release = Completer<void>();
+        final starts = <int>[];
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'distant-tracks',
+          generation: 1,
+          total: 32 * mib,
+          aheadBytes: 32 * mib,
+          fetch: (start, end) async {
+            starts.add(start);
+            return ReadAheadTransfer(
+              (() async* {
+                for (var offset = start; offset <= end; offset += block) {
+                  yield Uint8List(block)
+                    ..fillRange(0, block, (offset ~/ block) % 251);
+                  if (offset == 0) await release.future;
+                }
+              })(),
+              () {
+                if (!release.isCompleted) release.complete();
+              },
+            );
+          },
+        );
+        try {
+          await ahead.read(0, block - 1).drain<void>();
+          final audio = ahead
+              .read(24 * mib, 24 * mib + block - 1)
+              .fold<List<int>>([], (all, part) => all..addAll(part));
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          if (!release.isCompleted) release.complete();
+          expect(
+            (await audio.timeout(
+              const Duration(seconds: 5),
+            )).every((byte) => byte == (24 * mib ~/ block) % 251),
+            isTrue,
+          );
+          expect(starts, [0]);
+        } finally {
+          if (!release.isCompleted) release.complete();
           await ahead.close();
           await cache.close();
         }

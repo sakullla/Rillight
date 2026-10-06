@@ -149,6 +149,8 @@ class RillightVideoBackend extends VideoBackend
   bool _authenticationReported = false;
   VideoOpenRequest? _lastOpenRequest;
   bool _opened = false;
+  final _openingDownloadProgress = Stopwatch();
+  int _openingDownloadBytes = 0;
   bool _wantsPlayback = true;
   bool _recovering = false;
   int _recoveryEpoch = 0;
@@ -399,6 +401,10 @@ class RillightVideoBackend extends VideoBackend
     _containerAudioTrackId = null;
     _cacheTrackPending = 0;
     _opened = false;
+    _openingDownloadProgress
+      ..reset()
+      ..start();
+    _openingDownloadBytes = 0;
     _lastFailure = null;
     _lastCoreEvent = null;
     _lastCoreErrorCode = null;
@@ -446,6 +452,7 @@ class RillightVideoBackend extends VideoBackend
             : PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
         dynamicSource: request.dynamicSource,
         sessionBuffering: true,
+        continuousTransfers: Platform.isAndroid,
       );
       if (_disposed || generation != _generation) {
         await transport.close();
@@ -781,7 +788,13 @@ class RillightVideoBackend extends VideoBackend
       final data = await transport.diagnostics.timeout(
         const Duration(seconds: 2),
       );
+      if (generation != _generation || _disposed) return;
       _lastTransportDiagnostics = data;
+      final downloaded = (data['upstreamBytes'] as num?)?.toInt() ?? 0;
+      if (!_opened && downloaded != _openingDownloadBytes) {
+        _openingDownloadBytes = downloaded;
+        _openingDownloadProgress.reset();
+      }
       _reportAuthentication(data, generation);
       final rate = data['upstreamBytesPerSecond'];
       if (rate is num) {
@@ -802,9 +815,18 @@ class RillightVideoBackend extends VideoBackend
           ((data['recoveryAttempts'] as num?) ?? 0) > 0 &&
           data['readAheadWaitingForDisk'] != true &&
           ((data['readAheadPublicationActive'] as num?) ?? 0) == 0;
-      if (_opened &&
+      // A source can stall before the first frame, while no read-ahead
+      // scheduler exists yet. Renewal must also serve this pending open.
+      final stalledOpening =
+          !_opened &&
+          _openPhase == 'openingCore' &&
+          _openingDownloadProgress.elapsed >= const Duration(seconds: 15) &&
+          ((data['recoveryAttempts'] as num?) ?? 0) > 0 &&
+          ((data['activeRequests'] as num?) ?? 0) > 0 &&
+          data['readAheadWaitingForDisk'] != true;
+      if ((_opened || stalledOpening) &&
           _lastOpenRequest?.dynamicSource == false &&
-          (rejectedSource || stalledSource) &&
+          (rejectedSource || stalledSource || stalledOpening) &&
           (_sourceRenewalRequestedAt == null ||
               DateTime.now().difference(_sourceRenewalRequestedAt!) >
                   const Duration(seconds: 30))) {

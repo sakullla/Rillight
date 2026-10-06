@@ -37,6 +37,7 @@ class PlaybackHttpProxy {
     this.sessionBuffering,
     this.readAheadBytes,
     this.readAheadConcurrency,
+    this.continuousTransfers,
     this.onStreamChanged,
     Future<SessionByteCache>? pendingCache,
   ) : _secret = List.generate(
@@ -69,6 +70,7 @@ class PlaybackHttpProxy {
   final bool sessionBuffering;
   final int readAheadBytes;
   final int readAheadConcurrency;
+  final bool continuousTransfers;
   SessionReadAhead? _readAhead;
   final _readAheadBypass = <String>{};
   MatroskaCacheIndex? _timelineIndex;
@@ -202,6 +204,16 @@ class PlaybackHttpProxy {
     _readAheadBypassReason = null;
     if (_readAhead?.resource == resource.identity) {
       _readAhead?.retryAfterSourceRenewal();
+    }
+    // Interrupt only requests still awaiting their first response. Their
+    // existing retry loop will pick up the renewed route; keep the downstream
+    // reader alive and never splice an unvalidated in-flight response body.
+    for (final read in _reads) {
+      if (read.resourceKey == resource.identity && read.response == null) {
+        for (final request in read.requests.toList()) {
+          request.abort();
+        }
+      }
     }
   }
 
@@ -497,6 +509,7 @@ class PlaybackHttpProxy {
     bool sessionBuffering = false,
     int readAheadBytes = 0,
     int readAheadConcurrency = 1,
+    bool continuousTransfers = false,
     FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged,
   }) async => PlaybackHttpProxy._(
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
@@ -507,6 +520,7 @@ class PlaybackHttpProxy {
     sessionBuffering,
     readAheadBytes,
     readAheadConcurrency,
+    continuousTransfers,
     onStreamChanged,
     cache is Future<SessionByteCache> ? cache : null,
   );
@@ -1684,6 +1698,7 @@ class PlaybackHttpProxy {
           await _retireRejectedResponse(response, read);
           read.requests.clear();
           _useSerialUpstream();
+          read.claimRefusalRetry();
           final resumePrevious = resumeReadAhead;
           final resumeAfterRefusal = await _readAhead?.yieldToForeground(
             refusal: 'foreground-http-${response.statusCode}',
@@ -1697,6 +1712,30 @@ class PlaybackHttpProxy {
           if (retryAfter != null) {
             await _backoff(0, DateTime.now(), read, retryAfter: retryAfter);
           }
+          _recoveryAttempts++;
+          continue;
+        }
+        // A just-completed stream can still hold the origin's lease briefly.
+        // Retry a known media continuation once even when this client has only
+        // one stream. Do not publish the intermediate refusal as an auth error.
+        // Cache gap probes and their foreground fallback share this budget.
+        if (response.statusCode == HttpStatus.forbidden &&
+            (method ?? incoming.method) == 'GET' &&
+            _roles[read.resourceKey] == PlaybackResourceRole.media &&
+            _representations[read.resourceKey]?.rangeSupported == true &&
+            _readAhead?.hasParallelTransfers != true &&
+            read.claimRefusalRetry()) {
+          await _retireRejectedResponse(response, read);
+          for (final previous in read.requests.toList()) {
+            previous.abort();
+          }
+          read.requests.clear();
+          await _backoff(
+            0,
+            DateTime.now(),
+            read,
+            retryAfter: _retryAfter(response.headers.value('retry-after')),
+          );
           _recoveryAttempts++;
           continue;
         }
@@ -1777,6 +1816,9 @@ class PlaybackHttpProxy {
       if (result == null) read.check();
       return result as bool;
     } on TimeoutException {
+      // Fast headers before a body stall do not predict the recovery request:
+      // a cold or overloaded origin may need the full header budget again.
+      _mediaHeaderDeadlines.removeWhere((key, _) => key.$1 == read.resourceKey);
       for (final request in read.requests.toList()) {
         request.abort();
       }
@@ -2382,7 +2424,7 @@ class PlaybackHttpProxy {
   ) async {
     final identity = '$key:${representation.generation}:$start:$end';
     final load = _loads.putIfAbsent(identity, () {
-      final producer = _ProxyRead()..resourceKey = key;
+      final producer = _ProxyRead(refusalParent: consumer)..resourceKey = key;
       final shared = _SharedLoad(producer);
       shared.future = (() async {
         var started = DateTime.now();
@@ -2621,6 +2663,7 @@ class PlaybackHttpProxy {
           generation: rep.generation,
           total: rep.total,
           aheadBytes: readAheadBytes,
+          continuousTransfers: continuousTransfers,
           maxConcurrentTransfers: _serialUpstream ? 1 : readAheadConcurrency,
           reserveWorkspace: () {
             final bytes = ahead!.workspaceBytes;
@@ -4963,8 +5006,17 @@ class _ReadAheadSeed {
 }
 
 class _ProxyRead {
-  _ProxyRead({this.seekGeneration = 0});
+  _ProxyRead({this.seekGeneration = 0, this.refusalParent});
   final int seekGeneration;
+  final _ProxyRead? refusalParent;
+  bool _refusalRetried = false;
+  bool claimRefusalRetry() {
+    if (refusalParent != null) return refusalParent!.claimRefusalRetry();
+    if (_refusalRetried) return false;
+    _refusalRetried = true;
+    return true;
+  }
+
   String? resourceKey;
   bool readAheadProducer = false;
   HttpClientResponse? response;

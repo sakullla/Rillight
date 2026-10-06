@@ -198,9 +198,10 @@ internal class CorePlayback(
         lastDecoderCheckMs = 0L
         operation.set(0)
         handler.removeCallbacks(openTimeout)
-        // Include one body-stall recovery plus cold decoder/first-frame work.
+        // Include proxy body/header recovery, container probes and the first
+        // decoded frame. Keep this outside the 45 s loopback read deadline.
         // Retirement and a new open still cancel this generation's timeout.
-        handler.postDelayed(openTimeout, 45_000)
+        handler.postDelayed(openTimeout, 60_000)
         serial.execute {
             retire(previous)
             if (generation.get() != revision) return@execute
@@ -335,8 +336,10 @@ internal class CorePlayback(
                 }
                 "subtitleOff" -> {
                     val code = synchronized(outputLock) {
+                        val timeline = CoreNative.snapshot(handle)?.get(3)
                         val selected = CoreNative.selectSubtitle(handle, -1, operation.incrementAndGet())
-                        if (selected == 0) audioOutput?.flush()
+                        if (selected == 0 && CoreNative.snapshot(handle)?.get(3) != timeline)
+                            audioOutput?.flush()
                         selected
                     }
                     if (code == 0) { beginTrack(result, -1, true, handle); return }

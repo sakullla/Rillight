@@ -44,6 +44,7 @@ class SessionReadAhead {
     required this.aheadBytes,
     required this.fetch,
     this.maxConcurrentTransfers = 1,
+    this.continuousTransfers = false,
     this.reserveWorkspace,
     this.releaseWorkspace,
   }) : _concurrency = maxConcurrentTransfers.clamp(1, 4);
@@ -55,12 +56,19 @@ class SessionReadAhead {
   static const requestBytes = 8 * 1024 * 1024; // HLS segment prefetch cap.
   static const maxRequestBytes = 32 * 1024 * 1024;
   static const parallelRequestBytes = 8 * 1024 * 1024;
+  // Cover a 15 s body-stall detection and one 20 s header retry. A shorter
+  // downstream deadline would abandon a still-recovering upstream response.
+  static const progressTimeout = Duration(seconds: 40);
   final SessionByteCache cache;
   final String resource;
   final int generation;
   final int total;
   final int aheadBytes;
   final int maxConcurrentTransfers;
+
+  /// Reuse one serial response across bounded cache scheduling windows.
+  final bool continuousTransfers;
+  _ContinuousTransfer? _continuous;
   int _concurrency;
   String? _concurrencyFallback;
   DateTime? _serialRestartAfter;
@@ -166,6 +174,7 @@ class SessionReadAhead {
     _active = false;
     _reader++;
     _producerEpoch++;
+    _cancelContinuous();
     for (final job in _jobs) {
       job.transfer?.cancel();
     }
@@ -418,7 +427,7 @@ class SessionReadAhead {
         currentJob = job;
         _jobs.add(job);
         _transferPeak = max(_transferPeak, _jobs.length);
-        final transfer = await fetch(start, end);
+        final transfer = await _fetchWindow(start, end, reader);
         job.transfer = transfer;
         if (!_active ||
             _closed ||
@@ -579,6 +588,7 @@ class SessionReadAhead {
       if (_active && !_closed && reader == _producerEpoch) {
         _failed = true;
         _failure = error;
+        _cancelContinuous();
         for (final job in _jobs) {
           job.transfer?.cancel();
         }
@@ -602,14 +612,48 @@ class SessionReadAhead {
           length: min(64 * 1024, end - start + 1),
         ) ==
         null;
+    if (continuousTransfers &&
+        (cachedStart || _continuous?.canRead(start) == true)) {
+      return true;
+    }
     return _worker != null &&
         (cachedStart ||
             _jobs.any(
               (job) =>
                   job.epoch == _producerEpoch &&
                   start >= job.start &&
-                  start <= min(job.end, job.offset + job.length + blockBytes),
+                  start <= job.end &&
+                  (start <= job.offset + job.length + blockBytes ||
+                      // A completed bounded AVIO read followed by another
+                      // track is not a user seek. Keep the one response that
+                      // already covers both tracks instead of aborting it
+                      // before its distant audio/video bytes can arrive.
+                      // Explicit seeks call stop(); overlapping long readers
+                      // retain the preemption rule above.
+                      _readers.isEmpty && end - start + 1 <= 1024 * 1024),
             ));
+  }
+
+  void _cancelContinuous() {
+    final previous = _continuous;
+    _continuous = null;
+    previous?.cancel();
+  }
+
+  Future<ReadAheadTransfer> _fetchWindow(int start, int end, int epoch) async {
+    if (!continuousTransfers || _concurrency != 1) return fetch(start, end);
+    var source = _continuous;
+    if (source == null || !source.canRead(start)) {
+      _cancelContinuous();
+      final transfer = await fetch(start, total - 1);
+      if (_closed || !_active || epoch != _producerEpoch) {
+        transfer.cancel();
+        throw const ReadAheadSuperseded();
+      }
+      source = _ContinuousTransfer(transfer, start, total - 1);
+      _continuous = source;
+    }
+    return ReadAheadTransfer(source.slice(start, end), () {});
   }
 
   void _updateReader(int reader, int position, {required bool waiting}) {
@@ -639,7 +683,7 @@ class SessionReadAhead {
     _readerWaiting = false;
     try {
       var offset = start;
-      var progressDeadline = DateTime.now().add(const Duration(seconds: 25));
+      var progressDeadline = DateTime.now().add(progressTimeout);
       while (offset <= end) {
         if (_closed || !_active || cancellation != _cancelGeneration) {
           throw const ReadAheadSuperseded();
@@ -709,7 +753,7 @@ class SessionReadAhead {
         offset += hit.bytes.length;
         _noteReaderPosition(offset);
         _updateReader(reader, offset, waiting: false);
-        progressDeadline = DateTime.now().add(const Duration(seconds: 25));
+        progressDeadline = DateTime.now().add(progressTimeout);
         _schedule();
       }
     } finally {
@@ -734,6 +778,63 @@ class SessionReadAhead {
         if (!_prefetchAllowed && _readers.isEmpty) stop();
       }
     }
+  }
+}
+
+/// Keeps only the current network chunk, including bytes yielded to a window
+/// whose cache publication may have been interrupted. Storage limits still
+/// belong to SessionReadAhead; reaching a window boundary pauses this iterator.
+class _ContinuousTransfer {
+  _ContinuousTransfer(this.transfer, this.chunkStart, this.end)
+    : iterator = StreamIterator(transfer.bytes);
+
+  final ReadAheadTransfer transfer;
+  final StreamIterator<List<int>> iterator;
+  final int end;
+  List<int> chunk = const [];
+  int chunkStart;
+  bool cancelled = false;
+
+  bool canRead(int start) =>
+      !cancelled && start >= chunkStart && start <= chunkStart + chunk.length;
+
+  void cancel() {
+    if (cancelled) return;
+    cancelled = true;
+    transfer.cancel();
+    // A transport failure can complete both moveNext and cancel with the same
+    // error. The window reader owns reporting it; cancellation must not emit
+    // an unhandled isolate error during seek or representation invalidation.
+    iterator.cancel().ignore();
+    chunk = const [];
+  }
+
+  Stream<List<int>> slice(int start, int windowEnd) async* {
+    var position = start;
+    while (position <= windowEnd) {
+      if (cancelled) throw const ReadAheadSuperseded();
+      if (position < chunkStart) {
+        throw const HttpException('Continuous response coverage lost');
+      }
+      if (position >= chunkStart + chunk.length) {
+        chunkStart += chunk.length;
+        chunk = const [];
+        if (!await iterator.moveNext()) {
+          throw const HttpException('Truncated continuous response');
+        }
+        if (cancelled) throw const ReadAheadSuperseded();
+        chunk = iterator.current;
+        continue;
+      }
+      final begin = position - chunkStart;
+      final count = min(chunk.length - begin, windowEnd - position + 1);
+      final current = chunk;
+      yield current is Uint8List
+          ? Uint8List.sublistView(current, begin, begin + count)
+          : Uint8List.fromList(current.sublist(begin, begin + count));
+      position += count;
+    }
+    if (windowEnd == end) cancel();
   }
 }
 

@@ -3075,11 +3075,15 @@ void run(RillightCoreImpl *core, uint64_t session) {
       core->speed_change = false;
     }
     core->active_read_timeline = timeline;
+    const bool subtitle_off_only = change_subtitle && selected_subtitle == -1 &&
+        seek < 0 && !change_audio && !change_speed;
     const bool reconfigure = seek >= 0 || change_audio || change_subtitle || change_speed;
     if (reconfigure) {
-      video_lane.Quiesce();
-      conversion_lane.Quiesce();
-      audio_lane.Quiesce();
+      if (!subtitle_off_only) {
+        video_lane.Quiesce();
+        conversion_lane.Quiesce();
+        audio_lane.Quiesce();
+      }
       subtitle_lane.Quiesce();
     }
     if (seek >= 0) {
@@ -3881,6 +3885,8 @@ int rillight_core_select_audio(RillightCore *pointer, int stream_index,
   return 0;
 }
 
+static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core, bool redraw);
+
 int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
                                    uint64_t operation_id) {
   if (!pointer || stream_index < -1) return -1;
@@ -3897,9 +3903,27 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
                             track.stream_index == stream_index;
                    })) return -1;
   if (!accept_operation(core, operation_id)) return -1;
-  if (core->subtitle_index == stream_index && !core->subtitle_change)
+  if (core->subtitle_index == stream_index &&
+      (!core->subtitle_change || core->requested_subtitle == stream_index))
     return 0;
   if (core->input_exhausted) return -1;
+  if (stream_index == -1 && !core->subtitle_change &&
+      core->state != RILLIGHT_CORE_RECOVERING) {
+    // Hiding captions needs no media seek or codec flush. Publish the choice
+    // immediately, including while paused or waiting for network data; the
+    // demux worker retires only the subtitle decoder at its next safe point.
+    core->subtitle_index = -1;
+    core->requested_subtitle = -1;
+    core->subtitle_change = true;
+    core->error = 0;
+    if (core->displayed_clean) {
+      rillight_core_release_frame(core->subtitle_preview);
+      core->subtitle_preview = compose_displayed_frame(core, true);
+      core->subtitle_redraw = core->subtitle_preview != nullptr;
+    }
+    core->wake.notify_all();
+    return 0;
+  }
   core->base_position = playback_position(core);
   core->requested_subtitle = stream_index;
   core->subtitle_change = true;
@@ -4125,8 +4149,6 @@ int rillight_core_container_track_ids(RillightCore *pointer,
   return 0;
 }
 
-static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core, bool redraw);
-
 int rillight_core_set_subtitle_presentation(RillightCore *pointer,
     const RillightCoreSubtitlePresentation *p, uint64_t session) {
   if (!pointer || !p || p->struct_size != sizeof(*p) || p->version != 1 ||
@@ -4184,6 +4206,7 @@ static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core,
     frame = subtitle_frame_copy(core->displayed_clean);
     if (!frame) return nullptr;
     frame->subtitle_redraw = redraw;
+    if (core->subtitle_index < 0) return frame;
     std::lock_guard subtitle_lock(core->subtitle_mutex);
     core->subtitle_cues.erase(std::remove_if(core->subtitle_cues.begin(),
         core->subtitle_cues.end(), [frame](const SubtitleCue &cue) {

@@ -13,6 +13,150 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CoreInputTest {
+    @Test fun startupReturnsAvailableProbeWithoutFillingAReadAheadWindow() {
+        val release = CountDownLatch(1)
+        val server = LocalHttpServer { _, output ->
+            replyHeader(output, 200, 256 * 1024)
+            output.write(ByteArray(1024) { 7 })
+            output.flush()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val bytes = ByteArray(1024)
+            val read = executor.submit<Int> { input.read(bytes, bytes.size) }
+            assertEquals(1024, read.get(2, TimeUnit.SECONDS))
+            org.junit.Assert.assertArrayEquals(ByteArray(1024) { 7 }, bytes)
+        } finally {
+            release.countDown()
+            input.close()
+            executor.shutdownNow()
+            server.close()
+        }
+    }
+
+    @Test fun slowProxyRecoveryCanOutliveOneUpstreamHeaderAttempt() {
+        val server = LocalHttpServer { _, output ->
+            // A 20-second origin attempt plus renewal/reconnect can still be
+            // healthy while the owned loopback response is pending.
+            Thread.sleep(26_000)
+            reply(output, 200, byteArrayOf(42))
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/slow", null)
+        try {
+            val bytes = ByteArray(1)
+            assertEquals(1, input.read(bytes, 1))
+            assertEquals(42.toByte(), bytes[0])
+        } finally { input.close(); server.close() }
+    }
+
+    @Test fun sequentialReadsGrowWindowsButDistantSeeksStaySmall() {
+        val data = ByteArray(8 * 1024 * 1024) { (it % 251).toByte() }
+        val ranges = java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Int>>())
+        val server = LocalHttpServer { headers, output ->
+            val range = headers.getValue("range").removePrefix("bytes=").split('-')
+            val start = range[0].toInt()
+            val end = minOf(range[1].toIntOrNull() ?: data.lastIndex, data.lastIndex)
+            ranges.add(Pair(start, end - start + 1))
+            reply(output, 206, data.copyOfRange(start, end + 1), "bytes $start-$end/${data.size}")
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            val bytes = ByteArray(32768)
+            var offset = 0
+            while (offset < 4 * 1024 * 1024) {
+                val count = input.read(bytes, bytes.size)
+                org.junit.Assert.assertTrue(count > 0)
+                org.junit.Assert.assertArrayEquals(data.copyOfRange(offset, offset + count), bytes.copyOf(count))
+                offset += count
+            }
+            org.junit.Assert.assertTrue("Sequential reads must not reopen every 256 KiB", ranges.size <= 6)
+            assertEquals(Pair(0, data.size), ranges.first())
+            org.junit.Assert.assertTrue(ranges.drop(1).all { it.second <= 1024 * 1024 })
+            val distant = 7 * 1024 * 1024
+            assertEquals(distant.toLong(), input.seek(distant.toLong(), 0))
+            assertEquals(bytes.size, input.read(bytes, bytes.size))
+            org.junit.Assert.assertArrayEquals(data.copyOfRange(distant, distant + bytes.size), bytes)
+            assertEquals(Pair(distant, 256 * 1024), ranges.last())
+        } finally { input.close(); server.close() }
+    }
+
+    @Test fun interleavedTracksReuseBoundedWindows() {
+        val data = ByteArray(2 * 1024 * 1024) { (it % 251).toByte() }
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val largest = java.util.concurrent.atomic.AtomicInteger()
+        val server = LocalHttpServer { headers, output ->
+            requests.incrementAndGet()
+            val range = headers["range"]?.removePrefix("bytes=")?.split('-') ?: listOf("0", "")
+            val start = range[0].toInt()
+            val end = minOf(range[1].toIntOrNull() ?: data.lastIndex, data.lastIndex)
+            if (range[1].isNotEmpty()) largest.updateAndGet { maxOf(it, end - start + 1) }
+            reply(output, 206, data.copyOfRange(start, end + 1), "bytes $start-$end/${data.size}")
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            val bytes = ByteArray(1024)
+            repeat(100) { packet ->
+                for (track in listOf(0, 1024 * 1024)) {
+                    val position = track + packet * bytes.size
+                    assertEquals(position.toLong(), input.seek(position.toLong(), 0))
+                    assertEquals(bytes.size, input.read(bytes, bytes.size))
+                    org.junit.Assert.assertArrayEquals(data.copyOfRange(position, position + bytes.size), bytes)
+                }
+            }
+            // The immediate first probe precedes one retained window per track.
+            assertEquals(3, requests.get())
+            assertEquals(256 * 1024, largest.get())
+        } finally { input.close(); server.close() }
+    }
+
+    @Test fun shortPartialResponsesContinueUntilRepresentationEof() {
+        val data = ByteArray(4099) { (it % 251).toByte() }
+        val server = LocalHttpServer { headers, output ->
+            val start = headers.getValue("range").removePrefix("bytes=").substringBefore('-').toInt()
+            val end = minOf(start + 1023, data.lastIndex)
+            reply(output, 206, data.copyOfRange(start, end + 1), "bytes $start-$end/${data.size}")
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            val all = java.io.ByteArrayOutputStream()
+            val bytes = ByteArray(333)
+            while (true) {
+                val count = input.read(bytes, bytes.size)
+                if (count == 0) break
+                org.junit.Assert.assertTrue(count > 0)
+                all.write(bytes, 0, count)
+            }
+            org.junit.Assert.assertArrayEquals(data, all.toByteArray())
+            assertEquals(0, input.read(bytes, bytes.size))
+        } finally { input.close(); server.close() }
+    }
+
+    @Test fun sequentialUnknownLengthResponseKeepsOneConnectionAndEnds() {
+        val data = ByteArray(400 * 1024) { (it % 251).toByte() }
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val server = LocalHttpServer { _, output ->
+            requests.incrementAndGet()
+            output.write("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+            output.write(data)
+            output.flush()
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            val all = java.io.ByteArrayOutputStream()
+            val bytes = ByteArray(65536)
+            while (true) {
+                val count = input.read(bytes, bytes.size)
+                if (count == 0) break
+                org.junit.Assert.assertTrue(count > 0)
+                all.write(bytes, 0, count)
+            }
+            org.junit.Assert.assertArrayEquals(data, all.toByteArray())
+            assertEquals(1, requests.get())
+        } finally { input.close(); server.close() }
+    }
+
     @Test fun appPrivateFileSupportsSizeAndSeekAfterCancel() {
         val file = File.createTempFile("rillight-core-io", ".bin")
         try {

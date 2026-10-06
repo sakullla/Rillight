@@ -84,6 +84,7 @@ class PlaybackTransportSession {
     int readAheadBytes = 512 * 1024 * 1024,
     bool dynamicSource = false,
     bool sessionBuffering = false,
+    bool continuousTransfers = false,
   }) async {
     final inbox = ReceivePort();
     final ready = ReceivePort();
@@ -102,6 +103,7 @@ class PlaybackTransportSession {
           readAheadBytes,
           dynamicSource,
           sessionBuffering,
+          continuousTransfers,
         ],
         onError: inbox.sendPort,
         onExit: inbox.sendPort,
@@ -277,6 +279,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
       readAheadBytes: arguments[8]! as int,
       dynamicSource: arguments[9]! as bool,
       sessionBuffering: arguments[10]! as bool,
+      continuousTransfers: arguments[11]! as bool,
     );
     ready.send(commands.sendPort);
     await for (final message in commands) {

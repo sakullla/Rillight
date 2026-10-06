@@ -218,6 +218,61 @@ void main() {
     addTearDown(() => isolatedCache.delete(recursive: true));
   });
   test(
+    'stalled initial open renews its source before the core is ready',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final held = <HttpResponse>[];
+      upstream.listen((request) async {
+        if (request.uri.path == '/old') {
+          held.add(request.response);
+          return;
+        }
+        request.response.contentLength = 8;
+        request.response.add(List.filled(8, 9));
+        await request.response.close();
+      });
+      final driver = _PendingOpenCoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      final refresh = backend.events.firstWhere(
+        (event) => event.kind == VideoEventKind.sourceRefreshRequired,
+      );
+      final opening = backend.open(
+        VideoOpenRequest(
+          sessionId: 73,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/old'),
+        ),
+      );
+      // Observe errors immediately, including during cleanup of a failing test.
+      final opened = expectLater(opening, completes);
+      try {
+        final event = await refresh.timeout(const Duration(seconds: 24));
+        expect(event.value, 408);
+        expect((await backend.diagnostics())['openPhase'], 'openingCore');
+        await backend.refreshSourceUrl(
+          Uri.parse('http://127.0.0.1:${upstream.port}/new'),
+        );
+        driver.releaseOpen.complete();
+        await opened.timeout(const Duration(seconds: 5));
+        expect((await backend.diagnostics())['sourceRenewalCount'], 1);
+      } finally {
+        if (!driver.releaseOpen.isCompleted) driver.releaseOpen.complete();
+        await backend.dispose();
+        for (final response in held) {
+          try {
+            await response.close();
+          } catch (_) {}
+        }
+        await upstream.close(force: true);
+      }
+    },
+    timeout: const Timeout(Duration(seconds: 40)),
+  );
+
+  test(
     'stalled live downloader renews its source without discarding cached bytes',
     () async {
       const total = 16 * 1024 * 1024;
