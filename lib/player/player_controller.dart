@@ -3371,10 +3371,15 @@ class PlayerController extends ChangeNotifier {
     state.phase = PlaybackPhase.idle;
     _emit();
     final stopped = _stopSession();
-    await _operations.interrupt(backend.stop);
-    await _operations.drained;
-    await stopped;
-    _restoreSharedPlaybackClient();
+    try {
+      await _operations.interrupt(backend.stop);
+      await _operations.drained;
+      await stopped;
+    } finally {
+      // Stop can fail after a shared-client line switch. Put the browsing
+      // session back on its previous address before this shutdown ends.
+      _restoreSharedPlaybackClient();
+    }
     await _persistSettings();
     if (window.isFullScreen) await window.setFullScreen(false);
   }
@@ -3424,17 +3429,22 @@ class PlayerController extends ChangeNotifier {
     }
     await _eventSub?.cancel();
     try {
-      await _operations.interrupt(backend.stop);
-    } finally {
-      await _operations.drained;
       try {
-        await backend.dispose();
+        await _operations.interrupt(backend.stop);
       } finally {
-        await _deleteSubtitleCache();
+        await _operations.drained;
+        try {
+          await backend.dispose();
+        } finally {
+          await _deleteSubtitleCache();
+        }
       }
+      await stopped;
+    } finally {
+      // close() still leaves the player when stop or dispose throws. Put the
+      // shared browsing session back before that exit, including on failure.
+      _restoreSharedPlaybackClient();
     }
-    await stopped;
-    _restoreSharedPlaybackClient();
     await _persistSettings();
     state.phase = PlaybackPhase.closed;
   }

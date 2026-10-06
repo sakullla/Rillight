@@ -60,6 +60,18 @@ class _Client extends EmbyClient {
   bool failPublic = false;
   bool offerNext = false;
   @override
+  EmbyClient withRequestGuard(void Function() guard) {
+    final probe = _Client(reports);
+    probe.attachSession(
+      baseUrl: baseUrl!,
+      accessToken: accessToken!,
+      userId: userId!,
+      userAgent: customUserAgent,
+    );
+    return probe;
+  }
+
+  @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
     if (failPublic) throw StateError('synthetic offline');
     return PublicServerInfo(
@@ -156,11 +168,26 @@ class _Backend extends FakeVideoBackend {
   Completer<void>? openEntered;
   Completer<void>? stopGate;
   bool stopEntered = false;
+  bool failStop = false;
+  bool failDispose = false;
   @override
   Future<void> stop() async {
     stopEntered = true;
     await stopGate?.future;
+    if (failStop) {
+      failStop = false;
+      throw StateError('synthetic stop failure');
+    }
     await super.stop();
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (failDispose) {
+      failDispose = false;
+      throw StateError('synthetic dispose failure');
+    }
+    await super.dispose();
   }
 
   @override
@@ -877,6 +904,57 @@ void main() {
       'line',
     );
   });
+
+  test(
+    'in-process line switch restores the shared address when stop or dispose fails',
+    () async {
+      for (final failure in ['stop', 'dispose']) {
+        final reports = <PlaybackReport>[];
+        final client = _Client(reports);
+        client.attachSession(
+          baseUrl: Uri.parse('https://a'),
+          accessToken: 'token',
+          userId: 'user',
+          userAgent: 'Rillight',
+        );
+        final video = _Backend();
+        final playing = PlayerController(
+          client: client,
+          itemId: 'movie',
+          backend: video,
+          window: PlayerWindow(),
+          settingsStore: MemoryPlayerSettingsStore(),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          progressInterval: const Duration(milliseconds: 30),
+          playbackLineSnapshot: const [
+            ServerLine(id: 'line', address: 'https://a'),
+            ServerLine(id: 'mirror', address: 'https://mirror'),
+          ],
+          verifiedPlaybackServerId: 'a',
+        );
+        try {
+          await playing.start();
+          await playing.switchLine('mirror');
+          expect(client.baseUrl?.host, 'mirror');
+          if (failure == 'stop') {
+            video.failStop = true;
+          } else {
+            video.failDispose = true;
+          }
+          await playing.close();
+          expect(client.baseUrl?.host, 'a');
+          expect(client.accessToken, 'token');
+          expect(client.userId, 'user');
+          expect(client.customUserAgent, 'Rillight');
+        } finally {
+          try {
+            await playing.disposeAsync();
+          } catch (_) {}
+          playing.dispose();
+        }
+      }
+    },
+  );
 
   test('playback line label uses a nickname, otherwise host and port', () {
     expect(
