@@ -13,8 +13,10 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -49,13 +51,16 @@ void main() {
     double scale = 1,
     FakeVideoBackend? backend,
     Set<String>? libraryIds,
+    List<FakeEmbyServer> extraServers = const [],
+    bool signedIn = false,
   }) async {
     tester.view.physicalSize = Size(width, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final catalog = [server, ...extraServers];
     final auth = SyntheticSourceAuth(
-      adapter: FakeEmbyAdapter([server]),
+      adapter: FakeEmbyAdapter(catalog),
       device: const EmbyDeviceInfo(
         clientName: 'test',
         deviceName: 'phone',
@@ -76,6 +81,20 @@ void main() {
         settingsStore: MemoryPlayerSettingsStore(),
       ),
     );
+    if (signedIn) {
+      await tester.runAsync(() async {
+        for (final item in catalog) {
+          final connected = await auth.connect(
+            address: item.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          if (!connected) {
+            throw StateError('signed-in fixture failed for ${item.baseUrl}');
+          }
+        }
+      });
+    }
     tester.platformDispatcher.textScaleFactorTestValue = scale;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await tester.pumpWidget(app);
@@ -164,19 +183,37 @@ void main() {
     tester,
   ) async {
     final server = FakeEmbyServer();
-    await start(tester, server);
-    await login(tester, server);
-    ScrollPosition position(String key, {bool offstage = false}) => tester
-        .state<ScrollableState>(
-          find
-              .descendant(
-                of: find.byKey(PageStorageKey(key), skipOffstage: !offstage),
-                matching: find.byType(Scrollable, skipOffstage: !offstage),
-                skipOffstage: !offstage,
-              )
-              .first,
-        )
-        .position;
+    // One continue-watching row fits in 360×800, so the outer list cannot
+    // scroll. Extra signed-in servers add vertical shelves.
+    await start(
+      tester,
+      server,
+      extraServers: [
+        for (var i = 2; i <= 3; i++)
+          FakeEmbyServer(
+            serverId: 'server-id-$i',
+            serverName: '来源 $i',
+            baseUrl: Uri.parse('http://emby-$i.test:8096'),
+          ),
+      ],
+      signedIn: true,
+    );
+    ScrollPosition position(String key, {bool offstage = false}) {
+      final elements = find
+          .descendant(
+            of: find.byKey(PageStorageKey(key), skipOffstage: !offstage),
+            matching: find.byType(Scrollable, skipOffstage: !offstage),
+            skipOffstage: !offstage,
+          )
+          .evaluate();
+      for (final element in elements) {
+        final scroll =
+            ((element as StatefulElement).state as ScrollableState).position;
+        if (scroll.axis == Axis.vertical) return scroll;
+      }
+      fail('no vertical scrollable for $key');
+    }
+
     bool transparent() =>
         tester.widget<AppBar>(find.byType(AppBar)).forceMaterialTransparency;
     expect(transparent(), isTrue);
@@ -196,6 +233,7 @@ void main() {
     await tester.tap(find.text('聚合').last);
     await tester.pumpAndSettle();
     final aggregation = position('aggregation');
+    expect(aggregation.maxScrollExtent, greaterThan(0));
     aggregation.jumpTo(aggregation.maxScrollExtent);
     await tester.pumpAndSettle();
     await tester.tap(find.text('首页').last);
@@ -203,9 +241,10 @@ void main() {
     expect(transparent(), isTrue);
     // Offstage IndexedStack children still issue scroll notifications. They
     // must not change home chrome, including ballistic dimension correction.
-    // The server rows are horizontal and may not overflow; use that real range.
     final offstageAggregation = position('aggregation', offstage: true);
+    expect(offstageAggregation.maxScrollExtent, greaterThan(0));
     offstageAggregation.jumpTo(offstageAggregation.maxScrollExtent);
+    expect(offstageAggregation.pixels, greaterThan(0));
     tester.view.physicalSize = const Size(800, 360);
     await tester.pumpAndSettle();
     expect(transparent(), isTrue);
@@ -877,6 +916,17 @@ void main() {
   ) async {
     final server = FakeEmbyServer(items: [], views: []);
     final (app, backend) = await start(tester, server);
+    final navigator = Navigator.of(
+      tester.element(find.byType(AndroidConnectPage)),
+    );
+    navigator.push(
+      MaterialPageRoute<void>(builder: (context) => const AggregationPage()),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppEmptyView, '没有已登录的服务器'), findsOneWidget);
+    expect(find.widgetWithText(AppEmptyView, '添加服务器'), findsOneWidget);
+    navigator.pop();
+    await tester.pumpAndSettle();
     await login(tester, server);
     expect(find.text('暂无内容'), findsOneWidget);
     expect(find.byType(MobileEmptyState), findsOneWidget);
@@ -890,11 +940,8 @@ void main() {
     await tester.tap(find.text('聚合').last);
     await tester.pumpAndSettle();
     expect(find.byType(AggregationPage), findsOneWidget);
-    expect(
-      find.byKey(const Key('aggregation-segment-continue')),
-      findsOneWidget,
-    );
-    expect(find.text('未选择可参与的服务或媒体库'), findsNothing);
+    expect(find.widgetWithText(AppEmptyView, '所选范围没有匹配作品'), findsOneWidget);
+    expect(find.widgetWithText(AppEmptyView, '添加服务器'), findsNothing);
     expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
     // Declare a real synthetic library before testing an allowed but
     // unsupported stream; empty/unknown scope must never bypass the gate.
