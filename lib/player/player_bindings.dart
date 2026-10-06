@@ -9,6 +9,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
+import 'package:rillight/player/player_startup.dart';
 
 typedef PlaybackObservationSink =
     Future<bool> Function(
@@ -44,6 +45,7 @@ class PlayerBindings {
     this.observationSink,
     this.switchDispatcher,
     this.reportOutcomeSink,
+    this.startupData,
   });
 
   final VideoBackend Function()? createBackend;
@@ -54,6 +56,7 @@ class PlayerBindings {
   final PlaybackObservationSink? observationSink;
   final PlaybackSwitchDispatcher? switchDispatcher;
   final PlaybackReportOutcomeSink? reportOutcomeSink;
+  final Future<PlayerStartupData?>? startupData;
 
   /// 会话快照存储;为 null 时 [PlayerController] 使用当前进程 pid 命名的
   /// `FilePlaybackSessionSnapshotStore`,测试注入

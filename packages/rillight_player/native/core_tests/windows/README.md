@@ -22,7 +22,7 @@ recorded separately in `../../HDR_PRESENTATION.md`.
 
 `flutter_core_smoke.dart` and `flutter_smoke_source.cpp` exercise the complete
 core → Flutter texture path with generated `tracks.mkv` media. Run from the
-repository root in PowerShell on Windows with Flutter 3.47.4, the pinned
+repository root in PowerShell on Windows with Flutter 3.47.6, the pinned
 Windows core SDK, and MSYS2 MinGW64 installed:
 
 ```powershell

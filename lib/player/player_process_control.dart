@@ -10,14 +10,20 @@ import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/spawn_player_process.dart';
 
 abstract class PlayerProcessControl {
-  Future<int> spawn({required String executable, required String arguments});
+  Future<void> prepare({required String executable});
+  Future<void> discardPrepared();
+  Future<int> spawn({
+    required String executable,
+    required String arguments,
+    Future<Map<String, dynamic>>? startup,
+  });
   bool isAlive(int pid);
   Future<bool> requestClose(int pid, Duration wait);
   Future<void> kill(int pid);
   Future<PlayerHostOpenItemCommand?> consumeOpenItem(int pid);
   Future<void> heartbeat(int pid);
   Future<void> release(int pid);
-  void cancelPendingSpawns();
+  void cancelPendingSpawns({bool includePrepared = false});
   Future<void> terminateAll();
   Iterable<int> get activePids;
   PlaybackSessionSnapshotStore snapshotStore(int pid);
@@ -73,32 +79,141 @@ abstract class DesktopPlayerProcessControl
   final Map<int, PlayerProcessProtocol> _endpoints = {};
   final Map<int, Future<void>> _releases = {};
   int _generation = 0;
+  int _preparationGeneration = 0;
+  int _preparedPid = 0;
+  Future<void>? _preparing;
+  Timer? _preparedHeartbeat;
+  Future<void>? _preparedPulse;
 
   Future<int> launch(String executable, String payloadPath);
   Future<void> terminate(int pid);
   Future<void> activate(int pid) async {}
+  void grantActivation(int pid) {}
+
+  /// Keep at most one hidden engine ready. It has no server credentials,
+  /// decoder or media requests until the host adopts it for an actual play.
+  @override
+  Future<void> prepare({required String executable}) {
+    if (_preparing != null) return _preparing!;
+    if (_endpoints.isNotEmpty) return Future<void>.value();
+    final preparation = () async {
+      try {
+        _preparedPid = await spawn(
+          executable: executable,
+          arguments: '{"warmPlayer":true}',
+        );
+        _preparedHeartbeat = Timer.periodic(const Duration(seconds: 2), (_) {
+          if (_preparedPulse != null || _preparedPid == 0) return;
+          final child = _preparedPid;
+          final pulse = () async {
+            try {
+              if (isAlive(child)) {
+                await heartbeat(child);
+              } else if (_preparedPid == child) {
+                _preparedPid = 0;
+                _preparedHeartbeat?.cancel();
+                await release(child);
+              }
+            } catch (_) {
+              // Adoption/close may retire the mailbox during this heartbeat.
+            }
+          }();
+          _preparedPulse = pulse;
+          unawaited(
+            pulse.whenComplete(() {
+              if (identical(_preparedPulse, pulse)) _preparedPulse = null;
+            }),
+          );
+        });
+      } on PlayerProcessStartupException catch (error) {
+        await release(error.pid);
+      } catch (_) {
+        // Prewarming is optional; an actual play can use the cold path.
+      }
+    }();
+    _preparing = preparation;
+    return preparation.whenComplete(() {
+      if (identical(_preparing, preparation)) _preparing = null;
+    });
+  }
+
+  @override
+  Future<void> discardPrepared() async {
+    cancelPendingSpawns(includePrepared: true);
+    await _preparing;
+    _preparedHeartbeat?.cancel();
+    await _preparedPulse;
+    final child = _preparedPid;
+    _preparedPid = 0;
+    if (child != 0) {
+      await kill(child);
+      await release(child);
+    }
+  }
 
   @override
   Future<int> spawn({
     required String executable,
     required String arguments,
+    Future<Map<String, dynamic>>? startup,
   }) async {
-    final generation = _generation;
-    final endpoint = await PlayerProcessProtocol.create();
-    var child = 0;
+    final payload = Map<String, dynamic>.from(jsonDecode(arguments) as Map);
+    final warming = payload['warmPlayer'] == true;
+    final generation = warming ? _preparationGeneration : _generation;
+    bool cancelled() =>
+        generation != (warming ? _preparationGeneration : _generation);
+    if (!warming) {
+      await _preparing;
+      _preparedHeartbeat?.cancel();
+      await _preparedPulse;
+    }
+    if (cancelled()) throw StateError('Player launch cancelled');
+    var child = warming ? 0 : _preparedPid;
+    if (!warming) {
+      _preparedPid = 0;
+      _preparedHeartbeat?.cancel();
+    }
+    if (child != 0 && !isAlive(child)) {
+      await release(child);
+      child = 0;
+    }
+    final endpoint = child == 0
+        ? await PlayerProcessProtocol.create()
+        : _endpoints[child]!;
+    var acceptsStartup = true;
     try {
-      await endpoint.writeLaunch(
-        Map<String, dynamic>.from(jsonDecode(arguments) as Map),
-      );
+      if (startup != null) {
+        unawaited(
+          startup
+              .then<void>((data) async {
+                if (acceptsStartup &&
+                    (child == 0 || identical(_endpoints[child], endpoint))) {
+                  await endpoint.write('startup', data);
+                }
+              })
+              .catchError((Object _) {
+                // A superseded/closed child may already have removed its mailbox.
+              }),
+        );
+      }
+      await endpoint.writeLaunch(payload);
       await endpoint.heartbeat();
-      if (generation != _generation) {
+      if (cancelled()) {
         throw StateError('Player launch cancelled');
       }
-      child = await launch(executable, endpoint.launchFile.path);
-      _endpoints[child] = endpoint;
+      if (child == 0) {
+        child = await launch(executable, endpoint.launchFile.path);
+        _endpoints[child] = endpoint;
+        if (!warming) grantActivation(child);
+      } else {
+        // A prewarmed child was not created by this click. Transfer the
+        // foreground host's permission before the child attempts Show/Focus.
+        grantActivation(child);
+        await endpoint.write('start');
+      }
       final deadline = DateTime.now().add(startupTimeout);
       while (DateTime.now().isBefore(deadline)) {
-        if (generation != _generation) {
+        if (cancelled()) {
           throw StateError('Player launch cancelled');
         }
         if (!isAlive(child)) {
@@ -109,9 +224,9 @@ abstract class DesktopPlayerProcessControl
           throw StateError('Player window initialization failed');
         }
         final ready = await endpoint.read('ready');
-        if (ready?['pid'] == child && generation == _generation) {
-          await activate(child);
-          if (generation != _generation) {
+        if (ready?['pid'] == child && !cancelled()) {
+          if (!warming) await activate(child);
+          if (cancelled()) {
             throw StateError('Player launch cancelled');
           }
           return child;
@@ -124,6 +239,7 @@ abstract class DesktopPlayerProcessControl
         startupTimeout,
       );
     } catch (error) {
+      acceptsStartup = false;
       if (child != 0) {
         await terminate(child);
         // Preserve this endpoint until the host reconciles a possible snapshot.
@@ -147,7 +263,10 @@ abstract class DesktopPlayerProcessControl
   }
 
   @override
-  void cancelPendingSpawns() => _generation++;
+  void cancelPendingSpawns({bool includePrepared = false}) {
+    _generation++;
+    if (includePrepared) _preparationGeneration++;
+  }
 
   @override
   Future<bool> requestClose(int pid, Duration wait) async {
@@ -238,6 +357,7 @@ abstract class DesktopPlayerProcessControl
   @override
   Future<void> terminateAll() async {
     cancelPendingSpawns();
+    await discardPrepared();
     for (final pid in _endpoints.keys.toList()) {
       await kill(pid);
     }
@@ -274,6 +394,13 @@ class WindowsPlayerProcessControl extends DesktopPlayerProcessControl {
 
   @override
   bool isAlive(int pid) => _children[pid]?.isAlive ?? false;
+
+  @override
+  void grantActivation(int pid) {
+    // A later user switch to another application may legitimately deny this.
+    // Respect Windows activation policy instead of making the player topmost.
+    if (_children[pid]?.isAlive == true) AllowSetForegroundWindow(pid);
+  }
 
   @override
   Future<void> terminate(int pid) async {

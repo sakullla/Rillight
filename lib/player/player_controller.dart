@@ -1,3 +1,4 @@
+import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'package:rillight/player/player_host_command.dart';
 import 'dart:convert';
@@ -34,6 +35,7 @@ import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/player_startup.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
 
@@ -153,8 +155,10 @@ class PlayerController extends ChangeNotifier {
     this.openRequest,
     this.routeLeaseKey,
     this.nextPrefixFetch,
+    Future<PlayerStartupData?>? startupData,
     PlaybackSessionSnapshotStore? snapshotStore,
-  }) : snapshotStore =
+  }) : _startupData = startupData,
+       snapshotStore =
            snapshotStore ??
            FilePlaybackSessionSnapshotStore.forCurrentProcess() {
     _pauseIntent = openRequest?.startPaused ?? false;
@@ -211,6 +215,7 @@ class PlayerController extends ChangeNotifier {
   bool _revoked = false;
   bool get permissionRevoked => _revoked;
   bool _revokedCleanupComplete = false;
+  Future<PlayerStartupData?>? _startupData;
   String itemId;
   final VideoBackend backend;
   final PlayerWindow window;
@@ -541,6 +546,7 @@ class PlayerController extends ChangeNotifier {
         return;
       }
     }
+    PlayerStartupTrace.record('controller.start');
     final operation = _beginOperation();
     if (operation == null || _disposed) return;
     await _start(operation);
@@ -605,20 +611,37 @@ class PlayerController extends ChangeNotifier {
       EmbyUser? loadedUser;
       await Future.wait<void>([
         _restoreSettings(operation),
-        _sourceRequest(() => client.getItem(itemId)).then<void>((value) {
-          loadedItem = value;
-        }),
         () async {
-          try {
-            loadedUser = await _sourceRequest(client.getUser);
-          } on EmbyException {
-            // Optional user preferences must not block an otherwise playable item.
+          final startup = _startupData;
+          _startupData = null;
+          final prepared = await startup;
+          if (!_accepts(operation)) return;
+          if (!_scopedPlayback &&
+              prepared != null &&
+              prepared.item.id == itemId &&
+              (prepared.user == null || prepared.user!.id == client.userId)) {
+            loadedItem = prepared.item;
+            loadedUser = prepared.user;
+            return;
           }
+          await Future.wait<void>([
+            _sourceRequest(
+              () => client.getItem(itemId),
+            ).then<void>((value) => loadedItem = value),
+            () async {
+              try {
+                loadedUser = await _sourceRequest(client.getUser);
+              } on EmbyException {
+                // Optional preferences must not fail otherwise playable media.
+              }
+            }(),
+          ], eagerError: true);
         }(),
       ], eagerError: true);
       if (!_accepts(operation)) {
         return;
       }
+      PlayerStartupTrace.record('controller.catalogReady');
       item = loadedItem;
       if (!item!.isPlayable) {
         error = PlayerErrorKind.notPlayable;
@@ -3272,6 +3295,7 @@ class PlayerController extends ChangeNotifier {
     _emit();
 
     try {
+      PlayerStartupTrace.record('controller.playbackInfo');
       onStage?.call('metadata');
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
@@ -3301,6 +3325,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) {
         return;
       }
+      PlayerStartupTrace.record('controller.playbackInfoReady');
       mediaSources = info.mediaSources;
       if (runtime != null && origin != null) {
         preferenceResolution = runtime!.preference(

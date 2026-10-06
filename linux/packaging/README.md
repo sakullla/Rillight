@@ -39,6 +39,6 @@ hardware GPU performance, or a macOS/Windows result. Restore the ordinary
 From Windows, `tool/linux_playback_validation.ps1 -Container NAME` copies a
 current source snapshot into a prepared Linux container, builds production and
 smoke targets, and saves logs under `build/player-validation/`. The container
-needs Flutter 3.47.4, a verified core SDK at `/cache/native`, and the listed
+needs Flutter 3.47.6, a verified core SDK at `/cache/native`, and the listed
 window-smoke dependencies. The script reports failures as failures; it does
 not turn Docker/Xvfb evidence into a Linux hardware claim.

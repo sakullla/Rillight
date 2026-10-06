@@ -23,6 +23,80 @@ Uint8List _paddedProgressiveMp4() {
 }
 
 void main() {
+  for (final closeEarly in [false, true]) {
+    test(
+      'HTTP begins during cache initialization (close=$closeEarly)',
+      () async {
+        final initialized = Completer<SessionByteCache>();
+        final requested = Completer<void>();
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final proxy = await PlaybackHttpProxy.create(cache: initialized.future);
+        final client = HttpClient();
+        server.listen((request) async {
+          requested.complete();
+          request.response.write('startup');
+          await request.response.close();
+        });
+        final response = (await client.getUrl(
+          proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+        )).close();
+        try {
+          // A gate, rather than a timing comparison, proves the HTTP request
+          // reaches its origin before cache initialization is allowed to finish.
+          await requested.future.timeout(const Duration(seconds: 3));
+          expect(initialized.isCompleted, false);
+          final failedRead = closeEarly
+              ? response
+                    .then<void>((value) => value.drain<void>())
+                    .catchError((Object _) {})
+              : null;
+          final closing = closeEarly ? proxy.close() : null;
+          final cache = await SessionByteCache.open();
+          initialized.complete(cache);
+          if (closeEarly) {
+            await closing;
+            await failedRead;
+            expect(cache.diagnostics['closed'], true);
+          } else {
+            expect(
+              await (await response).transform(utf8.decoder).join(),
+              'startup',
+            );
+          }
+        } finally {
+          if (!initialized.isCompleted) {
+            initialized.complete(await SessionByteCache.open());
+          }
+          client.close(force: true);
+          await proxy.close();
+          await server.close(force: true);
+        }
+      },
+    );
+  }
+
+  test('adjacent tail metadata probes share one validated suffix', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 8 * mib,
+    );
+    fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+    await fixture.readBytes('bytes=0-0');
+    final tags = await fixture.read('bytes=${8 * mib - 1124}-${8 * mib - 1}');
+    expect(tags.$2, String.fromCharCode(9) * 1124);
+    final cues = await fixture.read(
+      'bytes=${8 * mib - 13406}-${8 * mib - 1125}',
+    );
+    expect(cues.$2, String.fromCharCode(9) * 12282);
+    expect(fixture.ranges, [
+      'bytes=0-0',
+      'bytes=${8 * mib - 64 * 1024}-${8 * mib - 1}',
+    ]);
+  });
+
   test(
     'next-episode warm handoff keeps cache coverage and download speed after seek',
     () async {
@@ -1829,6 +1903,143 @@ void main() {
 
   for (final readAhead in [false, true]) {
     test(
+      'first tiny media packet readAhead=$readAhead is delivered before the next packet',
+      () async {
+        const mib = 1024 * 1024;
+        final fixture = await _CacheFixture.open(
+          memoryBytes: 8 * mib,
+          disk: true,
+          sessionBuffering: true,
+          readAheadBytes: readAhead ? 8 * mib : 0,
+        );
+        fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+        fixture.holdAfterBytes = 1024;
+        fixture.hold = Completer<void>();
+        StreamIterator<List<int>>? chunks;
+        try {
+          final request = await fixture.client.getUrl(fixture.url);
+          request.headers.set('range', 'bytes=0-');
+          final response = await request.close().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => throw StateError(
+              'first packet headers: '
+              'originHeld=${fixture.holdEntered} '
+              'received=${fixture.proxy.upstreamBytes} '
+              'producer=${fixture.proxy.diagnostics['readAheadConcurrentTransfers']} '
+              'waiting=${fixture.proxy.diagnostics['readAheadReaderWaiting']}',
+            ),
+          );
+          chunks = StreamIterator(response);
+          expect(
+            await chunks.moveNext().timeout(const Duration(seconds: 3)),
+            true,
+          );
+          expect(chunks.current, everyElement(9));
+          expect(chunks.current.length, lessThanOrEqualTo(1024));
+          expect(fixture.hold!.isCompleted, false);
+          expect(fixture.ranges, ['bytes=0-']);
+        } finally {
+          fixture.hold!.complete();
+          await chunks?.cancel();
+        }
+      },
+    );
+  }
+
+  test('small sequential media reads share one live download', () async {
+    const kib = 1024;
+    const mib = 1024 * kib;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 8 * mib,
+    );
+    fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+    await fixture.readBytes('bytes=0-0');
+    fixture.delay = const Duration(milliseconds: 150);
+    fixture.holdAfterBytes = mib;
+    fixture.hold = Completer<void>();
+    try {
+      for (var i = 0; i < 8; i++) {
+        final start = 1 + i * 64 * kib;
+        final (status, body) = await fixture
+            .read('bytes=$start-${start + 64 * kib - 1}')
+            .timeout(const Duration(seconds: 5));
+        expect(status, 206);
+        expect(body, String.fromCharCode(9) * 64 * kib);
+      }
+      // The native reader must get its bytes while the large origin response
+      // is still incomplete, without reopening a tiny Range for each read.
+      expect(fixture.holdEntered, true);
+      expect(fixture.hold!.isCompleted, false);
+      expect(fixture.ranges, ['bytes=0-0', 'bytes=1-${8 * mib - 1}']);
+      expect(fixture.proxy.diagnostics['readAheadTransferPeak'], 1);
+    } finally {
+      fixture.hold!.complete();
+    }
+  });
+
+  test(
+    'cold media open adopts its response without a second origin request',
+    () async {
+      const mib = 1024 * 1024;
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 8 * mib,
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 8 * mib,
+      );
+      fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+      fixture.delay = const Duration(milliseconds: 150);
+      final (status, body) = await fixture.read('bytes=0-');
+      expect(status, 206);
+      expect(body, String.fromCharCode(9) * 8 * mib);
+      expect(fixture.ranges, ['bytes=0-']);
+      expect(fixture.proxy.upstreamBytes, 8 * mib);
+      await fixture.settle();
+      await fixture.readBytes('bytes=${2 * mib}-${3 * mib - 1}');
+      expect(fixture.ranges, ['bytes=0-']);
+    },
+  );
+
+  test('adopted startup response resumes at its first missing byte', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 8 * mib,
+    );
+    fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+    fixture.truncateAfterBytes = mib;
+    fixture.afterTruncate = () => fixture.truncateAfterBytes = null;
+    final (status, body) = await fixture.read('bytes=0-');
+    expect(status, 206);
+    expect(body, String.fromCharCode(9) * 8 * mib);
+    expect(fixture.ranges, ['bytes=0-', 'bytes=$mib-${8 * mib - 1}']);
+    expect(fixture.proxy.upstreamBytes, 8 * mib);
+    expect(fixture.proxy.diagnostics['readAheadFailed'], false);
+  });
+
+  test('adopted open-ended response keeps the 32 MiB transfer bound', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 64 * mib,
+    );
+    fixture.binaryBody = Uint8List(40 * mib)..fillRange(0, 40 * mib, 9);
+    final (status, body) = await fixture.read('bytes=0-');
+    expect(status, 206);
+    expect(body, String.fromCharCode(9) * 40 * mib);
+    expect(fixture.ranges, ['bytes=0-', 'bytes=${32 * mib}-${40 * mib - 1}']);
+    expect(fixture.proxy.diagnostics['readAheadFailed'], false);
+  });
+
+  for (final readAhead in [false, true]) {
+    test(
       '${readAhead ? 'read-ahead' : 'cache gap'} rejects changed content after a partial transfer',
       () async {
         const mib = 1024 * 1024;
@@ -1949,9 +2160,9 @@ void main() {
     );
   }
 
-  for (final lanes in [1, 4]) {
+  for (final (lanes, delayedRelease) in [(1, false), (1, true), (4, false)]) {
     test(
-      'foreground probe with $lanes lanes releases background streams',
+      'foreground probe with $lanes lanes releases background streams (delayed=$delayedRelease)',
       () async {
         const mib = 1024 * 1024;
         final fixture = await _CacheFixture.open(
@@ -1964,6 +2175,9 @@ void main() {
         fixture.binaryBody = Uint8List(48 * mib)..fillRange(0, 48 * mib, 7);
         await fixture.readBytes('bytes=0-0');
         fixture.chunkDelay = const Duration(milliseconds: 4);
+        if (delayedRelease) {
+          fixture.streamReleaseDelay = const Duration(milliseconds: 100);
+        }
         final playback = fixture.readBytes('bytes=0-${2 * mib - 1}');
         final deadline = DateTime.now().add(const Duration(seconds: 5));
         while ((fixture._activeBodies < lanes ||
@@ -1981,8 +2195,11 @@ void main() {
         expect(probe.$1, 206);
         expect(probe.$2.codeUnits, List.filled(32, 7));
         expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
-        expect(fixture.proxy.diagnostics['serialUpstream'], lanes > 1);
-        if (lanes == 1) expect(fixture.parallelRefusals, 0);
+        expect(
+          fixture.proxy.diagnostics['serialUpstream'],
+          fixture.parallelRefusals > 0,
+        );
+        if (delayedRelease) expect(fixture.parallelRefusals, greaterThan(0));
         expect(fixture.proxy.diagnostics['readAheadConcurrencyLimit'], 1);
         final refusals = fixture.parallelRefusals;
         final second = await fixture.read('bytes=${42 * mib}-${42 * mib + 31}');
@@ -3060,6 +3277,7 @@ class _CacheFixture {
   int? redirectVersion;
   Duration delay = Duration.zero;
   Duration chunkDelay = Duration.zero;
+  Duration streamReleaseDelay = Duration.zero;
   int? parallelRefusalStatus;
   String refusalBody = '';
   int parallelRefusals = 0;
@@ -3141,6 +3359,10 @@ class _CacheFixture {
     } on HttpException {
       // Same intentional cancellation while a delayed response is flushing.
     } finally {
+      if (request.response.statusCode == 206 &&
+          streamReleaseDelay != Duration.zero) {
+        await Future<void>.delayed(streamReleaseDelay);
+      }
       _activeBodies--;
     }
   }
@@ -3213,6 +3435,7 @@ class _CacheFixture {
       final holdAt = holdAfterBytes;
       if (holdAt != null && hold != null && bytes.length > holdAt) {
         holdEntered = true;
+        output.bufferOutput = false;
         output.add(bytes.sublist(0, holdAt));
         await output.flush();
         await hold!.future;

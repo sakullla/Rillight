@@ -28,7 +28,7 @@ jobs:
             wayland-protocols libxkbcommon-dev libepoxy-dev ffmpeg
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.47.4'
+          flutter-version: '3.47.6'
           channel: stable
           cache: true
       - name: Restore pinned Linux SDK

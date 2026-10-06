@@ -16,7 +16,7 @@
 
 ## 开发与验证
 
-使用 Flutter 3.47.4（Dart 3.11.5+）及对应平台工具链。原生构建需要仓库固定来源的 FFmpeg/libass SDK；不同平台的构建入口、环境变量、来源哈希与许可证材料见[播放器包说明](packages/rillight_player/README.md)。缺少 SDK 时构建应明确失败，不会改用 libmpv 或 Media3。
+使用 Flutter 3.47.6（Dart 3.11.5+）及对应平台工具链。原生构建需要仓库固定来源的 FFmpeg/libass SDK；不同平台的构建入口、环境变量、来源哈希与许可证材料见[播放器包说明](packages/rillight_player/README.md)。缺少 SDK 时构建应明确失败，不会改用 libmpv 或 Media3。
 
 ```sh
 flutter pub get
@@ -29,6 +29,8 @@ flutter test packages/rillight_player/test
 Android APK 在设置 `RILLIGHT_CORE_SDK_ROOT` 后使用 `flutter build apk --debug` 构建；SDK 必须含 arm64-v8a、armeabi-v7a 和 x86_64。Android Studio 手机与 TV 模拟器用隔离的 `.validation` 应用和合成凭据验证，操作与证据边界见 [Android 验证说明](integration_test/android/README.md)。桌面使用 `flutter run -d windows`、`linux` 或 `macos`，分别在对应宿主构建。
 
 新增或重命名 `test/*_cases.dart` 后运行 `python tool/test_execution/generate_suites.py`。完整页面用例标记 `integration`；默认 `flutter test` 仍包含这些用例。播放代理、缓存和 UI 用例不能代替实际画面、声音及硬件稳定性测试。
+
+Windows 播放窗口预热、实际画面起播计时及合成慢响应对照见 [起播验证说明](tool/player_startup_validation.md)。保持默认 Impeller 渲染器，预热仅提前初始化一个隐藏引擎；点击播放后才请求影片信息和视频。
 
 ## 候选制品与实测边界
 

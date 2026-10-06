@@ -208,6 +208,15 @@ class _RejectedAudioCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  late Directory isolatedCache;
+  setUp(() async {
+    isolatedCache = await Directory.systemTemp.createTemp(
+      'rillight-backend-test-',
+    );
+    // Never join the real player's shared quota while running unit tests.
+    // A test's default 2 GiB budget can evict an active 8 GiB session.
+    addTearDown(() => isolatedCache.delete(recursive: true));
+  });
   test(
     'stalled live downloader renews its source without discarding cached bytes',
     () async {
@@ -294,6 +303,7 @@ void main() {
     () async {
       final driver = _CoreDriver();
       final backend = RillightVideoBackend(
+        diskCacheDirectory: isolatedCache,
         settingsStore: MemoryPlayerSettingsStore(),
         createPlayer: () async => driver,
       );
@@ -343,6 +353,7 @@ void main() {
         await request.response.close();
       });
       final backend = RillightVideoBackend(
+        diskCacheDirectory: isolatedCache,
         settingsStore: MemoryPlayerSettingsStore(),
         createPlayer: () async => _WarmHandoffCoreDriver(),
       );
@@ -398,7 +409,9 @@ void main() {
             (s) =>
                 s.sessionId == 2 &&
                 s.byteCoverage?.ranges.any(
-                      (r) => r.start == 131072 && r.end == 262144,
+                      // The continuous producer may already have cached
+                      // beyond the small seek response when diagnostics run.
+                      (r) => r.start <= 131072 && r.end >= 262144,
                     ) ==
                     true,
           ),
@@ -419,6 +432,7 @@ void main() {
     () async {
       final core = _RejectedAudioCoreDriver();
       final backend = RillightVideoBackend(
+        diskCacheDirectory: isolatedCache,
         settingsStore: MemoryPlayerSettingsStore(),
         createPlayer: () async => core,
       );
@@ -504,6 +518,7 @@ void main() {
       PlatformException(code: 'playback', message: 'Core rejected media open'),
     );
     final backend = RillightVideoBackend(
+      diskCacheDirectory: isolatedCache,
       settingsStore: MemoryPlayerSettingsStore(),
       createPlayer: () async => core,
     );
@@ -532,6 +547,7 @@ void main() {
       ),
     );
     final backend = RillightVideoBackend(
+      diskCacheDirectory: isolatedCache,
       settingsStore: MemoryPlayerSettingsStore(),
       createPlayer: () async => core,
     );
@@ -559,6 +575,7 @@ void main() {
       ),
     );
     final backend = RillightVideoBackend(
+      diskCacheDirectory: isolatedCache,
       settingsStore: MemoryPlayerSettingsStore(),
       createPlayer: () async => core,
     );
@@ -582,6 +599,7 @@ void main() {
       TimeoutException('Core did not render the first frame'),
     );
     final backend = RillightVideoBackend(
+      diskCacheDirectory: isolatedCache,
       settingsStore: MemoryPlayerSettingsStore(),
       createPlayer: () async => core,
     );
@@ -601,6 +619,7 @@ void main() {
   test('container track IDs follow confirmed native audio changes', () async {
     final core = _TrackIdCoreDriver();
     final backend = RillightVideoBackend(
+      diskCacheDirectory: isolatedCache,
       settingsStore: MemoryPlayerSettingsStore(),
       createPlayer: () async => core,
     );

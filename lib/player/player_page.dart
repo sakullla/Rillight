@@ -183,6 +183,7 @@ class PlayerPageState extends State<PlayerPage> {
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
       seekStep: bindings.seekStep,
       settingsStore: bindings.settingsStore,
+      startupData: bindings.startupData,
       snapshotStore: bindings.snapshotStore,
       onClose: _leave,
       onOpenItem: _openItem,

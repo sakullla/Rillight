@@ -17,6 +17,7 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/player_startup.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -92,6 +93,61 @@ void main() {
 
   EmbyItem episode(String id) =>
       EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
+
+  test(
+    'prepared metadata retains fresh resume preferences without duplicate requests',
+    () async {
+      await controller.disposeAsync();
+      controller.dispose();
+      controller = PlayerController(
+        client: client,
+        itemId: 'movie-up',
+        backend: backend,
+        window: PlayerWindow(),
+        settingsStore: settings,
+        snapshotStore: snapshots,
+        startupData: Future.value(
+          PlayerStartupData(
+            EmbyItem.fromJson({
+              'Id': 'movie-up',
+              'Type': 'Movie',
+              'UserData': {'PlaybackPositionTicks': 300000000},
+            }),
+            EmbyUser(id: client.userId!, name: 'test', resumeRewindSeconds: 5),
+          ),
+        ),
+      );
+      final beforeUsers = client.userRequests;
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(client.requestedItems, isEmpty);
+      expect(client.userRequests, beforeUsers);
+      expect(backend.openedStart, const Duration(seconds: 25));
+      await controller.start();
+      expect(client.requestedItems, ['movie-up']);
+      expect(client.userRequests, beforeUsers + 1);
+    },
+  );
+
+  test(
+    'prepared metadata for another item falls back to fresh requests',
+    () async {
+      await controller.disposeAsync();
+      controller.dispose();
+      controller = PlayerController(
+        client: client,
+        itemId: 'movie-up',
+        backend: backend,
+        window: PlayerWindow(),
+        settingsStore: settings,
+        snapshotStore: snapshots,
+        startupData: Future.value(PlayerStartupData(episode('wrong'), null)),
+      );
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(client.requestedItems, ['movie-up']);
+    },
+  );
 
   test('startup loads item and resume preferences concurrently', () async {
     final gate = client.itemGates['movie-up'] = Completer<void>();

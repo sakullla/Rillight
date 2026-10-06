@@ -17,6 +17,154 @@ Future<void> _until(bool Function() ready) async {
 
 void main() {
   test(
+    'hidden prepared engine is adopted once without another launch or premature activation',
+    () async {
+      final control = _ControlledProcess();
+      addTearDown(control.clean);
+      final preparing = control.prepare(executable: 'test');
+      await _until(() => control.endpoint != null);
+      expect(
+        jsonDecode(
+          await control.endpoint!.launchFile.readAsString(),
+        )['warmPlayer'],
+        isTrue,
+      );
+      await control.ready();
+      await preparing;
+      expect(control.activations, isEmpty);
+      expect(control.activationGrants, isEmpty);
+      final endpoint = control.endpoint;
+      control.cancelPendingSpawns();
+      final spawning = control.spawn(
+        executable: 'test',
+        arguments: '{"itemId":"selected"}',
+      );
+      Map<String, dynamic>? start;
+      while (start == null) {
+        start = await endpoint!.read('start');
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(control.endpoint, same(endpoint));
+      expect(control.launchCount, 1);
+      expect(control.activationGrants, [42]);
+      expect(
+        jsonDecode(await endpoint!.launchFile.readAsString())['itemId'],
+        'selected',
+      );
+      await control.ready();
+      expect(await spawning, 42);
+      expect(control.activations, [42]);
+    },
+  );
+
+  test('discard closes a hidden engine and clears its mailbox', () async {
+    final control = _ControlledProcess();
+    addTearDown(control.clean);
+    final preparing = control.prepare(executable: 'test');
+    await _until(() => control.endpoint != null);
+    await control.ready();
+    await preparing;
+    await control.discardPrepared();
+    expect(control.alive, isFalse);
+    expect(control.activePids, isEmpty);
+    expect(await control.endpoint!.directory.exists(), isFalse);
+  });
+
+  test('a dead hidden engine falls back to a cold launch', () async {
+    final control = _ControlledProcess();
+    addTearDown(control.clean);
+    final preparing = control.prepare(executable: 'test');
+    await _until(() => control.endpoint != null);
+    await control.ready();
+    await preparing;
+    control.alive = false;
+    final spawning = control.spawn(executable: 'test', arguments: '{}');
+    await _until(() => control.launchCount == 2);
+    await control.ready();
+    expect(await spawning, 42);
+    expect(control.activations, [42]);
+  });
+
+  test(
+    'play during unfinished prewarm adopts the same engine after it is ready',
+    () async {
+      final control = _ControlledProcess();
+      addTearDown(control.clean);
+      final preparing = control.prepare(executable: 'test');
+      await _until(() => control.endpoint != null);
+      control.cancelPendingSpawns();
+      final spawning = control.spawn(executable: 'test', arguments: '{}');
+      await control.ready();
+      await preparing;
+      Map<String, dynamic>? start;
+      while (start == null) {
+        start = await control.endpoint!.read('start');
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(control.launchCount, 1);
+      await control.ready();
+      expect(await spawning, 42);
+      expect(control.activations, [42]);
+    },
+  );
+
+  test('close during prewarm retires the unfinished hidden engine', () async {
+    final control = _ControlledProcess();
+    addTearDown(control.clean);
+    final preparing = control.prepare(executable: 'test');
+    await _until(() => control.endpoint != null);
+    await control.discardPrepared();
+    await preparing;
+    expect(control.alive, isFalse);
+    expect(control.activePids, isEmpty);
+    expect(await control.endpoint!.directory.exists(), isFalse);
+  });
+
+  test(
+    'metadata handoff does not delay process creation or readiness',
+    () async {
+      final control = _ControlledProcess();
+      addTearDown(control.clean);
+      final startup = Completer<Map<String, dynamic>>();
+      final spawning = control.spawn(
+        executable: 'test',
+        arguments: '{}',
+        startup: startup.future,
+      );
+      await _until(() => control.endpoint != null);
+      await control.ready();
+      expect(await spawning, 42);
+      expect(startup.isCompleted, isFalse);
+      startup.complete({'itemId': 'fresh'});
+      Map<String, dynamic>? received;
+      for (var i = 0; i < 100 && received == null; i++) {
+        received = await control.endpoint!.read('startup');
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      expect(received?['itemId'], 'fresh');
+    },
+  );
+
+  test('late metadata cannot recreate a retired mailbox', () async {
+    final control = _ControlledProcess();
+    addTearDown(control.clean);
+    final startup = Completer<Map<String, dynamic>>();
+    final spawning = control.spawn(
+      executable: 'test',
+      arguments: '{}',
+      startup: startup.future,
+    );
+    await _until(() => control.endpoint != null);
+    await control.ready();
+    final child = await spawning;
+    await control.kill(child);
+    await control.release(child);
+    startup.complete({'itemId': 'late'});
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(await control.endpoint!.directory.exists(), isFalse);
+  });
+
+  test(
     'Windows denied termination accepts a subsequently confirmed exit',
     () async {
       final child = _FakeWindowsProcess(42)
@@ -409,7 +557,11 @@ class _ControlledProcess extends DesktopPlayerProcessControl {
   PlayerProcessProtocol? endpoint;
   bool alive = false;
   int killed = 0;
+  int launchCount = 0;
   final activations = <int>[];
+  final activationGrants = <int>[];
+  @override
+  void grantActivation(int pid) => activationGrants.add(pid);
   Completer<void>? activationGate;
 
   @override
@@ -424,6 +576,7 @@ class _ControlledProcess extends DesktopPlayerProcessControl {
       jsonDecode(await File(payloadPath).readAsString()),
     );
     alive = true;
+    launchCount++;
     return 42;
   }
 

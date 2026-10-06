@@ -103,7 +103,6 @@ class SessionReadAhead {
   /// playback readers alive; the pool queues the restarted producer behind it.
   Future<void Function()> yieldToForeground({String? refusal}) async {
     _foregroundAcquisitions++;
-    final wasDownloading = _worker != null;
     final waiting = _readerWaiting;
     final active = _active;
     if (refusal != null) {
@@ -114,9 +113,10 @@ class SessionReadAhead {
     _active = active;
     _readerWaiting = waiting;
     await _worker;
-    // A cancelled response can retain the origin's stream lease until its
-    // socket close arrives. Do not race a foreground retry against that lease.
-    if (wasDownloading || _concurrencyFallback != null) {
+    // Apply stream-lease grace only after an actual concurrency refusal.
+    // Ordinary MKV index probes should not each pay an extra 250 ms after
+    // cancellation. A refusing origin still teaches the existing serial retry.
+    if (_concurrencyFallback != null) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
     return () {

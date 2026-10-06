@@ -66,4 +66,7 @@ Future<void> main(List<String> args) async {
       ),
     ),
   );
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(playerHost.prepare());
+  });
 }

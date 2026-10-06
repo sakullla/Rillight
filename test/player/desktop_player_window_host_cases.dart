@@ -134,6 +134,30 @@ void main() {
     ];
   }
 
+  test(
+    'fresh metadata is fetched while the player process is still booting',
+    () async {
+      final auth = await loggedInAuth();
+      final host = newHost(auth);
+      addTearDown(() {
+        host.dispose();
+        auth.dispose();
+      });
+      control.spawnHold = Completer<void>();
+      final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      while (control.startupPayloads.isEmpty) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      final payload = await control.startupPayloads.single!;
+      expect(payload['itemId'], 'movie-up');
+      expect((payload['item'] as Map)['Id'], 'movie-up');
+      expect(host.current, isNull);
+      control.spawnHold!.complete();
+      await opening;
+      await host.close();
+    },
+  );
+
   group('DesktopPlayerWindowHost', () {
     test(
       'a delayed detail command cannot route after another player opens',
@@ -802,6 +826,7 @@ void main() {
       listener.onWindowClose();
       await tester.pump();
       await pumpUntil(tester, () => calls.contains('destroy'));
+      await tester.pumpAndSettle();
 
       expect(calls, [
         'spawn:$pid',

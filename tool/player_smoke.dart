@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
+import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -955,8 +956,14 @@ Future<void> main(List<String> args) async {
         userAgent: 'Rillight-Validation',
       );
       if (!app!.auth.isLoggedIn) throw StateError('Synthetic login failed');
+      final host = app!.windowHost;
+      if (host is DesktopPlayerWindowHost) await host.prepare();
+      await record('prepared-through-production-host');
+      final hostOpenWatch = Stopwatch()..start();
       await app!.windowHost.open(const PlayerOpenRequest(itemId: 'baseline'));
-      await record('opened-through-production-host');
+      await record('opened-through-production-host', {
+        'openMs': hostOpenWatch.elapsedMilliseconds,
+      });
       final settingsWrites = () async {
         final settings = await openPlayerSettingsStore();
         for (var index = 0; index < 20; index++) {

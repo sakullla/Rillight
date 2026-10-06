@@ -1,6 +1,6 @@
 """Build current sources and validate Linux in a prepared Docker container.
 
-Prerequisites: /cache/flutter (3.47.4), /cache/pub, /cache/native (pinned
+Prerequisites: /cache/flutter (3.47.6), /cache/pub, /cache/native (pinned
 media build), Linux build tools and the playback_smoke.sh dependencies.
 The repository must be mounted read-only at /source, including the synthetic
 build/player-validation/media fixtures. No existing build is accepted as proof.
@@ -41,8 +41,8 @@ def inside(output):
     try:
         run('sdk', ['flutter', '--version', '--machine'])
         sdk = json.loads((output / 'sdk.log').read_text())
-        if sdk['frameworkVersion'] != '3.47.4':
-            raise RuntimeError('Linux validation requires Flutter 3.47.4')
+        if sdk['frameworkVersion'] != '3.47.6':
+            raise RuntimeError('Linux validation requires Flutter 3.47.6')
         run('compiler', ['clang', '--version'])
         run('cmake', ['cmake', '--version'])
         run('dependencies', ['flutter', 'pub', 'get'])

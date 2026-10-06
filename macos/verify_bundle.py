@@ -43,7 +43,7 @@ def verify(app_path, *, signed=False):
         info = plistlib.load(source)
     minimum = tuple(map(int, info['LSMinimumSystemVersion'].split('.')))
     if minimum < (12, 0):
-        raise RuntimeError('Flutter 3.47.4 requires macOS 12 or newer')
+        raise RuntimeError('Flutter 3.47.6 requires macOS 12 or newer')
     record_path = resources / 'rillight-macos-closure.json'
     source_lock_path = resources / 'rillight-core-source-lock.json'
     sdk_marker_path = resources / 'rillight-core-dependencies.json'

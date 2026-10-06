@@ -32,16 +32,19 @@ class PlaybackHttpProxy {
     this._server,
     this.origin,
     this.headers,
-    this.cache,
+    this._cache,
     this.dynamicSource,
     this.sessionBuffering,
     this.readAheadBytes,
     this.readAheadConcurrency,
     this.onStreamChanged,
+    Future<SessionByteCache>? pendingCache,
   ) : _secret = List.generate(
         24,
         (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join() {
+    _cacheReady = pendingCache?.then((value) => _cache = value);
+    _cacheReady?.ignore();
     _client.autoUncompress = true;
     // Read-ahead lanes must not occupy foreground seek/subtitle connections.
     _client.maxConnectionsPerHost = _maxRequests + 4;
@@ -56,7 +59,9 @@ class PlaybackHttpProxy {
   final Uri? origin;
   final Map<String, String> headers;
   final String _secret;
-  final SessionByteCache? cache;
+  SessionByteCache? _cache;
+  SessionByteCache? get cache => _cache;
+  Future<SessionByteCache>? _cacheReady;
   final bool dynamicSource;
 
   /// Explicit playback-only storage policy. The cache must be session-owned
@@ -487,7 +492,7 @@ class PlaybackHttpProxy {
   static Future<PlaybackHttpProxy> create({
     Uri? origin,
     Map<String, String> headers = const {},
-    SessionByteCache? cache,
+    FutureOr<SessionByteCache>? cache,
     bool dynamicSource = false,
     bool sessionBuffering = false,
     int readAheadBytes = 0,
@@ -497,12 +502,13 @@ class PlaybackHttpProxy {
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
     origin,
     Map.unmodifiable(headers),
-    cache,
+    cache is SessionByteCache ? cache : null,
     dynamicSource,
     sessionBuffering,
     readAheadBytes,
     readAheadConcurrency,
     onStreamChanged,
+    cache is Future<SessionByteCache> ? cache : null,
   );
 
   Duration bufferedEnd(Duration position, Duration demuxerEnd) {
@@ -1183,6 +1189,10 @@ class PlaybackHttpProxy {
     } catch (_) {
       return false;
     }
+    if (_cacheReady != null) {
+      await Future.any([_cacheReady!, read.cancelledFuture]);
+      read.check();
+    }
     final parsed = MediaContentRange.parse(
       upstream.headers.value('content-range'),
     );
@@ -1551,11 +1561,16 @@ class PlaybackHttpProxy {
   }) async {
     read.releaseUnconsumedResponse();
     void Function()? resumeReadAhead;
+    var yieldedMediaTransfer = false;
     if (_serialUpstream && !read.readAheadProducer) {
       await _retireBufferedResponses(read);
     }
     if ((_serialUpstream || readAheadConcurrency == 1) &&
         !read.readAheadProducer) {
+      yieldedMediaTransfer =
+          (_readAhead?.diagnostics['readAheadConcurrentTransfers'] as int? ??
+              0) >
+          0;
       resumeReadAhead = await _readAhead?.yieldToForeground();
     }
     try {
@@ -1659,7 +1674,9 @@ class PlaybackHttpProxy {
         if (!read.readAheadProducer &&
             !_serialUpstream &&
             const [403, 409, 429, 503].contains(response.statusCode) &&
-            ((_readAhead?.diagnostics['readAheadConcurrentTransfers'] as int? ??
+            (yieldedMediaTransfer ||
+                (_readAhead?.diagnostics['readAheadConcurrentTransfers']
+                            as int? ??
                         0) >
                     0 ||
                 _responseReadAheads.isNotEmpty)) {
@@ -1667,9 +1684,14 @@ class PlaybackHttpProxy {
           await _retireRejectedResponse(response, read);
           read.requests.clear();
           _useSerialUpstream();
-          resumeReadAhead ??= await _readAhead?.yieldToForeground(
+          final resumePrevious = resumeReadAhead;
+          final resumeAfterRefusal = await _readAhead?.yieldToForeground(
             refusal: 'foreground-http-${response.statusCode}',
           );
+          resumeReadAhead = () {
+            resumeAfterRefusal?.call();
+            resumePrevious?.call();
+          };
           await _retireBufferedResponses(read);
           final retryAfter = _retryAfter(response.headers.value('retry-after'));
           if (retryAfter != null) {
@@ -2504,7 +2526,12 @@ class PlaybackHttpProxy {
     }
   }
 
-  bool _canReadAhead(HttpRequest incoming, String key, _Representation? rep) {
+  bool _canReadAhead(
+    HttpRequest incoming,
+    String key,
+    _Representation? rep, {
+    bool allowSmallMediaRange = false,
+  }) {
     final storage = cache;
     if (readAheadBytes <= 0 ||
         !_playbackActive ||
@@ -2530,7 +2557,18 @@ class PlaybackHttpProxy {
       incoming.headers.value('range'),
       rep.total,
     );
-    return range != null && range.length >= 1024 * 1024;
+    if (range == null) return false;
+    if (range.length >= 1024 * 1024) return true;
+    // Native readers may request one AVIO-sized slice at a time. Once the
+    // representation is known, stream these slices from the same bounded
+    // producer instead of paying a new HTTP round trip per 64 KiB. Keep tiny
+    // metadata probes and the EOF index suffix on the foreground cache path.
+    // A short initial response cannot seed a larger producer range.
+    return allowSmallMediaRange &&
+        sessionBuffering &&
+        _roles[key] == PlaybackResourceRole.media &&
+        range.length >= 64 * 1024 &&
+        range.start < rep.total - 64 * 1024;
   }
 
   Future<bool> _tryReadAhead(
@@ -2539,9 +2577,18 @@ class PlaybackHttpProxy {
     Uri url,
     _ProxyRead read, {
     bool validated = false,
+    _ReadAheadSeed? seed,
   }) async {
     final rep = _representations[key];
-    if (rep == null || !_canReadAhead(incoming, key, rep)) return false;
+    if (rep == null ||
+        !_canReadAhead(
+          incoming,
+          key,
+          rep,
+          allowSmallMediaRange: seed == null,
+        )) {
+      return false;
+    }
     if (_readAhead?.resource == key && _readAhead!.failed) return false;
     // A VOD representation already tied to this private playback session has
     // a strong validator. Its cached blocks need no extra HEAD/GET probe on
@@ -2599,20 +2646,26 @@ class PlaybackHttpProxy {
                 for (var attempt = 0; cursor <= end && attempt < 6; attempt++) {
                   producer.check();
                   try {
-                    final (response, effective) = await _fetchOnce(
-                      incoming,
-                      url,
-                      allowRange: true,
-                      read: producer,
-                      method: 'GET',
-                      reportAuthentication: false,
-                      overrides: {
-                        'range': 'bytes=$cursor-$end',
-                        'if-range': rep.policy.strongEtag,
-                        'if-none-match': null,
-                        'if-modified-since': null,
-                      },
-                    );
+                    // The first response already paid for connection setup,
+                    // redirects and sniffing. Transfer its ownership to this
+                    // bounded producer instead of requesting byte zero again.
+                    final adopted = seed?.take(start, end, producer);
+                    final (response, effective) = adopted != null
+                        ? (adopted.response, adopted.effective)
+                        : await _fetchOnce(
+                            incoming,
+                            url,
+                            allowRange: true,
+                            read: producer,
+                            method: 'GET',
+                            reportAuthentication: false,
+                            overrides: {
+                              'range': 'bytes=$cursor-$end',
+                              'if-range': rep.policy.strongEtag,
+                              'if-none-match': null,
+                              'if-modified-since': null,
+                            },
+                          );
                     if (ahead?.hasParallelTransfers == true &&
                         const [
                           200,
@@ -2711,12 +2764,14 @@ class PlaybackHttpProxy {
                         response.statusCode != 206 ||
                         range == null ||
                         range.start != cursor ||
-                        range.end != end ||
+                        (adopted == null
+                            ? range.end != end
+                            : range.end < end) ||
                         range.total != rep.total ||
                         (!sessionBuffering && effective != rep.effective) ||
                         !policy.storable ||
                         policy.strongEtag != rep.policy.strongEtag ||
-                        response.contentLength != end - cursor + 1 ||
+                        response.contentLength != range.end - cursor + 1 ||
                         response.compressionState ==
                             HttpClientResponseCompressionState.decompressed) {
                       if (policy.strongEtag != null &&
@@ -2730,11 +2785,23 @@ class PlaybackHttpProxy {
                     }
                     rep.policy = policy;
                     _prefetchAuthenticationStatus = null;
-                    final iterator = StreamIterator<List<int>>(response);
+                    final iterator =
+                        adopted?.chunks ?? StreamIterator<List<int>>(response);
                     producer.iterators.add(iterator);
                     try {
-                      while (await _advance(iterator, producer)) {
-                        final bytes = iterator.current;
+                      List<int>? prefix = adopted?.prefix;
+                      while (cursor <= end &&
+                          (prefix != null ||
+                              await _advance(iterator, producer))) {
+                        final fromPrefix = prefix != null;
+                        final chunk = prefix ?? iterator.current;
+                        prefix = null;
+                        // The original open-ended response may exceed the
+                        // scheduler's 32 MiB window. Never grow that window.
+                        final bytes =
+                            adopted != null && chunk.length > end + 1 - cursor
+                            ? chunk.sublist(0, end + 1 - cursor)
+                            : chunk;
                         producer.check();
                         if (_representations[key]?.generation !=
                                 rep.generation ||
@@ -2743,7 +2810,7 @@ class PlaybackHttpProxy {
                             'Read-ahead representation changed',
                           );
                         }
-                        _received(bytes.length);
+                        if (!fromPrefix) _received(chunk.length);
                         cursor += bytes.length;
                         if (bytes.isNotEmpty) {
                           // Bound consecutive failures, not a healthy transfer's
@@ -2850,6 +2917,10 @@ class PlaybackHttpProxy {
         );
         ahead.setPrefetchAllowed(_playbackActive);
         _readAhead = ahead;
+      } else {
+        // An existing scheduler's fetch closure cannot adopt this response.
+        // Release it before that scheduler needs the single connection pool.
+        seed?.cancelUnused();
       }
       final range = MediaByteRange.resolve(
         incoming.headers.value('range'),
@@ -3201,6 +3272,19 @@ class PlaybackHttpProxy {
         missing + 256 * 1024 - 1,
         min(range.end, (next ?? range.end + 1) - 1),
       );
+      // MKV often places Tags and Cues in adjacent tiny ranges at EOF.
+      // Read that bounded suffix once instead of paying a round trip per
+      // element. Only validated, session-owned media can reuse these bytes.
+      final tailProbe =
+          sessionBuffering &&
+          !dynamicSource &&
+          readAheadBytes > 0 &&
+          _roles[key] == PlaybackResourceRole.media &&
+          representation.total > 1024 * 1024 &&
+          range.length <= 16 * 1024 &&
+          range.start >= representation.total - 64 * 1024;
+      final fetchStart = tailProbe ? representation.total - 64 * 1024 : missing;
+      final fetchEnd = tailProbe ? representation.total - 1 : end;
       // Check the first known gap's validator before committing cached prefixes.
       // A later representation change aborts the incomplete HTTP response.
       prefetched = await _loadGap(
@@ -3208,11 +3292,20 @@ class PlaybackHttpProxy {
         key,
         url,
         representation,
-        missing,
-        end,
+        fetchStart,
+        fetchEnd,
         read,
       );
       if (prefetched == null) return false;
+      if (tailProbe) {
+        prefetched = Uint8List.fromList(
+          Uint8List.sublistView(
+            prefetched,
+            missing - fetchStart,
+            end - fetchStart + 1,
+          ),
+        );
+      }
     }
     final prefetchedLength = prefetched?.length ?? 0;
     _charge(prefetchedLength);
@@ -3315,6 +3408,10 @@ class PlaybackHttpProxy {
     final chunks = StreamIterator(body);
     try {
       if (!await chunks.moveNext()) return false;
+      // Media readers need the first packet even when the origin pauses before
+      // its next one. HttpResponse's small-write buffer otherwise holds it.
+      // addStream still provides socket backpressure; cache blocks remain large.
+      output.bufferOutput = false;
       Stream<List<int>> remaining() async* {
         do {
           yield chunks.current;
@@ -3605,6 +3702,13 @@ class PlaybackHttpProxy {
         read: read,
         overrides: startupOverrides,
       );
+      // Start HTTP/TLS while the disk coordinator inventories old sessions.
+      // Storage must be ready before we admit/publish media, but it need not
+      // delay sending the first request to a high-latency origin.
+      if (_cacheReady != null) {
+        await Future.any([_cacheReady!, read.cancelledFuture]);
+        read.check();
+      }
       void copyResponseHeaders(HttpClientResponse source) {
         output.statusCode = source.statusCode;
         for (final name in [
@@ -3914,21 +4018,29 @@ class PlaybackHttpProxy {
           }
           if (response.statusCode == HttpStatus.partialContent &&
               _canReadAhead(incoming, key, representation)) {
-            // Metadata/sniffing is complete. Do not keep this unbounded probe
-            // downloading beside the bounded range producer.
-            for (final request in read.requests.toList()) {
-              request.abort();
-            }
-            read.requests.clear();
-            await chunks.cancel();
-            if (await _tryReadAhead(
-              incoming,
-              key,
-              url,
+            final seed = _ReadAheadSeed(
+              response,
+              effective,
+              chunks,
+              prefixBytes,
               read,
-              validated: true,
-            )) {
-              return;
+            );
+            // A scheduler owns its response independently of the downstream
+            // demuxer socket. Its cancellation/recovery rules still apply.
+            responseDetached = true;
+            try {
+              if (await _tryReadAhead(
+                incoming,
+                key,
+                url,
+                read,
+                validated: true,
+                seed: seed,
+              )) {
+                return;
+              }
+            } finally {
+              seed.cancelUnused();
             }
             _readAheadBypassReason ??= 'admission';
             _readAheadBypass.add(key);
@@ -4740,6 +4852,11 @@ class PlaybackHttpProxy {
     }
     _client.close(force: true);
     await _server.close(force: true);
+    try {
+      await _cacheReady;
+    } catch (_) {
+      // A failed cache initialization owns no disk session to close.
+    }
     await cache?.close();
     await Future.wait(_writes.toList());
     _routes.close();
@@ -4793,6 +4910,56 @@ class _Representation {
   final bool rangeSupported;
   bool complete = false;
   bool headUnsupported = false;
+}
+
+class _ReadAheadSeed {
+  _ReadAheadSeed(
+    this.response,
+    this.effective,
+    this.chunks,
+    this.prefix,
+    _ProxyRead read,
+  ) : owner = _ProxyRead() {
+    owner.requests.addAll(read.requests);
+    read.requests.clear();
+    owner.iterators.add(chunks);
+    read.iterators.remove(chunks);
+    owner.response = read.response;
+    read.response = null;
+  }
+
+  final HttpClientResponse response;
+  final Uri effective;
+  final StreamIterator<List<int>> chunks;
+  final List<int> prefix;
+  final _ProxyRead owner;
+  bool used = false;
+
+  _ReadAheadSeed? take(int start, int end, _ProxyRead producer) {
+    if (used) return null;
+    final range = MediaContentRange.parse(
+      response.headers.value('content-range'),
+    );
+    if (range == null || range.start != start || range.end < end) {
+      cancelUnused();
+      return null;
+    }
+    used = true;
+    producer.requests.addAll(owner.requests);
+    owner.requests.clear();
+    producer.iterators.addAll(owner.iterators);
+    owner.iterators.clear();
+    producer.response = owner.response;
+    owner.response = null;
+    return this;
+  }
+
+  void cancelUnused() {
+    if (!used) {
+      used = true;
+      owner.cancel();
+    }
+  }
 }
 
 class _ProxyRead {

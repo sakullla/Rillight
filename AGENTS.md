@@ -11,7 +11,7 @@ Rillight is a Flutter Emby client for Windows, macOS, Linux, Android phones and 
 
 ## Build, Test, and Development Commands
 
-Use Flutter 3.47.4 with desktop support enabled (Dart constraint `^3.11.5`).
+Use Flutter 3.47.6 with desktop support enabled (Dart constraint `^3.11.5`).
 
 - `flutter pub get` — install dependencies.
 - `flutter run -d macos` — launch the native macOS desktop window locally (macOS 12+).

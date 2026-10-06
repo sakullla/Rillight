@@ -1,3 +1,4 @@
+import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -30,6 +31,7 @@ import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_process_protocol.dart';
+import 'package:rillight/player/player_startup.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -52,6 +54,7 @@ class PlayerWindowLaunch {
     this.userAgent,
     this.protocol,
     this.regionGeneration,
+    this.preparedStartup = false,
   });
 
   final PlayerOpenRequest request;
@@ -62,10 +65,12 @@ class PlayerWindowLaunch {
   final String? userAgent;
   final PlayerProcessProtocol? protocol;
   final int? regionGeneration;
+  final bool preparedStartup;
 
   factory PlayerWindowLaunch.fromAuth({
     required AuthController auth,
     required PlayerOpenRequest request,
+    bool preparedStartup = false,
   }) {
     final client = auth.client;
     final baseUrl = client.baseUrl;
@@ -81,6 +86,7 @@ class PlayerWindowLaunch {
       userId: userId,
       device: client.device,
       userAgent: client.customUserAgent,
+      preparedStartup: preparedStartup,
     );
   }
 
@@ -125,6 +131,7 @@ class PlayerWindowLaunch {
       accessToken: json['accessToken'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
       userAgent: json['userAgent'] as String?,
+      preparedStartup: json['preparedStartup'] == true,
       protocol: json['processSessionId'] == null
           ? null
           : PlayerProcessProtocol.fromJson(json),
@@ -144,6 +151,7 @@ class PlayerWindowLaunch {
       if (request.work != null) 'work': encodeSource(request.work!),
       if (request.libraryId != null) 'libraryId': request.libraryId,
       if (regionGeneration != null) 'regionGeneration': regionGeneration,
+      if (preparedStartup) 'preparedStartup': true,
       ...?protocol?.fields,
       'itemId': request.itemId,
       'autoResume': request.autoResume,
@@ -261,6 +269,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   bool _watchBusy = false;
   bool _urgentLockBusy = false;
   String? _authIdentity;
+  PlayerStartupPreparation? _startupPreparation;
+  bool _opening = false;
   String get _currentAuthIdentity =>
       '${auth.client.baseUrl}|${auth.client.userId}|${auth.client.accessToken}';
 
@@ -277,6 +287,17 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   @override
   Stream<PlayerHostNotice> get notices => _notices.stream;
 
+  Future<void> prepare() async {
+    if (!Platform.isWindows ||
+        _disposed ||
+        _opening ||
+        _pid != 0 ||
+        !auth.isLoggedIn) {
+      return;
+    }
+    await _control.prepare(executable: Platform.resolvedExecutable);
+  }
+
   @override
   Future<void> open(PlayerOpenRequest request) {
     _pendingSwitch = null;
@@ -289,7 +310,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     PlayerOpenRequest request, {
     PlaybackOrigin? prepared,
   }) {
+    PlayerStartupTrace.record('host.open');
     final revision = ++_requestRevision;
+    _opening = true;
     _control.cancelPendingSpawns();
     return _runInFlight(() async {
       if (_disposed || revision != _requestRevision) return;
@@ -376,7 +399,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           regionGeneration: origin.permit.regionGeneration,
         );
       } else {
-        launch = PlayerWindowLaunch.fromAuth(auth: auth, request: request);
+        launch = PlayerWindowLaunch.fromAuth(
+          auth: auth,
+          request: request,
+          preparedStartup: true,
+        );
       }
       if (_disposed || revision != _requestRevision) return;
       await _stopProcess();
@@ -388,10 +415,16 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       _lastSwitchCommand = -1;
       _lastObservationSequence = null;
       _privateRevoked = false;
+      // Scoped sources keep permission-checked metadata dispatch in the
+      // existing runtime path. Do not prefetch them through auth.client.
+      final preparation = _startupPreparation = runtime == null
+          ? PlayerStartupPreparation(auth.client, request.itemId)
+          : null;
       try {
         final pid = await _control.spawn(
           executable: Platform.resolvedExecutable,
           arguments: launch.toArguments(),
+          startup: preparation?.payload,
         );
         if (_disposed ||
             revision != _requestRevision ||
@@ -400,6 +433,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                 : (auth.client.baseUrl?.toString() != launch.baseUrl ||
                       auth.client.userId != launch.userId ||
                       auth.client.accessToken != launch.accessToken))) {
+          preparation?.cancel();
           await _control.kill(pid);
           await _reconcileSnapshot(pid);
           await _control.release(pid);
@@ -413,6 +447,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         notifyListeners();
         _startWatch(pid);
       } catch (error) {
+        preparation?.cancel();
         if (error is PlayerProcessStartupException) {
           await _reconcileSnapshot(error.pid);
           await _control.release(error.pid);
@@ -420,6 +455,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         if (!_disposed && revision == _requestRevision) _clearWindow();
         rethrow;
       }
+    }).whenComplete(() {
+      if (revision == _requestRevision) _opening = false;
     });
   }
 
@@ -451,18 +488,22 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   @override
   Future<void> close() {
     _requestRevision++;
-    _control.cancelPendingSpawns();
+    _control.cancelPendingSpawns(includePrepared: true);
     return _runInFlight(() async {
       final epoch = _epoch;
       await _stopProcess();
+      await _control.discardPrepared();
+      _opening = false;
       if (_epoch == epoch) _clearWindow();
     });
   }
 
   @override
   Future<void> forceClose() async {
+    _startupPreparation?.cancel();
+    _startupPreparation = null;
     _requestRevision++;
-    _control.cancelPendingSpawns();
+    _control.cancelPendingSpawns(includePrepared: true);
     _watch?.cancel();
     await _control.terminateAll();
     for (final pid in _control.activePids.toList()) {
@@ -486,6 +527,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (!auth.isLoggedIn ||
         (_authIdentity != null && _authIdentity != _currentAuthIdentity)) {
       unawaited(close());
+    } else if (_pid == 0) {
+      unawaited(prepare());
     }
   }
 
@@ -519,6 +562,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             if (watch != null) runtime?.history.endSession(watch);
             _watchSession = null;
             _clearWindow();
+            unawaited(prepare());
           });
         } catch (_) {
           // A close may remove the mailbox while a watcher read is in flight.
@@ -530,6 +574,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   Future<void> _stopProcess() async {
+    _startupPreparation?.cancel();
+    _startupPreparation = null;
     _watch?.cancel();
     _watch = null;
     final pid = _pid;
@@ -1336,14 +1382,19 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   void dispose() {
     _disposed = true;
     _requestRevision++;
-    _control.cancelPendingSpawns();
+    _control.cancelPendingSpawns(includePrepared: true);
     auth.removeListener(_onAuth);
     auth.regionAccess.removeRevocationHook(_revokePrivate);
     auth.regionAccess.removeCleanupHook(_closePrivate);
     auth.regionAccess.removeTerminationHook(_terminatePrivate);
     runtime?.registry.removeMembershipCleanup(_membershipRevoked);
     runtime?.registry.removeSourceRevocation(_sourceRevoked);
-    unawaited(_runInFlight(_stopProcess).whenComplete(_notices.close));
+    unawaited(
+      _runInFlight(() async {
+        await _stopProcess();
+        await _control.discardPrepared();
+      }).whenComplete(_notices.close),
+    );
     super.dispose();
   }
 }
@@ -1357,7 +1408,12 @@ Future<void> runPlayerWindow({String? argumentFallback}) async {
       raw = await file.readAsString();
       await file.delete();
     }
-    launch = PlayerWindowLaunch.fromArguments(raw);
+    final payload = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    if (payload['warmPlayer'] == true) {
+      await _runPreparedPlayer(PlayerProcessProtocol.fromJson(payload));
+      return;
+    }
+    launch = PlayerWindowLaunch.fromJson(payload);
     if (launch.protocol == null) {
       throw const FormatException('Missing player process endpoint');
     }
@@ -1366,6 +1422,25 @@ Future<void> runPlayerWindow({String? argumentFallback}) async {
     exit(1);
   }
   runApp(PlayerWindowApp(launch: launch));
+}
+
+Future<void> _runPreparedPlayer(PlayerProcessProtocol protocol) async {
+  // Rasterize offscreen with the normal renderer (including Impeller). No
+  // player/controller or credentials exist until a user requests playback.
+  runApp(const ColoredBox(color: Color(0xFF000000)));
+  await WidgetsBinding.instance.waitUntilFirstFrameRasterized;
+  await protocol.write('ready');
+  while (true) {
+    if (await protocol.read('close') != null ||
+        await protocol.parentExpired()) {
+      exit(0);
+    }
+    if (await protocol.read('start') != null) {
+      await runPlayerWindow(argumentFallback: protocol.launchFile.path);
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
 }
 
 class PlayerWindowApp extends StatefulWidget {
@@ -1405,12 +1480,22 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   bool _readingCommand = false;
   int _ipcSequence = 0;
   int _launchRevision = 0;
+  Future<PlayerStartupData?>? _startup;
 
   @override
   void initState() {
     super.initState();
     _launch = widget.launch;
     _auth = _authFor(_launch);
+    if (_launch.preparedStartup && _launch.protocol != null) {
+      // Start polling before window configuration; both proceed independently.
+      _startup = PlayerStartupData.receive(
+        _launch.protocol!,
+        itemId: _launch.request.itemId,
+        userId: _launch.userId,
+      );
+      unawaited(_startup!.then<void>((_) {}, onError: (Object _) {}));
+    }
     windowManager.addListener(this);
     if (widget._onExit == null) {
       unawaited(_configureWindow());
@@ -1493,6 +1578,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     _playerKey = GlobalKey<PlayerPageState>();
     setState(() {
       _launch = launch;
+      _startup = null;
       _auth.client.attachSession(
         baseUrl: Uri.parse(launch.baseUrl),
         accessToken: launch.accessToken,
@@ -1516,8 +1602,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
         maximumSize: kMaxPlayerWindowSize,
       );
       await windowManager.setTitle(_playerWindowTitle);
+      PlayerStartupTrace.record('window.show');
       await windowManager.show();
       await windowManager.focus();
+      PlayerStartupTrace.record('window.ready');
       await _launch.protocol?.write('ready');
     } catch (_) {
       await _launch.protocol?.write('failed');
@@ -1695,6 +1783,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           switchDispatcher: _launch.request.source == null
               ? null
               : _dispatchSwitch,
+          startupData: _startup,
           snapshotStore: _launch.protocol == null
               ? null
               : FilePlaybackSessionSnapshotStore(

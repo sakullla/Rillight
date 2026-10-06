@@ -54,6 +54,8 @@ class PlayerProcessProtocol {
   File _file(String kind) {
     if (!const {
       'ready',
+      'startup',
+      'start',
       'failed',
       'close',
       'open-item',
@@ -156,6 +158,8 @@ class PlayerProcessProtocol {
         await File('${directory.path}/snapshot.json').exists()) {
       for (final name in [
         'launch',
+        'startup',
+        'start',
         'ready',
         'failed',
         'close',

@@ -116,7 +116,7 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
                         str(directory / 'tracks-long.mkv')], check=True)
 
 
-def serve(media, output):
+def serve(media, output, metadata_delay_ms=0):
     conditions = {'offline': False, 'unstable': False, 'faulted': False}
     fault_lock = threading.Lock()
     paths = {'baseline': 'baseline.mp4', 'delayed-report': 'timeout.mp4', 'delayed-subtitle': 'timeout.mp4', 'tracks': 'tracks-long.mkv', 'hls': 'stream.m3u8',
@@ -189,8 +189,10 @@ def serve(media, output):
             if path == '/System/Info/Public':
                 self.send_json({'Id': 'validation-server', 'ServerName': 'Rillight validation', 'Version': '4.9.0'})
             elif path == '/Users/validation-user':
+                time.sleep(metadata_delay_ms / 1000)
                 self.send_json(user)
             elif re.fullmatch(r'/Users/validation-user/Items/[^/]+', path) and path.split('/')[-1] in paths:
+                time.sleep(metadata_delay_ms / 1000)
                 self.send_json(item(path.split('/')[-1]))
             elif path.startswith('/media/') or '/Subtitles/' in path:
                 if '/delayed-subtitle/' in path and '/Subtitles/' in path:
@@ -266,6 +268,7 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path)
     parser.add_argument('--ffmpeg')
     parser.add_argument('--long-cache', action='store_true')
+    parser.add_argument('--metadata-delay-ms', type=int, default=0)
     args = parser.parse_args()
     if args.ffmpeg: generate(args.media.resolve(), args.ffmpeg, args.long_cache)
-    if args.output: serve(args.media.resolve(), args.output.resolve())
+    if args.output: serve(args.media.resolve(), args.output.resolve(), args.metadata_delay_ms)

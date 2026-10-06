@@ -1,3 +1,4 @@
+import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -416,13 +417,16 @@ class RillightVideoBackend extends VideoBackend
     _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
     _emit(VideoEventKind.cacheSpeed, 0.0, generation);
     _openPhase = 'retiringPrevious';
+    PlayerStartupTrace.record('backend.retiringPrevious');
     await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: false);
     if (_disposed || generation != _generation) return;
     try {
       _openPhase = 'settings';
+      PlayerStartupTrace.record('backend.settings');
       final settings =
           await (_settingsStore ??= await openPlayerSettingsStore()).read();
       _openPhase = 'transport';
+      PlayerStartupTrace.record('backend.transport');
       final transport = await PlaybackTransportSession.start(
         origin: request.credentialOrigin,
         headers: request.credentialHeaders.isNotEmpty
@@ -453,6 +457,7 @@ class RillightVideoBackend extends VideoBackend
       // transport yields its single producer to uncached index/track probes.
       await transport.setPlaybackActive(!request.startPaused);
       _openPhase = 'register';
+      PlayerStartupTrace.record('backend.register');
       final sealed = await transport.register(request.url);
       _mediaRoute = sealed;
       final warmed = request.warmedPrefix;
@@ -465,6 +470,7 @@ class RillightVideoBackend extends VideoBackend
       }
       if (_disposed || generation != _generation) return;
       _openPhase = 'player';
+      PlayerStartupTrace.record('backend.player');
       final player = _player ??= await _createPlayer();
       _bindNativePresentation(player);
       if (_disposed || generation != _generation) {
@@ -482,6 +488,7 @@ class RillightVideoBackend extends VideoBackend
         unawaited(_refreshDiagnostics(generation));
       });
       _openPhase = 'openingCore';
+      PlayerStartupTrace.record('backend.openingCore');
       final result = await player.open(
         CorePlayerOpen(
           url: sealed,
@@ -518,6 +525,7 @@ class RillightVideoBackend extends VideoBackend
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _opened = true;
       _openPhase = 'opened';
+      PlayerStartupTrace.record('backend.opened');
       unawaited(_refreshDiagnostics(generation));
     } catch (error) {
       if (generation == _generation) {
@@ -573,6 +581,10 @@ class RillightVideoBackend extends VideoBackend
         isPlaying = event.value == true;
         _emit(VideoEventKind.playing, isPlaying, generation);
       case 'buffering':
+        PlayerStartupTrace.record('backend.buffering', {
+          'enabled': event.value == true ? 1 : 0,
+          'positionMs': position.inMilliseconds,
+        });
         _emit(VideoEventKind.buffering, event.value == true, generation);
       case 'completed':
         _emit(VideoEventKind.completed, event.value == true, generation);

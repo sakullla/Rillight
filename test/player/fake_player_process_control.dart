@@ -9,6 +9,10 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 /// [calls] 可与其他被测对象共享,以断言跨对象的调用顺序
 /// (例如 `requestClose` 必须先于 `logout`)。
 class FakePlayerProcessControl implements PlayerProcessControl {
+  @override
+  Future<void> prepare({required String executable}) async {}
+  @override
+  Future<void> discardPrepared() async {}
   FakePlayerProcessControl({
     List<String>? calls,
     this.requestCloseResult = false,
@@ -33,6 +37,7 @@ class FakePlayerProcessControl implements PlayerProcessControl {
 
   /// 每次 spawn 收到的 JSON 启动载荷。
   final List<String> spawnedArguments = [];
+  final List<Future<Map<String, dynamic>>?> startupPayloads = [];
 
   /// 当前视为存活的 pid。
   final Set<int> alive = {};
@@ -45,10 +50,12 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   Future<int> spawn({
     required String executable,
     required String arguments,
+    Future<Map<String, dynamic>>? startup,
   }) async {
     final pid = _nextPid++;
     alive.add(pid);
     spawnedArguments.add(arguments);
+    startupPayloads.add(startup);
     calls.add('spawn:$pid');
     await spawnHold?.future;
     return pid;
@@ -87,7 +94,7 @@ class FakePlayerProcessControl implements PlayerProcessControl {
   @override
   Future<void> release(int pid) async => onRelease?.call(pid);
   @override
-  void cancelPendingSpawns() {}
+  void cancelPendingSpawns({bool includePrepared = false}) {}
   @override
   Iterable<int> get activePids => alive.toList();
   @override

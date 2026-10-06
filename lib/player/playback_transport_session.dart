@@ -254,7 +254,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
   final inbox = arguments[1]! as SendPort;
   final commands = ReceivePort();
 
-  SessionByteCache? cache;
+  Future<SessionByteCache>? cache;
   PlaybackHttpProxy? proxy;
   IOSink? trace;
   try {
@@ -263,12 +263,13 @@ Future<void> _serveTransport(List<Object?> arguments) async {
       trace = File(tracePath).openWrite(mode: FileMode.append);
       unawaited(trace.done.catchError((Object _) {}));
     }
-    cache = await SessionByteCache.open(
+    cache = SessionByteCache.open(
       root: arguments[4] == null ? null : Directory(arguments[4]! as String),
       memoryLimitBytes: arguments[5]! as int,
       diskLimitBytes: arguments[6]! as int,
       pendingLimitBytes: arguments[7]! as int,
     );
+    cache.ignore();
     proxy = await PlaybackHttpProxy.create(
       origin: arguments[2] == null ? null : Uri.parse(arguments[2]! as String),
       headers: Map<String, String>.from(arguments[3]! as Map),
@@ -312,7 +313,15 @@ Future<void> _serveTransport(List<Object?> arguments) async {
                 .toString();
             break;
           case 'diagnostics':
-            result = proxy.diagnostics;
+            result = {
+              // Configured limits are known while the disk session opens.
+              // Live/applied values replace them once initialization finishes.
+              'memoryLimitBytes': arguments[5],
+              'pendingLimitBytes': arguments[7],
+              'diskSessionLimitBytes': arguments[6],
+              'cacheInitializing': proxy.cache == null,
+              ...proxy.diagnostics,
+            };
             // Opt-in local investigation only. Never record resource IDs,
             // headers, URLs, credentials or exception messages.
             trace?.writeln(
@@ -370,7 +379,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
             break;
           case 'resize':
             final value = message[2] as List;
-            await cache.resize(
+            await (await cache).resize(
               memoryBytes: value[0] as int,
               pendingBytes: value[1] as int,
               diskBytes: value[2] as int,
@@ -391,7 +400,11 @@ Future<void> _serveTransport(List<Object?> arguments) async {
   } catch (error) {
     ready.send(error.toString());
     await proxy?.close();
-    await cache?.close();
+    try {
+      await (await cache)?.close();
+    } catch (_) {
+      // Initialization failure has no cache session to release.
+    }
   } finally {
     try {
       await trace?.close();
