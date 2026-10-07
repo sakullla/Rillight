@@ -40,3 +40,6 @@ app.*.symbols
 
 # Obfuscation related
 app.*.map.json
+
+# Local MSVC object from the audio route test.
+/audio_route_test.obj
