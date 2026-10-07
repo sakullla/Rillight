@@ -87,8 +87,17 @@ class _Transport implements HttpClientAdapter {
       data = {
         'Id': id,
         'Name': '$host-$id-detail',
-        'Type': id == 'library' ? 'CollectionFolder' : 'Movie',
-        if (id != 'library') 'ParentId': 'library',
+        'Type': switch (id) {
+          'library' => 'CollectionFolder',
+          'episode-no-parent' => 'Episode',
+          'season-no-parent' => 'Season',
+          'series' => 'Series',
+          _ => 'Movie',
+        },
+        if (id == 'episode-no-parent') 'SeasonId': 'season-no-parent',
+        if (id.endsWith('-no-parent')) 'SeriesId': 'series',
+        if (id != 'library' && !id.endsWith('-no-parent'))
+          'ParentId': 'library',
         if (id != 'library') 'ImageTags': {'Primary': 'synthetic-$host'},
       };
     }
@@ -451,7 +460,7 @@ void main() {
     PresentationEnvironment.phone,
     PresentationEnvironment.tv,
   ]) {
-    for (final id in ['same-id', 'different-b-id']) {
+    for (final id in ['same-id', 'different-b-id', 'episode-no-parent']) {
       testWidgets(
         '${environment.presentation.name} Auth A receives B detail $id without naked-ID fallback',
         (tester) async {
@@ -541,7 +550,7 @@ void main() {
           expect(auth.session!.server.id, 'a');
           // Source-local cards remain usable, but unadapted bare-ID shelf
           // expansion must not leave this scope and request selected Auth A.
-          if (environment.isDesktop) {
+          if (environment.isDesktop && id != 'episode-no-parent') {
             final similarShelf = tester.widget<MediaShelf>(
               find.byWidgetPredicate(
                 (widget) =>
@@ -550,7 +559,7 @@ void main() {
               ),
             );
             expect(similarShelf.onMore, isNull);
-          } else if (!environment.isTv) {
+          } else if (!environment.isTv && id != 'episode-no-parent') {
             final more = tester.widget<TextButton>(
               find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar)),
             );

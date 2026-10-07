@@ -45,7 +45,7 @@ internal object CoreNative {
     external fun track(handle: Long, ordinal: Int): IntArray?
     external fun trackLanguage(handle: Long, ordinal: Int): String?
     external fun takeAudio(handle: Long): CoreAudioFrame?
-    /** Returns PTS, geometry, SAR, rotation, session and timeline after Surface post. */
+    /** Returns PTS, geometry, SAR, rotation, session, timeline, transfer and primaries after post. */
     external fun renderVideo(handle: Long, surface: Surface, hdrDisplaySupported: Boolean): LongArray?
     external fun releaseColorRenderer()
     external fun videoFrameRate(handle: Long): Double

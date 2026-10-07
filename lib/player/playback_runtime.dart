@@ -104,11 +104,11 @@ class PlaybackRuntime {
       final visited = <String>{};
       while (!allowed.single.libraryIds.contains(item.id)) {
         if (!visited.add(item.id) ||
-            item.parentId == null ||
+            item.hierarchyParentId == null ||
             visited.length > 32) {
           throw StateError('Cannot establish playback library membership');
         }
-        item = await permit.dispatch((c) => c.getItem(item.parentId!));
+        item = await permit.dispatch((c) => c.getItem(item.hierarchyParentId!));
       }
       library = item.id;
       source = SourceReference(
@@ -144,13 +144,15 @@ class PlaybackRuntime {
     final visited = <String>{};
     while (ancestor.id != library) {
       if (!visited.add(ancestor.id) ||
-          ancestor.parentId == null ||
+          ancestor.hierarchyParentId == null ||
           visited.length > 32) {
         throw StateError(
           'Playback item does not belong to the permitted library',
         );
       }
-      ancestor = await permit.dispatch((c) => c.getItem(ancestor.parentId!));
+      ancestor = await permit.dispatch(
+        (c) => c.getItem(ancestor.hierarchyParentId!),
+      );
     }
     final work =
         request.work ??

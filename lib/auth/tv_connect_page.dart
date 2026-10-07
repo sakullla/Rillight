@@ -480,6 +480,15 @@ class _TvLanPending extends StatelessWidget {
                   ),
                 ],
               ),
+              if (pending.userAgent != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '${l10n.userAgent}: ${pending.userAgent}',
+                  key: const Key('tv-lan-user-agent'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ],
           ),
         ),

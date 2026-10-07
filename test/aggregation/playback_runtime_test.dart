@@ -95,6 +95,10 @@ class _Client extends EmbyClient {
             ? 'CollectionFolder'
             : id.startsWith('episode')
             ? 'Episode'
+            : id == 'season'
+            ? 'Season'
+            : id == 'series'
+            ? 'Series'
             : 'Movie',
         if (id.startsWith('episode')) ...{
           'SeriesId': 'series',
@@ -102,7 +106,8 @@ class _Client extends EmbyClient {
           'ParentIndexNumber': 1,
           'IndexNumber': id == 'episode1' ? 1 : 2,
         },
-        if (id != 'library')
+        if (id == 'season') 'SeriesId': 'series',
+        if (id != 'library' && id != 'season' && id != 'episode-no-parent')
           'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
         'RunTimeTicks': 120 * kEmbyTicksPerSecond,
         'ProviderIds': {'Tmdb': '1'},
@@ -832,6 +837,28 @@ void main() {
       );
     },
   );
+
+  for (final explicitSource in [false, true]) {
+    test(
+      'episode without ParentId resolves its library, explicit=$explicitSource',
+      () async {
+        await setup();
+        if (!explicitSource) await auth.restore();
+        final origin = await runtime.resolve(
+          PlayerOpenRequest(
+            itemId: 'episode-no-parent',
+            libraryId: explicitSource ? 'library' : null,
+            source: explicitSource
+                ? SourceReference(account: account, itemId: 'episode-no-parent')
+                : null,
+          ),
+        );
+        expect(origin.libraryId, 'library');
+        expect(origin.work.itemId, 'series');
+        expect(origin.source.account, account);
+      },
+    );
+  }
 
   test(
     'backup management checks never reopen or reassign source-owned playback',

@@ -53,17 +53,20 @@ class CorePlayerTrack {
     required this.type,
     required this.language,
     required this.isExternal,
+    this.videoRange,
   });
   final int index;
   final String type;
   final String? language;
   final bool isExternal;
+  final String? videoRange;
 
   Map<String, Object?> toChannel() => {
     'index': index,
     'type': type,
     'language': language,
     'external': isExternal,
+    'videoRange': videoRange,
   };
 }
 

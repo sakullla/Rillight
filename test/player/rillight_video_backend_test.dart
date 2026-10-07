@@ -1010,7 +1010,7 @@ void main() {
         url: Uri.parse('http://127.0.0.1:8765/stream.m3u8'),
         playMethod: PlayMethod.transcode,
         mediaStreams: const [
-          MediaStreamInfo(index: 0, type: 'Video'),
+          MediaStreamInfo(index: 0, type: 'Video', videoRange: 'SDR'),
           MediaStreamInfo(index: 1, type: 'Audio'),
           MediaStreamInfo(
             index: 2,
@@ -1026,6 +1026,7 @@ void main() {
       false,
       true,
     ]);
+    expect(driver.request!.streams.first.toChannel()['videoRange'], 'SDR');
   });
 
   test('confirmed external subtitle retains its server track index', () async {

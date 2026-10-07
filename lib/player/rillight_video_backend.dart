@@ -515,6 +515,7 @@ class RillightVideoBackend extends VideoBackend
                 index: stream.index,
                 type: stream.type,
                 language: stream.language,
+                videoRange: stream.videoRange,
                 isExternal:
                     stream.type == 'Subtitle' &&
                     (request.playMethod == PlayMethod.transcode

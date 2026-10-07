@@ -585,7 +585,8 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
   const jlong values[] = {frame->pts_us, frame->width, frame->height,
                           frame->sar_num, frame->sar_den, rotation,
                           static_cast<jlong>(frame->session_id),
-                          static_cast<jlong>(frame->timeline_version)};
+                          static_cast<jlong>(frame->timeline_version),
+                          frame->source_color_transfer, frame->source_color_primaries};
   auto *result = numbers(env, values, sizeof(values) / sizeof(values[0]));
   rillight_core_release_frame(frame);
   return result;

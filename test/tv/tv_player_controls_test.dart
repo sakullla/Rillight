@@ -112,6 +112,27 @@ void main() {
         .controller!;
   }
 
+  testWidgets('TV idle controls hide while playback is rebuffering', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend();
+    final current = await start(tester, backend);
+    current.onUserActivity();
+    backend.emitBuffering(true);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect(current.controlsVisible, isFalse);
+    backend.emitBuffering(false);
+    await tester.pump();
+    expect(current.controlsVisible, isFalse);
+    await current.togglePlay();
+    await tester.pump();
+    expect(current.controlsVisible, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+  }, tags: ['integration']);
+
   testWidgets('TV completion focuses replay and remote can replay or close', (
     tester,
   ) async {

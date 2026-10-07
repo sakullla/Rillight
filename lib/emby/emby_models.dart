@@ -475,6 +475,20 @@ class EmbyItem {
   bool get isSeries => type == 'Series';
   bool get isSeason => type == 'Season';
   bool get isEpisode => type == 'Episode';
+
+  /// Some Emby responses omit ParentId for episodes/seasons but include the
+  /// concrete series hierarchy. Callers must still verify the library ancestor.
+  String? get hierarchyParentId {
+    for (final id in [
+      parentId,
+      if (isEpisode) seasonId,
+      if (isEpisode || isSeason) seriesId,
+    ]) {
+      if (id != null && id.isNotEmpty) return id;
+    }
+    return null;
+  }
+
   bool get isPhoto => type == 'Photo';
   bool get isPhotoAlbum => type == 'PhotoAlbum';
   bool get isPlayable => isMovie || isEpisode;

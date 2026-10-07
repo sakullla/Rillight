@@ -150,11 +150,11 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       final visited = <String>{};
       while (item.id != command.libraryId) {
         if (!visited.add(item.id) ||
-            item.parentId == null ||
+            item.hierarchyParentId == null ||
             visited.length > 32) {
           return;
         }
-        item = await permit.dispatch((c) => c.getItem(item.parentId!));
+        item = await permit.dispatch((c) => c.getItem(item.hierarchyParentId!));
       }
       final client = await permit.dispatch(
         (c) async => c.withRequestGuard(permit.requireValid),

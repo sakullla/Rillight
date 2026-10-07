@@ -208,6 +208,15 @@ void main() {
           parentIndexNumber: 1,
           runTimeTicks: minute * 22,
         ),
+        for (var index = 4; index <= 40; index++)
+          FakeEpisode(
+            id: 'episode-friends-s1e$index',
+            name: 'Episode $index',
+            seasonId: 'season-friends-1',
+            indexNumber: index,
+            parentIndexNumber: 1,
+            runTimeTicks: minute * 22,
+          ),
       ]);
       final app = await start(tester, server);
       await login(tester, server);
@@ -216,12 +225,28 @@ void main() {
       expect(find.byType(TvDetailPage), findsOneWidget);
       expect(find.byKey(const Key('tv-detail-backdrop')), findsOneWidget);
       expect(find.byKey(const Key('tv-detail-episodes')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('episode-friends-s1e40')),
+        findsNothing,
+        reason: 'Offscreen episodes must not mount every image in the season',
+      );
 
       // 续播集是主操作,自动聚焦在播放上。
       expect(focusedLabel(tester), '继续播放');
 
       // 当前集(续播目标)有可识别标识,行内带进度条;已看集有已看标记。
       final currentTile = find.byKey(const ValueKey('episode-friends-s1e2'));
+      await tester.scrollUntilVisible(
+        currentTile,
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byType(TvDetailPage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await _settle(tester);
       expect(
         find.descendant(
           of: currentTile,
@@ -236,6 +261,17 @@ void main() {
         ),
         findsOneWidget,
       );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('episode-friends-s1e1')),
+        -150,
+        scrollable: find
+            .descendant(
+              of: find.byType(TvDetailPage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await _settle(tester);
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('episode-friends-s1e1')),

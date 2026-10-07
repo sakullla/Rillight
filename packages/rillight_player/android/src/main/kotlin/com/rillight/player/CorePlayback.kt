@@ -81,6 +81,7 @@ internal class CorePlayback(
     private var buffering = false
     private var lastPlaying = false
     private var scaleMode = "fit"
+    private var textureVideo = false
     private var lastHardware: Int? = null
     private var preferredHardware = 8
     private var lastDecoderCheckMs = 0L
@@ -110,6 +111,7 @@ internal class CorePlayback(
         view?.detach()
         return CoreSurfaceView(context, this).also {
             view = it
+            it.useTextureOutput(textureVideo)
             it.scale(scaleMode)
         }
     }
@@ -187,6 +189,10 @@ internal class CorePlayback(
                 stream["type"] as? String ?: return@mapNotNull null,
                 stream["language"] as? String, stream["external"] == true)
         } ?: emptyList()
+        textureVideo = coreUseTextureVideo(Build.HARDWARE, Build.MODEL, Build.VERSION.SDK_INT,
+            (args["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+                ?.filter { it["type"] == "Video" }?.map { it["videoRange"] as? String } ?: emptyList())
+        view?.useTextureOutput(textureVideo)
         val initialStartUs = ((args["start"] as? Number)?.toLong() ?: 0).coerceAtLeast(0) * 1000
         desiredPaused = args["paused"] == true
         audioReady = false
@@ -604,6 +610,18 @@ internal class CorePlayback(
                         if (generation.get() == active.generation) {
                             val current = CoreNative.snapshot(active.handle)
                             if (current != null && current[1] == frame[6] && current[3] == frame[7]) {
+                                // Server metadata may omit VideoRange. Prefer the actual decoded
+                                // color description, and never keep HDR in the SDR texture path.
+                                val range = coreDecodedVideoRange(frame[8], frame[9])
+                                if (range != null) {
+                                    val texture = coreUseTextureVideo(Build.HARDWARE, Build.MODEL,
+                                        Build.VERSION.SDK_INT, listOf(range))
+                                    if (texture != textureVideo) {
+                                        textureVideo = texture
+                                        view?.useTextureOutput(texture)
+                                        return@post
+                                    }
+                                }
                                 view?.frame(frame[1].toInt(), frame[2].toInt(), frame[3].toInt(),
                                     frame[4].toInt(), frame[5].toInt())
                                 if (overlay != null) view?.overlay(overlay)
@@ -667,7 +685,7 @@ internal class CorePlayback(
         emit("duration", (snap[8] / 1000).coerceAtLeast(0))
         val newBuffering = snap[0] == 5L || snap[0] == 6L
         if (newBuffering != buffering) { buffering = newBuffering; emit("buffering", buffering) }
-        val playing = !desiredPaused && snap[0] == 3L && (renderedFirst || snap[5] < 0)
+        val playing = corePlaybackPlaying(snap[0], desiredPaused, snap[5] >= 0, renderedFirst)
         if (playing != lastPlaying) {
             lastPlaying = playing
             view?.keepScreenOn = playing

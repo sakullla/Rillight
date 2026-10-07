@@ -61,7 +61,11 @@ class TvLanAssist extends ChangeNotifier {
     if (held == null) {
       return null;
     }
-    return TvLanSubmission(server: held.server, account: held.account);
+    return TvLanSubmission(
+      server: held.server,
+      account: held.account,
+      userAgent: held.userAgent,
+    );
   }
 
   bool get isTerminal =>
@@ -154,6 +158,7 @@ class TvLanAssist extends ChangeNotifier {
         address: held.server,
         username: held.account,
         password: password,
+        userAgent: held.userAgent,
         preserveSessionOnFailure: true,
       );
     } finally {
@@ -482,16 +487,23 @@ class TvLanAssist extends ChangeNotifier {
     final address = (form['address'] ?? '').trim();
     final username = (form['username'] ?? '').trim();
     final password = form['password'] ?? '';
+    final userAgent = (form['userAgent'] ?? '').trim();
     if (address.isEmpty ||
         username.isEmpty ||
         address.length > 512 ||
         username.length > 256 ||
-        password.length > 256) {
+        password.length > 256 ||
+        userAgent.length > 1024 ||
+        RegExp(r'[\x00-\x1f\x7f]').hasMatch(userAgent)) {
       _reserved = false;
       await _reply(request, HttpStatus.badRequest, _phoneMessage('请填写服务器和账号。'));
       return;
     }
-    _pending = _HeldSubmission(server: address, account: username);
+    _pending = _HeldSubmission(
+      server: address,
+      account: username,
+      userAgent: userAgent.isEmpty ? null : userAgent,
+    );
     _password = password;
     _phase = TvLanPhase.pending;
     _notify();
@@ -567,10 +579,15 @@ class TvLanOffer {
 }
 
 class TvLanSubmission {
-  const TvLanSubmission({required this.server, required this.account});
+  const TvLanSubmission({
+    required this.server,
+    required this.account,
+    this.userAgent,
+  });
 
   final String server;
   final String account;
+  final String? userAgent;
 }
 
 class TvLanQrImage extends StatelessWidget {
@@ -588,10 +605,15 @@ class TvLanQrImage extends StatelessWidget {
 }
 
 class _HeldSubmission {
-  const _HeldSubmission({required this.server, required this.account});
+  const _HeldSubmission({
+    required this.server,
+    required this.account,
+    this.userAgent,
+  });
 
   final String server;
   final String account;
+  final String? userAgent;
 }
 
 class _CertificateMaterial {
@@ -767,6 +789,7 @@ $_phoneHead
 <label>服务器地址<input name="address" autocomplete="url" inputmode="url" placeholder="http://192.168.1.10:8096" required></label>
 <label>用户名<input name="username" autocomplete="username" required></label>
 <label>密码<input name="password" type="password" autocomplete="current-password"></label>
+<label>User-Agent<input name="userAgent" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="1024" placeholder="可选，留空则使用默认"></label>
 <button type="submit">提交到电视</button>
 </form>
 <div class="note">一次性配对,过期自动失效<br>本页不含脚本与外部资源</div>

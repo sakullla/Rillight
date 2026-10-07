@@ -85,13 +85,14 @@ void main() {
       expect(page.body.contains(_password), isFalse);
       expect(page.body.contains('cdn'), isFalse);
       expect(page.body.contains('<script'), isFalse);
+      expect(page.body, contains('name="userAgent"'));
       expect(page.sawUntrustedCertificate, isTrue);
       expect(page.certificateDer, orderedEquals(offer.certificateDer));
     },
   );
 
   test(
-    'a phone submission does not log in until the remote confirms',
+    'a phone submission applies its UA only after the remote confirms',
     () async {
       final server = FakeEmbyServer();
       final auth = authFor(server);
@@ -102,7 +103,12 @@ void main() {
         assist!.offer!,
         method: 'POST',
         path: '/submit',
-        body: _form(server.baseUrl.toString(), 'alice', 'correct-horse'),
+        body: _form(
+          server.baseUrl.toString(),
+          'alice',
+          'correct-horse',
+          userAgent: '  TvAssist/1.0  ',
+        ),
       );
       expect(posted!.status, 200);
       expect(posted.body, contains('待确认'));
@@ -111,15 +117,36 @@ void main() {
       expect(assist!.phase, TvLanPhase.pending);
       expect(assist!.pending!.server, server.baseUrl.toString());
       expect(assist!.pending!.account, 'alice');
+      expect(assist!.pending!.userAgent, 'TvAssist/1.0');
       expect(auth.isLoggedIn, isFalse);
       expect(auth.session, isNull);
 
       await assist!.confirm(auth);
       expect(auth.isLoggedIn, isTrue);
       expect(auth.session!.username, 'alice');
+      expect(auth.client.userAgent, 'TvAssist/1.0');
+      expect(auth.session!.server.normalizedUserAgent, 'TvAssist/1.0');
       expect(auth.session!.accessToken.contains('correct-horse'), isFalse);
     },
   );
+
+  for (final ua in ['bad\r\nheader', 'x' * 1025]) {
+    test(
+      'invalid UA is rejected before confirmation (${ua.length} chars)',
+      () async {
+        assist = start();
+        await assist!.open();
+        final response = await _exchange(
+          assist!.offer!,
+          method: 'POST',
+          path: '/submit',
+          body: _form('http://server.test', 'alice', 'secret', userAgent: ua),
+        );
+        expect(response!.status, 400);
+        expect(assist!.pending, isNull);
+      },
+    );
+  }
 
   test(
     'reject, cancel, expiry, and a second device cannot reuse the entry',
@@ -828,10 +855,16 @@ Set<String> _statusQuery(String body) {
   return uri.queryParameters.keys.toSet();
 }
 
-String _form(String address, String username, String password) {
+String _form(
+  String address,
+  String username,
+  String password, {
+  String? userAgent,
+}) {
   return 'address=${Uri.encodeQueryComponent(address)}'
       '&username=${Uri.encodeQueryComponent(username)}'
-      '&password=${Uri.encodeQueryComponent(password)}';
+      '&password=${Uri.encodeQueryComponent(password)}'
+      '${userAgent == null ? '' : '&userAgent=${Uri.encodeQueryComponent(userAgent)}'}';
 }
 
 class _Page {

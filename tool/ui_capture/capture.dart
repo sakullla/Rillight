@@ -1197,7 +1197,7 @@ _LanPhonePage _lanPhonePage(String html, String fingerprint) {
   expect(page.title, '灯川 Rillight');
   expect(page.intro, '证书指纹');
   expect(page.fingerprint, fingerprint);
-  expect(page.labels, ['服务器地址', '用户名', '密码']);
+  expect(page.labels, ['服务器地址', '用户名', '密码', 'User-Agent']);
   expect(page.submit, '提交到电视');
   return page;
 }

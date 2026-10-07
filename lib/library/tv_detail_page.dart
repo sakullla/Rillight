@@ -135,6 +135,9 @@ class _TvDetailPageState extends State<TvDetailPage> {
         final artwork = item?.isSeries == true && season != null
             ? seasonArtworkItem(season, item!)
             : item;
+        final gutter = EdgeInsets.symmetric(
+          horizontal: tvSafeGutter(MediaQuery.sizeOf(context).width),
+        );
         return ContentTheme(
           item: artwork,
           preferBackdrop: item?.isEpisode != true,
@@ -276,50 +279,60 @@ class _TvDetailPageState extends State<TvDetailPage> {
                                 ),
                             ],
                           ),
-                          Column(
-                            key: const Key('tv-detail-episodes'),
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (c.episodesLoading && c.episodes.isEmpty)
-                                const _TvEpisodeSkeleton(),
-                              if (c.episodeError != null)
-                                TvFailure(
-                                  error: c.episodeError!,
-                                  retry: () => c.selectSeason(
-                                    c.seasonId!,
-                                    more: c.episodes.isNotEmpty && c.hasMore,
-                                  ),
-                                ),
-                              if (!c.episodesLoading && c.episodes.isEmpty)
-                                Text(l.mobileEmpty),
-                              for (final episode in c.episodes)
-                                _TvEpisodeTile(
-                                  episode: episode,
-                                  current: episode.id == target?.id,
-                                  focusNode: _focus.nodeFor(
-                                    'episode:${episode.id}',
-                                  ),
-                                ),
-                              if (c.hasMore)
-                                TvAction(
-                                  key: const Key('tv-episodes-more'),
-                                  onPressed: c.episodesLoading
-                                      ? null
-                                      : () => c.selectSeason(
-                                          c.seasonId!,
-                                          more: true,
-                                        ),
-                                  child: Text(l.mobileLoadMore),
-                                ),
-                            ],
-                          ),
                         ],
-                        TvAction(
-                          key: const Key('tv-detail-refresh'),
-                          onPressed: c.load,
-                          child: Text(l.mobileRefresh),
-                        ),
                       ],
+                    ),
+                  ),
+                  // Each episode is a lazy ListView child. A whole season in
+                  // one Column mounts every image and focus target at startup.
+                  if (item.isSeries) ...[
+                    const SizedBox(key: Key('tv-detail-episodes')),
+                    if (c.episodesLoading && c.episodes.isEmpty)
+                      Padding(
+                        padding: gutter,
+                        child: const _TvEpisodeSkeleton(),
+                      ),
+                    if (c.episodeError != null)
+                      Padding(
+                        padding: gutter,
+                        child: TvFailure(
+                          error: c.episodeError!,
+                          retry: () => c.selectSeason(
+                            c.seasonId!,
+                            more: c.episodes.isNotEmpty && c.hasMore,
+                          ),
+                        ),
+                      ),
+                    if (!c.episodesLoading && c.episodes.isEmpty)
+                      Padding(padding: gutter, child: Text(l.mobileEmpty)),
+                    for (final episode in c.episodes)
+                      Padding(
+                        key: ValueKey('episode:${episode.id}'),
+                        padding: gutter,
+                        child: _TvEpisodeTile(
+                          episode: episode,
+                          current: episode.id == target?.id,
+                          focusNode: _focus.nodeFor('episode:${episode.id}'),
+                        ),
+                      ),
+                    if (c.hasMore)
+                      Padding(
+                        padding: gutter,
+                        child: TvAction(
+                          key: const Key('tv-episodes-more'),
+                          onPressed: c.episodesLoading
+                              ? null
+                              : () => c.selectSeason(c.seasonId!, more: true),
+                          child: Text(l.mobileLoadMore),
+                        ),
+                      ),
+                  ],
+                  Padding(
+                    padding: gutter,
+                    child: TvAction(
+                      key: const Key('tv-detail-refresh'),
+                      onPressed: c.load,
+                      child: Text(l.mobileRefresh),
                     ),
                   ),
                 ],

@@ -84,9 +84,11 @@ void main() {
   test(
     'response coverage uses original offsets and retracts after eviction',
     () async {
-      final fixture = await _Direct.open();
+      const start = 7958;
+      // Bound the response while observing its original offset. Otherwise
+      // socket buffering lets the producer race the coverage snapshot.
+      final fixture = await _Direct.open(holdAfter: start + 6 * _mib);
       try {
-        const start = 7958;
         final reader = await fixture.read(start: start);
         expect(await reader.moveNext(), isTrue);
         await fixture.waitFor(

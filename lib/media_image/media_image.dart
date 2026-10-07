@@ -40,6 +40,20 @@ String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
   origin.client.baseUrl.toString(),
 ]);
 
+// Keep the nullable source guard outside the async image loop. The pinned
+// Dart AOT compiler hoists origin.permit loads ahead of that loop's null guard
+// when this check is a captured, inlined local closure (ARM profile SIGSEGV).
+// Retain the live permit check after every asynchronous boundary.
+@pragma('vm:never-inline')
+bool _imageSourceIsValid(
+  PlaybackOrigin? origin,
+  AuthController auth,
+  String? accountScope,
+) {
+  if (origin == null) return mediaImageAccountScope(auth) == accountScope;
+  return origin.permit.isValid;
+}
+
 /// Cache policy is a consumer of the existing source permit, not an authority.
 /// Private bytes never enter the disk store (including probes and lazy writes).
 class MediaImageSourcePolicy extends ChangeNotifier {
@@ -775,9 +789,7 @@ class _MediaImageState extends State<MediaImage> {
     final origin = DetailSourceScope.maybeOf(context);
     final client = DetailSourceScope.clientOf(context);
     final serverId = _accountScope;
-    bool sourceValid() => origin != null
-        ? origin.permit.isValid
-        : mediaImageAccountScope(auth) == serverId;
+    bool sourceValid() => _imageSourceIsValid(origin, auth, serverId);
     if (serverId == null) return null;
     // This callback can be inspected while another image is unmounting. Do
     // not look up inherited widgets on a deactivated element.
