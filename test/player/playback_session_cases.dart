@@ -491,6 +491,26 @@ void main() {
     },
   );
 
+  for (final paused in [false, true]) {
+    test(
+      'episode switch during native rate recovery preserves paused=$paused intent',
+      () async {
+        await controller.start();
+        if (paused) await controller.togglePlay();
+        backend.recoverOnNextRateChange = true;
+        await controller.setRate(1.25);
+        await _until(() => controller.state.buffering && !controller.isPlaying);
+        expect(controller.loading, isFalse);
+
+        await controller.playEpisode(episode('episode-friends-s1e1'));
+
+        expect(controller.itemId, 'episode-friends-s1e1');
+        expect(controller.error, isNull);
+        expect(controller.isPlaying, !paused);
+      },
+    );
+  }
+
   test(
     'close cancels an in-flight native open and waits for disposal',
     () async {
@@ -1249,6 +1269,7 @@ class _ControlledBackend extends FakeVideoBackend {
 
   Completer<void>? rateGate;
   bool rateStarted = false;
+  bool recoverOnNextRateChange = false;
   Completer<void>? subtitleGate;
   bool subtitleWaiting = false;
   int disposeCount = 0;
@@ -1303,6 +1324,13 @@ class _ControlledBackend extends FakeVideoBackend {
     await rateGate?.future;
     if (fail) throw StateError('rate failed');
     await super.setRate(rate);
+    if (recoverOnNextRateChange) {
+      recoverOnNextRateChange = false;
+      // The owned core reports recovering before output resumes. The command
+      // reply does not mean the first frame on the new rate timeline is ready.
+      emitBuffering(true);
+      await super.pause();
+    }
   }
 
   @override

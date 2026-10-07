@@ -1876,10 +1876,12 @@ class PlayerController extends ChangeNotifier {
     bool finishCurrent = false,
   }) async {
     final actual = origin;
+    // A rate/seek recovery reports not-playing until output is ready again.
+    // Switching in that interval must retain the user's playback intent.
     final paused =
         !playbackEnded &&
         !_handlingCompleted &&
-        (loading ? _pauseIntent : !isPlaying);
+        (loading || state.buffering ? _pauseIntent : !isPlaying);
     if (runtime == null && switchDispatcher != null) {
       await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
       if (_disposed || _revoked) return;
