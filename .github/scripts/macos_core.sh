@@ -16,7 +16,32 @@ cmake -S packages/rillight_player/native -B build/macos-core \
   2>&1 | tee "$evidence/core-configure.log"
 cmake --build build/macos-core --config Release --target rillight_core --parallel 3 \
   2>&1 | tee "$evidence/core-build.log"
-cp build/macos-core/librillight_core.dylib "$core_dylib"
+# prepare_macos.py and the app bundle only read weights beside the published
+# dylib. POST_BUILD writes RIFE, Real-ESRGAN and Anime4K next to the built
+# library; copying the dylib alone drops that tree.
+core_build="build/macos-core"
+enhancement_files=(
+  rife-v4.6/flownet.param
+  rife-v4.6/flownet.bin
+  realesr-general-x4v3.param
+  realesr-general-x4v3.bin
+  shaders/anime4k/Anime4K_Restore_CNN_M.glsl
+  shaders/anime4k/Anime4K_Restore_CNN_VL.glsl
+  shaders/anime4k/Anime4K_Upscale_CNN_x2_M.glsl
+  shaders/anime4k/Anime4K_Upscale_CNN_x2_VL.glsl
+)
+for relative in "${enhancement_files[@]}"; do
+  if [[ ! -f "$core_build/$relative" ]]; then
+    echo "Pinned enhancement file missing beside built core: $relative" >&2
+    exit 1
+  fi
+done
+cp "$core_build/librillight_core.dylib" "$core_dylib"
+rm -rf "$evidence/rife-v4.6" "$evidence/shaders" \
+  "$evidence/realesr-general-x4v3.param" "$evidence/realesr-general-x4v3.bin"
+cp -R "$core_build/rife-v4.6" "$evidence/rife-v4.6"
+cp -R "$core_build/shaders" "$evidence/shaders"
+cp "$core_build/realesr-general-x4v3.param" "$core_build/realesr-general-x4v3.bin" "$evidence/"
 tar -czf "$sdk_archive" -C "$sdk_prefix" .
 python3 packages/rillight_player/native/verify_core_dependencies.py \
   --prefix "$sdk_prefix" --target macos-universal --require-subtitles
