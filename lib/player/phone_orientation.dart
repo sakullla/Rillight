@@ -1,35 +1,45 @@
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 
 typedef PhoneOrientationRequest =
     Future<void> Function(List<DeviceOrientation> orientations);
 
-/// Requests landscape for phone playback and portrait on exit.
+/// Whether the picture itself is landscape.
 ///
-/// [request] is replaceable so tests can observe the calls without rotating
-/// a device. A failed request is recorded and swallowed; playback continues.
+/// WeChat and YouTube choose fullscreen direction from the video aspect ratio:
+/// wider than tall rotates to landscape, and a square or vertical picture stays
+/// portrait. Missing or empty dimensions return null so playback does not guess.
+bool? videoPictureIsLandscape(int? width, int? height) {
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    return null;
+  }
+  return width > height;
+}
+
+/// Phone playback orientation taken from the video picture, not the device.
+///
+/// A landscape picture requests both landscape sides. A portrait or square
+/// picture requests both portrait sides. Leaving playback releases every
+/// orientation instead of requesting portrait, which would rotate the player
+/// that is still on screen.
+///
+/// [request] is replaceable so tests can observe the calls without rotating a
+/// device. A failed request is recorded and swallowed; playback continues.
 /// This never writes an activity-wide manifest lock.
-///
-/// Exit leaves [restoreTo] in place until the viewport is portrait. Releasing
-/// all orientations in the same step could keep the player in landscape when
-/// the system's automatic rotation is disabled.
-class PhoneOrientation with WidgetsBindingObserver {
-  PhoneOrientation({
-    PhoneOrientationRequest? request,
-    List<DeviceOrientation>? restoreTo,
-  }) : _request = request ?? systemRequest,
-       restoreTo = List<DeviceOrientation>.unmodifiable(restoreTo ?? portrait);
+class PhoneOrientation {
+  PhoneOrientation({PhoneOrientationRequest? request})
+    : _request = request ?? systemRequest;
 
-  static const portrait = <DeviceOrientation>[DeviceOrientation.portraitUp];
+  static const portrait = <DeviceOrientation>[
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ];
 
-  /// Android's userLandscape requests a landscape axis even when automatic
-  /// rotation is disabled, while allowing either side when it is enabled.
   static const landscape = <DeviceOrientation>[
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ];
 
-  /// Browsing default: every orientation, released after portrait is visible.
+  /// Browsing default after playback. Not a portrait lock.
   static const unlocked = <DeviceOrientation>[
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -37,8 +47,8 @@ class PhoneOrientation with WidgetsBindingObserver {
     DeviceOrientation.landscapeRight,
   ];
 
-  // Orientation is activity-wide. A departing route must not release a newer
-  // player's landscape request after its own delayed metrics callback.
+  // Orientation is activity-wide. A departing route must not overwrite a newer
+  // player's picture.
   static PhoneOrientation? _owner;
   static int _generation = 0;
 
@@ -48,14 +58,10 @@ class PhoneOrientation with WidgetsBindingObserver {
 
   final PhoneOrientationRequest _request;
 
-  /// Direction to restore when playback exits (portrait on phones by default).
-  final List<DeviceOrientation> restoreTo;
-
   final List<List<DeviceOrientation>> calls = [];
   Object? lastError;
   bool _entered = false;
-  bool _awaitingReturn = false;
-  bool _observing = false;
+  bool? _landscape;
   int? _lease;
   Future<void> _queue = Future<void>.value();
 
@@ -65,119 +71,43 @@ class PhoneOrientation with WidgetsBindingObserver {
 
   Future<void> enterPlayback() {
     if (_entered) return _queue;
-    _owner?._cancelReturn();
     _owner = this;
     _lease = ++_generation;
     _entered = true;
-    _cancelReturn();
-    return _enqueueCurrent(() => _send(landscape));
+    return _queue;
+  }
+
+  /// Lock to the picture once its display size is known.
+  Future<void> applyPicture({required bool landscape}) {
+    if (!_entered || _landscape == landscape) return _queue;
+    _landscape = landscape;
+    return _enqueueCurrent(
+      () => _send(landscape ? PhoneOrientation.landscape : portrait),
+    );
   }
 
   /// Android may recreate its activity while the player is in the background.
-  /// Reapply the landscape request when playback becomes visible again.
+  /// Reapply the picture orientation when playback becomes visible again.
   Future<void> reassert() {
-    if (!_entered) return _queue;
-    return _enqueueCurrent(() => _send(landscape));
+    final landscape = _landscape;
+    if (!_entered || landscape == null) return _queue;
+    return _enqueueCurrent(
+      () => _send(landscape ? PhoneOrientation.landscape : portrait),
+    );
   }
 
   Future<void> leavePlayback() {
     if (!_entered) return _queue;
     _entered = false;
-    final leaveLease = _lease;
+    _landscape = null;
     return _enqueueCurrent(() async {
-      final releaseLater = !_same(restoreTo, unlocked);
-      if (releaseLater) {
-        _awaitingReturn = true;
-        _startObserving();
-      }
-      await _send(restoreTo);
-      if (!_ownsLease || _lease != leaveLease) return;
-      if (lastError != null || !releaseLater) {
-        _cancelReturn();
-        _dropLease();
-        return;
-      }
-      // A metrics callback during [restoreTo] may already have released.
-      if (!_awaitingReturn) return;
-      final current = _viewportOrientation();
-      if (current != null && _isEntry(current)) {
-        // Already in portrait, so nothing still has to turn back.
-        // Wait until after this callback so the four-direction request cannot
-        // share the restore step.
-        _releaseOnNextFrame();
-      }
-    });
-  }
-
-  @override
-  void didChangeMetrics() {
-    if (!_awaitingReturn || !_ownsLease) return;
-    final current = _viewportOrientation();
-    if (current == null || !_isEntry(current)) return;
-    _release();
-  }
-
-  void _releaseOnNextFrame() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_awaitingReturn || !_ownsLease) return;
-      final current = _viewportOrientation();
-      if (current == null || !_isEntry(current)) return;
-      _release();
-    });
-    WidgetsBinding.instance.scheduleFrame();
-  }
-
-  void _release() {
-    if (!_awaitingReturn || !_ownsLease) return;
-    _cancelReturn();
-    _enqueueCurrent(() async {
       await _send(unlocked);
       _dropLease();
     });
   }
 
-  void _cancelReturn() {
-    _awaitingReturn = false;
-    _stopObserving();
-  }
-
   void _dropLease() {
     if (_ownsLease && !_entered) _owner = null;
-  }
-
-  void _startObserving() {
-    if (_observing) return;
-    _observing = true;
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  void _stopObserving() {
-    if (!_observing) return;
-    _observing = false;
-    WidgetsBinding.instance.removeObserver(this);
-  }
-
-  /// Viewport axis, or null when the window has no size yet.
-  Orientation? _viewportOrientation() {
-    final view = WidgetsBinding.instance.platformDispatcher.implicitView;
-    if (view == null) return null;
-    final size = view.physicalSize;
-    if (size.isEmpty) return null;
-    return size.width > size.height
-        ? Orientation.landscape
-        : Orientation.portrait;
-  }
-
-  bool _isEntry(Orientation orientation) {
-    if (restoreTo.isEmpty) return false;
-    final portrait = orientation == Orientation.portrait;
-    for (final direction in restoreTo) {
-      final directionIsPortrait =
-          direction == DeviceOrientation.portraitUp ||
-          direction == DeviceOrientation.portraitDown;
-      if (directionIsPortrait != portrait) return false;
-    }
-    return true;
   }
 
   Future<void> _enqueue(Future<void> Function() action) {
@@ -206,13 +136,5 @@ class PhoneOrientation with WidgetsBindingObserver {
     } catch (error) {
       lastError = error;
     }
-  }
-
-  static bool _same(List<DeviceOrientation> a, List<DeviceOrientation> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
   }
 }

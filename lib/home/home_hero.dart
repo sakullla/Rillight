@@ -14,8 +14,9 @@ import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// Netflix 式全出血轮播:图片铺满卡片,底部渐变遮罩上排文字,
-/// 圆点指示,悬停暂停的 7 秒自动轮播。仅海报的条目走海报聚焦版式。
+/// Netflix 式全出血轮播:图片铺满卡片,底部渐变遮罩上排「最新电影/剧集」
+/// 引导标签、标题、年份·流派·时长与简介,圆点指示,悬停暂停的 7 秒自动轮播。
+/// 仅海报的条目走海报聚焦版式。候选只来自片库最近入库,不含观看记录。
 class HomeHero extends StatefulWidget {
   const HomeHero({super.key, required this.catalog, this.topOverlap = 0});
   final CatalogController catalog;
@@ -86,8 +87,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
       limit: HomeHero.maxFeatured,
     );
     if (items.isEmpty) {
-      if (!widget.catalog.resume.loading &&
-          !widget.catalog.latestMovies.loading &&
+      if (!widget.catalog.latestMovies.loading &&
           !widget.catalog.latestSeries.loading) {
         return const SizedBox.shrink();
       }
@@ -135,7 +135,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
                     constraints.maxWidth,
                     viewportHeight: MediaQuery.sizeOf(context).height,
                   ),
-                  252 * scale + 32,
+                  276 * scale + 32,
                 ) +
                 widget.topOverlap;
             final layout = _layoutOverride[item.id] ?? heroLayoutFor(artwork);
@@ -145,6 +145,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             );
             final actions = HeroPlaybackActions(
               item: item,
+              catalog: widget.catalog,
               onDetails: () => context.push(AppRoutes.item(item.id)),
             );
             final text = HeroTextBlock(

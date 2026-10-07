@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
+import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
@@ -57,6 +58,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   final _scroll = ScrollController();
   late final _episodeScrollCoordinator = EpisodeScrollCoordinator(_scroll);
   var _barSolid = false;
+
+  /// 用户点中的季。自动落到的第一季不写这里，头图就保持打开时的那一张。
+  String? _artworkSeasonId;
 
   @override
   void initState() {
@@ -116,6 +120,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   Future<void> _changeSeason(String id, {bool more = false}) async {
     final controller = _controller;
     if (controller == null) return;
+    if (!more && id != controller.seasonId) _artworkSeasonId = id;
     await controller.selectSeason(id, more: more);
   }
 
@@ -358,6 +363,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
               ),
             ),
             Expanded(
+              // 格子编号是列表位置，不是正在看的那一集。已加载的分集
+              // 不能拿来上色，对不上观看进度时就留空。
               child: GridView.builder(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.md,
@@ -374,18 +381,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 itemCount: total,
                 itemBuilder: (context, index) {
                   final number = index + 1;
-                  final current = controller.episodes.any(
-                    (episode) => episode.indexNumber == number,
-                  );
                   return OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      backgroundColor: current
-                          ? Theme.of(
-                              context,
-                            ).colorScheme.primary.withValues(alpha: 0.18)
-                          : null,
-                    ),
+                    style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
                     onPressed: () => Navigator.pop(context, number),
                     child: Text('$number'),
                   );
@@ -495,17 +492,25 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         final selectedSeason = controller.seasons
             .where((season) => season.id == controller.seasonId)
             .firstOrNull;
+        // 从海报点进来时，头图和取色都停在那一张上。加载完成后不再改成
+        // 背景或第一季的图，否则会先看到点进去的画面，再换成另一张，颜色变两次。
         final imageSource = failed
             ? null
+            : handoff != null
+            ? handoff.item
             : item == null
-            ? handoff?.item
-            : item.isSeries && selectedSeason != null
+            ? null
+            : item.isSeries &&
+                  selectedSeason != null &&
+                  selectedSeason.id == _artworkSeasonId
             ? seasonArtworkItem(selectedSeason, item)
             : item;
+        final preferBackdrop = handoff?.preferBackdrop ?? true;
+        final imageWidth = handoff?.maxWidth ?? PhoneMotion.pageRequestWidth;
         final immersive = imageSource != null && !_barSolid;
         return ContentTheme(
           item: imageSource,
-          preferBackdrop: pending ? (handoff?.preferBackdrop ?? true) : true,
+          preferBackdrop: preferBackdrop,
           child: Scaffold(
             extendBodyBehindAppBar: imageSource != null,
             appBar: AppBar(
@@ -618,13 +623,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                         ? () => _openItem(_nextEpisode!.id)
                                         : null,
                                   ),
-                            preferBackdrop: pending
-                                ? (handoff?.preferBackdrop ?? true)
-                                : true,
-                            maxWidth: pending
-                                ? (handoff?.maxWidth ??
-                                      PhoneMotion.pageRequestWidth)
-                                : PhoneMotion.pageRequestWidth,
+                            preferBackdrop: preferBackdrop,
+                            maxWidth: imageWidth,
                             showCaption: !pending,
                           ),
                         ),
@@ -1114,25 +1114,28 @@ class _DetailSimilar extends StatelessWidget {
         ),
         SizedBox(
           height: 128 * 1.5 + phonePosterCardLabelExtent(context),
-          child: ListView.separated(
-            key: CatalogKeys.similarRow,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            itemCount: items.length,
-            separatorBuilder: (context, index) =>
-                const SizedBox(width: AppSpacing.sm),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return SizedBox(
-                width: 128,
-                child: PhonePosterCard(
-                  item: item,
-                  pressKey: CatalogKeys.item(item.id),
-                  imageMaxWidth: 320,
-                  onTap: () => onOpenItem(item.id),
-                ),
-              );
-            },
+          child: DetachedHorizontalScroll(
+            builder: (controller) => ListView.separated(
+              controller: controller,
+              key: CatalogKeys.similarRow,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              itemCount: items.length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return SizedBox(
+                  width: 128,
+                  child: PhonePosterCard(
+                    item: item,
+                    pressKey: CatalogKeys.item(item.id),
+                    imageMaxWidth: 320,
+                    onTap: () => onOpenItem(item.id),
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ],

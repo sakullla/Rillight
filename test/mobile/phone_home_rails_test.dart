@@ -403,7 +403,7 @@ void main() {
           lessThan(picture.width * picture.height * 0.5),
         );
         expect(
-          tester.getTopLeft(find.text('片库入口')).dy -
+          tester.getTopLeft(find.text('媒体库')).dy -
               tester.getRect(find.byKey(CatalogKeys.item('ep-1'))).bottom,
           greaterThanOrEqualTo(16),
         );
@@ -421,25 +421,31 @@ void main() {
     );
   }
 
-  testWidgets('a short viewport only compresses the banner extension', (
+  testWidgets('a short viewport shrinks the hero poster instead of clipping', (
     tester,
   ) async {
     await _pumpRails(tester, width: 360, height: 560);
-    final natural = tester.getSize(find.byKey(PhoneHero.bannerKey)).height;
-    final clips = find.ancestor(
-      of: find.byKey(PhoneHero.bannerKey),
-      matching: find.byType(ClipRect),
+    final banner = find.byKey(PhoneHero.bannerKey);
+    final rect = tester.getRect(banner);
+    // 海报高按视口份额封顶,整段高度随之收缩,与骨架屏估算保持一致。
+    final posterHeight = 560 * PhoneHero.posterViewportShare;
+    expect(
+      PhoneHero.posterHeightFor(360, viewportHeight: 560),
+      closeTo(posterHeight, .01),
     );
-    var fitted = natural;
-    for (var i = 0; i < clips.evaluate().length; i++) {
-      final height = tester.getSize(clips.at(i)).height;
-      if (height < fitted) {
-        fitted = height;
-      }
-    }
-    // 矮视口只压缩顶栏延伸，保留完整横图与文字区。
-    expect(fitted, lessThanOrEqualTo(natural));
-    expect(fitted, greaterThanOrEqualTo(PhoneHero.contentHeightFor(360)));
+    final expected = 56 + PhoneHero.contentHeightFor(360, viewportHeight: 560);
+    expect(rect.height, inInclusiveRange(expected, expected + 24));
+    // 海报、标题、按钮与圆点都完整落在轮播区内,不被裁掉。
+    final poster = tester.getRect(find.byKey(PhoneHero.openKey));
+    expect(poster.height, closeTo(posterHeight, .01));
+    expect(poster.top, greaterThanOrEqualTo(rect.top));
+    final play = find.descendant(of: banner, matching: find.text('播放'));
+    expect(play, findsOneWidget);
+    expect(tester.getRect(play).bottom, lessThanOrEqualTo(rect.bottom));
+    expect(
+      tester.getRect(find.byKey(CatalogKeys.heroDot(0))).bottom,
+      lessThanOrEqualTo(rect.bottom + .5),
+    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -675,7 +681,23 @@ Future<void> _pumpRails(
       ],
     )
     ..nextUp = const CatalogRowState(hidden: true)
-    ..latestMovies = const CatalogRowState(hidden: true)
+    // 轮播只吃最近入库:给两部带海报的电影,让横幅出现在继续观看行之上。
+    ..latestMovies = const CatalogRowState(
+      items: [
+        EmbyItem(
+          id: 'hero-1',
+          name: '新片一',
+          type: 'Movie',
+          primaryImageTag: 'poster-1',
+        ),
+        EmbyItem(
+          id: 'hero-2',
+          name: '新片二',
+          type: 'Movie',
+          primaryImageTag: 'poster-2',
+        ),
+      ],
+    )
     ..latestSeries = const CatalogRowState(hidden: true)
     ..libraries = const [
       EmbyItem(

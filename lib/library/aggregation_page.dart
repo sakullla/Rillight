@@ -16,6 +16,7 @@ import '../auth/source_management.dart';
 import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
+import '../app/theme/tokens.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/app_empty_view.dart';
 import '../auth/auth_controller.dart';
@@ -101,8 +102,12 @@ class AggregationPage extends StatefulWidget {
     this.initialGenre = '',
     this.initialType,
     this.searchFocusNode,
+    this.searchClearsTopBar = true,
   });
   final FocusNode? searchFocusNode;
+
+  /// 路由页从窗口顶开始，搜索栏要避开桌面顶栏。覆盖层自己已经让出顶栏。
+  final bool searchClearsTopBar;
   final PlayerHostOpenItemCommand? sourceCommand;
   final bool legacySelected;
   final String initialGenre;
@@ -337,7 +342,10 @@ class _AggregationPageState extends State<AggregationPage> {
   Widget build(BuildContext context) {
     if (_usesNewExperience) {
       return widget.search
-          ? _AggregationSearch(focusNode: widget.searchFocusNode)
+          ? _AggregationSearch(
+              focusNode: widget.searchFocusNode,
+              clearOfDesktopBar: widget.searchClearsTopBar,
+            )
           : const _AggregationBrowse();
     }
     final l = AppLocalizations.of(context);
@@ -1461,6 +1469,62 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     openServerItem(context, account: account, item: item);
   }
 
+  Widget _segments(AppLocalizations l) {
+    final track = Theme.of(context).colorScheme.surfaceContainerHigh;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: track.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _segmentButton(
+              l.resumePlay,
+              'aggregation-segment-continue',
+              _AggregationSegment.continueWatching,
+            ),
+            _segmentButton(
+              l.filterFavorite,
+              'aggregation-segment-favorites',
+              _AggregationSegment.favorites,
+            ),
+            _segmentButton(
+              l.libraries,
+              'aggregation-segment-libraries',
+              _AggregationSegment.libraries,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _segmentButton(String label, String keyName, _AggregationSegment value) {
+    final selected = _segment == value;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return TextButton(
+      key: Key(keyName),
+      onPressed: () => setState(() => _segment = value),
+      style: TextButton.styleFrom(
+        foregroundColor: selected ? scheme.onSurface : scheme.onSurfaceVariant,
+        backgroundColor: selected ? scheme.surface : Colors.transparent,
+        textStyle: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        minimumSize: const Size(0, 32),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: const StadiumBorder(),
+      ),
+      child: Text(label),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
@@ -1479,35 +1543,13 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(16, desktop ? 64 : 12, 16, 12),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  key: const Key('aggregation-segment-continue'),
-                  label: Text(l.resumePlay),
-                  selected: _segment == _AggregationSegment.continueWatching,
-                  onSelected: (_) => setState(
-                    () => _segment = _AggregationSegment.continueWatching,
-                  ),
-                ),
-                ChoiceChip(
-                  key: const Key('aggregation-segment-favorites'),
-                  label: Text(l.filterFavorite),
-                  selected: _segment == _AggregationSegment.favorites,
-                  onSelected: (_) =>
-                      setState(() => _segment = _AggregationSegment.favorites),
-                ),
-                ChoiceChip(
-                  key: const Key('aggregation-segment-libraries'),
-                  label: const Text('媒体库'),
-                  selected: _segment == _AggregationSegment.libraries,
-                  onSelected: (_) =>
-                      setState(() => _segment = _AggregationSegment.libraries),
-                ),
-              ],
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              desktop ? 64 : 8,
+              AppSpacing.page,
+              4,
             ),
+            child: _segments(l),
           ),
           Expanded(child: _body(context, loader, servers, rows)),
         ],
@@ -1536,6 +1578,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
       return AppEmptyView(message: l.aggregationEmpty);
     }
     final captioned = _segment == _AggregationSegment.continueWatching;
+    final libraries = _segment == _AggregationSegment.libraries;
     return ListView(
       key: const PageStorageKey('aggregation'),
       children: [
@@ -1554,9 +1597,14 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
                   ? null
                   : () => loader.retry(section.serverId),
               onTap: (item) => _open(section, item),
-              extent: captioned ? _continueExtent(context) : null,
-              itemBuilder: captioned
-                  ? (context, item) => _continueCard(context, section, item)
+              wide: captioned || libraries,
+              showProgress: captioned,
+              onMore: captioned && _slice(section).items.isNotEmpty
+                  ? () => context.push(AppRoutes.serverResume(section.serverId))
+                  : null,
+              extent: libraries ? _libraryExtent(context) : null,
+              itemBuilder: libraries
+                  ? (context, item) => _libraryCard(context, section, item)
                   : null,
             ),
           ),
@@ -1564,48 +1612,29 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     );
   }
 
-  double _continueExtent(BuildContext context) {
+  /// 媒体库主图是横版拼图，按 16:9 横幅排，不走竖版海报。
+  double _libraryExtent(BuildContext context) {
     final screen = MediaQuery.sizeOf(context).width;
-    final image = MediaShelf.posterWidthFor(screen) * 1.5;
+    final image = MediaShelf.wideCardWidthFor(screen) * 9 / 16;
     final labels = MediaShelf.posterLabelExtentFor(
       context,
       showProgress: false,
     );
-    final caption = MediaShelf.lineHeightOf(
-      context,
-      Theme.of(context).textTheme.bodySmall,
-    );
-    // 货架内部还要留出悬停余量，字幕行必须算进总高度。
-    return ((image + labels + caption) * MediaShelf.hoverScale + 48)
-        .ceilToDouble();
+    return ((image + labels) * MediaShelf.hoverScale).ceilToDouble();
   }
 
-  Widget _continueCard(
+  Widget _libraryCard(
     BuildContext context,
     ServerSections section,
     EmbyItem item,
   ) {
-    final width = MediaShelf.posterWidthFor(MediaQuery.sizeOf(context).width);
-    final caption = aggregationContinueCaption(item);
-    return SizedBox(
+    final width = MediaShelf.wideCardWidthFor(MediaQuery.sizeOf(context).width);
+    return PosterCard(
+      item: item,
+      wide: true,
+      preferBackdrop: false,
       width: width,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          PosterCard(
-            item: item,
-            width: width,
-            onTap: () => _open(section, item),
-          ),
-          if (caption != null)
-            Text(
-              caption,
-              key: ValueKey(
-                'aggregation-caption-${section.serverId}-${item.id}',
-              ),
-            ),
-        ],
-      ),
+      onTap: () => _open(section, item),
     );
   }
 }
@@ -1646,9 +1675,10 @@ class _SearchHit {
 }
 
 class _AggregationSearch extends StatefulWidget {
-  const _AggregationSearch({this.focusNode});
+  const _AggregationSearch({this.focusNode, this.clearOfDesktopBar = true});
 
   final FocusNode? focusNode;
+  final bool clearOfDesktopBar;
 
   @override
   State<_AggregationSearch> createState() => _AggregationSearchState();
@@ -1660,6 +1690,10 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   List<_SearchHit> _rows = const [];
   String _term = '';
   bool _searching = false;
+  bool _filtersOpen = false;
+
+  /// null 表示全部已登录服务器。收起筛选时仍沿用这里的选择。
+  Set<String>? _servers;
   int _generation = 0;
   final Map<String, int> _attempt = {};
 
@@ -1712,7 +1746,10 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     final registry = AuthScope.of(context).sources;
     await registry.load();
     if (!mounted || generation != _generation) return;
-    final targets = registry.project(AccessRegion.ordinary);
+    final targets = [
+      for (final server in registry.project(AccessRegion.ordinary))
+        if (_servers == null || _servers!.contains(server.id)) server,
+    ];
     _attempt
       ..clear()
       ..addEntries(targets.map((server) => MapEntry(server.id, 0)));
@@ -1820,16 +1857,30 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     }
   }
 
+  void _toggleServer(List<SavedServer> servers, String id, bool selected) {
+    final all = servers.map((server) => server.id).toSet();
+    final next = {..._servers ?? all};
+    if (selected) {
+      next.add(id);
+    } else {
+      next.remove(id);
+    }
+    setState(() => _servers = next.containsAll(all) ? null : next);
+    if (_term.isNotEmpty) unawaited(_run(_term));
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final presentation = PresentationScope.of(context);
-    final tv = presentation.isTv;
+    final servers = AuthScope.of(
+      context,
+    ).sources.project(AccessRegion.ordinary);
     final visible = [
       for (final row in _rows)
         if (row.items.isNotEmpty || row.error != null || row.loading) row,
     ];
-    final field = tv
+    final field = presentation.isTv
         ? TvInput(
             key: const Key('aggregation-keyword'),
             autofocus: true,
@@ -1858,15 +1909,59 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: presentation.isDesktop
-                ? field
-                : Row(
-                    children: [
+            padding: EdgeInsets.fromLTRB(
+              16,
+              presentation.isDesktop && widget.clearOfDesktopBar ? 64 : 12,
+              16,
+              8,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (!presentation.isDesktop)
                       BackButton(onPressed: () => context.pop()),
-                      Expanded(child: field),
-                    ],
+                    Expanded(child: field),
+                    if (servers.isNotEmpty)
+                      IconButton(
+                        key: const Key('aggregation-search-filters'),
+                        tooltip: l.searchServerFilter,
+                        onPressed: () =>
+                            setState(() => _filtersOpen = !_filtersOpen),
+                        icon: Icon(
+                          Icons.filter_list,
+                          color: _servers == null
+                              ? null
+                              : Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                  ],
+                ),
+                if (_filtersOpen)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final server in servers)
+                          FilterChip(
+                            key: ValueKey(
+                              'aggregation-search-server-${server.id}',
+                            ),
+                            label: Text(server.displayName),
+                            selected:
+                                _servers == null ||
+                                _servers!.contains(server.id),
+                            onSelected: (selected) =>
+                                _toggleServer(servers, server.id, selected),
+                          ),
+                      ],
+                    ),
                   ),
+              ],
+            ),
           ),
           Expanded(child: _results(context, visible)),
         ],

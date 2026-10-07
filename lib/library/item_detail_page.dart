@@ -88,6 +88,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   List<String> _sectionGenres = const [];
   ({String itemId, List<String> tags})? _sectionAlbum;
 
+  /// 打开剧集时头图保持剧集自己的海报。点选某一季之后才换成那一季的图。
+  var _applySeasonArtwork = false;
   List<EmbyItem> _seasons = const [];
   List<EmbyItem> _episodes = const [];
   List<EmbyItem> _similar = const [];
@@ -736,7 +738,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     if (!mounted || total <= 0) {
       return;
     }
-    final currentNumber = _item?.indexNumber;
+    final currentNumber = _item?.isEpisode == true ? _item?.indexNumber : null;
     final selected = await showDialog<int>(
       context: context,
       builder: (context) => _EpisodeNumberPicker(
@@ -863,6 +865,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final serial = ++_jumpSerial;
     final gen = _loadGen;
     setState(() {
+      _applySeasonArtwork = true;
       _seasonId = seasonId;
       _focusedEpisodeId = null;
       _episodes = const [];
@@ -1219,7 +1222,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final wideCardWidth = MediaShelf.wideCardWidthFor(screenWidth);
     final season = _seasons.where((s) => s.id == _seasonId).firstOrNull;
-    final artwork = item.isSeries && season != null
+    final artwork = item.isSeries && _applySeasonArtwork && season != null
         ? seasonArtworkItem(season, item)
         : item;
     final shared = _sharedBackdrop ?? artwork;

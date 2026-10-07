@@ -306,6 +306,7 @@ class _AppShellState extends State<AppShell> {
                                   child: AggregationPage(
                                     search: true,
                                     searchFocusNode: _searchQueryFocus,
+                                    searchClearsTopBar: false,
                                   ),
                                 ),
                               ),
@@ -367,15 +368,17 @@ class _TopBar extends StatelessWidget {
         .firstOrNull;
     final title =
         library?.name ??
-        switch (location) {
-          AppRoutes.settings => l10n.settings,
-          AppRoutes.search => l10n.search,
-          AppRoutes.shelfResume => l10n.resumeRow,
-          AppRoutes.shelfNextUp => l10n.nextUpRow,
-          AppRoutes.shelfLatestMovies => l10n.latestMoviesRow,
-          AppRoutes.shelfLatestSeries => l10n.latestSeriesRow,
-          _ => l10n.details,
-        };
+        (AppRoutes.isServerResume(location)
+            ? l10n.resumeRow
+            : switch (location) {
+                AppRoutes.settings => l10n.settings,
+                AppRoutes.search => l10n.search,
+                AppRoutes.shelfResume => l10n.resumeRow,
+                AppRoutes.shelfNextUp => l10n.nextUpRow,
+                AppRoutes.shelfLatestMovies => l10n.latestMoviesRow,
+                AppRoutes.shelfLatestSeries => l10n.latestSeriesRow,
+                _ => l10n.details,
+              });
     final scheme = Theme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final scrim = light ? scheme.surface : scheme.scrim;
@@ -385,43 +388,42 @@ class _TopBar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            height: overlayHeight,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: light
-                        ? [0, height / overlayHeight, 1]
-                        : AppScrim.topBarStops,
-                    colors: [
-                      scrim.withValues(
-                        alpha: light
-                            ? AppScrim.of(context, AppScrim.lightTopBar)
-                            : opaque
-                            ? 0.98
-                            : AppScrim.of(context, AppScrim.topBar),
-                      ),
-                      scrim.withValues(
-                        alpha: light
-                            ? AppScrim.of(context, AppScrim.lightTopBar)
-                            : opaque
-                            ? 0.94
-                            : AppScrim.of(context, AppScrim.topBarMid),
-                      ),
-                      scrim.withValues(alpha: 0),
-                    ],
+          if (opaque)
+            Positioned.fill(child: ColoredBox(color: scheme.surface))
+          else
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: overlayHeight,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      stops: light
+                          ? [0, height / overlayHeight, 1]
+                          : AppScrim.topBarStops,
+                      colors: [
+                        scrim.withValues(
+                          alpha: light
+                              ? AppScrim.of(context, AppScrim.lightTopBar)
+                              : AppScrim.of(context, AppScrim.topBar),
+                        ),
+                        scrim.withValues(
+                          alpha: light
+                              ? AppScrim.of(context, AppScrim.lightTopBar)
+                              : AppScrim.of(context, AppScrim.topBarMid),
+                        ),
+                        scrim.withValues(alpha: 0),
+                      ],
+                    ),
                   ),
+                  child: const SizedBox.expand(),
                 ),
-                child: const SizedBox.expand(),
               ),
             ),
-          ),
           Material(
             key: AppShell.topBarKey,
             type: MaterialType.transparency,
@@ -429,7 +431,9 @@ class _TopBar extends StatelessWidget {
               padding: EdgeInsets.only(left: leading, right: trailing),
               child: Row(
                 children: [
-                  if (canPop || location != AppRoutes.home)
+                  if (canPop ||
+                      (location != AppRoutes.home &&
+                          !AppRoutes.showsBrowseNav(location)))
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.xs,

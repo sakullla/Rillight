@@ -23,6 +23,13 @@ abstract final class AppRoutes {
   static bool isItem(String path) => path.startsWith('/item/');
 
   static String library(String viewId) => '/library/$viewId';
+
+  /// 某一台服务器的继续观看完整列表，和首页「更多」打开的是同一类货架。
+  static String serverResume(String serverId) =>
+      '/server/${Uri.encodeComponent(serverId)}/resume';
+
+  static bool isServerResume(String path) =>
+      path.startsWith('/server/') && path.endsWith('/resume');
   static String item(
     String itemId, {
     String? seasonId,

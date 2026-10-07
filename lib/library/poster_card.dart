@@ -18,6 +18,7 @@ class PosterCard extends StatelessWidget {
     this.showProgress = false,
     this.width = 120,
     this.wide = false,
+    this.preferBackdrop,
     this.hoverScale = 1.04,
     this.onRemoveFromResume,
   });
@@ -27,6 +28,9 @@ class PosterCard extends StatelessWidget {
   final bool showProgress;
   final double width;
   final bool wide;
+
+  /// 横卡默认用背景图。媒体库拼图是主图，需要横幅时传 false。
+  final bool? preferBackdrop;
   final double hoverScale;
   final ValueChanged<EmbyItem>? onRemoveFromResume;
 
@@ -69,7 +73,7 @@ class PosterCard extends StatelessWidget {
                           item: item,
                           width: width,
                           height: height,
-                          preferBackdrop: wide,
+                          preferBackdrop: preferBackdrop ?? wide,
                           maxWidth: wide ? 360 : 280,
                           fit: BoxFit.cover,
                         ),

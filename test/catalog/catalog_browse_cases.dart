@@ -201,7 +201,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(CatalogKeys.librariesMenu),
-          matching: find.text('片库'),
+          matching: find.text('媒体库'),
         ),
         findsOneWidget,
       );

@@ -1325,7 +1325,7 @@ class PlayerController extends ChangeNotifier {
         _transcodeSubtitleDelivery(stream) == TranscodeSubtitleDelivery.burnIn);
   }
 
-  /// Called only by phone layout, using the actual video display rectangle.
+  /// Uses the actual video display rectangle on every platform.
   /// PiP callers pass its actual rectangle; its short height caps font size.
   Future<void> updateSubtitleViewport({
     required double width,

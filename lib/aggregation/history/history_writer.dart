@@ -212,7 +212,21 @@ class HistoryWriter implements Listenable {
         'Actual version, source-specific work and library required',
       );
     }
-    final permit = registry.permit(source.account, libraryId: libraryId);
+    // 未勾选库的显式播放没有范围许可。会话仍有效时照常记这条观看，
+    // 聚合历史列表会按范围把它滤掉。
+    OperationPermit? scoped;
+    try {
+      scoped = registry.permit(source.account, libraryId: libraryId);
+    } on StateError catch (error) {
+      if (error.message != 'Source outside allowed scope') rethrow;
+    }
+    final permit =
+        scoped ??
+        registry.permit(
+          source.account,
+          libraryId: libraryId,
+          sessionOnly: true,
+        );
     permit.requireValid();
     await _commit(sessions: _sessionCounter + 1);
     permit.requireValid();

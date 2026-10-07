@@ -311,28 +311,16 @@ void main() {
           final catalog = CatalogScope.of(
             tester.element(find.byType(PhoneHero)),
           );
-          final originals = [
-            for (final item in server.items)
-              (
-                item,
-                item.played,
-                item.nextUp,
-                item.playbackPositionTicks,
-                item.playedPercentage,
-              ),
-          ];
-          for (final item in server.items) {
-            if (item.type == 'Movie') item.played = true;
-            if (item.type == 'Movie' || item.type == 'Episode') {
-              item.nextUp = false;
-              item.playbackPositionTicks = 0;
-              item.playedPercentage = 0;
-            }
-          }
-          await tester.runAsync(catalog.reloadHomeRows);
-          await capture.advance(700);
+          // 轮播只取最近入库的电影/剧集交错,与观看记录无关;用圆点切到
+          // 剧集页,主操作「播放」要先解析出该播的那一集。
+          final seriesPage = PhoneHero.featuredItemsOf(
+            catalog,
+          ).indexWhere((item) => item.id == 'series-friends');
+          expect(seriesPage, greaterThanOrEqualTo(0));
           await tester.ensureVisible(find.byKey(PhoneHero.bannerKey));
           await capture.advance(300);
+          await capture.tap(CatalogKeys.heroDot(seriesPage));
+          await capture.advance(700);
           await capture.save('home-series-featured');
           await capture.tap(const ValueKey('hero-resume-series-friends'));
           await capture.advance(1000);
@@ -345,13 +333,6 @@ void main() {
           await capture.save('player-from-series-hero');
           app.router.pop();
           await capture.advance(500);
-          for (final original in originals) {
-            original.$1.played = original.$2;
-            original.$1.nextUp = original.$3;
-            original.$1.playbackPositionTicks = original.$4;
-            original.$1.playedPercentage = original.$5;
-          }
-          await tester.runAsync(catalog.reloadHomeRows);
           backend = CaptureBackend();
         }
 

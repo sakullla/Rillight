@@ -14,6 +14,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_carousel.dart';
+import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/home/library_latest_row.dart';
 import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/phone_home_sections.dart';
@@ -35,7 +36,8 @@ abstract final class TvHomeKeys {
 /// TV 首页：轮播图、继续观看、下一集、片库入口和每个片库的最近添加。
 /// 顺序和显隐按服务器记在电视自己的存储里，手机和桌面不受影响。行级焦点记忆。
 ///
-/// featured 候选复用 [featuredHomeItems](继续观看优先,上限 5),只手动左右
+/// featured 候选复用 [featuredHomeItems](最近入库的电影/剧集交错,上限 5,
+/// 不含观看记录),只手动左右
 /// 切换不自动轮换;无候选时整区隐藏。切换控件在 AnimatedSwitcher 之外,快速
 /// 连按时焦点节点不被移除,焦点不跳出行/区。
 class TvHomePage extends StatefulWidget {
@@ -295,6 +297,7 @@ class _TvFeatured extends StatefulWidget {
 
 class _TvFeaturedState extends State<_TvFeatured> {
   int _index = 0;
+  bool _opening = false;
 
   void _go(int delta) {
     final count = widget.items.length;
@@ -302,6 +305,30 @@ class _TvFeaturedState extends State<_TvFeatured> {
       return;
     }
     setState(() => _index = ((_index + delta) % count + count) % count);
+  }
+
+  /// 电影直接播;剧集先解析出该播的那一集,没有可播集时提示。
+  Future<void> _play(EmbyItem item) async {
+    if (_opening) return;
+    _opening = true;
+    try {
+      final target = await resolveHeroPlayTarget(context, item);
+      if (!mounted) return;
+      if (target == null) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context).noPlayableStream),
+          ),
+        );
+        return;
+      }
+      await context.push(
+        '/play/${target.id}',
+        extra: PlayerOpenRequest(itemId: target.id, autoResume: true),
+      );
+    } finally {
+      _opening = false;
+    }
   }
 
   @override
@@ -322,7 +349,6 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final title = heroTitle(item);
     final meta = heroMetaLabels(l, item);
     final overview = plainOverview(item.overview);
-    final playable = item.canResume || item.isMovie || item.isEpisode;
     return SizedBox(
       key: TvHomeKeys.featured,
       width: viewSize.width,
@@ -358,6 +384,8 @@ class _TvFeaturedState extends State<_TvFeatured> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  HeroKicker(label: heroKicker(l, item)),
+                  const SizedBox(height: 10),
                   Text(
                     title,
                     key: TvHomeKeys.featuredTitle,
@@ -415,26 +443,17 @@ class _TvFeaturedState extends State<_TvFeatured> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (playable) ...[
-                        TvAction(
-                          key: TvHomeKeys.featuredPlay,
-                          emphasized: true,
-                          pill: true,
-                          leading: const Icon(Icons.play_arrow_rounded),
-                          onPressed: () => context.push(
-                            '/play/${item.id}',
-                            extra: PlayerOpenRequest(
-                              itemId: item.id,
-                              autoResume: true,
-                            ),
-                          ),
-                          child: Text(item.canResume ? l.resumePlay : l.play),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
+                      TvAction(
+                        key: TvHomeKeys.featuredPlay,
+                        emphasized: true,
+                        pill: true,
+                        leading: const Icon(Icons.play_arrow_rounded),
+                        onPressed: () => _play(item),
+                        child: Text(l.play),
+                      ),
+                      const SizedBox(width: 8),
                       TvAction(
                         key: TvHomeKeys.featuredOpen,
-                        emphasized: !playable,
                         pill: true,
                         onPressed: () => context.push(AppRoutes.item(item.id)),
                         child: Text(l.details),

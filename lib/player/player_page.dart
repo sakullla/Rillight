@@ -37,6 +37,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_settings_menu.dart';
 import 'package:rillight/player/playback_control_scrims.dart';
 import 'package:rillight/player/seek_preview.dart';
+import 'package:rillight/player/subtitle_viewport.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -612,6 +613,11 @@ class PlayerPageState extends State<PlayerPage> {
                           child: current.backend.buildView(
                             key: const ValueKey('player-video-surface'),
                           ),
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: SubtitleViewportReporter(controller: current),
                         ),
                       ),
                       if (current.loading)

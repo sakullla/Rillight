@@ -486,14 +486,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get home => '首页';
 
   @override
-  String get libraries => '片库';
+  String get libraries => '媒体库';
 
   @override
   String get customizeNav => '自定义导航';
 
   @override
   String customizeNavHint(int count) {
-    return '最多勾选 $count 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。';
+    return '最多勾选 $count 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页媒体库。';
   }
 
   @override
@@ -518,6 +518,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get searchEmptyQuery => '输入片名后搜索';
+
+  @override
+  String get searchServerFilter => '服务器';
 
   @override
   String get searchNoResults => '没有结果';
@@ -697,7 +700,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get details => '详情';
 
   @override
-  String get browseEmpty => '暂无可浏览的内容，请刷新或从片库开始浏览。';
+  String get heroNewMovie => '最新电影';
+
+  @override
+  String get heroNewSeries => '最新剧集';
+
+  @override
+  String heroItemOf(int index, int count) {
+    return '第 $index 项，共 $count 项';
+  }
+
+  @override
+  String get browseEmpty => '暂无可浏览的内容，请刷新或从媒体库开始浏览。';
 
   @override
   String browseLoaded(int count) {
@@ -1347,7 +1361,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneHomeEdit => '编辑首页';
 
   @override
-  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。';
+  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。';
 
   @override
   String get phoneHomeSectionBanner => '轮播图';
@@ -1362,7 +1376,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneHomeSectionLatestSeries => '最近剧集';
 
   @override
-  String get phoneHomeSectionLibraries => '片库入口';
+  String get phoneHomeSectionLibraries => '媒体库';
 
   @override
   String phoneHomeLibraryLatest(String name) {
@@ -1573,7 +1587,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneDiscover => '发现好故事';
 
   @override
-  String get phoneLibraryBrowse => '浏览片库';
+  String get phoneLibraryBrowse => '浏览媒体库';
 
   @override
   String get phoneSearchHint => '搜索电影、剧集和演员';
@@ -1584,7 +1598,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get phoneSubtitleSize => '手机字幕大小';
+  String get phoneSubtitleSize => '字幕大小';
 
   @override
   String get phoneSubtitleSmall => '小';

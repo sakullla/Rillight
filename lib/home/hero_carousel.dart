@@ -19,14 +19,69 @@ String heroTitle(EmbyItem item) =>
     ? item.seriesName!
     : item.name;
 
-/// 轮播 meta 行:SxxExx / 年份 / 时长 / 已看进度。
-List<String> heroMetaLabels(AppLocalizations l10n, EmbyItem item) => [
-  if (item.isEpisode) ?seasonEpisodeCode(item),
-  if (!item.isEpisode && item.productionYear != null) '${item.productionYear}',
-  ?runtimeLabel(l10n, item),
-  if (item.canResume)
-    l10n.playbackProgress((item.playbackProgress * 100).round()),
-];
+/// 轮播 meta 行:年份 · 流派(最多两个) · 时长 / 季数。
+/// 只描述作品本身,不带任何观看记录(已看、进度、下一集)。
+List<String> heroMetaLabels(AppLocalizations l10n, EmbyItem item) {
+  final year = item.productionYear;
+  final seasons = item.childCount ?? 0;
+  return [
+    if (item.isEpisode) ?seasonEpisodeCode(item),
+    if (year != null && year > 0) '$year',
+    ...item.genres
+        .map((genre) => genre.trim())
+        .where((g) => g.isNotEmpty)
+        .take(2),
+    if (item.isSeries && seasons > 0)
+      l10n.seasonCount(seasons)
+    else if (!item.isSeries)
+      ?runtimeLabel(l10n, item),
+  ];
+}
+
+/// 轮播条目的「为什么在这里」:最新电影 / 最新剧集。
+String heroKicker(AppLocalizations l10n, EmbyItem item) =>
+    item.isMovie ? l10n.heroNewMovie : l10n.heroNewSeries;
+
+/// 小号大写感的引导标签,放在标题上方;[onScrim] 决定用遮罩白还是主题强调色。
+class HeroKicker extends StatelessWidget {
+  const HeroKicker({super.key, required this.label, this.onScrim = true});
+
+  final String label;
+  final bool onScrim;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = onScrim
+        ? Colors.white.withValues(alpha: .82)
+        : theme.colorScheme.primary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 3,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.2,
+            height: 1.2,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 /// 轮播版式:有合格背景图走全出血;只有海报走海报聚焦。
 enum HeroLayout { fullBleed, posterSpotlight }
@@ -37,15 +92,18 @@ HeroLayout heroLayoutFor(HeroArtworkSources sources) =>
     : HeroLayout.fullBleed;
 
 /// ★ 评分徽标:一位小数,无评分不占位。
+/// [onScrim] 为 true 时白字(压在图片遮罩上),否则跟随主题前景色。
 class HeroRatingBadge extends StatelessWidget {
-  const HeroRatingBadge({super.key, required this.rating});
+  const HeroRatingBadge({super.key, required this.rating, this.onScrim = true});
 
   final double? rating;
+  final bool onScrim;
 
   @override
   Widget build(BuildContext context) {
     final value = rating;
     if (value == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -53,8 +111,8 @@ class HeroRatingBadge extends StatelessWidget {
         const SizedBox(width: 3),
         Text(
           value.toStringAsFixed(1),
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Colors.white,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: onScrim ? Colors.white : theme.colorScheme.onSurface,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -155,6 +213,7 @@ class HeroTextBlock extends StatelessWidget {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final meta = heroMetaLabels(l10n, item);
+    final overview = showOverview ? plainOverview(item.overview) : null;
     final titleStyle = compact
         ? theme.textTheme.titleLarge
         : theme.textTheme.headlineMedium;
@@ -162,6 +221,8 @@ class HeroTextBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        HeroKicker(label: heroKicker(l10n, item)),
+        SizedBox(height: compact ? 6 : 10),
         Text(
           heroTitle(item),
           maxLines: 2,
@@ -169,6 +230,7 @@ class HeroTextBlock extends StatelessWidget {
           style: titleStyle?.copyWith(
             color: Colors.white,
             fontWeight: FontWeight.w700,
+            height: 1.15,
             shadows: const [Shadow(blurRadius: 12, color: Colors.black54)],
           ),
         ),
@@ -194,10 +256,10 @@ class HeroTextBlock extends StatelessWidget {
             ],
           ),
         ],
-        if (showOverview && item.overview?.trim().isNotEmpty == true) ...[
+        if (overview != null) ...[
           const SizedBox(height: 12),
           Text(
-            item.overview!,
+            overview,
             maxLines: 3,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(

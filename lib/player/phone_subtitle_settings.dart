@@ -9,21 +9,27 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.error,
+    this.showHeading = true,
   });
   final PhoneSubtitleSettings value;
   final ValueChanged<PhoneSubtitleSettings> onChanged;
   final String? error;
+
+  /// Player menus already title the section. Settings keeps the heading.
+  final bool showHeading;
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          l.phoneSubtitleSize,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
+        if (showHeading) ...[
+          Text(
+            l.phoneSubtitleSize,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+        ],
         Wrap(
           spacing: 8,
           runSpacing: 8,

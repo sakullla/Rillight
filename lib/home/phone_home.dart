@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -171,22 +170,16 @@ class _PhoneHomeState extends State<PhoneHome> {
             for (final library in catalog.libraries) library.id: library,
           };
           const sectionMargin = EdgeInsets.symmetric(horizontal: AppSpacing.md);
-          final screen = MediaQuery.sizeOf(context);
-          final bannerSlot = _bannerSlot(
-            context: context,
-            width: screen.width,
-            viewport: screen.height,
-            visible: visible,
-            resume: byId[PhoneHomeSectionId.resume],
-          );
-          // 区块之间统一 24 的垂直节奏；隐藏的区块不占位。横幅全出血。
+          // 区块之间统一 24 的垂直节奏；隐藏的区块不占位。横幅全出血,
+          // 排在第一位时伸进状态栏与透明顶栏之下。
           final children = <Widget>[];
           for (final id in visible) {
             if (id == PhoneHomeSectionId.banner) {
               children.add(
-                _fitBanner(
-                  slot: bannerSlot,
-                  child: PhoneHero(catalog: catalog),
+                PhoneHero(
+                  catalog: catalog,
+                  extendBehindTopBar:
+                      visible.first == PhoneHomeSectionId.banner,
                 ),
               );
               continue;
@@ -342,73 +335,6 @@ double _rowHeightOf(BuildContext context, {required bool wide}) =>
 
 double _wideBadgeHeight(BuildContext context) =>
     phoneHomeWideBadgeHeight(context);
-
-/// 保留完整横向画面与文字区，矮视口只压缩顶栏延伸。
-class _BannerSlot {
-  const _BannerSlot({required this.natural, required this.fitted});
-
-  final double natural;
-  final double fitted;
-}
-
-_BannerSlot _bannerSlot({
-  required BuildContext context,
-  required double width,
-  required double viewport,
-  required List<String> visible,
-  required _HomeSection? resume,
-}) {
-  final extension = MediaQuery.viewPaddingOf(context).top + 56;
-  final picture = PhoneHero.contentHeightFor(
-    width,
-    textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
-  );
-  final natural = extension + picture;
-  var bannerThenResume = false;
-  for (final id in visible) {
-    if (id == PhoneHomeSectionId.banner) {
-      bannerThenResume = true;
-      continue;
-    }
-    bannerThenResume =
-        bannerThenResume &&
-        id == PhoneHomeSectionId.resume &&
-        resume != null &&
-        !resume.state.hidden;
-    break;
-  }
-  if (!bannerThenResume || !viewport.isFinite || viewport <= 0) {
-    return _BannerSlot(natural: natural, fitted: natural);
-  }
-  final titleLine = math.max(
-    24.0,
-    MediaQuery.textScalerOf(context).scale(14) * 1.2,
-  );
-  final beforeImage = AppSpacing.md * 2 + titleLine + AppSpacing.sm;
-  final resumeImage = phoneHomeWideCardWidth(width) * 9 / 16;
-  final limit = viewport - phoneScrollClearance(context);
-  final overflow = natural + beforeImage + resumeImage - limit;
-  if (overflow <= 0) {
-    return _BannerSlot(natural: natural, fitted: natural);
-  }
-  return _BannerSlot(
-    natural: natural,
-    fitted: math.max(picture, natural - overflow),
-  );
-}
-
-Widget _fitBanner({required _BannerSlot slot, required Widget child}) {
-  if (slot.natural <= 0 || slot.fitted >= slot.natural - 0.5) {
-    return child;
-  }
-  return ClipRect(
-    child: Align(
-      alignment: Alignment.bottomCenter,
-      heightFactor: (slot.fitted / slot.natural).clamp(0.01, 1.0),
-      child: child,
-    ),
-  );
-}
 
 class _HomeSection {
   const _HomeSection({
@@ -592,7 +518,12 @@ class _WideCard extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: MobilePressable(
             key: CatalogKeys.item(item.id),
-            onTap: () => PhoneMotion.openItem(context, item),
+            onTap: () => PhoneMotion.openItem(
+              context,
+              item,
+              preferBackdrop: !item.isEpisode,
+              maxWidth: PhoneMotion.posterRequestWidth,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,

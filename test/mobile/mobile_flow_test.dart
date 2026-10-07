@@ -273,9 +273,15 @@ void main() {
     );
     await login(tester, server);
     final catalog = CatalogScope.of(tester.element(find.byType(PhoneHome)));
+    // 轮播首帧是最新入库的电影,而不是继续观看条目。
     final item = PhoneHero.featuredItemsOf(catalog).first;
-    expect(item.canResume, isTrue);
+    expect(item.isMovie, isTrue);
+    expect(item.canResume, isFalse);
     final resume = find.byKey(ValueKey('hero-resume-${item.id}'));
+    expect(
+      find.descendant(of: resume, matching: find.text('播放')),
+      findsOneWidget,
+    );
     await tester.tap(resume);
     await tester.pumpAndSettle();
     expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -286,10 +292,7 @@ void main() {
         .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
         .controller!;
     expect(controller.itemId, item.id);
-    expect(
-      backend.openedStart,
-      Duration(microseconds: item.userData.playbackPositionTicks ~/ 10),
-    );
+    expect(backend.openedStart, Duration.zero);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 4));
@@ -1103,16 +1106,20 @@ void main() {
       final blocks = tester
           .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
           .toList();
+      // 轮播骨架是一张居中的 2:3 海报,与成品同形。
+      final heroPoster = PhoneHero.posterHeightFor(360, viewportHeight: 800);
       expect(
         blocks.where(
-          (block) => (block.width ?? 0) > 200 && (block.height ?? 0) > 100,
+          (block) =>
+              ((block.height ?? 0) - heroPoster).abs() < 0.1 &&
+              ((block.width ?? 0) - heroPoster * 2 / 3).abs() < 0.1,
         ),
-        isNotEmpty,
+        hasLength(1),
       );
       final posterWidth = phoneHomePosterCardWidth(360);
       expect(
         blocks
-            .where((block) => (block.width! - posterWidth).abs() < 0.1)
+            .where((block) => ((block.width ?? 0) - posterWidth).abs() < 0.1)
             .length,
         greaterThanOrEqualTo(3),
       );
@@ -1282,11 +1289,15 @@ void main() {
       final server = FakeEmbyServer();
       await start(tester, server);
       await login(tester, server);
+      // 取 tab 转场自己的 SlideTransition(最外层),页面内容里的滑入
+      // 动效(如轮播文字区)不算。
       SlideTransition slide() => tester.widget<SlideTransition>(
-        find.descendant(
-          of: find.byType(PhoneTabTransition),
-          matching: find.byType(SlideTransition),
-        ),
+        find
+            .descendant(
+              of: find.byType(PhoneTabTransition),
+              matching: find.byType(SlideTransition),
+            )
+            .first,
       );
 
       // 首次入场不播放,位置归零。

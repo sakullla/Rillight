@@ -21,6 +21,8 @@ import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'player_window_host.dart';
 import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/subtitle_viewport.dart';
 
 class TvPlayerPage extends StatefulWidget {
   const TvPlayerPage({
@@ -470,6 +472,67 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                             track.index,
                                       ),
                                     ),
+                                  if (c.canAdjustSubtitleSize) ...[
+                                    const SizedBox(height: 16),
+                                    Text(l.phoneSubtitleSize),
+                                    for (final size in PhoneSubtitleSize.values)
+                                      TvAction(
+                                        key: ValueKey(
+                                          'tv-subtitle-size-${size.name}',
+                                        ),
+                                        selected:
+                                            c.phoneSubtitleSettings.size ==
+                                            size,
+                                        onPressed: () =>
+                                            c.setPhoneSubtitleSettings(
+                                              PhoneSubtitleSettings(
+                                                size: size,
+                                                originalAss: c
+                                                    .phoneSubtitleSettings
+                                                    .originalAss,
+                                              ),
+                                            ),
+                                        child: _choiceLabel(
+                                          switch (size) {
+                                            PhoneSubtitleSize.small =>
+                                              l.phoneSubtitleSmall,
+                                            PhoneSubtitleSize.standard =>
+                                              l.phoneSubtitleStandard,
+                                            PhoneSubtitleSize.large =>
+                                              l.phoneSubtitleLarge,
+                                            PhoneSubtitleSize.extraLarge =>
+                                              l.phoneSubtitleExtraLarge,
+                                          },
+                                          selected:
+                                              c.phoneSubtitleSettings.size ==
+                                              size,
+                                        ),
+                                      ),
+                                    TvAction(
+                                      key: const Key('tv-subtitle-original'),
+                                      selected:
+                                          c.phoneSubtitleSettings.originalAss,
+                                      onPressed: () =>
+                                          c.setPhoneSubtitleSettings(
+                                            PhoneSubtitleSettings(
+                                              size:
+                                                  c.phoneSubtitleSettings.size,
+                                              originalAss: !c
+                                                  .phoneSubtitleSettings
+                                                  .originalAss,
+                                            ),
+                                          ),
+                                      child: _choiceLabel(
+                                        l.phoneSubtitleOriginal,
+                                        selected:
+                                            c.phoneSubtitleSettings.originalAss,
+                                      ),
+                                    ),
+                                  ] else
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 12),
+                                      child: Text(l.phoneSubtitleUnavailable),
+                                    ),
                                 ],
                               ],
                               if (panel == _TvPanel.source)
@@ -793,6 +856,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
             children: [
               // Keep this sibling mounted while loading, showing controls or panels.
               ExcludeFocus(child: c.backend.buildView()),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: SubtitleViewportReporter(controller: c),
+                ),
+              ),
               ListenableBuilder(
                 listenable: c,
                 builder: (context, _) {

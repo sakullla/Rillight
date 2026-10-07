@@ -392,7 +392,7 @@
   "@home": {
     "description": "Navigation label for the signed-in home catalog."
   },
-  "libraries": "片库",
+  "libraries": "媒体库",
   "@libraries": {
     "description": "Home section of movie and TV library tiles."
   },
@@ -400,7 +400,7 @@
   "@customizeNav": {
     "description": "Action to choose which libraries appear in the top bar and their order."
   },
-  "customizeNavHint": "最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。",
+  "customizeNavHint": "最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页媒体库。",
   "@customizeNavHint": {
     "description": "Explains the pin limit in the customize-nav dialog.",
     "placeholders": {
@@ -441,6 +441,10 @@
   "searchEmptyQuery": "输入片名后搜索",
   "@searchEmptyQuery": {
     "description": "Hint shown when search has not been submitted."
+  },
+  "searchServerFilter": "服务器",
+  "@searchServerFilter": {
+    "description": "Opens the server list used to limit a search. Hidden until chosen."
   },
   "searchNoResults": "没有结果",
   "@searchNoResults": {
@@ -695,7 +699,27 @@
   "@details": {
     "description": "Opens the detail page for the featured home hero item."
   },
-  "browseEmpty": "暂无可浏览的内容，请刷新或从片库开始浏览。",
+  "heroNewMovie": "最新电影",
+  "@heroNewMovie": {
+    "description": "Home hero kicker above a recently added movie title."
+  },
+  "heroNewSeries": "最新剧集",
+  "@heroNewSeries": {
+    "description": "Home hero kicker above a recently updated series title."
+  },
+  "heroItemOf": "第 {index} 项，共 {count} 项",
+  "@heroItemOf": {
+    "description": "Accessibility label for the current home hero slide.",
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "browseEmpty": "暂无可浏览的内容，请刷新或从媒体库开始浏览。",
   "browseLoaded": "已载入 {count} 项",
   "@browseLoaded": {
     "placeholders": {
@@ -1493,7 +1517,7 @@
   "@phoneHomeEdit": {
     "description": "Home-screen entry and title for reordering or hiding phone home rows."
   },
-  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。",
+  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。",
   "@phoneHomeEditHint": {
     "description": "Explains that the home editor does not change the libraries tab."
   },
@@ -1513,7 +1537,7 @@
   "@phoneHomeSectionLatestSeries": {
     "description": "Phone home section label for the latest series row."
   },
-  "phoneHomeSectionLibraries": "片库入口",
+  "phoneHomeSectionLibraries": "媒体库",
   "@phoneHomeSectionLibraries": {
     "description": "Phone home section label for the library shortcut row."
   },
@@ -1689,7 +1713,7 @@
   "filterSortAscending": "升序",
   "filterSortDescending": "降序",
   "phoneDiscover": "发现好故事",
-  "phoneLibraryBrowse": "浏览片库",
+  "phoneLibraryBrowse": "浏览媒体库",
   "phoneSearchHint": "搜索电影、剧集和演员",
   "phoneSelectedSeason": "本季 {count} 集",
   "@phoneSelectedSeason": {
@@ -1699,7 +1723,7 @@
       }
     }
   },
-  "phoneSubtitleSize": "手机字幕大小",
+  "phoneSubtitleSize": "字幕大小",
   "phoneSubtitleSmall": "小",
   "phoneSubtitleStandard": "标准",
   "phoneSubtitleLarge": "大",

@@ -140,11 +140,69 @@ void main() {
       final expected = count > 1 ? findsOneWidget : findsNothing;
       expect(find.byKey(PlayerKeys.audio), expected);
       expect(find.byKey(PlayerKeys.quality), expected);
-      expect(find.byKey(PlayerKeys.mediaSource), expected);
       expect(find.byKey(PlayerKeys.speed), findsOneWidget);
+      if (count > 1) {
+        await tester.scrollUntilVisible(
+          find.byKey(PlayerKeys.mediaSource),
+          80,
+          scrollable: find.descendant(
+            of: find.byKey(const Key('player-settings-categories')),
+            matching: find.byType(Scrollable),
+          ),
+        );
+      }
+      expect(find.byKey(PlayerKeys.mediaSource), expected);
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('desktop playback menu changes the shared subtitle size', (
+    tester,
+  ) async {
+    controller.subtitleStreamIndex = 1;
+    controller.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/movie'),
+      playSessionId: 'session',
+      mediaSource: const PlaybackMediaSource(
+        id: 'one',
+        mediaStreams: [
+          MediaStreamInfo(
+            index: 1,
+            type: 'Subtitle',
+            isTextSubtitleStream: true,
+            displayTitle: 'Chinese',
+          ),
+        ],
+      ),
+      itemId: 'current',
+    );
+    await tester.pumpWidget(app(PlaybackSettingsMenu(controller: controller)));
+    await tester.tap(find.byKey(PlayerKeys.more));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('player-subtitle-size-section')),
+      80,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('player-settings-categories')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('player-subtitle-size-section')));
+    await tester.pumpAndSettle();
+    expect(find.text('字幕大小'), findsWidgets);
+    await tester.tap(find.byKey(const ValueKey('phone-subtitle-extraLarge')));
+    await tester.pumpAndSettle();
+    expect(controller.phoneSubtitleSettings.size, PhoneSubtitleSize.extraLarge);
+    expect(
+      (await store.read()).effectivePhoneSubtitles.size,
+      PhoneSubtitleSize.extraLarge,
+    );
+    await tester.tap(find.byKey(const Key('phone-subtitle-original')));
+    await tester.pumpAndSettle();
+    expect(controller.phoneSubtitleSettings.originalAss, isTrue);
+    expect((await store.read()).effectivePhoneSubtitles.originalAss, isTrue);
+  });
 
   testWidgets(
     'settings categories stay available and persist both skip choices',

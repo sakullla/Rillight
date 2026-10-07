@@ -12,9 +12,11 @@ import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/phone_subtitle_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
+import 'package:rillight/player/player_settings.dart';
 
-enum _SettingsSection { speed, skip, audio, quality, source }
+enum _SettingsSection { speed, skip, subtitles, audio, quality, source }
 
 /// 分类始终留在面板里，改值时不收起。窄窗口改成顶部分类条，控件相同。
 class PlaybackSettingsMenu extends StatefulWidget {
@@ -164,6 +166,13 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           if (c.skipOutroEnabled) l10n.settingsSkipOutro,
         ];
         return enabled.isEmpty ? l10n.playerSettingOff : enabled.join(' · ');
+      case _SettingsSection.subtitles:
+        return switch (c.phoneSubtitleSettings.size) {
+          PhoneSubtitleSize.small => l10n.phoneSubtitleSmall,
+          PhoneSubtitleSize.standard => l10n.phoneSubtitleStandard,
+          PhoneSubtitleSize.large => l10n.phoneSubtitleLarge,
+          PhoneSubtitleSize.extraLarge => l10n.phoneSubtitleExtraLarge,
+        };
       case _SettingsSection.audio:
         for (final track in c.selectableAudioTracks) {
           if (track.index == c.audioStreamIndex) return track.label;
@@ -196,6 +205,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         l10n.playerSkipSettings,
         Icons.skip_next_rounded,
         const Key('player-skip-settings-section'),
+      ),
+      _SettingsSection.subtitles: (
+        l10n.phoneSubtitleSize,
+        Icons.subtitles_rounded,
+        const Key('player-subtitle-size-section'),
       ),
       if (c.canSwitchAudioTrack)
         _SettingsSection.audio: (
@@ -344,6 +358,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             child: ScrollConfiguration(
               behavior: const _CategoryScrollBehavior(),
               child: ListView(
+                key: const Key('player-settings-categories'),
                 scrollDirection: Axis.horizontal,
                 primary: false,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -374,6 +389,19 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     switch (section) {
       case _SettingsSection.speed:
         return const [];
+      case _SettingsSection.subtitles:
+        if (!c.canAdjustSubtitleSize) {
+          return [Text(l10n.phoneSubtitleUnavailable)];
+        }
+        return [
+          PhoneSubtitleSettingsControls(
+            value: c.phoneSubtitleSettings,
+            showHeading: false,
+            error: c.subtitlePresentationError,
+            onChanged: (value) =>
+                unawaited(_apply(() => c.setPhoneSubtitleSettings(value))),
+          ),
+        ];
       case _SettingsSection.skip:
         return [
           PlaybackSkipSettings(controller: c, compact: true),

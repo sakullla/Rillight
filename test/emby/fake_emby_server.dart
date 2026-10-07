@@ -32,6 +32,8 @@ class FakeMediaStream {
     this.isExternal = false,
     this.isTextSubtitleStream,
     this.channels,
+    this.width,
+    this.height,
   });
 
   final int index;
@@ -43,6 +45,8 @@ class FakeMediaStream {
   final bool isExternal;
   final bool? isTextSubtitleStream;
   final int? channels;
+  final int? width;
+  final int? height;
 
   Map<String, dynamic> toJson() {
     return {
@@ -56,6 +60,8 @@ class FakeMediaStream {
       if (isTextSubtitleStream != null)
         'IsTextSubtitleStream': isTextSubtitleStream,
       if (channels != null) 'Channels': channels,
+      if (width != null) 'Width': width,
+      if (height != null) 'Height': height,
     };
   }
 }

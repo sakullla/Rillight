@@ -67,6 +67,26 @@ const _device = EmbyDeviceInfo(
   version: '1',
 );
 
+void _setVideoSize(FakeEmbyServer server, String id, int width, int height) {
+  final item = server.items.firstWhere((item) => item.id == id);
+  item.mediaStreams = [
+    FakeMediaStream(
+      index: 0,
+      type: 'Video',
+      codec: 'h264',
+      width: width,
+      height: height,
+    ),
+    const FakeMediaStream(
+      index: 1,
+      type: 'Audio',
+      codec: 'aac',
+      isDefault: true,
+      channels: 2,
+    ),
+  ];
+}
+
 void main() {
   Future<void> enterSection(WidgetTester tester, String section) async {
     final entry = find.byKey(ValueKey('mobile-player-section-$section'));
@@ -358,83 +378,74 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('old player cannot unlock after a new player takes orientation', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(800, 360);
-    addTearDown(tester.view.resetPhysicalSize);
-    final portraitRequest = Completer<void>();
-    final a = PhoneOrientation(
-      request: (orientations) async {
-        if (orientations.length == 1 &&
-            orientations.single == DeviceOrientation.portraitUp) {
-          await portraitRequest.future;
-        }
+  test('picture orientation follows video width and height', () {
+    expect(videoPictureIsLandscape(1920, 1080), isTrue);
+    expect(videoPictureIsLandscape(1080, 1920), isFalse);
+    expect(videoPictureIsLandscape(1080, 1080), isFalse);
+    expect(videoPictureIsLandscape(null, 1080), isNull);
+    expect(videoPictureIsLandscape(0, 1080), isNull);
+  });
+
+  test('old player cannot overwrite a newer picture orientation', () async {
+    final gate = Completer<void>();
+    late final PhoneOrientation a;
+    a = PhoneOrientation(
+      request: (_) async {
+        if (a.calls.length == 1 && !gate.isCompleted) await gate.future;
       },
     );
     final b = PhoneOrientation(request: (_) async {});
 
     await a.enterPlayback();
+    final first = a.applyPicture(landscape: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(a.calls, [PhoneOrientation.landscape]);
     final oldLeave = a.leavePlayback();
-    await tester.pump();
-    expect(a.calls, [PhoneOrientation.landscape, PhoneOrientation.portrait]);
-
-    // The old page has queued a delayed unlock while its portrait request is
-    // still pending. The new page takes the activity-wide orientation lease.
-    tester.view.physicalSize = const Size(360, 800);
-    final newEnter = b.enterPlayback();
-    portraitRequest.complete();
+    await b.enterPlayback();
+    final newer = b.applyPicture(landscape: false);
+    gate.complete();
+    await first;
     await oldLeave;
-    await newEnter;
+    await newer;
     await a.settled;
-    expect(a.calls, [PhoneOrientation.landscape, PhoneOrientation.portrait]);
-    expect(b.calls, [PhoneOrientation.landscape]);
-
-    await b.reassert();
-    expect(b.calls.last, PhoneOrientation.landscape);
-    await b.leavePlayback();
-    await tester.pump();
     await b.settled;
-    expect(b.calls.last, PhoneOrientation.unlocked);
+    expect(a.calls, [PhoneOrientation.landscape]);
+    expect(b.calls, [PhoneOrientation.portrait]);
   });
 
-  testWidgets('reentering the same orientation owner cancels its old exit', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(800, 360);
-    addTearDown(tester.view.resetPhysicalSize);
-    final portraitRequest = Completer<void>();
-    final orientation = PhoneOrientation(
-      request: (orientations) async {
-        if (orientations.length == 1 &&
-            orientations.single == DeviceOrientation.portraitUp &&
-            !portraitRequest.isCompleted) {
-          await portraitRequest.future;
+  test('reentering the same orientation owner cancels its old exit', () async {
+    final gate = Completer<void>();
+    late final PhoneOrientation orientation;
+    orientation = PhoneOrientation(
+      request: (_) async {
+        if (orientation.calls.length == 1 && !gate.isCompleted) {
+          await gate.future;
         }
       },
     );
 
     await orientation.enterPlayback();
+    final first = orientation.applyPicture(landscape: true);
+    await Future<void>.delayed(Duration.zero);
     final oldLeave = orientation.leavePlayback();
-    await tester.pump();
-    final newEnter = orientation.enterPlayback();
-    portraitRequest.complete();
+    await orientation.enterPlayback();
+    final second = orientation.applyPicture(landscape: true);
+    gate.complete();
+    await first;
     await oldLeave;
-    await newEnter;
+    await second;
     expect(orientation.calls, [
       PhoneOrientation.landscape,
-      PhoneOrientation.portrait,
       PhoneOrientation.landscape,
     ]);
 
     await orientation.leavePlayback();
-    tester.view.physicalSize = const Size(360, 800);
     await orientation.settled;
     expect(orientation.calls.last, PhoneOrientation.unlocked);
   });
 
   testWidgets(
-    'playback requests landscape and restores portrait; a denied request still plays',
+    'playback follows the video picture and exit does not force portrait',
     (tester) async {
       final orientation = PhoneOrientation(request: (orientations) async {});
       final current = await showPlayer(
@@ -442,24 +453,40 @@ void main() {
         itemId: 'movie-inception',
         orientation: orientation,
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        prepare: (server) =>
+            _setVideoSize(server, 'movie-inception', 1920, 1080),
       );
       expect(current.error, isNull);
-      expect(orientation.calls.first, PhoneOrientation.landscape);
+      await orientation.settled;
+      expect(orientation.calls, [PhoneOrientation.landscape]);
       await closePlayer(tester);
       await orientation.settled;
       expect(find.byType(MobilePlayerPage), findsNothing);
-      // The surface is still landscape. A trailing unlock would follow the
-      // sensor and leave playback's landscape hold in place.
-      expect(orientation.calls, hasLength(2));
-      expect(orientation.calls[1], PhoneOrientation.portrait);
-      expect(orientation.calls.last, isNot(PhoneOrientation.unlocked));
+      expect(orientation.calls, [
+        PhoneOrientation.landscape,
+        PhoneOrientation.unlocked,
+      ]);
 
-      tester.view.physicalSize = const Size(360, 800);
-      await orientation.settled;
-      expect(orientation.calls[1], PhoneOrientation.portrait);
-      expect(orientation.calls.last, PhoneOrientation.unlocked);
+      final portrait = PhoneOrientation(request: (_) async {});
+      final vertical = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        orientation: portrait,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        prepare: (server) =>
+            _setVideoSize(server, 'movie-inception', 1080, 1920),
+      );
+      expect(vertical.error, isNull);
+      await portrait.settled;
+      expect(portrait.calls, [PhoneOrientation.portrait]);
+      await closePlayer(tester);
+      await portrait.settled;
+      expect(portrait.calls, [
+        PhoneOrientation.portrait,
+        PhoneOrientation.unlocked,
+      ]);
 
-      // 系统拒绝方向请求时播放仍要能启动，退出仍请求竖屏。
+      // 系统拒绝方向请求时播放仍要能启动，退出也不改成只允许竖屏。
       final denied = PhoneOrientation(
         request: (_) async => throw StateError('orientation denied'),
       );
@@ -468,46 +495,47 @@ void main() {
         itemId: 'movie-inception',
         orientation: denied,
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        prepare: (server) =>
+            _setVideoSize(server, 'movie-inception', 1920, 1080),
       );
       expect(failed.error, isNull);
       expect(failed.loading, isFalse);
+      await denied.settled;
       expect(denied.calls.first, PhoneOrientation.landscape);
       expect(denied.lastError, isA<StateError>());
       expect(find.byType(MobilePlayerPage), findsOneWidget);
       await closePlayer(tester);
       await denied.settled;
       expect(find.byType(MobilePlayerPage), findsNothing);
-      expect(denied.calls[1], PhoneOrientation.portrait);
-      expect(denied.calls.last, isNot(PhoneOrientation.unlocked));
+      expect(denied.calls.last, PhoneOrientation.unlocked);
     },
     tags: ['integration'],
   );
 
-  testWidgets('portrait viewport remains usable while landscape is pending', (
-    tester,
-  ) async {
-    final orientation = PhoneOrientation(request: (_) async {});
-    final player = await showPlayer(
-      tester,
-      itemId: 'movie-inception',
-      size: const Size(360, 800),
-      orientation: orientation,
-      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
-    );
-    expect(orientation.calls.first, PhoneOrientation.landscape);
-    expect(player.error, isNull);
-    expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
-    expect(find.byTooltip('关闭'), findsOneWidget);
+  testWidgets(
+    'portrait playback stays usable and exit does not force portrait',
+    (tester) async {
+      final orientation = PhoneOrientation(request: (_) async {});
+      final player = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        size: const Size(360, 800),
+        orientation: orientation,
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      );
+      await orientation.settled;
+      expect(orientation.calls, isEmpty);
+      expect(player.error, isNull);
+      expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
+      expect(find.byTooltip('关闭'), findsOneWidget);
 
-    await closePlayer(tester);
-    await tester.pump();
-    await orientation.settled;
-    expect(orientation.calls, [
-      PhoneOrientation.landscape,
-      PhoneOrientation.portrait,
-      PhoneOrientation.unlocked,
-    ]);
-  }, tags: ['integration']);
+      await closePlayer(tester);
+      await tester.pump();
+      await orientation.settled;
+      expect(orientation.calls, [PhoneOrientation.unlocked]);
+    },
+    tags: ['integration'],
+  );
 
   for (final size in [const Size(360, 800), const Size(800, 360)]) {
     testWidgets('phone completion offers replay and close at $size', (
@@ -1486,7 +1514,7 @@ void main() {
   }, tags: ['integration']);
 
   testWidgets(
-    'playback hides system bars, reasserts landscape, and drops the rotate button',
+    'playback hides system bars, waits for the picture, and drops the rotate button',
     (tester) async {
       final channelCalls = <MethodCall>[];
       _mockAndroidPlayerChannel(channelCalls);
@@ -1502,7 +1530,7 @@ void main() {
       await bars.settled;
       expect(bars.calls, [true]);
       expect(_systemBarHidden(channelCalls), [true]);
-      expect(orientation.calls.single, PhoneOrientation.landscape);
+      expect(orientation.calls, isEmpty);
       expect(find.byIcon(Icons.screen_rotation), findsNothing);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-more')), findsOneWidget);
@@ -1514,17 +1542,14 @@ void main() {
       expect(bars.calls, [true, true]);
       expect(_systemBarHidden(channelCalls), [true, true]);
       await orientation.settled;
-      expect(orientation.calls, [
-        PhoneOrientation.landscape,
-        PhoneOrientation.landscape,
-      ]);
+      expect(orientation.calls, isEmpty);
 
       await closePlayer(tester);
       await bars.settled;
       await orientation.settled;
       expect(bars.calls, [true, true, false]);
       expect(_systemBarHidden(channelCalls), [true, true, false]);
-      expect(orientation.calls[2], PhoneOrientation.portrait);
+      expect(orientation.calls, [PhoneOrientation.unlocked]);
       expect(find.byType(MobilePlayerPage), findsNothing);
     },
     tags: ['integration'],

@@ -508,7 +508,8 @@ class _AlbumRailState extends State<_AlbumRail> {
     }
   }
 
-  final _controller = ScrollController();
+  // 不读详情页的竖向 PageStorage，滚出视口再回来时不会贴到最右边。
+  final _controller = ScrollController(keepScrollOffset: false);
   var _canScrollLeft = false;
   var _canScrollRight = false;
 

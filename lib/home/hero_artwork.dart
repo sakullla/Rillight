@@ -103,6 +103,8 @@ class HeroArtwork extends StatefulWidget {
     required this.requestWidth,
     this.compact = false,
     this.spotlightBackground = false,
+    this.posterFirst = false,
+    this.ambient = false,
     this.onResolved,
   });
 
@@ -113,6 +115,15 @@ class HeroArtwork extends StatefulWidget {
   /// Poster-spotlight mode: a poster result renders only the blurred, darkened
   /// full-bleed background; the parent draws the crisp poster card itself.
   final bool spotlightBackground;
+
+  /// Poster-forward mode (phone card): try posters before backdrops and request
+  /// the poster at [requestWidth]. A backdrop fallback renders contained over
+  /// its own blur so a 2:3 card never crops a wide still.
+  final bool posterFirst;
+
+  /// Ambient mode: whatever resolves is drawn only as a soft blurred fill; the
+  /// parent tints and fades it into the page. Never reports a theme colour.
+  final bool ambient;
 
   /// Fires once per resolved image (post-frame, deduped by identity) so parents
   /// can switch between full-bleed and poster-spotlight layouts.
@@ -166,12 +177,16 @@ class _HeroArtworkState extends State<HeroArtwork> {
     _schedule();
   }
 
+  List<ItemImageRef> get _orderedRefs => widget.posterFirst
+      ? [...widget.sources.posters, ...widget.sources.backdrops]
+      : [...widget.sources.backdrops, ...widget.sources.posters];
+
   void _schedule() {
     final auth = AuthScope.maybeOf(context);
     final scope = mediaImageAccountScope(auth);
-    final refs = [...widget.sources.backdrops, ...widget.sources.posters];
+    final refs = _orderedRefs;
     final token =
-        '$scope/${widget.requestWidth}/${widget.compact}/${refs.map((ref) => '${ref.itemId}:${ref.type}:${ref.tag}').join('|')}';
+        '$scope/${widget.requestWidth}/${widget.compact}/${widget.posterFirst}/${refs.map((ref) => '${ref.itemId}:${ref.type}:${ref.tag}').join('|')}';
     if (_token == token) return;
     _token = token;
     final generation = ++_generation;
@@ -183,7 +198,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
     final client = auth.client;
     final width = widget.requestWidth;
     final minimum = math.min(widget.compact ? 640 : 960, width);
-    final refs = [...widget.sources.backdrops, ...widget.sources.posters];
+    final refs = _orderedRefs;
     bool current() =>
         mounted &&
         generation == _generation &&
@@ -193,7 +208,10 @@ class _HeroArtworkState extends State<HeroArtwork> {
       try {
         final poster = ref.type == 'Primary';
         // The sharp poster decodes at 480px; its blurred fill only needs 160px.
-        final sourceWidth = poster ? math.min(width, 480) : width;
+        // A poster-forward card asks for the poster at its own request width.
+        final sourceWidth = poster && !widget.posterFirst
+            ? math.min(width, 480)
+            : width;
         CancelToken? cancel;
         final bytes = await MediaImageCache.instance.load(
           serverId: scope,
@@ -289,13 +307,21 @@ class _HeroArtworkState extends State<HeroArtwork> {
           final image = snapshot.data;
           if (image == null) return const SizedBox.expand();
           _notifyResolved(image);
+          if (widget.ambient) {
+            return _blurredFill(image.bytes, opacity: 1, sigma: 40);
+          }
           if (widget.spotlightBackground && image.poster) {
             return _spotlightBackdrop(image.bytes);
           }
+          // The art whose shape matches the surface covers it; the other shape
+          // sits contained over its own blur.
+          final contain = widget.posterFirst ? !image.poster : image.poster;
           final art = Image.memory(
             image.bytes,
-            fit: image.poster ? BoxFit.contain : BoxFit.cover,
-            cacheWidth: image.poster ? 480 : widget.requestWidth,
+            fit: contain ? BoxFit.contain : BoxFit.cover,
+            cacheWidth: image.poster && !widget.posterFirst
+                ? 480
+                : widget.requestWidth,
             filterQuality: FilterQuality.medium,
             frameBuilder: (context, child, frame, synchronous) {
               if (frame != null || synchronous) {
@@ -309,13 +335,20 @@ class _HeroArtworkState extends State<HeroArtwork> {
             },
             errorBuilder: (_, _, _) => const SizedBox.expand(),
           );
-          if (!image.poster) return SizedBox.expand(child: art);
+          if (!contain) return SizedBox.expand(child: art);
           return ClipRect(
             child: Stack(
               fit: StackFit.expand,
               children: [
-                _blurredFill(image.bytes, opacity: .25, sigma: 24),
-                Padding(padding: const EdgeInsets.all(20), child: art),
+                _blurredFill(
+                  image.bytes,
+                  opacity: widget.posterFirst ? .45 : .25,
+                  sigma: 24,
+                ),
+                Padding(
+                  padding: EdgeInsets.all(widget.posterFirst ? 0 : 20),
+                  child: art,
+                ),
               ],
             ),
           );

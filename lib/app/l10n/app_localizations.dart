@@ -1027,7 +1027,7 @@ abstract class AppLocalizations {
   /// Home section of movie and TV library tiles.
   ///
   /// In zh, this message translates to:
-  /// **'片库'**
+  /// **'媒体库'**
   String get libraries;
 
   /// Action to choose which libraries appear in the top bar and their order.
@@ -1039,7 +1039,7 @@ abstract class AppLocalizations {
   /// Explains the pin limit in the customize-nav dialog.
   ///
   /// In zh, this message translates to:
-  /// **'最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。'**
+  /// **'最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页媒体库。'**
   String customizeNavHint(int count);
 
   /// Save customized library navigation.
@@ -1083,6 +1083,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'输入片名后搜索'**
   String get searchEmptyQuery;
+
+  /// Opens the server list used to limit a search. Hidden until chosen.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器'**
+  String get searchServerFilter;
 
   /// Empty-success copy after a completed search with no hits.
   ///
@@ -1414,10 +1420,28 @@ abstract class AppLocalizations {
   /// **'详情'**
   String get details;
 
+  /// Home hero kicker above a recently added movie title.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新电影'**
+  String get heroNewMovie;
+
+  /// Home hero kicker above a recently updated series title.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新剧集'**
+  String get heroNewSeries;
+
+  /// Accessibility label for the current home hero slide.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {index} 项，共 {count} 项'**
+  String heroItemOf(int index, int count);
+
   /// No description provided for @browseEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'暂无可浏览的内容，请刷新或从片库开始浏览。'**
+  /// **'暂无可浏览的内容，请刷新或从媒体库开始浏览。'**
   String get browseEmpty;
 
   /// No description provided for @browseLoaded.
@@ -2665,7 +2689,7 @@ abstract class AppLocalizations {
   /// Explains that the home editor does not change the libraries tab.
   ///
   /// In zh, this message translates to:
-  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'**
+  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'**
   String get phoneHomeEditHint;
 
   /// Home section label for the featured carousel.
@@ -2695,7 +2719,7 @@ abstract class AppLocalizations {
   /// Phone home section label for the library shortcut row.
   ///
   /// In zh, this message translates to:
-  /// **'片库入口'**
+  /// **'媒体库'**
   String get phoneHomeSectionLibraries;
 
   /// Phone home row and editor label for one library. The row itself is recently added items.
@@ -3091,7 +3115,7 @@ abstract class AppLocalizations {
   /// No description provided for @phoneLibraryBrowse.
   ///
   /// In zh, this message translates to:
-  /// **'浏览片库'**
+  /// **'浏览媒体库'**
   String get phoneLibraryBrowse;
 
   /// No description provided for @phoneSearchHint.
@@ -3109,7 +3133,7 @@ abstract class AppLocalizations {
   /// No description provided for @phoneSubtitleSize.
   ///
   /// In zh, this message translates to:
-  /// **'手机字幕大小'**
+  /// **'字幕大小'**
   String get phoneSubtitleSize;
 
   /// No description provided for @phoneSubtitleSmall.

@@ -779,6 +779,33 @@ void main() {
   );
 
   test(
+    'aggregation item plays from the server session when its library is not checked',
+    () async {
+      await setup();
+      await runtime.registry.configureScope(
+        'a',
+        participates: true,
+        libraryIds: {},
+      );
+      final origin = await runtime.resolve(
+        PlayerOpenRequest(
+          itemId: 'movie',
+          libraryId: 'library',
+          source: SourceReference(account: account, itemId: 'movie'),
+        ),
+      );
+      expect(origin.permit.sessionOnly, isTrue);
+      expect(origin.libraryId, 'library');
+      expect(
+        (await origin.permit.dispatch((client) => client.getItem('movie'))).id,
+        'movie',
+      );
+      final session = await runtime.begin(origin, 'v');
+      expect(session.permit.sessionOnly, isTrue);
+    },
+  );
+
+  test(
     'foreign library and forged work cannot authorize an explicit source',
     () async {
       await setup();

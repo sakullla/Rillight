@@ -232,6 +232,16 @@ GoRouter createAppRouter({
               ),
             ),
             GoRoute(
+              path: '/server/:serverId/resume',
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: ServerResumePage(
+                  serverId: state.pathParameters['serverId']!,
+                ),
+              ),
+            ),
+            GoRoute(
               path: '/item/:itemId',
               pageBuilder: (context, state) => PhoneMotion.detailPage(
                 context: context,
@@ -294,6 +304,11 @@ GoRouter createAppRouter({
                 serverId: state.pathParameters['serverId']!,
                 viewId: state.pathParameters['viewId']!,
               ),
+            ),
+            GoRoute(
+              path: '/server/:serverId/resume',
+              builder: (context, state) =>
+                  ServerResumePage(serverId: state.pathParameters['serverId']!),
             ),
             GoRoute(
               path: '/shelf/:source',
@@ -372,6 +387,13 @@ GoRouter createAppRouter({
                   serverId: state.pathParameters['serverId']!,
                   viewId: state.pathParameters['viewId']!,
                 ),
+              ),
+            ),
+            GoRoute(
+              path: '/server/:serverId/resume',
+              pageBuilder: (context, state) => _desktopPage(
+                state,
+                ServerResumePage(serverId: state.pathParameters['serverId']!),
               ),
             ),
             GoRoute(

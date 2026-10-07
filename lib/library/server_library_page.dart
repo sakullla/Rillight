@@ -182,3 +182,92 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
     );
   }
 }
+
+/// 某一台服务器的继续观看。网格、排序和「更多」之后的加载与首页货架相同，
+/// 会话用这台服务器自己的，不切换当前首页。
+class ServerResumePage extends StatefulWidget {
+  const ServerResumePage({super.key, required this.serverId});
+
+  final String serverId;
+
+  @override
+  State<ServerResumePage> createState() => _ServerResumePageState();
+}
+
+class _ServerResumePageState extends State<ServerResumePage> {
+  EmbyClient? _client;
+  SourceAccount? _account;
+  EmbyException? _error;
+  bool _loading = true;
+  bool _started = false;
+  int _attempt = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final attempt = ++_attempt;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final session = await AuthScope.of(
+        context,
+      ).sources.authenticate(widget.serverId);
+      if (!mounted || attempt != _attempt) return;
+      setState(() {
+        _client = session.client;
+        _account = session.account;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted || attempt != _attempt) return;
+      setState(() {
+        _loading = false;
+        _error = error is EmbyException
+            ? error
+            : EmbyException(EmbyFailureKind.unknown, cause: error);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final client = _client;
+    final account = _account;
+    if (_loading || client == null || account == null) {
+      if (_error != null) {
+        return Scaffold(
+          body: AppErrorView(
+            message: catalogFailureMessage(
+              AppLocalizations.of(context),
+              _error!,
+            ),
+            onRetry: _load,
+          ),
+        );
+      }
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
+      body: scopeServerPosters(
+        account: account,
+        serverId: widget.serverId,
+        child: ShelfClientOverride(
+          client: client,
+          child: ShelfItemOpen(
+            onOpen: (item) =>
+                openServerItem(context, account: account, item: item),
+            child: const ShelfGridPage(source: 'resume'),
+          ),
+        ),
+      ),
+    );
+  }
+}

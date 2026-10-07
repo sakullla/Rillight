@@ -1784,6 +1784,11 @@ void main() {
         expect(find.text('来源 A'), findsOneWidget);
         expect(find.text('来源 B'), findsOneWidget);
         expect(find.text('电影'), findsWidgets);
+        final libraryImage = tester.widget<MediaImage>(
+          find.byType(MediaImage).first,
+        );
+        expect(libraryImage.preferBackdrop, isFalse);
+        expect(libraryImage.height, libraryImage.width! * 9 / 16);
         expect(find.text('重试'), findsOneWidget);
         f.b.viewsStatus = null;
         await tester.tap(find.text('重试'));
@@ -2981,6 +2986,55 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('desktop search keeps server filters hidden until opened', (
+    tester,
+  ) async {
+    isolateImageCache();
+    final f = _Fixture();
+    await tester.runAsync(f.open);
+    addTearDown(f.close);
+    final app = f.app(PresentationEnvironment.desktop);
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    app.router.go('/search');
+    await _settle(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    await tester.tap(find.byKey(const Key('aggregation-search-filters')));
+    await _settle(tester);
+    expect(
+      find.byKey(ValueKey('aggregation-search-server-${f.aId}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('aggregation-search-server-${f.bId}')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(ValueKey('aggregation-search-server-${f.bId}')),
+    );
+    await _settle(tester);
+    await tester.enterText(find.byKey(const Key('aggregation-keyword')), '合成');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await _settle(tester);
+    expect(
+      f.a.requests.where((request) => request.contains('SearchTerm=')),
+      isNotEmpty,
+    );
+    expect(
+      f.b.requests.where((request) => request.contains('SearchTerm=')),
+      isEmpty,
+    );
+    expect(find.byKey(ValueKey('aggregation-search-${f.aId}')), findsOneWidget);
+    expect(find.byKey(ValueKey('aggregation-search-${f.bId}')), findsNothing);
+    await tester.tap(find.byKey(const Key('aggregation-search-filters')));
+    await _settle(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.text('来源 A'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+  }, tags: ['integration']);
 
   testWidgets(
     'each server poster uses that session and opened details hide comparison',

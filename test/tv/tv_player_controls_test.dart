@@ -197,6 +197,50 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('TV tracks panel applies subtitle size on the shared surface', (
+    tester,
+  ) async {
+    final video = FakeVideoBackend();
+    final c = await start(tester, video);
+    c.subtitleStreamIndex = 1;
+    c.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/media'),
+      playSessionId: 'session',
+      mediaSource: const PlaybackMediaSource(
+        id: 'only',
+        mediaStreams: [
+          MediaStreamInfo(
+            index: 1,
+            type: 'Subtitle',
+            isTextSubtitleStream: true,
+            displayTitle: 'Chinese',
+          ),
+        ],
+      ),
+      itemId: c.itemId,
+    );
+    c.onUserActivity();
+    await tester.pumpAndSettle();
+    expect(c.canAdjustSubtitleSize, isTrue);
+    await tester.tap(find.byKey(const Key('tv-player-tracks')));
+    await tester.pumpAndSettle();
+    final extraLarge = find.byKey(
+      const ValueKey('tv-subtitle-size-extraLarge'),
+    );
+    await tester.ensureVisible(extraLarge);
+    await tester.pumpAndSettle();
+    await tester.tap(extraLarge);
+    await tester.pumpAndSettle();
+    expect(c.phoneSubtitleSettings.size, PhoneSubtitleSize.extraLarge);
+    expect(video.subtitlePresentation, isNotNull);
+    expect(video.subtitlePresentation!.userScale, 1.5);
+    expect(video.subtitlePresentation!.displayWidth, 960);
+    expect(video.subtitlePresentation!.displayHeight, 540);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
+
   testWidgets(
     'surface remote seek and scan preserve playing and paused intent',
     (tester) async {

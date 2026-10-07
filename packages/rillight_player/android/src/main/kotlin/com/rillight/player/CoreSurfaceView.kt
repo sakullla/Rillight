@@ -85,6 +85,7 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
         subtitles.invalidate()
         val margins = subtitleCropMargins(desiredWidth, desiredHeight, width, height, rotation)
         owner.videoGeometry(mapOf("width" to desiredWidth, "height" to desiredHeight,
+            "contentWidth" to effectiveWidth, "contentHeight" to effectiveHeight,
             "visibleWidth" to minOf(width.toFloat(), effectiveWidth * factor),
             "visibleHeight" to minOf(height.toFloat(), effectiveHeight * factor),
             "safeHorizontal" to margins.first,
