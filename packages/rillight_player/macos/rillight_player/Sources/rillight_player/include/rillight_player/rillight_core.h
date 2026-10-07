@@ -445,13 +445,16 @@ typedef struct RillightCoreEnhancementStatus {
 
 /* Allowed outside CLOSING. Identical requests keep an overload downgrade.
  * A changed request restores the selected stages and still does not write the
- * media URL, duration, or audio speed. */
+ * media URL, duration, or audio speed. A display_refresh_hz change recomputes
+ * interpolation and does not clear the scale-capacity latch. That latch is
+ * updated only by processing the current picture. */
 RILLIGHT_CORE_API int rillight_core_configure_enhancement(
     RillightCore *core, const RillightCoreEnhancementRequest *request);
 /* Clears this session's overload downgrade and resolves request again, even
  * when it matches. display_refresh_hz is the current display. Zero, or a
  * positive rate below twice the source frame rate, leaves double
- * interpolation inactive. Does not write the media URL, duration, or speed. */
+ * interpolation inactive. Does not clear the scale-capacity latch or write
+ * the media URL, duration, or speed. */
 RILLIGHT_CORE_API int rillight_core_retry_enhancement(
     RillightCore *core, const RillightCoreEnhancementRequest *request);
 /* met is 0 or 1. monotonic_us is a caller clock. One continuous second of

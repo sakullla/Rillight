@@ -2215,7 +2215,7 @@ abstract class AppLocalizations {
   /// No description provided for @playbackEnhanceReasonCapacity.
   ///
   /// In zh, this message translates to:
-  /// **'Anime4K 与通用超分不能同时生效。'**
+  /// **'画面尺寸或缓冲放不下放大，因此未生效且原画继续。'**
   String get playbackEnhanceReasonCapacity;
 
   /// No description provided for @playbackEnhanceReasonMismatch.

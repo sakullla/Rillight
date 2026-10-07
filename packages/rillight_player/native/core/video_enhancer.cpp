@@ -226,7 +226,9 @@ int VideoQualityEnhancer::Configure(
   drop_interpolation_ = 0;
   drop_scale_ = 0;
   drop_spatial_ = 0;
-  scale_capacity_ = 0;
+  // Refresh and selection changes do not own scale_capacity_. The current
+  // picture's Process does, so a paused display change cannot mark an unfit
+  // upscale effective.
   miss_valid_ = false;
   last_note_us_ = -1;
   retained_ = {};
@@ -237,14 +239,11 @@ int VideoQualityEnhancer::Configure(
 int VideoQualityEnhancer::Retry(const RillightCoreEnhancementRequest& request) {
   std::lock_guard lock(mutex_);
   if (!ValidRequest(request)) return -1;
-  const bool same = configured_ && SameRequest(request);
   request_ = request;
   configured_ = true;
   drop_interpolation_ = 0;
   drop_scale_ = 0;
   drop_spatial_ = 0;
-  // Capacity is a picture limit, not this session's overload downgrade.
-  if (!same) scale_capacity_ = 0;
   miss_valid_ = false;
   last_note_us_ = -1;
   retained_ = {};
@@ -440,8 +439,10 @@ bool VideoQualityEnhancer::Process(
   result->has_midpoint = false;
   result->current.clear();
   result->midpoint.clear();
-  const bool wants_scale = status_.effective_anime4k > 0 ||
-                           status_.effective_super_resolution != 0;
+  // The previous effective tier is already off while the latch is set, so
+  // the request decides whether this picture can hold a 2x upscale.
+  const bool wants_scale =
+      request_.anime4k != 0 || request_.super_resolution != 0;
   const uint64_t scaled_bytes = static_cast<uint64_t>(width) *
                                 static_cast<uint64_t>(height) *
                                 static_cast<uint64_t>(bytes_per_pixel) * 4u;
@@ -625,7 +626,133 @@ bool ValidLoad(const RillightCoreEnhancementLoad& load) {
 
 }  // namespace
 
+namespace {
+
+RillightCoreEnhancementRequest probe_request(int interpolation, int anime4k,
+                                             int super_resolution,
+                                             int refresh_hz) {
+  RillightCoreEnhancementRequest request{};
+  request.struct_size = sizeof(request);
+  request.interpolation = interpolation;
+  request.anime4k = anime4k;
+  request.super_resolution = super_resolution;
+  request.display_refresh_hz = refresh_hz;
+  return request;
+}
+
+bool probe_process(rillight::VideoQualityEnhancer* enhancer, int width,
+                   int height, uint8_t value, size_t max_bytes,
+                   rillight::QualityProcessResult* result) {
+  std::vector<uint8_t> pixels(static_cast<size_t>(width * height * 4), value);
+  return enhancer->Process(pixels.data(), width, height, width * 4, 4, 0, 1,
+                           nullptr, 0, max_bytes, result);
+}
+
+}  // namespace
+
 extern "C" {
+
+// 0 when a refresh-only configure keeps an unfit upscale inactive and
+// recomputes interpolation. Any other value is the failing step.
+RILLIGHT_CORE_API int rillight_enhancement_refresh_capacity_probe(void) {
+  rillight::VideoQualityEnhancer enhancer;
+  auto request = probe_request(2, 2, 0, 120);
+  if (enhancer.Configure(request) != 0) return 1;
+  enhancer.UpdatePlaybackFacts(0, 30.0);
+  constexpr int kWidth = 48;
+  constexpr int kHeight = 48;
+  const size_t too_small =
+      static_cast<size_t>(kWidth) * kHeight * 4u * 4u - 1u;
+  rillight::QualityProcessResult processed;
+  if (!probe_process(&enhancer, kWidth, kHeight, 0, too_small, &processed))
+    return 2;
+  auto status = enhancer.Status();
+  if (status.effective_anime4k != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY)
+    return 3;
+  if (status.effective_interpolation != 2 || processed.width != kWidth)
+    return 4;
+  if (!probe_process(&enhancer, kWidth, kHeight, 255, too_small, &processed))
+    return 5;
+  status = enhancer.Status();
+  if (status.effective_anime4k != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY ||
+      processed.width != kWidth)
+    return 6;
+
+  request.display_refresh_hz = 50;
+  if (enhancer.Configure(request) != 0) return 7;
+  status = enhancer.Status();
+  if (status.effective_interpolation != 0 ||
+      status.reason_interpolation != RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP ||
+      status.output_frame_rate != 30.0)
+    return 8;
+  if (status.effective_anime4k != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY)
+    return 9;
+
+  request.display_refresh_hz = 0;
+  if (enhancer.Configure(request) != 0) return 10;
+  status = enhancer.Status();
+  if (status.effective_interpolation != 0 ||
+      status.reason_interpolation != RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP ||
+      status.effective_anime4k != 0)
+    return 11;
+
+  request.display_refresh_hz = 120;
+  if (enhancer.Configure(request) != 0) return 12;
+  status = enhancer.Status();
+  if (status.effective_interpolation != 2 || status.output_frame_rate != 60.0 ||
+      status.effective_anime4k != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY)
+    return 13;
+
+  request = probe_request(0, 0, 2, 120);
+  if (enhancer.Configure(request) != 0) return 14;
+  status = enhancer.Status();
+  if (status.effective_super_resolution != 0 ||
+      status.reason_super_resolution != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY)
+    return 15;
+
+  if (!probe_process(&enhancer, 8, 8, 90, too_small, &processed)) return 16;
+  status = enhancer.Status();
+  if (status.effective_super_resolution != 2 || processed.width != 16)
+    return 17;
+
+  request = probe_request(2, 2, 0, 120);
+  if (enhancer.Configure(request) != 0) return 18;
+  if (!probe_process(&enhancer, kWidth, kHeight, 20, too_small, &processed))
+    return 19;
+  if (enhancer.NoteDeadline(0, 0) != 0 ||
+      enhancer.NoteDeadline(0, 1000000) != 0)
+    return 20;
+  status = enhancer.Status();
+  if (status.effective_interpolation != 0 || status.effective_anime4k != 0)
+    return 21;
+  if (enhancer.Configure(request) != 0) return 22;
+  status = enhancer.Status();
+  if (status.effective_interpolation != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY)
+    return 23;
+  if (enhancer.Retry(request) != 0) return 24;
+  status = enhancer.Status();
+  if (status.effective_interpolation != 2 || status.effective_anime4k != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY)
+    return 25;
+
+  std::vector<uint8_t> wide(static_cast<size_t>(4097 * 4), 30);
+  if (!enhancer.Process(wide.data(), 4097, 1, 4097 * 4, 4, 0, 1, nullptr, 0,
+                        1024u * 1024u, &processed))
+    return 26;
+  request.display_refresh_hz = 30;
+  if (enhancer.Configure(request) != 0) return 27;
+  status = enhancer.Status();
+  if (status.effective_anime4k != 0 ||
+      status.reason_anime4k != RILLIGHT_CORE_ENHANCE_REASON_CAPACITY ||
+      status.effective_interpolation != 0)
+    return 28;
+  return 0;
+}
 
 int rillight_enhancement_model_ready(int kind) {
   if (kind == 0) return rillight::RifeReady() ? 1 : 0;

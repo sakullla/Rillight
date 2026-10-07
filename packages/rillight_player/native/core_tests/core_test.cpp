@@ -1069,9 +1069,11 @@ RILLIGHT_DOVI_TEST_API int rillight_present_output_kind(int frame_type, int wind
 RILLIGHT_DOVI_TEST_API int rillight_android_color_output_kind(int pq_selected);
 RILLIGHT_DOVI_TEST_API uint8_t rillight_tonemap_channel(int transfer, uint8_t code);
 extern "C" RILLIGHT_DOVI_TEST_API int rillight_core_has_decoder(const char *name);
+extern "C" RILLIGHT_DOVI_TEST_API int rillight_enhancement_refresh_capacity_probe(void);
 
 int main() {
   enhancement_contract();
+  assert(rillight_enhancement_refresh_capacity_probe() == 0);
   assert(rillight_dovi_base_rejected(-1, 0) == 0);
   assert(rillight_dovi_base_rejected(5, 0) == 1);
   assert(rillight_dovi_base_rejected(8, 0) == 1);

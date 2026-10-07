@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/app/l10n/app_localizations_zh.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_settings.dart';
 
 void main() {
@@ -412,4 +414,14 @@ void main() {
       );
     },
   );
+
+  test('capacity reason says the picture does not fit', () {
+    final l10n = AppLocalizationsZh();
+    const reason = '画面尺寸或缓冲放不下放大，因此未生效且原画继续。';
+    expect(l10n.playbackEnhanceReasonCapacity, reason);
+    expect(playbackEnhanceReason(l10n, 7), reason);
+    expect(l10n.playbackEnhanceReasonCapacity.contains('不能同时'), isFalse);
+    expect(l10n.playbackEnhanceReplaceSuper, contains('不能同时生效'));
+    expect(l10n.playbackEnhanceReplaceAnime, contains('不能同时生效'));
+  });
 }

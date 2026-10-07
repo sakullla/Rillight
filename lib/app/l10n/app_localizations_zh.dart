@@ -1114,7 +1114,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playbackEnhanceReasonNoPicture => '还没有可处理的画面。';
 
   @override
-  String get playbackEnhanceReasonCapacity => 'Anime4K 与通用超分不能同时生效。';
+  String get playbackEnhanceReasonCapacity => '画面尺寸或缓冲放不下放大，因此未生效且原画继续。';
 
   @override
   String get playbackEnhanceReasonMismatch => '生效值与请求不一致。';

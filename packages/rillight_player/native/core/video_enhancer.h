@@ -43,6 +43,7 @@ class VideoQualityEnhancer {
   int Configure(const RillightCoreEnhancementRequest& request);
   // Same selection as Configure, but never the identical-request early return.
   // Clears this session's overload downgrade and resolves display_refresh_hz.
+  // Does not clear scale_capacity_.
   int Retry(const RillightCoreEnhancementRequest& request);
   void ResetSession();
   void ResetTemporal();
@@ -75,6 +76,7 @@ class VideoQualityEnhancer {
   int drop_interpolation_ = 0;
   int drop_scale_ = 0;
   int drop_spatial_ = 0;
+  // Current picture only. Process sets it; ResetSession clears it.
   int scale_capacity_ = 0;
   bool configured_ = false;
   bool miss_valid_ = false;
