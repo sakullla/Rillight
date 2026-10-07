@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
@@ -20,13 +21,45 @@ void main() {
     (tester) async {
       final path = Platform.environment['RILLIGHT_TEST_LAUNCH'];
       if (path == null) return;
-      final json = await tester.runAsync(
-        () async =>
-            jsonDecode(await File(path).readAsString()) as Map<String, dynamic>,
-      );
-      final launch = PlayerWindowLaunch.fromJson(json!);
+      Future<Map<String, dynamic>> readLaunch() async {
+        final decoded = await tester.runAsync(() async {
+          return jsonDecode(await File(path).readAsString())
+              as Map<String, dynamic>;
+        });
+        return decoded!;
+      }
+
+      var payload = await readLaunch();
+      // Warm launches omit source until the host writes the real payload and start.
+      if (payload['warmPlayer'] == true) {
+        final protocol = PlayerProcessProtocol.fromJson(payload);
+        await tester.runAsync(() => protocol.write('ready'));
+        final deadline = DateTime.now().add(const Duration(seconds: 65));
+        var adopted = false;
+        while (DateTime.now().isBefore(deadline)) {
+          await tester.pump(const Duration(milliseconds: 20));
+          if (await tester.runAsync(() => protocol.read('close')) != null) {
+            return;
+          }
+          if (await tester.runAsync(() => protocol.parentExpired()) == true) {
+            return;
+          }
+          if (await tester.runAsync(() => protocol.read('start')) != null) {
+            payload = await readLaunch();
+            adopted = true;
+            break;
+          }
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+        }
+        if (!adopted) return;
+      }
+      final launch = PlayerWindowLaunch.fromJson(payload);
+      final source = launch.request.source;
+      if (source == null) return;
       final server = FakeEmbyServer(
-        serverId: launch.request.source!.account.verifiedServerId,
+        serverId: source.account.verifiedServerId,
         baseUrl: Uri.parse(launch.baseUrl),
         items: [
           FakeEmbyItem(
