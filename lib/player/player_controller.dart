@@ -1876,12 +1876,9 @@ class PlayerController extends ChangeNotifier {
     bool finishCurrent = false,
   }) async {
     final actual = origin;
-    // A rate/seek recovery reports not-playing until output is ready again.
-    // Switching in that interval must retain the user's playback intent.
-    final paused =
-        !playbackEnded &&
-        !_handlingCompleted &&
-        (loading || state.buffering ? _pauseIntent : !isPlaying);
+    // Native open and rate/seek recovery may finish before playing arrives,
+    // even after buffering clears. That observation is not a user pause.
+    final paused = !playbackEnded && !_handlingCompleted && _pauseIntent;
     if (runtime == null && switchDispatcher != null) {
       await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
       if (_disposed || _revoked) return;

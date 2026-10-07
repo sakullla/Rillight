@@ -99,7 +99,7 @@ void main() {
         );
         fixture.proxy.cancelPendingReads();
         await reader.cancel();
-        await fixture.waitForCoverage();
+        await fixture.waitForCoverage(start: start);
         final diagnostics = fixture.proxy.diagnostics;
         expect(diagnostics['cachedByteTotal'], fixture.length);
         final ranges = diagnostics['cachedByteRanges'] as List;
@@ -376,16 +376,23 @@ class _Direct {
     expect(condition(), isTrue, reason: '${proxy.diagnostics}');
   }
 
-  Future<void> waitForCoverage() async {
+  Future<void> waitForCoverage({int? start}) async {
     final deadline = DateTime.now().add(const Duration(seconds: 5));
     do {
       // Integrity snapshots deliberately yield to pending foreground disk I/O.
       // Poll as the backend does instead of requiring its first attempt to win.
       await proxy.refreshTimeline(const Duration(minutes: 20));
-      if ((proxy.diagnostics['cachedByteRanges'] as List).isNotEmpty) return;
+      // The first snapshot may contain only the latest in-memory blocks while
+      // earlier blocks are still being published to disk. Wait for the range
+      // this test needs, not merely any nonempty snapshot.
+      final ranges = proxy.diagnostics['cachedByteRanges'] as List;
+      if (ranges.isNotEmpty &&
+          (start == null || (ranges.first as Map)['start'] == start)) {
+        return;
+      }
       await Future<void>.delayed(const Duration(milliseconds: 5));
     } while (DateTime.now().isBefore(deadline));
-    fail('No verified response coverage: ${proxy.diagnostics}');
+    fail('No verified response coverage from $start: ${proxy.diagnostics}');
   }
 
   Future<void> close() async {

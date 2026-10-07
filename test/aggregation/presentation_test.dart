@@ -1012,11 +1012,18 @@ void main() {
           ).writeAsString(jsonEncode(command)),
         );
         Map<String, dynamic>? receipt;
-        for (var frame = 0; frame < 80 && receipt == null; frame++) {
+        final receiptDeadline = DateTime.now().add(const Duration(seconds: 4));
+        while (receipt == null && DateTime.now().isBefore(receiptDeadline)) {
           await tester.pump(const Duration(milliseconds: 50));
-          receipt = await tester.runAsync<Map<String, dynamic>?>(
-            () => privateEndpoint.read('lock-reply'),
-          );
+          receipt = await tester.runAsync<Map<String, dynamic>?>(() async {
+            final reply = await privateEndpoint.read('lock-reply');
+            // The helper is a real process; pumping Flutter's fake clock
+            // alone does not give its filesystem polling time to run.
+            if (reply == null) {
+              await Future<void>.delayed(const Duration(milliseconds: 30));
+            }
+            return reply;
+          });
         }
         expect(receipt?['sequence'], command['sequence']);
         expect(receipt?['accepted'], isFalse, reason: 'Invalid lock $index');

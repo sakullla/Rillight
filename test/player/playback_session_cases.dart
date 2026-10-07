@@ -493,6 +493,25 @@ void main() {
 
   for (final paused in [false, true]) {
     test(
+      'back-to-back episode switches preserve paused=$paused before playing arrives',
+      () async {
+        await controller.start();
+        if (paused) await controller.togglePlay();
+        backend.deferNextPlaying = true;
+        await controller.playEpisode(episode('episode-friends-s1e1'));
+        await _until(() => !controller.isPlaying);
+        expect(controller.loading, isFalse);
+        expect(controller.state.buffering, isFalse);
+
+        await controller.playEpisode(episode('episode-friends-s1e2'));
+
+        expect(controller.itemId, 'episode-friends-s1e2');
+        expect(controller.error, isNull);
+        expect(controller.isPlaying, !paused);
+      },
+    );
+
+    test(
       'episode switch during native rate recovery preserves paused=$paused intent',
       () async {
         await controller.start();
@@ -1270,6 +1289,7 @@ class _ControlledBackend extends FakeVideoBackend {
   Completer<void>? rateGate;
   bool rateStarted = false;
   bool recoverOnNextRateChange = false;
+  bool deferNextPlaying = false;
   Completer<void>? subtitleGate;
   bool subtitleWaiting = false;
   int disposeCount = 0;
@@ -1282,6 +1302,12 @@ class _ControlledBackend extends FakeVideoBackend {
     await openGate?.future;
     if (!_openCancelled) {
       await super.open(request);
+      if (deferNextPlaying) {
+        deferNextPlaying = false;
+        // Open readiness and the first playing event have separate delivery.
+        // The next item may be selected before that event reaches Flutter.
+        await super.pause();
+      }
       // Simulate a backend that lost its audio selection on reopen. A backend
       // already holding the requested track correctly skips redundant work.
       if (failInitialization == 'audio') audioIndex = null;
