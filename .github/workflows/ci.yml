@@ -61,6 +61,17 @@ jobs:
           python3 macos/player_smoke_test.py
           bash linux/packaging/launcher_contract_test.sh
 
+  windows:
+    name: Windows release build and shared caches
+    # Only default-branch caches can be reused by later tag releases. Running
+    # this on main also seeds Flutter/pub instead of saving them on every tag.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/windows-build
+
   linux-package:
     uses: ./.github/workflows/linux-package.yml
 
