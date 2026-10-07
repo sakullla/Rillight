@@ -174,6 +174,213 @@ class _CoreSnapshot {
   final int dolbyVisionCompatibility;
 }
 
+/// One desktop snapshot plus the enhancement reasons read beside it.
+/// Position and playback state are not part of equality.
+class CoreOutputSample {
+  const CoreOutputSample({
+    required this.dolbyVisionProfile,
+    required this.dolbyVisionCompatibility,
+    required this.videoOutputKind,
+    required this.doviReconstruction,
+    required this.audioDelivery,
+    required this.audioChannels,
+    required this.audioLayout,
+    required this.audioAtmos,
+    required this.audioCodecId,
+    required this.requestedInterpolation,
+    required this.effectiveInterpolation,
+    required this.requestedAnime4k,
+    required this.effectiveAnime4k,
+    required this.requestedSuperResolution,
+    required this.effectiveSuperResolution,
+    required this.requestedDenoise,
+    required this.effectiveDenoise,
+    required this.requestedSharpen,
+    required this.effectiveSharpen,
+    required this.reasonInterpolation,
+    required this.reasonAnime4k,
+    required this.reasonSuperResolution,
+    required this.reasonDenoise,
+    required this.reasonSharpen,
+  });
+
+  factory CoreOutputSample.fromSnapshot({
+    required int dolbyVisionProfile,
+    required int dolbyVisionCompatibility,
+    required int videoOutputKind,
+    required int doviReconstruction,
+    required int audioDelivery,
+    required int audioChannels,
+    required int audioLayout,
+    required int audioAtmos,
+    required int audioCodecId,
+    required int requestedInterpolation,
+    required int effectiveInterpolation,
+    required int requestedAnime4k,
+    required int effectiveAnime4k,
+    required int requestedSuperResolution,
+    required int effectiveSuperResolution,
+    required int requestedDenoise,
+    required int effectiveDenoise,
+    required int requestedSharpen,
+    required int effectiveSharpen,
+    Map<String, Object> enhancement = const {},
+  }) {
+    int picked(String key, int fallback) {
+      final value = enhancement[key];
+      return value is num ? value.toInt() : fallback;
+    }
+
+    return CoreOutputSample(
+      dolbyVisionProfile: dolbyVisionProfile,
+      dolbyVisionCompatibility: dolbyVisionCompatibility,
+      videoOutputKind: videoOutputKind,
+      doviReconstruction: doviReconstruction,
+      audioDelivery: audioDelivery,
+      audioChannels: audioChannels,
+      audioLayout: audioLayout,
+      audioAtmos: audioAtmos,
+      audioCodecId: audioCodecId,
+      requestedInterpolation: picked(
+        'requestedInterpolation',
+        requestedInterpolation,
+      ),
+      effectiveInterpolation: picked(
+        'effectiveInterpolation',
+        effectiveInterpolation,
+      ),
+      requestedAnime4k: picked('requestedAnime4k', requestedAnime4k),
+      effectiveAnime4k: picked('effectiveAnime4k', effectiveAnime4k),
+      requestedSuperResolution: picked(
+        'requestedSuperResolution',
+        requestedSuperResolution,
+      ),
+      effectiveSuperResolution: picked(
+        'effectiveSuperResolution',
+        effectiveSuperResolution,
+      ),
+      requestedDenoise: picked('requestedDenoise', requestedDenoise),
+      effectiveDenoise: picked('effectiveDenoise', effectiveDenoise),
+      requestedSharpen: picked('requestedSharpen', requestedSharpen),
+      effectiveSharpen: picked('effectiveSharpen', effectiveSharpen),
+      reasonInterpolation: picked('reasonInterpolation', 0),
+      reasonAnime4k: picked('reasonAnime4k', 0),
+      reasonSuperResolution: picked('reasonSuperResolution', 0),
+      reasonDenoise: picked('reasonDenoise', 0),
+      reasonSharpen: picked('reasonSharpen', 0),
+    );
+  }
+
+  final int dolbyVisionProfile;
+  final int dolbyVisionCompatibility;
+  final int videoOutputKind;
+  final int doviReconstruction;
+  final int audioDelivery;
+  final int audioChannels;
+  final int audioLayout;
+  final int audioAtmos;
+  final int audioCodecId;
+  final int requestedInterpolation;
+  final int effectiveInterpolation;
+  final int requestedAnime4k;
+  final int effectiveAnime4k;
+  final int requestedSuperResolution;
+  final int effectiveSuperResolution;
+  final int requestedDenoise;
+  final int effectiveDenoise;
+  final int requestedSharpen;
+  final int effectiveSharpen;
+  final int reasonInterpolation;
+  final int reasonAnime4k;
+  final int reasonSuperResolution;
+  final int reasonDenoise;
+  final int reasonSharpen;
+
+  Map<String, Object> toMap() => {
+    'dolbyVisionProfile': dolbyVisionProfile,
+    'dolbyVisionCompatibility': dolbyVisionCompatibility,
+    'videoOutputKind': videoOutputKind,
+    'doviReconstruction': doviReconstruction,
+    'audioDelivery': audioDelivery,
+    'audioChannels': audioChannels,
+    'audioLayout': audioLayout,
+    'audioAtmos': audioAtmos,
+    'audioCodecId': audioCodecId,
+    'requestedInterpolation': requestedInterpolation,
+    'effectiveInterpolation': effectiveInterpolation,
+    'requestedAnime4k': requestedAnime4k,
+    'effectiveAnime4k': effectiveAnime4k,
+    'requestedSuperResolution': requestedSuperResolution,
+    'effectiveSuperResolution': effectiveSuperResolution,
+    'requestedDenoise': requestedDenoise,
+    'effectiveDenoise': effectiveDenoise,
+    'requestedSharpen': requestedSharpen,
+    'effectiveSharpen': effectiveSharpen,
+    'reasonInterpolation': reasonInterpolation,
+    'reasonAnime4k': reasonAnime4k,
+    'reasonSuperResolution': reasonSuperResolution,
+    'reasonDenoise': reasonDenoise,
+    'reasonSharpen': reasonSharpen,
+  };
+
+  @override
+  bool operator ==(Object other) {
+    return other is CoreOutputSample &&
+        other.dolbyVisionProfile == dolbyVisionProfile &&
+        other.dolbyVisionCompatibility == dolbyVisionCompatibility &&
+        other.videoOutputKind == videoOutputKind &&
+        other.doviReconstruction == doviReconstruction &&
+        other.audioDelivery == audioDelivery &&
+        other.audioChannels == audioChannels &&
+        other.audioLayout == audioLayout &&
+        other.audioAtmos == audioAtmos &&
+        other.audioCodecId == audioCodecId &&
+        other.requestedInterpolation == requestedInterpolation &&
+        other.effectiveInterpolation == effectiveInterpolation &&
+        other.requestedAnime4k == requestedAnime4k &&
+        other.effectiveAnime4k == effectiveAnime4k &&
+        other.requestedSuperResolution == requestedSuperResolution &&
+        other.effectiveSuperResolution == effectiveSuperResolution &&
+        other.requestedDenoise == requestedDenoise &&
+        other.effectiveDenoise == effectiveDenoise &&
+        other.requestedSharpen == requestedSharpen &&
+        other.effectiveSharpen == effectiveSharpen &&
+        other.reasonInterpolation == reasonInterpolation &&
+        other.reasonAnime4k == reasonAnime4k &&
+        other.reasonSuperResolution == reasonSuperResolution &&
+        other.reasonDenoise == reasonDenoise &&
+        other.reasonSharpen == reasonSharpen;
+  }
+
+  @override
+  int get hashCode => Object.hashAll([
+    dolbyVisionProfile,
+    dolbyVisionCompatibility,
+    videoOutputKind,
+    doviReconstruction,
+    audioDelivery,
+    audioChannels,
+    audioLayout,
+    audioAtmos,
+    audioCodecId,
+    requestedInterpolation,
+    effectiveInterpolation,
+    requestedAnime4k,
+    effectiveAnime4k,
+    requestedSuperResolution,
+    effectiveSuperResolution,
+    requestedDenoise,
+    effectiveDenoise,
+    requestedSharpen,
+    effectiveSharpen,
+    reasonInterpolation,
+    reasonAnime4k,
+    reasonSuperResolution,
+    reasonDenoise,
+    reasonSharpen,
+  ]);
+}
+
 abstract class CorePlayer {
   Stream<CorePlayerEvent> get events;
   Future<Map<String, dynamic>> open(CorePlayerOpen request);
@@ -362,6 +569,7 @@ class DesktopCorePlayer
   int _previousDuration = -1;
   int _previousState = -1;
   int _previousTimeline = -1;
+  CoreOutputSample? _lastOutputSample;
 
   static Future<DesktopCorePlayer> create({String? libraryPath}) async {
     final bindings = CoreBindings(libraryPath: libraryPath);
@@ -403,6 +611,7 @@ class DesktopCorePlayer
     _poll?.cancel();
     _previousPosition = _previousDuration = _previousState = _previousTimeline =
         -1;
+    _lastOutputSample = null;
     _check(
       _bindings.configureHardware(
         _handle,
@@ -518,6 +727,44 @@ class DesktopCorePlayer
         );
       }
     }
+    _publishOutput(snapshot);
+  }
+
+  // Kind, delivery and enhancement tiers are rewritten on later frames.
+  // An open settings panel follows this event, not the command snapshot.
+  void _publishOutput(_CoreSnapshot snapshot) {
+    if (_disposed || _session.isEmpty) return;
+    Map<String, Object> enhancement = const {};
+    try {
+      enhancement = _readEnhancementStatus();
+    } catch (_) {
+      // Snapshot fields still carry video kind and audio delivery.
+    }
+    final next = CoreOutputSample.fromSnapshot(
+      dolbyVisionProfile: snapshot.dolbyVisionProfile,
+      dolbyVisionCompatibility: snapshot.dolbyVisionCompatibility,
+      videoOutputKind: snapshot.videoOutputKind,
+      doviReconstruction: snapshot.doviReconstruction,
+      audioDelivery: snapshot.audioDelivery,
+      audioChannels: snapshot.audioChannels,
+      audioLayout: snapshot.audioLayout,
+      audioAtmos: snapshot.audioAtmos,
+      audioCodecId: snapshot.audioCodecId,
+      requestedInterpolation: snapshot.requestedInterpolation,
+      effectiveInterpolation: snapshot.effectiveInterpolation,
+      requestedAnime4k: snapshot.requestedAnime4k,
+      effectiveAnime4k: snapshot.effectiveAnime4k,
+      requestedSuperResolution: snapshot.requestedSuperResolution,
+      effectiveSuperResolution: snapshot.effectiveSuperResolution,
+      requestedDenoise: snapshot.requestedDenoise,
+      effectiveDenoise: snapshot.effectiveDenoise,
+      requestedSharpen: snapshot.requestedSharpen,
+      effectiveSharpen: snapshot.effectiveSharpen,
+      enhancement: enhancement,
+    );
+    if (next == _lastOutputSample) return;
+    _lastOutputSample = next;
+    _events.add(CorePlayerEvent(_session, 'outputStatus', next.toMap()));
   }
 
   _CoreSnapshot _readSnapshot() {

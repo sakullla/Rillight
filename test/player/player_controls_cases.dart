@@ -64,6 +64,20 @@ void _useAacSource(FakeEmbyServer server) {
   ];
 }
 
+class _RejectingOutputBackend extends FakeVideoBackend
+    implements VideoBackendOutputReport {
+  @override
+  PlaybackOutputStatus outputStatus = PlaybackOutputStatus.unknown;
+
+  @override
+  Future<PlaybackOutputStatus> refreshOutputStatus() async => outputStatus;
+
+  @override
+  Future<void> applyVideoEnhancement(VideoEnhancementSelection selection) {
+    throw StateError('enhancement rejected');
+  }
+}
+
 class _FailOneOpenBackend extends FakeVideoBackend {
   bool failNext = false;
 
@@ -1410,6 +1424,47 @@ void main() {
       expect(picture, isNot(contains('杜比')));
       expect(picture, isNot(contains('Atmos')));
       expect(audio, '实际音频输出  立体声 PCM');
+      expect(find.textContaining('这项增强未运行'), findsOneWidget);
+      expect(find.textContaining('倍速播放时压缩透传不可用'), findsOneWidget);
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 5,
+          'dolbyVisionCompatibility': 1,
+          'videoOutputKind': 2,
+          'outputColorSpace': 'BT.2020 PQ',
+          'doviReconstruction': 1,
+          'audioDelivery': 3,
+          'audioChannels': 6,
+          'audioAtmos': 0,
+          'catalogVideo': '杜比视界',
+          'catalogAudio': 'Atmos',
+          'requestedInterpolation': 2,
+          'effectiveInterpolation': 0,
+          'reasonInterpolation': 4,
+        }),
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-video')))
+            .data,
+        contains('HDR（PQ）'),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-video')))
+            .data,
+        isNot(contains('杜比视界')),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-audio')))
+            .data,
+        contains('6 声道 PCM'),
+      );
+      expect(find.textContaining('已降低生效档'), findsOneWidget);
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
       expect(
         tester
             .widget<Text>(
@@ -1426,7 +1481,6 @@ void main() {
             .data,
         contains('生效 关闭'),
       );
-      expect(find.textContaining('这项增强未运行'), findsOneWidget);
       expect(find.textContaining('倍速播放时压缩透传不可用'), findsOneWidget);
 
       final disable = find.byKey(const Key('playback-output-disable'));
@@ -1564,6 +1618,41 @@ void main() {
       expect(source, contains('基础层回退'));
       expect(audio, '实际音频输出  立体声 PCM');
       expect(find.textContaining('这项增强未运行'), findsOneWidget);
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 8,
+          'dolbyVisionCompatibility': 1,
+          'videoOutputKind': 2,
+          'outputColorSpace': 'BT.2020 PQ',
+          'audioDelivery': 3,
+          'audioChannels': 6,
+          'audioAtmos': 0,
+          'catalogVideo': '杜比视界',
+          'catalogAudio': 'Atmos',
+          'requestedInterpolation': 2,
+          'effectiveInterpolation': 0,
+          'reasonInterpolation': 4,
+        }),
+      );
+      await tester.pump();
+      expect(find.textContaining('HDR（PQ）'), findsOneWidget);
+      expect(find.textContaining('6 声道 PCM'), findsOneWidget);
+      expect(find.textContaining('已降低生效档'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-video')))
+            .data,
+        isNot(contains('杜比')),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-source')))
+            .data,
+        contains('杜比视界 Profile 8'),
+      );
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      expect(controller.playbackRate, 1.25);
       final disable = find.byKey(const Key('playback-output-disable'));
       await tester.ensureVisible(disable);
       await tester.tap(disable);
@@ -1573,6 +1662,78 @@ void main() {
       expect(video.position, const Duration(seconds: 12));
       expect(controller.playbackRate, 1.25);
       expect(controller.videoEnhancement.interpolation, FrameInterpolation.off);
+    },
+  );
+
+  test('closing enhancement does not clear the last effective tier', () {
+    final status = PlaybackOutputStatus.fromCoreMap({
+      'dolbyVisionProfile': 5,
+      'videoOutputKind': 3,
+      'audioDelivery': 4,
+      'audioChannels': 8,
+      'audioAtmos': 1,
+      'requestedInterpolation': 2,
+      'effectiveInterpolation': 2,
+      'reasonInterpolation': 1,
+    });
+    final next = status.applying(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    expect(next.requestedInterpolation, 0);
+    expect(next.effectiveInterpolation, 2);
+    expect(next.reasonInterpolation, 1);
+    expect(next.videoOutputKind, 3);
+    expect(next.audioDelivery, 4);
+    expect(next.audioAtmos, isTrue);
+  });
+
+  test(
+    'a rejected enhancement command keeps the previous core sample',
+    () async {
+      final backend = _RejectingOutputBackend();
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'synthetic',
+        backend: backend,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(),
+      );
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      controller.state.phase = PlaybackPhase.playing;
+      controller.isPlaying = true;
+      controller.playbackRate = 1.5;
+      controller.position = const Duration(seconds: 12);
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 7,
+          'videoOutputKind': 3,
+          'audioDelivery': 4,
+          'audioChannels': 8,
+          'audioAtmos': 1,
+          'requestedInterpolation': 2,
+          'effectiveInterpolation': 2,
+          'reasonInterpolation': 1,
+        }),
+      );
+      await controller.disableVideoEnhancement();
+      expect(controller.outputStatus.videoOutputKind, 3);
+      expect(controller.outputStatus.effectiveInterpolation, 2);
+      expect(controller.outputStatus.requestedInterpolation, 2);
+      expect(controller.outputStatus.audioAtmos, isTrue);
+      expect(controller.videoEnhancement.interpolation, FrameInterpolation.off);
+      expect(controller.isPlaying, isTrue);
+      expect(controller.playbackRate, 1.5);
+      expect(controller.position, const Duration(seconds: 12));
+      expect(backend.position, Duration.zero);
+      expect(backend.isPlaying, isFalse);
     },
   );
 }

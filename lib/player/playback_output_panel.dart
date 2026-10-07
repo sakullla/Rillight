@@ -214,15 +214,18 @@ class PlaybackOutputPanelView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PlaybackOutputPanel(
-      status: controller.outputStatus,
-      saved: controller.videoEnhancement,
-      playbackRate: controller.playbackRate,
-      onDisable: controller.disableVideoEnhancement,
-      onKeepOutput: controller.keepCurrentVideoOutput,
-      onUseAvailable: controller.useAvailableVideoOutput,
-      onRetry: controller.retryVideoOutput,
-      onRefresh: controller.refreshOutputStatus,
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => PlaybackOutputPanel(
+        status: controller.outputStatus,
+        saved: controller.videoEnhancement,
+        playbackRate: controller.playbackRate,
+        onDisable: controller.disableVideoEnhancement,
+        onKeepOutput: controller.keepCurrentVideoOutput,
+        onUseAvailable: controller.useAvailableVideoOutput,
+        onRetry: controller.retryVideoOutput,
+        onRefresh: controller.refreshOutputStatus,
+      ),
     );
   }
 }

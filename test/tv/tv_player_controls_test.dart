@@ -505,6 +505,36 @@ void main() {
       expect(audio, contains('6 声道 PCM'));
       expect(audio, isNot(contains('Atmos')));
       expect(find.textContaining('已降低生效档'), findsOneWidget);
+      c.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 8,
+          'dolbyVisionCompatibility': 1,
+          'videoOutputKind': 2,
+          'outputColorSpace': 'BT.2020 PQ',
+          'audioDelivery': 3,
+          'audioChannels': 6,
+          'requestedSuperResolution': 2,
+          'effectiveSuperResolution': 0,
+          'reasonSuperResolution': 4,
+          'catalogVideo': '杜比视界',
+          'catalogAudio': 'Atmos',
+        }),
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-video')))
+            .data,
+        contains('HDR（PQ）'),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-video')))
+            .data,
+        isNot(contains('杜比')),
+      );
+      expect(video.isPlaying, playing);
+      expect(video.position, position);
       final disable = find.byKey(const Key('playback-output-disable'));
       await tester.ensureVisible(disable);
       await tester.tap(disable);

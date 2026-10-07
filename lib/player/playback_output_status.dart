@@ -115,21 +115,10 @@ class PlaybackOutputStatus {
     );
   }
 
-  /// Saved choice becomes the request. Turning everything off also clears the
-  /// effective tier; any other choice waits for the next core sample.
+  /// Saved choice becomes the request. Effective tiers and reasons stay on the
+  /// last core sample until a later frame publishes them.
   PlaybackOutputStatus applying(VideoEnhancementSelection selection) {
     final args = selection.toCoreArgs();
-    final interpolation = _int(args['interpolation'], 0);
-    final anime4k = _int(args['anime4k'], 0);
-    final superResolution = _int(args['superResolution'], 0);
-    final denoise = _int(args['denoise'], 0);
-    final sharpen = _int(args['sharpen'], 0);
-    final allOff =
-        interpolation == 0 &&
-        anime4k == 0 &&
-        superResolution == 0 &&
-        denoise == 0 &&
-        sharpen == 0;
     return PlaybackOutputStatus(
       sampled: sampled,
       dolbyVisionProfile: dolbyVisionProfile,
@@ -142,21 +131,21 @@ class PlaybackOutputStatus {
       hdrDisplayActive: hdrDisplayActive,
       outputColorSpace: outputColorSpace,
       hdrOutput: hdrOutput,
-      requestedInterpolation: interpolation,
-      effectiveInterpolation: allOff ? 0 : effectiveInterpolation,
-      reasonInterpolation: allOff ? 0 : reasonInterpolation,
-      requestedAnime4k: anime4k,
-      effectiveAnime4k: allOff ? 0 : effectiveAnime4k,
-      reasonAnime4k: allOff ? 0 : reasonAnime4k,
-      requestedSuperResolution: superResolution,
-      effectiveSuperResolution: allOff ? 0 : effectiveSuperResolution,
-      reasonSuperResolution: allOff ? 0 : reasonSuperResolution,
-      requestedDenoise: denoise,
-      effectiveDenoise: allOff ? 0 : effectiveDenoise,
-      reasonDenoise: allOff ? 0 : reasonDenoise,
-      requestedSharpen: sharpen,
-      effectiveSharpen: allOff ? 0 : effectiveSharpen,
-      reasonSharpen: allOff ? 0 : reasonSharpen,
+      requestedInterpolation: _int(args['interpolation'], 0),
+      effectiveInterpolation: effectiveInterpolation,
+      reasonInterpolation: reasonInterpolation,
+      requestedAnime4k: _int(args['anime4k'], 0),
+      effectiveAnime4k: effectiveAnime4k,
+      reasonAnime4k: reasonAnime4k,
+      requestedSuperResolution: _int(args['superResolution'], 0),
+      effectiveSuperResolution: effectiveSuperResolution,
+      reasonSuperResolution: reasonSuperResolution,
+      requestedDenoise: _int(args['denoise'], 0),
+      effectiveDenoise: effectiveDenoise,
+      reasonDenoise: reasonDenoise,
+      requestedSharpen: _int(args['sharpen'], 0),
+      effectiveSharpen: effectiveSharpen,
+      reasonSharpen: reasonSharpen,
     );
   }
 
@@ -371,4 +360,34 @@ List<String> playbackOutputReasons(
     lines.add(l10n.playbackOutputSpeedPcm);
   }
   return lines;
+}
+
+/// True when a later frame rewrote kind, delivery, or an enhancement tier.
+bool playbackOutputFrameChanged(
+  PlaybackOutputStatus before,
+  PlaybackOutputStatus next,
+) {
+  if (!next.sampled || next == before) return false;
+  return before.videoOutputKind != next.videoOutputKind ||
+      before.doviReconstruction != next.doviReconstruction ||
+      before.dolbyVisionProfile != next.dolbyVisionProfile ||
+      before.dolbyVisionCompatibility != next.dolbyVisionCompatibility ||
+      before.audioDelivery != next.audioDelivery ||
+      before.audioChannels != next.audioChannels ||
+      before.audioAtmos != next.audioAtmos ||
+      before.requestedInterpolation != next.requestedInterpolation ||
+      before.effectiveInterpolation != next.effectiveInterpolation ||
+      before.reasonInterpolation != next.reasonInterpolation ||
+      before.requestedAnime4k != next.requestedAnime4k ||
+      before.effectiveAnime4k != next.effectiveAnime4k ||
+      before.reasonAnime4k != next.reasonAnime4k ||
+      before.requestedSuperResolution != next.requestedSuperResolution ||
+      before.effectiveSuperResolution != next.effectiveSuperResolution ||
+      before.reasonSuperResolution != next.reasonSuperResolution ||
+      before.requestedDenoise != next.requestedDenoise ||
+      before.effectiveDenoise != next.effectiveDenoise ||
+      before.reasonDenoise != next.reasonDenoise ||
+      before.requestedSharpen != next.requestedSharpen ||
+      before.effectiveSharpen != next.effectiveSharpen ||
+      before.reasonSharpen != next.reasonSharpen;
 }

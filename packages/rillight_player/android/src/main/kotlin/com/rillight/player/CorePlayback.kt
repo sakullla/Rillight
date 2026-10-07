@@ -104,6 +104,8 @@ internal class CorePlayback(
         }
     }
     @Volatile private var lastPresentedUs = -1L
+    private var watchedOutput: LongArray? = null
+    private var watchedReasons: IntArray? = null
     @Volatile var session = ""
         private set
     var view: CoreSurfaceView? = null
@@ -267,6 +269,8 @@ internal class CorePlayback(
                 }
                 val active = Running(handle, revision)
                 running = active
+                watchedOutput = null
+                watchedReasons = null
                 registerRouteWatcher()
                 if (desiredPaused) {
                     CoreNative.play(handle, false, operation.incrementAndGet())
@@ -412,6 +416,8 @@ internal class CorePlayback(
     fun stop(result: MethodChannel.Result? = null) {
         val stoppedSession = session
         generation.incrementAndGet()
+        watchedOutput = null
+        watchedReasons = null
         unregisterRouteWatcher()
         val previous = running
         previous?.alive?.set(false)
@@ -749,6 +755,7 @@ internal class CorePlayback(
     private fun update(active: Running, snap: LongArray) {
         emit("position", (snap[9] / 1000).coerceAtLeast(0))
         emit("duration", (snap[8] / 1000).coerceAtLeast(0))
+        publishObservedOutput(active, snap)
         val newBuffering = snap[0] == 5L || snap[0] == 6L
         if (newBuffering != buffering) { buffering = newBuffering; emit("buffering", buffering) }
         val playing = !desiredPaused && snap[0] == 3L && (renderedFirst || snap[5] < 0)
@@ -805,6 +812,16 @@ internal class CorePlayback(
             }
         }
         confirmTrack(active, snap)
+    }
+
+    // The pump already reads kind, delivery and effective tiers. Push the same
+    // sample as outputStatus when one of them, or a reason, changes.
+    private fun publishObservedOutput(active: Running, snap: LongArray) {
+        val reasons = CoreNative.enhancementStatus(active.handle)
+        if (!CoreOutputWatch.changed(watchedOutput, snap, watchedReasons, reasons)) return
+        watchedOutput = snap.copyOf()
+        watchedReasons = reasons?.copyOf()
+        emit("outputStatus", successMap(active.handle))
     }
 
     private fun confirmTrack(active: Running, snapshot: LongArray?): Boolean {

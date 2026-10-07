@@ -324,6 +324,14 @@ void main() {
             .data,
         contains('请求 关闭'),
       );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('生效 未知'),
+      );
     },
     tags: ['integration'],
   );

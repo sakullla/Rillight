@@ -191,6 +191,49 @@ class _TrackIdCoreDriver extends _CoreDriver {
   };
 }
 
+class _FrameOutputCoreDriver extends _CoreDriver {
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    final base = await super.command(method, args);
+    if (method == 'enhancement') {
+      return {
+        ...base,
+        'dolbyVisionProfile': 7,
+        'dolbyVisionCompatibility': 6,
+        'videoOutputKind': 3,
+        'audioDelivery': 4,
+        'audioChannels': 8,
+        'audioAtmos': 1,
+        'requestedInterpolation': 2,
+        'effectiveInterpolation': 2,
+        'reasonInterpolation': 1,
+      };
+    }
+    if (method == 'outputStatus') {
+      return {
+        ...base,
+        'dolbyVisionProfile': 7,
+        'dolbyVisionCompatibility': 6,
+        'videoOutputKind': 1,
+        'doviReconstruction': 3,
+        'audioDelivery': 3,
+        'audioChannels': 6,
+        'audioAtmos': 0,
+        'requestedInterpolation': 2,
+        'effectiveInterpolation': 0,
+        'reasonInterpolation': 4,
+        'outputColorSpace': 'scRGB',
+        'hdrOutput': false,
+        'hdrDisplayActive': false,
+      };
+    }
+    return base;
+  }
+}
+
 class _RejectedAudioCoreDriver extends _CoreDriver {
   int attempts = 0;
 
@@ -1152,4 +1195,122 @@ void main() {
       });
     },
   );
+
+  test(
+    'later core output samples replace kind and tier without moving playback',
+    () async {
+      final driver = _CoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      addTearDown(backend.dispose);
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 43,
+          url: Uri.parse('http://127.0.0.1:1/output.mp4'),
+          start: const Duration(seconds: 4),
+        ),
+      );
+      final position = backend.position;
+      driver.emit('outputStatus', {
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 3,
+        'audioDelivery': 4,
+        'audioChannels': 8,
+        'audioAtmos': 1,
+        'outputColorSpace': 'scRGB',
+        'hdrDisplayActive': true,
+        'hdrOutput': true,
+        'requestedInterpolation': 2,
+        'effectiveInterpolation': 2,
+        'reasonInterpolation': 1,
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(backend.outputStatus.videoOutputKind, 3);
+      expect(backend.outputStatus.outputColorSpace, 'scRGB');
+      expect(backend.outputStatus.hdrDisplayActive, isTrue);
+      driver.emit('outputStatus', {
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 1,
+        'audioDelivery': 2,
+        'audioChannels': 2,
+        'audioAtmos': 0,
+        'requestedInterpolation': 2,
+        'effectiveInterpolation': 0,
+        'reasonInterpolation': 4,
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(backend.outputStatus.videoOutputKind, 1);
+      expect(backend.outputStatus.audioDelivery, 2);
+      expect(backend.outputStatus.effectiveInterpolation, 0);
+      expect(backend.outputStatus.reasonInterpolation, 4);
+      expect(backend.outputStatus.outputColorSpace, 'scRGB');
+      expect(backend.outputStatus.hdrDisplayActive, isTrue);
+      expect(backend.position, position);
+      expect(backend.isPlaying, isFalse);
+    },
+  );
+
+  test('enhancement waits for the frame that rewrites video kind', () async {
+    final driver = _FrameOutputCoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+    );
+    addTearDown(backend.dispose);
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 44,
+        url: Uri.parse('http://127.0.0.1:1/frame.mp4'),
+      ),
+    );
+    expect(backend.outputStatus.videoOutputKind, 3);
+    final position = backend.position;
+    await backend.applyVideoEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    expect(backend.outputStatus.videoOutputKind, 1);
+    expect(backend.outputStatus.audioDelivery, 3);
+    expect(backend.outputStatus.effectiveInterpolation, 0);
+    expect(backend.outputStatus.reasonInterpolation, 4);
+    expect(backend.outputStatus.outputColorSpace, 'scRGB');
+    expect(backend.position, position);
+    expect(driver.commands.where((method) => method == 'outputStatus'), [
+      'outputStatus',
+    ]);
+
+    driver.emit('playing', true);
+    await backend.applyVideoEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.doubleRate,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: true,
+      ),
+    );
+    expect(backend.isPlaying, isTrue);
+    expect(backend.outputStatus.videoOutputKind, 3);
+    for (
+      var attempt = 0;
+      attempt < 8 && backend.outputStatus.videoOutputKind != 1;
+      attempt++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(backend.outputStatus.videoOutputKind, 1);
+    expect(backend.outputStatus.reasonInterpolation, 4);
+    expect(backend.position, position);
+  });
 }

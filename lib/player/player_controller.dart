@@ -428,6 +428,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> retryVideoOutput() => _applyEnhancement(videoEnhancement);
 
   Future<void> _applyEnhancement(VideoEnhancementSelection selection) async {
+    final previousStatus = outputStatus;
     videoEnhancement = selection;
     if (outputStatus.sampled) {
       outputStatus = outputStatus.applying(selection);
@@ -456,7 +457,16 @@ class PlayerController extends ChangeNotifier {
         selection,
       );
     } catch (_) {
-      // The saved choice remains. Playback position and pause state stay put.
+      // The saved choice remains. A rejected command must not pretend the
+      // previous effective tier already dropped.
+      if (!_disposed && outputStatus != previousStatus) {
+        outputStatus = previousStatus;
+        _emit();
+      }
+      return;
+    }
+    if (!_disposed) {
+      applyObservedOutput((report as VideoBackendOutputReport).outputStatus);
     }
   }
 

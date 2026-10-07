@@ -164,6 +164,7 @@ class RillightVideoBackend extends VideoBackend
   double _volume = 1;
   double _rate = 1;
   PlaybackOutputStatus _outputStatus = PlaybackOutputStatus.unknown;
+  int _outputFollowUp = 0;
 
   @override
   PlaybackOutputStatus get outputStatus => _outputStatus;
@@ -177,10 +178,26 @@ class RillightVideoBackend extends VideoBackend
         result['reasonInterpolation'] is! num) {
       return;
     }
-    final next = PlaybackOutputStatus.fromCoreMap(result);
+    final merged = Map<String, dynamic>.from(result);
+    final previous = _outputStatus;
+    if (previous.sampled) {
+      _keepDisplayFact(merged, 'hdrDisplayActive', previous.hdrDisplayActive);
+      _keepDisplayFact(merged, 'outputColorSpace', previous.outputColorSpace);
+      _keepDisplayFact(merged, 'hdrOutput', previous.hdrOutput);
+    }
+    final next = PlaybackOutputStatus.fromCoreMap(merged);
     if (!next.sampled || next == _outputStatus) return;
     _outputStatus = next;
     _emit(VideoEventKind.outputStatus, next, generation);
+  }
+
+  void _keepDisplayFact(
+    Map<String, dynamic> merged,
+    String key,
+    Object? previous,
+  ) {
+    if (previous == null || merged.containsKey(key)) return;
+    merged[key] = previous;
   }
 
   @override
@@ -213,8 +230,45 @@ class RillightVideoBackend extends VideoBackend
   }
 
   @override
-  Future<void> applyVideoEnhancement(VideoEnhancementSelection selection) {
-    return _command('enhancement', selection.toCoreArgs());
+  Future<void> applyVideoEnhancement(
+    VideoEnhancementSelection selection,
+  ) async {
+    final generation = _generation;
+    final token = ++_outputFollowUp;
+    await _command('enhancement', selection.toCoreArgs());
+    if (_disposed || generation != _generation) return;
+    // configure_enhancement updates the request immediately. video_output_kind
+    // and audio_delivery are rewritten when the next frame is enqueued.
+    final followUp = _sampleOutputAfterFrame(generation, token);
+    if (!isPlaying) {
+      await followUp;
+      return;
+    }
+    unawaited(followUp);
+  }
+
+  Future<void> _sampleOutputAfterFrame(int generation, int token) async {
+    final immediate = _outputStatus;
+    if (!isPlaying) {
+      await refreshOutputStatus();
+      return;
+    }
+    final started = position;
+    final deadline = DateTime.now().add(const Duration(milliseconds: 320));
+    while (DateTime.now().isBefore(deadline)) {
+      if (_disposed || generation != _generation || token != _outputFollowUp) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (_disposed || generation != _generation || token != _outputFollowUp) {
+        return;
+      }
+      await refreshOutputStatus();
+      if (playbackOutputFrameChanged(immediate, _outputStatus) ||
+          position != started) {
+        return;
+      }
+    }
   }
 
   @override
@@ -471,6 +525,17 @@ class RillightVideoBackend extends VideoBackend
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
     _sourceRenewalRequestedAt = null;
+    if (!sameSession) {
+      _outputFollowUp++;
+      if (_outputStatus != PlaybackOutputStatus.unknown) {
+        _outputStatus = PlaybackOutputStatus.unknown;
+        _emit(
+          VideoEventKind.outputStatus,
+          PlaybackOutputStatus.unknown,
+          generation,
+        );
+      }
+    }
     bufferSnapshot = BufferSnapshot.empty(
       sessionId: request.sessionId,
       resourceId: request.url.toString(),
@@ -677,6 +742,11 @@ class RillightVideoBackend extends VideoBackend
         }
       case 'authenticationRequired':
         _emit(VideoEventKind.authenticationRequired, event.value, generation);
+      case 'outputStatus':
+        final sample = event.value;
+        if (sample is Map) {
+          _noteOutput(Map<String, dynamic>.from(sample), generation);
+        }
       case 'interruption':
         isPlaying = false;
         final transport = _transport;

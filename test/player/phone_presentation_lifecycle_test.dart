@@ -6,6 +6,7 @@ import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
 
@@ -183,6 +184,25 @@ void main() {
     await tester.pump();
     await lifecycle.settled;
     expect(c.suspends, 1);
+    expect(c.backgroundReleased, isTrue);
+    c.applyObservedOutput(
+      PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 1,
+        'audioDelivery': 1,
+        'audioChannels': 2,
+        'requestedInterpolation': 2,
+        'effectiveInterpolation': 2,
+        'reasonInterpolation': 1,
+      }),
+    );
+    c.settingsStore = MemoryPlayerSettingsStore();
+    await c.disableVideoEnhancement();
+    await tester.pump();
+    expect(c.outputStatus.effectiveInterpolation, 2);
+    expect(c.outputStatus.videoOutputKind, 1);
+    expect(c.suspends, 1);
+    expect(c.restores, 0);
     expect(c.backgroundReleased, isTrue);
     c.applyObservedOutput(PlaybackOutputStatus.unknown);
     await tester.pump();
