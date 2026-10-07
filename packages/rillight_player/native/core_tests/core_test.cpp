@@ -637,14 +637,17 @@ double red_variance(const uint8_t *bytes, int count) {
 
 void enhancement_contract() {
   const auto none = enhancement_load(0, 0, 0);
+  assert(rillight_enhancement_model_ready(0) == 1);
+  assert(rillight_enhancement_model_ready(1) == 1);
+  assert(rillight_enhancement_model_ready(2) == 1);
   const double film = 24000.0 / 1001.0;
   const auto doubled = enhancement_resolved(
       enhancement_request(2, 0, 0, 0, 0, 0, 60),
       enhancement_facts(0, film, 1), none);
   assert(doubled.effective_interpolation == 2);
   assert(doubled.output_frame_rate == film * 2.0);
-  assert(doubled.interpolation_backend == RILLIGHT_CORE_INTERP_BACKEND_SCENE_BLEND);
-  assert(doubled.interpolation_backend != RILLIGHT_CORE_INTERP_BACKEND_RIFE);
+  assert(doubled.interpolation_backend == RILLIGHT_CORE_INTERP_BACKEND_RIFE);
+  assert(doubled.reason_interpolation == RILLIGHT_CORE_ENHANCE_REASON_ACTIVE);
 
   const auto capped = enhancement_resolved(
       enhancement_request(2, 0, 0, 0, 0, 0, 50),
@@ -680,12 +683,10 @@ void enhancement_contract() {
   const auto sr = enhancement_resolved(
       enhancement_request(0, 0, 2, 0, 0, 0, 0), plain, none);
   assert(sr.requested_super_resolution == 2);
-  assert(sr.effective_super_resolution == 0);
+  assert(sr.effective_super_resolution == 2);
   assert(sr.effective_anime4k == 0);
-  assert(sr.reason_super_resolution ==
-         RILLIGHT_CORE_ENHANCE_REASON_MODEL_UNAVAILABLE);
-  assert(sr.super_resolution_backend == RILLIGHT_CORE_SR_BACKEND_NONE);
-  assert(sr.super_resolution_backend != RILLIGHT_CORE_SR_BACKEND_REALESRGAN);
+  assert(sr.reason_super_resolution == RILLIGHT_CORE_ENHANCE_REASON_ACTIVE);
+  assert(sr.super_resolution_backend == RILLIGHT_CORE_SR_BACKEND_REALESRGAN);
 
   const auto blocked_dolby = enhancement_resolved(
       enhancement_request(2, 2, 0, 40, 30, 0, 0),
@@ -708,7 +709,8 @@ void enhancement_contract() {
   assert(left_dolby.left_native_dolby == 1);
   assert(left_dolby.effective_interpolation == 2);
   assert(left_dolby.effective_anime4k == 1);
-  assert(left_dolby.anime4k_backend == RILLIGHT_CORE_ANIME4K_BACKEND_GRADIENT);
+  assert(left_dolby.anime4k_backend == RILLIGHT_CORE_ANIME4K_BACKEND_GLSL);
+  assert(left_dolby.interpolation_backend == RILLIGHT_CORE_INTERP_BACKEND_RIFE);
   assert(left_dolby.effective_denoise == 10);
   assert(left_dolby.effective_sharpen == 10);
 
@@ -888,25 +890,55 @@ void enhancement_contract() {
   assert(strong_w == kWidth * 2 && strong_h == kHeight * 2);
   assert(std::memcmp(light_dst.data(), strong_dst.data(),
                      static_cast<size_t>(light_w * light_h * 4)) != 0);
+  const double light_mean = red_mean(light_dst.data(), light_w * light_h);
+  const double strong_mean = red_mean(strong_dst.data(), strong_w * strong_h);
+  assert(light_mean > 40.0 && light_mean < 200.0);
+  assert(strong_mean > 40.0 && strong_mean < 200.0);
+  for (int index = 3; index < light_w * light_h * 4; index += 4)
+    assert(light_dst[static_cast<size_t>(index)] == 255);
+  const auto sr_request = enhancement_request(0, 0, 2, 0, 0, 0, 0);
+  std::vector<uint8_t> sr_dst(light_dst.size(), 0x11);
+  int sr_w = 0, sr_h = 0;
+  assert(rillight_enhancement_process_rgba(
+             &sr_request, &plain, &none, edge.data(), kWidth, kHeight,
+             kWidth * 4, nullptr, 0, sr_dst.data(),
+             static_cast<int>(sr_dst.size()), &sr_w, &sr_h, flat_mid.data(),
+             static_cast<int>(flat_mid.size()), &mid_bytes) == 0);
+  assert(sr_w == kWidth * 2 && sr_h == kHeight * 2);
+  const double sr_mean = red_mean(sr_dst.data(), sr_w * sr_h);
+  assert(sr_mean > 40.0 && sr_mean < 200.0);
 
-  std::vector<uint8_t> dark(static_cast<size_t>(16 * 4), 0);
-  std::vector<uint8_t> bright(dark.size(), 20);
-  for (size_t index = 3; index < bright.size(); index += 4) {
-    dark[index] = 255;
-    bright[index] = 255;
-  }
+  constexpr int kMotion = 32;
+  std::vector<uint8_t> motion_prior(static_cast<size_t>(kMotion * kMotion * 4));
+  std::vector<uint8_t> motion_now(motion_prior.size());
+  fill_plane(motion_prior, kMotion, kMotion, kMotion * 4,
+             [](int x, int, int channel) {
+               if (channel == 3) return 255;
+               return x < 10 ? 0 : 255;
+             });
+  fill_plane(motion_now, kMotion, kMotion, kMotion * 4,
+             [](int x, int, int channel) {
+               if (channel == 3) return 255;
+               return x < 15 ? 0 : 255;
+             });
   const auto blend = enhancement_request(2, 0, 0, 0, 0, 0, 0);
-  std::vector<uint8_t> blend_dst(dark.size() * 4, 0x11);
-  std::vector<uint8_t> blend_mid(blend_dst.size(), 0x5A);
+  std::vector<uint8_t> blend_dst(motion_now.size(), 0x11);
+  std::vector<uint8_t> blend_mid(motion_now.size(), 0x5A);
   mid_bytes = -1;
   assert(rillight_enhancement_process_rgba(
-             &blend, &plain, &none, bright.data(), 4, 4, 16, dark.data(), 16,
-             blend_dst.data(), static_cast<int>(blend_dst.size()), &out_w,
-             &out_h, blend_mid.data(), static_cast<int>(blend_mid.size()),
+             &blend, &plain, &none, motion_now.data(), kMotion, kMotion,
+             kMotion * 4, motion_prior.data(), kMotion * 4, blend_dst.data(),
+             static_cast<int>(blend_dst.size()), &out_w, &out_h,
+             blend_mid.data(), static_cast<int>(blend_mid.size()),
              &mid_bytes) == 0);
-  assert(out_w == 4 && out_h == 4 && mid_bytes == 16 * 4);
-  assert(blend_mid[0] == 10 && blend_mid[1] == 10 && blend_mid[2] == 10);
-  assert(blend_dst[0] == 20);
+  assert(out_w == kMotion && out_h == kMotion);
+  assert(mid_bytes == kMotion * kMotion * 4);
+  assert(blend_dst[0] == 0);
+  const int behind = 10 * 4;
+  const int ahead = 24 * 4;
+  assert(std::abs(blend_mid[behind] - 127) > 40);
+  assert(blend_mid[ahead] > 200);
+  std::vector<uint8_t> dark(static_cast<size_t>(16 * 4), 0);
   std::vector<uint8_t> cut(dark.size(), 220);
   for (size_t index = 3; index < cut.size(); index += 4) cut[index] = 255;
   std::fill(blend_mid.begin(), blend_mid.end(), static_cast<uint8_t>(0x5A));

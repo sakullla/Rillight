@@ -1,5 +1,8 @@
 #include "video_enhancer.h"
 
+#include "anime4k_glsl.h"
+#include "enhancement_models.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -160,91 +163,6 @@ void Sharpen(VideoQualityEnhancer::Image* image, int strength, float ceiling) {
   }
 }
 
-void PushEdges(VideoQualityEnhancer::Image* image, float strength) {
-  const int width = image->width;
-  const int height = image->height;
-  if (width < 3 || height < 3) return;
-  std::vector<float> luma(static_cast<size_t>(width * height));
-  for (int i = 0; i < width * height; ++i) {
-    const size_t index = static_cast<size_t>(i * 3);
-    luma[static_cast<size_t>(i)] =
-        Luma(image->rgb[index], image->rgb[index + 1], image->rgb[index + 2]);
-  }
-  std::vector<float> out = image->rgb;
-  for (int y = 1; y < height - 1; ++y) {
-    for (int x = 1; x < width - 1; ++x) {
-      const float gx = luma[static_cast<size_t>(y * width + x + 1)] -
-                       luma[static_cast<size_t>(y * width + x - 1)];
-      const float gy = luma[static_cast<size_t>((y + 1) * width + x)] -
-                       luma[static_cast<size_t>((y - 1) * width + x)];
-      const float mag = std::fabs(gx) + std::fabs(gy);
-      if (mag < 0.04f) continue;
-      int sx = 0;
-      int sy = 0;
-      if (std::fabs(gx) >= std::fabs(gy)) sx = gx > 0.0f ? 1 : -1;
-      else sy = gy > 0.0f ? 1 : -1;
-      const size_t from = static_cast<size_t>((y * width + x) * 3);
-      const size_t to =
-          static_cast<size_t>(((y + sy) * width + (x + sx)) * 3);
-      const float blend = std::min(0.85f, strength * std::min(1.0f, mag));
-      for (int channel = 0; channel < 3; ++channel) {
-        const size_t offset = static_cast<size_t>(channel);
-        out[from + offset] = image->rgb[from + offset] +
-                             blend * (image->rgb[to + offset] -
-                                      image->rgb[from + offset]);
-      }
-    }
-  }
-  image->rgb.swap(out);
-}
-
-VideoQualityEnhancer::Image Upscale(const VideoQualityEnhancer::Image& source,
-                                    float edge_bias) {
-  VideoQualityEnhancer::Image out;
-  out.width = source.width * 2;
-  out.height = source.height * 2;
-  out.pts_us = source.pts_us;
-  out.timeline = source.timeline;
-  out.valid = true;
-  out.rgb.assign(static_cast<size_t>(out.width * out.height * 3), 0.0f);
-  out.alpha.assign(static_cast<size_t>(out.width * out.height), 1.0f);
-  auto at = [&](int x, int y, int channel) {
-    const int cx = std::clamp(x, 0, source.width - 1);
-    const int cy = std::clamp(y, 0, source.height - 1);
-    return source.rgb[static_cast<size_t>((cy * source.width + cx) * 3 + channel)];
-  };
-  for (int y = 0; y < out.height; ++y) {
-    for (int x = 0; x < out.width; ++x) {
-      const float sx = (static_cast<float>(x) + 0.5f) * 0.5f - 0.5f;
-      const float sy = (static_cast<float>(y) + 0.5f) * 0.5f - 0.5f;
-      const int x0 = static_cast<int>(std::floor(sx));
-      const int y0 = static_cast<int>(std::floor(sy));
-      float fx = sx - static_cast<float>(x0);
-      float fy = sy - static_cast<float>(y0);
-      const int cx = std::clamp(x0, 0, source.width - 1);
-      const int cy = std::clamp(y0, 0, source.height - 1);
-      const float gx = at(cx + 1, cy, 0) - at(cx - 1, cy, 0);
-      const float gy = at(cx, cy + 1, 0) - at(cx, cy - 1, 0);
-      if (std::fabs(gx) > std::fabs(gy) * edge_bias) fy *= 0.35f;
-      else if (std::fabs(gy) > std::fabs(gx) * edge_bias) fx *= 0.35f;
-      const size_t dest = static_cast<size_t>((y * out.width + x) * 3);
-      for (int channel = 0; channel < 3; ++channel) {
-        const float top = at(x0, y0, channel) * (1.0f - fx) +
-                          at(x0 + 1, y0, channel) * fx;
-        const float bottom = at(x0, y0 + 1, channel) * (1.0f - fx) +
-                             at(x0 + 1, y0 + 1, channel) * fx;
-        out.rgb[dest + static_cast<size_t>(channel)] =
-            top * (1.0f - fy) + bottom * fy;
-      }
-      const float a0 = source.alpha[static_cast<size_t>(
-          std::clamp(y0, 0, source.height - 1) * source.width +
-          std::clamp(x0, 0, source.width - 1))];
-      out.alpha[static_cast<size_t>(y * out.width + x)] = a0;
-    }
-  }
-  return out;
-}
-
 void Encode(const VideoQualityEnhancer::Image& image, int bytes_per_pixel,
             float ceiling, std::vector<uint8_t>* bytes, int* stride) {
   *stride = image.width * bytes_per_pixel;
@@ -399,6 +317,19 @@ RillightCoreEnhancementStatus VideoQualityEnhancer::Status() const {
   return status_;
 }
 
+bool VideoQualityEnhancer::NeedsReconstructedPicture() const {
+  std::lock_guard lock(mutex_);
+  RillightCoreEnhancementFacts facts = facts_;
+  facts.struct_size = sizeof(facts);
+  facts.picture_available = 1;
+  const RillightCoreEnhancementStatus status = ResolveEnhancement(
+      request_, facts, drop_interpolation_, drop_scale_, drop_spatial_,
+      scale_capacity_);
+  return status.effective_interpolation == 2 || status.effective_anime4k != 0 ||
+         status.effective_super_resolution != 0 || status.effective_denoise != 0 ||
+         status.effective_sharpen != 0;
+}
+
 VideoQualityEnhancer::Image VideoQualityEnhancer::Decode(
     const uint8_t* src, int width, int height, int stride,
     int bytes_per_pixel) const {
@@ -440,10 +371,13 @@ VideoQualityEnhancer::Image VideoQualityEnhancer::Filter(
   if (status_.effective_sharpen > 0)
     Sharpen(&image, status_.effective_sharpen, ceiling);
   if (allow_scale && status_.effective_anime4k > 0) {
-    const int passes = status_.effective_anime4k == 1 ? 1 : 2;
-    const float strength = status_.effective_anime4k == 1 ? 0.35f : 0.85f;
-    for (int pass = 0; pass < passes; ++pass) PushEdges(&image, strength);
-    image = Upscale(image, status_.effective_anime4k == 1 ? 1.0f : 1.8f);
+    if (!ApplyAnime4k(&image.rgb, &image.alpha, &image.width, &image.height,
+                      status_.effective_anime4k, ceiling))
+      return image;
+  } else if (allow_scale && status_.effective_super_resolution == 2) {
+    if (!ApplySuperResolution(&image.rgb, &image.alpha, &image.width,
+                              &image.height, ceiling))
+      return image;
   }
   return image;
 }
@@ -476,7 +410,8 @@ bool VideoQualityEnhancer::Process(
   result->has_midpoint = false;
   result->current.clear();
   result->midpoint.clear();
-  const bool wants_scale = status_.effective_anime4k > 0;
+  const bool wants_scale = status_.effective_anime4k > 0 ||
+                           status_.effective_super_resolution != 0;
   const uint64_t scaled_bytes = static_cast<uint64_t>(width) *
                                 static_cast<uint64_t>(height) *
                                 static_cast<uint64_t>(bytes_per_pixel) * 4u;
@@ -486,7 +421,8 @@ bool VideoQualityEnhancer::Process(
   Recompute();
   const bool spatial = status_.effective_denoise > 0 ||
                        status_.effective_sharpen > 0 ||
-                       status_.effective_anime4k > 0;
+                       status_.effective_anime4k > 0 ||
+                       status_.effective_super_resolution != 0;
   const bool interp = status_.effective_interpolation == 2;
   if (!spatial && !interp) {
     retained_.valid = false;
@@ -525,17 +461,18 @@ bool VideoQualityEnhancer::Process(
   }
   if (interp && have_prior && !HardCut(prior, current)) {
     Image mid = current;
-    for (size_t index = 0; index < mid.rgb.size(); ++index)
-      mid.rgb[index] = 0.5f * (prior.rgb[index] + current.rgb[index]);
-    for (size_t index = 0; index < mid.alpha.size(); ++index)
-      mid.alpha[index] = 0.5f * (prior.alpha[index] + current.alpha[index]);
-    Encode(mid, bytes_per_pixel, ceiling, &result->midpoint, &result->mid_stride);
-    result->mid_width = mid.width;
-    result->mid_height = mid.height;
-    result->mid_pts_us = prior.pts_us >= 0 && pts_us >= 0
-                             ? prior.pts_us + (pts_us - prior.pts_us) / 2
-                             : pts_us;
-    result->has_midpoint = true;
+    if (ApplyRife(prior.rgb, current.rgb, current.width, current.height, ceiling,
+                  &mid.rgb)) {
+      for (size_t index = 0; index < mid.alpha.size(); ++index)
+        mid.alpha[index] = 0.5f * (prior.alpha[index] + current.alpha[index]);
+      Encode(mid, bytes_per_pixel, ceiling, &result->midpoint, &result->mid_stride);
+      result->mid_width = mid.width;
+      result->mid_height = mid.height;
+      result->mid_pts_us = prior.pts_us >= 0 && pts_us >= 0
+                               ? prior.pts_us + (pts_us - prior.pts_us) / 2
+                               : pts_us;
+      result->has_midpoint = true;
+    }
   }
   retained_ = current;
   retained_.valid = interp;
@@ -583,40 +520,49 @@ RillightCoreEnhancementStatus ResolveEnhancement(
     return active ? RILLIGHT_CORE_ENHANCE_REASON_ACTIVE
                   : RILLIGHT_CORE_ENHANCE_REASON_OFF;
   };
-  const bool interp_on = request.interpolation == 2 && !dolby && !refresh_blocks &&
-                         drop_interpolation == 0 && !no_picture;
-  const bool anime_on = request.anime4k != 0 && !dolby && drop_scale == 0 &&
-                        !no_picture && scale_capacity == 0;
-  const bool sr_on = false;
+  const bool rife_ready = RifeReady();
+  const bool anime_ready = Anime4kShadersReady();
+  const bool sr_ready = SuperResolutionReady();
+  const bool interp_on = request.interpolation == 2 && rife_ready && !dolby &&
+                         !refresh_blocks && drop_interpolation == 0 && !no_picture;
+  const bool anime_on = request.anime4k != 0 && anime_ready && !dolby &&
+                        drop_scale == 0 && !no_picture && scale_capacity == 0;
+  const bool sr_on = request.super_resolution == 2 && sr_ready &&
+                     request.anime4k == 0 && !dolby && drop_scale == 0 &&
+                     !no_picture && scale_capacity == 0;
   const bool denoise_on = request.denoise != 0 && !dolby && drop_spatial == 0 &&
                           !no_picture;
   const bool sharpen_on = request.sharpen != 0 && !dolby && drop_spatial == 0 &&
                           !no_picture;
   status.effective_interpolation = interp_on ? 2 : 0;
   status.effective_anime4k = anime_on ? request.anime4k : 0;
-  status.effective_super_resolution = 0;
+  status.effective_super_resolution = sr_on ? 2 : 0;
   status.effective_denoise = denoise_on ? request.denoise : 0;
   status.effective_sharpen = sharpen_on ? request.sharpen : 0;
   status.reason_interpolation =
-      reason(request.interpolation == 2, false, refresh_blocks,
+      reason(request.interpolation == 2, !rife_ready, refresh_blocks,
              drop_interpolation != 0, interp_on);
-  status.reason_anime4k = reason(request.anime4k != 0, false, false,
+  status.reason_anime4k = reason(request.anime4k != 0, !anime_ready, false,
                                  drop_scale != 0, anime_on);
-  if (request.anime4k != 0 && !dolby && !no_picture && drop_scale == 0 &&
-      scale_capacity != 0)
+  if (request.anime4k != 0 && anime_ready && !dolby && !no_picture &&
+      drop_scale == 0 && scale_capacity != 0)
     status.reason_anime4k = RILLIGHT_CORE_ENHANCE_REASON_CAPACITY;
   status.reason_super_resolution =
-      reason(request.super_resolution == 2, true, false, drop_scale != 0, sr_on);
+      reason(request.super_resolution == 2, !sr_ready, false, drop_scale != 0,
+             sr_on);
+  if (request.super_resolution == 2 && request.anime4k == 0 && sr_ready &&
+      !dolby && !no_picture && drop_scale == 0 && scale_capacity != 0)
+    status.reason_super_resolution = RILLIGHT_CORE_ENHANCE_REASON_CAPACITY;
   status.reason_denoise =
       reason(request.denoise != 0, false, false, drop_spatial != 0, denoise_on);
   status.reason_sharpen =
       reason(request.sharpen != 0, false, false, drop_spatial != 0, sharpen_on);
-  status.interpolation_backend =
-      interp_on ? RILLIGHT_CORE_INTERP_BACKEND_SCENE_BLEND
-                : RILLIGHT_CORE_INTERP_BACKEND_NONE;
-  status.anime4k_backend = anime_on ? RILLIGHT_CORE_ANIME4K_BACKEND_GRADIENT
+  status.interpolation_backend = interp_on ? RILLIGHT_CORE_INTERP_BACKEND_RIFE
+                                            : RILLIGHT_CORE_INTERP_BACKEND_NONE;
+  status.anime4k_backend = anime_on ? RILLIGHT_CORE_ANIME4K_BACKEND_GLSL
                                     : RILLIGHT_CORE_ANIME4K_BACKEND_NONE;
-  status.super_resolution_backend = RILLIGHT_CORE_SR_BACKEND_NONE;
+  status.super_resolution_backend = sr_on ? RILLIGHT_CORE_SR_BACKEND_REALESRGAN
+                                          : RILLIGHT_CORE_SR_BACKEND_NONE;
   status.output_frame_rate = interp_on ? source * 2.0 : source;
   return status;
 }
@@ -647,6 +593,13 @@ bool ValidLoad(const RillightCoreEnhancementLoad& load) {
 }  // namespace
 
 extern "C" {
+
+int rillight_enhancement_model_ready(int kind) {
+  if (kind == 0) return rillight::RifeReady() ? 1 : 0;
+  if (kind == 1) return rillight::Anime4kShadersReady() ? 1 : 0;
+  if (kind == 2) return rillight::SuperResolutionReady() ? 1 : 0;
+  return 0;
+}
 
 int rillight_enhancement_resolve(const RillightCoreEnhancementRequest* request,
                                  const RillightCoreEnhancementFacts* facts,

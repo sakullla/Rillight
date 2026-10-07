@@ -2158,7 +2158,8 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  bool hdr_video = false,
                                  bool macos_edr = false,
                                  const AVFrame *enhancement = nullptr,
-                                 int *convert_error = nullptr) {
+                                 int *convert_error = nullptr,
+                                 bool linear_cpu = false) {
   if (frame->width <= 0 || frame->height <= 0 ||
       frame->width > static_cast<int>(kMaxVideoBytes / 4))
     return nullptr;
@@ -2365,7 +2366,7 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     (void)gpu_video;
     (void)hdr_video;
 #endif
-    if (!converted && macos_edr) {
+    if (!converted && (macos_edr || linear_cpu)) {
       const int half_stride = width * 8;
       const int half_bytes = half_stride * height;
       if (half_bytes > 0 && static_cast<size_t>(half_bytes) <= kMaxVideoBytes) {
@@ -2837,6 +2838,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   const AVFrame *picture = decoded;
   bool decoded_with_hardware = false;
   RillightCoreFrame *output = nullptr;
+  RillightCoreFrame *hardware_fallback = nullptr;
+  const bool reconstruct = core->quality.NeedsReconstructedPicture();
 #if defined(__ANDROID__)
   bool android_color = hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
       decoded->format == AV_PIX_FMT_P010LE &&
@@ -2899,8 +2902,9 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
       std::memcpy(native->display_matrix, matrix->data, sizeof(native->display_matrix));
       native->has_display_matrix = 1;
     }
-    output = native;
-    decoded_with_hardware = true;
+    if (reconstruct) hardware_fallback = native;
+    else output = native;
+    decoded_with_hardware = output != nullptr;
   }
 #endif
 #if defined(_WIN32)
@@ -2910,7 +2914,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   const bool gpu_color = transfer == AVCOL_TRC_SMPTE2084 ||
       transfer == AVCOL_TRC_ARIB_STD_B67 ||
       av_frame_get_side_data(decoded, AV_FRAME_DATA_DOVI_METADATA) != nullptr;
-  if (gpu_color && decoded->format == AV_PIX_FMT_D3D11 && decoded->hw_frames_ctx) {
+  if (!reconstruct && gpu_color && decoded->format == AV_PIX_FMT_D3D11 &&
+      decoded->hw_frames_ctx) {
     int convert_error = 0;
     output = convert_video(decoded, pts, session, timeline,
         format->streams[stream_index], scale, output_width, output_height,
@@ -2938,6 +2943,7 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     }
     if (!scale->downloaded) scale->downloaded = av_frame_alloc();
     if (!scale->downloaded || !scale->download_context) {
+      if (hardware_fallback) rillight_core_release_frame(hardware_fallback);
       return AVERROR(ENOMEM);
     }
     result = av_hwframe_transfer_data(scale->downloaded, decoded, 0);
@@ -2948,15 +2954,33 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     av_dict_free(&scale->downloaded->metadata);
     if (result >= 0)
       result = av_frame_copy_props(scale->downloaded, decoded);
-    if (result < 0) return result;
-    picture = scale->downloaded;
-    decoded_with_hardware = true;
+    if (result < 0) {
+      if (!hardware_fallback) return result;
+    } else {
+      picture = scale->downloaded;
+      decoded_with_hardware = true;
+    }
   }
   int convert_error = 0;
-  if (!output) output = convert_video(picture, pts, session, timeline,
-                               format->streams[stream_index], scale,
-                               output_width, output_height, gpu_video, hdr_video,
-                               macos_edr, enhancement_frame.frame, &convert_error);
+#if defined(_WIN32)
+  const bool linear_cpu = reconstruct && hdr_video;
+#else
+  const bool linear_cpu = false;
+#endif
+  if (!output && picture)
+    output = convert_video(picture, pts, session, timeline,
+                           format->streams[stream_index], scale, output_width,
+                           output_height, gpu_video && !reconstruct, hdr_video,
+                           macos_edr, enhancement_frame.frame, &convert_error,
+                           linear_cpu);
+  if (!output && hardware_fallback) {
+    output = hardware_fallback;
+    hardware_fallback = nullptr;
+    decoded_with_hardware = true;
+  } else if (hardware_fallback) {
+    rillight_core_release_frame(hardware_fallback);
+    hardware_fallback = nullptr;
+  }
   if (!output) return convert_error < 0 ? convert_error : AVERROR(EINVAL);
   if (decoded_with_hardware) {
     std::lock_guard lock(core->mutex);
@@ -2969,6 +2993,26 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   // cues are composited later, when the frame is taken for display.
   std::vector<RillightCoreFrame *> leading;
   apply_video_quality(core, output, &leading);
+#if defined(_WIN32)
+  if (reconstruct && gpu_video && hdr_video) {
+    auto attach_scrgb = [scale](RillightCoreFrame* frame) {
+      if (!frame || frame->type != RILLIGHT_CORE_VIDEO_RGBA16F || !frame->data)
+        return;
+      auto* video = static_cast<VideoOutputFrame*>(frame);
+      if (video->gpu_texture) return;
+      void* texture = scale->color_pipeline.UploadScRgbHalf(
+          reinterpret_cast<const uint16_t*>(frame->data), frame->width,
+          frame->height, frame->stride);
+      if (!texture) return;
+      video->gpu_texture = std::shared_ptr<void>(texture, [](void* pointer) {
+        static_cast<ID3D11Texture2D*>(pointer)->Release();
+      });
+      frame->type = RILLIGHT_CORE_VIDEO_D3D11;
+    };
+    for (auto* extra : leading) attach_scrgb(extra);
+    attach_scrgb(output);
+  }
+#endif
   for (auto *extra : leading) {
     const int queued = enqueue(core, extra, stream_index, timeline);
     if (queued < 0) {

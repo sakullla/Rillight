@@ -45,5 +45,73 @@
     "android-arm64-v8a": {"sdk_required": true},
     "android-armeabi-v7a": {"sdk_required": true},
     "android-x86_64": {"sdk_required": true}
+  },
+  "enhancement": {
+    "anime4k": {
+      "version": "4.0.1",
+      "repository": "https://github.com/bloc97/Anime4K.git",
+      "commit": "4029bf701ecaa15f163cdc49cffe5501c1acf410",
+      "license": "MIT",
+      "shaders": {
+        "Anime4K_Restore_CNN_M.glsl": {
+          "sha256": "dd515c307d97d8e5c809f263dd94174cc5667b8c1299082cdff14e6ddfc8d4bc",
+          "bytes": 36191
+        },
+        "Anime4K_Restore_CNN_VL.glsl": {
+          "sha256": "da18324507c31947943a4401ddcaea669a027705c5d8f4675aeca8a671c2eea7",
+          "bytes": 144948
+        },
+        "Anime4K_Upscale_CNN_x2_M.glsl": {
+          "sha256": "249dc3be467f556ed3361deea79f42bac1ae57456c22588c2cc3c2ee8808909c",
+          "bytes": 37985
+        },
+        "Anime4K_Upscale_CNN_x2_VL.glsl": {
+          "sha256": "ff9028a58aac9ad470ecbe379c1accf72443b348fa59eac7af1f091e333c733e",
+          "bytes": 147712
+        }
+      }
+    },
+    "rife": {
+      "repository": "https://github.com/nihui/rife-ncnn-vulkan.git",
+      "commit": "a7532fc3f9f8f008cd6eecd6f2ffe2a9698e0cf7",
+      "license": "MIT",
+      "model": "rife-v4.6",
+      "files": {
+        "rife-v4.6/flownet.param": {
+          "sha256": "28df14d57a225725ee5386f52eba422488450d37c9f40800ed4f62e8ba846692",
+          "bytes": 16749
+        },
+        "rife-v4.6/flownet.bin": {
+          "sha256": "f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958",
+          "bytes": 10614320
+        }
+      }
+    },
+    "ncnn": {
+      "version": "20260526",
+      "repository": "https://github.com/Tencent/ncnn.git",
+      "commit": "e54e7b1f88434e1d844ea0551b880a1cfb079ce1",
+      "license": "BSD-3-Clause"
+    },
+    "realesrgan": {
+      "model": "realesr-general-x4v3",
+      "license": "BSD-3-Clause",
+      "pytorch_release": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+      "ncnn_weights": {
+        "source_repository": "https://github.com/upscayl/custom-models",
+        "files": {
+          "realesr-general-x4v3.param": {
+            "url": "https://github.com/upscayl/custom-models/raw/main/models/RealESRGAN_General_x4_v3.param",
+            "sha256": "22174924330297357434ad21ed0af7f4b820008d2a502b492754d130d4142714",
+            "bytes": 5019
+          },
+          "realesr-general-x4v3.bin": {
+            "url": "https://github.com/upscayl/custom-models/raw/main/models/RealESRGAN_General_x4_v3.bin",
+            "sha256": "85ee266b632a765a725425ba6a5620c088c8aa2939a03063b2d83b3462724cc1",
+            "bytes": 2435272
+          }
+        }
+      }
+    }
   }
 }

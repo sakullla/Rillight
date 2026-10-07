@@ -381,6 +381,7 @@ RILLIGHT_CORE_API double rillight_core_output_frame_rate(RillightCore *core);
 #define RILLIGHT_CORE_INTERP_BACKEND_VIDEOTOOLBOX 3
 #define RILLIGHT_CORE_ANIME4K_BACKEND_NONE 0
 #define RILLIGHT_CORE_ANIME4K_BACKEND_GRADIENT 1
+#define RILLIGHT_CORE_ANIME4K_BACKEND_GLSL 2
 #define RILLIGHT_CORE_SR_BACKEND_NONE 0
 #define RILLIGHT_CORE_SR_BACKEND_REALESRGAN 1
 #define RILLIGHT_CORE_SR_BACKEND_VIDEOTOOLBOX 2
@@ -466,6 +467,9 @@ RILLIGHT_CORE_API int rillight_enhancement_process_rgba(
     int height, int stride, const uint8_t *previous, int previous_stride,
     uint8_t *dst, int dst_capacity, int *out_width, int *out_height,
     uint8_t *midpoint, int midpoint_capacity, int *midpoint_bytes);
+/* kind 0 is RIFE, 1 is Anime4K GLSL, 2 is Real-ESRGAN. 1 means the pinned
+ * weights loaded. A missing model stays inactive. */
+RILLIGHT_CORE_API int rillight_enhancement_model_ready(int kind);
 /* Optional Windows GPU sink, enabled while idle; disabling it is allowed
  * during playback to recover from unavailable cross-adapter sharing.
  * VIDEO_D3D11 requests

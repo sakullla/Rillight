@@ -2,6 +2,8 @@
 
 Currently this builder supports native Linux. Cross-platform prefixes must be
 produced by target-specific builders and pass verify_core_dependencies.py.
+``--stage-enhancement-only`` checks the pinned Anime4K shaders and, when
+``build/enhancement-models`` exists, the staged RIFE and Real-ESRGAN files.
 """
 
 import argparse
@@ -77,14 +79,55 @@ def fetch_source(source: Path, repository: str, commit: str, tag: str) -> None:
         raise RuntimeError(f"Source tree has local changes: {source}")
 
 
+def stage_enhancement_only() -> None:
+    spec = SPEC["enhancement"]
+    shader_dir = ROOT / "core" / "shaders" / "anime4k"
+    shaders = spec["anime4k"]["shaders"]
+    for name, record in shaders.items():
+        path = shader_dir / name
+        if not path.is_file():
+            raise RuntimeError(f"Missing Anime4K shader: {name}")
+        actual = sha256(path)
+        size = path.stat().st_size
+        if actual != record["sha256"] or size != record["bytes"]:
+            raise RuntimeError(
+                f"Anime4K shader pin mismatch: {name} sha256={actual} bytes={size}")
+    model_root = ROOT.parents[2] / "build" / "enhancement-models"
+    checked: list[str] = []
+    if model_root.is_dir():
+        files = dict(spec["rife"]["files"])
+        files.update(spec["realesrgan"]["ncnn_weights"]["files"])
+        for relative, record in files.items():
+            path = model_root / Path(relative)
+            if not path.is_file():
+                raise RuntimeError(f"Missing enhancement model: {relative}")
+            actual = sha256(path)
+            size = path.stat().st_size
+            if actual != record["sha256"] or size != record["bytes"]:
+                raise RuntimeError(
+                    f"Enhancement model pin mismatch: {relative} "
+                    f"sha256={actual} bytes={size}")
+            checked.append(relative)
+    print(
+        f"Enhancement pins verified: {len(shaders)} shaders, "
+        f"{len(checked)} model files")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prefix", type=Path, required=True)
-    parser.add_argument("--work", type=Path, required=True)
+    parser.add_argument("--prefix", type=Path)
+    parser.add_argument("--work", type=Path)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     parser.add_argument("--with-libass", action="store_true",
                         help="build pinned libass 0.17.5 for ASS/SSA composition")
+    parser.add_argument("--stage-enhancement-only", action="store_true",
+                        help="verify pinned Anime4K shaders and staged model files")
     args = parser.parse_args()
+    if args.stage_enhancement_only:
+        stage_enhancement_only()
+        return 0
+    if args.prefix is None or args.work is None:
+        parser.error("--prefix and --work are required")
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         parser.error("native builder currently supports Linux x86_64 only")
     prefix = args.prefix.resolve()

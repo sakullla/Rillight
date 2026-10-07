@@ -25,9 +25,9 @@ struct QualityProcessResult {
 };
 
 // Reconstructed pictures only. Subtitle overlays are not an input.
-// Interpolation is a scene-cut blend because RIFE weights are not linked.
-// Anime4K is an owned 2x gradient push, not the upstream GLSL chain.
-// Real-ESRGAN weights are not linked, so that stage stays unavailable.
+// Interpolation is RIFE v4.6. Anime4K is the upstream v4.0.1 GLSL chain.
+// Super-resolution is realesr-general-x4v3 reduced to 2x.
+// A stage stays inactive until that algorithm actually runs.
 class VideoQualityEnhancer {
  public:
   struct Image {
@@ -48,6 +48,7 @@ class VideoQualityEnhancer {
   void ApplyLoad(int drop_interpolation, int drop_scale, int drop_spatial);
   int NoteDeadline(int met, int64_t monotonic_us);
   RillightCoreEnhancementStatus Status() const;
+  bool NeedsReconstructedPicture() const;
   bool Process(const uint8_t* src, int width, int height, int stride,
                int bytes_per_pixel, int64_t pts_us, uint64_t timeline,
                const uint8_t* previous, int previous_stride, size_t max_bytes,

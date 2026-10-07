@@ -17,10 +17,10 @@ enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 /// 插帧。JSON 用 `double` 表示两倍,因为 `double` 不能做枚举名。
 enum FrameInterpolation { off, doubleRate }
 
-/// Anime4K 档位。light/strong 都是自有 2 倍梯度,不是上游 GLSL。
+/// Anime4K 档位。light 是 v4.0.1 Mode A (Fast) 2 倍链，strong 是 Mode A (HQ) 2 倍链。
 enum Anime4kLevel { off, light, strong }
 
-/// 通用超分。x2 目前没有 Real-ESRGAN 权重,请求可保存,生效保持关闭。
+/// 通用超分。x2 用 realesr-general-x4v3 再降到 2 倍；权重缺失时请求仍可保存，生效保持关闭。
 enum SuperResolution { off, x2 }
 
 /// 已保存的增强选择。生效档不在这里,过载或原生杜比可以低于选择。
