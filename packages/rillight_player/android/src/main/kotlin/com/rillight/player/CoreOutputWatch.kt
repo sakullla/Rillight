@@ -35,3 +35,22 @@ internal object CoreOutputWatch {
         return true
     }
 }
+
+/** Monotonic id for one output sample. Position changes do not advance it. */
+internal class OutputEpoch {
+    var epoch: Long = 0
+        private set
+    var snap: LongArray? = null
+        private set
+    var reasons: IntArray? = null
+        private set
+
+    fun observe(current: LongArray?, currentReasons: IntArray?): Long {
+        if (current == null) return epoch
+        if (!CoreOutputWatch.changed(snap, current, reasons, currentReasons)) return epoch
+        epoch += 1
+        snap = current.copyOf()
+        reasons = currentReasons?.copyOf()
+        return epoch
+    }
+}

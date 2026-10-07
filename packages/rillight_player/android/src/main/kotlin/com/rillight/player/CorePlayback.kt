@@ -106,6 +106,8 @@ internal class CorePlayback(
     @Volatile private var lastPresentedUs = -1L
     private var watchedOutput: LongArray? = null
     private var watchedReasons: IntArray? = null
+    private var outputClock = OutputEpoch()
+    private var acceptedOutputEpoch = 0L
     @Volatile var session = ""
         private set
     var view: CoreSurfaceView? = null
@@ -269,8 +271,7 @@ internal class CorePlayback(
                 }
                 val active = Running(handle, revision)
                 running = active
-                watchedOutput = null
-                watchedReasons = null
+                resetOutputWatch()
                 registerRouteWatcher()
                 if (desiredPaused) {
                     CoreNative.play(handle, false, operation.incrementAndGet())
@@ -287,6 +288,11 @@ internal class CorePlayback(
     }
 
     fun command(method: String, args: Map<*, *>, result: MethodChannel.Result) {
+        if (method == "acceptOutput") {
+            acceptOutput((args["epoch"] as? Number)?.toLong() ?: 0L)
+            result.success(mapOf("sessionId" to session))
+            return
+        }
         val active = running ?: run {
             result.error("control", "Playback is opening or closed", mapOf("sessionId" to session)); return
         }
@@ -416,8 +422,7 @@ internal class CorePlayback(
     fun stop(result: MethodChannel.Result? = null) {
         val stoppedSession = session
         generation.incrementAndGet()
-        watchedOutput = null
-        watchedReasons = null
+        resetOutputWatch()
         unregisterRouteWatcher()
         val previous = running
         previous?.alive?.set(false)
@@ -814,14 +819,34 @@ internal class CorePlayback(
         confirmTrack(active, snap)
     }
 
-    // The pump already reads kind, delivery and effective tiers. Push the same
-    // sample as outputStatus when one of them, or a reason, changes.
+    // The pump already reads kind, delivery and effective tiers. Push that
+    // sample until the backend accepts the epoch. Position is not a sample.
     private fun publishObservedOutput(active: Running, snap: LongArray) {
-        val reasons = CoreNative.enhancementStatus(active.handle)
-        if (!CoreOutputWatch.changed(watchedOutput, snap, watchedReasons, reasons)) return
-        watchedOutput = snap.copyOf()
-        watchedReasons = reasons?.copyOf()
-        emit("outputStatus", successMap(active.handle))
+        if (snap.size <= CoreOutputWatch.outputEnd) return
+        val payload = successMap(active.handle)
+        val epoch = (payload["outputEpoch"] as? Number)?.toLong() ?: 0L
+        val current = outputClock.snap ?: return
+        if (epoch <= acceptedOutputEpoch &&
+            !CoreOutputWatch.changed(watchedOutput, current, watchedReasons, outputClock.reasons)) {
+            return
+        }
+        emit("outputStatus", payload)
+    }
+
+    // watchedOutput stays on the last accepted sample. A newer frame keeps
+    // publishing until Flutter acknowledges that epoch.
+    private fun acceptOutput(epoch: Long) {
+        if (epoch <= 0L || epoch != outputClock.epoch) return
+        acceptedOutputEpoch = epoch
+        watchedOutput = outputClock.snap?.copyOf()
+        watchedReasons = outputClock.reasons?.copyOf()
+    }
+
+    private fun resetOutputWatch() {
+        watchedOutput = null
+        watchedReasons = null
+        outputClock = OutputEpoch()
+        acceptedOutputEpoch = 0L
     }
 
     private fun confirmTrack(active: Running, snapshot: LongArray?): Boolean {
@@ -878,6 +903,8 @@ internal class CorePlayback(
         val rejectedAudio = serverStreams.filter { it.type == "Audio" && it.index !in mapping }.map { it.index }
         val rejectedText = serverStreams.filter { it.type == "Subtitle" && !it.external && it.index !in mapping }.map { it.index }
         val containerIds = handle?.let(CoreNative::containerTrackIds)
+        val reasons = handle?.let(CoreNative::enhancementStatus)
+        val epoch = outputClock.observe(snap, reasons)
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,
             "subtitleIndex" to subtitleIndex, "playableAudio" to playableAudio,
             "rejectedAudio" to rejectedAudio, "playableSubtitle" to playableText,
@@ -904,13 +931,13 @@ internal class CorePlayback(
             "requestedSharpen" to (snap?.getOrNull(32)?.toInt() ?: 0),
             "effectiveSharpen" to (snap?.getOrNull(33)?.toInt() ?: 0),
             "doviReconstruction" to (snap?.getOrNull(34)?.toInt() ?: 0),
-            "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1)) +
-            enhancementFields(handle)
+            "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1),
+            "outputEpoch" to epoch) +
+            enhancementFields(handle, reasons)
     }
 
-    private fun enhancementFields(handle: Long?): Map<String, Any> {
-        if (handle == null) return emptyMap()
-        val status = CoreNative.enhancementStatus(handle) ?: return emptyMap()
+    private fun enhancementFields(handle: Long?, status: IntArray?): Map<String, Any> {
+        if (handle == null || status == null) return emptyMap()
         fun at(index: Int) = status.getOrNull(index) ?: 0
         return mapOf(
             "reasonInterpolation" to at(10),

@@ -478,6 +478,21 @@ class AndroidCorePlayer implements CorePlayer {
   @override
   Future<Map<String, dynamic>> surfaceStatus() async => const {};
 
+  /// The native pump remembers an output sample only after this epoch is the
+  /// one the backend kept. A lost event is published again until then.
+  Future<void> acceptOutputSample(int epoch) async {
+    if (_disposed || epoch <= 0) return;
+    try {
+      await _channel.invokeMethod<void>('acceptOutput', {
+        'owner': owner,
+        'sessionId': _session,
+        'epoch': epoch,
+      });
+    } catch (_) {
+      // The next output sample is published again until it is accepted.
+    }
+  }
+
   @override
   Widget buildView({Key? key}) => PlatformViewLink(
     key: key,
@@ -569,7 +584,9 @@ class DesktopCorePlayer
   int _previousDuration = -1;
   int _previousState = -1;
   int _previousTimeline = -1;
-  CoreOutputSample? _lastOutputSample;
+  int _outputEpoch = 0;
+  CoreOutputSample? _outputCurrent;
+  CoreOutputSample? _acceptedOutput;
 
   static Future<DesktopCorePlayer> create({String? libraryPath}) async {
     final bindings = CoreBindings(libraryPath: libraryPath);
@@ -611,7 +628,9 @@ class DesktopCorePlayer
     _poll?.cancel();
     _previousPosition = _previousDuration = _previousState = _previousTimeline =
         -1;
-    _lastOutputSample = null;
+    _outputEpoch = 0;
+    _outputCurrent = null;
+    _acceptedOutput = null;
     _check(
       _bindings.configureHardware(
         _handle,
@@ -680,7 +699,7 @@ class DesktopCorePlayer
             continue;
           }
         }
-        return _trackResult(snapshot, request.streams);
+        return _finishOutput(_trackResult(snapshot, request.streams), snapshot);
       }
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
@@ -731,16 +750,43 @@ class DesktopCorePlayer
   }
 
   // Kind, delivery and enhancement tiers are rewritten on later frames.
-  // An open settings panel follows this event, not the command snapshot.
+  // Remember the sample only after the backend accepts it, so a stale command
+  // snapshot cannot suppress the next publish of the same tier.
   void _publishOutput(_CoreSnapshot snapshot) {
     if (_disposed || _session.isEmpty) return;
-    Map<String, Object> enhancement = const {};
+    final next = _outputSample(snapshot);
+    if (next == _acceptedOutput) return;
+    final epoch = _observeOutput(next);
+    _events.add(
+      CorePlayerEvent(
+        _session,
+        'outputStatus',
+        next.toMap()..['outputEpoch'] = epoch,
+      ),
+    );
+  }
+
+  /// Backend kept this epoch. Older command maps must not replace it.
+  void acceptOutputSample(int epoch) {
+    if (epoch != _outputEpoch || _outputCurrent == null) return;
+    _acceptedOutput = _outputCurrent;
+  }
+
+  Map<String, Object> _enhancementOrEmpty() {
     try {
-      enhancement = _readEnhancementStatus();
+      return _readEnhancementStatus();
     } catch (_) {
       // Snapshot fields still carry video kind and audio delivery.
+      return const {};
     }
-    final next = CoreOutputSample.fromSnapshot(
+  }
+
+  CoreOutputSample _outputSample(
+    _CoreSnapshot snapshot, [
+    Map<String, Object>? enhancement,
+  ]) {
+    final resolved = enhancement ?? _enhancementOrEmpty();
+    return CoreOutputSample.fromSnapshot(
       dolbyVisionProfile: snapshot.dolbyVisionProfile,
       dolbyVisionCompatibility: snapshot.dolbyVisionCompatibility,
       videoOutputKind: snapshot.videoOutputKind,
@@ -760,11 +806,28 @@ class DesktopCorePlayer
       effectiveDenoise: snapshot.effectiveDenoise,
       requestedSharpen: snapshot.requestedSharpen,
       effectiveSharpen: snapshot.effectiveSharpen,
-      enhancement: enhancement,
+      enhancement: resolved,
     );
-    if (next == _lastOutputSample) return;
-    _lastOutputSample = next;
-    _events.add(CorePlayerEvent(_session, 'outputStatus', next.toMap()));
+  }
+
+  int _observeOutput(CoreOutputSample next) {
+    if (next == _outputCurrent && _outputEpoch > 0) return _outputEpoch;
+    _outputEpoch++;
+    _outputCurrent = next;
+    return _outputEpoch;
+  }
+
+  Map<String, dynamic> _finishOutput(
+    Map<String, dynamic> mapped,
+    _CoreSnapshot snapshot,
+  ) {
+    final enhancement = _enhancementOrEmpty();
+    // Frame rate and backend ids stay on the command result. The epoch is
+    // assigned from the same merged sample the tick publishes.
+    mapped.addAll(enhancement);
+    final sample = _outputSample(snapshot, enhancement);
+    mapped['outputEpoch'] = _observeOutput(sample);
+    return mapped;
   }
 
   _CoreSnapshot _readSnapshot() {
@@ -1127,13 +1190,7 @@ class DesktopCorePlayer
     } else {
       snapshot = _readSnapshot();
     }
-    final mapped = _trackResult(snapshot, _serverStreams);
-    try {
-      mapped.addAll(_readEnhancementStatus());
-    } catch (_) {
-      // A missing enhancement read must not fail play, pause or seek.
-    }
-    return mapped;
+    return _finishOutput(_trackResult(snapshot, _serverStreams), snapshot);
   }
 
   Map<String, Object> _readEnhancementStatus() {

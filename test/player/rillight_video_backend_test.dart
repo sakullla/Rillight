@@ -234,6 +234,117 @@ class _FrameOutputCoreDriver extends _CoreDriver {
   }
 }
 
+class _StaleOutputCoreDriver extends _CoreDriver {
+  Map<String, dynamic> _fields({
+    required int kind,
+    required int delivery,
+    required int effective,
+    required int reason,
+    required int epoch,
+  }) {
+    return {
+      'dolbyVisionProfile': 7,
+      'dolbyVisionCompatibility': 6,
+      'videoOutputKind': kind,
+      'doviReconstruction': kind == 1 ? 3 : 2,
+      'audioDelivery': delivery,
+      'audioChannels': kind == 3 ? 8 : 6,
+      'audioAtmos': kind == 3 ? 1 : 0,
+      'requestedInterpolation': 2,
+      'effectiveInterpolation': effective,
+      'reasonInterpolation': reason,
+      'outputColorSpace': 'scRGB',
+      'hdrDisplayActive': true,
+      'hdrOutput': false,
+      'outputEpoch': epoch,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    final base = await super.command(method, args);
+    if (method == 'enhancement') {
+      return {
+        ...base,
+        ..._fields(kind: 3, delivery: 4, effective: 2, reason: 1, epoch: 1),
+      };
+    }
+    if (method == 'outputStatus') {
+      // The command captured native Dolby before this yield. The frame path
+      // publishes SDR while that result is still in flight.
+      await Future<void>.delayed(Duration.zero);
+      emit(
+        'outputStatus',
+        _fields(kind: 1, delivery: 3, effective: 0, reason: 4, epoch: 2),
+      );
+      emit('position', 2400);
+      await Future<void>.delayed(Duration.zero);
+      return {
+        ...base,
+        ..._fields(kind: 3, delivery: 4, effective: 2, reason: 1, epoch: 1),
+      };
+    }
+    return base;
+  }
+}
+
+class _LateFrameCoreDriver extends _CoreDriver {
+  int outputReads = 0;
+
+  Map<String, dynamic> _fields({
+    required int kind,
+    required int epoch,
+    required int effective,
+    required int delivery,
+    required int reason,
+  }) {
+    return {
+      'dolbyVisionProfile': 7,
+      'dolbyVisionCompatibility': 6,
+      'videoOutputKind': kind,
+      'audioDelivery': delivery,
+      'audioChannels': kind == 3 ? 8 : 6,
+      'audioAtmos': kind == 3 ? 1 : 0,
+      'requestedInterpolation': 2,
+      'effectiveInterpolation': effective,
+      'reasonInterpolation': reason,
+      'outputEpoch': epoch,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    final base = await super.command(method, args);
+    if (method == 'enhancement') {
+      return {
+        ...base,
+        ..._fields(kind: 3, delivery: 4, epoch: 1, effective: 2, reason: 1),
+      };
+    }
+    if (method == 'outputStatus') {
+      outputReads++;
+      emit('position', 1000 + outputReads * 100);
+      if (outputReads < 3) {
+        return {
+          ...base,
+          ..._fields(kind: 3, delivery: 4, epoch: 1, effective: 2, reason: 1),
+        };
+      }
+      return {
+        ...base,
+        ..._fields(kind: 1, delivery: 3, epoch: 2, effective: 0, reason: 4),
+      };
+    }
+    return base;
+  }
+}
+
 class _RejectedAudioCoreDriver extends _CoreDriver {
   int attempts = 0;
 
@@ -1312,5 +1423,80 @@ void main() {
     expect(backend.outputStatus.videoOutputKind, 1);
     expect(backend.outputStatus.reasonInterpolation, 4);
     expect(backend.position, position);
+  });
+
+  test('stale output refresh does not cover a newer frame sample', () async {
+    final driver = _StaleOutputCoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+    );
+    addTearDown(backend.dispose);
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 45,
+        url: Uri.parse('http://127.0.0.1:1/stale.mp4'),
+      ),
+    );
+    await backend.applyVideoEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    expect(backend.outputStatus.videoOutputKind, 1);
+    expect(backend.outputStatus.audioDelivery, 3);
+    expect(backend.outputStatus.effectiveInterpolation, 0);
+    expect(backend.outputStatus.reasonInterpolation, 4);
+    expect(backend.outputStatus.audioAtmos, isFalse);
+    expect(backend.outputStatus.outputColorSpace, 'scRGB');
+    expect(backend.outputStatus.hdrDisplayActive, isTrue);
+    expect(backend.position, const Duration(milliseconds: 2400));
+  });
+
+  test('playing follow-up waits for output fields, not position', () async {
+    final driver = _LateFrameCoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+    );
+    addTearDown(backend.dispose);
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 46,
+        url: Uri.parse('http://127.0.0.1:1/late-frame.mp4'),
+      ),
+    );
+    driver.emit('playing', true);
+    await backend.applyVideoEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: true,
+      ),
+    );
+    expect(backend.isPlaying, isTrue);
+    expect(backend.outputStatus.videoOutputKind, 3);
+    for (
+      var attempt = 0;
+      attempt < 20 && backend.outputStatus.videoOutputKind != 1;
+      attempt++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(driver.outputReads, greaterThanOrEqualTo(3));
+    expect(backend.outputStatus.videoOutputKind, 1);
+    expect(backend.outputStatus.audioDelivery, 3);
+    expect(backend.outputStatus.effectiveInterpolation, 0);
+    expect(backend.outputStatus.reasonInterpolation, 4);
   });
 }

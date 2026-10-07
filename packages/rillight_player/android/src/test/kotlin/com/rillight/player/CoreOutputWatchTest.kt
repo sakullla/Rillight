@@ -1,5 +1,6 @@
 package com.rillight.player
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -33,5 +34,17 @@ class CoreOutputWatchTest {
         val current = snap()
         assertFalse(CoreOutputWatch.changed(current, current.copyOf(), null, null))
         assertTrue(CoreOutputWatch.changed(current, current, null, reasons()))
+    }
+
+    @Test fun epochAdvancesForKindDeliveryTierOrReasonNotPosition() {
+        val clock = OutputEpoch()
+        val current = snap()
+        assertEquals(0L, OutputEpoch().observe(null, null))
+        assertEquals(1L, clock.observe(current, reasons()))
+        assertEquals(1L, clock.observe(current.copyOf().also { it[9] = 90_000 }, reasons()))
+        assertEquals(2L, clock.observe(snap(kind = 1), reasons()))
+        assertEquals(3L, clock.observe(snap(kind = 1, delivery = 3), reasons()))
+        assertEquals(4L, clock.observe(snap(kind = 1, delivery = 3, effective = 0), reasons()))
+        assertEquals(5L, clock.observe(snap(kind = 1, delivery = 3, effective = 0), reasons(4)))
     }
 }

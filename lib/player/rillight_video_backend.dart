@@ -164,12 +164,19 @@ class RillightVideoBackend extends VideoBackend
   double _volume = 1;
   double _rate = 1;
   PlaybackOutputStatus _outputStatus = PlaybackOutputStatus.unknown;
+  int _acceptedOutputEpoch = 0;
   int _outputFollowUp = 0;
 
   @override
   PlaybackOutputStatus get outputStatus => _outputStatus;
 
   void _noteOutput(Map<String, dynamic> result, int generation) {
+    if (generation != _generation) return;
+    final stamped = result['outputEpoch'];
+    final epoch = stamped is num ? stamped.toInt() : null;
+    // A refresh can return the snapshot it read before the frame event.
+    // That older epoch must not cover the sample already on screen.
+    if (epoch != null && epoch < _acceptedOutputEpoch) return;
     if (result['videoOutputKind'] is! num &&
         result['dolbyVisionProfile'] is! num) {
       return;
@@ -186,9 +193,23 @@ class RillightVideoBackend extends VideoBackend
       _keepDisplayFact(merged, 'hdrOutput', previous.hdrOutput);
     }
     final next = PlaybackOutputStatus.fromCoreMap(merged);
-    if (!next.sampled || next == _outputStatus) return;
+    if (!next.sampled) return;
+    if (epoch != null && epoch > 0) {
+      _acceptedOutputEpoch = epoch;
+      _acknowledgeOutput(epoch);
+    }
+    if (next == _outputStatus) return;
     _outputStatus = next;
     _emit(VideoEventKind.outputStatus, next, generation);
+  }
+
+  void _acknowledgeOutput(int epoch) {
+    final player = _player;
+    if (player is DesktopCorePlayer) {
+      player.acceptOutputSample(epoch);
+    } else if (player is AndroidCorePlayer) {
+      unawaited(player.acceptOutputSample(epoch));
+    }
   }
 
   void _keepDisplayFact(
@@ -205,17 +226,20 @@ class RillightVideoBackend extends VideoBackend
     final player = _player;
     final generation = _generation;
     if (player == null || _disposed) return _outputStatus;
-    Map<String, dynamic> core = const {};
-    try {
-      core = await player.command('outputStatus');
-    } catch (_) {
-      // Keep the last sample when this build has no read-only status command.
-    }
-    if (_disposed || generation != _generation) return _outputStatus;
     Map<String, dynamic> surface = const {};
     try {
       surface = await surfaceStatus();
     } catch (_) {}
+    if (_disposed || generation != _generation) return _outputStatus;
+    final Map<String, dynamic> core;
+    try {
+      // Surface and the core command both yield. Read the core snapshot after
+      // that wait; an older map is dropped by outputEpoch in _noteOutput.
+      core = await player.command('outputStatus');
+    } catch (_) {
+      // Keep the last sample when this build has no read-only status command.
+      return _outputStatus;
+    }
     if (_disposed || generation != _generation) return _outputStatus;
     final merged = <String, dynamic>{...core};
     for (final key in const [
@@ -253,7 +277,8 @@ class RillightVideoBackend extends VideoBackend
       await refreshOutputStatus();
       return;
     }
-    final started = position;
+    // Playback position moves before the next frame rewrites kind, delivery,
+    // or an effective tier. Keep sampling until that rewrite, or the deadline.
     final deadline = DateTime.now().add(const Duration(milliseconds: 320));
     while (DateTime.now().isBefore(deadline)) {
       if (_disposed || generation != _generation || token != _outputFollowUp) {
@@ -264,10 +289,7 @@ class RillightVideoBackend extends VideoBackend
         return;
       }
       await refreshOutputStatus();
-      if (playbackOutputFrameChanged(immediate, _outputStatus) ||
-          position != started) {
-        return;
-      }
+      if (playbackOutputFrameChanged(immediate, _outputStatus)) return;
     }
   }
 
@@ -493,6 +515,7 @@ class RillightVideoBackend extends VideoBackend
   Future<void> _open(VideoOpenRequest request) async {
     if (_disposed) throw StateError('Player backend disposed');
     final generation = ++_generation;
+    _acceptedOutputEpoch = 0;
     final sameSession = _sessionId == request.sessionId;
     _sessionId = request.sessionId;
     _coreSession = 'app-${request.sessionId}-$generation';
