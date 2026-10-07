@@ -257,8 +257,6 @@ struct AndroidColorPipeline::Impl {
     glUseProgram(program);
     glUniform1i(glGetUniformLocation(program, "luma"), 0);
     glUniform1i(glGetUniformLocation(program, "chroma"), 1);
-    __android_log_print(ANDROID_LOG_INFO, "RillightColor", "GLES P010/RPU output=%s renderer=%s",
-        hdr ? "BT2020-PQ-10bit" : "SDR-8bit", glGetString(GL_RENDERER));
     return glGetError() == GL_NO_ERROR;
   }
 

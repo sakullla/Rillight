@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -20,6 +22,9 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/library/detail_source_scope.dart';
+import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/server_library_page.dart';
+import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -115,6 +120,163 @@ class _Transport implements HttpClientAdapter {
 }
 
 void main() {
+  testWidgets(
+    'server shelf play and detail retain source and concrete parent',
+    (tester) async {
+      final transport = _Transport();
+      EmbyClient client() => EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'test',
+          deviceId: 'source-card',
+          version: '1',
+        ),
+        dio: Dio()..httpClientAdapter = transport,
+      );
+      final store = MemoryServerListStore(
+        ServerListSnapshot(
+          lastServerId: 'a',
+          servers: [
+            for (final id in ['a', 'b'])
+              SavedServer(
+                id: id,
+                name: id,
+                username: 'synthetic',
+                libraryIds: const ['library'],
+                scopeKnown: true,
+                lines: [ServerLine(id: 'line', address: 'https://$id')],
+              ),
+          ],
+        ),
+      );
+      final credentials = MemoryCredentialStore({
+        for (final id in ['a', 'b'])
+          id: StoredCredentials(
+            accessToken: 'token-$id',
+            userId: 'user-$id',
+            username: 'synthetic',
+          ),
+      });
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: credentials,
+        createClient: client,
+      );
+      await tester.runAsync(registry.load);
+      final account = (await tester.runAsync(
+        () => registry.authenticate('b'),
+      ))!.account;
+      final auth = AuthController(
+        client: client(),
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      await tester.runAsync(auth.restore);
+      final host = OverlayPlayerWindowHost();
+      const item = EmbyItem(
+        id: 'episode-no-parent',
+        name: 'Episode',
+        type: 'Episode',
+        parentId: 'virtual-resume-folder',
+        seriesId: 'series',
+      );
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, _) => Scaffold(
+              body: Center(
+                child: scopeServerPosters(
+                  account: account,
+                  serverId: 'b',
+                  child: PosterCard(
+                    item: item,
+                    wide: true,
+                    onTap: () =>
+                        openServerItem(context, account: account, item: item),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/item/:id',
+            builder: (context, state) => SourceDetailGate(
+              auth: auth,
+              itemId: state.pathParameters['id']!,
+              command: state.extra as PlayerHostOpenItemCommand,
+              showComparison: false,
+              child: Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('source-detail-ready'),
+                      PosterCard(item: item, wide: true, onTap: () {}),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        AuthScope(
+          controller: auth,
+          child: PlayerWindowScope(
+            host: host,
+            child: MaterialApp.router(
+              routerConfig: router,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await pointer.addPointer(location: Offset.zero);
+      await pointer.moveTo(tester.getCenter(find.byType(PosterCard)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(PosterCard.playButtonKey(item.id)));
+      await tester.pumpAndSettle();
+      expect(host.current?.source?.account, account);
+      expect(host.current?.itemId, item.id);
+      expect(host.current?.libraryId, 'season-no-parent');
+      expect(host.current?.autoResume, isTrue);
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(PosterCard)) + const Offset(12, 12),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('source-detail-ready'), findsOneWidget);
+      expect(
+        (router.state.extra as PlayerHostOpenItemCommand).libraryId,
+        'season-no-parent',
+      );
+      expect(auth.session?.server.id, 'a');
+      await host.close();
+      await pointer.moveTo(tester.getCenter(find.byType(PosterCard)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(PosterCard.playButtonKey(item.id)));
+      await tester.pumpAndSettle();
+      expect(host.current?.source?.account, account);
+      expect(host.current?.libraryId, 'season-no-parent');
+      expect(
+        transport.requests.where(
+          (r) => r.uri.host == 'a' && r.path.endsWith('/Items/${item.id}'),
+        ),
+        isEmpty,
+      );
+      await pointer.removePointer();
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      host.dispose();
+      auth.dispose();
+    },
+  );
   testWidgets(
     'private B gate keeps poster and chapters off disk and evicts only B on lock',
     (tester) async {
@@ -344,8 +506,20 @@ void main() {
             ),
           );
         }
-        await Future<void>.delayed(const Duration(milliseconds: 20));
       });
+      // Pump both the widget zone and real transport until dispatch, rather
+      // than assuming the Windows runner completes it within 20 ms.
+      for (var frame = 0; frame < 100; frame++) {
+        if (transport.requests.any(
+          (r) => r.uri.path.endsWith('/Images/Chapter/1'),
+        )) {
+          break;
+        }
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
       expect(
         transport.requests.where(
           (r) => r.uri.path.contains('/Items/late-poster/Images/'),

@@ -67,8 +67,12 @@ void main() {
     ('desktop', PresentationEnvironment.desktop, const Size(1024, 768)),
     ('phone', PresentationEnvironment.phone, const Size(360, 800)),
     ('phone', PresentationEnvironment.phone, const Size(412, 915)),
+    // Android TV 实机:1080p 面板 DPR 2、4K 面板 DPR 4,逻辑画布都是 960×540。
     ('tv', PresentationEnvironment.tv, const Size(1920, 1080)),
+    ('tv', PresentationEnvironment.tv, const Size(3840, 2160)),
   ];
+  double pixelRatioOf((String, PresentationEnvironment, Size) config) =>
+      config.$1 == 'tv' ? config.$3.width / 960 : 1;
   for (final config in configurations) {
     final profiles = Platform.environment['RILLIGHT_CAPTURE_PROFILES'];
     if (profiles != null &&
@@ -90,7 +94,7 @@ void main() {
       if (selectedTheme != 'all' && selectedTheme != theme) continue;
       testWidgets('${config.$1} ${config.$3} $theme', (tester) async {
         isolateImageCache();
-        tester.view.devicePixelRatio = 1;
+        tester.view.devicePixelRatio = pixelRatioOf(config);
         tester.view.physicalSize = config.$3;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
@@ -664,6 +668,19 @@ class CaptureSession {
     }
     var target = find.byKey(key);
     expect(target, findsOneWidget, reason: 'Missing capture interaction: $key');
+    // TV 导航在内容下滚后收起;像遥控器那样先把焦点送回导航,栏再展开。
+    if (key is ValueKey<String> && key.value.startsWith('tv-nav-')) {
+      tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: target,
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode
+          ?.requestFocus();
+      await advance(450);
+    }
     // ExpansionTile's whole render box includes its expanded children. Click
     // the header, otherwise a tall section's midpoint can hit a child instead.
     if (tester.widget(target) is ExpansionTile) {
@@ -728,7 +745,9 @@ class CaptureSession {
     await tester.runAsync(() async {
       final render =
           boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      final image = await render.toImage();
+      final image = await render.toImage(
+        pixelRatio: tester.view.devicePixelRatio,
+      );
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       await File('$out/$file').writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
@@ -966,10 +985,13 @@ class CaptureSession {
         of: find.byKey(const Key('tv-connect-password')),
         matching: find.byType(Text),
       );
-      expect(passwordLabel, findsOneWidget);
-      final passwordText = tester.widget<Text>(passwordLabel).data ?? '';
-      expect(passwordText.contains('•'), isFalse);
-      expect(passwordText.contains(secret), isFalse);
+      // 标签与当前值是两行文字:都不能露出密码或掩码。
+      expect(passwordLabel, findsWidgets);
+      for (final text in tester.widgetList<Text>(passwordLabel)) {
+        final data = text.data ?? '';
+        expect(data.contains('•'), isFalse);
+        expect(data.contains(secret), isFalse);
+      }
       expect(find.textContaining(secret), findsNothing);
       if (shouldCapture('tv-lan-confirm')) {
         await Scrollable.ensureVisible(

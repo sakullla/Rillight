@@ -198,6 +198,8 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 "ac3" to has("ac3"),
                 "eac3" to has("eac3"),
                 "truehd" to has("truehd"),
+                "dts" to has("dts"),
+                "pgssub" to has("pgssub"),
                 "ass" to has("ass"),
                 "ssa" to has("ssa")))
             return

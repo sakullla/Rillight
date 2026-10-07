@@ -121,6 +121,22 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
         jsonDecode(await File(payloadPath).readAsString())
             as Map<String, dynamic>;
     final launch = PlayerWindowLaunch.fromJson(json);
+    // Flutter copies native assets into build/native_assets before each test
+    // invocation. Windows cannot replace a DLL loaded by the parent suite.
+    // Give only this child a private Flutter config/output directory; keep its
+    // source, SDK, native hooks and IPC protocol identical to the parent.
+    Directory? childConfig;
+    if (Platform.isWindows) {
+      childConfig = await Directory.systemTemp.createTemp(
+        'rillight-ipc-config-',
+      );
+      await File('${childConfig.path}/.flutter_settings').writeAsString(
+        jsonEncode({
+          'build-dir':
+              'build/ipc-helper-$pid-${DateTime.now().microsecondsSinceEpoch}',
+        }),
+      );
+    }
     final child = await Process.start(
       'flutter',
       [
@@ -130,7 +146,10 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
         'expanded',
         'test/helpers/desktop_ipc_fixture.dart',
       ],
-      environment: {'RILLIGHT_TEST_LAUNCH': payloadPath},
+      environment: {
+        'RILLIGHT_TEST_LAUNCH': payloadPath,
+        if (childConfig != null) 'APPDATA': childConfig.path,
+      },
       // Flutter is a .bat entrypoint on Windows; direct CreateProcess cannot
       // resolve it as an executable without the command shell.
       runInShell: Platform.isWindows,
@@ -139,9 +158,10 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
     child.stderr.transform(utf8.decoder).listen(output.write);
     var finished = false;
     unawaited(
-      child.exitCode.then((_) {
+      child.exitCode.then((_) async {
         finished = true;
         alive.removeWhere((id) => children[id] == child);
+        await childConfig?.delete(recursive: true);
       }),
     );
     final deadline = DateTime.now().add(const Duration(seconds: 65));
@@ -921,7 +941,12 @@ void main() {
       await _settle(tester);
       await tester.ensureVisible(find.widgetWithText(FilledButton, '播放').first);
       await tester.tap(find.widgetWithText(FilledButton, '播放').first);
-      for (var i = 0; i < 1200; i++) {
+      // The real helper launch allows 70 seconds, including native asset and
+      // Flutter compilation. Its observation deadline must not expire first.
+      final privateHelperDeadline = DateTime.now().add(
+        const Duration(seconds: 80),
+      );
+      while (DateTime.now().isBefore(privateHelperDeadline)) {
         await tester.pump(const Duration(milliseconds: 30));
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 30)),
@@ -932,7 +957,9 @@ void main() {
           break;
         }
       }
-      final privateRecord = f.history.records(AccessRegion.private).first;
+      final privateRecords = f.history.records(AccessRegion.private);
+      expect(privateRecords, isNotEmpty, reason: control.output.toString());
+      final privateRecord = privateRecords.first;
       expect(
         privateRecord.source.account.configuredServerId,
         f.aId,

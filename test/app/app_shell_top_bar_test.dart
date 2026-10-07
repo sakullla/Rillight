@@ -57,7 +57,9 @@ void main() {
       )
       .first;
 
-  testWidgets('aggregation top bar is a solid surface', (tester) async {
+  testWidgets('aggregation navigation blends into the page background', (
+    tester,
+  ) async {
     await pump(tester, AppRoutes.aggregation);
     final stack = barStack();
     expect(
@@ -79,7 +81,7 @@ void main() {
       fill.color,
       Theme.of(
         tester.element(find.byKey(AppShell.topBarKey)),
-      ).colorScheme.surface,
+      ).scaffoldBackgroundColor,
     );
   });
 

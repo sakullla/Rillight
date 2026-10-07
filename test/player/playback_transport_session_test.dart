@@ -8,6 +8,89 @@ import 'package:rillight/player/playback_transport_session.dart';
 
 void main() {
   test(
+    'parallel read-ahead crosses the isolate boundary with ordered bytes',
+    () async {
+      const mib = 1024 * 1024;
+      const total = 40 * mib;
+      final cache = await Directory.systemTemp.createTemp('rillight-parallel-');
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var active = 0;
+      var peak = 0;
+      server.listen((request) async {
+        final range = RegExp(
+          r'bytes=(\d+)-(\d*)',
+        ).firstMatch(request.headers.value('range') ?? '');
+        final start = range == null ? 0 : int.parse(range[1]!);
+        final end = range == null || range[2]!.isEmpty
+            ? total - 1
+            : int.parse(range[2]!);
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set('etag', '"stable-parallel-media"');
+        request.response.headers.set(
+          'content-range',
+          'bytes $start-$end/$total',
+        );
+        request.response.contentLength = end - start + 1;
+        active++;
+        if (active > peak) peak = active;
+        try {
+          for (var cursor = start; cursor <= end;) {
+            final length = (end - cursor + 1).clamp(0, 64 * 1024);
+            request.response.add(
+              List<int>.generate(length, (i) => (cursor + i) % 251),
+            );
+            cursor += length;
+            await request.response.flush();
+            await Future<void>.delayed(const Duration(milliseconds: 2));
+          }
+          await request.response.close();
+        } catch (_) {
+          // Closing the playback session cancels speculative range bodies.
+        } finally {
+          active--;
+        }
+      });
+      final session = await PlaybackTransportSession.start(
+        cacheRoot: cache,
+        memoryLimitBytes: 8 * mib,
+        diskLimitBytes: 64 * mib,
+        readAheadBytes: 32 * mib,
+        readAheadConcurrency: 4,
+        sessionBuffering: true,
+        continuousTransfers: true,
+      );
+      final client = HttpClient();
+      try {
+        final url = await session.register(
+          Uri.parse('http://127.0.0.1:${server.port}/movie.mkv'),
+        );
+        final probe = await client.getUrl(url);
+        probe.headers.set('range', 'bytes=0-0');
+        await (await probe.close()).drain<void>();
+        final read = await client.getUrl(url);
+        read.headers.set('range', 'bytes=0-${4 * mib - 1}');
+        var received = 0;
+        await for (final bytes in await read.close()) {
+          for (var i = 0; i < bytes.length; i++) {
+            if (bytes[i] != (received + i) % 251) {
+              fail('Out-of-order range at ${received + i}');
+            }
+          }
+          received += bytes.length;
+        }
+        expect(received, 4 * mib);
+        expect(peak, greaterThan(1));
+        expect((await session.diagnostics)['readAheadConcurrencyLimit'], 4);
+      } finally {
+        client.close(force: true);
+        await session.close();
+        await server.close(force: true);
+        await cache.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
     'truncated unvalidated media fails its read without killing the worker',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

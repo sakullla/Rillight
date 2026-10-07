@@ -82,6 +82,7 @@ class PlaybackTransportSession {
     int diskLimitBytes = 2048 * 1024 * 1024,
     int pendingLimitBytes = defaultCachePendingBytes,
     int readAheadBytes = 512 * 1024 * 1024,
+    int readAheadConcurrency = 1,
     bool dynamicSource = false,
     bool sessionBuffering = false,
     bool continuousTransfers = false,
@@ -104,6 +105,7 @@ class PlaybackTransportSession {
           dynamicSource,
           sessionBuffering,
           continuousTransfers,
+          readAheadConcurrency,
         ],
         onError: inbox.sendPort,
         onExit: inbox.sendPort,
@@ -280,6 +282,7 @@ Future<void> _serveTransport(List<Object?> arguments) async {
       dynamicSource: arguments[9]! as bool,
       sessionBuffering: arguments[10]! as bool,
       continuousTransfers: arguments[11]! as bool,
+      readAheadConcurrency: arguments[12]! as int,
     );
     ready.send(commands.sendPort);
     await for (final message in commands) {

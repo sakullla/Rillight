@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/emby_mark.dart';
@@ -194,21 +193,6 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                   leading: const Icon(Icons.password_outlined),
                   title: Text(l10n.changePassword),
                   onTap: widget.onChangePassword,
-                ),
-                ListTile(
-                  key: ServerSwitcherDialog.privateKey,
-                  leading: const Icon(Icons.lock_outline),
-                  title: Text(l10n.aggregationPrivate),
-                  onTap: () async {
-                    final router = GoRouter.of(context);
-                    final navigator = Navigator.of(context);
-                    final opened = await SessionActions.ensurePrivateAccess(
-                      context,
-                    );
-                    if (!opened) return;
-                    navigator.pop();
-                    router.push('/private');
-                  },
                 ),
                 ListTile(
                   leading: const Icon(Icons.logout),

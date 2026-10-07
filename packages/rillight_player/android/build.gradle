@@ -26,6 +26,16 @@ android {
     externalNativeBuild {
         cmake { path 'CMakeLists.txt' }
     }
+    // Flutter's profile app falls back to a plugin's debug variant when no
+    // profile variant exists. Keep native playback optimized during hardware
+    // profiling as well as release; an unoptimized subtitle compositor can
+    // miss frame deadlines even while MediaCodec's decoded queue is full.
+    buildTypes {
+        profile {
+            initWith release
+            matchingFallbacks = ['release']
+        }
+    }
     sourceSets {
         main.jniLibs.srcDirs += [layout.buildDirectory.dir('generated/coreJni').get().asFile]
     }

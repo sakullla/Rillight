@@ -340,7 +340,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     };
     final scheme = Theme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
-    final panelWidth = math.min(480.0, math.max(360.0, screen.width * .42));
+    final s = TvDesign.scaleOf(context);
+    final panelWidth = math.min(400 * s, math.max(320 * s, screen.width * .38));
     await showDialog<void>(
       context: context,
       useRootNavigator: false,
@@ -361,19 +362,18 @@ class TvPlayerPageState extends State<TvPlayerPage> {
           height: double.infinity,
           child: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(28, 24, 28, 24),
+              padding: EdgeInsets.fromLTRB(24 * s, 24 * s, 24 * s, 20 * s),
               child: DefaultTextStyle.merge(
-                style: TextStyle(fontSize: 20, color: scheme.onSurface),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge!.copyWith(color: scheme.onSurface),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
                       title,
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurface,
-                      ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(color: scheme.onSurface),
                     ),
                     const SizedBox(height: 6),
                     ListenableBuilder(
@@ -382,13 +382,12 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                         _panelValue(c, panel, l),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 18,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 18),
+                    SizedBox(height: 14 * s),
                     Expanded(
                       child: ListenableBuilder(
                         listenable: c,
@@ -403,12 +402,15 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
+                            spacing: 6 * s,
                             children: [
                               if (panel == _TvPanel.tracks) ...[
-                                if (c.canSwitchAudioTrack) Text(l.audioTrack),
+                                if (c.canSwitchAudioTrack)
+                                  _panelLabel(l.audioTrack),
                                 if (c.canSwitchAudioTrack)
                                   for (final track in c.selectableAudioTracks)
                                     TvAction(
+                                      variant: TvActionVariant.tile,
                                       key: ValueKey('audio-${track.index}'),
                                       autofocus:
                                           track.index == c.audioStreamIndex ||
@@ -434,8 +436,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     ),
                                 if (c.canConfigureSubtitles) ...[
                                   const SizedBox(height: 16),
-                                  Text(l.subtitleTrack),
+                                  _panelLabel(l.subtitleTrack),
                                   TvAction(
+                                    variant: TvActionVariant.tile,
                                     autofocus:
                                         !c.canSwitchAudioTrack &&
                                         (c.subtitleStreamIndex == null ||
@@ -456,6 +459,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   for (final track
                                       in c.selectableSubtitleTracks)
                                     TvAction(
+                                      variant: TvActionVariant.tile,
                                       key: ValueKey('subtitle-${track.index}'),
                                       autofocus:
                                           !c.canSwitchAudioTrack &&
@@ -474,9 +478,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     ),
                                   if (c.canAdjustSubtitleSize) ...[
                                     const SizedBox(height: 16),
-                                    Text(l.phoneSubtitleSize),
+                                    _panelLabel(l.phoneSubtitleSize),
                                     for (final size in PhoneSubtitleSize.values)
                                       TvAction(
+                                        variant: TvActionVariant.tile,
                                         key: ValueKey(
                                           'tv-subtitle-size-${size.name}',
                                         ),
@@ -509,6 +514,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                         ),
                                       ),
                                     TvAction(
+                                      variant: TvActionVariant.tile,
                                       key: const Key('tv-subtitle-original'),
                                       selected:
                                           c.phoneSubtitleSettings.originalAss,
@@ -538,6 +544,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                               if (panel == _TvPanel.source)
                                 for (final source in c.mediaSources)
                                   TvAction(
+                                    variant: TvActionVariant.tile,
                                     key: ValueKey('source-${source.id}'),
                                     autofocus:
                                         source.id == c.activeMediaSourceId ||
@@ -564,6 +571,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                               if (panel == _TvPanel.quality)
                                 for (final bitrate in c.availableBitrates)
                                   TvAction(
+                                    variant: TvActionVariant.tile,
                                     key: ValueKey('tv-quality-$bitrate'),
                                     autofocus:
                                         bitrate == c.maxStreamingBitrate ||
@@ -584,6 +592,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   ),
                               if (panel == _TvPanel.skip) ...[
                                 TvAction(
+                                  variant: TvActionVariant.tile,
                                   key: const Key('tv-skip-intro-enabled'),
                                   autofocus: true,
                                   selected: c.skipIntroEnabled,
@@ -597,6 +606,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   ),
                                 ),
                                 TvAction(
+                                  variant: TvActionVariant.tile,
                                   key: const Key('tv-skip-outro-enabled'),
                                   selected: c.skipOutroEnabled,
                                   onPressed: () => c.setSkipEnabled(
@@ -612,6 +622,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                               if (panel == _TvPanel.speed)
                                 for (final rate in kPlaybackRateLadder)
                                   TvAction(
+                                    variant: TvActionVariant.tile,
                                     key: ValueKey('tv-rate-$rate'),
                                     autofocus: rate == c.playbackRate,
                                     selected: c.playbackRate == rate,
@@ -636,6 +647,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     ),
                     const SizedBox(height: 12),
                     TvAction(
+                      variant: TvActionVariant.tile,
                       key: const Key('tv-panel-back'),
                       onPressed: () => Navigator.pop(context),
                       child: Text(l.mobileBack),
@@ -706,22 +718,30 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            text,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
+          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
         if (selected) ...[
-          const SizedBox(width: 12),
-          const Icon(Icons.check_rounded, size: 26),
+          SizedBox(width: context.tvdp(10)),
+          const Icon(Icons.check_rounded),
         ],
       ],
     );
   }
+
+  Widget _panelLabel(String text) => Padding(
+    padding: EdgeInsets.fromLTRB(
+      context.tvdp(4),
+      context.tvdp(10),
+      0,
+      context.tvdp(6),
+    ),
+    child: Text(
+      text,
+      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    ),
+  );
 
   String _time(Duration value) {
     final seconds = (value.inSeconds % 60).toString().padLeft(2, '0');
@@ -740,29 +760,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       key: Key(key),
       focusNode: focusNode,
       onPressed: onPressed,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 圆形遮罩图标:亮画面上也可读,视觉重量统一。
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: AppScrim.control),
-                shape: BoxShape.circle,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Icon(icon, size: 28),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-            ),
-          ],
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon),
+          SizedBox(width: context.tvdp(6)),
+          Text(label),
+        ],
       ),
     );
   }
@@ -800,36 +804,291 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         onPressed: c.loading || _failed || c.duration <= Duration.zero
             ? null
             : _commitSeek,
+        subtle: true,
+        child: Column(
+          children: [
+            BufferedRangesProgressIndicator(
+              snapshot: c.bufferSnapshot,
+              duration: c.duration,
+              value: c.duration.inMilliseconds <= 0
+                  ? 0
+                  : (position.inMilliseconds / c.duration.inMilliseconds).clamp(
+                      0,
+                      1,
+                    ),
+            ),
+            SizedBox(height: context.tvdp(6)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _time(position),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Colors.white,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  _time(c.duration),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Colors.white70,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 控制层:左上标题与状态,右上关闭;底部依次是网速、时间轴与控制行。
+  /// 尺寸按 960 画布换算,4K 面板上同样比例。
+  Widget _overlay(
+    BuildContext context,
+    PlayerController c,
+    AppLocalizations l,
+    String status,
+    bool ready,
+  ) {
+    final theme = Theme.of(context);
+    final size = MediaQuery.sizeOf(context);
+    final s = TvDesign.scaleOf(context);
+    final gutter = tvSafeGutter(size.width);
+    final vertical = tvSafeVertical(size.height);
+    final secondary = theme.textTheme.bodyMedium?.copyWith(
+      color: Colors.white.withValues(alpha: .72),
+    );
+    return DecoratedBox(
+      key: const Key('tv-player-gradient'),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black.withValues(alpha: AppScrim.of(context, AppScrim.top)),
+            Colors.black.withValues(alpha: 0),
+            Colors.black.withValues(
+              alpha: AppScrim.of(context, AppScrim.playerBarSoft),
+            ),
+            Colors.black.withValues(
+              alpha: AppScrim.of(context, AppScrim.playerBar),
+            ),
+          ],
+          stops: const [0, .32, .6, 1],
+        ),
+      ),
+      child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _time(position),
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
+          padding: EdgeInsets.fromLTRB(gutter, vertical, gutter, vertical),
+          child: DefaultTextStyle.merge(
+            style: (theme.textTheme.bodyMedium ?? const TextStyle()).copyWith(
+              color: Colors.white,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            c.item?.displayName ?? l.playerLoading,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          SizedBox(height: 4 * s),
+                          Row(
+                            children: [
+                              Icon(
+                                c.isPlaying
+                                    ? Icons.play_arrow_rounded
+                                    : Icons.pause_rounded,
+                                size: 16 * s,
+                                color: Colors.white70,
+                              ),
+                              SizedBox(width: 6 * s),
+                              Flexible(
+                                child: Text(
+                                  status,
+                                  maxLines: 2,
+                                  style: secondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: 16 * s),
+                    _action(
+                      'tv-player-close',
+                      Icons.close_rounded,
+                      l.closePlayer,
+                      _close,
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: Center(
+                    child: c.loading
+                        ? SizedBox.square(
+                            dimension: 44 * s,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3 * s,
+                              color: Colors.white,
+                            ),
+                          )
+                        : _failed
+                        ? _action(
+                            'tv-player-retry',
+                            Icons.refresh_rounded,
+                            c.sessionExpired ? l.connect : l.retry,
+                            c.sessionExpired
+                                ? () async {
+                                    await _close();
+                                    await _auth?.logout();
+                                  }
+                                : c.retryPlayback,
+                            focusNode: _retryFocus,
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+                DefaultTextStyle.merge(
+                  style: secondary,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (c.progressSyncFailed) Text(l.progressSyncFailed),
+                      if (c.networkSlow)
+                        Row(
+                          children: [
+                            Expanded(child: Text(l.networkSlowHint)),
+                            IconButton(
+                              key: const Key('tv-dismiss-network-hint'),
+                              tooltip: MaterialLocalizations.of(
+                                context,
+                              ).closeButtonTooltip,
+                              color: Colors.white,
+                              onPressed: c.dismissNetworkSlowHint,
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                        ),
+                      if (c.playbackLineFailure != null)
+                        Text(
+                          l.playbackLineFailed(c.playbackLineFailure!),
+                          key: const Key('playback-line-failure'),
+                        ),
+                      if (c.trackFailure != null) Text(c.trackFailure!),
+                      if (c.backgroundReleased) Text(l.mobileBackgroundPaused),
+                    ],
+                  ),
+                ),
+                Tooltip(
+                  message: l.playerNetworkSpeedTooltip,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: NetworkSpeedReadout(
+                      key: const Key('tv-player-network-speed'),
+                      bytesPerSecond: c.cacheSpeedBytesPerSec,
+                      textStyle: theme.textTheme.labelMedium,
+                      color: Colors.white70,
                     ),
                   ),
-                  Text(
-                    _time(c.duration),
-                    style: const TextStyle(fontSize: 22, color: Colors.white70),
+                ),
+                SizedBox(height: 6 * s),
+                _timeline(c),
+                SizedBox(height: 10 * s),
+                LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.none,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minWidth: constraints.maxWidth,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _action(
+                            'tv-player-toggle',
+                            c.isPlaying
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            c.isPlaying ? l.pause : l.play,
+                            ready ? c.togglePlay : null,
+                            focusNode: _playFocus,
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final control in <Widget>[
+                                if (c.canSwitchAudioTrack ||
+                                    c.canConfigureSubtitles)
+                                  _action(
+                                    'tv-player-tracks',
+                                    Icons.subtitles_outlined,
+                                    c.canSwitchAudioTrack
+                                        ? l.mobileTracks
+                                        : l.subtitleTrack,
+                                    ready
+                                        ? () => _panel(_TvPanel.tracks)
+                                        : null,
+                                  ),
+                                if (c.canSwitchQuality)
+                                  _action(
+                                    'tv-player-quality',
+                                    Icons.high_quality_outlined,
+                                    l.quality,
+                                    ready
+                                        ? () => _panel(_TvPanel.quality)
+                                        : null,
+                                  ),
+                                SourceSwitchButton(
+                                  controller: c,
+                                  surface: PlaybackLineSurface.dialog,
+                                ),
+                                if (c.canSwitchMediaSource)
+                                  _action(
+                                    'tv-player-source',
+                                    Icons.video_library_outlined,
+                                    l.mediaSource,
+                                    ready
+                                        ? () => _panel(_TvPanel.source)
+                                        : null,
+                                  ),
+                                _action(
+                                  'tv-player-skip',
+                                  Icons.fast_forward_rounded,
+                                  l.playerSkipSettings,
+                                  () => _panel(_TvPanel.skip),
+                                ),
+                                _action(
+                                  'tv-player-speed',
+                                  Icons.speed_rounded,
+                                  '${c.playbackRate}x',
+                                  ready ? () => _panel(_TvPanel.speed) : null,
+                                ),
+                              ]) ...[SizedBox(width: 8 * s), control],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              BufferedRangesProgressIndicator(
-                snapshot: c.bufferSnapshot,
-                duration: c.duration,
-                value: c.duration.inMilliseconds <= 0
-                    ? 0
-                    : (position.inMilliseconds / c.duration.inMilliseconds)
-                          .clamp(0, 1),
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -919,267 +1178,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       excluding: !visible,
                       child: TickerMode(
                         enabled: visible,
-                        child: DecoratedBox(
-                          key: const Key('tv-player-gradient'),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.black.withValues(
-                                  alpha: AppScrim.of(context, AppScrim.top),
-                                ),
-                                Colors.black.withValues(alpha: 0),
-                                Colors.black.withValues(
-                                  alpha: AppScrim.of(
-                                    context,
-                                    AppScrim.playerBarSoft,
-                                  ),
-                                ),
-                                Colors.black.withValues(
-                                  alpha: AppScrim.of(
-                                    context,
-                                    AppScrim.playerBar,
-                                  ),
-                                ),
-                              ],
-                              stops: const [0, .38, .62, 1],
-                            ),
-                          ),
-                          child: SafeArea(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                40,
-                                24,
-                                40,
-                                24,
-                              ),
-                              child: DefaultTextStyle.merge(
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                c.item?.displayName ??
-                                                    l.playerLoading,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontSize: 30,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              Row(
-                                                children: [
-                                                  Icon(
-                                                    c.isPlaying
-                                                        ? Icons
-                                                              .play_arrow_rounded
-                                                        : Icons.pause_rounded,
-                                                    size: 20,
-                                                    color: Colors.white70,
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Flexible(
-                                                    child: Text(
-                                                      status,
-                                                      maxLines: 2,
-                                                      style: const TextStyle(
-                                                        fontSize: 20,
-                                                        color: Colors.white70,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(width: 24),
-                                        _action(
-                                          'tv-player-close',
-                                          Icons.close_rounded,
-                                          l.closePlayer,
-                                          _close,
-                                        ),
-                                      ],
-                                    ),
-                                    Expanded(
-                                      child: Center(
-                                        child: c.loading
-                                            ? const CircularProgressIndicator()
-                                            : _failed
-                                            ? _action(
-                                                'tv-player-retry',
-                                                Icons.refresh_rounded,
-                                                c.sessionExpired
-                                                    ? l.connect
-                                                    : l.retry,
-                                                c.sessionExpired
-                                                    ? () async {
-                                                        await _close();
-                                                        await _auth?.logout();
-                                                      }
-                                                    : c.retryPlayback,
-                                                focusNode: _retryFocus,
-                                              )
-                                            : const SizedBox.shrink(),
-                                      ),
-                                    ),
-                                    if (c.progressSyncFailed)
-                                      Text(l.progressSyncFailed),
-                                    if (c.networkSlow)
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(l.networkSlowHint),
-                                          ),
-                                          IconButton(
-                                            key: const Key(
-                                              'tv-dismiss-network-hint',
-                                            ),
-                                            tooltip: MaterialLocalizations.of(
-                                              context,
-                                            ).closeButtonTooltip,
-                                            onPressed: c.dismissNetworkSlowHint,
-                                            icon: const Icon(Icons.close),
-                                          ),
-                                        ],
-                                      ),
-                                    if (c.playbackLineFailure != null)
-                                      Text(
-                                        l.playbackLineFailed(
-                                          c.playbackLineFailure!,
-                                        ),
-                                        key: const Key('playback-line-failure'),
-                                      ),
-                                    if (c.trackFailure != null)
-                                      Text(c.trackFailure!),
-                                    if (c.backgroundReleased)
-                                      Text(l.mobileBackgroundPaused),
-                                    Tooltip(
-                                      message: l.playerNetworkSpeedTooltip,
-                                      child: NetworkSpeedReadout(
-                                        key: const Key(
-                                          'tv-player-network-speed',
-                                        ),
-                                        bytesPerSecond: c.cacheSpeedBytesPerSec,
-                                        textStyle: const TextStyle(
-                                          fontSize: 20,
-                                        ),
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    _timeline(c),
-                                    const SizedBox(height: 16),
-                                    LayoutBuilder(
-                                      builder: (context, constraints) =>
-                                          SingleChildScrollView(
-                                            scrollDirection: Axis.horizontal,
-                                            child: ConstrainedBox(
-                                              constraints: BoxConstraints(
-                                                minWidth: constraints.maxWidth,
-                                              ),
-                                              child: Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
-                                                children: [
-                                                  _action(
-                                                    'tv-player-toggle',
-                                                    c.isPlaying
-                                                        ? Icons.pause_rounded
-                                                        : Icons
-                                                              .play_arrow_rounded,
-                                                    c.isPlaying
-                                                        ? l.pause
-                                                        : l.play,
-                                                    ready ? c.togglePlay : null,
-                                                    focusNode: _playFocus,
-                                                  ),
-                                                  if (c.canSwitchAudioTrack ||
-                                                      c.canConfigureSubtitles)
-                                                    _action(
-                                                      'tv-player-tracks',
-                                                      Icons.subtitles_outlined,
-                                                      c.canSwitchAudioTrack
-                                                          ? l.mobileTracks
-                                                          : l.subtitleTrack,
-                                                      ready
-                                                          ? () => _panel(
-                                                              _TvPanel.tracks,
-                                                            )
-                                                          : null,
-                                                    ),
-                                                  if (c.canSwitchQuality)
-                                                    _action(
-                                                      'tv-player-quality',
-                                                      Icons
-                                                          .high_quality_outlined,
-                                                      l.quality,
-                                                      ready
-                                                          ? () => _panel(
-                                                              _TvPanel.quality,
-                                                            )
-                                                          : null,
-                                                    ),
-                                                  SourceSwitchButton(
-                                                    controller: c,
-                                                    surface: PlaybackLineSurface
-                                                        .dialog,
-                                                  ),
-                                                  if (c.canSwitchMediaSource)
-                                                    _action(
-                                                      'tv-player-source',
-                                                      Icons
-                                                          .video_library_outlined,
-                                                      l.mediaSource,
-                                                      ready
-                                                          ? () => _panel(
-                                                              _TvPanel.source,
-                                                            )
-                                                          : null,
-                                                    ),
-                                                  _action(
-                                                    'tv-player-skip',
-                                                    Icons.fast_forward_rounded,
-                                                    l.playerSkipSettings,
-                                                    () => _panel(_TvPanel.skip),
-                                                  ),
-                                                  _action(
-                                                    'tv-player-speed',
-                                                    Icons.speed_rounded,
-                                                    '${c.playbackRate}x',
-                                                    ready
-                                                        ? () => _panel(
-                                                            _TvPanel.speed,
-                                                          )
-                                                        : null,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+                        child: _overlay(context, c, l, status, ready),
                       ),
                     ),
                   );
@@ -1192,8 +1191,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     return const SizedBox.shrink();
                   }
                   return Positioned(
-                    left: 48,
-                    bottom: 220,
+                    left: tvSafeGutter(MediaQuery.sizeOf(context).width),
+                    bottom: context.tvdp(150),
                     child: NextEpisodeCard(
                       controller: c,
                       playFocus: _nextPlayFocus,
@@ -1212,18 +1211,20 @@ class TvPlayerPageState extends State<TvPlayerPage> {
 
 enum _TvPanel { tracks, quality, source, speed, skip }
 
-/// Playback controls update their focus ring immediately, including reduced motion.
-/// The timeline stays transparent so the video remains the visual backdrop.
+/// 播放控制按钮:静止时半透明黑底白字,聚焦整块反相为白底黑字,
+/// 减少动效时同样即时生效。时间轴用 [subtle]:只加描边,画面仍是背景。
 class _TvPlaybackAction extends StatefulWidget {
   const _TvPlaybackAction({
     super.key,
     required this.child,
     required this.onPressed,
     this.focusNode,
+    this.subtle = false,
   });
   final Widget child;
   final FutureOr<void> Function()? onPressed;
   final FocusNode? focusNode;
+  final bool subtle;
   @override
   State<_TvPlaybackAction> createState() => _TvPlaybackActionState();
 }
@@ -1233,6 +1234,10 @@ class _TvPlaybackActionState extends State<_TvPlaybackAction> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null;
+    final s = TvDesign.scaleOf(context);
+    final theme = Theme.of(context);
+    final focused = _focused;
+    final foreground = focused && !widget.subtle ? Colors.black : Colors.white;
     return FocusableActionDetector(
       enabled: enabled,
       focusNode: widget.focusNode,
@@ -1256,25 +1261,38 @@ class _TvPlaybackActionState extends State<_TvPlaybackAction> {
       child: Semantics(
         button: true,
         enabled: enabled,
-        focused: _focused,
+        focused: focused,
         child: GestureDetector(
           onTap: widget.onPressed,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 56),
-            padding: const EdgeInsets.all(4),
+            constraints: BoxConstraints(minHeight: 38 * s),
+            padding: widget.subtle
+                ? EdgeInsets.symmetric(horizontal: 12 * s, vertical: 10 * s)
+                : EdgeInsets.symmetric(horizontal: 14 * s, vertical: 8 * s),
             decoration: BoxDecoration(
-              color: _focused
-                  ? Theme.of(context).colorScheme.tertiaryContainer
-                  : Colors.transparent,
+              color: widget.subtle
+                  ? (focused
+                        ? Colors.white.withValues(alpha: .12)
+                        : Colors.transparent)
+                  : focused
+                  ? Colors.white
+                  : Colors.black.withValues(alpha: .34),
               border: Border.all(
-                color: _focused
-                    ? Theme.of(context).colorScheme.onSurface
+                color: widget.subtle && focused
+                    ? Colors.white
                     : Colors.transparent,
-                width: 3,
+                width: 2 * s,
               ),
-              borderRadius: BorderRadius.circular(AppRadii.md),
+              borderRadius: BorderRadius.circular(widget.subtle ? 12 * s : 999),
             ),
-            child: Opacity(opacity: enabled ? 1 : .4, child: widget.child),
+            child: IconTheme.merge(
+              data: IconThemeData(color: foreground, size: 20 * s),
+              child: DefaultTextStyle.merge(
+                style: (theme.textTheme.labelLarge ?? const TextStyle())
+                    .copyWith(color: foreground),
+                child: Opacity(opacity: enabled ? 1 : .4, child: widget.child),
+              ),
+            ),
           ),
         ),
       ),

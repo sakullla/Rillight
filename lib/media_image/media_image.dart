@@ -102,6 +102,19 @@ const int kMediaBackdropMaxRequestWidth = 1280;
 /// 轮播单独放宽一档。
 const int kMediaBackdropHeroMaxRequestWidth = 1920;
 
+/// 电视 4K 面板(物理 3840 宽)的出血主图与详情背景上限。2560 在 4K 上
+/// 已足够细腻,单张解码约 15 MB,比原生 4K 省一半内存。
+const int kMediaBackdropTvMaxRequestWidth = 2560;
+
+/// 电视解码缓存:4K 面板上海报与背景按物理像素解码,单张约为 1080p 的四倍。
+const int kTvPaintingImageCacheMaxBytes = 160 * 1024 * 1024;
+
+/// 环境确认为电视后放宽解码缓存,避免 4K 下来回滚动反复解码。
+void configureTvPaintingImageCache() {
+  PaintingBinding.instance.imageCache.maximumSizeBytes =
+      kTvPaintingImageCacheMaxBytes;
+}
+
 /// 把 Flutter 解码缓存收到低配可承受的上限。启动时调用一次。
 void configurePaintingImageCache({bool playerProcess = false}) {
   final cache = PaintingBinding.instance.imageCache;
@@ -138,13 +151,14 @@ int mediaBackdropRequestWidth({
 int mediaHeroBackdropRequestWidth({
   required double layoutWidth,
   required double devicePixelRatio,
+  int max = kMediaBackdropHeroMaxRequestWidth,
 }) {
   final px = (layoutWidth * devicePixelRatio).round();
   if (px < kMediaBackdropMinRequestWidth) {
     return kMediaBackdropMinRequestWidth;
   }
-  if (px > kMediaBackdropHeroMaxRequestWidth) {
-    return kMediaBackdropHeroMaxRequestWidth;
+  if (px > max) {
+    return max;
   }
   return px;
 }

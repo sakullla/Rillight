@@ -1,4 +1,3 @@
-import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -324,7 +323,6 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     PlayerOpenRequest request, {
     PlaybackOrigin? prepared,
   }) {
-    PlayerStartupTrace.record('host.open');
     final revision = ++_requestRevision;
     _opening = true;
     _control.cancelPendingSpawns();
@@ -1618,10 +1616,8 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
         maximumSize: kMaxPlayerWindowSize,
       );
       await windowManager.setTitle(_playerWindowTitle);
-      PlayerStartupTrace.record('window.show');
       await windowManager.show();
       await windowManager.focus();
-      PlayerStartupTrace.record('window.ready');
       await _launch.protocol?.write('ready');
     } catch (_) {
       await _launch.protocol?.write('failed');

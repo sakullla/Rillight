@@ -117,6 +117,7 @@ val stageCoreNotices = tasks.register<Sync>("stageCoreNotices") {
             "FFmpeg-LGPL-2.1.txt", "FFmpeg-GPL-2.0.txt", "libass-ISC.txt",
             "FreeType-LICENSE.txt", "FreeType-FTL.txt",
             "FriBidi-LGPL-2.1.txt", "HarfBuzz-Old-MIT.txt", "libunibreak-Zlib.txt",
+            "chromium-crc32-BSD-3-Clause.txt",
         )
         into("rillight-core/licenses")
     }

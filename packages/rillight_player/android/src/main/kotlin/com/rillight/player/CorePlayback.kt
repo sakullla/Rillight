@@ -85,9 +85,6 @@ internal class CorePlayback(
     private var lastHardware: Int? = null
     private var preferredHardware = 8
     private var lastDecoderCheckMs = 0L
-    private var lastDiagnosticMs = 0L
-    private val debugDiagnostics = (context.applicationInfo.flags and
-        android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
     @Volatile private var volume = 1f
     @Volatile private var lastPresentedUs = -1L
     @Volatile var session = ""
@@ -189,9 +186,9 @@ internal class CorePlayback(
                 stream["type"] as? String ?: return@mapNotNull null,
                 stream["language"] as? String, stream["external"] == true)
         } ?: emptyList()
-        textureVideo = coreUseTextureVideo(Build.HARDWARE, Build.MODEL, Build.VERSION.SDK_INT,
-            (args["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
-                ?.filter { it["type"] == "Video" }?.map { it["videoRange"] as? String } ?: emptyList())
+        val videoRanges = (args["streams"] as? List<*>)?.mapNotNull { it as? Map<*, *> }
+            ?.filter { it["type"] == "Video" }?.map { it["videoRange"] as? String } ?: emptyList()
+        textureVideo = coreUseTextureVideo(videoRanges)
         view?.useTextureOutput(textureVideo)
         val initialStartUs = ((args["start"] as? Number)?.toLong() ?: 0).coerceAtLeast(0) * 1000
         desiredPaused = args["paused"] == true
@@ -273,9 +270,6 @@ internal class CorePlayback(
             result.error("control", "Playback is opening or closed", mapOf("sessionId" to session)); return
         }
         val handle = active.handle
-        val started = System.nanoTime()
-        if (debugDiagnostics) android.util.Log.i("RillightCommand",
-            "begin method=$method generation=${active.generation}")
         try {
             val accepted = when (method) {
                 "play" -> {
@@ -374,9 +368,7 @@ internal class CorePlayback(
         } catch (error: Throwable) {
             result.error("control", error.message ?: "Core command failed", mapOf("sessionId" to session))
         } finally {
-            if (debugDiagnostics) android.util.Log.i("RillightCommand",
-                "end method=$method generation=${active.generation} ms=${(System.nanoTime() - started) / 1_000_000}")
-        }
+            }
     }
 
     fun stop(result: MethodChannel.Result? = null) {
@@ -427,9 +419,6 @@ internal class CorePlayback(
     }
 
     private fun trackFailure(message: String) {
-        if (debugDiagnostics && (pendingTrack != null || externalPending != null))
-            android.util.Log.i("RillightCommand", "track-failure generation=${generation.get()} " +
-                "subtitle=${pendingTrack?.subtitle} external=${externalPending != null}")
         handler.removeCallbacks(trackTimeout)
         pendingTrack?.result?.error("track", message, mapOf("sessionId" to session))
         pendingTrack = null
@@ -476,6 +465,7 @@ internal class CorePlayback(
         try {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
             while (active.alive.get() && generation.get() == active.generation) {
+                var submittedAudio = false
                 val snap = CoreNative.snapshot(active.handle) ?: throw IllegalStateException("Core snapshot unavailable")
                 if (snap[0] == 8L) throw IllegalStateException("FFmpeg core error ${snap[4]}")
                 if (snap[3] != timeline) {
@@ -514,7 +504,10 @@ internal class CorePlayback(
                                     // PCM carries source-time samples. AudioTrack applies
                                     // tempo; multiplying this clock by rate counts it twice.
                                     val written = audio.write(frame, pendingOffset, 1.0)
-                                    if (written > 0) audioReady = true
+                                    if (written > 0) {
+                                        audioReady = true
+                                        submittedAudio = true
+                                    }
                                     pendingOffset += written
                                     if (pendingOffset >= frame.bytes.size) {
                                         pending = null; pendingOffset = 0
@@ -549,7 +542,11 @@ internal class CorePlayback(
                             active.drainedAudioTimeline.set(timeline)
                     }
                 }
-                outputWaitLock.withLock {
+                // TrueHD can decode to 40-sample (0.83 ms) PCM frames. Sleeping
+                // 4 ms after each successful write caps playback below realtime
+                // and starves the audio master clock. Drain nonblocking writes
+                // until AudioTrack is full or the decoder has no frame ready.
+                if (!submittedAudio) outputWaitLock.withLock {
                     if (active.alive.get())
                         outputWake.await(if (desiredPaused) 100L else 4L, TimeUnit.MILLISECONDS)
                 }
@@ -565,6 +562,10 @@ internal class CorePlayback(
     }
 
     private fun pump(active: Running) {
+        // This thread submits already-decoded frames to the display. Do not
+        // leave it at background-work priority while cache/download workers
+        // compete for the small TV CPU; audio retains its higher priority.
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
         var timeline = -1L
         var outputSurfaceRevision = -1
         var outputViewport = Pair(-1, -1)
@@ -610,12 +611,11 @@ internal class CorePlayback(
                         if (generation.get() == active.generation) {
                             val current = CoreNative.snapshot(active.handle)
                             if (current != null && current[1] == frame[6] && current[3] == frame[7]) {
-                                // Server metadata may omit VideoRange. Prefer the actual decoded
-                                // color description, and never keep HDR in the SDR texture path.
+                                // Prefer actual color metadata over incomplete server ranges.
+                                // HDR retains its native surface and color metadata.
                                 val range = coreDecodedVideoRange(frame[8], frame[9])
                                 if (range != null) {
-                                    val texture = coreUseTextureVideo(Build.HARDWARE, Build.MODEL,
-                                        Build.VERSION.SDK_INT, listOf(range))
+                                    val texture = coreUseTextureVideo(listOf(range))
                                     if (texture != textureVideo) {
                                         textureVideo = texture
                                         view?.useTextureOutput(texture)
@@ -694,13 +694,6 @@ internal class CorePlayback(
         val current = CoreNative.snapshot(active.handle)
         if (current == null || current[1] != snap[1] || current[3] != snap[3]) return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (debugDiagnostics && now - lastDiagnosticMs >= 2000) {
-            lastDiagnosticMs = now
-            android.util.Log.i("RillightPresent", "generation=${active.generation} timeline=${snap[3]} " +
-                "state=${snap[0]} posMs=${snap[9] / 1000} presentedMs=${lastPresentedUs / 1000} " +
-                "first=$renderedFirst surface=${surface?.isValid == true} paused=$desiredPaused " +
-                "audioReady=$audioReady hardware=$lastHardware vq=${snap[13]} aq=${snap[14]}")
-        }
         if (snap[5] >= 0 && snap[10] == 1L && now - lastDecoderCheckMs >= 1000) {
             lastDecoderCheckMs = now
             for (ordinal in 0 until CoreNative.trackCount(active.handle)) {

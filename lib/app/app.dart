@@ -11,6 +11,7 @@ import 'package:rillight/app/product.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -67,11 +68,17 @@ class RillightApp extends StatelessWidget {
                       localizationsDelegates:
                           AppLocalizations.localizationsDelegates,
                       theme: environment.isTv
-                          ? AppTheme.light()
+                          ? AppTheme.tvLight()
                           : AppTheme.phoneLight(),
                       darkTheme: environment.isTv
-                          ? AppTheme.dark()
+                          ? AppTheme.tvDark()
                           : AppTheme.phoneDark(),
+                      // TV 每条路由(含弹窗)共用按画布换算的字号与弹窗样式。
+                      builder: environment.isTv
+                          ? (context, child) => TvStageTheme(
+                              child: child ?? const SizedBox.shrink(),
+                            )
+                          : null,
                       themeMode: mode,
                       scrollBehavior: environment.isTv
                           ? null

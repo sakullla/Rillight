@@ -17,7 +17,7 @@ if (args.includes('--help')) {
   --theme all|dark|light               default: all
   --feature home,aggregation,library,detail,search,servers,settings,login,player,danmaku
   --only 'server-*,danmaku-search-*'    exact state IDs or * / ? patterns
-  --size 360,412,1024,1440,1920         profile widths, default: all
+  --size 360,412,1024,1440,1920,3840    profile widths, default: all
   --list                              list matching states without rendering
   --out build/ui-capture               each run gets a separate directory
 Filters combine with AND. Lists within one filter combine with OR.
@@ -37,8 +37,8 @@ if (!['all', 'desktop', 'phone', 'tv'].includes(options.platform) || !['all', 'd
 const features = options.feature === 'all' ? [] : options.feature.split(',').map(f => featureAliases[f] ?? f);
 const validFeatures = new Set(catalog.map(s => s.feature));
 for (const f of features) if (!validFeatures.has(f)) throw new Error(`未知功能：${f}`);
-const profiles = [{ platform: 'desktop', width: 1440 }, { platform: 'desktop', width: 1024 }, { platform: 'phone', width: 360 }, { platform: 'phone', width: 412 }, { platform: 'tv', width: 1920 }].filter(p => (options.platform === 'all' || p.platform === options.platform) && (options.size === 'all' || options.size.split(',').includes(String(p.width))));
-if (!profiles.length || (options.size !== 'all' && options.size.split(',').some(s => !['360', '412', '1024', '1440', '1920'].includes(s)))) throw new Error('尺寸与平台没有匹配的配置');
+const profiles = [{ platform: 'desktop', width: 1440 }, { platform: 'desktop', width: 1024 }, { platform: 'phone', width: 360 }, { platform: 'phone', width: 412 }, { platform: 'tv', width: 1920 }, { platform: 'tv', width: 3840 }].filter(p => (options.platform === 'all' || p.platform === options.platform) && (options.size === 'all' || options.size.split(',').includes(String(p.width))));
+if (!profiles.length || (options.size !== 'all' && options.size.split(',').some(s => !['360', '412', '1024', '1440', '1920', '3840'].includes(s)))) throw new Error('尺寸与平台没有匹配的配置');
 const glob = pattern => new RegExp(`^${pattern.split('').map(c => c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[\\^$+.[\]{}()|]/g, '\\$&')).join('')}$`);
 const patterns = options.only.split(',').map(glob);
 const selected = catalog.filter(s => (!features.length || features.includes(s.feature)) && patterns.some(p => p.test(s.id)) && profiles.some(p => s.platforms.includes(p.platform)));

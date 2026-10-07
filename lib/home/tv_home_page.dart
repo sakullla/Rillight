@@ -8,7 +8,6 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/tv_top_nav.dart';
-import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -20,7 +19,6 @@ import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/home/library_latest_row.dart';
-import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_section_prefs.dart';
 import 'package:rillight/library/item_format.dart';
@@ -37,15 +35,16 @@ abstract final class TvHomeKeys {
   static const featuredTitle = Key('tv-featured-title');
 }
 
-/// TV 首页：轮播图、继续观看、下一集、片库入口和每个片库的最近添加。
-/// 顺序和显隐按服务器记在电视自己的存储里，手机和桌面不受影响。行级焦点记忆。
+/// TV 首页:沉浸 hero、继续观看、下一集、媒体库和每个片库的最近添加。
+/// 顺序和显隐按服务器记在电视自己的存储里,手机和桌面不受影响。
 ///
-/// featured 候选复用 [featuredHomeItems](最近入库的电影/剧集交错,上限 5,
-/// 不含观看记录),只手动左右
-/// 切换不自动轮换;无候选时整区隐藏。切换控件在 AnimatedSwitcher 之外,快速
-/// 连按时焦点节点不被移除,焦点不跳出行/区。
+/// 版式:hero 占首屏约七成,第一行内容在首屏露头;每行一个安静的小标题,
+/// 卡片左缘对齐安全区,行尾是「查看全部」。行级焦点记忆由 [TvItemRow] 提供。
 class TvHomePage extends StatefulWidget {
-  const TvHomePage({super.key});
+  const TvHomePage({super.key, this.heroVisible});
+
+  /// 首页顶部是否为出血 hero,导航据此决定是否压在影像上。
+  final ValueNotifier<bool>? heroVisible;
 
   @override
   State<TvHomePage> createState() => _TvHomePageState();
@@ -67,6 +66,14 @@ class _TvHomePageState extends State<TvHomePage> {
     unawaited(_sections.load(serverId));
   }
 
+  void _reportHero(bool visible) {
+    final notifier = widget.heroVisible;
+    if (notifier == null || notifier.value == visible) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) notifier.value = visible;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = CatalogScope.of(context), l = AppLocalizations.of(context);
@@ -74,6 +81,8 @@ class _TvHomePageState extends State<TvHomePage> {
     return ListenableBuilder(
       listenable: Listenable.merge([c, sections]),
       builder: (context, _) {
+        final s = TvDesign.scaleOf(context);
+        final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
         final featured = featuredHomeItems(c);
         final showBanner = !sections.isHidden(PhoneHomeSectionId.banner);
         final visible = sections.visibleIds(c.libraries);
@@ -111,140 +120,124 @@ class _TvHomePageState extends State<TvHomePage> {
         final librariesById = {
           for (final library in c.libraries) library.id: library,
         };
+        final titlePadding = EdgeInsets.fromLTRB(gutter, 10 * s, gutter, 0);
+
         List<Widget> shelf(
           String title,
           CatalogRowState state,
           String route,
-          String shelfId, {
-          bool wide = false,
-        }) {
-          if (state.hidden) {
-            return const [];
-          }
+          String shelfId,
+        ) {
+          if (state.hidden) return const [];
           return [
-            TvAction(
-              key: CatalogKeys.shelfMore(shelfId),
-              onPressed: state.items.isEmpty ? null : () => context.push(route),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                  if (state.items.isNotEmpty)
-                    Icon(
-                      Icons.chevron_right,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                ],
-              ),
-            ),
-            if (state.loading && state.items.isEmpty) const _TvRowSkeleton(),
+            TvSectionTitle(title, padding: titlePadding),
+            if (state.loading && state.items.isEmpty)
+              const TvRowSkeleton(wide: true),
             if (state.error != null || state.notice != null)
-              TvFailure(
-                error: (state.error ?? state.notice)!,
-                retry: c.reloadHomeRows,
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: gutter),
+                child: TvFailure(
+                  error: (state.error ?? state.notice)!,
+                  retry: c.reloadHomeRows,
+                ),
               ),
             if (state.items.isNotEmpty)
-              _TvFocusMemoryRow(title: title, items: state.items, wide: wide),
-            const SizedBox(height: 20),
+              TvItemRow(
+                title: title,
+                items: state.items,
+                wide: true,
+                trailing: (context, metrics) => TvMoreTile(
+                  key: CatalogKeys.shelfMore(shelfId),
+                  metrics: metrics,
+                  onPressed: () => context.push(route),
+                ),
+              ),
+            SizedBox(height: 8 * s),
           ];
         }
-
-        final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
-        Widget padded(List<Widget> children) => Padding(
-          padding: EdgeInsets.symmetric(horizontal: gutter),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: children,
-          ),
-        );
-
-        /// 空 section 不占位,保证全部为空时回落到空态文案。
-        List<Widget> padSection(List<Widget> children) =>
-            children.isEmpty ? const [] : [padded(children)];
 
         final sectionChildren = <Widget>[
           for (final id in visible) ...[
             if (id == PhoneHomeSectionId.banner &&
                 showBanner &&
-                featured.isNotEmpty) ...[
-              _TvFeatured(items: featured, series: c.latestSeries.items),
-              const SizedBox(height: 20),
-            ] else if (id == PhoneHomeSectionId.resume)
-              ...padSection(
-                shelf(
-                  l.resumeRow,
-                  resumeState,
-                  AppRoutes.shelfResume,
-                  CatalogKeys.shelfResume,
-                  wide: true,
-                ),
+                featured.isNotEmpty)
+              _TvFeatured(items: featured, series: c.latestSeries.items)
+            else if (id == PhoneHomeSectionId.resume)
+              ...shelf(
+                l.resumeRow,
+                resumeState,
+                AppRoutes.shelfResume,
+                CatalogKeys.shelfResume,
               )
             else if (id == PhoneHomeSectionId.nextUp)
-              ...padSection(
-                shelf(
-                  l.nextUpRow,
-                  nextUpState,
-                  AppRoutes.shelfNextUp,
-                  CatalogKeys.shelfNextUp,
-                ),
+              ...shelf(
+                l.nextUpRow,
+                nextUpState,
+                AppRoutes.shelfNextUp,
+                CatalogKeys.shelfNextUp,
               )
-            else if (id == PhoneHomeSectionId.libraries && showLibraryEntry)
-              padded([
-                LibraryTiles(
-                  libraries: c.libraries,
-                  cardBuilder: (context, library, width, height) {
-                    return TvAction(
-                      key: CatalogKeys.library(library.id),
-                      onPressed: () =>
-                          context.push(AppRoutes.library(library.id)),
-                      child: SizedBox(
-                        width: width,
-                        height: height,
-                        child: LibraryCardFace(
-                          library: library,
-                          width: width,
-                          height: height,
-                        ),
-                      ),
-                    );
-                  },
+            else if (id == PhoneHomeSectionId.libraries &&
+                showLibraryEntry) ...[
+              TvSectionTitle(l.libraries, padding: titlePadding),
+              TvItemRow(
+                title: l.libraries,
+                items: c.libraries,
+                wide: true,
+                subtitle: false,
+                width: 184 * s,
+                cardBuilder: (context, library, node, metrics) => TvCard(
+                  key: CatalogKeys.library(library.id),
+                  item: library,
+                  wide: true,
+                  focusNode: node,
+                  imageMaxWidth: metrics.imageMaxWidth,
+                  onPressed: () => context.push(AppRoutes.library(library.id)),
                 ),
-              ])
-            else if (PhoneHomeSectionId.libraryIdOf(id) case final libraryId?
+              ),
+              SizedBox(height: 8 * s),
+            ] else if (PhoneHomeSectionId.libraryIdOf(id) case final libraryId?
                 when librariesById[libraryId] != null)
-              padded([_TvLibraryLatest(library: librariesById[libraryId]!)]),
+              _TvLibraryLatest(library: librariesById[libraryId]!),
           ],
         ];
+        final heroFirst = sectionChildren.firstOrNull is _TvFeatured;
+        _reportHero(heroFirst);
         return ListView(
           key: const PageStorageKey('tv-home'),
           // Only the featured image bleeds behind the navigation. When it is
           // hidden, empty or reordered, keep the first action below the bar.
           padding: EdgeInsets.only(
-            top: sectionChildren.firstOrNull is _TvFeatured
-                ? 0
-                : TvTopNavBar.reserveHeight,
+            top: heroFirst ? 0 : TvTopNavBar.reserveOf(context),
+            bottom: tvSafeVertical(MediaQuery.sizeOf(context).height),
           ),
           children: [
             ...sectionChildren,
-            if (sectionChildren.isEmpty) padded([Text(l.mobileEmpty)]),
-            padded([
-              TvAction(
-                key: const Key('tv-home-display'),
-                onPressed: () => showTvSectionEditor(context),
-                child: Text(l.phoneHomeEdit),
+            if (sectionChildren.isEmpty)
+              SizedBox(
+                height: 200 * s,
+                child: TvEmptyState(message: l.mobileEmpty),
               ),
-              TvAction(
-                onPressed: () => c.reload(showCachedFirst: false),
-                child: Text(l.mobileRefresh),
+            Padding(
+              padding: EdgeInsets.fromLTRB(gutter, 16 * s, gutter, 0),
+              child: Row(
+                children: [
+                  TvAction(
+                    key: const Key('tv-home-display'),
+                    pill: true,
+                    leading: const Icon(Icons.tune_rounded),
+                    onPressed: () => showTvSectionEditor(context),
+                    child: Text(l.phoneHomeEdit),
+                  ),
+                  SizedBox(width: 10 * s),
+                  TvAction(
+                    pill: true,
+                    leading: const Icon(Icons.refresh_rounded),
+                    onPressed: () => c.reload(showCachedFirst: false),
+                    child: Text(l.mobileRefresh),
+                  ),
+                ],
               ),
-            ]),
+            ),
           ],
         );
       },
@@ -259,6 +252,8 @@ class _TvLibraryLatest extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final s = TvDesign.scaleOf(context);
+    final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
     return LibraryLatestData(
       library: library,
       builder: (context, snapshot) {
@@ -269,24 +264,29 @@ class _TvLibraryLatest extends StatelessWidget {
         }
         return Column(
           key: Key('tv-library-${library.id}'),
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TvAction(
-              onPressed: () => context.push(AppRoutes.library(library.id)),
-              child: Text(
-                library.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+            TvSectionTitle(
+              library.name,
+              padding: EdgeInsets.fromLTRB(gutter, 10 * s, gutter, 0),
             ),
             if (snapshot.loading && snapshot.items.isEmpty)
-              const _TvRowSkeleton(),
+              const TvRowSkeleton(),
             if (snapshot.error != null)
-              TvFailure(error: snapshot.error!, retry: snapshot.retry),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: gutter),
+                child: TvFailure(error: snapshot.error!, retry: snapshot.retry),
+              ),
             if (snapshot.items.isNotEmpty)
-              _TvFocusMemoryRow(title: library.name, items: snapshot.items),
-            const SizedBox(height: 20),
+              TvItemRow(
+                title: library.name,
+                items: snapshot.items,
+                trailing: (context, metrics) => TvMoreTile(
+                  metrics: metrics,
+                  onPressed: () => context.push(AppRoutes.library(library.id)),
+                ),
+              ),
+            SizedBox(height: 8 * s),
           ],
         );
       },
@@ -296,7 +296,7 @@ class _TvLibraryLatest extends StatelessWidget {
 
 /// featured 沉浸舞台:全宽出血宣传图 + 遮罩 + Logo/大标题 + 主操作,手动左右
 /// 切换,无自动轮换。舞台铺满视口宽并伸到顶部导航栏下,文字恒白压遮罩,
-/// 深色主题底缘溶进页面底色。
+/// 底缘溶进页面底色。
 ///
 /// 背景与文字分层过渡:新图在旧图之上淡入,旧文字先淡出、新文字再上移淡入。
 /// 「播放 / 详情」与切换控件不在过渡层里,连按切换时焦点节点始终不变。
@@ -360,23 +360,22 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final viewSize = MediaQuery.sizeOf(context);
-    // 舞台约占视口高 62%,第一行货架仍在首屏露头;宽度铺满视口。
-    final height = (viewSize.height * 0.62).clamp(340.0, 720.0).roundToDouble();
-    final roomy = height >= 400;
+    final s = TvDesign.scaleOf(context);
+    // 舞台约占视口高 72%,第一行内容的标题在首屏露头。
+    final height = (viewSize.height * .72).roundToDouble();
     final gutter = tvSafeGutter(viewSize.width);
-    final bottom = math.max(28.0, viewSize.height * .04);
-    final textWidth = math.min(viewSize.width * .44, 820.0);
-    final logoWidth = math.min(textWidth * .78, 560.0);
-    final logoHeight = roomy ? 150.0 : 96.0;
+    final bottom = 30 * s;
+    final textWidth = math.min(viewSize.width * .46, 460 * s);
+    final logoWidth = textWidth * .8;
+    final logoHeight = 84 * s;
     final requestWidth = mediaHeroBackdropRequestWidth(
       layoutWidth: viewSize.width,
       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      max: kMediaBackdropTvMaxRequestWidth,
     );
     final artwork = _sources(item);
     final multiple = items.length > 1;
-    final fade = theme.brightness == Brightness.dark
-        ? theme.scaffoldBackgroundColor
-        : null;
+    final page = theme.scaffoldBackgroundColor;
     final neighbours = <EmbyItem>{
       if (multiple) items[(index + 1) % items.length],
       if (items.length > 2) items[(index - 1 + items.length) % items.length],
@@ -426,101 +425,160 @@ class _TvFeaturedState extends State<_TvFeatured> {
                           sources: artwork,
                           requestWidth: requestWidth,
                           insets: EdgeInsets.fromLTRB(
-                            gutter + textWidth + 48,
-                            TvTopNavBar.reserveHeight,
+                            gutter + textWidth + 48 * s,
+                            TvTopNavBar.reserveOf(context),
                             gutter,
-                            bottom + 72,
+                            bottom + 56 * s,
                           ),
                         ),
                 ),
               ),
-            const Positioned.fill(
-              child: TvHeroScrim(bottom: false, leading: false),
+            const Positioned.fill(child: TvHeroScrim(bottom: false)),
+            // 深色主题底缘溶进页面底色,首行标题和舞台之间没有硬边;
+            // 浅色主题舞台保持深色,底部压暗托住白字与按钮,和页面直接分界。
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: height * .34,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: theme.brightness == Brightness.dark
+                        ? [page.withValues(alpha: 0), page]
+                        : [
+                            Colors.black.withValues(alpha: 0),
+                            Colors.black.withValues(
+                              alpha: AppScrim.of(context, .6),
+                            ),
+                          ],
+                  ),
+                ),
+              ),
             ),
-            Positioned.fill(child: HeroScrim(leading: true, fadeTo: fade)),
             Positioned(
               left: gutter,
               bottom: bottom,
               width: textWidth,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedSwitcher(
-                    duration: AppMotion.durationOf(context, heroSlideDuration),
-                    switchInCurve: heroCaptionInCurve,
-                    switchOutCurve: heroCaptionOutCurve,
-                    transitionBuilder: heroCaptionTransition,
-                    layoutBuilder: (current, previous) => Stack(
-                      alignment: Alignment.bottomLeft,
-                      children: [...previous, ?current],
-                    ),
-                    child: _TvFeaturedCaption(
-                      key: ValueKey('tv-featured-caption-${item.id}'),
-                      item: item,
-                      roomy: roomy,
-                      logoWidth: logoWidth,
-                      logoHeight: logoHeight,
-                    ),
-                  ),
-                  SizedBox(height: roomy ? 22 : 14),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TvAction(
-                        key: TvHomeKeys.featuredPlay,
-                        emphasized: true,
-                        pill: true,
-                        leading: const Icon(Icons.play_arrow_rounded),
-                        onPressed: () => _play(item),
-                        child: Text(l.play),
+              child: TvDarkStage(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedSwitcher(
+                      duration: AppMotion.durationOf(
+                        context,
+                        heroSlideDuration,
                       ),
-                      const SizedBox(width: 12),
-                      TvAction(
-                        key: TvHomeKeys.featuredOpen,
-                        pill: true,
-                        onPressed: () => context.push(AppRoutes.item(item.id)),
-                        child: Text(l.details),
+                      switchInCurve: heroCaptionInCurve,
+                      switchOutCurve: heroCaptionOutCurve,
+                      transitionBuilder: heroCaptionTransition,
+                      layoutBuilder: (current, previous) => Stack(
+                        alignment: Alignment.bottomLeft,
+                        children: [...previous, ?current],
                       ),
-                    ],
-                  ),
-                ],
+                      child: _TvFeaturedCaption(
+                        key: ValueKey('tv-featured-caption-${item.id}'),
+                        item: item,
+                        logoWidth: logoWidth,
+                        logoHeight: logoHeight,
+                      ),
+                    ),
+                    SizedBox(height: 16 * s),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TvAction(
+                          key: TvHomeKeys.featuredPlay,
+                          emphasized: true,
+                          pill: true,
+                          leading: const Icon(Icons.play_arrow_rounded),
+                          onPressed: () => _play(item),
+                          child: Text(l.play),
+                        ),
+                        SizedBox(width: 10 * s),
+                        TvAction(
+                          key: TvHomeKeys.featuredOpen,
+                          pill: true,
+                          leading: const Icon(Icons.info_outline_rounded),
+                          onPressed: () =>
+                              context.push(AppRoutes.item(item.id)),
+                          child: Text(l.details),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
             if (multiple)
               Positioned(
                 right: gutter,
                 bottom: bottom,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TvAction(
-                      key: TvHomeKeys.featuredPrev,
-                      onPressed: () => _go(-1),
-                      child: const Icon(Icons.chevron_left),
-                    ),
-                    const SizedBox(width: 16),
-                    HeroDots(index: index, count: items.length, onSelect: null),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${index + 1} / ${items.length}',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.8),
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                child: TvDarkStage(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TvAction(
+                        key: TvHomeKeys.featuredPrev,
+                        variant: TvActionVariant.icon,
+                        onPressed: () => _go(-1),
+                        child: const Icon(Icons.chevron_left_rounded),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    TvAction(
-                      key: TvHomeKeys.featuredNext,
-                      onPressed: () => _go(1),
-                      child: const Icon(Icons.chevron_right),
-                    ),
-                  ],
+                      SizedBox(width: 12 * s),
+                      _TvPagerDots(index: index, count: items.length),
+                      SizedBox(width: 10 * s),
+                      Text(
+                        '${index + 1} / ${items.length}',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: Colors.white.withValues(alpha: .75),
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      SizedBox(width: 12 * s),
+                      TvAction(
+                        key: TvHomeKeys.featuredNext,
+                        variant: TvActionVariant.icon,
+                        onPressed: () => _go(1),
+                        child: const Icon(Icons.chevron_right_rounded),
+                      ),
+                    ],
+                  ),
                 ),
               ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TvPagerDots extends StatelessWidget {
+  const _TvPagerDots({required this.index, required this.count});
+  final int index, count;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = TvDesign.scaleOf(context);
+    final duration = AppMotion.durationOf(context, AppMotion.normal);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < count; i++)
+          AnimatedContainer(
+            duration: duration,
+            curve: AppMotion.standard,
+            margin: EdgeInsets.symmetric(horizontal: 2.5 * s),
+            width: (i == index ? 18 : 6) * s,
+            height: 6 * s,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: i == index ? .95 : .4),
+              borderRadius: BorderRadius.circular(3 * s),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -531,13 +589,11 @@ class _TvFeaturedCaption extends StatelessWidget {
   const _TvFeaturedCaption({
     super.key,
     required this.item,
-    required this.roomy,
     required this.logoWidth,
     required this.logoHeight,
   });
 
   final EmbyItem item;
-  final bool roomy;
   final double logoWidth;
   final double logoHeight;
 
@@ -545,27 +601,45 @@ class _TvFeaturedCaption extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final s = TvDesign.scaleOf(context);
     final meta = heroMetaLabels(l, item);
     final overview = plainOverview(item.overview);
+    const shadow = [Shadow(blurRadius: 12, color: Colors.black54)];
     final title = Text(
       heroTitle(item),
-      maxLines: roomy ? 2 : 1,
+      maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style:
-          (roomy ? theme.textTheme.displayMedium : theme.textTheme.displaySmall)
-              ?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                height: 1.12,
-                shadows: const [Shadow(blurRadius: 16, color: Colors.black54)],
-              ),
+      style: theme.textTheme.displaySmall?.copyWith(
+        color: Colors.white,
+        shadows: shadow,
+      ),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        HeroKicker(label: heroKicker(l, item)),
-        const SizedBox(height: 12),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 3 * s,
+              height: 12 * s,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary,
+                borderRadius: BorderRadius.circular(2 * s),
+              ),
+            ),
+            SizedBox(width: 6 * s),
+            Text(
+              heroKicker(l, item),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: Colors.white.withValues(alpha: .85),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 10 * s),
         KeyedSubtree(
           key: TvHomeKeys.featuredTitle,
           child: HeroLogo.available(item)
@@ -578,194 +652,49 @@ class _TvFeaturedCaption extends StatelessWidget {
               : title,
         ),
         if (meta.isNotEmpty || item.communityRating != null) ...[
-          const SizedBox(height: 10),
+          SizedBox(height: 10 * s),
           Row(
             children: [
+              if (item.communityRating case final rating?) ...[
+                Icon(
+                  Icons.star_rounded,
+                  size: 16 * s,
+                  color: const Color(0xFFFFC94D),
+                ),
+                SizedBox(width: 3 * s),
+                Text(
+                  rating.toStringAsFixed(1),
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(width: 10 * s),
+              ],
               if (meta.isNotEmpty)
                 Flexible(
                   child: Text(
-                    meta.join(' · '),
+                    meta.join('  ·  '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.82),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withValues(alpha: .82),
                     ),
                   ),
                 ),
-              if (item.communityRating != null) ...[
-                const SizedBox(width: 12),
-                HeroRatingBadge(rating: item.communityRating),
-              ],
             ],
           ),
         ],
-        // 矮视口只留标题与操作,保证按钮不被挤出舞台。
-        if (overview != null && roomy) ...[
-          const SizedBox(height: 12),
+        if (overview != null) ...[
+          SizedBox(height: 8 * s),
           Text(
             overview,
-            maxLines: 3,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: Colors.white.withValues(alpha: 0.8),
-              height: 1.5,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withValues(alpha: .75),
             ),
           ),
         ],
-      ],
-    );
-  }
-}
-
-/// 带行级焦点记忆的海报行:记住上次焦点项 id,行重获焦点时落回该项。
-///
-/// 外层 [Focus] 不可直接聚焦,仅在焦点从行外进入时触发恢复;行内左右移动
-/// 不改变外层 hasFocus,不会误触发。滚动位置仍由 [PageStorageKey] 记忆,
-/// 焦点目标移除由 TvFocusRegion 补焦,二者分工不变。
-class _TvFocusMemoryRow extends StatefulWidget {
-  const _TvFocusMemoryRow({
-    required this.title,
-    required this.items,
-    this.wide = false,
-  });
-
-  final String title;
-  final List<EmbyItem> items;
-
-  /// 16:9 横版卡行(继续观看)。
-  final bool wide;
-
-  @override
-  State<_TvFocusMemoryRow> createState() => _TvFocusMemoryRowState();
-}
-
-class _TvFocusMemoryRowState extends State<_TvFocusMemoryRow> {
-  final _nodes = <String, FocusNode>{};
-  String? _lastId;
-
-  FocusNode _nodeFor(EmbyItem item) {
-    return _nodes.putIfAbsent(item.id, () {
-      final node = FocusNode();
-      node.addListener(() {
-        if (node.hasFocus) {
-          _lastId = item.id;
-        }
-      });
-      return node;
-    });
-  }
-
-  void _prune() {
-    final ids = widget.items.map((item) => item.id).toSet();
-    for (final id in _nodes.keys.toList()) {
-      if (!ids.contains(id)) {
-        _nodes.remove(id)?.dispose();
-        if (_lastId == id) {
-          _lastId = null;
-        }
-      }
-    }
-  }
-
-  void _onRowFocus(bool focused) {
-    if (!focused) {
-      return;
-    }
-    final last = _lastId;
-    if (last == null) {
-      return;
-    }
-    final node = _nodes[last];
-    final primary = FocusManager.instance.primaryFocus;
-    // 焦点刚从行外进入:方向遍历落在位移最近项,改落回上次焦点项;
-    // 该项滚出视口未构建或不可聚焦时保持遍历结果。
-    if (node != null &&
-        node != primary &&
-        node.context?.mounted == true &&
-        node.canRequestFocus) {
-      node.requestFocus();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _TvFocusMemoryRow oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _prune();
-  }
-
-  @override
-  void dispose() {
-    for (final node in _nodes.values) {
-      node.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    _prune();
-    final wide = widget.wide;
-    return Focus(
-      canRequestFocus: false,
-      skipTraversal: true,
-      onFocusChange: _onRowFocus,
-      child: SizedBox(
-        key: ValueKey('tv-row-${widget.title}'),
-        height: wide ? 220 : 272,
-        child: ListView.builder(
-          key: PageStorageKey('tv-row-${widget.title}'),
-          scrollDirection: Axis.horizontal,
-          itemCount: widget.items.length,
-          itemBuilder: (context, index) {
-            final item = widget.items[index];
-            return SizedBox(
-              key: ValueKey(item.id),
-              width: wide ? 288 : 170,
-              child: TvPoster(
-                item: item,
-                wide: wide,
-                focusNode: _nodeFor(item),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _TvRowSkeleton extends StatelessWidget {
-  const _TvRowSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 272,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: 6,
-        separatorBuilder: (context, index) => const SizedBox(width: 12),
-        itemBuilder: (context, index) {
-          return const SizedBox(width: 170, child: _TvPosterBone());
-        },
-      ),
-    );
-  }
-}
-
-class _TvPosterBone extends StatelessWidget {
-  const _TvPosterBone();
-
-  @override
-  Widget build(BuildContext context) {
-    final animate = !MediaQuery.disableAnimationsOf(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: SkeletonBlock(animated: animate)),
-        const SizedBox(height: 8),
-        SkeletonBlock(width: 120, height: 16, animated: animate),
       ],
     );
   }

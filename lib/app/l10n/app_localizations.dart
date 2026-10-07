@@ -2500,6 +2500,36 @@ abstract class AppLocalizations {
   /// **'其他'**
   String get tvSettingsOther;
 
+  /// 电视设置里标记当前登录的服务器
+  ///
+  /// In zh, this message translates to:
+  /// **'当前'**
+  String get tvSettingsCurrent;
+
+  /// 电视首页行尾进入完整列表的卡片
+  ///
+  /// In zh, this message translates to:
+  /// **'查看全部'**
+  String get tvViewAll;
+
+  /// 电视登录页左侧的一句说明
+  ///
+  /// In zh, this message translates to:
+  /// **'输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。'**
+  String get tvConnectHint;
+
+  /// 电视登录表单与手机辅助连接之间的分隔
+  ///
+  /// In zh, this message translates to:
+  /// **'或'**
+  String get tvConnectOr;
+
+  /// 电视登录表单里的可选 UA 字段
+  ///
+  /// In zh, this message translates to:
+  /// **'User-Agent(可选)'**
+  String get tvUserAgentOptional;
+
   /// No description provided for @mobileAddServer.
   ///
   /// In zh, this message translates to:

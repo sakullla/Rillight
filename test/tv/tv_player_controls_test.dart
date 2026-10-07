@@ -427,7 +427,9 @@ void main() {
         find.byKey(const Key('tv-player-network-speed')),
       );
       expect(speed.bytesPerSecond, 0);
-      expect(speed.textStyle!.fontSize, greaterThanOrEqualTo(20));
+      // 960 画布下不低于 12(1080p 上 24 像素、4K 上 48 像素),
+      // 3 米外仍可读,又不和标题抢视线。
+      expect(speed.textStyle!.fontSize, greaterThanOrEqualTo(12));
       expect(find.textContaining('缓存'), findsNothing);
       expect(
         tester

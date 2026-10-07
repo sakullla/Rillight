@@ -117,8 +117,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
-    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
-    await key(tester, LogicalKeyboardKey.arrowDown);
+    // 表单卡里 User-Agent 下面就是连接按钮;外观选项在左栏。
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);
@@ -261,14 +260,12 @@ void main() {
         ),
         findsOneWidget,
       );
+      // 分集是横向一行:在分集行里往回滑到第一集。
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('episode-friends-s1e1')),
         -150,
         scrollable: find
-            .descendant(
-              of: find.byType(TvDetailPage),
-              matching: find.byType(Scrollable),
-            )
+            .ancestor(of: currentTile, matching: find.byType(Scrollable))
             .first,
       );
       await _settle(tester);

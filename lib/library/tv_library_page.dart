@@ -130,92 +130,122 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   @override
   Widget build(BuildContext context) {
     final c = _controller!, l = AppLocalizations.of(context);
-    return TvFrame(
-      title: l.libraries,
-      child: ListenableBuilder(
-        listenable: c,
-        builder: (context, _) {
-          _focus.retain(c.items.map((item) => item.id));
-          return LayoutBuilder(
+    final library = CatalogScope.of(
+      context,
+    ).libraries.where((item) => item.id == widget.viewId).firstOrNull;
+    return ListenableBuilder(
+      listenable: c,
+      builder: (context, _) {
+        _focus.retain(c.items.map((item) => item.id));
+        final s = TvDesign.scaleOf(context);
+        final padding = TvFrame.contentPadding(context);
+        final active = _hasActiveFilters(c);
+        return TvFrame(
+          title: library?.name ?? l.libraries,
+          subtitle: active ? _filterSummary(c) : null,
+          actions: [
+            TvAction(
+              key: const Key('tv-library-filter'),
+              autofocus: true,
+              pill: true,
+              selected: active,
+              leading: const Icon(Icons.tune_rounded),
+              onPressed: _filter,
+              child: Text(l.libraryFilter),
+            ),
+          ],
+          child: LayoutBuilder(
             builder: (context, constraints) {
-              final metrics = TvGrid.metricsFor(context, constraints.maxWidth);
+              final metrics = TvGrid.metricsFor(
+                context,
+                constraints.maxWidth - padding.horizontal,
+              );
               return MediaImageScrollListener(
                 child: CustomScrollView(
                   key: PageStorageKey('tv-library-${widget.viewId}'),
                   scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
                   slivers: [
-                    SliverToBoxAdapter(
-                      child: Row(
-                        children: [
-                          TvAction(
-                            key: const Key('tv-library-filter'),
-                            autofocus: true,
-                            pill: true,
-                            leading: const Icon(Icons.tune_rounded, size: 20),
-                            onPressed: _filter,
-                            child: Text(l.libraryFilter),
-                          ),
-                          if (_hasActiveFilters(c)) ...[
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: TvAction(
-                                pill: true,
-                                onPressed: _filter,
-                                child: Text(
-                                  _filterSummary(c),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    if (c.loadingMore || (c.loading && c.items.isNotEmpty))
-                      const SliverToBoxAdapter(
-                        child: LinearProgressIndicator(),
-                      ),
-                    if (c.loading && c.items.isEmpty)
-                      const SliverToBoxAdapter(
-                        child: LinearProgressIndicator(),
+                    if (c.loadingMore || c.loading)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          padding.left,
+                          0,
+                          padding.right,
+                          8 * s,
+                        ),
+                        sliver: const SliverToBoxAdapter(
+                          child: LinearProgressIndicator(),
+                        ),
                       ),
                     if (c.error != null)
-                      SliverToBoxAdapter(
-                        child: TvFailure(
-                          error: c.error!,
-                          retry: () =>
-                              c.load(more: c.items.isNotEmpty && c.hasMore),
+                      SliverPadding(
+                        padding: EdgeInsets.symmetric(horizontal: padding.left),
+                        sliver: SliverToBoxAdapter(
+                          child: TvFailure(
+                            error: c.error!,
+                            retry: () =>
+                                c.load(more: c.items.isNotEmpty && c.hasMore),
+                          ),
                         ),
                       ),
                     if (!c.loading && c.error == null && c.items.isEmpty)
-                      SliverToBoxAdapter(child: Text(l.mobileEmpty)),
-                    if (c.items.isNotEmpty)
-                      _posterGrid(c.items, metrics, _focus),
-                    if (c.hasMore)
                       SliverToBoxAdapter(
-                        child: TvAction(
-                          key: const Key('tv-library-more'),
-                          onPressed: c.loading || c.loadingMore
-                              ? null
-                              : () => c.load(more: true),
-                          child: Text(l.mobileLoadMore),
+                        child: SizedBox(
+                          height: 240 * s,
+                          child: TvEmptyState(message: l.mobileEmpty),
                         ),
                       ),
-                    SliverToBoxAdapter(
-                      child: TvAction(
-                        key: const Key('tv-library-refresh'),
-                        onPressed: c.load,
-                        child: Text(l.mobileRefresh),
+                    if (c.items.isNotEmpty)
+                      SliverPadding(
+                        // 上下留出聚焦放大的空间,首行焦点环不被裁切。
+                        padding: EdgeInsets.fromLTRB(
+                          padding.left,
+                          10 * s,
+                          padding.right,
+                          0,
+                        ),
+                        sliver: _posterGrid(c.items, metrics, _focus),
+                      ),
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        padding.left,
+                        20 * s,
+                        padding.right,
+                        padding.bottom,
+                      ),
+                      sliver: SliverToBoxAdapter(
+                        child: Row(
+                          children: [
+                            if (c.hasMore) ...[
+                              TvAction(
+                                key: const Key('tv-library-more'),
+                                pill: true,
+                                leading: const Icon(Icons.expand_more_rounded),
+                                onPressed: c.loading || c.loadingMore
+                                    ? null
+                                    : () => c.load(more: true),
+                                child: Text(l.mobileLoadMore),
+                              ),
+                              SizedBox(width: 10 * s),
+                            ],
+                            TvAction(
+                              key: const Key('tv-library-refresh'),
+                              pill: true,
+                              leading: const Icon(Icons.refresh_rounded),
+                              onPressed: c.load,
+                              child: Text(l.mobileRefresh),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
               );
             },
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -227,10 +257,7 @@ Widget _posterGrid(
 ) {
   return SliverGrid(
     key: const Key('tv-library-grid'),
-    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: metrics.columns,
-      childAspectRatio: metrics.childAspectRatio,
-    ),
+    gridDelegate: metrics.delegate,
     delegate: SliverChildBuilderDelegate(
       (context, index) {
         final item = items[index];

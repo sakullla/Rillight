@@ -7,9 +7,9 @@ import 'package:rillight/app/tv_widgets.dart';
 
 void main() {
   testWidgets(
-    'reduced motion keeps a focus ring that is not only scale or fill color',
+    'reduced motion still shows focus as an instant high-contrast inverted fill',
     (tester) async {
-      for (final theme in [AppTheme.dark(), AppTheme.light()]) {
+      for (final theme in [AppTheme.tvDark(), AppTheme.tvLight()]) {
         final first = FocusNode();
         final second = FocusNode();
         addTearDown(() async {
@@ -50,39 +50,35 @@ void main() {
           ),
         );
         await tester.pump();
+        final scheme = theme.colorScheme;
+        final page = theme.scaffoldBackgroundColor;
 
-        expect(_border(tester, 'first').top.color.a, 0);
-        expect(_border(tester, 'second').top.color.a, 0);
+        _expectRest(tester, 'first', scheme);
+        _expectRest(tester, 'second', scheme);
 
         first.requestFocus();
         // Focus lands on the next frame. Elapsed time stays zero, so a fade-in
-        // cannot finish; the ring has to be fully painted.
+        // cannot finish; the inverted fill has to be fully painted.
         await tester.pump();
         await tester.pump();
 
         expect(first.hasFocus, isTrue);
-        expect(
-          MediaQuery.disableAnimationsOf(
-            tester.element(find.byKey(const Key('first'))),
-          ),
-          isTrue,
-        );
-        _expectFocusRing(tester, 'first', theme.colorScheme);
-        expect(_border(tester, 'second').top.color.a, 0);
+        _expectFocused(tester, 'first', scheme, page);
+        _expectRest(tester, 'second', scheme);
 
         second.requestFocus();
         await tester.pump();
         await tester.pump();
 
-        expect(_border(tester, 'first').top.color.a, 0);
-        _expectFocusRing(tester, 'second', theme.colorScheme);
+        _expectRest(tester, 'first', scheme);
+        _expectFocused(tester, 'second', scheme, page);
         expect(tester.takeException(), isNull);
       }
     },
   );
 
   testWidgets(
-    'TvFrame padding stays at max(48, 5% of the viewport) inside SafeArea',
+    'TvFrame header sits inside the 5% safe area and content keeps full width',
     (tester) async {
       Future<void> expectGutter(Size size, {FakeViewPadding? inset}) async {
         tester.view.physicalSize = size;
@@ -94,46 +90,46 @@ void main() {
         addTearDown(tester.view.resetPadding);
         addTearDown(tester.view.resetViewPadding);
 
+        late EdgeInsets content;
         await tester.pumpWidget(
           MaterialApp(
-            theme: AppTheme.dark(),
-            home: const TvFrame(title: '片库', child: SizedBox.expand()),
+            theme: AppTheme.tvDark(),
+            home: TvFrame(
+              title: '片库',
+              child: Builder(
+                builder: (context) {
+                  content = TvFrame.contentPadding(context);
+                  return const SizedBox.expand(key: Key('body'));
+                },
+              ),
+            ),
           ),
         );
         await tester.pump();
 
         final horizontal = math.max(48.0, size.width * 0.05);
-        final vertical = math.max(48.0, size.height * 0.05);
-        expect(horizontal, greaterThanOrEqualTo(48));
-        expect(vertical, greaterThanOrEqualTo(48));
-
-        final safe = tester.widget<SafeArea>(find.byType(SafeArea));
-        final padding = safe.child as Padding;
-        final insets = padding.padding as EdgeInsets;
+        final vertical = math.max(24.0, size.height * 0.05);
+        final header = tester.widget<Padding>(
+          find.byKey(const Key('tv-frame-header')),
+        );
+        final insets = header.padding as EdgeInsets;
         expect(insets.left, horizontal);
         expect(insets.right, horizontal);
         expect(insets.top, vertical);
-        expect(insets.bottom, vertical);
 
-        final outer = tester.getRect(find.byWidget(padding));
-        final inner = tester.getRect(
-          find.descendant(
-            of: find.byWidget(padding),
-            matching: find.byType(Column),
-          ),
-        );
-        expect(inner.left - outer.left, closeTo(horizontal, 0.01));
-        expect(outer.right - inner.right, closeTo(horizontal, 0.01));
-        expect(inner.top - outer.top, closeTo(vertical, 0.01));
-        expect(outer.bottom - inner.bottom, closeTo(vertical, 0.01));
-        expect(inner.left, greaterThanOrEqualTo(horizontal));
-        expect(inner.top, greaterThanOrEqualTo(vertical));
-        expect(size.width - inner.right, greaterThanOrEqualTo(horizontal));
-        expect(size.height - inner.bottom, greaterThanOrEqualTo(vertical));
+        // Content scrolls edge to edge so focus scale is never clipped;
+        // it applies the same gutters as its own scroll padding.
+        expect(content.left, horizontal);
+        expect(content.right, horizontal);
+        expect(content.bottom, vertical);
+        final safe = inset == null ? 0.0 : 30.0;
+        final body = tester.getRect(find.byKey(const Key('body')));
+        expect(body.left, safe);
+        expect(body.right, size.width - safe);
       }
 
-      await expectGutter(const Size(800, 600));
       await expectGutter(const Size(960, 540));
+      await expectGutter(const Size(1280, 720));
       await expectGutter(const Size(1920, 1080));
       await expectGutter(const Size(3840, 2160));
       await expectGutter(
@@ -142,44 +138,88 @@ void main() {
       );
     },
   );
+
+  testWidgets('TV sizes scale with the logical canvas, not physical pixels', (
+    tester,
+  ) async {
+    // 4K 面板 DPR 4 与 1080p 面板 DPR 2 的逻辑画布都是 960×540。
+    for (final (physical, ratio) in [
+      (const Size(1920, 1080), 2.0),
+      (const Size(3840, 2160), 4.0),
+    ]) {
+      tester.view.physicalSize = physical;
+      tester.view.devicePixelRatio = ratio;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      late double scale;
+      late int poster;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              scale = TvDesign.scaleOf(context);
+              poster = TvCardMetrics.of(context).imageMaxWidth;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      expect(scale, 1);
+      // 图片按物理像素请求:4K 面板拉到约 4 倍宽,不会被放大发虚。
+      expect(poster, (TvDesign.posterWidth * ratio).round());
+    }
+    // 1280×720 逻辑画布的机型整体放大 4/3。
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.5;
+    late double scale;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            scale = TvDesign.scaleOf(context);
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+    expect(scale, closeTo(4 / 3, .001));
+  });
 }
 
-Border _border(WidgetTester tester, String key) {
-  final decoration =
-      tester
-              .widget<DecoratedBox>(
-                find.descendant(
-                  of: find.byKey(Key(key)),
-                  matching: find.byType(DecoratedBox),
-                ),
-              )
-              .decoration
-          as BoxDecoration;
-  return decoration.border! as Border;
+BoxDecoration _decoration(WidgetTester tester, String key) =>
+    tester
+            .widget<DecoratedBox>(
+              find.descendant(
+                of: find.byKey(Key(key)),
+                matching: find.byType(DecoratedBox),
+              ),
+            )
+            .decoration
+        as BoxDecoration;
+
+void _expectRest(WidgetTester tester, String key, ColorScheme scheme) {
+  final fill = _decoration(tester, key).color!;
+  expect(fill, isNot(scheme.inverseSurface));
+  // 静止态是半透明的前景色薄底,不是实色块。
+  expect(fill.a, lessThan(.3));
 }
 
-void _expectFocusRing(WidgetTester tester, String key, ColorScheme scheme) {
-  final decoration =
-      tester
-              .widget<DecoratedBox>(
-                find.descendant(
-                  of: find.byKey(Key(key)),
-                  matching: find.byType(DecoratedBox),
-                ),
-              )
-              .decoration
-          as BoxDecoration;
-  final border = decoration.border! as Border;
-  final fill = decoration.color!;
-  for (final side in [border.top, border.right, border.bottom, border.left]) {
-    expect(side.width, greaterThanOrEqualTo(TvAction.focusRingWidth));
-    expect(side.width, greaterThanOrEqualTo(4));
-    expect(side.color, scheme.onSurface);
-    expect(side.color.a, 1);
-  }
-  // A fill recolor or scale is not the mark; the ring has to stand off the fill.
-  expect(fill, isNot(scheme.onSurface));
-  expect(_contrast(scheme.onSurface, fill), greaterThanOrEqualTo(3));
+void _expectFocused(
+  WidgetTester tester,
+  String key,
+  ColorScheme scheme,
+  Color page,
+) {
+  final fill = _decoration(tester, key).color!;
+  expect(fill, scheme.inverseSurface);
+  expect(fill.a, 1);
+  // 反相实底与页面底色、与其上的文字都高对比。
+  expect(_contrast(fill, page), greaterThanOrEqualTo(3));
+  expect(_contrast(fill, scheme.onInverseSurface), greaterThanOrEqualTo(4.5));
+  final text = tester.widget<RichText>(
+    find.descendant(of: find.byKey(Key(key)), matching: find.byType(RichText)),
+  );
+  expect(text.text.style?.color, scheme.onInverseSurface);
 }
 
 double _contrast(Color a, Color b) {

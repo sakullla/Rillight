@@ -1,4 +1,3 @@
-import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -123,7 +122,6 @@ class RillightVideoBackend extends VideoBackend
   StreamSubscription<CorePlayerEvent>? _coreEvents;
   Timer? _diagnosticsTimer;
   bool _diagnosticsBusy = false;
-  DateTime? _lastTransportTrace;
   bool _timelineRefreshing = false;
   int _timelineRefreshGeneration = -1;
   bool _disposed = false;
@@ -288,6 +286,8 @@ class RillightVideoBackend extends VideoBackend
       'ac3',
       'eac3',
       'truehd',
+      'dts',
+      'pgssub',
       'ass',
       'ssa',
     ];
@@ -314,6 +314,8 @@ class RillightVideoBackend extends VideoBackend
           'ac3',
           'eac3',
           'truehd',
+          'dts',
+          'pgssub',
           'ass',
           'ssa',
         ])
@@ -329,6 +331,8 @@ class RillightVideoBackend extends VideoBackend
       ac3: probed['ac3'] == true,
       eac3: probed['eac3'] == true,
       truehd: probed['truehd'] == true,
+      dts: probed['dts'] == true,
+      pgs: probed['pgssub'] == true,
       ass: probed['ass'] == true,
       ssa: probed['ssa'] == true,
       maxStreamingBitrate: maxStreamingBitrate,
@@ -426,16 +430,16 @@ class RillightVideoBackend extends VideoBackend
     _emit(VideoEventKind.bufferSnapshot, bufferSnapshot, generation);
     _emit(VideoEventKind.cacheSpeed, 0.0, generation);
     _openPhase = 'retiringPrevious';
-    PlayerStartupTrace.record('backend.retiringPrevious');
+
     await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: false);
     if (_disposed || generation != _generation) return;
     try {
       _openPhase = 'settings';
-      PlayerStartupTrace.record('backend.settings');
+
       final settings =
           await (_settingsStore ??= await openPlayerSettingsStore()).read();
       _openPhase = 'transport';
-      PlayerStartupTrace.record('backend.transport');
+
       final transport = await PlaybackTransportSession.start(
         origin: request.credentialOrigin,
         headers: request.credentialHeaders.isNotEmpty
@@ -456,6 +460,7 @@ class RillightVideoBackend extends VideoBackend
         dynamicSource: request.dynamicSource,
         sessionBuffering: true,
         continuousTransfers: Platform.isAndroid,
+        readAheadConcurrency: 1,
       );
       if (_disposed || generation != _generation) {
         await transport.close();
@@ -467,7 +472,7 @@ class RillightVideoBackend extends VideoBackend
       // transport yields its single producer to uncached index/track probes.
       await transport.setPlaybackActive(!request.startPaused);
       _openPhase = 'register';
-      PlayerStartupTrace.record('backend.register');
+
       final sealed = await transport.register(request.url);
       _mediaRoute = sealed;
       final warmed = request.warmedPrefix;
@@ -480,7 +485,7 @@ class RillightVideoBackend extends VideoBackend
       }
       if (_disposed || generation != _generation) return;
       _openPhase = 'player';
-      PlayerStartupTrace.record('backend.player');
+
       final player = _player ??= await _createPlayer();
       _bindNativePresentation(player);
       if (_disposed || generation != _generation) {
@@ -498,7 +503,7 @@ class RillightVideoBackend extends VideoBackend
         unawaited(_refreshDiagnostics(generation));
       });
       _openPhase = 'openingCore';
-      PlayerStartupTrace.record('backend.openingCore');
+
       final result = await player.open(
         CorePlayerOpen(
           url: sealed,
@@ -536,7 +541,7 @@ class RillightVideoBackend extends VideoBackend
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _opened = true;
       _openPhase = 'opened';
-      PlayerStartupTrace.record('backend.opened');
+
       unawaited(_refreshDiagnostics(generation));
     } catch (error) {
       if (generation == _generation) {
@@ -592,10 +597,6 @@ class RillightVideoBackend extends VideoBackend
         isPlaying = event.value == true;
         _emit(VideoEventKind.playing, isPlaying, generation);
       case 'buffering':
-        PlayerStartupTrace.record('backend.buffering', {
-          'enabled': event.value == true ? 1 : 0,
-          'positionMs': position.inMilliseconds,
-        });
         _emit(VideoEventKind.buffering, event.value == true, generation);
       case 'completed':
         _emit(VideoEventKind.completed, event.value == true, generation);
@@ -794,46 +795,6 @@ class RillightVideoBackend extends VideoBackend
       );
       if (generation != _generation || _disposed) return;
       _lastTransportDiagnostics = data;
-      final traceNow = DateTime.now();
-      if (_lastTransportTrace == null ||
-          traceNow.difference(_lastTransportTrace!) >=
-              const Duration(seconds: 2)) {
-        _lastTransportTrace = traceNow;
-        PlayerStartupTrace.record('backend.io', {
-          for (final key in const [
-            'upstreamBytes',
-            'upstreamBytesPerSecond',
-            'activeRequests',
-            'upstreamConnectingRequests',
-            'upstreamAwaitingHeadersRequests',
-            'recoveryAttempts',
-            'mediaHeaderTimeouts',
-            'lastRequestedRedirectCount',
-            'lastUpstreamStatus',
-            'lastMediaUpstreamStatus',
-            'lastUpstreamPhaseElapsedMs',
-            'readAheadActive',
-            'readAheadWorkerActive',
-            'readAheadReaderWaiting',
-            'readAheadReaders',
-            'readAheadNoProgressMs',
-            'readAheadFailed',
-            'readAheadWaitingForDisk',
-            'readAheadPrefetchAllowed',
-            'readAheadPositionBytes',
-            'readAheadPublishedBytes',
-            'readAheadConcurrentTransfers',
-            'readAheadForegroundAcquisitions',
-            'readAheadPublicationActive',
-            'pendingBytes',
-            'diskBytes',
-          ])
-            if (data[key] is num || data[key] is bool)
-              key: data[key] is num
-                  ? data[key] as num
-                  : (data[key] == true ? 1 : 0),
-        });
-      }
       final downloaded = (data['upstreamBytes'] as num?)?.toInt() ?? 0;
       if (!_opened && downloaded != _openingDownloadBytes) {
         _openingDownloadBytes = downloaded;

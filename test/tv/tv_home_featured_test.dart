@@ -118,8 +118,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
-    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
-    await key(tester, LogicalKeyboardKey.arrowDown);
+    // 表单卡里 User-Agent 下面就是连接按钮;外观选项在左栏。
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);
@@ -190,7 +189,7 @@ void main() {
   );
 
   testWidgets(
-    'focused TV action scales within 1.05-1.1 and shows a high-contrast ring of at least 4px',
+    'focused TV action scales within 1.05-1.1 and inverts to a high-contrast fill',
     (tester) async {
       final server = FakeEmbyServer();
       await start(tester, server);
@@ -212,13 +211,12 @@ void main() {
           matching: find.byType(AnimatedContainer),
         ),
       );
-      final border =
-          (focusedContainer.decoration as BoxDecoration).border! as Border;
-      expect(border.top.width, greaterThanOrEqualTo(4));
-      // 焦点环取主题前景色:深色主题是暖白,浅色主题是深色,均高对比。
+      // 聚焦反相为主题的反色实底(深色主题近白、浅色主题近黑),
+      // 与静止态的半透明底和页面底色对比度都远高于 3:1。
+      final scheme = Theme.of(tester.element(focusedAction())).colorScheme;
       expect(
-        border.top.color,
-        Theme.of(tester.element(focusedAction())).colorScheme.onSurface,
+        (focusedContainer.decoration as BoxDecoration).color,
+        scheme.inverseSurface,
       );
 
       // Unfocused action stays at rest scale.
@@ -317,13 +315,13 @@ void main() {
     ) {
       await key(tester, LogicalKeyboardKey.arrowDown);
     }
-    expect(focusedLabel(tester), '飞屋环游记');
-
-    // Step to the other poster in this row. The shelf title is full width, so
-    // a further right-arrow leaves the row instead of finding another poster.
-    await key(tester, LogicalKeyboardKey.arrowLeft);
-    expect(find.descendant(of: row, matching: focusedAction()), findsOneWidget);
+    // 从 hero 的播放按钮下移,落在行首卡片。
     expect(focusedLabel(tester), 'Inception');
+
+    // 行内右移到另一张卡,再离开行、回来,应回到这张而不是行首。
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(find.descendant(of: row, matching: focusedAction()), findsOneWidget);
+    expect(focusedLabel(tester), '飞屋环游记');
     final remembered = FocusManager.instance.primaryFocus;
     final rememberedLabel = focusedLabel(tester);
 
@@ -370,8 +368,14 @@ void main() {
       );
 
       // Every vertical step keeps a live focus target down to the page bottom.
+      // 页尾「编辑首页」与「刷新」并排,到达后右移一次。
       for (var i = 0; i < 40 && focusedLabel(tester) != '刷新'; i++) {
-        await key(tester, LogicalKeyboardKey.arrowDown);
+        await key(
+          tester,
+          focusedLabel(tester) == '编辑首页'
+              ? LogicalKeyboardKey.arrowRight
+              : LogicalKeyboardKey.arrowDown,
+        );
         expect(focusedAction(), findsOneWidget);
       }
       expect(focusedLabel(tester), '刷新');

@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
@@ -31,6 +32,15 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   int _index = 0;
   int _paneSelectionRevision = 0;
   bool _initialized = false, _recovering = false, _failed = false;
+
+  /// 面板内容向下滚动后收起导航;焦点回到导航时重新展开。
+  bool _navHidden = false;
+
+  /// 每个面板主滚动视图的上下文,导航重获焦点时把它滚回顶部。
+  final _paneScroll = List<BuildContext?>.filled(4, null);
+
+  /// 首页顶部是否是出血 hero(导航压在影像上)。
+  final _heroVisible = ValueNotifier<bool>(true);
   final _home = FocusNode();
   final _recoveryRetry = FocusNode();
   final _navScope = FocusScopeNode(
@@ -48,6 +58,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _navScope.addListener(_navFocusChanged);
   }
 
   @override
@@ -59,6 +70,59 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
         if (mounted) _recover();
       });
     }
+  }
+
+  void _navFocusChanged() {
+    if (!_navScope.hasFocus || !mounted) return;
+    if (_navHidden) setState(() => _navHidden = false);
+    final scroll = _paneScroll[_index];
+    if (scroll != null && scroll.mounted) {
+      final position = Scrollable.maybeOf(scroll)?.position;
+      if (position != null && position.pixels > 0) {
+        unawaited(
+          position.animateTo(
+            0,
+            duration: AppMotion.durationOf(context, AppMotion.slow),
+            curve: AppMotion.standard,
+          ),
+        );
+      }
+    }
+  }
+
+  /// 面板内按上键已到顶(没有更上面的目标)时回到导航当前标签,
+  /// 不依赖跨焦点域的方向搜索。
+  KeyEventResult _paneKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey != LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null || _navScope.hasFocus) return KeyEventResult.ignored;
+    if (primary.focusInDirection(TraversalDirection.up)) {
+      return KeyEventResult.handled;
+    }
+    final remembered = _navScope.focusedChild;
+    if (remembered != null && remembered.canRequestFocus) {
+      remembered.requestFocus();
+    } else {
+      _home.requestFocus();
+    }
+    return KeyEventResult.handled;
+  }
+
+  bool _onPaneScroll(int pane, ScrollNotification notification) {
+    if (notification.depth != 0 ||
+        notification.metrics.axis != Axis.vertical ||
+        pane != _index) {
+      return false;
+    }
+    _paneScroll[pane] = notification.context;
+    final hide = notification.metrics.pixels > 4 && !_navScope.hasFocus;
+    if (hide != _navHidden) setState(() => _navHidden = hide);
+    return false;
   }
 
   Future<void> _recover() async {
@@ -126,7 +190,12 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   void _selectPane(int index, {bool enter = false}) {
     final revision = ++_paneSelectionRevision;
     final changed = _index != index;
-    if (changed) setState(() => _index = index);
+    if (changed) {
+      setState(() {
+        _index = index;
+        _navHidden = false;
+      });
+    }
     if (!enter) return;
     // Nav focus may have selected this index before its ExcludeFocus subtree
     // rebuilds. Enter only after that frame, including an unchanged index.
@@ -161,9 +230,11 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _navScope.removeListener(_navFocusChanged);
     _home.dispose();
     _recoveryRetry.dispose();
     _navScope.dispose();
+    _heroVisible.dispose();
     for (final pane in _panes) {
       pane.dispose();
     }
@@ -174,16 +245,8 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final auth = AuthScope.of(context);
-    final horizontal = tvSafeGutter(MediaQuery.sizeOf(context).width);
-    // 首页面板 hero 出血到导航栏后,不加预留;其余面板避开叠层导航。
-    Widget padded(Widget pane) => Padding(
-      padding: EdgeInsets.only(
-        top: TvTopNavBar.reserveHeight,
-        left: horizontal,
-        right: horizontal,
-      ),
-      child: pane,
-    );
+    final s = TvDesign.scaleOf(context);
+    final duration = AppMotion.durationOf(context, TvNavMotion.duration);
     return PopScope(
       canPop: _index == 0,
       onPopInvokedWithResult: (popped, _) {
@@ -199,78 +262,102 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
               fit: StackFit.expand,
               children: [
                 Positioned.fill(
-                  child: SafeArea(
-                    child: _recovering
-                        ? const Center(child: CircularProgressIndicator())
-                        : _failed
-                        ? Padding(
-                            padding: EdgeInsets.only(
-                              top: TvTopNavBar.reserveHeight,
-                              left: horizontal,
-                              right: horizontal,
-                            ),
-                            child: Column(
-                              children: [
-                                Text(l.mobileRecoveryFailed),
-                                TvAction(
-                                  autofocus: true,
-                                  focusNode: _recoveryRetry,
-                                  onPressed: _recover,
-                                  child: Text(l.retry),
-                                ),
-                                TvAction(
-                                  onPressed: AuthScope.of(context).logout,
-                                  child: Text(l.connect),
-                                ),
-                              ],
-                            ),
-                          )
-                        : IndexedStack(
-                            index: _index,
+                  child: _recovering
+                      ? const Center(child: CircularProgressIndicator())
+                      : _failed
+                      ? TvEmptyState(
+                          icon: Icons.cloud_off_rounded,
+                          message: l.mobileRecoveryFailed,
+                          action: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              for (var i = 0; i < 4; i++)
-                                ExcludeFocus(
-                                  excluding: i != _index,
-                                  child: TickerMode(
-                                    enabled: i == _index,
-                                    child: FocusScope(
-                                      node: _panes[i],
-                                      child: [
-                                        const TvHomePage(),
-                                        padded(const _TvLibraries()),
-                                        padded(
-                                          SearchRouteGuard(
-                                            canPop: true,
-                                            onPop: () {
-                                              _selectPane(0);
-                                              _home.requestFocus();
-                                            },
-                                            child: const AggregationPage(
-                                              search: true,
-                                            ),
-                                          ),
-                                        ),
-                                        padded(const _TvSession()),
-                                      ][i],
-                                    ),
-                                  ),
-                                ),
+                              TvAction(
+                                autofocus: true,
+                                emphasized: true,
+                                focusNode: _recoveryRetry,
+                                onPressed: _recover,
+                                child: Text(l.retry),
+                              ),
+                              SizedBox(width: 12 * s),
+                              TvAction(
+                                onPressed: AuthScope.of(context).logout,
+                                child: Text(l.connect),
+                              ),
                             ],
                           ),
-                  ),
+                        )
+                      : IndexedStack(
+                          index: _index,
+                          children: [
+                            for (var i = 0; i < 4; i++)
+                              ExcludeFocus(
+                                excluding: i != _index,
+                                child: TickerMode(
+                                  enabled: i == _index,
+                                  child:
+                                      NotificationListener<ScrollNotification>(
+                                        onNotification: (n) =>
+                                            _onPaneScroll(i, n),
+                                        child: Focus(
+                                          canRequestFocus: false,
+                                          skipTraversal: true,
+                                          onKeyEvent: _paneKey,
+                                          child: FocusScope(
+                                            node: _panes[i],
+                                            child: [
+                                              TvHomePage(
+                                                heroVisible: _heroVisible,
+                                              ),
+                                              const _TvLibraries(),
+                                              SearchRouteGuard(
+                                                canPop: true,
+                                                onPop: () {
+                                                  _selectPane(0);
+                                                  _home.requestFocus();
+                                                },
+                                                child: const AggregationPage(
+                                                  search: true,
+                                                ),
+                                              ),
+                                              const _TvSession(),
+                                            ][i],
+                                          ),
+                                        ),
+                                      ),
+                                ),
+                              ),
+                          ],
+                        ),
                 ),
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  child: FocusScope(
-                    node: _navScope,
-                    child: TvTopNavBar(
-                      index: _index,
-                      onSelect: (i) => _selectPane(i),
-                      onEnter: (i) => _selectPane(i, enter: true),
-                      homeNode: _home,
-                      username: auth.session?.username,
+                  child: AnimatedSlide(
+                    offset: Offset(0, _navHidden ? -1.2 : 0),
+                    duration: duration,
+                    curve: AppMotion.standard,
+                    child: AnimatedOpacity(
+                      opacity: _navHidden ? 0 : 1,
+                      duration: duration,
+                      child: FocusScope(
+                        node: _navScope,
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _heroVisible,
+                          builder: (context, hero, _) {
+                            final overImage = _index == 0 && hero;
+                            final nav = TvTopNavBar(
+                              index: _index,
+                              onSelect: (i) => _selectPane(i),
+                              onEnter: (i) => _selectPane(i, enter: true),
+                              homeNode: _home,
+                              username: auth.session?.username,
+                              overImage: overImage,
+                            );
+                            return overImage ? TvDarkStage(child: nav) : nav;
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -291,6 +378,7 @@ class _TvLibraries extends StatelessWidget {
   }
 }
 
+/// 设置面板:左侧账户卡与账户操作,右侧外观与服务器线路。
 class _TvSession extends StatelessWidget {
   const _TvSession();
 
@@ -302,8 +390,6 @@ class _TvSession extends StatelessWidget {
   static const serverDeleteCancelKey = Key('tv-server-delete-cancel');
 
   static const changePasswordKey = Key('tv-change-password');
-
-  static const privateKey = Key('tv-session-private');
 
   /// 线路切换失败时的原因行;成功或开始新的切换后随控制器清空。
   static const lineSwitchFailureKey = Key('tv-line-switch-failure');
@@ -320,109 +406,270 @@ class _TvSession extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context), l = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    Widget header(String title) => Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 4),
-      child: Text(
-        title,
-        style: theme.textTheme.titleMedium?.copyWith(
-          fontWeight: FontWeight.w700,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
+    final s = TvDesign.scaleOf(context);
+    final size = MediaQuery.sizeOf(context);
+    final gutter = tvSafeGutter(size.width);
     return ListenableBuilder(
       listenable: auth,
       builder: (context, _) => ListView(
         key: const PageStorageKey('tv-session'),
+        padding: EdgeInsets.fromLTRB(
+          gutter,
+          TvTopNavBar.reserveOf(context) + 8 * s,
+          gutter,
+          tvSafeVertical(size.height),
+        ),
         children: [
-          header(l.mobileAccountServerGroup),
-          Text(
-            '${auth.session?.server.name ?? ''} · ${auth.session?.username ?? ''}',
-          ),
-          // TvAppearancePicker 自带「外观」标签,作本节标题。
-          const SizedBox(height: 20),
-          const TvAppearancePicker(),
-          header(l.mobileLine),
-          if (auth.lineSwitchFailure != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              l.lineSwitchFailed(auth.lineSwitchFailure!.detail),
-              key: _TvSession.lineSwitchFailureKey,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-          for (final server in auth.savedServers) ...[
-            for (final line in server.lines) ...[
-              TvAction(
-                key: ValueKey('${server.id}-${line.id}'),
-                selected:
-                    auth.session?.server.id == server.id &&
-                    auth.session?.server.activeLine?.id == line.id,
-                onPressed: auth.isBusy
-                    ? null
-                    : () => auth.switchTo(server.id, lineId: line.id),
-                child: Text('${server.name} · ${line.hostLabel}'),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 272 * s,
+                child: _TvAccountCard(auth: auth),
               ),
-              TvAction(
-                key: lineEditKey(server.id, line.id),
-                onPressed: auth.isBusy
-                    ? null
-                    : () => _editLine(context, auth, server, line),
-                child: Text('${l.editLine} · ${line.hostLabel}'),
-              ),
-              TvAction(
-                key: lineDeleteKey(server.id, line.id),
-                onPressed: auth.isBusy || server.lines.length <= 1
-                    ? null
-                    : () => _deleteLine(context, auth, server, line),
-                child: Text('${l.deleteLine} · ${line.hostLabel}'),
+              SizedBox(width: 36 * s),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TvSectionTitle(l.settingsAppearance),
+                    SizedBox(height: 6 * s),
+                    const TvAppearancePicker(),
+                    SizedBox(height: TvDesign.sectionGap * s),
+                    TvSectionTitle(l.mobileLine),
+                    if (auth.lineSwitchFailure != null)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: 8 * s),
+                        child: Text(
+                          l.lineSwitchFailed(auth.lineSwitchFailure!.detail),
+                          key: _TvSession.lineSwitchFailureKey,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    for (final server in auth.savedServers) ...[
+                      SizedBox(height: 6 * s),
+                      _TvServerCard(auth: auth, server: server),
+                    ],
+                  ],
+                ),
               ),
             ],
-            TvAction(
-              key: lineAddKey(server.id),
-              onPressed: auth.isBusy
-                  ? null
-                  : () => _addLine(context, auth, server.id),
-              child: Text('${l.addLine} · ${server.name}'),
-            ),
-            TvAction(
-              key: serverDeleteKey(server.id),
-              onPressed: auth.isBusy
-                  ? null
-                  : () => _confirmDelete(context, auth, server),
-              child: Text('${l.deleteServer} · ${server.name}'),
-            ),
-          ],
-          header(l.tvSettingsOther),
-          TvAction(
-            onPressed: () => context.push('${AppRoutes.connect}?add=1'),
-            child: Text(l.mobileAddServer),
           ),
-          TvAction(
-            key: changePasswordKey,
-            onPressed: auth.isBusy
-                ? null
-                : () => showDialog<void>(
-                    context: context,
-                    builder: (dialogContext) =>
-                        ChangePasswordDialog(auth: auth),
+        ],
+      ),
+    );
+  }
+}
+
+class _TvAccountCard extends StatelessWidget {
+  const _TvAccountCard({required this.auth});
+  final AuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final s = TvDesign.scaleOf(context);
+    final name = auth.session?.username ?? '';
+    final server = auth.session?.server;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: EdgeInsets.all(18 * s),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainer,
+            borderRadius: BorderRadius.circular(16 * s),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 22 * s,
+                backgroundColor: scheme.primaryContainer,
+                child: Text(
+                  name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: scheme.onPrimaryContainer,
                   ),
-            child: Text(l.changePassword),
+                ),
+              ),
+              SizedBox(width: 14 * s),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    SizedBox(height: 2 * s),
+                    Text(
+                      [
+                        server?.name ?? '',
+                        server?.activeLine?.hostLabel ?? '',
+                      ].where((v) => v.isNotEmpty).join(' · '),
+                      key: const Key('tv-session-summary'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          TvAction(
-            key: _TvSession.privateKey,
-            onPressed: () async {
-              if (await SessionActions.ensurePrivateAccess(context) &&
-                  context.mounted) {
-                context.push('/private');
-              }
-            },
-            child: Text(l.aggregationPrivate),
+        ),
+        SizedBox(height: 14 * s),
+        TvNavTile(
+          icon: Icons.add_rounded,
+          title: l.mobileAddServer,
+          onPressed: () => context.push('${AppRoutes.connect}?add=1'),
+        ),
+        SizedBox(height: 6 * s),
+        TvNavTile(
+          actionKey: _TvSession.changePasswordKey,
+          icon: Icons.password_rounded,
+          title: l.changePassword,
+          onPressed: auth.isBusy
+              ? null
+              : () => showDialog<void>(
+                  context: context,
+                  builder: (dialogContext) => ChangePasswordDialog(auth: auth),
+                ),
+        ),
+        SizedBox(height: 6 * s),
+        TvNavTile(
+          icon: Icons.logout_rounded,
+          title: l.logout,
+          destructive: true,
+          chevron: false,
+          onPressed: auth.isBusy ? null : auth.logout,
+        ),
+      ],
+    );
+  }
+}
+
+/// 一台服务器:标题行(名称 + 添加线路 / 删除服务器),下列每条线路。
+/// 线路行本身选中即切换;右侧两个图标按钮编辑/删除,左右键可达。
+class _TvServerCard extends StatelessWidget {
+  const _TvServerCard({required this.auth, required this.server});
+  final AuthController auth;
+  final SavedServer server;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final s = TvDesign.scaleOf(context);
+    final current = auth.session?.server.id == server.id;
+    return Container(
+      padding: EdgeInsets.fromLTRB(16 * s, 12 * s, 12 * s, 12 * s),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16 * s),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.dns_rounded, size: 20 * s, color: scheme.primary),
+              SizedBox(width: 10 * s),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '${server.name} · ${server.username}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ),
+                    if (current) ...[
+                      SizedBox(width: 8 * s),
+                      _Tag(label: l.tvSettingsCurrent),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(width: 12 * s),
+              TvAction(
+                key: _TvSession.lineAddKey(server.id),
+                variant: TvActionVariant.ghost,
+                leading: const Icon(Icons.add_rounded),
+                onPressed: auth.isBusy
+                    ? null
+                    : () => _addLine(context, auth, server.id),
+                child: Text(l.addLine),
+              ),
+              SizedBox(width: 4 * s),
+              TvAction(
+                key: _TvSession.serverDeleteKey(server.id),
+                variant: TvActionVariant.ghost,
+                leading: const Icon(Icons.delete_outline_rounded),
+                onPressed: auth.isBusy
+                    ? null
+                    : () => _confirmDelete(context, auth, server),
+                child: Text(l.deleteServer),
+              ),
+            ],
           ),
-          TvAction(
-            onPressed: auth.isBusy ? null : auth.logout,
-            child: Text(l.logout),
-          ),
+          SizedBox(height: 10 * s),
+          for (final line in server.lines) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: TvChoiceTile(
+                    actionKey: ValueKey('${server.id}-${line.id}'),
+                    label: line.hostLabel,
+                    subtitle: line.address == line.hostLabel
+                        ? null
+                        : line.address,
+                    selected: current && server.activeLine?.id == line.id,
+                    onPressed: auth.isBusy
+                        ? null
+                        : () => auth.switchTo(server.id, lineId: line.id),
+                  ),
+                ),
+                SizedBox(width: 8 * s),
+                TvAction(
+                  key: _TvSession.lineEditKey(server.id, line.id),
+                  variant: TvActionVariant.icon,
+                  onPressed: auth.isBusy
+                      ? null
+                      : () => _editLine(context, auth, server, line),
+                  child: Semantics(
+                    label: l.editLine,
+                    child: const Icon(Icons.edit_outlined),
+                  ),
+                ),
+                SizedBox(width: 4 * s),
+                TvAction(
+                  key: _TvSession.lineDeleteKey(server.id, line.id),
+                  variant: TvActionVariant.icon,
+                  onPressed: auth.isBusy || server.lines.length <= 1
+                      ? null
+                      : () => _deleteLine(context, auth, server, line),
+                  child: Semantics(
+                    label: l.deleteLine,
+                    child: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 6 * s),
+          ],
         ],
       ),
     );
@@ -494,30 +741,24 @@ class _TvSession extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
-        return SimpleDialog(
+        final s = TvDesign.scaleOf(dialogContext);
+        return AlertDialog(
           title: Text(l10n.deleteServer),
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(l10n.deleteServerConfirmMessage(server.name)),
+          content: SizedBox(
+            width: 420 * s,
+            child: Text(l10n.deleteServerConfirmMessage(server.name)),
+          ),
+          actions: [
+            TvAction(
+              key: _TvSession.serverDeleteCancelKey,
+              autofocus: true,
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(l10n.cancelAction),
             ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TvAction(
-                  key: serverDeleteCancelKey,
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: Text(l10n.cancelAction),
-                ),
-                const SizedBox(width: 12),
-                TvAction(
-                  key: serverDeleteConfirmKey,
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: Text(l10n.deleteServerConfirm),
-                ),
-                const SizedBox(width: 24),
-              ],
+            TvAction(
+              key: _TvSession.serverDeleteConfirmKey,
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(l10n.deleteServerConfirm),
             ),
           ],
         );
@@ -526,5 +767,29 @@ class _TvSession extends StatelessWidget {
     if (confirmed == true) {
       await auth.deleteServer(server.id);
     }
+  }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = TvDesign.scaleOf(context);
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 8 * s, vertical: 2 * s),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onPrimaryContainer,
+        ),
+      ),
+    );
   }
 }

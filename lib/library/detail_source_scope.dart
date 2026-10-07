@@ -26,11 +26,13 @@ class DetailSourceScope extends InheritedWidget {
     required this.origin,
     required this.cache,
     required this.imagePolicy,
+    this.hasLibraryBoundary = true,
     required super.child,
   });
   final PlaybackOrigin origin;
   final CatalogCache cache;
   final MediaImageSourcePolicy imagePolicy;
+  final bool hasLibraryBoundary;
   static MediaImageSourcePolicy? imagePolicyOf(BuildContext context) => context
       .dependOnInheritedWidgetOfExactType<DetailSourceScope>()
       ?.imagePolicy;
@@ -39,13 +41,39 @@ class DetailSourceScope extends InheritedWidget {
       CatalogScope.of(context).cache;
   @override
   bool updateShouldNotify(DetailSourceScope oldWidget) =>
-      origin != oldWidget.origin;
+      origin != oldWidget.origin ||
+      hasLibraryBoundary != oldWidget.hasLibraryBoundary;
   static PlaybackOrigin? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<DetailSourceScope>()?.origin;
   static EmbyClient clientOf(BuildContext context) {
     final origin = maybeOf(context);
     origin?.permit.requireValid();
     return origin?.client ?? AuthScope.of(context).client;
+  }
+
+  /// Image-only server shelves have no library boundary. Resolve the concrete
+  /// item instead of treating their image-cache namespace as a library.
+  static Future<PlayerOpenRequest> playbackRequest(
+    BuildContext context,
+    String itemId,
+  ) async {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<DetailSourceScope>();
+    if (scope == null) return PlayerOpenRequest(itemId: itemId);
+    final origin = scope.origin;
+    origin.permit.requireValid();
+    var libraryId = origin.libraryId;
+    if (!scope.hasLibraryBoundary) {
+      final item = await origin.permit.dispatch((c) => c.getItem(itemId));
+      libraryId = item.hierarchyParentId ?? item.id;
+    }
+    origin.permit.requireValid();
+    return PlayerOpenRequest(
+      itemId: itemId,
+      source: SourceReference(account: origin.source.account, itemId: itemId),
+      libraryId: libraryId,
+      regionGeneration: origin.permit.regionGeneration,
+    );
   }
 
   static PlayerHostOpenItemCommand? command(
@@ -458,6 +486,7 @@ class _ServerSessionImagesState extends State<ServerSessionImages> {
         origin: origin,
         cache: _cache,
         imagePolicy: policy,
+        hasLibraryBoundary: widget.libraryId != null,
         child: widget.child,
       );
     }

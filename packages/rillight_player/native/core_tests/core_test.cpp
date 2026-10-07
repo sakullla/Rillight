@@ -396,6 +396,34 @@ int main() {
   }
   assert(unity_drained && unity_samples == 4800);
   rillight_core_destroy(unity_core);
+  // PCM batching must retain even a sub-block stream and the final short
+  // block, without padding or dropping samples at EOF.
+  for (const uint32_t sample_count : {40u, 481u, 4841u}) {
+    Media short_media{make_wav(sample_count), make_bmp()};
+    RillightCoreIo short_io{&short_media, open, read, seek, close, nullptr,
+                          cancel_media_io};
+    auto* short_core = rillight_core_create(&short_io);
+    assert(short_core && rillight_core_open(short_core, "synthetic.wav", 1) == 0);
+    uint32_t samples = 0;
+    bool drained = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (auto* frame = rillight_core_take_frame(short_core, RILLIGHT_CORE_AUDIO_S16)) {
+        samples += frame->sample_count;
+#if defined(__ANDROID__)
+        assert(frame->sample_count <= 480);
+#endif
+        rillight_core_release_frame(frame);
+      } else {
+        const auto state = snapshot(short_core);
+        assert(state.state != RILLIGHT_CORE_FAILED);
+        if (state.source_eof && state.queued_audio_frames == 0) { drained = true; break; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    }
+    assert(drained && samples == sample_count);
+    rillight_core_destroy(short_core);
+  }
   auto *core = rillight_core_create(&io);
   assert(core);
   assert(rillight_core_open(core, "synthetic.wav", 1) == 0);

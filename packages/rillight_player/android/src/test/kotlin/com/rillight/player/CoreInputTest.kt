@@ -188,7 +188,16 @@ class CoreInputTest {
                 for (track in listOf(0, 1024 * 1024)) {
                     val position = track + packet * bytes.size
                     assertEquals(position.toLong(), input.seek(position.toLong(), 0))
-                    assertEquals(bytes.size, input.read(bytes, bytes.size))
+                    // AVIO permits a short prefix; packet boundaries must not
+                    // depend on how the OS fragments a loopback response.
+                    var filled = 0
+                    while (filled < bytes.size) {
+                        val part = ByteArray(bytes.size - filled)
+                        val count = input.read(part, part.size)
+                        org.junit.Assert.assertTrue(count in 1..part.size)
+                        part.copyInto(bytes, filled, 0, count)
+                        filled += count
+                    }
                     org.junit.Assert.assertArrayEquals(data.copyOfRange(position, position + bytes.size), bytes)
                 }
             }

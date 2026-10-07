@@ -12,19 +12,13 @@ import java.util.concurrent.atomic.AtomicLong
 /** Only a sealed loopback transport or an app-private subtitle may reach FFmpeg. */
 internal class CoreIoFactory(context: Context) {
     private val privateRoot = File(context.applicationInfo.dataDir).canonicalFile
-    private val diagnostics = context.applicationInfo.flags and
-        android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
-
-    private fun trace(message: String) {
-        if (diagnostics) android.util.Log.i("RillightInput", message)
-    }
 
     fun open(raw: String): CoreInput? {
         val uri = try { URI(raw) } catch (_: Exception) { return null }
         if (uri.userInfo != null || uri.fragment != null) return null
         return when (uri.scheme?.lowercase()) {
             "http" -> if (uri.host == "127.0.0.1" && uri.port in 1..65535)
-                CoreInput(raw, null, ::trace) else null
+                CoreInput(raw, null) else null
             "file" -> {
                 val file = try { File(uri).canonicalFile } catch (_: Exception) { return null }
                 if (!file.isFile || !file.toPath().startsWith(privateRoot.toPath())) null
@@ -36,8 +30,7 @@ internal class CoreIoFactory(context: Context) {
 }
 
 /** AVIO-compatible input. interrupt() never waits for read/seek and is reusable. */
-internal class CoreInput(private val url: String?, private val file: File?,
-                         private val trace: (String) -> Unit = {}) {
+internal class CoreInput(private val url: String?, private val file: File?) {
     companion object { private val nextInputId = AtomicLong() }
     private val inputId = nextInputId.incrementAndGet().toString()
     private val epoch = AtomicLong()
@@ -106,12 +99,12 @@ internal class CoreInput(private val url: String?, private val file: File?,
     }
 
     fun interrupt() {
-        val revision = epoch.incrementAndGet()
-        val started = System.nanoTime()
-        trace("interrupt begin epoch=$revision")
+        epoch.incrementAndGet()
+
+
         // HttpURLConnection.disconnect() is a signal; do not acquire a read lock.
         for (request in connections.toList()) request.disconnect()
-        trace("interrupt end epoch=$revision ms=${(System.nanoTime() - started) / 1_000_000}")
+
     }
 
     fun close() {
@@ -173,11 +166,11 @@ internal class CoreInput(private val url: String?, private val file: File?,
         // proxy can hand it to the downloader, adding another network open.
         val bootstrap = position == 0L && total < 0 && blocks.isEmpty()
         request.setRequestProperty("Range", if (bootstrap) "bytes=0-" else "bytes=$position-$requestEnd")
-        val started = System.nanoTime()
-        trace("headers begin epoch=$observed offset=$position window=$blockBytes bootstrap=$bootstrap")
+
+
         if (epoch.get() != observed) { closeHttp(); throw java.io.InterruptedIOException() }
         val status = request.responseCode
-        trace("headers end epoch=$observed status=$status ms=${(System.nanoTime() - started) / 1_000_000}")
+
         if (epoch.get() != observed) { request.disconnect(); throw java.io.InterruptedIOException() }
         if (status !in 200..299 || (position > 0 && status != 206)) {
             request.disconnect()
@@ -241,7 +234,7 @@ internal class CoreInput(private val url: String?, private val file: File?,
             val previousLength = window.length
             var count = previousLength
             val needed = minOf(pending.size - count, size) + count
-            val started = System.nanoTime()
+
             while (count < pending.size) {
                 val read = try {
                     // Only requested bytes may block. Opportunistic read-ahead
@@ -268,8 +261,6 @@ internal class CoreInput(private val url: String?, private val file: File?,
                 if (responseRemaining >= 0) responseRemaining -= read
             }
             if (responseRemaining == 0L) closeHttp()
-            val elapsedMs = (System.nanoTime() - started) / 1_000_000
-            if (elapsedMs >= 1000) trace("read epoch=$observed offset=$position bytes=${count - previousLength} ms=$elapsedMs")
             if (count == previousLength) {
                 if (total >= 0 && position < total) throw java.io.EOFException()
                 return -1

@@ -1412,6 +1412,26 @@
   "@tvSettingsOther": {
     "description": "TV settings pane group header for misc actions (add server, change password, logout)."
   },
+  "tvSettingsCurrent": "当前",
+  "@tvSettingsCurrent": {
+    "description": "电视设置里标记当前登录的服务器"
+  },
+  "tvViewAll": "查看全部",
+  "@tvViewAll": {
+    "description": "电视首页行尾进入完整列表的卡片"
+  },
+  "tvConnectHint": "输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。",
+  "@tvConnectHint": {
+    "description": "电视登录页左侧的一句说明"
+  },
+  "tvConnectOr": "或",
+  "@tvConnectOr": {
+    "description": "电视登录表单与手机辅助连接之间的分隔"
+  },
+  "tvUserAgentOptional": "User-Agent(可选)",
+  "@tvUserAgentOptional": {
+    "description": "电视登录表单里的可选 UA 字段"
+  },
   "mobileAddServer": "连接其他服务器",
   "mobileAccountServerGroup": "账户与服务器",
   "@mobileAccountServerGroup": {

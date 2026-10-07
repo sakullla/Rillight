@@ -6,6 +6,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'cache_limits.dart';
+import 'cache_crc32.dart';
 import 'directory_inventory.dart';
 
 /// One coordinator isolate per root in this process. Its queue is the local
@@ -1466,20 +1467,4 @@ void _assertRegularOrAbsent(String path) {
   }
 }
 
-final _crcTable = Uint32List.fromList(
-  List.generate(256, (value) {
-    var crc = value;
-    for (var bit = 0; bit < 8; bit++) {
-      crc = (crc >> 1) ^ ((crc & 1) == 0 ? 0 : 0xedb88320);
-    }
-    return crc;
-  }),
-);
-
-int _crc32(Uint8List bytes) {
-  var crc = 0xffffffff;
-  for (final byte in bytes) {
-    crc = (crc >> 8) ^ _crcTable[(crc ^ byte) & 0xff];
-  }
-  return (crc ^ 0xffffffff) & 0xffffffff;
-}
+int _crc32(Uint8List bytes) => cacheCrc32(bytes);

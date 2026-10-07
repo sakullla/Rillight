@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:flutter/services.dart';
 
 import '../app/l10n/app_localizations.dart';
@@ -144,35 +145,38 @@ class _FocusableLineButtonState extends State<_FocusableLineButton> {
         label: widget.label,
         child: GestureDetector(
           onTap: widget.onPressed,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 56),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: _focused
-                  ? Theme.of(context).colorScheme.tertiaryContainer
-                  : Colors.transparent,
-              border: Border.all(
-                color: _focused
-                    ? Theme.of(context).colorScheme.onSurface
-                    : Colors.transparent,
-                width: 3,
-              ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.alt_route, size: 28),
-                const SizedBox(width: 8),
-                Text(
-                  widget.label,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w500,
-                  ),
+          child: Builder(
+            builder: (context) {
+              // 与电视播放控制行同一外观:半透明黑底,聚焦反相为白底黑字。
+              final s = TvDesign.scaleOf(context);
+              final foreground = _focused ? Colors.black : Colors.white;
+              return Container(
+                constraints: BoxConstraints(minHeight: 38 * s),
+                padding: EdgeInsets.symmetric(
+                  horizontal: 14 * s,
+                  vertical: 8 * s,
                 ),
-              ],
-            ),
+                decoration: BoxDecoration(
+                  color: _focused
+                      ? Colors.white
+                      : Colors.black.withValues(alpha: .34),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.alt_route, size: 20 * s, color: foreground),
+                    SizedBox(width: 6 * s),
+                    Text(
+                      widget.label,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelLarge?.copyWith(color: foreground),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),

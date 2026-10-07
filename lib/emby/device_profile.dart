@@ -9,6 +9,8 @@ Map<String, dynamic> androidDeviceProfile({
   bool ac3 = false,
   bool eac3 = false,
   bool truehd = false,
+  bool dts = false,
+  bool pgs = false,
   bool ass = false,
   bool ssa = false,
   int maxStreamingBitrate = 20000000,
@@ -19,6 +21,7 @@ Map<String, dynamic> androidDeviceProfile({
     if (ac3) 'ac3',
     if (eac3) 'eac3',
     if (truehd) 'truehd',
+    if (dts) 'dts',
   ];
   return {
     'Name': 'Rillight Android owned FFmpeg core',
@@ -53,9 +56,17 @@ Map<String, dynamic> androidDeviceProfile({
       // The owned core renders these locally with libass. Advertising Encode
       // for a verified decoder forces otherwise direct MKV playback through
       // server-side video transcoding merely because an ASS track is selected.
+      // External ASS/SSA is downloaded separately and loaded into the same
+      // renderer. Embed alone does not cover a server-selected sidecar track.
+      if (ass) {'Format': 'ass', 'Method': 'External'},
+      if (ssa) {'Format': 'ssa', 'Method': 'External'},
       {'Format': 'ass', 'Method': ass ? 'Embed' : 'Encode'},
       {'Format': 'ssa', 'Method': ssa ? 'Embed' : 'Encode'},
-      for (final format in ['pgs', 'pgssub', 'dvdsub', 'dvbsub'])
+      // The owned core composites decoded PGS bitmaps locally. Keep burn-in
+      // only when that decoder is absent from the loaded native library.
+      for (final format in ['pgs', 'pgssub'])
+        {'Format': format, 'Method': pgs ? 'Embed' : 'Encode'},
+      for (final format in ['dvdsub', 'dvbsub'])
         {'Format': format, 'Method': 'Encode'},
     ],
   };
@@ -70,6 +81,8 @@ Map<String, dynamic> ownedCoreDeviceProfile({
   bool ac3 = false,
   bool eac3 = false,
   bool truehd = false,
+  bool dts = false,
+  bool pgs = false,
   bool ass = false,
   bool ssa = false,
   int maxStreamingBitrate = kCoreMaxStreamingBitrate,
@@ -81,6 +94,8 @@ Map<String, dynamic> ownedCoreDeviceProfile({
     ac3: ac3,
     eac3: eac3,
     truehd: truehd,
+    dts: dts,
+    pgs: pgs,
     ass: ass,
     ssa: ssa,
     maxStreamingBitrate: maxStreamingBitrate,

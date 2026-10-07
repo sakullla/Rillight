@@ -95,40 +95,43 @@ extension PageCaptures on CaptureSession {
       }
       await advance(1200);
       await save('aggregation-ready');
-      await tap(const Key('aggregation-source-management'));
-      await save('aggregation-management');
-      await activate(find.widgetWithText(ListTile, '私密区域'));
-      await save('aggregation-pin-setup');
-      await tester.enterText(find.byKey(const Key('private-pin')), '1234');
-      await tester.enterText(
-        find.byKey(const Key('private-pin-confirm')),
-        '5678',
-      );
-      await tap(const Key('private-unlock'));
-      await save('aggregation-pin-error');
-      await tap(const Key('private-pin-cancel'));
-      await tap(const Key('source-management-close'));
-      final sources = auth.sources.project(AccessRegion.ordinary);
-      await activate(
-        find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
-      );
-      await advance(600);
-      await save('aggregation-single-source');
-      await activate(
-        find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
-      );
-      await save('aggregation-empty-scope');
-      await activate(find.widgetWithText(FilterChip, '全部普通来源'));
-      await advance(900);
-      await activate(find.widgetWithText(TextButton, '查找同源 · 2').first);
-      await advance(900);
-      await save('aggregation-comparison');
-      await dismiss();
-      adapter.failAggregationMirror = true;
-      await activate(find.widgetWithText(FilterChip, '全部普通来源'));
-      await advance(1000);
-      await save('aggregation-partial-failure');
-      adapter.failAggregationMirror = false;
+      // TV 聚合页是分段 + 卡片行的新版本,没有旧版来源管理与筛选条。
+      if (platform != 'tv') {
+        await tap(const Key('aggregation-source-management'));
+        await save('aggregation-management');
+        await activate(find.widgetWithText(ListTile, '私密区域'));
+        await save('aggregation-pin-setup');
+        await tester.enterText(find.byKey(const Key('private-pin')), '1234');
+        await tester.enterText(
+          find.byKey(const Key('private-pin-confirm')),
+          '5678',
+        );
+        await tap(const Key('private-unlock'));
+        await save('aggregation-pin-error');
+        await tap(const Key('private-pin-cancel'));
+        await tap(const Key('source-management-close'));
+        final sources = auth.sources.project(AccessRegion.ordinary);
+        await activate(
+          find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
+        );
+        await advance(600);
+        await save('aggregation-single-source');
+        await activate(
+          find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
+        );
+        await save('aggregation-empty-scope');
+        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await advance(900);
+        await activate(find.widgetWithText(TextButton, '查找同源 · 2').first);
+        await advance(900);
+        await save('aggregation-comparison');
+        await dismiss();
+        adapter.failAggregationMirror = true;
+        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await advance(1000);
+        await save('aggregation-partial-failure');
+        adapter.failAggregationMirror = false;
+      }
       if (platform == 'desktop') {
         app.router.go('/search');
         await advance(700);
@@ -191,7 +194,11 @@ extension PageCaptures on CaptureSession {
     }
     if (wants('library')) {
       await route(app, '/library/view-movies', 'library-movies');
-      await aggregationFilterStates();
+      if (platform == 'tv') {
+        await filterStates(const Key('tv-library-filter'), 'tv-library');
+      } else {
+        await aggregationFilterStates();
+      }
       await route(app, '/library/view-tv', 'library-series');
       await route(app, '/shelf/resume', 'shelf-continue-watching');
       await route(app, '/shelf/nextup', 'shelf-next-up');

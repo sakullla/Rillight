@@ -7,7 +7,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
-import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/library/aggregation_page.dart';
@@ -120,8 +120,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
-    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
-    await key(tester, LogicalKeyboardKey.arrowDown);
+    // 表单卡里 User-Agent 下面就是连接按钮;外观选项在左栏。
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);
@@ -210,7 +209,7 @@ void main() {
   }
 
   Future<void> focusTitle(WidgetTester tester, String title) =>
-      focusTarget(tester, find.widgetWithText(PosterCard, title), title);
+      focusTarget(tester, find.widgetWithText(TvCard, title), title);
 
   testWidgets('snapshot recovery retry is reachable from navigation', (
     tester,

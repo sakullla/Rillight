@@ -43,7 +43,7 @@ class AppShell extends StatefulWidget {
   static const overflowNavKey = Key('app-shell-libraries-overflow');
 
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
-  static const topBarHeight = 56.0;
+  static const topBarHeight = 40.0;
 
   /// 桌面搜索覆盖层里的返回。只关闭覆盖层，不弹出底下的路由。
   static const searchBackKey = Key('search-overlay-back');
@@ -395,7 +395,11 @@ class _TopBar extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           if (opaque)
-            Positioned.fill(child: ColoredBox(color: scheme.surface))
+            Positioned.fill(
+              child: ColoredBox(
+                color: Theme.of(context).scaffoldBackgroundColor,
+              ),
+            )
           else
             Positioned(
               left: 0,

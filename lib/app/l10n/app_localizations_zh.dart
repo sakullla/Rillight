@@ -1266,6 +1266,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get tvSettingsOther => '其他';
 
   @override
+  String get tvSettingsCurrent => '当前';
+
+  @override
+  String get tvViewAll => '查看全部';
+
+  @override
+  String get tvConnectHint => '输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。';
+
+  @override
+  String get tvConnectOr => '或';
+
+  @override
+  String get tvUserAgentOptional => 'User-Agent(可选)';
+
+  @override
   String get mobileAddServer => '连接其他服务器';
 
   @override

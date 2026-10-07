@@ -453,7 +453,7 @@ void main() {
     );
 
     testWidgets(
-      'search closes in place and private entry lives in the account menu',
+      'search closes in place and private entry stays hidden in the account menu',
       (tester) async {
         final auth = await _connect(tester);
         final app = await _sourceApp(tester, auth as SyntheticSourceAuth);
@@ -546,11 +546,9 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('退出登录'), findsOneWidget);
-        expect(find.byKey(ServerSwitcherDialog.privateKey), findsOneWidget);
-        await tester.tap(find.byKey(ServerSwitcherDialog.privateKey));
-        await settle(tester);
-        expect(find.byType(ServerSwitcherDialog), findsNothing);
-        expect(path(), '/private');
+        expect(find.byKey(ServerSwitcherDialog.privateKey), findsNothing);
+        expect(find.byType(ServerSwitcherDialog), findsOneWidget);
+        expect(path(), AppRoutes.library('view-movies'));
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],

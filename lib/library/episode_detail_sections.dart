@@ -648,6 +648,33 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     return value.toUpperCase();
   }
 
+  /// 紧凑摘要:视频、音频、字幕各一行,供电视详情的信息区使用。
+  static List<(String, String)> summary(
+    AppLocalizations l10n,
+    ItemMediaSource source,
+  ) {
+    String join(
+      Iterable<ItemMediaStream> streams,
+      String Function(ItemMediaStream) line,
+    ) => {
+      for (final stream in streams) line(stream),
+    }.where((value) => value.isNotEmpty).join('  ·  ');
+    final video = join(source.streams.where((s) => s.isVideo), _videoLine);
+    final audio = join(
+      source.streams.where((s) => s.isAudio),
+      (stream) => _audioLine(l10n, stream),
+    );
+    final subtitle = join(
+      source.streams.where((s) => s.isSubtitle),
+      _subtitleLine,
+    );
+    return [
+      if (video.isNotEmpty) (l10n.videoTrack, video),
+      if (audio.isNotEmpty) (l10n.audioTrack, audio),
+      if (subtitle.isNotEmpty) (l10n.subtitleTrack, subtitle),
+    ];
+  }
+
   static String _videoLine(ItemMediaStream stream) {
     final range = stream.videoRange?.trim();
     final showRange =

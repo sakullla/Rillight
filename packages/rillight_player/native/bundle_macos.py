@@ -18,6 +18,7 @@ NATIVE_LICENSES = (
     "FFmpeg-GPL-2.0.txt", "FFmpeg-LGPL-2.1.txt", "libass-ISC.txt",
     "dav1d-BSD-2-Clause.txt", "FreeType-FTL.txt", "FreeType-LICENSE.txt",
     "FriBidi-LGPL-2.1.txt", "HarfBuzz-Old-MIT.txt", "libunibreak-Zlib.txt",
+    "chromium-crc32-BSD-3-Clause.txt",
 )
 
 

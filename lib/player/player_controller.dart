@@ -1,4 +1,3 @@
-import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'package:rillight/player/player_host_command.dart';
 import 'dart:convert';
@@ -595,7 +594,7 @@ class PlayerController extends ChangeNotifier {
         return;
       }
     }
-    PlayerStartupTrace.record('controller.start');
+
     final operation = _beginOperation();
     if (operation == null || _disposed) return;
     await _start(operation);
@@ -656,7 +655,7 @@ class PlayerController extends ChangeNotifier {
       if (_settingsSaveTimer != null) await _persistSettings();
       if (!_accepts(operation)) return;
       onStage?.call('catalog metadata');
-      PlayerStartupTrace.record('controller.catalog');
+
       late EmbyItem loadedItem;
       EmbyUser? loadedUser;
       await Future.wait<void>([
@@ -691,7 +690,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) {
         return;
       }
-      PlayerStartupTrace.record('controller.catalogReady');
+
       item = loadedItem;
       if (!item!.isPlayable) {
         error = PlayerErrorKind.notPlayable;
@@ -768,10 +767,6 @@ class PlayerController extends ChangeNotifier {
         onStage: onStage,
       );
     } on EmbyException catch (failure) {
-      PlayerStartupTrace.record(
-        'controller.catalogFailed.${failure.kind.name}',
-        {'status': failure.statusCode ?? 0},
-      );
       if (!_accepts(operation)) {
         return;
       }
@@ -781,9 +776,6 @@ class PlayerController extends ChangeNotifier {
       state.phase = PlaybackPhase.failed;
       _emit();
     } catch (failure) {
-      PlayerStartupTrace.record(
-        'controller.catalogFailed.${failure.runtimeType}',
-      );
       if (!_accepts(operation)) return;
       error = PlayerErrorKind.load;
       loading = false;
@@ -1138,7 +1130,7 @@ class PlayerController extends ChangeNotifier {
         // budget. Restoration is a separate bounded attempt, still owned by
         // this operation so cancellation and a newer switch take precedence.
         clock.reset();
-        PlayerStartupTrace.record('controller.restoringPreviousSource');
+
         resolved = previous;
         await _open(
           operation: operation,
@@ -1163,7 +1155,7 @@ class PlayerController extends ChangeNotifier {
       resolved = previous;
     } on TimeoutException {
       if (!_accepts(operation)) return;
-      PlayerStartupTrace.record('controller.recoveryTimeout.$stage');
+
       // Keep the command barrier and native handle owned until open/stop exits.
       _operations.invalidate();
       if (stage != 'stop' &&
@@ -3623,7 +3615,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     _sourceRenewalOperation = operation.id;
-    PlayerStartupTrace.record('controller.sourceRenewal');
+
     try {
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
@@ -3660,11 +3652,7 @@ class PlayerController extends ChangeNotifier {
       await (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
         next.streamUrl,
       );
-      PlayerStartupTrace.record('controller.sourceRenewalReady', {
-        'urlChanged': next.streamUrl == current.streamUrl ? 0 : 1,
-      });
     } catch (_) {
-      PlayerStartupTrace.record('controller.sourceRenewalFailed');
       // Renewal is optional while cached playback continues. Normal failure
       // reporting remains available if foreground bytes cannot be recovered.
     } finally {
@@ -3750,7 +3738,6 @@ class PlayerController extends ChangeNotifier {
     _emit();
 
     try {
-      PlayerStartupTrace.record('controller.playbackInfo');
       onStage?.call('metadata');
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
@@ -3780,7 +3767,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) {
         return;
       }
-      PlayerStartupTrace.record('controller.playbackInfoReady');
+
       mediaSources = info.mediaSources;
       if (runtime != null && origin != null) {
         preferenceResolution = runtime!.preference(
@@ -3952,24 +3939,7 @@ class PlayerController extends ChangeNotifier {
       Future<void>? started;
       final subtitleRevision = ++_trackRevision;
       _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
-      PlayerStartupTrace.record('controller.mediaRequest', {
-        'sameOrigin': next.streamUrl.origin == client.baseUrl!.origin ? 1 : 0,
-        'queryNeedsPreservation':
-            next.streamUrl.query ==
-                next.streamUrl
-                    .replace(queryParameters: next.streamUrl.queryParametersAll)
-                    .query
-            ? 0
-            : 1,
-        'explicitSource': requestedSourceId == null ? 0 : 1,
-        'urlSourceMatches':
-            next.streamUrl.queryParameters['MediaSourceId'] == null
-            ? -1
-            : next.streamUrl.queryParameters['MediaSourceId'] ==
-                  next.mediaSource.id
-            ? 1
-            : 0,
-      });
+
       onStage?.call('native open');
       await _operations.run(operation, () async {
         await backend.open(
@@ -4145,12 +4115,8 @@ class PlayerController extends ChangeNotifier {
         await _failOpen(operation, detail: failure.toString());
       }
     } on EmbyException catch (failure) {
-      PlayerStartupTrace.record('controller.openFailed.${failure.kind.name}', {
-        'status': failure.statusCode ?? 0,
-      });
       await _failOpen(operation, failure: failure);
     } catch (error) {
-      PlayerStartupTrace.record('controller.openFailed.${error.runtimeType}');
       await _failOpen(operation, detail: error.toString());
     }
   }

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/source_sessions.dart';
@@ -10,27 +12,34 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
+import 'package:rillight/home/tv_shelf_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/search/search_action.dart';
 
 /// 用海报所在服务器的已有会话打开详情，不切换首页当前服务器。
-void openServerItem(
+Future<void> openServerItem(
   BuildContext context, {
   required SourceAccount account,
   required EmbyItem item,
-}) {
-  SearchOverlayController.maybeOf(context)?.close();
+}) async {
+  final overlay = SearchOverlayController.maybeOf(context);
   final registry = AuthScope.of(context).sources;
-  final libraryId = item.parentId != null && item.parentId!.isNotEmpty
-      ? item.parentId!
-      : item.id;
   final source = SourceReference(account: account, itemId: item.id);
   final location = _serverItemLocation(item.id);
   try {
+    // Resume/search projections may carry a virtual or stale ParentId.
+    final sessionPermit = registry.permit(account, sessionOnly: true);
+    final concrete = await sessionPermit.dispatch((c) => c.getItem(item.id));
+    sessionPermit.requireValid();
+    if (!context.mounted) return;
+    if (concrete.id != item.id) throw StateError('Source item mismatch');
+    final libraryId = concrete.hierarchyParentId ?? concrete.id;
     final permit = _openPermit(registry, account, libraryId);
-    context.push(
+    final router = GoRouter.of(context);
+    overlay?.close();
+    router.push(
       location,
       extra: PlayerHostOpenItemCommand(
         itemId: item.id,
@@ -39,8 +48,11 @@ void openServerItem(
         regionGeneration: permit.regionGeneration,
       ),
     );
-  } on StateError {
-    context.push(
+  } catch (_) {
+    if (!context.mounted) return;
+    final router = GoRouter.of(context);
+    overlay?.close();
+    router.push(
       location,
       extra: PlayerHostOpenItemCommand(itemId: item.id, source: source),
     );
@@ -143,7 +155,9 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
   Widget build(BuildContext context) {
     final client = _client;
     final account = _account;
+    final tv = PresentationScope.of(context).isTv;
     if (_loading || client == null || account == null) {
+      if (tv) return _tvPending(context, _title, _error, _load);
       if (_error != null) {
         return Scaffold(
           body: AppErrorView(
@@ -156,6 +170,23 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
         );
       }
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (tv) {
+      return scopeServerPosters(
+        account: account,
+        serverId: widget.serverId,
+        libraryId: widget.viewId,
+        child: TvShelfPage(
+          key: ValueKey((widget.serverId, widget.viewId)),
+          source: 'items',
+          title: _title,
+          client: client,
+          parentId: widget.viewId,
+          includeItemTypes: _includeItemTypes,
+          onOpen: (item) =>
+              openServerItem(context, account: account, item: item),
+        ),
+      );
     }
     return Scaffold(
       body: scopeServerPosters(
@@ -241,7 +272,16 @@ class _ServerResumePageState extends State<ServerResumePage> {
   Widget build(BuildContext context) {
     final client = _client;
     final account = _account;
+    final tv = PresentationScope.of(context).isTv;
     if (_loading || client == null || account == null) {
+      if (tv) {
+        return _tvPending(
+          context,
+          AppLocalizations.of(context).resumeRow,
+          _error,
+          _load,
+        );
+      }
       if (_error != null) {
         return Scaffold(
           body: AppErrorView(
@@ -254,6 +294,18 @@ class _ServerResumePageState extends State<ServerResumePage> {
         );
       }
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (tv) {
+      return scopeServerPosters(
+        account: account,
+        serverId: widget.serverId,
+        child: TvShelfPage(
+          source: 'resume',
+          client: client,
+          onOpen: (item) =>
+              openServerItem(context, account: account, item: item),
+        ),
+      );
     }
     return Scaffold(
       body: scopeServerPosters(
@@ -270,4 +322,26 @@ class _ServerResumePageState extends State<ServerResumePage> {
       ),
     );
   }
+}
+
+/// 电视:会话建立前的等待与失败,同样用电视页框。
+Widget _tvPending(
+  BuildContext context,
+  String title,
+  EmbyException? error,
+  VoidCallback retry,
+) {
+  final padding = TvFrame.contentPadding(context);
+  return TvFrame(
+    title: title,
+    child: error == null
+        ? const Center(child: CircularProgressIndicator())
+        : Padding(
+            padding: EdgeInsets.symmetric(horizontal: padding.left),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: TvFailure(error: error, retry: retry),
+            ),
+          ),
+  );
 }

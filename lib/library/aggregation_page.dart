@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:rillight/app/app_shell.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
@@ -18,6 +19,7 @@ import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
 import '../app/theme/tokens.dart';
+import '../app/tv_top_nav.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/app_empty_view.dart';
 import '../auth/auth_controller.dart';
@@ -1542,6 +1544,9 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             _slice(section).loading)
           section,
     ];
+    if (PresentationScope.of(context).isTv) {
+      return _tvBuild(context, loader, servers, rows);
+    }
     return Material(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1549,7 +1554,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
           Padding(
             padding: EdgeInsets.fromLTRB(
               AppSpacing.page,
-              desktop ? 64 : 8,
+              desktop ? AppShell.topBarHeight + AppSpacing.sm : 8,
               AppSpacing.page,
               4,
             ),
@@ -1626,6 +1631,174 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
           );
         },
       ),
+    );
+  }
+
+  /// 电视:分段胶囊在顶,下面每台服务器一行卡片;分段随内容一起滚走,
+  /// 顶部导航收起后整屏都是内容。
+  Widget _tvBuild(
+    BuildContext context,
+    ServerSectionsLoader? loader,
+    List<ServerSections> servers,
+    List<ServerSections> rows,
+  ) {
+    final l = AppLocalizations.of(context);
+    final s = TvDesign.scaleOf(context);
+    final size = MediaQuery.sizeOf(context);
+    final gutter = tvSafeGutter(size.width);
+    Widget segment(
+      String label,
+      String key,
+      _AggregationSegment value,
+      IconData icon,
+    ) => TvAction(
+      key: Key(key),
+      pill: true,
+      selected: _segment == value,
+      leading: Icon(icon),
+      onPressed: () => setState(() => _segment = value),
+      child: Text(label),
+    );
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(
+        gutter,
+        TvTopNavBar.reserveOf(context) + 4 * s,
+        gutter,
+        4 * s,
+      ),
+      child: Wrap(
+        spacing: 8 * s,
+        runSpacing: 8 * s,
+        children: [
+          segment(
+            l.resumePlay,
+            'aggregation-segment-continue',
+            _AggregationSegment.continueWatching,
+            Icons.history_rounded,
+          ),
+          segment(
+            l.filterFavorite,
+            'aggregation-segment-favorites',
+            _AggregationSegment.favorites,
+            Icons.favorite_border_rounded,
+          ),
+          segment(
+            l.libraries,
+            'aggregation-segment-libraries',
+            _AggregationSegment.libraries,
+            Icons.video_library_outlined,
+          ),
+        ],
+      ),
+    );
+    final Widget body;
+    if (loader == null || (loader.loading && servers.isEmpty)) {
+      body = SizedBox(
+        height: 260 * s,
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    } else if (servers.isEmpty) {
+      body = SizedBox(
+        height: 300 * s,
+        child: TvEmptyState(
+          icon: Icons.dns_outlined,
+          message: '没有已登录的服务器',
+          action: TvAction(
+            emphasized: true,
+            onPressed: () => context.push('${AppRoutes.connect}?add=1'),
+            child: Text(l.addServer),
+          ),
+        ),
+      );
+    } else if (rows.isEmpty) {
+      body = SizedBox(
+        height: 300 * s,
+        child: TvEmptyState(message: l.aggregationEmpty),
+      );
+    } else {
+      final captioned = _segment == _AggregationSegment.continueWatching;
+      final libraries = _segment == _AggregationSegment.libraries;
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final section in rows)
+            _tvRow(context, loader, section, captioned, libraries),
+        ],
+      );
+    }
+    return Material(
+      type: MaterialType.transparency,
+      child: MediaImageScrollListener(
+        child: ListView(
+          key: PageStorageKey('aggregation-$_segment'),
+          padding: EdgeInsets.only(bottom: tvSafeVertical(size.height)),
+          children: [header, body],
+        ),
+      ),
+    );
+  }
+
+  Widget _tvRow(
+    BuildContext context,
+    ServerSectionsLoader loader,
+    ServerSections section,
+    bool captioned,
+    bool libraries,
+  ) {
+    final s = TvDesign.scaleOf(context);
+    final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
+    final slice = _slice(section);
+    return Column(
+      key: ValueKey('aggregation-server-${section.serverId}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TvSectionTitle(
+          section.serverName,
+          padding: EdgeInsets.fromLTRB(gutter, 14 * s, gutter, 0),
+        ),
+        if (slice.loading && slice.items.isEmpty)
+          TvRowSkeleton(wide: captioned || libraries),
+        if (slice.error != null)
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: gutter),
+            child: TvFailure(
+              error: slice.error!,
+              retry: () => loader.retry(section.serverId),
+            ),
+          ),
+        if (slice.items.isNotEmpty)
+          scopeServerPosters(
+            account: section.account,
+            serverId: section.serverId,
+            child: TvItemRow(
+              title: 'aggregation-${section.serverId}-$_segment',
+              items: slice.items,
+              wide: captioned || libraries,
+              subtitle: libraries ? false : null,
+              width: libraries ? 184 * s : null,
+              onPressed: (item) => _open(section, item),
+              cardBuilder: libraries
+                  ? (context, item, node, metrics) => TvCard(
+                      item: item,
+                      wide: true,
+                      focusNode: node,
+                      imageWidth: metrics.width,
+                      preferBackdrop: false,
+                      imageMaxWidth: metrics.imageMaxWidth,
+                      onPressed: () => _open(section, item),
+                    )
+                  : null,
+              trailing: captioned
+                  ? (context, metrics) => TvMoreTile(
+                      metrics: metrics,
+                      onPressed: () => context.push(
+                        AppRoutes.serverResume(section.serverId),
+                      ),
+                    )
+                  : null,
+            ),
+          ),
+      ],
     );
   }
 
@@ -1897,6 +2070,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
       for (final row in _rows)
         if (row.items.isNotEmpty || row.error != null || row.loading) row,
     ];
+    if (presentation.isTv) return _tvBuild(context, servers, visible);
     final field = presentation.isTv
         ? TvInput(
             key: const Key('aggregation-keyword'),
@@ -1982,6 +2156,174 @@ class _AggregationSearchState extends State<_AggregationSearch> {
           ),
           Expanded(child: _results(context, visible)),
         ],
+      ),
+    );
+  }
+
+  /// 电视搜索:胶囊搜索框 + 来源筛选,结果按服务器分行。
+  Widget _tvBuild(
+    BuildContext context,
+    List<SavedServer> servers,
+    List<_SearchHit> visible,
+  ) {
+    final l = AppLocalizations.of(context);
+    final s = TvDesign.scaleOf(context);
+    final size = MediaQuery.sizeOf(context);
+    final gutter = tvSafeGutter(size.width);
+    final failed = visible.where((row) => row.error != null).length;
+    bool chosen(String id) => _servers == null || _servers!.contains(id);
+    final header = Padding(
+      padding: EdgeInsets.fromLTRB(
+        gutter,
+        TvTopNavBar.reserveOf(context) + 4 * s,
+        gutter,
+        4 * s,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TvInput(
+                  key: const Key('aggregation-keyword'),
+                  autofocus: true,
+                  pill: true,
+                  leading: const Icon(Icons.search_rounded),
+                  label: l.searchHint,
+                  controller: _keyword,
+                  onSubmitted: _submit,
+                ),
+              ),
+              if (servers.isNotEmpty) ...[
+                SizedBox(width: 10 * s),
+                TvAction(
+                  key: const Key('aggregation-search-filters'),
+                  pill: true,
+                  selected: _filtersOpen || _servers != null,
+                  leading: const Icon(Icons.filter_list_rounded),
+                  onPressed: () => setState(() => _filtersOpen = !_filtersOpen),
+                  child: Text(l.searchServerFilter),
+                ),
+              ],
+            ],
+          ),
+          if (_filtersOpen) ...[
+            SizedBox(height: 10 * s),
+            Wrap(
+              spacing: 8 * s,
+              runSpacing: 8 * s,
+              children: [
+                for (final server in servers)
+                  TvAction(
+                    key: ValueKey('aggregation-search-server-${server.id}'),
+                    pill: true,
+                    selected: chosen(server.id),
+                    leading: Icon(
+                      chosen(server.id)
+                          ? Icons.check_rounded
+                          : Icons.add_rounded,
+                    ),
+                    onPressed: () =>
+                        _toggleServer(servers, server.id, !chosen(server.id)),
+                    child: Text(server.displayName),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+    final Widget body;
+    if (_term.isEmpty) {
+      body = SizedBox(
+        height: 280 * s,
+        child: TvEmptyState(
+          icon: Icons.search_rounded,
+          message: l.searchEmptyQuery,
+        ),
+      );
+    } else if (_searching && visible.isEmpty) {
+      body = SizedBox(
+        height: 260 * s,
+        child: const Center(child: CircularProgressIndicator()),
+      );
+    } else if (visible.isEmpty) {
+      body = SizedBox(
+        height: 280 * s,
+        child: TvEmptyState(
+          icon: Icons.search_off_rounded,
+          message: l.searchNoResults,
+        ),
+      );
+    } else {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (failed > 0)
+            Padding(
+              padding: EdgeInsets.fromLTRB(gutter, 8 * s, gutter, 0),
+              child: Text(
+                failed == visible.length
+                    ? l.aggregationAllFailed
+                    : l.aggregationPartialFailure,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          for (final row in visible)
+            Column(
+              key: ValueKey('aggregation-search-${row.serverId}'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TvSectionTitle(
+                  row.serverName,
+                  trailing: row.items.isEmpty
+                      ? null
+                      : Text(
+                          '${row.items.length}',
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                  padding: EdgeInsets.fromLTRB(gutter, 14 * s, gutter, 0),
+                ),
+                if (row.loading && row.items.isEmpty) const TvRowSkeleton(),
+                if (row.error != null)
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: gutter),
+                    child: TvFailure(
+                      error: row.error!,
+                      retry: () => _retry(row.serverId),
+                    ),
+                  ),
+                if (row.items.isNotEmpty)
+                  scopeServerPosters(
+                    account: row.account,
+                    serverId: row.serverId,
+                    child: TvItemRow(
+                      title: 'aggregation-search-${row.serverId}',
+                      items: row.items,
+                      onPressed: (item) {
+                        final account = row.account;
+                        if (account == null) return;
+                        openServerItem(context, account: account, item: item);
+                      },
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      );
+    }
+    return Material(
+      type: MaterialType.transparency,
+      child: ListView(
+        key: const PageStorageKey('aggregation-search'),
+        padding: EdgeInsets.only(bottom: tvSafeVertical(size.height)),
+        children: [header, body],
       ),
     );
   }

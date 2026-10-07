@@ -355,14 +355,14 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
     await tester.pumpAndSettle();
-    final searchBack = find.descendant(
-      of: find.byWidgetPredicate(
+    // 电视不画屏幕返回钮,遥控器返回键回到首页。
+    expect(
+      find.byWidgetPredicate(
         (widget) => widget is AggregationPage && widget.search,
       ),
-      matching: find.byType(BackButton),
+      findsOneWidget,
     );
-    expect(searchBack, findsOneWidget);
-    await tester.tap(searchBack);
+    await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.byType(TvHomePage), findsOneWidget);
     expect(
@@ -391,20 +391,7 @@ void main() {
       );
       expect(find.text(label), findsOneWidget);
     }
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('tv-session-private')),
-      -200,
-      scrollable: sessionList,
-    );
-    expect(find.byKey(const Key('tv-session-private')), findsOneWidget);
-    await tester.runAsync(() async {
-      await auth.setPrivatePin('1234', '1234');
-      await auth.regionAccess.unlock('1234');
-    });
-    await tester.ensureVisible(find.byKey(const Key('tv-session-private')));
-    await tester.tap(find.byKey(const Key('tv-session-private')));
-    await tester.pumpAndSettle();
-    expect(app.router.state.uri.path, '/private');
+    expect(find.byKey(const Key('tv-session-private')), findsNothing);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 }

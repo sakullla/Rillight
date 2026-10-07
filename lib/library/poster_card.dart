@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -9,6 +7,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 
 class PosterCard extends StatelessWidget {
   const PosterCard({
@@ -516,12 +515,22 @@ class _PosterRevealOverlay extends StatelessWidget {
                         child: IconButton(
                           key: playKey,
                           tooltip: l10n.play,
-                          onPressed: () {
-                            unawaited(
-                              PlayerWindowScope.of(
-                                context,
-                              ).open(PlayerOpenRequest(itemId: item.id)),
-                            );
+                          onPressed: () async {
+                            final host = PlayerWindowScope.of(context);
+                            try {
+                              final request =
+                                  await DetailSourceScope.playbackRequest(
+                                    context,
+                                    item.id,
+                                  );
+                              if (!context.mounted) return;
+                              await host.open(request);
+                            } catch (_) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                SnackBar(content: Text(l10n.playbackFailed)),
+                              );
+                            }
                           },
                           style: IconButton.styleFrom(
                             backgroundColor: Colors.white,
