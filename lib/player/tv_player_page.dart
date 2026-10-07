@@ -166,7 +166,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         next.$3 == previous.$3;
     final keepLine =
         sameAccount &&
-        (next.$1 == (previous as (Uri?, String?, String?)).$1 ||
+        (next.$1 == previous.$1 ||
             (current?.isConfiguredPlaybackUrl(next.$1) ?? false));
     if (keepLine) {
       _identity = next;

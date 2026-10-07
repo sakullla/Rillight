@@ -6,6 +6,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/tv_top_nav.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -220,7 +221,13 @@ class _TvHomePageState extends State<TvHomePage> {
         ];
         return ListView(
           key: const PageStorageKey('tv-home'),
-          padding: EdgeInsets.zero,
+          // Only the featured image bleeds behind the navigation. When it is
+          // hidden, empty or reordered, keep the first action below the bar.
+          padding: EdgeInsets.only(
+            top: sectionChildren.firstOrNull is _TvFeatured
+                ? 0
+                : TvTopNavBar.reserveHeight,
+          ),
           children: [
             ...sectionChildren,
             if (sectionChildren.isEmpty) padded([Text(l.mobileEmpty)]),

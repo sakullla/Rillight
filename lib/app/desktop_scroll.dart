@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show precisionErrorTolerance;
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:rillight/app/desktop_performance_host.dart';
 
@@ -61,14 +63,6 @@ class _DesktopScrollPosition extends ScrollPositionWithSingleContext {
     super.debugLabel,
   });
 
-  double? _wheelTarget;
-  int _wheelGeneration = 0;
-
-  void _cancelWheelTarget() {
-    _wheelTarget = null;
-    _wheelGeneration++;
-  }
-
   @override
   void pointerScroll(double delta) {
     final platform = ScrollConfiguration.of(
@@ -77,7 +71,6 @@ class _DesktopScrollPosition extends ScrollPositionWithSingleContext {
     if ((platform != TargetPlatform.windows &&
             platform != TargetPlatform.linux) ||
         delta.abs() <= 8) {
-      _cancelWheelTarget();
       super.pointerScroll(delta);
       return;
     }
@@ -85,11 +78,13 @@ class _DesktopScrollPosition extends ScrollPositionWithSingleContext {
     // page. Precision input keeps the OS-provided distance above.
     final wheelDelta = delta * 1.6;
     if (DesktopPerformanceHost.systemReducedMotionOf(context.storageContext)) {
-      _cancelWheelTarget();
       super.pointerScroll(wheelDelta);
       return;
     }
-    final pending = activity is DrivenScrollActivity ? _wheelTarget : null;
+    final wheel = activity is _WheelScrollActivity
+        ? activity as _WheelScrollActivity
+        : null;
+    final pending = wheel?.target;
     // Reverse immediately instead of first consuming the previous direction's
     // remaining distance. Same-direction ticks accumulate without being lost.
     final base = pending != null && (pending - pixels) * delta > 0
@@ -97,45 +92,79 @@ class _DesktopScrollPosition extends ScrollPositionWithSingleContext {
         : pixels;
     final target = (base + wheelDelta).clamp(minScrollExtent, maxScrollExtent);
     if (target == pixels) {
-      _cancelWheelTarget();
       super.pointerScroll(0);
       return;
     }
-    _wheelTarget = target;
-    final generation = ++_wheelGeneration;
     updateUserScrollDirection(
       delta < 0 ? ScrollDirection.forward : ScrollDirection.reverse,
     );
-    super
-        .animateTo(
-          target,
-          duration: const Duration(milliseconds: 60),
-          curve: Curves.easeOutCubic,
-        )
-        .whenComplete(() {
-          if (generation == _wheelGeneration) _wheelTarget = null;
-        });
+    if (wheel != null) {
+      wheel.retarget(from: pixels, to: target);
+    } else {
+      beginActivity(
+        _WheelScrollActivity(
+          this,
+          from: pixels,
+          to: target,
+          vsync: context.vsync,
+        ),
+      );
+    }
+  }
+}
+
+/// Keep one ticker alive for a burst. Replacing DrivenScrollActivity on every
+/// wheel event resets its first frame to t=0, so input arriving before every
+/// vsync can prevent *any* movement until the burst ends.
+class _WheelScrollActivity extends ScrollActivity {
+  _WheelScrollActivity(
+    super.delegate, {
+    required double from,
+    required double to,
+    required TickerProvider vsync,
+  }) : _from = from,
+       target = to {
+    _ticker = vsync.createTicker(_tick)..start();
+  }
+
+  late final Ticker _ticker;
+  double _from;
+  double target;
+  Duration _elapsed = Duration.zero;
+  Duration _segmentStart = Duration.zero;
+  double _velocity = 0;
+  static const _durationUs = 60000;
+
+  void retarget({required double from, required double to}) {
+    _from = from;
+    target = to;
+    _segmentStart = _elapsed;
+  }
+
+  void _tick(Duration elapsed) {
+    _elapsed = elapsed;
+    final t = ((elapsed - _segmentStart).inMicroseconds / _durationUs).clamp(
+      0.0,
+      1.0,
+    );
+    final value = _from + (target - _from) * Curves.easeOutCubic.transform(t);
+    _velocity = (target - _from) * 3 * (1 - t) * (1 - t) / .06;
+    if (delegate.setPixels(value).abs() > precisionErrorTolerance) {
+      delegate.goIdle();
+    } else if (t >= 1) {
+      delegate.goBallistic(0);
+    }
   }
 
   @override
-  void jumpTo(double value) {
-    _cancelWheelTarget();
-    super.jumpTo(value);
-  }
-
+  bool get shouldIgnorePointer => true;
   @override
-  Future<void> animateTo(
-    double to, {
-    required Duration duration,
-    required Curve curve,
-  }) {
-    _cancelWheelTarget();
-    return super.animateTo(to, duration: duration, curve: curve);
-  }
-
+  bool get isScrolling => true;
+  @override
+  double get velocity => _velocity;
   @override
   void dispose() {
-    _cancelWheelTarget();
+    _ticker.dispose();
     super.dispose();
   }
 }

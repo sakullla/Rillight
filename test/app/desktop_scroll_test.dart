@@ -91,6 +91,30 @@ void main() {
     expect(controller.position.isScrollingNotifier.value, isFalse);
   });
 
+  testWidgets('wheel events between vsyncs keep vertical scrolling moving', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_subject(controller));
+    final offsets = <double>[];
+    for (var i = 0; i < 8; i++) {
+      await _wheel(tester, 40);
+      // A real event arrives between frames; do not give each replacement
+      // animation an extra zero-time frame before the next vsync.
+      await tester.pump(const Duration(milliseconds: 16));
+      offsets.add(controller.offset);
+    }
+    expect(offsets[3], greaterThan(0));
+    for (var i = 2; i < offsets.length; i++) {
+      expect(
+        offsets[i],
+        greaterThan(offsets[i - 1]),
+        reason: 'Input must not restart the ticker at zero every frame',
+      );
+    }
+    await tester.pump(const Duration(milliseconds: 64));
+    expect(controller.offset, closeTo(8 * 40 * 1.6, 0.01));
+  });
+
   testWidgets('reversing direction cancels the pending forward distance', (
     tester,
   ) async {

@@ -11,10 +11,10 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
-import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
+import 'synthetic_mailbox.dart';
 
 void main() {
   testWidgets(
@@ -28,6 +28,11 @@ void main() {
       );
       if (json!['warmPlayer'] == true) exit(0);
       final launch = PlayerWindowLaunch.fromJson(json);
+      expect(
+        await tester.runAsync(() => launch.protocol!.parentExpired()),
+        isFalse,
+        reason: 'Parent heartbeat expired while compiling the helper',
+      );
       final server = FakeEmbyServer(
         serverId: launch.request.source!.account.verifiedServerId,
         baseUrl: Uri.parse(launch.baseUrl),
@@ -135,21 +140,13 @@ void main() {
           final file = File(
             '${launch.protocol!.directory.path}/synthetic-position.json',
           );
-          if (!await file.exists()) return null;
-          final result =
-              jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-          await file.delete();
-          return result;
+          return consumeSyntheticMessage(file);
         });
         final menu = await tester.runAsync(() async {
           final file = File(
             '${launch.protocol!.directory.path}/synthetic-menu.json',
           );
-          if (!await file.exists()) return null;
-          final result =
-              jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-          await file.delete();
-          return result;
+          return consumeSyntheticMessage(file);
         });
         if (menu != null) await menuAction(menu);
         if (message != null) {

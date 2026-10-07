@@ -74,10 +74,11 @@ void main() {
           matching: find.byType(MediaImage),
         ),
       );
-      expect(header().item.id, 'season-friends-1');
+      // Entering a series keeps its artwork until the user selects a season.
+      expect(header().item.id, 'series-friends');
       expect(
         server.requests.any(
-          (r) => r.contains('/season-friends-1/Images/Backdrop'),
+          (r) => r.contains('/series-friends/Images/Backdrop'),
         ),
         isTrue,
       );
@@ -85,13 +86,8 @@ void main() {
       await tester.tap(find.byKey(CatalogKeys.season('season-friends-2')));
       await _artworkFrames(tester);
       expect(header().item.id, 'season-friends-2');
-      // 只有竖版季海报时,宽幅横幅优先共享的剧集横版背景。
-      expect(
-        server.requests.any(
-          (r) => r.contains('/series-friends/Images/Backdrop'),
-        ),
-        isTrue,
-      );
+      // 只有竖版季海报时复用已缓存的剧集横版背景。
+      expect(header().item.parentBackdropItemId, 'series-friends');
       expect(
         server.requests.any(
           (r) => r.contains('/season-friends-2/Images/Primary'),
@@ -107,6 +103,15 @@ void main() {
         server.requests.any((r) => r.contains('/season-friends-3/Images/')),
         isFalse,
       );
+      await tester.tap(find.byKey(CatalogKeys.season('season-friends-1')));
+      await _artworkFrames(tester);
+      expect(header().item.id, 'season-friends-1');
+      expect(
+        server.requests.any(
+          (r) => r.contains('/season-friends-1/Images/Backdrop'),
+        ),
+        isTrue,
+      );
       // 季海报失效不再影响横幅:共享背景直接命中,失效的季海报根本不被请求,
       // 也不会残留上一季旧图。
       server.items
@@ -118,6 +123,12 @@ void main() {
       await _artworkFrames(tester);
       server.requests.clear();
       app.router.go('/item/series-friends?season=season-friends-2');
+      await _artworkFrames(tester);
+      expect(header().item.id, 'series-friends');
+      await tester.tap(find.byKey(CatalogKeys.season('season-friends-1')));
+      await _artworkFrames(tester);
+      server.requests.clear();
+      await tester.tap(find.byKey(CatalogKeys.season('season-friends-2')));
       await _artworkFrames(tester);
       expect(header().item.id, 'season-friends-2');
       expect(header().item.primaryImageTag, 'two-failed');

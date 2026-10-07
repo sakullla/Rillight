@@ -64,7 +64,11 @@ const Key gridFilterClearKey = Key('catalog-grid-filter-clear');
 
 /// 其他服务器的片库网格使用该服务器会话，而不是首页当前会话。
 class ShelfClientOverride extends InheritedWidget {
-  const ShelfClientOverride({required this.client, required super.child});
+  const ShelfClientOverride({
+    super.key,
+    required this.client,
+    required super.child,
+  });
 
   final EmbyClient client;
 
@@ -78,7 +82,7 @@ class ShelfClientOverride extends InheritedWidget {
 
 /// 片库海报的打开方式。未提供时仍进入当前会话的条目路由。
 class ShelfItemOpen extends InheritedWidget {
-  const ShelfItemOpen({required this.onOpen, required super.child});
+  const ShelfItemOpen({super.key, required this.onOpen, required super.child});
 
   final ValueChanged<EmbyItem> onOpen;
 

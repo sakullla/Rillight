@@ -29,10 +29,10 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/player_host_command.dart';
-import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/aggregation/query/aggregation_query.dart';
 import 'package:rillight/aggregation/query/same_source_query.dart';
 import 'package:rillight/library/episode_mapping_dialog.dart';
+import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -49,6 +49,7 @@ import 'package:rillight/auth/source_management.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_mailbox.dart';
 
 class _Movie extends FakeEmbyItem {
   _Movie()
@@ -108,6 +109,12 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
   final Map<int, PlayerProcessProtocol> protocols = {};
   final Set<int> alive = {};
   final StringBuffer output = StringBuffer();
+
+  // This fixture exercises cold, simulated player windows. It does not host
+  // the native prewarmed-engine entry point (covered by process-control tests).
+  @override
+  Future<void> prepare({required String executable}) async {}
+
   @override
   Future<int> launch(String executable, String payloadPath) async {
     final json =
@@ -139,6 +146,10 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
     );
     final deadline = DateTime.now().add(const Duration(seconds: 65));
     while (!finished && DateTime.now().isBefore(deadline)) {
+      // Unlike native CreateProcess, this launch waits for Flutter to compile
+      // the child. Keep the parent's lease alive during that wait; otherwise
+      // a compilation over 15 seconds makes the child immediately self-close.
+      await launch.protocol!.heartbeat();
       final ready = await launch.protocol!.read('ready', consume: false);
       if (ready != null) {
         final id = ready['pid'] as int;
@@ -590,10 +601,7 @@ void main() {
           await f.auth.sources.renameLine(f.aId, saved.lines.last.id, '备用线路');
           session = await f.auth.sources.authenticate(f.aId);
         });
-        final permit = f.auth.sources.permit(
-          session.account,
-          libraryId: 'view-movies',
-        );
+        f.auth.sources.permit(session.account, libraryId: 'view-movies');
         final activeClient = f.auth.client;
         final activeUrl = activeClient.baseUrl;
         tester.view.physicalSize = environment.isTv
@@ -843,11 +851,7 @@ void main() {
           final file = File(
             '${control.protocols[pid]!.directory.path}/synthetic-menu-receipt.json',
           );
-          if (!await file.exists()) return null;
-          final result =
-              jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-          await file.delete();
-          return result;
+          return consumeSyntheticMessage(file);
         });
       }
       expect(lineReceipt, isNotNull, reason: control.output.toString());
@@ -1826,7 +1830,6 @@ void main() {
       await tester.runAsync(f.open);
       addTearDown(f.close);
       late SourceReference source;
-      late WatchSession session;
       await tester.runAsync(() async {
         final account = await f.auth.sources.acquireAccount(
           f.bId,
@@ -1838,7 +1841,7 @@ void main() {
           itemId: 'shared-id',
           mediaSourceId: 'recorded-version',
         );
-        session = await f.history.beginSession(
+        await f.history.beginSession(
           source: source,
           work: source.item,
           libraryId: 'view-movies',
@@ -1864,8 +1867,12 @@ void main() {
       await _settle(tester);
       expect(find.text('来源 A'), findsOneWidget);
       expect(find.text('来源 B'), findsOneWidget);
-      expect(find.text('2010'), findsOneWidget);
-      expect(find.text('2011'), findsOneWidget);
+      expect(
+        tester
+            .widgetList<PosterCard>(find.byType(PosterCard))
+            .map((card) => card.item.productionYear),
+        containsAll([2010, 2011]),
+      );
       expect(find.byTooltip('从本机记录的实际来源继续'), findsNothing);
       final poster = find.descendant(
         of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
@@ -1907,8 +1914,12 @@ void main() {
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      expect(find.text('1999'), findsOneWidget);
-      expect(find.text('2001'), findsOneWidget);
+      expect(
+        tester
+            .widgetList<PosterCard>(find.byType(PosterCard))
+            .map((card) => card.item.productionYear),
+        containsAll([1999, 2001]),
+      );
       expect(find.textContaining('不取最大进度'), findsNothing);
       final poster = find.descendant(
         of: find.byKey(ValueKey('aggregation-server-${f.bId}')),

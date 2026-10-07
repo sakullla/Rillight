@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -49,6 +50,7 @@ class _Source {
   bool forbidPublicInfo = false;
   int nextUpStatus = 200;
   bool rich = true;
+  Completer<void>? favoritesGate;
   final List<({Uri uri, String? userAgent, String? token})> seen = [];
 
   Future<void> open() async {
@@ -61,6 +63,9 @@ class _Source {
         token: request.headers.value('x-emby-token'),
       ));
       final path = request.uri.path;
+      if (request.uri.queryParameters['Filters'] == 'IsFavorite') {
+        await favoritesGate?.future;
+      }
       Object data = {'Id': 'user-$id', 'Name': 'user'};
       var code = 200;
       if (path.endsWith('/System/Info/Public')) {
@@ -216,12 +221,7 @@ class _Harness {
     if (includePrivate) {
       private = await add('private', 'Private');
     }
-    final listed = [
-      alpha,
-      beta,
-      if (loggedOut != null) loggedOut,
-      if (private != null) private,
-    ];
+    final listed = [alpha, beta, ?loggedOut, ?private];
     access = RegionAccessController();
     registry = SourceSessionRegistry(
       access: access,
@@ -278,6 +278,37 @@ class _Harness {
 }
 
 void main() {
+  test('each module publishes without waiting for a slow sibling', () async {
+    final harness = _Harness();
+    await harness.start();
+    addTearDown(harness.close);
+    final gate = Completer<void>();
+    harness.source('alpha').favoritesGate = gate;
+    final ready = Completer<void>();
+    harness.loader.addListener(() {
+      final alpha = harness.loader.servers
+          .where((section) => section.serverId == 'alpha')
+          .firstOrNull;
+      if (alpha != null &&
+          !alpha.continueWatching.loading &&
+          alpha.continueWatching.items.isNotEmpty &&
+          !alpha.libraries.loading &&
+          alpha.libraries.items.isNotEmpty &&
+          alpha.favorites.loading &&
+          !ready.isCompleted) {
+        ready.complete();
+      }
+    });
+    final loading = harness.loader.load();
+    try {
+      await ready.future.timeout(const Duration(seconds: 2));
+    } finally {
+      gate.complete();
+      await loading;
+    }
+    expect(harness.loader.servers.first.favorites.items, isNotEmpty);
+  });
+
   test(
     'logged-in ordinary servers load rows without a scope selection',
     () async {

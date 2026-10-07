@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
@@ -19,7 +20,8 @@ import 'package:rillight/media_image/media_image.dart';
 /// 播放和已看一直留在行尾,方便扫视一季时直接开播或标已看。
 /// [error] 非空且没有剧集时,分区换成说明与重试。已有剧集时 [loadMoreError]
 /// 留在列表上方,条目保持可见;[hasMore] 时列表末尾提供「加载更多」。
-class EpisodeList extends StatelessWidget {
+/// 作为 sliver 放入父级 [CustomScrollView]，分集只在视口附近构建。
+class EpisodeList extends StatefulWidget {
   const EpisodeList({
     super.key,
     required this.episodes,
@@ -60,118 +62,211 @@ class EpisodeList extends StatelessWidget {
   final VoidCallback? onMore;
 
   @override
+  State<EpisodeList> createState() => _EpisodeListState();
+}
+
+class _EpisodeListState extends State<EpisodeList> {
+  final _header = GlobalKey();
+  final _rows = <String, GlobalKey>{};
+  int _seekGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _locate();
+  }
+
+  @override
+  void didUpdateWidget(EpisodeList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final ids = widget.episodes.map((episode) => episode.id).toSet();
+    _rows.removeWhere((id, _) => !ids.contains(id));
+    if (oldWidget.currentId != widget.currentId ||
+        oldWidget.revealToken != widget.revealToken ||
+        oldWidget.episodes.indexWhere(
+              (episode) => episode.id == widget.currentId,
+            ) !=
+            widget.episodes.indexWhere(
+              (episode) => episode.id == widget.currentId,
+            )) {
+      _locate();
+    }
+  }
+
+  void _locate() {
+    final generation = ++_seekGeneration;
+    final target = widget.episodes.indexWhere(
+      (episode) => episode.id == widget.currentId,
+    );
+    if (target < 0) return;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _seek(target, generation, 0),
+    );
+  }
+
+  // Estimate from an already laid-out row, then align the actual target once
+  // it is built. Seeking never materializes the entire season to measure it.
+  void _seek(int target, int generation, int attempt) {
+    if (!mounted || generation != _seekGeneration || attempt >= 24) return;
+    final id = widget.episodes[target].id;
+    final targetContext = _rows[id]?.currentContext;
+    if (targetContext != null) {
+      Scrollable.ensureVisible(targetContext, alignment: 0.25);
+      return;
+    }
+    final header = _header.currentContext;
+    if (header == null) return;
+    final position = Scrollable.of(header).position;
+    var anchor = header.findRenderObject() as RenderBox;
+    var distance = target;
+    var height =
+        EpisodeRow.thumbWidthFor(MediaQuery.sizeOf(context)) * 9 / 16 +
+        AppSpacing.xs * 3;
+    var headerExtent = anchor.size.height;
+    for (var i = 0; i < widget.episodes.length; i++) {
+      final row = _rows[widget.episodes[i].id]?.currentContext;
+      final box = row?.findRenderObject();
+      if (box is RenderBox &&
+          box.hasSize &&
+          (headerExtent > 0 || (target - i).abs() < distance.abs())) {
+        anchor = box;
+        distance = target - i;
+        height = box.size.height;
+        headerExtent = 0;
+      }
+    }
+    final start = RenderAbstractViewport.of(
+      anchor,
+    ).getOffsetToReveal(anchor, 0).offset;
+    final offset = (start + headerExtent + distance * height).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    position.jumpTo(offset);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _seek(target, generation, attempt + 1),
+    );
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final error = this.error;
-    final loadMoreError = this.loadMoreError;
-    return Padding(
+    final error = widget.error;
+    final loadMoreError = widget.loadMoreError;
+    final empty = widget.episodes.isEmpty;
+    return SliverMainAxisGroup(
       key: CatalogKeys.episodesRow,
-      padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-            child: Row(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            key: _header,
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              AppSpacing.md,
+              AppSpacing.page,
+              AppSpacing.sm,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Text(
-                    l10n.episodesRow,
-                    style: theme.textTheme.titleMedium,
-                  ),
-                ),
-                headerAction,
-                if (onMore != null && error == null)
-                  TextButton(
-                    key: CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes),
-                    onPressed: onMore,
-                    style: TextButton.styleFrom(
-                      foregroundColor: theme.colorScheme.onSurfaceVariant,
-                      textStyle: theme.textTheme.labelLarge,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l10n.episodesRow,
+                        style: theme.textTheme.titleMedium,
+                      ),
                     ),
-                    child: Text(l10n.more),
+                    widget.headerAction,
+                    if (widget.onMore != null && error == null)
+                      TextButton(
+                        key: CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes),
+                        onPressed: widget.onMore,
+                        style: TextButton.styleFrom(
+                          foregroundColor: theme.colorScheme.onSurfaceVariant,
+                          textStyle: theme.textTheme.labelLarge,
+                        ),
+                        child: Text(l10n.more),
+                      ),
+                  ],
+                ),
+                if (error != null && empty)
+                  AppErrorView(
+                    message: catalogFailureMessage(l10n, error),
+                    onRetry: widget.onRetry,
+                  )
+                else if (widget.loading && empty)
+                  const EpisodeListSkeleton(),
+                if (loadMoreError != null && !empty)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          catalogFailureMessage(l10n, loadMoreError),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (widget.onRetryLoadMore != null)
+                        TextButton(
+                          onPressed: widget.loadingMore
+                              ? null
+                              : widget.onRetryLoadMore,
+                          child: Text(l10n.retry),
+                        ),
+                    ],
                   ),
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.sm),
-          if (error != null && episodes.isEmpty)
-            AppErrorView(
-              message: catalogFailureMessage(l10n, error),
-              onRetry: onRetry,
-            )
-          else if (loading && episodes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: AppSpacing.page),
-              child: EpisodeListSkeleton(),
-            )
-          else ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (loadMoreError != null) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            catalogFailureMessage(l10n, loadMoreError),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (onRetryLoadMore != null)
-                          TextButton(
-                            onPressed: loadingMore ? null : onRetryLoadMore,
-                            child: Text(l10n.retry),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                  ],
-                  for (final episode in episodes)
-                    _EnsureVisibleWhenSelected(
-                      selected: episode.id == currentId,
-                      token: revealToken,
-                      child: RepaintBoundary(
-                        child: EpisodeRow(
-                          key: ValueKey('episode-row-${episode.id}'),
-                          item: episode,
-                          selected: episode.id == currentId,
-                          busyPlayed: busyPlayedIds.contains(episode.id),
-                          onTap: () => onTap(episode),
-                          onPlay: () => onPlay(episode),
-                          onTogglePlayed: () => onTogglePlayed(episode),
-                        ),
-                      ),
-                    ),
-                  if (hasMore)
-                    Padding(
-                      padding: const EdgeInsets.only(top: AppSpacing.sm),
-                      child: Center(
-                        child: OutlinedButton(
-                          key: CatalogKeys.episodesLoadMore,
-                          onPressed: loadingMore ? null : onLoadMore,
-                          child: loadingMore
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Text(l10n.episodesLoadMore),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+          sliver: SliverList.builder(
+            itemCount: widget.episodes.length,
+            itemBuilder: (context, index) {
+              final episode = widget.episodes[index];
+              return KeyedSubtree(
+                key: _rows.putIfAbsent(episode.id, () => GlobalKey()),
+                child: EpisodeRow(
+                  key: ValueKey('episode-row-${episode.id}'),
+                  item: episode,
+                  selected: episode.id == widget.currentId,
+                  busyPlayed: widget.busyPlayedIds.contains(episode.id),
+                  onTap: () => widget.onTap(episode),
+                  onPlay: () => widget.onPlay(episode),
+                  onTogglePlayed: () => widget.onTogglePlayed(episode),
+                ),
+              );
+            },
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(
+              top: AppSpacing.sm,
+              bottom: AppSpacing.md,
             ),
-          ],
-        ],
-      ),
+            child: widget.hasMore
+                ? Center(
+                    child: OutlinedButton(
+                      key: CatalogKeys.episodesLoadMore,
+                      onPressed: widget.loadingMore ? null : widget.onLoadMore,
+                      child: widget.loadingMore
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(l10n.episodesLoadMore),
+                    ),
+                  )
+                : null,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -661,60 +756,6 @@ class _EpisodeRowSkeleton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 当前集变化后滚入可视区(含选集跳到已在列表中的集)。
-class _EnsureVisibleWhenSelected extends StatefulWidget {
-  const _EnsureVisibleWhenSelected({
-    required this.selected,
-    required this.token,
-    required this.child,
-  });
-
-  final bool selected;
-  final int token;
-  final Widget child;
-
-  @override
-  State<_EnsureVisibleWhenSelected> createState() =>
-      _EnsureVisibleWhenSelectedState();
-}
-
-class _EnsureVisibleWhenSelectedState
-    extends State<_EnsureVisibleWhenSelected> {
-  @override
-  void initState() {
-    super.initState();
-    if (widget.selected) {
-      _schedule();
-    }
-  }
-
-  @override
-  void didUpdateWidget(_EnsureVisibleWhenSelected oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.selected &&
-        (!oldWidget.selected || oldWidget.token != widget.token)) {
-      _schedule();
-    }
-  }
-
-  void _schedule() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      Scrollable.ensureVisible(
-        context,
-        alignment: 0.25,
-        duration: AppMotion.durationOf(context, AppMotion.fast),
-        curve: AppMotion.standard,
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
 }
 
 class _EpisodeProgressBar extends StatelessWidget {

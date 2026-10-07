@@ -84,6 +84,47 @@ class CatalogController extends ChangeNotifier {
 
   /// 每次 [reload] 加一。首页各片库预览行据此重拉，手动刷新才会换上新条目。
   int libraryPreviewRevision = 0;
+  final _previewLoads = _PreviewLoadGate(2);
+  final _libraryPreviews =
+      <String, ({DateTime storedAt, Future<List<EmbyItem>> items})>{};
+
+  /// Keep parsed preview data across lazy row disposal. Refresh/session changes
+  /// invalidate it; failures are never retained as successful empty libraries.
+  Future<List<EmbyItem>> loadLibraryPreview(CatalogRequest request) {
+    final key = Uri(
+      path: request.path,
+      queryParameters: request.query,
+    ).toString();
+    final cached = _libraryPreviews[key];
+    if (cached != null &&
+        DateTime.now().isBefore(cached.storedAt.add(cache.ttl))) {
+      return cached.items;
+    }
+    final generation = libraryPreviewRevision;
+    final session = _sessionKey;
+    final source = client;
+    final future = _previewLoads.run(() async {
+      if (_disposed ||
+          generation != libraryPreviewRevision ||
+          session != _sessionKey) {
+        return const <EmbyItem>[];
+      }
+      return parseCatalogPage(await cache.fetch(source, request)).items;
+    });
+    _libraryPreviews[key] = (storedAt: DateTime.now(), items: future);
+    unawaited(
+      future.then<void>(
+        (_) {},
+        onError: (Object _) {
+          if (identical(_libraryPreviews[key]?.items, future)) {
+            _libraryPreviews.remove(key);
+          }
+        },
+      ),
+    );
+    return future;
+  }
+
   bool _disposed = false;
   String? _sessionKey;
   final Map<String, Timer> _retryTimers = {};
@@ -105,6 +146,7 @@ class CatalogController extends ChangeNotifier {
     }
     final gen = ++_loadGen;
     libraryPreviewRevision++;
+    _libraryPreviews.clear();
     _clearRetries();
     final sameSession = _sessionKey == _currentSessionKey;
     _sessionKey = _currentSessionKey;
@@ -156,6 +198,7 @@ class CatalogController extends ChangeNotifier {
 
   void _onAuthChanged() {
     if (!auth.isLoggedIn) {
+      _libraryPreviews.clear();
       _sessionKey = null;
       _syncCacheSession();
       return;
@@ -606,9 +649,37 @@ class CatalogController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _libraryPreviews.clear();
     _loadGen++;
     _clearRetries();
     auth.removeListener(_onAuthChanged);
     super.dispose();
+  }
+}
+
+class _PreviewLoadGate {
+  _PreviewLoadGate(this._limit);
+
+  final int _limit;
+  var _active = 0;
+  final _waiters = <Completer<void>>[];
+
+  Future<T> run<T>(Future<T> Function() job) async {
+    if (_active >= _limit) {
+      final ticket = Completer<void>();
+      _waiters.add(ticket);
+      await ticket.future;
+    } else {
+      _active++;
+    }
+    try {
+      return await job();
+    } finally {
+      if (_waiters.isNotEmpty) {
+        _waiters.removeAt(0).complete();
+      } else {
+        _active--;
+      }
+    }
   }
 }

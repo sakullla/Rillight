@@ -72,23 +72,36 @@ void main() {
       );
       addTearDown(catalog.dispose);
 
-      await tester.pumpWidget(
-        AuthScope(
-          controller: auth,
-          child: CatalogScope(
-            controller: catalog,
-            child: const MaterialApp(
-              locale: Locale('zh'),
-              supportedLocales: AppLocalizations.supportedLocales,
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
-              home: Scaffold(
-                body: LibraryLatestData(library: _library, builder: _names),
-              ),
+      final subject = AuthScope(
+        controller: auth,
+        child: CatalogScope(
+          controller: catalog,
+          child: const MaterialApp(
+            locale: Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            home: Scaffold(
+              body: LibraryLatestData(library: _library, builder: _names),
             ),
           ),
         ),
       );
+      await tester.pumpWidget(subject);
       await _until(tester, find.text('最近更新'));
+
+      final previewRequests = server.requests
+          .where((request) => request.contains('ParentId=view-tv'))
+          .length;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(subject);
+      await _until(tester, find.text('最近更新'));
+      expect(
+        server.requests.where(
+          (request) => request.contains('ParentId=view-tv'),
+        ),
+        hasLength(previewRequests),
+        reason: 'Scrolling a library row back into view must reuse its data',
+      );
 
       expect(
         server.requests.where(

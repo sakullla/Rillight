@@ -105,7 +105,7 @@ class ServerSectionsLoader extends ChangeNotifier {
   bool _disposed = false;
   bool loading = false;
 
-  List<ServerSections> get servers => List.unmodifiable(_servers);
+  List<ServerSections> get servers => _servers;
 
   /// 重新拉取当前全部已登录普通服务器。未登录的不占结果。
   Future<void> load() async {
@@ -125,7 +125,19 @@ class ServerSectionsLoader extends ChangeNotifier {
     _servers = const [];
     loading = true;
     _notify();
-    await Future.wait(targets.map((server) => _publish(server, generation, 0)));
+    // Bound fan-out across servers; each server still loads its three slices
+    // concurrently, and publishes each slice as soon as it is available.
+    var next = 0;
+    await Future.wait(
+      List.generate(targets.length.clamp(0, 3), (_) async {
+        while (!_disposed &&
+            generation == _generation &&
+            next < targets.length) {
+          final server = targets[next++];
+          await _publish(server, generation, 0);
+        }
+      }),
+    );
     if (_disposed || generation != _generation) {
       return;
     }
@@ -153,19 +165,53 @@ class ServerSectionsLoader extends ChangeNotifier {
   }
 
   Future<void> _publish(SavedServer server, int generation, int attempt) async {
-    final result = await _fetch(server);
-    if (!_current(generation, server.id, attempt)) {
+    final SourceSession session;
+    try {
+      session = await registry.ensureSession(server.id);
+    } catch (error) {
+      if (!_current(generation, server.id, attempt)) return;
+      if (error is StateError && error.message == 'Login required') {
+        _servers = List.unmodifiable([
+          for (final item in _servers)
+            if (item.serverId != server.id) item,
+        ]);
+      } else {
+        _replace(_failed(server, error));
+      }
+      _notify();
       return;
     }
-    if (result == null) {
-      _servers = [
-        for (final item in _servers)
-          if (item.serverId != server.id) item,
-      ];
-    } else {
-      _replace(result);
-    }
+    if (!_current(generation, server.id, attempt)) return;
+    var result =
+        _servers.where((item) => item.serverId == server.id).firstOrNull ??
+        ServerSections(
+          serverId: server.id,
+          serverName: server.displayName,
+          continueWatching: const ServerSectionSlice(loading: true),
+          favorites: const ServerSectionSlice(loading: true),
+          libraries: const ServerSectionSlice(loading: true),
+        );
+    result = result.copyWith(account: session.account);
+    _replace(result);
     _notify();
+    void publish(ServerSections Function(ServerSections) update) {
+      if (!_current(generation, server.id, attempt)) return;
+      result = update(result);
+      _replace(result);
+      _notify();
+    }
+
+    await Future.wait([
+      _continueWatching(session.client).then((slice) {
+        publish((current) => current.copyWith(continueWatching: slice));
+      }),
+      _favorites(session.client).then((slice) {
+        publish((current) => current.copyWith(favorites: slice));
+      }),
+      _libraries(session.client).then((slice) {
+        publish((current) => current.copyWith(libraries: slice));
+      }),
+    ]);
   }
 
   void _replace(ServerSections section) {
@@ -174,10 +220,10 @@ class ServerSectionsLoader extends ChangeNotifier {
     final order = _order.contains(section.serverId)
         ? _order
         : [..._order, section.serverId];
-    _servers = [
+    _servers = List.unmodifiable([
       for (final id in order)
         if (map.containsKey(id)) map[id]!,
-    ];
+    ]);
   }
 
   void _markLoading(String serverId) {
@@ -194,35 +240,8 @@ class ServerSectionsLoader extends ChangeNotifier {
       favorites: current.favorites.copyWith(loading: true, clearError: true),
       libraries: current.libraries.copyWith(loading: true, clearError: true),
     );
-    _servers = [..._servers]..[index] = next;
+    _servers = List.unmodifiable([..._servers]..[index] = next);
     _notify();
-  }
-
-  Future<ServerSections?> _fetch(SavedServer server) async {
-    final SourceSession session;
-    try {
-      session = await registry.ensureSession(server.id);
-    } on StateError catch (error) {
-      if (error.message == 'Login required') {
-        return null;
-      }
-      return _failed(server, error);
-    } catch (error) {
-      return _failed(server, error);
-    }
-    final slices = await Future.wait([
-      _continueWatching(session.client),
-      _favorites(session.client),
-      _libraries(session.client),
-    ]);
-    return ServerSections(
-      serverId: server.id,
-      serverName: server.displayName,
-      account: session.account,
-      continueWatching: slices[0],
-      favorites: slices[1],
-      libraries: slices[2],
-    );
   }
 
   ServerSections _failed(SavedServer server, Object error) {

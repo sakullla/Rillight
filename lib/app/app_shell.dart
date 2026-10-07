@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -640,10 +639,9 @@ class _SearchPopRouter extends GoRouter {
   _SearchPopRouter({
     required this.host,
     required GoRouter parent,
-    required ValueListenable<RoutingConfig> routingConfig,
+    required super.routingConfig,
   }) : _parent = parent,
        super.routingConfig(
-         routingConfig: routingConfig,
          initialLocation: '/',
          overridePlatformDefaultLocation: true,
          routerNeglect: true,

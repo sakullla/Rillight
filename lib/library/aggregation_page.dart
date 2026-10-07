@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../aggregation/query/aggregation_query.dart';
@@ -21,7 +22,6 @@ import '../app/tv_widgets.dart';
 import '../app/widgets/app_empty_view.dart';
 import '../auth/auth_controller.dart';
 import '../auth/server_list_store.dart';
-import '../auth/source_sessions.dart';
 import '../emby/emby_client.dart';
 import '../emby/emby_errors.dart';
 import '../home/media_shelf.dart';
@@ -1502,7 +1502,11 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     );
   }
 
-  Widget _segmentButton(String label, String keyName, _AggregationSegment value) {
+  Widget _segmentButton(
+    String label,
+    String keyName,
+    _AggregationSegment value,
+  ) {
     final selected = _segment == value;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -1579,36 +1583,49 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     }
     final captioned = _segment == _AggregationSegment.continueWatching;
     final libraries = _segment == _AggregationSegment.libraries;
-    return ListView(
+    final indices = {for (var i = 0; i < rows.length; i++) rows[i].serverId: i};
+    return MediaImageScrollListener(
       key: const PageStorageKey('aggregation'),
-      children: [
-        for (final section in rows)
-          scopeServerPosters(
-            account: section.account,
-            serverId: section.serverId,
-            child: MediaShelf(
-              key: ValueKey('aggregation-server-${section.serverId}'),
-              shelfId: 'aggregation-${section.serverId}-$_segment',
-              title: section.serverName,
-              items: _slice(section).items,
-              loading: _slice(section).loading,
-              error: _slice(section).error,
-              onRetry: _slice(section).error == null
-                  ? null
-                  : () => loader.retry(section.serverId),
-              onTap: (item) => _open(section, item),
-              wide: captioned || libraries,
-              showProgress: captioned,
-              onMore: captioned && _slice(section).items.isNotEmpty
-                  ? () => context.push(AppRoutes.serverResume(section.serverId))
-                  : null,
-              extent: libraries ? _libraryExtent(context) : null,
-              itemBuilder: libraries
-                  ? (context, item) => _libraryCard(context, section, item)
-                  : null,
+      child: ListView.builder(
+        key: PageStorageKey('aggregation-$_segment'),
+        scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+        itemCount: rows.length,
+        findChildIndexCallback: (key) =>
+            indices[(key as ValueKey<String>).value],
+        itemBuilder: (context, index) {
+          final section = rows[index];
+          final slice = _slice(section);
+          return KeyedSubtree(
+            key: ValueKey(section.serverId),
+            child: scopeServerPosters(
+              account: section.account,
+              serverId: section.serverId,
+              child: MediaShelf(
+                key: ValueKey('aggregation-server-${section.serverId}'),
+                shelfId: 'aggregation-${section.serverId}-$_segment',
+                title: section.serverName,
+                items: slice.items,
+                loading: slice.loading,
+                error: slice.error,
+                onRetry: slice.error == null
+                    ? null
+                    : () => loader.retry(section.serverId),
+                onTap: (item) => _open(section, item),
+                wide: captioned || libraries,
+                showProgress: captioned,
+                onMore: captioned && slice.items.isNotEmpty
+                    ? () =>
+                          context.push(AppRoutes.serverResume(section.serverId))
+                    : null,
+                extent: libraries ? _libraryExtent(context) : null,
+                itemBuilder: libraries
+                    ? (context, item) => _libraryCard(context, section, item)
+                    : null,
+              ),
             ),
-          ),
-      ],
+          );
+        },
+      ),
     );
   }
 

@@ -346,6 +346,7 @@ class _MediaImageState extends State<MediaImage> {
   int? _lastRequestWidth;
   int _loadGeneration = 0;
   List<ScrollPosition> _observedScrolls = const [];
+  bool _observingScrolls = false;
   bool _frameWakeQueued = false;
   Completer<void>? _layoutWake;
   Timer? _retryTimer;
@@ -395,6 +396,7 @@ class _MediaImageState extends State<MediaImage> {
       _lastRequestWidth = requestWidth;
       _loadGeneration++;
       _cancelRetryWait();
+      _observeScrolls(false);
       _future = null;
     }
     if (_hasImageSource && scope != null) {
@@ -447,6 +449,7 @@ class _MediaImageState extends State<MediaImage> {
         widthChanged) {
       _loadGeneration++;
       _cancelRetryWait();
+      _observeScrolls(false);
       _future = _hasImageSource && _accountScope != null ? _load() : null;
     }
   }
@@ -508,8 +511,24 @@ class _MediaImageState extends State<MediaImage> {
       position.removeListener(_onObservedScroll);
     }
     _observedScrolls = ancestorScrollPositions(context);
+    if (!_observingScrolls) return;
     for (final position in _observedScrolls) {
       position.addListener(_onObservedScroll);
+    }
+  }
+
+  // Loaded posters have no queue priority or viewport wait to update. Detach
+  // their per-pixel callbacks while retaining positions for a later image/tag
+  // change, keeping warm shelves and library grids out of scroll work.
+  void _observeScrolls(bool value) {
+    if (_observingScrolls == value) return;
+    _observingScrolls = value;
+    for (final position in _observedScrolls) {
+      if (value) {
+        position.addListener(_onObservedScroll);
+      } else {
+        position.removeListener(_onObservedScroll);
+      }
     }
   }
 
@@ -572,6 +591,7 @@ class _MediaImageState extends State<MediaImage> {
 
   Future<_LoadedImage?> _load() async {
     _cancelRetryWait();
+    _observeScrolls(false);
     final generation = ++_loadGeneration;
     bool current() => mounted && generation == _loadGeneration;
     // 内存命中立刻返回,回滑已看过的海报不闪骨架、也不等停稳。
@@ -580,6 +600,7 @@ class _MediaImageState extends State<MediaImage> {
       return peeked;
     }
     final cache = MediaImageCache.instance;
+    _observeScrolls(true);
     try {
       for (var attempt = 0; current(); attempt++) {
         if (!current()) {
@@ -669,6 +690,7 @@ class _MediaImageState extends State<MediaImage> {
       return null;
     } finally {
       if (generation == _loadGeneration) {
+        _observeScrolls(false);
         final wake = _layoutWake;
         _layoutWake = null;
         if (wake != null && !wake.isCompleted) {

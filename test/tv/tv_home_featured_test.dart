@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/app/tv_top_nav.dart';
 import 'dart:async';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -646,6 +647,29 @@ void main() {
       final server = FakeEmbyServer()..itemsStatus = 503;
       final (app, _) = await start(tester, server);
       await login(tester, server);
+      tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byKey(const PageStorageKey('tv-home')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position
+          .jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('tv-row-继续观看')),
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('tv-home')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tv-row-继续观看')), findsOneWidget);
       final moviesRetry = find.descendant(
         of: find.byKey(const Key('tv-library-view-movies')),
@@ -655,6 +679,16 @@ void main() {
         of: find.byKey(const Key('tv-library-view-tv')),
         matching: find.text('重试'),
       );
+      final resumeMore = find.byKey(
+        CatalogKeys.shelfMore(CatalogKeys.shelfResume),
+      );
+      await Scrollable.ensureVisible(tester.element(resumeMore), alignment: .5);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(resumeMore).dy,
+        greaterThanOrEqualTo(TvTopNavBar.reserveHeight),
+      );
+      expect(resumeMore.hitTestable(), findsOneWidget);
       await tester.tap(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
       );
@@ -703,6 +737,17 @@ void main() {
       await tester.scrollUntilVisible(seriesRetry, 400, scrollable: homeScroll);
       expect(seriesRetry, findsOneWidget);
       tester.state<ScrollableState>(homeScroll).position.jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('tv-row-继续观看')),
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('tv-home')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tv-row-继续观看')), findsOneWidget);
       expect(tester.takeException(), isNull);
