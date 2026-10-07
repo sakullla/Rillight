@@ -42,8 +42,12 @@ class VideoEnhancementSelection {
   final bool acceptLeaveNativeDolby;
 
   /// [displayRefreshHz] is the current display. Zero is unknown; the core
-  /// then keeps double interpolation inactive.
-  Map<String, Object?> toCoreArgs({int displayRefreshHz = 0}) => {
+  /// then keeps double interpolation inactive. [clearOverload] is playback
+  /// retry only. Ordinary repeats omit it so a downgrade can stay.
+  Map<String, Object?> toCoreArgs({
+    int displayRefreshHz = 0,
+    bool clearOverload = false,
+  }) => {
     'interpolation': interpolation == FrameInterpolation.doubleRate ? 2 : 0,
     'anime4k': switch (anime4k) {
       Anime4kLevel.off => 0,
@@ -55,6 +59,7 @@ class VideoEnhancementSelection {
     'sharpen': sharpen,
     'acceptLeaveNativeDolby': acceptLeaveNativeDolby,
     'displayRefreshHz': displayRefreshHz,
+    if (clearOverload) 'clearOverload': true,
   };
 }
 

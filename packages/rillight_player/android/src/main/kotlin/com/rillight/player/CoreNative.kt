@@ -66,6 +66,17 @@ internal object CoreNative {
         acceptLeaveNativeDolby: Int,
         displayRefreshHz: Int,
     ): Int
+
+    external fun retryEnhancement(
+        handle: Long,
+        interpolation: Int,
+        anime4k: Int,
+        superResolution: Int,
+        denoise: Int,
+        sharpen: Int,
+        acceptLeaveNativeDolby: Int,
+        displayRefreshHz: Int,
+    ): Int
     external fun noteFrameDeadline(handle: Long, met: Int, monotonicUs: Long): Int
     /** Nineteen status ints, matching RillightCoreEnhancementStatus after struct_size. */
     external fun enhancementStatus(handle: Long): IntArray?

@@ -823,6 +823,51 @@ void enhancement_contract() {
   assert(snapshot(core).effective_anime4k == 2);
   assert(snapshot(core).duration_us == -1);
   assert(snapshot(core).playback_speed == 1.0);
+
+  assert(rillight_core_retry_enhancement(core, &changed) == 0);
+  active = snapshot(core);
+  assert(active.effective_interpolation == 2);
+  assert(active.effective_anime4k == 2);
+  assert(active.effective_denoise == 40);
+  assert(active.requested_sharpen == 31 && active.effective_sharpen == 31);
+  assert(active.duration_us == -1 && active.playback_speed == 1.0);
+  // A fresh miss window: the previous overload clock must not drop again.
+  assert(rillight_core_note_frame_deadline(core, 0, 2000000) == 0);
+  assert(snapshot(core).effective_interpolation == 2);
+  assert(rillight_core_note_frame_deadline(core, 0, 2999999) == 0);
+  assert(snapshot(core).effective_interpolation == 2);
+  assert(rillight_core_note_frame_deadline(core, 0, 3000000) == 0);
+  assert(snapshot(core).effective_interpolation == 0);
+  assert(snapshot(core).requested_interpolation == 2);
+  assert(rillight_core_configure_enhancement(core, &changed) == 0);
+  assert(snapshot(core).effective_interpolation == 0);
+  assert(snapshot(core).effective_anime4k == 2);
+  assert(snapshot(core).duration_us == -1 && snapshot(core).playback_speed == 1.0);
+
+  const auto unknown_display = enhancement_request(2, 2, 0, 40, 31, 0, 0);
+  assert(rillight_core_retry_enhancement(core, &unknown_display) == 0);
+  RillightCoreEnhancementStatus retried{};
+  retried.struct_size = sizeof(retried);
+  assert(rillight_core_enhancement_status(core, &retried) == 0);
+  assert(retried.requested_interpolation == 2);
+  assert(retried.effective_interpolation == 0);
+  assert(retried.reason_interpolation == RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP);
+  assert(retried.effective_anime4k == 2);
+  assert(retried.effective_denoise == 40 && retried.effective_sharpen == 31);
+  assert(retried.output_frame_rate == retried.source_frame_rate);
+  // Idle playback has no source rate, so only an unknown display blocks.
+  // Twice the source rate is covered by rillight_enhancement_resolve.
+  const auto positive_refresh = enhancement_request(2, 2, 0, 40, 31, 0, 30);
+  assert(rillight_core_configure_enhancement(core, &positive_refresh) == 0);
+  assert(snapshot(core).effective_interpolation == 2);
+  assert(rillight_core_configure_enhancement(core, &unknown_display) == 0);
+  assert(snapshot(core).effective_interpolation == 0);
+  auto rejected_retry = positive_refresh;
+  rejected_retry.display_refresh_hz = 1001;
+  assert(rillight_core_retry_enhancement(core, &rejected_retry) == -1);
+  assert(snapshot(core).effective_interpolation == 0);
+  assert(snapshot(core).requested_sharpen == 31);
+  assert(snapshot(core).duration_us == -1 && snapshot(core).playback_speed == 1.0);
   rillight_core_destroy(core);
 
   constexpr int kWidth = 8;

@@ -146,7 +146,13 @@ enum VideoEventKind {
 abstract interface class VideoBackendOutputReport {
   PlaybackOutputStatus get outputStatus;
   Future<PlaybackOutputStatus> refreshOutputStatus();
-  Future<void> applyVideoEnhancement(VideoEnhancementSelection selection);
+
+  /// [clearOverload] is playback retry. The same request without it keeps
+  /// an overload downgrade.
+  Future<void> applyVideoEnhancement(
+    VideoEnhancementSelection selection, {
+    bool clearOverload = false,
+  });
 }
 
 /// The backend preserves the originating open's identity, including late events.

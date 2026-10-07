@@ -4694,8 +4694,9 @@ double rillight_core_output_frame_rate(RillightCore* pointer) {
   return core->quality.Status().output_frame_rate;
 }
 
-int rillight_core_configure_enhancement(
-    RillightCore* pointer, const RillightCoreEnhancementRequest* request) {
+static int apply_enhancement(RillightCore* pointer,
+                             const RillightCoreEnhancementRequest* request,
+                             int retry) {
   if (!pointer || !request) return -1;
   auto* core = impl(pointer);
   std::lock_guard lock(core->mutex);
@@ -4703,7 +4704,9 @@ int rillight_core_configure_enhancement(
 #if defined(__ANDROID__)
   const bool pixels_before = core->android_cpu_pictures;
 #endif
-  if (core->quality.Configure(*request) != 0) return -1;
+  const int code = retry != 0 ? core->quality.Retry(*request)
+                               : core->quality.Configure(*request);
+  if (code != 0) return -1;
   const bool pixels_after = core->quality.RequestsPicture();
   core->android_cpu_pictures = pixels_after;
   publish_enhancement_locked(core);
@@ -4728,6 +4731,16 @@ int rillight_core_configure_enhancement(
 #endif
   core->wake.notify_all();
   return 0;
+}
+
+int rillight_core_configure_enhancement(
+    RillightCore* pointer, const RillightCoreEnhancementRequest* request) {
+  return apply_enhancement(pointer, request, 0);
+}
+
+int rillight_core_retry_enhancement(
+    RillightCore* pointer, const RillightCoreEnhancementRequest* request) {
+  return apply_enhancement(pointer, request, 1);
 }
 
 int rillight_core_note_frame_deadline(RillightCore* pointer, int met,

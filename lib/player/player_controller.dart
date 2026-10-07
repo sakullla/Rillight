@@ -425,7 +425,8 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
-  Future<void> retryVideoOutput() => _applyEnhancement(videoEnhancement);
+  Future<void> retryVideoOutput() =>
+      _applyEnhancement(videoEnhancement, clearOverload: true);
 
   /// Persists a confirmed enhancement choice. Callers explain mutual exclusion
   /// and leaving native Dolby first; cancel must not reach this method.
@@ -433,7 +434,10 @@ class PlayerController extends ChangeNotifier {
     return _applyEnhancement(selection);
   }
 
-  Future<void> _applyEnhancement(VideoEnhancementSelection selection) async {
+  Future<void> _applyEnhancement(
+    VideoEnhancementSelection selection, {
+    bool clearOverload = false,
+  }) async {
     final previousStatus = outputStatus;
     videoEnhancement = selection;
     if (outputStatus.sampled) {
@@ -461,6 +465,7 @@ class PlayerController extends ChangeNotifier {
     try {
       await (report as VideoBackendOutputReport).applyVideoEnhancement(
         selection,
+        clearOverload: clearOverload,
       );
     } catch (_) {
       // The saved choice remains. A rejected command must not pretend the

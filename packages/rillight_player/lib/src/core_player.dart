@@ -1128,7 +1128,9 @@ class DesktopCorePlayer
                 : 0
             ..displayRefreshHz =
                 (args['displayRefreshHz'] as num?)?.toInt() ?? 0;
-          result = _bindings.configureEnhancement(_handle, request);
+          result = args['clearOverload'] == true
+              ? _bindings.retryEnhancement(_handle, request)
+              : _bindings.configureEnhancement(_handle, request);
         } finally {
           calloc.free(request);
         }

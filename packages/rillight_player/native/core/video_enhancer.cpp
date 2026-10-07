@@ -234,6 +234,24 @@ int VideoQualityEnhancer::Configure(
   return 0;
 }
 
+int VideoQualityEnhancer::Retry(const RillightCoreEnhancementRequest& request) {
+  std::lock_guard lock(mutex_);
+  if (!ValidRequest(request)) return -1;
+  const bool same = configured_ && SameRequest(request);
+  request_ = request;
+  configured_ = true;
+  drop_interpolation_ = 0;
+  drop_scale_ = 0;
+  drop_spatial_ = 0;
+  // Capacity is a picture limit, not this session's overload downgrade.
+  if (!same) scale_capacity_ = 0;
+  miss_valid_ = false;
+  last_note_us_ = -1;
+  retained_ = {};
+  Recompute();
+  return 0;
+}
+
 void VideoQualityEnhancer::ResetSession() {
   std::lock_guard lock(mutex_);
   drop_interpolation_ = 0;

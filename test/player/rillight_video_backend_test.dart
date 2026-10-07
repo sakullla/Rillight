@@ -1350,6 +1350,127 @@ void main() {
     expect(driver.enhancementArgs?['displayRefreshHz'], 0);
   });
 
+  test('retry marks clearOverload and ordinary apply does not', () async {
+    var hz = 120;
+    final driver = _CoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+      readDisplayRefreshHz: () => hz,
+    );
+    addTearDown(backend.dispose);
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 48,
+        url: Uri.parse('http://127.0.0.1:1/retry.mp4'),
+      ),
+    );
+    const selection = VideoEnhancementSelection(
+      interpolation: FrameInterpolation.doubleRate,
+      anime4k: Anime4kLevel.light,
+      superResolution: SuperResolution.off,
+      denoise: 20,
+      sharpen: 10,
+      acceptLeaveNativeDolby: false,
+    );
+    await backend.applyVideoEnhancement(selection);
+    expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
+    expect(driver.enhancementArgs?['displayRefreshHz'], 120);
+    hz = 50;
+    await backend.applyVideoEnhancement(selection, clearOverload: true);
+    expect(driver.enhancementArgs?['clearOverload'], isTrue);
+    expect(driver.enhancementArgs?['displayRefreshHz'], 50);
+    expect(driver.enhancementArgs?['interpolation'], 2);
+    expect(driver.enhancementArgs?['anime4k'], 1);
+    await backend.applyVideoEnhancement(selection);
+    expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
+    expect(driver.enhancementArgs?['displayRefreshHz'], 50);
+  });
+
+  test(
+    'screen, refresh, and resume reconfigure the current enhancement',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      var hz = 144;
+      var displayId = 7;
+      final driver = _CoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(
+            frameInterpolation: FrameInterpolation.doubleRate,
+          ),
+        ),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+        readDisplayRefreshHz: () => hz,
+        readDisplayId: () => displayId,
+      );
+      addTearDown(backend.dispose);
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 49,
+          url: Uri.parse('http://127.0.0.1:1/display.mp4'),
+        ),
+      );
+      int enhancementCount() =>
+          driver.commands.where((method) => method == 'enhancement').length;
+      expect(driver.enhancementArgs?['displayRefreshHz'], 144);
+      expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
+      final opened = enhancementCount();
+
+      WidgetsBinding.instance.handleMetricsChanged();
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), opened);
+
+      hz = 60;
+      WidgetsBinding.instance.handleMetricsChanged();
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), opened + 1);
+      expect(driver.enhancementArgs?['displayRefreshHz'], 60);
+      expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
+      expect(driver.enhancementArgs?['interpolation'], 2);
+
+      WidgetsBinding.instance.handleMetricsChanged();
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), opened + 1);
+
+      displayId = 8;
+      WidgetsBinding.instance.handleMetricsChanged();
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), opened + 2);
+      expect(driver.enhancementArgs?['displayRefreshHz'], 60);
+
+      WidgetsBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), opened + 3);
+      expect(driver.enhancementArgs?['displayRefreshHz'], 60);
+
+      hz = 0;
+      WidgetsBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), opened + 4);
+      expect(driver.enhancementArgs?['displayRefreshHz'], 0);
+      expect(driver.enhancementArgs?['interpolation'], 2);
+      expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
+
+      final afterResume = enhancementCount();
+      await backend.stop();
+      hz = 144;
+      displayId = 9;
+      WidgetsBinding.instance.handleMetricsChanged();
+      WidgetsBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await backend.debugPendingDisplayReconfigure;
+      expect(enhancementCount(), afterResume);
+    },
+  );
+
   test('display refresh rounds nominal rates and drops unknown ones', () {
     expect(normalizeDisplayRefreshHz(59.94), 60);
     expect(normalizeDisplayRefreshHz(47.95), 48);

@@ -384,15 +384,24 @@ internal class CorePlayback(
                     if (code == 0) { beginTrack(result, -1, true, handle); return }
                     code
                 }
-                "enhancement" -> CoreNative.configureEnhancement(
-                    handle,
-                    (args["interpolation"] as? Number)?.toInt() ?: 0,
-                    (args["anime4k"] as? Number)?.toInt() ?: 0,
-                    (args["superResolution"] as? Number)?.toInt() ?: 0,
-                    (args["denoise"] as? Number)?.toInt() ?: 0,
-                    (args["sharpen"] as? Number)?.toInt() ?: 0,
-                    if (args["acceptLeaveNativeDolby"] == true) 1 else 0,
-                    (args["displayRefreshHz"] as? Number)?.toInt() ?: 0)
+                "enhancement" -> {
+                    val refresh = (args["displayRefreshHz"] as? Number)?.toInt() ?: 0
+                    val interpolation = (args["interpolation"] as? Number)?.toInt() ?: 0
+                    val anime4k = (args["anime4k"] as? Number)?.toInt() ?: 0
+                    val superResolution = (args["superResolution"] as? Number)?.toInt() ?: 0
+                    val denoise = (args["denoise"] as? Number)?.toInt() ?: 0
+                    val sharpen = (args["sharpen"] as? Number)?.toInt() ?: 0
+                    val acceptLeave = if (args["acceptLeaveNativeDolby"] == true) 1 else 0
+                    if (args["clearOverload"] == true) {
+                        CoreNative.retryEnhancement(
+                            handle, interpolation, anime4k, superResolution,
+                            denoise, sharpen, acceptLeave, refresh)
+                    } else {
+                        CoreNative.configureEnhancement(
+                            handle, interpolation, anime4k, superResolution,
+                            denoise, sharpen, acceptLeave, refresh)
+                    }
+                }
                 "frameDeadline" -> CoreNative.noteFrameDeadline(
                     handle,
                     if (args["met"] == true) 1 else 0,

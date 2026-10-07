@@ -399,6 +399,17 @@ void main() {
         anime.videoEnhancement.toCoreArgs(),
         containsPair('displayRefreshHz', 0),
       );
+      expect(
+        anime.videoEnhancement.toCoreArgs(displayRefreshHz: 60),
+        isNot(contains('clearOverload')),
+      );
+      expect(
+        anime.videoEnhancement.toCoreArgs(
+          displayRefreshHz: 60,
+          clearOverload: true,
+        ),
+        containsPair('clearOverload', true),
+      );
     },
   );
 }

@@ -642,11 +642,11 @@ Java_com_rillight_player_CoreNative_outputFrameRate(JNIEnv*, jobject, jlong hand
   return handle ? rillight_core_output_frame_rate(bridge(handle)->core) : 0;
 }
 
-JNIEXPORT jint JNICALL
-Java_com_rillight_player_CoreNative_configureEnhancement(
-    JNIEnv*, jobject, jlong handle, jint interpolation, jint anime4k,
-    jint super_resolution, jint denoise, jint sharpen, jint accept_leave,
-    jint refresh_hz) {
+namespace {
+
+int apply_enhancement_jni(jlong handle, jint interpolation, jint anime4k,
+                          jint super_resolution, jint denoise, jint sharpen,
+                          jint accept_leave, jint refresh_hz, bool retry) {
   if (!handle) return -1;
   RillightCoreEnhancementRequest request{};
   request.struct_size = sizeof(request);
@@ -659,7 +659,30 @@ Java_com_rillight_player_CoreNative_configureEnhancement(
   request.display_refresh_hz = refresh_hz;
   auto* owner = bridge(handle);
   std::lock_guard lock(owner->presentation_mutex);
-  return rillight_core_configure_enhancement(owner->core, &request);
+  return retry ? rillight_core_retry_enhancement(owner->core, &request)
+               : rillight_core_configure_enhancement(owner->core, &request);
+}
+
+}  // namespace
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_configureEnhancement(
+    JNIEnv*, jobject, jlong handle, jint interpolation, jint anime4k,
+    jint super_resolution, jint denoise, jint sharpen, jint accept_leave,
+    jint refresh_hz) {
+  return apply_enhancement_jni(handle, interpolation, anime4k, super_resolution,
+                               denoise, sharpen, accept_leave, refresh_hz,
+                               false);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_retryEnhancement(
+    JNIEnv*, jobject, jlong handle, jint interpolation, jint anime4k,
+    jint super_resolution, jint denoise, jint sharpen, jint accept_leave,
+    jint refresh_hz) {
+  return apply_enhancement_jni(handle, interpolation, anime4k, super_resolution,
+                               denoise, sharpen, accept_leave, refresh_hz,
+                               true);
 }
 
 JNIEXPORT jint JNICALL

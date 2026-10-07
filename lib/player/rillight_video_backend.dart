@@ -24,6 +24,8 @@ typedef CorePlayerFactory = Future<CorePlayer> Function();
 
 typedef DisplayRefreshHzReader = int Function();
 
+typedef DisplayIdReader = int Function();
+
 /// Hertz for [rate]. Zero means unknown or outside the core's 1..1000 range.
 /// Fractional panels such as 59.94 round to the nominal rate.
 @visibleForTesting
@@ -37,17 +39,30 @@ int normalizeDisplayRefreshHz(double rate) {
 /// Refresh of the current view. Zero when that view does not report one.
 @visibleForTesting
 int currentDisplayRefreshHz() {
-  final dispatcher = PlatformDispatcher.instance;
-  final views = dispatcher.views;
-  final view = dispatcher.implicitView ?? (views.isEmpty ? null : views.first);
+  final view = _currentDisplayView();
   if (view == null) return 0;
   return normalizeDisplayRefreshHz(view.display.refreshRate);
+}
+
+/// Platform id of the current view's display. -1 when no view is attached.
+@visibleForTesting
+int currentDisplayId() {
+  final view = _currentDisplayView();
+  if (view == null) return -1;
+  return view.display.id;
+}
+
+FlutterView? _currentDisplayView() {
+  final dispatcher = PlatformDispatcher.instance;
+  final views = dispatcher.views;
+  return dispatcher.implicitView ?? (views.isEmpty ? null : views.first);
 }
 
 /// A single app contract for the owned FFmpeg core on desktop and Android.
 /// Source credentials stay inside the transport isolate; native code sees
 /// only one sealed loopback URL for each registered resource.
 class RillightVideoBackend extends VideoBackend
+    with WidgetsBindingObserver
     implements
         VideoBackendCapabilities,
         VideoBackendSubtitlePresentation,
@@ -64,13 +79,17 @@ class RillightVideoBackend extends VideoBackend
     CorePlayerFactory? createPlayer,
     Directory? diskCacheDirectory,
     DisplayRefreshHzReader? readDisplayRefreshHz,
+    DisplayIdReader? readDisplayId,
   }) : _settingsStore = settingsStore,
        _createPlayer = createPlayer ?? CorePlayer.create,
        _diskCacheDirectory = diskCacheDirectory,
        _readDisplayRefreshHz = readDisplayRefreshHz ?? currentDisplayRefreshHz,
+       _readDisplayId = readDisplayId ?? currentDisplayId,
        _player = Platform.isAndroid && createPlayer == null
            ? AndroidCorePlayer()
-           : null;
+           : null {
+    _attachDisplayWatch();
+  }
 
   @override
   final ValueNotifier<Map<String, dynamic>> phonePresentation = ValueNotifier(
@@ -124,6 +143,15 @@ class RillightVideoBackend extends VideoBackend
   final CorePlayerFactory _createPlayer;
   final Directory? _diskCacheDirectory;
   final DisplayRefreshHzReader _readDisplayRefreshHz;
+  final DisplayIdReader _readDisplayId;
+  VideoEnhancementSelection? _activeEnhancement;
+  int? _appliedRefreshHz;
+  int? _appliedDisplayId;
+  bool _enhancementLive = false;
+  bool _displayWatchAttached = false;
+  bool _displayReconfigureForce = false;
+  int _displayToken = 0;
+  Future<void> _displayReconfigure = Future<void>.value();
   final _events = StreamController<VideoBackendEvent>.broadcast();
   final _nativeEvents = StreamController<Map<String, dynamic>>.broadcast();
   CorePlayer? _player;
@@ -285,17 +313,87 @@ class RillightVideoBackend extends VideoBackend
     return hz;
   }
 
+  void _attachDisplayWatch() {
+    try {
+      WidgetsBinding.instance.addObserver(this);
+      _displayWatchAttached = true;
+    } on FlutterError {
+      // Pure unit tests construct the backend before a binding exists.
+      // didChangeMetrics and didChangeAppLifecycleState still reconfigure.
+    }
+  }
+
+  void _retireEnhancement() {
+    _enhancementLive = false;
+    _activeEnhancement = null;
+    _displayReconfigureForce = false;
+    ++_displayToken;
+  }
+
+  @visibleForTesting
+  Future<void> get debugPendingDisplayReconfigure => _displayReconfigure;
+
   @override
-  Future<void> applyVideoEnhancement(
-    VideoEnhancementSelection selection,
-  ) async {
+  void didChangeMetrics() {
+    _scheduleDisplayReconfigure(force: false);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleDisplayReconfigure(force: true);
+    }
+  }
+
+  void _scheduleDisplayReconfigure({required bool force}) {
+    if (_disposed || !_enhancementLive) return;
+    if (force) _displayReconfigureForce = true;
+    final token = ++_displayToken;
+    _displayReconfigure = _displayReconfigure.catchError((Object _) {}).then((
+      _,
+    ) async {
+      if (token != _displayToken || _disposed || !_enhancementLive) return;
+      final forced = _displayReconfigureForce;
+      _displayReconfigureForce = false;
+      await _reconfigureEnhancementForDisplay(force: forced);
+    });
+  }
+
+  Future<void> _reconfigureEnhancementForDisplay({required bool force}) async {
+    final selection = _activeEnhancement;
+    if (_disposed ||
+        !_enhancementLive ||
+        selection == null ||
+        _player == null) {
+      return;
+    }
+    final hz = _displayRefreshHz();
+    final id = _readDisplayId();
+    if (!force && hz == _appliedRefreshHz && id == _appliedDisplayId) return;
+    await _sendEnhancement(selection, displayRefreshHz: hz, displayId: id);
+  }
+
+  Future<void> _sendEnhancement(
+    VideoEnhancementSelection selection, {
+    bool clearOverload = false,
+    bool sample = true,
+    int? displayRefreshHz,
+    int? displayId,
+  }) async {
     final generation = _generation;
+    final hz = displayRefreshHz ?? _displayRefreshHz();
+    final id = displayId ?? _readDisplayId();
     final token = ++_outputFollowUp;
     await _command(
       'enhancement',
-      selection.toCoreArgs(displayRefreshHz: _displayRefreshHz()),
+      selection.toCoreArgs(displayRefreshHz: hz, clearOverload: clearOverload),
     );
     if (_disposed || generation != _generation) return;
+    _activeEnhancement = selection;
+    _appliedRefreshHz = hz;
+    _appliedDisplayId = id;
+    _enhancementLive = true;
+    if (!sample) return;
     // configure_enhancement updates the request immediately. video_output_kind
     // and audio_delivery are rewritten when the next frame is enqueued.
     final followUp = _sampleOutputAfterFrame(generation, token);
@@ -304,6 +402,14 @@ class RillightVideoBackend extends VideoBackend
       return;
     }
     unawaited(followUp);
+  }
+
+  @override
+  Future<void> applyVideoEnhancement(
+    VideoEnhancementSelection selection, {
+    bool clearOverload = false,
+  }) {
+    return _sendEnhancement(selection, clearOverload: clearOverload);
   }
 
   Future<void> _sampleOutputAfterFrame(int generation, int token) async {
@@ -550,6 +656,7 @@ class RillightVideoBackend extends VideoBackend
   Future<void> _open(VideoOpenRequest request) async {
     if (_disposed) throw StateError('Player backend disposed');
     final generation = ++_generation;
+    _retireEnhancement();
     _acceptedOutputEpoch = 0;
     final sameSession = _sessionId == request.sessionId;
     _sessionId = request.sessionId;
@@ -712,12 +819,7 @@ class RillightVideoBackend extends VideoBackend
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _noteOutput(result, generation);
-      await _command(
-        'enhancement',
-        settings.videoEnhancement.toCoreArgs(
-          displayRefreshHz: _displayRefreshHz(),
-        ),
-      );
+      await _sendEnhancement(settings.videoEnhancement, sample: false);
       if (_disposed || generation != _generation) return;
       _opened = true;
       _openPhase = 'opened';
@@ -1466,6 +1568,7 @@ class RillightVideoBackend extends VideoBackend
     ++_recoveryEpoch;
     _recovering = false;
     ++_generation;
+    _retireEnhancement();
     isPlaying = false;
     _emit(VideoEventKind.cacheSpeed, 0.0, _generation);
     await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: true);
@@ -1477,6 +1580,11 @@ class RillightVideoBackend extends VideoBackend
     _disposed = true;
     ++_recoveryEpoch;
     ++_generation;
+    _retireEnhancement();
+    if (_displayWatchAttached) {
+      WidgetsBinding.instance.removeObserver(this);
+      _displayWatchAttached = false;
+    }
     await _stopSession(keepAndroidPlayer: false, releaseRetainedSnapshot: true);
     await _events.close();
     await _nativeEvents.close();

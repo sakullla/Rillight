@@ -64,6 +64,27 @@ void _useAacSource(FakeEmbyServer server) {
   ];
 }
 
+class _RecordingOutputBackend extends FakeVideoBackend
+    implements VideoBackendOutputReport {
+  @override
+  PlaybackOutputStatus outputStatus = PlaybackOutputStatus.unknown;
+
+  bool? clearOverload;
+  VideoEnhancementSelection? applied;
+
+  @override
+  Future<PlaybackOutputStatus> refreshOutputStatus() async => outputStatus;
+
+  @override
+  Future<void> applyVideoEnhancement(
+    VideoEnhancementSelection selection, {
+    bool clearOverload = false,
+  }) async {
+    applied = selection;
+    this.clearOverload = clearOverload;
+  }
+}
+
 class _RejectingOutputBackend extends FakeVideoBackend
     implements VideoBackendOutputReport {
   @override
@@ -73,7 +94,10 @@ class _RejectingOutputBackend extends FakeVideoBackend
   Future<PlaybackOutputStatus> refreshOutputStatus() async => outputStatus;
 
   @override
-  Future<void> applyVideoEnhancement(VideoEnhancementSelection selection) {
+  Future<void> applyVideoEnhancement(
+    VideoEnhancementSelection selection, {
+    bool clearOverload = false,
+  }) {
     throw StateError('enhancement rejected');
   }
 }
@@ -2062,6 +2086,40 @@ void main() {
       expect(backend.isPlaying, isFalse);
     },
   );
+
+  test('playback retry clears overload and a repeat apply does not', () async {
+    final backend = _RecordingOutputBackend();
+    final controller = PlayerController(
+      client: EmbyClient(device: _device),
+      itemId: 'synthetic',
+      backend: backend,
+      window: PlayerWindow(),
+      settingsStore: MemoryPlayerSettingsStore(),
+    );
+    addTearDown(controller.dispose);
+    controller.loading = false;
+    controller.state.phase = PlaybackPhase.playing;
+    const selection = VideoEnhancementSelection(
+      interpolation: FrameInterpolation.doubleRate,
+      anime4k: Anime4kLevel.off,
+      superResolution: SuperResolution.off,
+      denoise: 0,
+      sharpen: 0,
+      acceptLeaveNativeDolby: false,
+    );
+    await controller.selectVideoEnhancement(selection);
+    expect(backend.clearOverload, isFalse);
+    expect(backend.applied?.interpolation, FrameInterpolation.doubleRate);
+    await controller.retryVideoOutput();
+    expect(backend.clearOverload, isTrue);
+    expect(backend.applied?.interpolation, FrameInterpolation.doubleRate);
+    expect(
+      controller.videoEnhancement.interpolation,
+      FrameInterpolation.doubleRate,
+    );
+    await controller.selectVideoEnhancement(selection);
+    expect(backend.clearOverload, isFalse);
+  });
 }
 
 void _withEpisodeStreams(

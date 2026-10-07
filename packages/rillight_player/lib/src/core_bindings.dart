@@ -360,6 +360,11 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Pointer<NativeEnhancementRequest>),
         int Function(Pointer<Void>, Pointer<NativeEnhancementRequest>)
       >('rillight_core_configure_enhancement');
+  late final retryEnhancement = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<NativeEnhancementRequest>),
+        int Function(Pointer<Void>, Pointer<NativeEnhancementRequest>)
+      >('rillight_core_retry_enhancement');
   late final noteFrameDeadline = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>, Int32, Int64),

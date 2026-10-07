@@ -41,6 +41,9 @@ class VideoQualityEnhancer {
   };
 
   int Configure(const RillightCoreEnhancementRequest& request);
+  // Same selection as Configure, but never the identical-request early return.
+  // Clears this session's overload downgrade and resolves display_refresh_hz.
+  int Retry(const RillightCoreEnhancementRequest& request);
   void ResetSession();
   void ResetTemporal();
   void UpdatePlaybackFacts(int native_dolby, double source_frame_rate);
