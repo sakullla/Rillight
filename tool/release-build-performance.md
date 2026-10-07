@@ -39,3 +39,32 @@ Local validation: actionlint, composite YAML/shell validation, Windows SDK
 manifest/closure tests, and workflow provisioning tests. A new remote warm-cache
 release duration has not yet been measured; the baseline does not establish an
 achieved speedup. Existing tags are not rewritten by this workflow change.
+
+## macOS and Linux breakdown
+
+The same successful baseline's macOS job spent 1m 24s setting up Flutter,
+2m 20s compiling the sandbox proxy target, 5m 17s in the playback smoke step
+(including its own Flutter build), and 1m 40s rebuilding the ordinary entry
+point. Its verified native SDK was already cached. These are separate release
+sandbox, playback and production targets; omitting one would remove validation
+or risk packaging the validation entry point. Windows-style default-branch SDK
+warming is already provided by the existing macOS main workflow.
+
+Linux spent 47s installing build dependencies, 55s building/auditing the normal
+bundle, 50s compiling the playback target and 33s generating fixtures. The
+separate Ubuntu 24.04 job spent 45s installing the package and 2m 6s checking
+native window pixels and virtual audio. The SDK cache also hit. The clean
+installation and native output checks are retained; their runtime is useful
+validation, rather than an uncached SDK rebuild.
+
+On 2026-10-07, macOS and Linux release checks failed after a rate change because
+switching items copied a transient native `playing=false` into the new item's
+pause request. The first controller fix passed that stage in PR run
+[37642299543](https://github.com/sakullla/Rillight/actions/runs/37642299543),
+then macOS exposed the same issue during consecutive opens before the playing
+event arrived. The follow-up preserves explicit pause intent across both
+transitions, with playing/paused regression cases. Native verification of that
+follow-up is pending; GitHub's
+[Git operations / PR / Actions incident](https://stspg.io/96smrcth8bpg)
+prevented its initial push. Failed runs are not evidence of improved build
+duration or successful playback.
