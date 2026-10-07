@@ -32,6 +32,7 @@ export 'package:rillight/player/playback_switch_preflight.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -352,6 +353,113 @@ class PlayerController extends ChangeNotifier {
   int _volumeRevision = 0;
   int _rateRevision = 0;
   double playbackRate = 1.0;
+  VideoEnhancementSelection videoEnhancement = const VideoEnhancementSelection(
+    interpolation: FrameInterpolation.off,
+    anime4k: Anime4kLevel.off,
+    superResolution: SuperResolution.off,
+    denoise: 0,
+    sharpen: 0,
+    acceptLeaveNativeDolby: false,
+  );
+  PlaybackOutputStatus outputStatus = PlaybackOutputStatus.unknown;
+
+  /// Test and backend hook. Does not pause, seek, or change the Android
+  /// background-release flag.
+  void applyObservedOutput(PlaybackOutputStatus value) {
+    if (value == outputStatus) return;
+    outputStatus = value;
+    _emit();
+  }
+
+  Future<void> refreshOutputStatus() async {
+    final report = backend;
+    if (_disposed || report is! VideoBackendOutputReport) return;
+    final output = report as VideoBackendOutputReport;
+    try {
+      final next = await output.refreshOutputStatus();
+      if (_disposed) return;
+      applyObservedOutput(next);
+    } catch (_) {
+      // A failed status read leaves the last sample and the playing session.
+    }
+  }
+
+  Future<void> disableVideoEnhancement() {
+    return _applyEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+  }
+
+  Future<void> keepCurrentVideoOutput() async {
+    final current = videoEnhancement;
+    await _applyEnhancement(
+      VideoEnhancementSelection(
+        interpolation: current.interpolation,
+        anime4k: current.anime4k,
+        superResolution: current.superResolution,
+        denoise: current.denoise,
+        sharpen: current.sharpen,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+  }
+
+  Future<void> useAvailableVideoOutput() async {
+    final current = videoEnhancement;
+    await _applyEnhancement(
+      VideoEnhancementSelection(
+        interpolation: current.interpolation,
+        anime4k: current.anime4k,
+        superResolution: current.superResolution,
+        denoise: current.denoise,
+        sharpen: current.sharpen,
+        acceptLeaveNativeDolby: true,
+      ),
+    );
+  }
+
+  Future<void> retryVideoOutput() => _applyEnhancement(videoEnhancement);
+
+  Future<void> _applyEnhancement(VideoEnhancementSelection selection) async {
+    videoEnhancement = selection;
+    if (outputStatus.sampled) {
+      outputStatus = outputStatus.applying(selection);
+    }
+    _emit();
+    try {
+      await (await _settings()).writePatch(
+        PlayerSettings(
+          frameInterpolation: selection.interpolation,
+          anime4k: selection.anime4k,
+          superResolution: selection.superResolution,
+          denoise: selection.denoise,
+          sharpen: selection.sharpen,
+          acceptLeaveNativeDolby: selection.acceptLeaveNativeDolby,
+        ),
+      );
+    } catch (_) {}
+    final report = backend;
+    if (_disposed ||
+        !_canSendPlaybackParameters ||
+        report is! VideoBackendOutputReport) {
+      return;
+    }
+    try {
+      await (report as VideoBackendOutputReport).applyVideoEnhancement(
+        selection,
+      );
+    } catch (_) {
+      // The saved choice remains. Playback position and pause state stay put.
+    }
+  }
+
   int maxStreamingBitrate = kCoreMaxStreamingBitrate;
   int? audioStreamIndex;
   int? subtitleStreamIndex;
@@ -3222,6 +3330,10 @@ class PlayerController extends ChangeNotifier {
           unawaited(backend.stop().catchError((Object _) {}));
         case VideoEventKind.sourceRefreshRequired:
           unawaited(_renewSourceUrl(operation));
+        case VideoEventKind.outputStatus:
+          final next = event.value;
+          if (next is PlaybackOutputStatus) applyObservedOutput(next);
+          return;
       }
       _lastPlaybackUi = DateTime.now();
       _emit();
@@ -4950,6 +5062,7 @@ class PlayerController extends ChangeNotifier {
       if (subtitleRevision == _subtitleSettingsRevision) {
         phoneSubtitleSettings = settings.effectivePhoneSubtitles;
       }
+      videoEnhancement = settings.videoEnhancement;
       skipIntroEnabled = settings.isSkipIntroEnabled;
       skipOutroEnabled = settings.isSkipOutroEnabled;
       _seriesPreferences = !_scopedPlayback

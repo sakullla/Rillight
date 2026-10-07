@@ -18,6 +18,8 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/next_episode_card.dart';
+import 'package:rillight/player/playback_output_panel.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'player_window_host.dart';
 import 'package:rillight/player/player_window.dart';
@@ -310,6 +312,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       _TvPanel.source => l.mediaSource,
       _TvPanel.speed => l.mobileSpeed,
       _TvPanel.skip => l.playerSkipSettings,
+      _TvPanel.output => l.playbackOutputSection,
     };
     final scheme = Theme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
@@ -521,6 +524,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   ),
                                 ),
                               ],
+                              if (panel == _TvPanel.output)
+                                PlaybackOutputPanelView(controller: c),
                               if (panel == _TvPanel.speed)
                                 for (final rate in kPlaybackRateLadder)
                                   TvAction(
@@ -606,6 +611,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
           if (c.skipOutroEnabled) l.settingsSkipOutro,
         ];
         return enabled.isEmpty ? l.playerSettingOff : enabled.join(' · ');
+      case _TvPanel.output:
+        return playbackVideoOutputLabel(l, c.outputStatus);
     }
   }
 
@@ -1062,6 +1069,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                           )
                                                         : null,
                                                   ),
+                                                  _action(
+                                                    'tv-player-output',
+                                                    Icons.tune_rounded,
+                                                    l.playbackOutputSection,
+                                                    () =>
+                                                        _panel(_TvPanel.output),
+                                                  ),
                                                 ],
                                               ),
                                             ),
@@ -1103,7 +1117,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   }
 }
 
-enum _TvPanel { tracks, quality, source, speed, skip }
+enum _TvPanel { tracks, quality, source, speed, skip, output }
 
 /// Playback controls update their focus ring immediately, including reduced motion.
 /// The timeline stays transparent so the video remains the visual backdrop.

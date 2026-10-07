@@ -10,6 +10,7 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_transport_session.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -31,7 +32,8 @@ class RillightVideoBackend extends VideoBackend
         VideoBackendTranscodeSubtitles,
         VideoBackendTrackSupport,
         VideoBackendSourceRenewal,
-        VideoBackendNativeOverlay {
+        VideoBackendNativeOverlay,
+        VideoBackendOutputReport {
   // Native presentation is optional; the other platform views retain their
   // existing background and surface lifecycle.
   RillightVideoBackend({
@@ -161,6 +163,59 @@ class RillightVideoBackend extends VideoBackend
   String? _selectedSubtitleTitle;
   double _volume = 1;
   double _rate = 1;
+  PlaybackOutputStatus _outputStatus = PlaybackOutputStatus.unknown;
+
+  @override
+  PlaybackOutputStatus get outputStatus => _outputStatus;
+
+  void _noteOutput(Map<String, dynamic> result, int generation) {
+    if (result['videoOutputKind'] is! num &&
+        result['dolbyVisionProfile'] is! num) {
+      return;
+    }
+    if (result['audioDelivery'] is! num &&
+        result['reasonInterpolation'] is! num) {
+      return;
+    }
+    final next = PlaybackOutputStatus.fromCoreMap(result);
+    if (!next.sampled || next == _outputStatus) return;
+    _outputStatus = next;
+    _emit(VideoEventKind.outputStatus, next, generation);
+  }
+
+  @override
+  Future<PlaybackOutputStatus> refreshOutputStatus() async {
+    final player = _player;
+    final generation = _generation;
+    if (player == null || _disposed) return _outputStatus;
+    Map<String, dynamic> core = const {};
+    try {
+      core = await player.command('outputStatus');
+    } catch (_) {
+      // Keep the last sample when this build has no read-only status command.
+    }
+    if (_disposed || generation != _generation) return _outputStatus;
+    Map<String, dynamic> surface = const {};
+    try {
+      surface = await surfaceStatus();
+    } catch (_) {}
+    if (_disposed || generation != _generation) return _outputStatus;
+    final merged = <String, dynamic>{...core};
+    for (final key in const [
+      'hdrDisplayActive',
+      'outputColorSpace',
+      'hdrOutput',
+    ]) {
+      if (surface.containsKey(key)) merged[key] = surface[key];
+    }
+    _noteOutput(merged, generation);
+    return _outputStatus;
+  }
+
+  @override
+  Future<void> applyVideoEnhancement(VideoEnhancementSelection selection) {
+    return _command('enhancement', selection.toCoreArgs());
+  }
 
   @override
   Duration position = Duration.zero;
@@ -533,6 +588,7 @@ class RillightVideoBackend extends VideoBackend
       if (_disposed || generation != _generation) return;
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
+      _noteOutput(result, generation);
       await _command('enhancement', settings.videoEnhancement.toCoreArgs());
       if (_disposed || generation != _generation) return;
       _opened = true;
@@ -1048,6 +1104,7 @@ class RillightVideoBackend extends VideoBackend
     }
     selectedAudioIndex = result['audioIndex'] as int?;
     selectedSubtitleIndex = result['subtitleIndex'] as int?;
+    _noteOutput(result, generation);
   }
 
   /// Reports one display deadline. The saved selection and sealed media URL

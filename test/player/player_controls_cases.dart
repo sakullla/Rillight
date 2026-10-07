@@ -17,7 +17,12 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_output_status.dart';
+import 'package:rillight/player/phone/phone_player_interaction.dart';
+import 'package:rillight/player/phone_player_controls.dart';
+import 'package:rillight/player/playback_settings_menu.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -1334,6 +1339,242 @@ void main() {
     );
     expect(playerEpisodeWindowStart(indexNumber: 40, total: 191), 40 - 1 - 4);
   });
+
+  testWidgets(
+    'playback settings show actual output separately from the source',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final video = FakeVideoBackend()
+        ..isPlaying = true
+        ..position = const Duration(seconds: 12)
+        ..rate = 1.5;
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'synthetic',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(volume: 40, playbackRate: 1.25),
+        ),
+      );
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      controller.playbackRate = 1.25;
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 5,
+          'dolbyVisionCompatibility': 1,
+          'videoOutputKind': 1,
+          'doviReconstruction': 3,
+          'audioDelivery': 1,
+          'audioChannels': 2,
+          'audioAtmos': 1,
+          'catalogVideo': '杜比视界',
+          'catalogAudio': 'Atmos',
+          'requestedInterpolation': 2,
+          'effectiveInterpolation': 0,
+          'reasonInterpolation': 2,
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: Scaffold(body: PlaybackSettingsMenu(controller: controller)),
+        ),
+      );
+      await tester.tap(find.byKey(PlayerKeys.more));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final outputSection = find.byKey(const Key('player-output-section'));
+      await tester.ensureVisible(outputSection);
+      await tester.tap(outputSection);
+      await tester.pump();
+
+      final source = tester
+          .widget<Text>(find.byKey(const Key('playback-output-source')))
+          .data!;
+      final picture = tester
+          .widget<Text>(find.byKey(const Key('playback-output-video')))
+          .data!;
+      final audio = tester
+          .widget<Text>(find.byKey(const Key('playback-output-audio')))
+          .data!;
+      expect(source, contains('杜比视界 Profile 5'));
+      expect(source, contains('基础层回退'));
+      expect(picture, contains('SDR 映射'));
+      expect(picture, isNot(contains('杜比')));
+      expect(picture, isNot(contains('Atmos')));
+      expect(audio, '实际音频输出  立体声 PCM');
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('请求 双倍'),
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('生效 关闭'),
+      );
+      expect(find.textContaining('这项增强未运行'), findsOneWidget);
+      expect(find.textContaining('倍速播放时压缩透传不可用'), findsOneWidget);
+
+      final disable = find.byKey(const Key('playback-output-disable'));
+      await tester.ensureVisible(disable);
+      await tester.tap(disable);
+      await tester.pump();
+      await tester.pump();
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      expect(video.rate, 1.5);
+      expect(controller.playbackRate, 1.25);
+      expect(controller.videoEnhancement.interpolation, FrameInterpolation.off);
+      expect(
+        (await controller.settingsStore!.read()).frameInterpolation,
+        FrameInterpolation.off,
+      );
+
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 7,
+          'dolbyVisionCompatibility': 6,
+          'videoOutputKind': 3,
+          'outputColorSpace': 'scRGB',
+          'audioDelivery': 4,
+          'audioChannels': 8,
+          'audioAtmos': 0,
+        }),
+      );
+      await tester.pump();
+      final mapped = tester
+          .widget<Text>(find.byKey(const Key('playback-output-video')))
+          .data!;
+      expect(mapped, contains('HDR（scRGB）'));
+      expect(mapped, isNot(contains('原生杜比')));
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-audio')))
+            .data,
+        contains('压缩透传'),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-output-audio')))
+            .data,
+        isNot(contains('Atmos')),
+      );
+    },
+  );
+
+  testWidgets(
+    'phone playback settings show actual output separately from the source',
+    (tester) async {
+      tester.view.physicalSize = const Size(412, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final video = FakeVideoBackend()
+        ..isPlaying = true
+        ..position = const Duration(seconds: 12);
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'synthetic',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(volume: 40, playbackRate: 1.25),
+        ),
+      );
+      final interaction = PhonePlayerInteraction();
+      addTearDown(interaction.dispose);
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      controller.isPlaying = true;
+      controller.duration = const Duration(minutes: 20);
+      controller.position = const Duration(seconds: 12);
+      controller.playbackRate = 1.25;
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 5,
+          'dolbyVisionCompatibility': 1,
+          'videoOutputKind': 1,
+          'doviReconstruction': 3,
+          'audioDelivery': 1,
+          'audioChannels': 2,
+          'audioAtmos': 1,
+          'catalogVideo': '杜比视界',
+          'catalogAudio': 'Atmos',
+          'requestedInterpolation': 2,
+          'effectiveInterpolation': 0,
+          'reasonInterpolation': 2,
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: Scaffold(
+            body: PhonePlayerControls(
+              controller: controller,
+              danmaku: null,
+              interaction: interaction,
+              onClose: () {},
+              onOpenDanmakuPanel: () {},
+              onOpenDanmakuSearch: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final section = find.byKey(
+        const ValueKey('mobile-player-section-output'),
+      );
+      await tester.ensureVisible(section);
+      expect(
+        tester.widget<ListTile>(section).subtitle,
+        isA<Text>().having((text) => text.data, 'data', contains('SDR 映射')),
+      );
+      expect(
+        tester.widget<ListTile>(section).subtitle,
+        isA<Text>().having((text) => text.data, 'data', isNot(contains('杜比'))),
+      );
+      await tester.tap(section);
+      await tester.pump();
+      final source = tester
+          .widget<Text>(find.byKey(const Key('playback-output-source')))
+          .data!;
+      final audio = tester
+          .widget<Text>(find.byKey(const Key('playback-output-audio')))
+          .data!;
+      expect(source, contains('杜比视界 Profile 5'));
+      expect(source, contains('基础层回退'));
+      expect(audio, '实际音频输出  立体声 PCM');
+      expect(find.textContaining('这项增强未运行'), findsOneWidget);
+      final disable = find.byKey(const Key('playback-output-disable'));
+      await tester.ensureVisible(disable);
+      await tester.tap(disable);
+      await tester.pump();
+      await tester.pump();
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      expect(controller.playbackRate, 1.25);
+      expect(controller.videoEnhancement.interpolation, FrameInterpolation.off);
+    },
+  );
 }
 
 void _withEpisodeStreams(

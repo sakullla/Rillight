@@ -817,6 +817,8 @@ class DesktopCorePlayer
           args['met'] == true ? 1 : 0,
           (args['monotonicUs'] as num?)?.toInt() ?? -1,
         );
+      case 'outputStatus':
+        result = 0;
       default:
         throw UnsupportedError('Unknown core command $method');
     }
@@ -879,8 +881,10 @@ class DesktopCorePlayer
       snapshot = _readSnapshot();
     }
     final mapped = _trackResult(snapshot, _serverStreams);
-    if (method == 'enhancement' || method == 'frameDeadline') {
+    try {
       mapped.addAll(_readEnhancementStatus());
+    } catch (_) {
+      // A missing enhancement read must not fail play, pause or seek.
     }
     return mapped;
   }

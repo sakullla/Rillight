@@ -291,6 +291,10 @@ internal class CorePlayback(
         if (debugDiagnostics) android.util.Log.i("RillightCommand",
             "begin method=$method generation=${active.generation}")
         try {
+            if (method == "outputStatus") {
+                result.success(successMap(handle))
+                return
+            }
             val accepted = when (method) {
                 "play" -> {
                     desiredPaused = false

@@ -1900,6 +1900,330 @@ abstract class AppLocalizations {
   /// **'播放设置'**
   String get playerPlaybackSettings;
 
+  /// Player and settings section for the real video, audio and enhancement state.
+  ///
+  /// In zh, this message translates to:
+  /// **'实际输出'**
+  String get playbackOutputSection;
+
+  /// No description provided for @playbackOutputSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'片源'**
+  String get playbackOutputSource;
+
+  /// No description provided for @playbackOutputVideo.
+  ///
+  /// In zh, this message translates to:
+  /// **'实际视频输出'**
+  String get playbackOutputVideo;
+
+  /// No description provided for @playbackOutputAudio.
+  ///
+  /// In zh, this message translates to:
+  /// **'实际音频输出'**
+  String get playbackOutputAudio;
+
+  /// No description provided for @playbackOutputUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'未知'**
+  String get playbackOutputUnknown;
+
+  /// No description provided for @playbackOutputNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'无'**
+  String get playbackOutputNone;
+
+  /// No description provided for @playbackOutputNotDolby.
+  ///
+  /// In zh, this message translates to:
+  /// **'非杜比视界'**
+  String get playbackOutputNotDolby;
+
+  /// No description provided for @playbackOutputProfile.
+  ///
+  /// In zh, this message translates to:
+  /// **'杜比视界 Profile {profile}'**
+  String playbackOutputProfile(int profile);
+
+  /// No description provided for @playbackOutputBaseLayer.
+  ///
+  /// In zh, this message translates to:
+  /// **'基础层 {layer}'**
+  String playbackOutputBaseLayer(String layer);
+
+  /// No description provided for @playbackOutputBaseHdr10.
+  ///
+  /// In zh, this message translates to:
+  /// **'HDR10'**
+  String get playbackOutputBaseHdr10;
+
+  /// No description provided for @playbackOutputBaseSdr.
+  ///
+  /// In zh, this message translates to:
+  /// **'SDR'**
+  String get playbackOutputBaseSdr;
+
+  /// No description provided for @playbackOutputBaseHlg.
+  ///
+  /// In zh, this message translates to:
+  /// **'HLG'**
+  String get playbackOutputBaseHlg;
+
+  /// No description provided for @playbackOutputSdr.
+  ///
+  /// In zh, this message translates to:
+  /// **'SDR 映射'**
+  String get playbackOutputSdr;
+
+  /// No description provided for @playbackOutputHdr.
+  ///
+  /// In zh, this message translates to:
+  /// **'HDR'**
+  String get playbackOutputHdr;
+
+  /// No description provided for @playbackOutputHdrScRgb.
+  ///
+  /// In zh, this message translates to:
+  /// **'HDR（scRGB）'**
+  String get playbackOutputHdrScRgb;
+
+  /// No description provided for @playbackOutputHdrEdr.
+  ///
+  /// In zh, this message translates to:
+  /// **'HDR（EDR）'**
+  String get playbackOutputHdrEdr;
+
+  /// No description provided for @playbackOutputHdrPq.
+  ///
+  /// In zh, this message translates to:
+  /// **'HDR（PQ）'**
+  String get playbackOutputHdrPq;
+
+  /// No description provided for @playbackOutputNativeDolby.
+  ///
+  /// In zh, this message translates to:
+  /// **'原生杜比视界'**
+  String get playbackOutputNativeDolby;
+
+  /// No description provided for @playbackOutputReconRpu.
+  ///
+  /// In zh, this message translates to:
+  /// **'RPU'**
+  String get playbackOutputReconRpu;
+
+  /// No description provided for @playbackOutputReconFel.
+  ///
+  /// In zh, this message translates to:
+  /// **'FEL'**
+  String get playbackOutputReconFel;
+
+  /// No description provided for @playbackOutputReconBase.
+  ///
+  /// In zh, this message translates to:
+  /// **'基础层回退'**
+  String get playbackOutputReconBase;
+
+  /// No description provided for @playbackOutputDisplayHdrOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示器 HDR：开启'**
+  String get playbackOutputDisplayHdrOn;
+
+  /// No description provided for @playbackOutputDisplayHdrOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示器 HDR：关闭'**
+  String get playbackOutputDisplayHdrOff;
+
+  /// No description provided for @playbackOutputAudioStereo.
+  ///
+  /// In zh, this message translates to:
+  /// **'立体声 PCM'**
+  String get playbackOutputAudioStereo;
+
+  /// No description provided for @playbackOutputAudioDownmix.
+  ///
+  /// In zh, this message translates to:
+  /// **'立体声下混'**
+  String get playbackOutputAudioDownmix;
+
+  /// No description provided for @playbackOutputAudioChannels.
+  ///
+  /// In zh, this message translates to:
+  /// **'{channels} 声道 PCM'**
+  String playbackOutputAudioChannels(int channels);
+
+  /// No description provided for @playbackOutputAudioPassthrough.
+  ///
+  /// In zh, this message translates to:
+  /// **'压缩透传'**
+  String get playbackOutputAudioPassthrough;
+
+  /// No description provided for @playbackOutputAudioAtmos.
+  ///
+  /// In zh, this message translates to:
+  /// **'Atmos 透传'**
+  String get playbackOutputAudioAtmos;
+
+  /// No description provided for @playbackOutputRequested.
+  ///
+  /// In zh, this message translates to:
+  /// **'请求'**
+  String get playbackOutputRequested;
+
+  /// No description provided for @playbackOutputEffective.
+  ///
+  /// In zh, this message translates to:
+  /// **'生效'**
+  String get playbackOutputEffective;
+
+  /// No description provided for @playbackOutputIdle.
+  ///
+  /// In zh, this message translates to:
+  /// **'未在播放，实际输出未知'**
+  String get playbackOutputIdle;
+
+  /// No description provided for @playbackOutputSpeedPcm.
+  ///
+  /// In zh, this message translates to:
+  /// **'倍速播放时压缩透传不可用，当前输出为 PCM。'**
+  String get playbackOutputSpeedPcm;
+
+  /// No description provided for @playbackOutputBaseFallback.
+  ///
+  /// In zh, this message translates to:
+  /// **'残差合成失败，当前是基础层回退，不是 FEL 完成。'**
+  String get playbackOutputBaseFallback;
+
+  /// No description provided for @playbackOutputProfile5MissingRpu.
+  ///
+  /// In zh, this message translates to:
+  /// **'Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。'**
+  String get playbackOutputProfile5MissingRpu;
+
+  /// No description provided for @playbackEnhanceInterpolation.
+  ///
+  /// In zh, this message translates to:
+  /// **'插帧'**
+  String get playbackEnhanceInterpolation;
+
+  /// No description provided for @playbackEnhanceAnime4k.
+  ///
+  /// In zh, this message translates to:
+  /// **'Anime4K'**
+  String get playbackEnhanceAnime4k;
+
+  /// No description provided for @playbackEnhanceSuperResolution.
+  ///
+  /// In zh, this message translates to:
+  /// **'通用超分'**
+  String get playbackEnhanceSuperResolution;
+
+  /// No description provided for @playbackEnhanceDenoise.
+  ///
+  /// In zh, this message translates to:
+  /// **'降噪'**
+  String get playbackEnhanceDenoise;
+
+  /// No description provided for @playbackEnhanceSharpen.
+  ///
+  /// In zh, this message translates to:
+  /// **'锐化'**
+  String get playbackEnhanceSharpen;
+
+  /// No description provided for @playbackEnhanceDouble.
+  ///
+  /// In zh, this message translates to:
+  /// **'双倍'**
+  String get playbackEnhanceDouble;
+
+  /// No description provided for @playbackEnhanceLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'轻'**
+  String get playbackEnhanceLight;
+
+  /// No description provided for @playbackEnhanceStrong.
+  ///
+  /// In zh, this message translates to:
+  /// **'强'**
+  String get playbackEnhanceStrong;
+
+  /// No description provided for @playbackEnhanceX2.
+  ///
+  /// In zh, this message translates to:
+  /// **'2 倍'**
+  String get playbackEnhanceX2;
+
+  /// No description provided for @playbackEnhanceDisable.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭增强'**
+  String get playbackEnhanceDisable;
+
+  /// No description provided for @playbackEnhanceKeepOutput.
+  ///
+  /// In zh, this message translates to:
+  /// **'留在当前输出'**
+  String get playbackEnhanceKeepOutput;
+
+  /// No description provided for @playbackEnhanceUseAvailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'改用可用输出'**
+  String get playbackEnhanceUseAvailable;
+
+  /// No description provided for @playbackEnhanceRetry.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试'**
+  String get playbackEnhanceRetry;
+
+  /// No description provided for @playbackEnhanceReasonNativeDolby.
+  ///
+  /// In zh, this message translates to:
+  /// **'原生杜比视界生效，这项增强未运行。'**
+  String get playbackEnhanceReasonNativeDolby;
+
+  /// No description provided for @playbackEnhanceReasonModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'模型或着色器不可用，继续原画。'**
+  String get playbackEnhanceReasonModel;
+
+  /// No description provided for @playbackEnhanceReasonOverload.
+  ///
+  /// In zh, this message translates to:
+  /// **'连续达不到帧期限，已降低生效档。已保存的选择未改。'**
+  String get playbackEnhanceReasonOverload;
+
+  /// No description provided for @playbackEnhanceReasonRefresh.
+  ///
+  /// In zh, this message translates to:
+  /// **'受显示器刷新率限制，未按请求生效。'**
+  String get playbackEnhanceReasonRefresh;
+
+  /// No description provided for @playbackEnhanceReasonNoPicture.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有可处理的画面。'**
+  String get playbackEnhanceReasonNoPicture;
+
+  /// No description provided for @playbackEnhanceReasonCapacity.
+  ///
+  /// In zh, this message translates to:
+  /// **'Anime4K 与通用超分不能同时生效。'**
+  String get playbackEnhanceReasonCapacity;
+
+  /// No description provided for @playbackEnhanceReasonMismatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'生效值与请求不一致。'**
+  String get playbackEnhanceReasonMismatch;
+
   /// Keep the player window above other windows.
   ///
   /// In zh, this message translates to:

@@ -17,6 +17,8 @@ import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/phone_subtitle_settings.dart';
+import 'package:rillight/player/playback_output_panel.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
@@ -740,6 +742,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   }
                 }
                 return '';
+              case 'output':
+                return playbackVideoOutputLabel(l, c.outputStatus);
               default:
                 return '';
             }
@@ -813,6 +817,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                           'danmaku' => l.danmaku,
                           'source' => l.mobileSource,
                           'picture' => l.playerPictureSettings,
+                          'output' => l.playbackOutputSection,
                           _ => l.mobileMore,
                         },
                         style: theme.textTheme.titleLarge?.copyWith(
@@ -868,6 +873,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               Icons.fast_forward_rounded,
                               l.playerSkipSettings,
                             ),
+                            'output': (
+                              Icons.tune_rounded,
+                              l.playbackOutputSection,
+                            ),
                             if (danmaku != null)
                               'danmaku': (Icons.chat_bubble_outline, l.danmaku),
                           }.entries)
@@ -909,6 +918,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                         ],
                         if (section == 'skip')
                           PlaybackSkipSettings(controller: c),
+                        if (section == 'output')
+                          PlaybackOutputPanelView(controller: c),
                         if (section == 'source' && c.canSwitchMediaSource) ...[
                           SizedBox(
                             height: 40,

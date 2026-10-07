@@ -1029,6 +1029,78 @@
   "@playerPlaybackSettings": {
     "description": "Player overflow control for speed, audio, quality, source, and skip settings."
   },
+  "playbackOutputSection": "实际输出",
+  "@playbackOutputSection": {
+    "description": "Player and settings section for the real video, audio and enhancement state."
+  },
+  "playbackOutputSource": "片源",
+  "playbackOutputVideo": "实际视频输出",
+  "playbackOutputAudio": "实际音频输出",
+  "playbackOutputUnknown": "未知",
+  "playbackOutputNone": "无",
+  "playbackOutputNotDolby": "非杜比视界",
+  "playbackOutputProfile": "杜比视界 Profile {profile}",
+  "@playbackOutputProfile": {
+    "placeholders": {
+      "profile": {"type": "int"}
+    }
+  },
+  "playbackOutputBaseLayer": "基础层 {layer}",
+  "@playbackOutputBaseLayer": {
+    "placeholders": {
+      "layer": {"type": "String"}
+    }
+  },
+  "playbackOutputBaseHdr10": "HDR10",
+  "playbackOutputBaseSdr": "SDR",
+  "playbackOutputBaseHlg": "HLG",
+  "playbackOutputSdr": "SDR 映射",
+  "playbackOutputHdr": "HDR",
+  "playbackOutputHdrScRgb": "HDR（scRGB）",
+  "playbackOutputHdrEdr": "HDR（EDR）",
+  "playbackOutputHdrPq": "HDR（PQ）",
+  "playbackOutputNativeDolby": "原生杜比视界",
+  "playbackOutputReconRpu": "RPU",
+  "playbackOutputReconFel": "FEL",
+  "playbackOutputReconBase": "基础层回退",
+  "playbackOutputDisplayHdrOn": "显示器 HDR：开启",
+  "playbackOutputDisplayHdrOff": "显示器 HDR：关闭",
+  "playbackOutputAudioStereo": "立体声 PCM",
+  "playbackOutputAudioDownmix": "立体声下混",
+  "playbackOutputAudioChannels": "{channels} 声道 PCM",
+  "@playbackOutputAudioChannels": {
+    "placeholders": {
+      "channels": {"type": "int"}
+    }
+  },
+  "playbackOutputAudioPassthrough": "压缩透传",
+  "playbackOutputAudioAtmos": "Atmos 透传",
+  "playbackOutputRequested": "请求",
+  "playbackOutputEffective": "生效",
+  "playbackOutputIdle": "未在播放，实际输出未知",
+  "playbackOutputSpeedPcm": "倍速播放时压缩透传不可用，当前输出为 PCM。",
+  "playbackOutputBaseFallback": "残差合成失败，当前是基础层回退，不是 FEL 完成。",
+  "playbackOutputProfile5MissingRpu": "Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。",
+  "playbackEnhanceInterpolation": "插帧",
+  "playbackEnhanceAnime4k": "Anime4K",
+  "playbackEnhanceSuperResolution": "通用超分",
+  "playbackEnhanceDenoise": "降噪",
+  "playbackEnhanceSharpen": "锐化",
+  "playbackEnhanceDouble": "双倍",
+  "playbackEnhanceLight": "轻",
+  "playbackEnhanceStrong": "强",
+  "playbackEnhanceX2": "2 倍",
+  "playbackEnhanceDisable": "关闭增强",
+  "playbackEnhanceKeepOutput": "留在当前输出",
+  "playbackEnhanceUseAvailable": "改用可用输出",
+  "playbackEnhanceRetry": "重试",
+  "playbackEnhanceReasonNativeDolby": "原生杜比视界生效，这项增强未运行。",
+  "playbackEnhanceReasonModel": "模型或着色器不可用，继续原画。",
+  "playbackEnhanceReasonOverload": "连续达不到帧期限，已降低生效档。已保存的选择未改。",
+  "playbackEnhanceReasonRefresh": "受显示器刷新率限制，未按请求生效。",
+  "playbackEnhanceReasonNoPicture": "还没有可处理的画面。",
+  "playbackEnhanceReasonCapacity": "Anime4K 与通用超分不能同时生效。",
+  "playbackEnhanceReasonMismatch": "生效值与请求不一致。",
   "alwaysOnTop": "窗口置顶",
   "@alwaysOnTop": {
     "description": "Keep the player window above other windows."

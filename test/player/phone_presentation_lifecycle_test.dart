@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -32,6 +33,37 @@ class _Controller extends PlayerController {
   @override
   Future<void> restorePlayback() async {
     restores++;
+  }
+}
+
+class _ReleaseProbe extends PlayerController {
+  _ReleaseProbe()
+    : super(
+        client: EmbyClient(
+          device: const EmbyDeviceInfo(
+            clientName: 'test',
+            deviceName: 'test',
+            deviceId: 'test',
+            version: '1',
+          ),
+        ),
+        itemId: 'synthetic',
+        backend: FakeVideoBackend(),
+        window: PlayerWindow(),
+      );
+
+  int suspends = 0, restores = 0;
+
+  @override
+  Future<void> suspendPlayback() {
+    suspends++;
+    return super.suspendPlayback();
+  }
+
+  @override
+  Future<void> restorePlayback() {
+    restores++;
+    return super.restorePlayback();
   }
 }
 
@@ -121,5 +153,42 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 701));
     expect(c.suspends, 1);
+  });
+
+  testWidgets('output status does not release or restore the session', (
+    tester,
+  ) async {
+    final c = _ReleaseProbe(), p = _Presentation();
+    final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+    addTearDown(c.dispose);
+    addTearDown(lifecycle.dispose);
+    c.applyObservedOutput(
+      PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 1,
+        'audioDelivery': 1,
+        'audioChannels': 2,
+        'catalogVideo': '杜比视界',
+      }),
+    );
+    await tester.pump();
+    expect(c.suspends, 0);
+    expect(c.restores, 0);
+    expect(c.backgroundReleased, isFalse);
+    expect(c.outputStatus.videoOutputKind, 1);
+    p.phonePresentation.value = {
+      'retainPlayback': false,
+      'shouldSuspend': true,
+    };
+    await tester.pump();
+    await lifecycle.settled;
+    expect(c.suspends, 1);
+    expect(c.backgroundReleased, isTrue);
+    c.applyObservedOutput(PlaybackOutputStatus.unknown);
+    await tester.pump();
+    expect(c.suspends, 1);
+    expect(c.restores, 0);
+    expect(c.backgroundReleased, isTrue);
+    expect(c.outputStatus.sampled, isFalse);
   });
 }

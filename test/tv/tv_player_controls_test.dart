@@ -15,6 +15,7 @@ import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/network_throughput.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
@@ -459,6 +460,82 @@ void main() {
       expect(current.itemId, 'episode-friends-s1e2');
       expect(backend.openCount, greaterThan(opens));
       expect(tester.takeException(), isNull);
+      await finish(tester);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'TV output panel shows the core sample and can turn enhancement off',
+    (tester) async {
+      final video = FakeVideoBackend()..isPlaying = true;
+      final c = await start(tester, video);
+      await tester.pumpAndSettle();
+      final playing = video.isPlaying;
+      final position = video.position;
+      c.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 8,
+          'dolbyVisionCompatibility': 2,
+          'videoOutputKind': 1,
+          'audioDelivery': 3,
+          'audioChannels': 6,
+          'audioAtmos': 1,
+          'requestedSuperResolution': 2,
+          'effectiveSuperResolution': 0,
+          'reasonSuperResolution': 4,
+          'catalogVideo': '杜比视界',
+          'catalogAudio': 'Atmos',
+        }),
+      );
+      c.onUserActivity();
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('tv-player-output')));
+      await tester.tap(find.byKey(const Key('tv-player-output')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('playback-output-panel')), findsOneWidget);
+      final picture = tester
+          .widget<Text>(find.byKey(const Key('playback-output-video')))
+          .data!;
+      final audio = tester
+          .widget<Text>(find.byKey(const Key('playback-output-audio')))
+          .data!;
+      expect(picture, contains('SDR 映射'));
+      expect(picture, isNot(contains('杜比')));
+      expect(audio, contains('6 声道 PCM'));
+      expect(audio, isNot(contains('Atmos')));
+      expect(find.textContaining('已降低生效档'), findsOneWidget);
+      final disable = find.byKey(const Key('playback-output-disable'));
+      await tester.ensureVisible(disable);
+      await tester.tap(disable);
+      await tester.pump();
+      await tester.pump();
+      expect(video.isPlaying, playing);
+      expect(video.position, position);
+      expect(c.videoEnhancement.superResolution, SuperResolution.off);
+      expect(c.videoEnhancement.interpolation, FrameInterpolation.off);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-super-resolution')),
+            )
+            .data,
+        contains('请求 关闭'),
+      );
+      final retry = find.byKey(const Key('playback-output-retry'));
+      await tester.ensureVisible(retry);
+      await tester.tap(retry);
+      await tester.pump();
+      expect(video.isPlaying, playing);
+      expect(video.position, position);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-super-resolution')),
+            )
+            .data,
+        contains('请求 关闭'),
+      );
       await finish(tester);
     },
     tags: ['integration'],

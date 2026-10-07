@@ -251,4 +251,80 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets(
+    'output section shows unknown actuals and saved enhancement requests',
+    (tester) async {
+      final store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          volume: 40,
+          frameInterpolation: FrameInterpolation.doubleRate,
+          anime4k: Anime4kLevel.strong,
+          denoise: 40,
+          acceptLeaveNativeDolby: true,
+        ),
+      );
+      await pumpPage(tester, store: store);
+      await expandSection(tester, '实际输出');
+      final picture = tester
+          .widget<Text>(find.byKey(const Key('playback-output-video')))
+          .data!;
+      final audio = tester
+          .widget<Text>(find.byKey(const Key('playback-output-audio')))
+          .data!;
+      expect(picture, contains('未知'));
+      expect(picture, isNot(contains('杜比')));
+      expect(audio, contains('未知'));
+      expect(audio, isNot(contains('Atmos')));
+      expect(find.textContaining('未在播放，实际输出未知'), findsWidgets);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('请求 双倍'),
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('生效 未知'),
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('playback-enhance-denoise')))
+            .data,
+        contains('请求 40'),
+      );
+
+      await tester.tap(find.byKey(const Key('playback-output-keep')));
+      await tester.pumpAndSettle();
+      expect((await store.read()).acceptLeaveNativeDolby, isFalse);
+      expect(
+        (await store.read()).frameInterpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect((await store.read()).volume, 40);
+
+      await tester.tap(find.byKey(const Key('playback-output-disable')));
+      await tester.pumpAndSettle();
+      final saved = await store.read();
+      expect(saved.frameInterpolation, FrameInterpolation.off);
+      expect(saved.anime4k, Anime4kLevel.off);
+      expect(saved.denoise, 0);
+      expect(saved.volume, 40);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('请求 关闭'),
+      );
+    },
+    tags: ['integration'],
+  );
 }

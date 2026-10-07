@@ -9,12 +9,14 @@ import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
+import 'package:rillight/player/playback_output_panel.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 
-enum _SettingsSection { speed, skip, audio, quality, source }
+enum _SettingsSection { speed, skip, audio, quality, source, output }
 
 /// 分类始终留在面板里，改值时不收起。窄窗口改成顶部分类条，控件相同。
 class PlaybackSettingsMenu extends StatefulWidget {
@@ -178,6 +180,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           }
         }
         return '';
+      case _SettingsSection.output:
+        return playbackVideoOutputLabel(l10n, c.outputStatus);
     }
   }
 
@@ -215,6 +219,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           Icons.video_library_outlined,
           PlayerKeys.mediaSource,
         ),
+      _SettingsSection.output: (
+        l10n.playbackOutputSection,
+        Icons.tune_rounded,
+        const Key('player-output-section'),
+      ),
     };
     final section = sections.containsKey(_section)
         ? _section
@@ -422,6 +431,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                   : null,
             ),
         ];
+      case _SettingsSection.output:
+        return [PlaybackOutputPanelView(controller: c)];
     }
   }
 

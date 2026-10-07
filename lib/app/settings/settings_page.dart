@@ -11,6 +11,8 @@ import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
+import 'package:rillight/player/playback_output_panel.dart';
+import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/phone_subtitle_settings.dart';
@@ -217,6 +219,25 @@ class _SettingsPageState extends State<SettingsPage> {
         phoneSubtitles: const PhoneSubtitleSettings(),
         skipIntroEnabled: true,
         skipOutroEnabled: true,
+        frameInterpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+  }
+
+  Future<void> _saveEnhancement(VideoEnhancementSelection selection) {
+    return _save(
+      PlayerSettings(
+        frameInterpolation: selection.interpolation,
+        anime4k: selection.anime4k,
+        superResolution: selection.superResolution,
+        denoise: selection.denoise,
+        sharpen: selection.sharpen,
+        acceptLeaveNativeDolby: selection.acceptLeaveNativeDolby,
       ),
     );
   }
@@ -524,6 +545,55 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
+                  icon: Icons.tune_rounded,
+                  title: l10n.playbackOutputSection,
+                  subtitle: l10n.playbackOutputIdle,
+                  children: [
+                    PlaybackOutputPanel(
+                      status: PlaybackOutputStatus.unknown,
+                      saved: _settings.videoEnhancement,
+                      playbackRate: _settings.effectivePlaybackRate,
+                      onDisable: () => _saveEnhancement(
+                        const VideoEnhancementSelection(
+                          interpolation: FrameInterpolation.off,
+                          anime4k: Anime4kLevel.off,
+                          superResolution: SuperResolution.off,
+                          denoise: 0,
+                          sharpen: 0,
+                          acceptLeaveNativeDolby: false,
+                        ),
+                      ),
+                      onKeepOutput: () {
+                        final current = _settings.videoEnhancement;
+                        return _saveEnhancement(
+                          VideoEnhancementSelection(
+                            interpolation: current.interpolation,
+                            anime4k: current.anime4k,
+                            superResolution: current.superResolution,
+                            denoise: current.denoise,
+                            sharpen: current.sharpen,
+                            acceptLeaveNativeDolby: false,
+                          ),
+                        );
+                      },
+                      onUseAvailable: () {
+                        final current = _settings.videoEnhancement;
+                        return _saveEnhancement(
+                          VideoEnhancementSelection(
+                            interpolation: current.interpolation,
+                            anime4k: current.anime4k,
+                            superResolution: current.superResolution,
+                            denoise: current.denoise,
+                            sharpen: current.sharpen,
+                            acceptLeaveNativeDolby: true,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                _SettingsSection(
                   icon: Icons.chat_bubble_outline_rounded,
                   title: l10n.settingsDanmakuConfiguration,
                   subtitle: l10n.settingsDanmakuConfigurationSummary,
@@ -674,6 +744,14 @@ PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
     playbackRate: patch.playbackRate ?? current.playbackRate,
     skipIntroEnabled: patch.skipIntroEnabled ?? current.skipIntroEnabled,
     skipOutroEnabled: patch.skipOutroEnabled ?? current.skipOutroEnabled,
+    phoneSubtitles: patch.phoneSubtitles ?? current.phoneSubtitles,
+    frameInterpolation: patch.frameInterpolation ?? current.frameInterpolation,
+    anime4k: patch.anime4k ?? current.anime4k,
+    superResolution: patch.superResolution ?? current.superResolution,
+    denoise: patch.denoise ?? current.denoise,
+    sharpen: patch.sharpen ?? current.sharpen,
+    acceptLeaveNativeDolby:
+        patch.acceptLeaveNativeDolby ?? current.acceptLeaveNativeDolby,
     seriesPreferences: patch.seriesPreferences.isNotEmpty
         ? patch.seriesPreferences
         : current.seriesPreferences,

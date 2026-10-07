@@ -951,6 +951,175 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playerPlaybackSettings => '播放设置';
 
   @override
+  String get playbackOutputSection => '实际输出';
+
+  @override
+  String get playbackOutputSource => '片源';
+
+  @override
+  String get playbackOutputVideo => '实际视频输出';
+
+  @override
+  String get playbackOutputAudio => '实际音频输出';
+
+  @override
+  String get playbackOutputUnknown => '未知';
+
+  @override
+  String get playbackOutputNone => '无';
+
+  @override
+  String get playbackOutputNotDolby => '非杜比视界';
+
+  @override
+  String playbackOutputProfile(int profile) {
+    return '杜比视界 Profile $profile';
+  }
+
+  @override
+  String playbackOutputBaseLayer(String layer) {
+    return '基础层 $layer';
+  }
+
+  @override
+  String get playbackOutputBaseHdr10 => 'HDR10';
+
+  @override
+  String get playbackOutputBaseSdr => 'SDR';
+
+  @override
+  String get playbackOutputBaseHlg => 'HLG';
+
+  @override
+  String get playbackOutputSdr => 'SDR 映射';
+
+  @override
+  String get playbackOutputHdr => 'HDR';
+
+  @override
+  String get playbackOutputHdrScRgb => 'HDR（scRGB）';
+
+  @override
+  String get playbackOutputHdrEdr => 'HDR（EDR）';
+
+  @override
+  String get playbackOutputHdrPq => 'HDR（PQ）';
+
+  @override
+  String get playbackOutputNativeDolby => '原生杜比视界';
+
+  @override
+  String get playbackOutputReconRpu => 'RPU';
+
+  @override
+  String get playbackOutputReconFel => 'FEL';
+
+  @override
+  String get playbackOutputReconBase => '基础层回退';
+
+  @override
+  String get playbackOutputDisplayHdrOn => '显示器 HDR：开启';
+
+  @override
+  String get playbackOutputDisplayHdrOff => '显示器 HDR：关闭';
+
+  @override
+  String get playbackOutputAudioStereo => '立体声 PCM';
+
+  @override
+  String get playbackOutputAudioDownmix => '立体声下混';
+
+  @override
+  String playbackOutputAudioChannels(int channels) {
+    return '$channels 声道 PCM';
+  }
+
+  @override
+  String get playbackOutputAudioPassthrough => '压缩透传';
+
+  @override
+  String get playbackOutputAudioAtmos => 'Atmos 透传';
+
+  @override
+  String get playbackOutputRequested => '请求';
+
+  @override
+  String get playbackOutputEffective => '生效';
+
+  @override
+  String get playbackOutputIdle => '未在播放，实际输出未知';
+
+  @override
+  String get playbackOutputSpeedPcm => '倍速播放时压缩透传不可用，当前输出为 PCM。';
+
+  @override
+  String get playbackOutputBaseFallback => '残差合成失败，当前是基础层回退，不是 FEL 完成。';
+
+  @override
+  String get playbackOutputProfile5MissingRpu =>
+      'Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。';
+
+  @override
+  String get playbackEnhanceInterpolation => '插帧';
+
+  @override
+  String get playbackEnhanceAnime4k => 'Anime4K';
+
+  @override
+  String get playbackEnhanceSuperResolution => '通用超分';
+
+  @override
+  String get playbackEnhanceDenoise => '降噪';
+
+  @override
+  String get playbackEnhanceSharpen => '锐化';
+
+  @override
+  String get playbackEnhanceDouble => '双倍';
+
+  @override
+  String get playbackEnhanceLight => '轻';
+
+  @override
+  String get playbackEnhanceStrong => '强';
+
+  @override
+  String get playbackEnhanceX2 => '2 倍';
+
+  @override
+  String get playbackEnhanceDisable => '关闭增强';
+
+  @override
+  String get playbackEnhanceKeepOutput => '留在当前输出';
+
+  @override
+  String get playbackEnhanceUseAvailable => '改用可用输出';
+
+  @override
+  String get playbackEnhanceRetry => '重试';
+
+  @override
+  String get playbackEnhanceReasonNativeDolby => '原生杜比视界生效，这项增强未运行。';
+
+  @override
+  String get playbackEnhanceReasonModel => '模型或着色器不可用，继续原画。';
+
+  @override
+  String get playbackEnhanceReasonOverload => '连续达不到帧期限，已降低生效档。已保存的选择未改。';
+
+  @override
+  String get playbackEnhanceReasonRefresh => '受显示器刷新率限制，未按请求生效。';
+
+  @override
+  String get playbackEnhanceReasonNoPicture => '还没有可处理的画面。';
+
+  @override
+  String get playbackEnhanceReasonCapacity => 'Anime4K 与通用超分不能同时生效。';
+
+  @override
+  String get playbackEnhanceReasonMismatch => '生效值与请求不一致。';
+
+  @override
   String get alwaysOnTop => '窗口置顶';
 
   @override

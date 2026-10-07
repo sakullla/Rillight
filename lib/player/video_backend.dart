@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_output_status.dart';
+import 'package:rillight/player/player_settings.dart';
 
 class VideoOpenRequest {
   const VideoOpenRequest({
@@ -137,6 +139,14 @@ enum VideoEventKind {
   cacheSpeed,
   authenticationRequired,
   sourceRefreshRequired,
+  outputStatus,
+}
+
+/// Optional. A read of the current core sample must not pause or reopen media.
+abstract interface class VideoBackendOutputReport {
+  PlaybackOutputStatus get outputStatus;
+  Future<PlaybackOutputStatus> refreshOutputStatus();
+  Future<void> applyVideoEnhancement(VideoEnhancementSelection selection);
 }
 
 /// The backend preserves the originating open's identity, including late events.
