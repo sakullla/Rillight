@@ -261,6 +261,32 @@ class LinuxReleaseTests(unittest.TestCase):
             self.assertEqual(launched.read_text().splitlines(), ['player', 'path with spaces'])
             self.assertFalse(dialog.exists())
 
+    def test_non_elf_weights_do_not_change_the_bundle_contract(self):
+        (self.bundle / 'lib/rife-v4.6').mkdir()
+        (self.bundle / 'lib/rife-v4.6/flownet.bin').write_bytes(b'weight')
+        (self.bundle / 'lib/realesr-general-x4v3.param').write_bytes(b'param')
+        (self.bundle / 'lib/shaders/anime4k').mkdir(parents=True)
+        (self.bundle / 'lib/shaders/anime4k/Anime4K_Upscale_CNN_x2_M.glsl').write_bytes(b'shader')
+        files = checks.verify_bundle(self.bundle, runtime=False,
+                                     desktop=checks.ROOT / 'linux/packaging/rillight.desktop')
+        self.assertEqual(len(files), 4)
+
+
+class EnhancementBundleInstallTest(unittest.TestCase):
+    def test_weights_are_copied_after_the_bundle_wipe_and_not_by_the_plugin(self):
+        app = (checks.ROOT / 'linux/CMakeLists.txt').read_text(encoding='utf-8')
+        plugin = (checks.ROOT / 'packages/rillight_player/linux/CMakeLists.txt').read_text(encoding='utf-8')
+        self.assertNotIn('flownet', plugin)
+        self.assertNotIn('install(CODE', plugin)
+        wipe = app.index('file(REMOVE_RECURSE \\"${BUILD_BUNDLE_DIR}/\\")')
+        copy = app.index('rife-v4.6/flownet.bin')
+        self.assertLess(wipe, copy)
+        window = app[max(0, copy - 500):copy + 900]
+        self.assertIn('INSTALL_BUNDLE_LIB_DIR', window)
+        self.assertIn('realesr-general-x4v3.param', app)
+        self.assertIn('shaders/anime4k', app)
+        self.assertLess(copy, app.index('linux_release_checks.py'))
+
 
 if __name__ == '__main__':
     unittest.main()

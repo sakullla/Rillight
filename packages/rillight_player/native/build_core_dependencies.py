@@ -169,6 +169,41 @@ def stage_enhancement(root: Path | None = None) -> tuple[Path, Path]:
     return ncnn_dir, model_root
 
 
+ENHANCEMENT_RUNTIME_PATHS = (
+    "rife-v4.6",
+    "shaders",
+    "realesr-general-x4v3.param",
+    "realesr-general-x4v3.bin",
+)
+
+
+def remove_enhancement_runtime(destination: Path) -> None:
+    for relative in ENHANCEMENT_RUNTIME_PATHS:
+        path = destination / relative
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        elif path.is_file() or path.is_symlink():
+            path.unlink()
+
+
+def stage_core_enhancement(source: Path, destination: Path) -> bool:
+    """Put pinned weights beside a library, or clear a stale copy.
+
+    A core build that did not produce flownet.bin leaves enhancement inactive.
+    A partial or retargeted tree is removed so an old layout cannot linger.
+    """
+    source = source.resolve()
+    destination = destination.resolve()
+    if (source == destination or source in destination.parents or
+            destination in source.parents):
+        raise RuntimeError("enhancement destination must be outside the source tree")
+    remove_enhancement_runtime(destination)
+    if not (source / "rife-v4.6" / "flownet.bin").is_file():
+        return False
+    install_enhancement_runtime(source, destination)
+    return True
+
+
 def install_enhancement_runtime(source_dir: Path, destination: Path) -> None:
     """Copy hash-pinned weights and Anime4K shaders next to a built library."""
     names = [

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from build_core_dependencies import (
     SPEC, fetch_source, locked_ffmpeg_patches, require_pinned_file,
-    verify_enhancement_models)
+    stage_core_enhancement, verify_enhancement_models)
 from build_android_core_dependencies import verify_supplied_source
 
 
@@ -119,6 +119,38 @@ class EnhancementPinTest(unittest.TestCase):
                 path.write_bytes(b"x" * record["bytes"])
             with self.assertRaisesRegex(RuntimeError, "pin mismatch"):
                 verify_enhancement_models(root)
+
+    def test_stage_removes_stale_weights_when_the_core_has_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "core"
+            destination = root / "lib"
+            source.mkdir()
+            stale = destination / "rife-v4.6"
+            stale.mkdir(parents=True)
+            (stale / "flownet.bin").write_bytes(b"old")
+            (destination / "realesr-general-x4v3.bin").write_bytes(b"old")
+            (destination / "shaders").mkdir()
+            self.assertFalse(stage_core_enhancement(source, destination))
+            self.assertFalse(stale.exists())
+            self.assertFalse((destination / "realesr-general-x4v3.bin").exists())
+            self.assertFalse((destination / "shaders").exists())
+
+    def test_stage_rejects_weights_that_miss_the_pin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "core"
+            (source / "rife-v4.6").mkdir(parents=True)
+            (source / "rife-v4.6" / "flownet.bin").write_bytes(b"nope")
+            with self.assertRaisesRegex(RuntimeError, "Missing enhancement file"):
+                stage_core_enhancement(source, root / "lib")
+
+    def test_stage_refuses_to_write_inside_the_source_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "core"
+            source.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "outside the source tree"):
+                stage_core_enhancement(source, source)
 
 
 if __name__ == "__main__":

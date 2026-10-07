@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 
+from build_core_dependencies import stage_core_enhancement
 from prepare_macos import RECORD, ROOT, digest, prepare
 
 NATIVE_LICENSES = (
@@ -79,6 +80,8 @@ def bundle(app_path: Path, *, root: Path = ROOT, record: dict | None = None) -> 
     for name in sorted(names):
         subprocess.check_call(["codesign", "--force", "--sign", identity,
                                "--timestamp=none", str(destination / name)])
+    # FindAsset reads the directory that contains librillight_core.dylib.
+    stage_core_enhancement(staged, destination)
     record = dict(record)
     record["bundled_libraries_sha256"] = {
         name: digest(destination / name) for name in sorted(names)}

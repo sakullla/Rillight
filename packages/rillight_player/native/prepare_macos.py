@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 
+from build_core_dependencies import stage_core_enhancement
 from verify_core_dependencies import verify
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -227,6 +228,9 @@ def prepare(prefix: Path | None = None, core: Path | None = None,
     (destination / RECORD).write_text(
         json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8")
+    # The closure record hashes dylibs only. Weights stay beside the built
+    # core and are copied here so the app bundle can find them.
+    stage_core_enhancement(core.parent, destination)
     return record
 
 
