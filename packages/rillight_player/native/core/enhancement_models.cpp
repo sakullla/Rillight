@@ -136,9 +136,6 @@ std::filesystem::path FindAsset(const std::filesystem::path& relative) {
   std::vector<std::filesystem::path> roots;
   if (const char* env = std::getenv("RILLIGHT_ENHANCEMENT_DIR"))
     roots.emplace_back(env);
-#ifdef RILLIGHT_ENHANCEMENT_MODEL_DIR
-  roots.emplace_back(RILLIGHT_ENHANCEMENT_MODEL_DIR);
-#endif
   const std::filesystem::path module = ModuleDirectory();
   if (!module.empty()) roots.push_back(module);
   for (const auto& root : roots) {

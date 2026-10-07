@@ -115,43 +115,69 @@ endif()
 target_sources(rillight_core PRIVATE core/anime4k_glsl.cpp core/enhancement_models.cpp)
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/core/shaders/anime4k" rillight_anime4k_dir)
 target_compile_definitions(rillight_core PRIVATE "RILLIGHT_ANIME4K_DIR=\"${rillight_anime4k_dir}\"")
-set(rillight_model_root "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/enhancement-models")
-if(EXISTS "${rillight_model_root}/rife-v4.6/flownet.param")
-  file(TO_CMAKE_PATH "${rillight_model_root}" rillight_model_dir)
-  target_compile_definitions(rillight_core PRIVATE
-    "RILLIGHT_ENHANCEMENT_MODEL_DIR=\"${rillight_model_dir}\"")
+# Weights are fetched from core_dependencies.json and copied beside the
+# library. FindAsset uses that directory, not a configure-time absolute path.
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/build_core_dependencies.py"
+    --stage-enhancement-only
+  RESULT_VARIABLE enhancement_stage_result
+  OUTPUT_VARIABLE enhancement_stage_output
+  ERROR_VARIABLE enhancement_stage_error
+)
+if(NOT enhancement_stage_result EQUAL 0)
+  message(FATAL_ERROR
+    "Enhancement dependency staging failed: ${enhancement_stage_output}${enhancement_stage_error}")
 endif()
+set(rillight_enhancement_root "${CMAKE_CURRENT_SOURCE_DIR}/../../../build")
+set(rillight_ncnn_dir "${rillight_enhancement_root}/enhancement-src/ncnn")
+set(rillight_model_dir "${rillight_enhancement_root}/enhancement-models")
+if(NOT EXISTS "${rillight_ncnn_dir}/CMakeLists.txt" OR
+   NOT EXISTS "${rillight_model_dir}/rife-v4.6/flownet.param" OR
+   NOT EXISTS "${rillight_model_dir}/rife-v4.6/flownet.bin" OR
+   NOT EXISTS "${rillight_model_dir}/realesr-general-x4v3.param" OR
+   NOT EXISTS "${rillight_model_dir}/realesr-general-x4v3.bin")
+  message(FATAL_ERROR "Pinned ncnn, RIFE, or Real-ESRGAN files were not staged")
+endif()
+enable_language(C)
+set(NCNN_VULKAN OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(NCNN_OPENMP OFF CACHE BOOL "" FORCE)
+set(NCNN_PYTHON OFF CACHE BOOL "" FORCE)
+set(NCNN_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(NCNN_INSTALL_SDK OFF CACHE BOOL "" FORCE)
+set(NCNN_PIXEL OFF CACHE BOOL "" FORCE)
+set(NCNN_PIXEL_ROTATE OFF CACHE BOOL "" FORCE)
+set(NCNN_PIXEL_AFFINE OFF CACHE BOOL "" FORCE)
+set(NCNN_PIXEL_DRAWING OFF CACHE BOOL "" FORCE)
+set(NCNN_INT8 OFF CACHE BOOL "" FORCE)
+set(NCNN_BF16 OFF CACHE BOOL "" FORCE)
+set(NCNN_C_API OFF CACHE BOOL "" FORCE)
+add_subdirectory("${rillight_ncnn_dir}" "${CMAKE_CURRENT_BINARY_DIR}/ncnn" EXCLUDE_FROM_ALL)
+target_compile_definitions(rillight_core PRIVATE RILLIGHT_HAVE_NCNN=1)
+target_link_libraries(rillight_core PRIVATE ncnn)
 add_custom_command(TARGET rillight_core POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/core/shaders/anime4k"
-    "$<TARGET_FILE_DIR:rillight_core>/shaders/anime4k")
-set(rillight_ncnn_candidate "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/enhancement-src/ncnn")
-if(NOT RILLIGHT_NCNN_DIR AND EXISTS "${rillight_ncnn_candidate}/CMakeLists.txt")
-  set(RILLIGHT_NCNN_DIR "${rillight_ncnn_candidate}")
-endif()
-if(RILLIGHT_NCNN_DIR)
-  set(NCNN_VULKAN OFF CACHE BOOL "" FORCE)
-  set(NCNN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-  set(NCNN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(NCNN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(NCNN_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
-  set(NCNN_OPENMP OFF CACHE BOOL "" FORCE)
-  set(NCNN_PYTHON OFF CACHE BOOL "" FORCE)
-  set(NCNN_SHARED_LIB OFF CACHE BOOL "" FORCE)
-  set(NCNN_INSTALL_SDK OFF CACHE BOOL "" FORCE)
-  set(NCNN_PIXEL OFF CACHE BOOL "" FORCE)
-  set(NCNN_PIXEL_ROTATE OFF CACHE BOOL "" FORCE)
-  set(NCNN_PIXEL_AFFINE OFF CACHE BOOL "" FORCE)
-  set(NCNN_PIXEL_DRAWING OFF CACHE BOOL "" FORCE)
-  set(NCNN_INT8 OFF CACHE BOOL "" FORCE)
-  set(NCNN_BF16 OFF CACHE BOOL "" FORCE)
-  set(NCNN_C_API OFF CACHE BOOL "" FORCE)
-  add_subdirectory("${RILLIGHT_NCNN_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ncnn" EXCLUDE_FROM_ALL)
-  target_compile_definitions(rillight_core PRIVATE RILLIGHT_HAVE_NCNN=1)
-  target_link_libraries(rillight_core PRIVATE ncnn)
-else()
-  target_compile_definitions(rillight_core PRIVATE RILLIGHT_HAVE_NCNN=0)
-endif()
+    "$<TARGET_FILE_DIR:rillight_core>/shaders/anime4k"
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+    "$<TARGET_FILE_DIR:rillight_core>/rife-v4.6"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${rillight_model_dir}/rife-v4.6/flownet.param"
+    "$<TARGET_FILE_DIR:rillight_core>/rife-v4.6/flownet.param"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${rillight_model_dir}/rife-v4.6/flownet.bin"
+    "$<TARGET_FILE_DIR:rillight_core>/rife-v4.6/flownet.bin"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${rillight_model_dir}/realesr-general-x4v3.param"
+    "$<TARGET_FILE_DIR:rillight_core>/realesr-general-x4v3.param"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${rillight_model_dir}/realesr-general-x4v3.bin"
+    "$<TARGET_FILE_DIR:rillight_core>/realesr-general-x4v3.bin"
+  VERBATIM)
 
 enable_testing()
 add_subdirectory(core_tests)

@@ -49,6 +49,8 @@ class VideoQualityEnhancer {
   int NoteDeadline(int met, int64_t monotonic_us);
   RillightCoreEnhancementStatus Status() const;
   bool NeedsReconstructedPicture() const;
+  // User request that still needs pixels, ignoring overload drops.
+  bool RequestsPicture() const;
   bool Process(const uint8_t* src, int width, int height, int stride,
                int bytes_per_pixel, int64_t pts_us, uint64_t timeline,
                const uint8_t* previous, int previous_stride, size_t max_bytes,
@@ -56,6 +58,8 @@ class VideoQualityEnhancer {
 
  private:
   bool SameRequest(const RillightCoreEnhancementRequest& request) const;
+  bool PictureWork(int drop_interpolation, int drop_scale, int drop_spatial,
+                   int scale_capacity) const;
   void Recompute();
   Image Decode(const uint8_t* src, int width, int height, int stride,
                int bytes_per_pixel) const;

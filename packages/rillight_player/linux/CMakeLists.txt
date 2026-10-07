@@ -21,3 +21,19 @@ target_include_directories(${PLUGIN_NAME} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter rillight_core
   PkgConfig::PULSE PkgConfig::EPOXY)
 set(rillight_player_bundled_libraries "$<TARGET_FILE:rillight_core>" PARENT_SCOPE)
+# The app install copies only the shared library. Keep the pinned relative
+# layout beside it; CMAKE_INSTALL_PREFIX is finalized after this file runs.
+install(CODE "
+  set(_enhancement_src \"$<TARGET_FILE_DIR:rillight_core>\")
+  set(_enhancement_dst \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib\")
+  if(EXISTS \"\${_enhancement_src}/rife-v4.6/flownet.bin\")
+    file(COPY \"\${_enhancement_src}/rife-v4.6\" DESTINATION \"\${_enhancement_dst}\")
+    file(COPY \"\${_enhancement_src}/realesr-general-x4v3.param\"
+         DESTINATION \"\${_enhancement_dst}\")
+    file(COPY \"\${_enhancement_src}/realesr-general-x4v3.bin\"
+         DESTINATION \"\${_enhancement_dst}\")
+  endif()
+  if(EXISTS \"\${_enhancement_src}/shaders/anime4k\")
+    file(COPY \"\${_enhancement_src}/shaders\" DESTINATION \"\${_enhancement_dst}\")
+  endif()
+" COMPONENT Runtime)

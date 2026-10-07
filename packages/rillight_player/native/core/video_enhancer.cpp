@@ -317,17 +317,29 @@ RillightCoreEnhancementStatus VideoQualityEnhancer::Status() const {
   return status_;
 }
 
-bool VideoQualityEnhancer::NeedsReconstructedPicture() const {
-  std::lock_guard lock(mutex_);
+bool VideoQualityEnhancer::PictureWork(
+    int drop_interpolation, int drop_scale, int drop_spatial,
+    int scale_capacity) const {
   RillightCoreEnhancementFacts facts = facts_;
   facts.struct_size = sizeof(facts);
   facts.picture_available = 1;
   const RillightCoreEnhancementStatus status = ResolveEnhancement(
-      request_, facts, drop_interpolation_, drop_scale_, drop_spatial_,
-      scale_capacity_);
+      request_, facts, drop_interpolation, drop_scale, drop_spatial,
+      scale_capacity);
   return status.effective_interpolation == 2 || status.effective_anime4k != 0 ||
          status.effective_super_resolution != 0 || status.effective_denoise != 0 ||
          status.effective_sharpen != 0;
+}
+
+bool VideoQualityEnhancer::NeedsReconstructedPicture() const {
+  std::lock_guard lock(mutex_);
+  return PictureWork(drop_interpolation_, drop_scale_, drop_spatial_,
+                     scale_capacity_);
+}
+
+bool VideoQualityEnhancer::RequestsPicture() const {
+  std::lock_guard lock(mutex_);
+  return PictureWork(0, 0, 0, 0);
 }
 
 VideoQualityEnhancer::Image VideoQualityEnhancer::Decode(

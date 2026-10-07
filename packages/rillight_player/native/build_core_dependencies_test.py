@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_core_dependencies import fetch_source, locked_ffmpeg_patches
+from build_core_dependencies import (
+    SPEC, fetch_source, locked_ffmpeg_patches, require_pinned_file,
+    verify_enhancement_models)
 from build_android_core_dependencies import verify_supplied_source
 
 
@@ -87,6 +89,36 @@ class SourceLockTest(unittest.TestCase):
                 )
                 self.assertEqual(git("remote", "get-url", "origin", cwd=source), mirror.as_uri())
                 self.assertEqual(git("rev-parse", "HEAD", cwd=source), commit)
+
+
+class EnhancementPinTest(unittest.TestCase):
+    def test_missing_pinned_file_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.bin"
+            with self.assertRaisesRegex(RuntimeError, "Missing enhancement file"):
+                require_pinned_file(path, {"sha256": "ab", "bytes": 1}, "missing.bin")
+
+    def test_hash_mismatch_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.bin"
+            path.write_bytes(b"nope")
+            with self.assertRaisesRegex(RuntimeError, "pin mismatch"):
+                require_pinned_file(
+                    path, {"sha256": "0" * 64, "bytes": 4}, "model.bin")
+
+    def test_model_tree_mismatch_fails_without_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            records = {}
+            records.update(SPEC["enhancement"]["rife"]["files"])
+            records.update(SPEC["enhancement"]["realesrgan"]["ncnn_weights"]["files"])
+            self.assertEqual(len(records), 4)
+            for relative, record in records.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x" * record["bytes"])
+            with self.assertRaisesRegex(RuntimeError, "pin mismatch"):
+                verify_enhancement_models(root)
 
 
 if __name__ == "__main__":

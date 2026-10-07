@@ -10,7 +10,8 @@ import shlex
 import shutil
 import subprocess
 
-from build_core_dependencies import fetch_source, locked_ffmpeg_patches
+from build_core_dependencies import (
+    fetch_source, install_enhancement_runtime, locked_ffmpeg_patches)
 from verify_core_dependencies import ROOT, SPEC, digest, verify
 
 
@@ -148,11 +149,14 @@ def main() -> None:
     # The dependency cache never substitutes for compiling the candidate core.
     core_build = work / 'core-build'
     shell(shlex.join(['cmake', '-S', unix(ROOT), '-B', unix(core_build), '-G', 'Ninja',
-                      '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_COMPILER=/mingw64/bin/c++.exe',
+                      '-DCMAKE_BUILD_TYPE=Release',
+                      '-DCMAKE_C_COMPILER=/mingw64/bin/cc.exe',
+                      '-DCMAKE_CXX_COMPILER=/mingw64/bin/c++.exe',
                       f'-DRILLIGHT_CORE_PREFIX={prefix_unix}']) + '\n' +
           shlex.join(['cmake', '--build', unix(core_build), '--target', 'rillight_core',
                       '--parallel', str(args.jobs)]))
     shutil.copy2(core_build / 'librillight_core.dll', prefix / 'bin/librillight_core.dll')
+    install_enhancement_runtime(core_build, prefix / 'bin')
     copy_runtime_dependencies(prefix, mingw)
     record_libraries(prefix, marker)
     errors = verify(prefix, 'windows-x64', require_subtitles=True)

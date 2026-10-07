@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 
+from build_core_dependencies import install_enhancement_runtime
 from verify_core_dependencies import SPEC, verify
 
 
@@ -51,14 +52,15 @@ def main() -> None:
     errors = verify(prefix, "windows-x64", require_subtitles=True)
     if errors:
         parser.error("Invalid pinned input SDK: " + "; ".join(errors))
-    cmake, compiler, ninja = (toolchain / name for name in
-                              ("cmake.exe", "c++.exe", "ninja.exe"))
-    if not all(path.is_file() for path in (cmake, compiler, ninja)):
-        parser.error(f"Missing MinGW64 CMake, g++ or Ninja in {toolchain}")
+    cmake, compiler, c_compiler, ninja = (toolchain / name for name in
+                                          ("cmake.exe", "c++.exe", "cc.exe", "ninja.exe"))
+    if not all(path.is_file() for path in (cmake, compiler, c_compiler, ninja)):
+        parser.error(f"Missing MinGW64 CMake, gcc or Ninja in {toolchain}")
     env = dict(os.environ)
     env["PATH"] = str(toolchain) + os.pathsep + env.get("PATH", "")
     subprocess.run([str(cmake), "-S", str(NATIVE), "-B", str(build),
                     "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                    f"-DCMAKE_C_COMPILER={c_compiler}",
                     f"-DCMAKE_CXX_COMPILER={compiler}",
                     f"-DRILLIGHT_CORE_PREFIX={prefix}"], env=env, check=True)
     subprocess.run([str(cmake), "--build", str(build), "--target", "rillight_core",
@@ -70,6 +72,7 @@ def main() -> None:
     temporary = published.with_suffix(".dll.new")
     shutil.copyfile(built, temporary)
     os.replace(temporary, published)
+    install_enhancement_runtime(build, prefix / "bin")
     marker_file = prefix / "rillight-core-dependencies.json"
     marker = json.loads(marker_file.read_text(encoding="utf-8"))
     marker["libraries"]["bin/librillight_core.dll"] = digest(published)

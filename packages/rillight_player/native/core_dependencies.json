@@ -90,7 +90,7 @@
     "ncnn": {
       "version": "20260526",
       "repository": "https://github.com/Tencent/ncnn.git",
-      "commit": "e54e7b1f88434e1d844ea0551b880a1cfb079ce1",
+      "commit": "e54f7b1f88434e1d844ea0551b880a1cfb079ce1",
       "license": "BSD-3-Clause"
     },
     "realesrgan": {
