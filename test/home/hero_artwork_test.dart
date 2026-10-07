@@ -85,24 +85,39 @@ void main() {
     final imageAuth = AuthController.memory(client: client);
     addTearDown(imageAuth.dispose);
     HeroArtworkData? resolved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthScope(
-          controller: imageAuth,
-          child: HeroArtwork(
-            sources: const HeroArtworkSources(
-              [ItemImageRef(itemId: 'title', type: 'Backdrop', tag: 'small')],
-              [ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
-            ),
-            requestWidth: 800,
-            onResolved: (data) => resolved = data,
+    Widget subject({bool prefetch = false}) => MaterialApp(
+      home: AuthScope(
+        controller: imageAuth,
+        child: HeroArtwork(
+          sources: const HeroArtworkSources(
+            [ItemImageRef(itemId: 'title', type: 'Backdrop', tag: 'small')],
+            [ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
           ),
+          requestWidth: 800,
+          prefetch: prefetch,
+          onResolved: (data) => resolved = data,
         ),
       ),
     );
+    await tester.pumpWidget(subject());
     await _pumpUntil(tester, () => resolved != null);
     expect(resolved!.poster, isFalse);
     expect(client.requests, [('Backdrop', 800)]);
+
+    // A carousel slide that comes back shows its cached art on the very first
+    // frame instead of flashing the placeholder while an async load resolves.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(subject());
+    expect(find.byType(Image), findsOneWidget);
+    expect(client.requests, [('Backdrop', 800)]);
+
+    // Prefetch paints nothing and never reports a layout to the parent.
+    resolved = null;
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(subject(prefetch: true));
+    await tester.pump();
+    expect(find.byType(Image), findsNothing);
+    expect(resolved, isNull);
     await tester.pumpWidget(const SizedBox());
   });
   test(

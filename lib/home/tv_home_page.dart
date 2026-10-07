@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -14,7 +15,9 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/featured_items.dart';
+import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/hero_carousel.dart';
+import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/home/library_latest_row.dart';
 import 'package:rillight/home/library_tiles.dart';
@@ -171,7 +174,7 @@ class _TvHomePageState extends State<TvHomePage> {
             if (id == PhoneHomeSectionId.banner &&
                 showBanner &&
                 featured.isNotEmpty) ...[
-              _TvFeatured(items: featured),
+              _TvFeatured(items: featured, series: c.latestSeries.items),
               const SizedBox(height: 20),
             ] else if (id == PhoneHomeSectionId.resume)
               ...padSection(
@@ -291,12 +294,20 @@ class _TvLibraryLatest extends StatelessWidget {
   }
 }
 
-/// featured 沉浸 hero:全宽出血背图 + 遮罩 + 大标题 + 主操作,手动左右切换,
-/// 无自动轮换。hero 铺满视口宽并伸到顶部导航栏下,文字恒白压遮罩。
+/// featured 沉浸舞台:全宽出血宣传图 + 遮罩 + Logo/大标题 + 主操作,手动左右
+/// 切换,无自动轮换。舞台铺满视口宽并伸到顶部导航栏下,文字恒白压遮罩,
+/// 深色主题底缘溶进页面底色。
+///
+/// 背景与文字分层过渡:新图在旧图之上淡入,旧文字先淡出、新文字再上移淡入。
+/// 「播放 / 详情」与切换控件不在过渡层里,连按切换时焦点节点始终不变。
+/// 左右相邻条目的图片与 Logo 提前解码,遥控器切换时不闪底色。
 class _TvFeatured extends StatefulWidget {
-  const _TvFeatured({required this.items});
+  const _TvFeatured({required this.items, this.series = const []});
 
   final List<EmbyItem> items;
+
+  /// 最新剧集行:单集条目借用所属剧集的宣传图。
+  final List<EmbyItem> series;
 
   @override
   State<_TvFeatured> createState() => _TvFeaturedState();
@@ -338,6 +349,9 @@ class _TvFeaturedState extends State<_TvFeatured> {
     }
   }
 
+  HeroArtworkSources _sources(EmbyItem item) =>
+      heroArtworkSources(item, series: widget.series);
+
   @override
   Widget build(BuildContext context) {
     final items = widget.items;
@@ -346,107 +360,110 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final viewSize = MediaQuery.sizeOf(context);
-    // 沉浸 hero:高度约为视口高 58%,夹在可读区间内;宽度铺满视口。
-    final height = (viewSize.height * 0.58).clamp(320.0, 620.0);
+    // 舞台约占视口高 62%,第一行货架仍在首屏露头;宽度铺满视口。
+    final height = (viewSize.height * 0.62).clamp(340.0, 720.0).roundToDouble();
+    final roomy = height >= 400;
     final gutter = tvSafeGutter(viewSize.width);
-    final hasImage =
-        item.backdropImageTag != null ||
-        item.parentBackdropImageTag != null ||
-        item.primaryImageTag != null;
-    final title = heroTitle(item);
-    final meta = heroMetaLabels(l, item);
-    final overview = plainOverview(item.overview);
+    final bottom = math.max(28.0, viewSize.height * .04);
+    final textWidth = math.min(viewSize.width * .44, 820.0);
+    final logoWidth = math.min(textWidth * .78, 560.0);
+    final logoHeight = roomy ? 150.0 : 96.0;
+    final requestWidth = mediaHeroBackdropRequestWidth(
+      layoutWidth: viewSize.width,
+      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+    final artwork = _sources(item);
+    final multiple = items.length > 1;
+    final fade = theme.brightness == Brightness.dark
+        ? theme.scaffoldBackgroundColor
+        : null;
+    final neighbours = <EmbyItem>{
+      if (multiple) items[(index + 1) % items.length],
+      if (items.length > 2) items[(index - 1 + items.length) % items.length],
+    };
     return SizedBox(
       key: TvHomeKeys.featured,
       width: viewSize.width,
       height: height,
       child: ColoredBox(
-        color: theme.colorScheme.surfaceContainerHigh,
+        color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (hasImage)
-              AnimatedSwitcher(
-                duration: AppMotion.durationOf(context, heroSlideDuration),
-                transitionBuilder: heroSlideTransition,
-                child: RepaintBoundary(
-                  key: ValueKey(item.id),
-                  child: MediaImage(
-                    item: item,
-                    height: height,
-                    preferBackdrop: true,
-                    maxWidth: mediaHeroBackdropRequestWidth(
-                      layoutWidth: viewSize.width,
-                      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+            for (final next in neighbours)
+              Offstage(
+                key: ValueKey('tv-featured-prefetch-${next.id}'),
+                child: Stack(
+                  children: [
+                    HeroArtwork(
+                      sources: _sources(next),
+                      requestWidth: requestWidth,
+                      prefetch: true,
                     ),
-                  ),
+                    if (HeroLogo.available(next))
+                      HeroLogo(
+                        item: next,
+                        fallback: const SizedBox.shrink(),
+                        maxWidth: logoWidth,
+                        maxHeight: logoHeight,
+                        prefetch: true,
+                      ),
+                  ],
                 ),
               ),
-            const Positioned.fill(child: TvHeroScrim()),
+            if (!artwork.isEmpty)
+              AnimatedSwitcher(
+                duration: AppMotion.durationOf(context, heroBackdropDuration),
+                transitionBuilder: heroBackdropTransition,
+                child: RepaintBoundary(
+                  key: ValueKey('tv-featured-art-${item.id}'),
+                  child: heroLayoutFor(artwork) == HeroLayout.fullBleed
+                      ? HeroArtwork(
+                          sources: artwork,
+                          requestWidth: requestWidth,
+                        )
+                      : HeroPosterSpotlight(
+                          sources: artwork,
+                          requestWidth: requestWidth,
+                          insets: EdgeInsets.fromLTRB(
+                            gutter + textWidth + 48,
+                            TvTopNavBar.reserveHeight,
+                            gutter,
+                            bottom + 72,
+                          ),
+                        ),
+                ),
+              ),
+            const Positioned.fill(
+              child: TvHeroScrim(bottom: false, leading: false),
+            ),
+            Positioned.fill(child: HeroScrim(leading: true, fadeTo: fade)),
             Positioned(
               left: gutter,
-              right: gutter,
-              bottom: 24,
+              bottom: bottom,
+              width: textWidth,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  HeroKicker(label: heroKicker(l, item)),
-                  const SizedBox(height: 10),
-                  Text(
-                    title,
-                    key: TvHomeKeys.featuredTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.displaySmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      shadows: const [
-                        Shadow(blurRadius: 12, color: Colors.black54),
-                      ],
+                  AnimatedSwitcher(
+                    duration: AppMotion.durationOf(context, heroSlideDuration),
+                    switchInCurve: heroCaptionInCurve,
+                    switchOutCurve: heroCaptionOutCurve,
+                    transitionBuilder: heroCaptionTransition,
+                    layoutBuilder: (current, previous) => Stack(
+                      alignment: Alignment.bottomLeft,
+                      children: [...previous, ?current],
+                    ),
+                    child: _TvFeaturedCaption(
+                      key: ValueKey('tv-featured-caption-${item.id}'),
+                      item: item,
+                      roomy: roomy,
+                      logoWidth: logoWidth,
+                      logoHeight: logoHeight,
                     ),
                   ),
-                  if (meta.isNotEmpty || item.communityRating != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        if (meta.isNotEmpty)
-                          Flexible(
-                            child: Text(
-                              meta.join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.8),
-                              ),
-                            ),
-                          ),
-                        if (item.communityRating != null) ...[
-                          const SizedBox(width: 10),
-                          HeroRatingBadge(rating: item.communityRating),
-                        ],
-                      ],
-                    ),
-                  ],
-                  // 矮视口只留标题与操作,保证按钮不被挤出 hero。
-                  if (overview != null && height >= 360) ...[
-                    const SizedBox(height: 8),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: viewSize.width * .5,
-                      ),
-                      child: Text(
-                        overview,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.82),
-                          height: 1.45,
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
+                  SizedBox(height: roomy ? 22 : 14),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -458,7 +475,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         onPressed: () => _play(item),
                         child: Text(l.play),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 12),
                       TvAction(
                         key: TvHomeKeys.featuredOpen,
                         pill: true,
@@ -470,53 +487,132 @@ class _TvFeaturedState extends State<_TvFeatured> {
                 ],
               ),
             ),
-            if (items.length > 1) ...[
-              Positioned(
-                left: 8,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: TvAction(
-                    key: TvHomeKeys.featuredPrev,
-                    onPressed: () => _go(-1),
-                    child: const Icon(Icons.chevron_left),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 8,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: TvAction(
-                    key: TvHomeKeys.featuredNext,
-                    onPressed: () => _go(1),
-                    child: const Icon(Icons.chevron_right),
-                  ),
-                ),
-              ),
+            if (multiple)
               Positioned(
                 right: gutter,
-                bottom: 28,
+                bottom: bottom,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TvAction(
+                      key: TvHomeKeys.featuredPrev,
+                      onPressed: () => _go(-1),
+                      child: const Icon(Icons.chevron_left),
+                    ),
+                    const SizedBox(width: 16),
                     HeroDots(index: index, count: items.length, onSelect: null),
                     const SizedBox(width: 8),
                     Text(
                       '${index + 1} / ${items.length}',
-                      style: theme.textTheme.labelMedium?.copyWith(
+                      style: theme.textTheme.labelLarge?.copyWith(
                         color: Colors.white.withValues(alpha: 0.8),
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
+                    const SizedBox(width: 16),
+                    TvAction(
+                      key: TvHomeKeys.featuredNext,
+                      onPressed: () => _go(1),
+                      child: const Icon(Icons.chevron_right),
+                    ),
                   ],
                 ),
               ),
-            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 舞台文字:引导标签 → Logo(无 Logo 时大标题) → 年份 · 流派 · 时长 ★ → 简介。
+/// 只在切换时整体过渡;操作按钮在外层,焦点不随换页丢失。
+class _TvFeaturedCaption extends StatelessWidget {
+  const _TvFeaturedCaption({
+    super.key,
+    required this.item,
+    required this.roomy,
+    required this.logoWidth,
+    required this.logoHeight,
+  });
+
+  final EmbyItem item;
+  final bool roomy;
+  final double logoWidth;
+  final double logoHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final meta = heroMetaLabels(l, item);
+    final overview = plainOverview(item.overview);
+    final title = Text(
+      heroTitle(item),
+      maxLines: roomy ? 2 : 1,
+      overflow: TextOverflow.ellipsis,
+      style:
+          (roomy ? theme.textTheme.displayMedium : theme.textTheme.displaySmall)
+              ?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                height: 1.12,
+                shadows: const [Shadow(blurRadius: 16, color: Colors.black54)],
+              ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        HeroKicker(label: heroKicker(l, item)),
+        const SizedBox(height: 12),
+        KeyedSubtree(
+          key: TvHomeKeys.featuredTitle,
+          child: HeroLogo.available(item)
+              ? HeroLogo(
+                  item: item,
+                  fallback: title,
+                  maxWidth: logoWidth,
+                  maxHeight: logoHeight,
+                )
+              : title,
+        ),
+        if (meta.isNotEmpty || item.communityRating != null) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              if (meta.isNotEmpty)
+                Flexible(
+                  child: Text(
+                    meta.join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.82),
+                    ),
+                  ),
+                ),
+              if (item.communityRating != null) ...[
+                const SizedBox(width: 12),
+                HeroRatingBadge(rating: item.communityRating),
+              ],
+            ],
+          ),
+        ],
+        // 矮视口只留标题与操作,保证按钮不被挤出舞台。
+        if (overview != null && roomy) ...[
+          const SizedBox(height: 12),
+          Text(
+            overview,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: Colors.white.withValues(alpha: 0.8),
+              height: 1.5,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

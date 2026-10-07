@@ -211,6 +211,16 @@ class CaptureAdapter extends FakeEmbyAdapter {
           200,
         );
       }
+      if (parts.last == 'Logo') {
+        final bytes = artwork['$id-logo'] ??= await drawLogo(id);
+        return ResponseBody.fromBytes(
+          bytes,
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['image/png'],
+          },
+        );
+      }
       if (id != 'movie-broken') {
         final wide = parts.last != 'Primary' || id.startsWith('episode-');
         final key = '$id-$wide';
@@ -261,6 +271,9 @@ class CaptureAdapter extends FakeEmbyAdapter {
           }
           if (value['Id'] == 'movie-up') {
             value['BackdropImageTags'] = ['capture-still-1', 'capture-still-2'];
+            // The carousel draws transparent title art when a logo exists.
+            final tags = value['ImageTags'];
+            if (tags is Map) tags['Logo'] = 'capture-logo';
           }
           // 首页轮播同时呈现全出血与海报聚焦两种版式。
           if (value['Id'] == 'series-friends') {
@@ -327,6 +340,43 @@ class CaptureBackend extends FakeVideoBackend
     painter: const LandscapePainter(seed: 4),
     child: const SizedBox.expand(),
   );
+}
+
+/// Synthetic transparent wordmark standing in for a server title logo.
+Future<Uint8List> drawLogo(String id) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final painter = TextPainter(
+    text: TextSpan(
+      text: 'UP',
+      style: TextStyle(
+        fontFamily: 'Roboto',
+        fontSize: 200,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 24,
+        height: 1,
+        foreground: Paint()
+          ..shader = ui.Gradient.linear(Offset.zero, const Offset(0, 200), [
+            const Color(0xFFFFF4D6),
+            const Color(0xFFF2B84B),
+          ]),
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  // Real title logos are trimmed to their glyphs.
+  final size = Size(
+    painter.width.ceilToDouble(),
+    painter.height.ceilToDouble(),
+  );
+  painter.paint(canvas, Offset.zero);
+  painter.dispose();
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(size.width.toInt(), size.height.toInt());
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  picture.dispose();
+  return data!.buffer.asUint8List();
 }
 
 Future<Uint8List> drawArtwork(String id, {required bool wide}) async {

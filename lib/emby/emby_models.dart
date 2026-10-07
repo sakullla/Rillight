@@ -399,6 +399,7 @@ class EmbyItem {
     this.parentIndexNumber,
     this.primaryImageTag,
     this.thumbImageTag,
+    this.logoImageTag,
     this.backdropImageTag,
     this.backdropImageTags = const [],
     this.parentBackdropImageTags = const [],
@@ -441,6 +442,10 @@ class EmbyItem {
   final int? parentIndexNumber;
   final String? primaryImageTag;
   final String? thumbImageTag;
+
+  /// Transparent title artwork (`ImageTags.Logo`). Only requested for the
+  /// featured carousel rows; other lists leave it null.
+  final String? logoImageTag;
   final String? backdropImageTag;
   final List<String> backdropImageTags;
   final List<String> parentBackdropImageTags;
@@ -656,6 +661,7 @@ class EmbyItem {
     final primaryTag =
         _mapImageTag(tagMap, 'Primary') ?? _stringTag(json['PrimaryImageTag']);
     final thumbTag = _mapImageTag(tagMap, 'Thumb');
+    final logoTag = _mapImageTag(tagMap, 'Logo');
     final backdropTags = _listTags(json['BackdropImageTags']);
     final parentBackdropTags = _listTags(json['ParentBackdropImageTags']);
     final backdropTag =
@@ -686,6 +692,7 @@ class EmbyItem {
       parentIndexNumber: _asInt(json['ParentIndexNumber']),
       primaryImageTag: primaryTag,
       thumbImageTag: thumbTag,
+      logoImageTag: logoTag,
       backdropImageTag: backdropTag,
       backdropImageTags: backdropTags,
       parentBackdropImageTags: parentBackdropTags,
@@ -755,6 +762,7 @@ class EmbyItem {
       parentIndexNumber: parentIndexNumber,
       primaryImageTag: primaryImageTag,
       thumbImageTag: thumbImageTag,
+      logoImageTag: logoImageTag,
       backdropImageTag: backdropImageTag,
       backdropImageTags: backdropImageTags,
       parentBackdropImageTags: parentBackdropImageTags,

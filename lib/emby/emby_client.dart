@@ -278,6 +278,10 @@ class EmbyClient {
   static const imageTypes = 'Primary,Backdrop,Thumb';
   static const detailImageTypes = 'Primary,Backdrop,Thumb,Chapter';
 
+  /// Latest movie/series rows also feed the home carousel, which draws the
+  /// transparent title logo when the server has one.
+  static const featuredImageTypes = 'Primary,Backdrop,Thumb,Logo';
+
   String _requireUserId() {
     final userId = _userId;
     if (!hasSession || userId == null || userId.isEmpty) {

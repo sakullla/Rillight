@@ -362,6 +362,7 @@ class CatalogController extends ChangeNotifier {
       sortBy: 'DateLastContentAdded',
       sortOrder: 'Descending',
       fields: EmbyClient.gridFields,
+      imageTypes: EmbyClient.featuredImageTypes,
     );
     final network = cache.fetch(client, request);
     var fresh = false;
@@ -413,6 +414,7 @@ class CatalogController extends ChangeNotifier {
       sortBy: 'DateLastContentAdded',
       sortOrder: 'Descending',
       fields: EmbyClient.gridFields,
+      imageTypes: EmbyClient.featuredImageTypes,
     );
     final network = cache.fetch(client, request);
     var fresh = false;

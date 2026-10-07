@@ -9,7 +9,11 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 
 void main() {
-  Future<void> pump(WidgetTester tester, String location) async {
+  Future<void> pump(
+    WidgetTester tester,
+    String location, {
+    bool light = false,
+  }) async {
     final auth = AuthController.memory();
     addTearDown(auth.dispose);
     final router = GoRouter(
@@ -35,7 +39,7 @@ void main() {
     addTearDown(router.dispose);
     await tester.pumpWidget(
       MaterialApp.router(
-        theme: AppTheme.dark(),
+        theme: light ? AppTheme.light() : AppTheme.dark(),
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -76,6 +80,29 @@ void main() {
       Theme.of(
         tester.element(find.byKey(AppShell.topBarKey)),
       ).colorScheme.surface,
+    );
+  });
+
+  testWidgets('light home bar is solid instead of fogging the hero', (
+    tester,
+  ) async {
+    await pump(tester, AppRoutes.home, light: true);
+    final stack = barStack();
+    expect(
+      find.descendant(
+        of: stack,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is DecoratedBox &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration as BoxDecoration).gradient != null,
+        ),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: stack, matching: find.byType(ColoredBox)),
+      findsOneWidget,
     );
   });
 

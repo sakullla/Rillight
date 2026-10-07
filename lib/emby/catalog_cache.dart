@@ -92,6 +92,7 @@ CatalogRequest catalogItemsRequest({
   List<String>? genres,
   List<int>? years,
   String fields = EmbyClient.gridFields,
+  String imageTypes = EmbyClient.imageTypes,
 }) {
   return CatalogRequest('/Users/$userId/Items', {
     if (parentId != null && parentId.isNotEmpty) 'ParentId': parentId,
@@ -107,7 +108,7 @@ CatalogRequest catalogItemsRequest({
     if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
     if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
     if (years != null && years.isNotEmpty) 'Years': years.join(','),
-    'EnableImageTypes': EmbyClient.imageTypes,
+    'EnableImageTypes': imageTypes,
   });
 }
 

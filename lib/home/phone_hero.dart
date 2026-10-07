@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/hero_carousel.dart';
+import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/player/player_window_host.dart';
 
@@ -106,6 +108,9 @@ class PhoneHero extends StatefulWidget {
 class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   int _index = 0;
   String? _reportedId;
+
+  /// A finger is on the banner: page changes come from the user, not the timer.
+  bool _touching = false;
   PageController _page = PageController();
   List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
@@ -218,13 +223,49 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
           PhoneHero.viewportFractionFor(width, viewportHeight: viewport),
         );
         final ambient = _artworkOf(item);
+        // Server logos are usually light artwork for dark backdrops: the
+        // caption only swaps to one on the dark page surface. The logo box is
+        // the height of the two-line title, so the layout does not move.
+        final logo = theme.brightness == Brightness.dark
+            ? Size(
+                math.min(width - PhoneHero.sidePadding * 2, 240),
+                22 * 1.2 * 2 * scale,
+              )
+            : null;
+        final neighbours = <EmbyItem>{
+          if (logo != null && items.length > 1) ...[
+            items[(index + 1) % items.length],
+            items[(index - 1 + items.length) % items.length],
+          ],
+        }..remove(item);
         return Listener(
           key: PhoneHero.bannerKey,
-          onPointerDown: (_) => pauseAutoRotate(),
-          onPointerUp: (_) => resumeAutoRotate(items.length),
-          onPointerCancel: (_) => resumeAutoRotate(items.length),
+          onPointerDown: (_) {
+            _touching = true;
+            pauseAutoRotate();
+          },
+          onPointerUp: (_) {
+            _touching = false;
+            resumeAutoRotate(items.length);
+          },
+          onPointerCancel: (_) {
+            _touching = false;
+            resumeAutoRotate(items.length);
+          },
           child: Stack(
             children: [
+              for (final next in neighbours)
+                if (HeroLogo.available(next))
+                  Offstage(
+                    key: ValueKey('phone-hero-prefetch-${next.id}'),
+                    child: HeroLogo(
+                      item: next,
+                      fallback: const SizedBox.shrink(),
+                      maxWidth: logo!.width,
+                      maxHeight: logo.height,
+                      prefetch: true,
+                    ),
+                  ),
               Positioned.fill(
                 child: _Ambient(
                   itemId: item.id,
@@ -249,6 +290,9 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                           : const NeverScrollableScrollPhysics(),
                       itemCount: items.length,
                       onPageChanged: (value) {
+                        // A light tick when a swipe settles on a new poster;
+                        // timed rotation stays silent.
+                        if (_touching) HapticFeedback.selectionClick();
                         setState(() => _index = value);
                         resetAutoRotate(items.length);
                       },
@@ -280,6 +324,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                         child: _Caption(
                           key: ValueKey('phone-hero-caption-${item.id}'),
                           item: item,
+                          logo: logo,
                         ),
                       ),
                     ),
@@ -349,17 +394,44 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   }) {
     final current = page == index;
     final l10n = AppLocalizations.of(context);
-    final card = Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      elevation: current ? 10 : 2,
-      shadowColor: Colors.black.withValues(alpha: .6),
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      clipBehavior: Clip.antiAlias,
-      child: HeroArtwork(
-        sources: _artworkOf(item),
-        requestWidth: requestWidth,
-        compact: true,
-        posterFirst: true,
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final radius = BorderRadius.circular(AppRadii.lg);
+    // A soft drop shadow lifts the centre poster off the ambient blur; a
+    // hairline edge keeps dark posters from melting into a dark page.
+    final card = DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: current ? .42 : .18),
+            blurRadius: current ? 28 : 12,
+            offset: Offset(0, current ? 14 : 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            border: Border.all(
+              color: dark
+                  ? Colors.white.withValues(alpha: .10)
+                  : Colors.black.withValues(alpha: .06),
+            ),
+          ),
+          child: ColoredBox(
+            color: theme.colorScheme.surfaceContainerLow,
+            child: HeroArtwork(
+              sources: _artworkOf(item),
+              requestWidth: requestWidth,
+              compact: true,
+              posterFirst: true,
+            ),
+          ),
+        ),
       ),
     );
     return KeyedSubtree(
@@ -446,10 +518,11 @@ class _Ambient extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // New blur fades in over the old one, which stays opaque until
+            // covered: no mid-transition dip to the bare page colour.
             AnimatedSwitcher(
-              duration: AppMotion.durationOf(context, heroSlideDuration),
-              switchInCurve: AppMotion.standard,
-              switchOutCurve: AppMotion.exit,
+              duration: AppMotion.durationOf(context, heroBackdropDuration),
+              transitionBuilder: heroBackdropTransition,
               child: RepaintBoundary(
                 key: ValueKey('phone-hero-ambient-$itemId'),
                 child: HeroArtwork(
@@ -468,8 +541,8 @@ class _Ambient extends StatelessWidget {
                   end: Alignment.bottomCenter,
                   stops: const [0, .42, .78, 1],
                   colors: [
-                    surface.withValues(alpha: dark ? .45 : .55),
-                    surface.withValues(alpha: dark ? .55 : .62),
+                    surface.withValues(alpha: dark ? .38 : .55),
+                    surface.withValues(alpha: dark ? .46 : .62),
                     surface,
                     surface,
                   ],
@@ -485,9 +558,12 @@ class _Ambient extends StatelessWidget {
 
 /// 海报下方的文字:引导标签 → 标题(居中,最多两行) → 年份 · 流派 · 时长 ★。
 class _Caption extends StatelessWidget {
-  const _Caption({super.key, required this.item});
+  const _Caption({super.key, required this.item, this.logo});
 
   final EmbyItem item;
+
+  /// Logo slot (dark theme only); null keeps the text title.
+  final Size? logo;
 
   @override
   Widget build(BuildContext context) {
@@ -501,16 +577,7 @@ class _Caption extends StatelessWidget {
       children: [
         HeroKicker(label: heroKicker(l10n, item), onScrim: false),
         const SizedBox(height: 6),
-        Text(
-          heroTitle(item),
-          textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            height: 1.2,
-          ),
-        ),
+        _title(theme),
         if (meta.isNotEmpty || item.communityRating != null) ...[
           const SizedBox(height: 6),
           Row(
@@ -537,6 +604,28 @@ class _Caption extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _title(ThemeData theme) {
+    final text = Text(
+      heroTitle(item),
+      textAlign: TextAlign.center,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.titleLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+        height: 1.2,
+      ),
+    );
+    final slot = logo;
+    if (slot == null || !HeroLogo.available(item)) return text;
+    return HeroLogo(
+      item: item,
+      fallback: text,
+      maxWidth: slot.width,
+      maxHeight: slot.height,
+      alignment: Alignment.center,
     );
   }
 }

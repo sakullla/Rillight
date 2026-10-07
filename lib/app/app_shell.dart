@@ -187,6 +187,13 @@ class _AppShellState extends State<AppShell> {
 
   /// 首页和详情的画面贴到窗口顶,顶栏用轻遮罩;其它页保持实心条。
   bool _immersiveTopBar(String location) {
+    // The light top bar is a near-opaque surface strip. Over the home hero
+    // it reads as fog on the artwork, so the light home bar is solid and the
+    // hero starts with a crisp edge beneath it. Dark stays immersive.
+    if (location == AppRoutes.home &&
+        Theme.of(context).brightness == Brightness.light) {
+      return false;
+    }
     return location == AppRoutes.home || AppRoutes.isItem(location);
   }
 

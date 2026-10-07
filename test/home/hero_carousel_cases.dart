@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -57,6 +58,107 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   }
+
+  group('desktop stage layout', () {
+    for (final size in const [
+      Size(1024, 768),
+      Size(1440, 900),
+      Size(1920, 1080),
+    ]) {
+      testWidgets('full-bleed stage keeps cinematic proportions at $size', (
+        tester,
+      ) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        catalog.latestMovies = CatalogRowState(
+          items: [
+            for (final id in ['a', 'b', 'c'])
+              EmbyItem(
+                id: 'movie-$id',
+                name: 'Movie $id',
+                type: 'Movie',
+                backdropImageTag: 'art-$id',
+                overview: '\u4e00\u6bb5\u5f88\u957f\u7684\u7b80\u4ecb' * 40,
+              ),
+          ],
+        );
+        await tester.pumpWidget(
+          wrap(
+            SingleChildScrollView(
+              child: HomeHero(catalog: catalog, topOverlap: 56),
+            ),
+          ),
+        );
+        await tester.pump();
+        final card = tester.getRect(find.byKey(const Key('home-hero-card')));
+        // Edge to edge, no side gutters or a box shape under the top bar.
+        expect(card.left, 0);
+        expect(card.width, size.width);
+        // Neither a thin letterbox strip nor the whole first screen.
+        expect(card.width / card.height, inInclusiveRange(1.6, 2.8));
+        expect(card.height, lessThan(size.height * .8));
+
+        final title = tester.getRect(find.text('Movie a'));
+        final textBlock = tester.getRect(
+          find.byKey(const ValueKey('home-hero-text-movie-a')),
+        );
+        // Overview wraps inside the text column instead of spanning the stage.
+        expect(
+          textBlock.width,
+          lessThanOrEqualTo(HomeHero.textBlockWidthFor(size.width) + .5),
+        );
+        // Copy is aligned with the shelf gutter and clear of the top bar.
+        expect(textBlock.left, AppSpacing.page);
+        expect(textBlock.top, greaterThan(56));
+        // Switch controls never sit on top of the title or copy.
+        for (final key in [CatalogKeys.heroPrev, CatalogKeys.heroNext]) {
+          final control = tester.getRect(find.byKey(key));
+          expect(control.overlaps(title), isFalse);
+          expect(control.overlaps(textBlock), isFalse);
+        }
+        expect(tester.takeException(), isNull);
+        await unmount(tester);
+      });
+    }
+
+    testWidgets('switching keeps one caption once the transition ends', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        wrap(
+          SingleChildScrollView(
+            child: HomeHero(catalog: catalog, topOverlap: 56),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(CatalogKeys.heroNext));
+      await tester.pump();
+      // Mid-transition the old caption has already faded out before the new
+      // one is fully in, so the two never print over each other at full ink.
+      await tester.pump(heroSlideDuration * .5);
+      final opacities = tester
+          .widgetList<FadeTransition>(
+            find.ancestor(
+              of: find.text('Movie A'),
+              matching: find.byType(FadeTransition),
+            ),
+          )
+          .map((fade) => fade.opacity.value);
+      expect(opacities.first, 0);
+      await tester.pump(heroBackdropDuration);
+      expect(find.text('Movie A'), findsNothing);
+      expect(find.text('Movie B'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await unmount(tester);
+    });
+  });
 
   group('desktop auto rotate', () {
     testWidgets(

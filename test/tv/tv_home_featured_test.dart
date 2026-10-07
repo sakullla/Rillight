@@ -11,7 +11,10 @@ import 'package:rillight/app/tv_top_nav.dart';
 import 'dart:async';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/hero_artwork.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/home/tv_section_prefs.dart';
@@ -243,6 +246,43 @@ void main() {
     expect(rect.width, 960);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'featured art covers the stage and switch controls stay in the safe area',
+    (tester) async {
+      final server = FakeEmbyServer();
+      await start(tester, server);
+      await login(tester, server);
+      final featured = find.byKey(TvHomeKeys.featured);
+      final stage = tester.getRect(featured);
+      // Validated promotional art covers the full width; a plain MediaImage
+      // used to keep its own aspect and leave bare bands on both sides.
+      expect(
+        find.descendant(of: featured, matching: find.byType(MediaImage)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: featured, matching: find.byType(HeroArtwork)),
+        findsWidgets,
+      );
+      final gutter = tvSafeGutter(stage.width);
+      final title = tester.getRect(find.byKey(TvHomeKeys.featuredTitle));
+      final play = tester.getRect(find.byKey(TvHomeKeys.featuredPlay));
+      for (final key in [TvHomeKeys.featuredPrev, TvHomeKeys.featuredNext]) {
+        final control = tester.getRect(find.byKey(key));
+        // Inside the overscan-safe gutter, never on the screen edge.
+        expect(control.left, greaterThanOrEqualTo(gutter - 1));
+        expect(control.right, lessThanOrEqualTo(stage.width - gutter + 1));
+        expect(control.bottom, lessThanOrEqualTo(stage.bottom));
+        // And clear of the title and primary actions.
+        expect(control.overlaps(title), isFalse);
+        expect(control.overlaps(play), isFalse);
+      }
+      expect(title.top, greaterThanOrEqualTo(TvTopNavBar.reserveHeight));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('poster row restores focus to the last focused item', (
     tester,
