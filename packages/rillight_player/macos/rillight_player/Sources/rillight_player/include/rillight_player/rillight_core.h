@@ -390,7 +390,9 @@ RILLIGHT_CORE_API double rillight_core_output_frame_rate(RillightCore *core);
  * super_resolution is 0 or 2. denoise and sharpen are 0..100.
  * Anime4K and super-resolution cannot both be non-zero.
  * accept_leave_native_dolby must be 1 before enhancement can leave a
- * video/dolby-vision decoder. display_refresh_hz 0 means unknown. */
+ * video/dolby-vision decoder. display_refresh_hz 0 is unknown and does not
+ * make double interpolation effective. A positive rate also stays inactive
+ * when twice the source frame rate exceeds it. */
 typedef struct RillightCoreEnhancementRequest {
   uint32_t struct_size;
   int interpolation;

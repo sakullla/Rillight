@@ -514,10 +514,13 @@ RillightCoreEnhancementStatus ResolveEnhancement(
           ? 1
           : 0;
   const bool no_picture = facts.picture_available == 0;
+  // 0 is unknown. Double interpolation stays inactive until a positive
+  // refresh can show twice the source rate.
   const bool refresh_blocks =
-      request.interpolation == 2 && source > 0.0 &&
-      request.display_refresh_hz > 0 &&
-      source * 2.0 > static_cast<double>(request.display_refresh_hz) + 0.05;
+      request.interpolation == 2 &&
+      (request.display_refresh_hz <= 0 ||
+       (source > 0.0 &&
+        source * 2.0 > static_cast<double>(request.display_refresh_hz) + 0.05));
   auto reason = [&](bool requested, bool model, bool refresh, bool overload,
                     bool active) {
     if (!requested) return RILLIGHT_CORE_ENHANCE_REASON_OFF;

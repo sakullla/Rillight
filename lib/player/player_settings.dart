@@ -41,6 +41,8 @@ class VideoEnhancementSelection {
   final int sharpen;
   final bool acceptLeaveNativeDolby;
 
+  /// [displayRefreshHz] is the current display. Zero is unknown; the core
+  /// then keeps double interpolation inactive.
   Map<String, Object?> toCoreArgs({int displayRefreshHz = 0}) => {
     'interpolation': interpolation == FrameInterpolation.doubleRate ? 2 : 0,
     'anime4k': switch (anime4k) {

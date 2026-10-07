@@ -391,6 +391,14 @@ void main() {
         containsPair('superResolution', 0),
       );
       expect(anime.videoEnhancement.toCoreArgs(), containsPair('anime4k', 1));
+      expect(
+        anime.videoEnhancement.toCoreArgs(displayRefreshHz: 60),
+        containsPair('displayRefreshHz', 60),
+      );
+      expect(
+        anime.videoEnhancement.toCoreArgs(),
+        containsPair('displayRefreshHz', 0),
+      );
     },
   );
 }

@@ -1264,7 +1264,7 @@ void main() {
         'denoise': 40,
         'sharpen': 0,
         'acceptLeaveNativeDolby': false,
-        'displayRefreshHz': 0,
+        'displayRefreshHz': currentDisplayRefreshHz(),
       });
       await backend.noteVideoFrameDeadline(met: false, monotonicUs: 0);
       await backend.noteVideoFrameDeadline(met: false, monotonicUs: 1000000);
@@ -1302,10 +1302,66 @@ void main() {
         'denoise': 0,
         'sharpen': 0,
         'acceptLeaveNativeDolby': false,
-        'displayRefreshHz': 0,
+        'displayRefreshHz': currentDisplayRefreshHz(),
       });
     },
   );
+
+  test('open and apply pass the current display refresh', () async {
+    var hz = 144;
+    final driver = _CoreDriver();
+    final backend = RillightVideoBackend(
+      settingsStore: MemoryPlayerSettingsStore(),
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => driver,
+      readDisplayRefreshHz: () => hz,
+    );
+    addTearDown(backend.dispose);
+    await backend.open(
+      VideoOpenRequest(
+        sessionId: 47,
+        url: Uri.parse('http://127.0.0.1:1/refresh.mp4'),
+      ),
+    );
+    expect(driver.enhancementArgs?['displayRefreshHz'], 144);
+    hz = 30;
+    await backend.applyVideoEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.doubleRate,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    expect(driver.enhancementArgs?['displayRefreshHz'], 30);
+    hz = 0;
+    await backend.applyVideoEnhancement(
+      const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.doubleRate,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    expect(driver.enhancementArgs?['displayRefreshHz'], 0);
+  });
+
+  test('display refresh rounds nominal rates and drops unknown ones', () {
+    expect(normalizeDisplayRefreshHz(59.94), 60);
+    expect(normalizeDisplayRefreshHz(47.95), 48);
+    expect(normalizeDisplayRefreshHz(60), 60);
+    expect(normalizeDisplayRefreshHz(0), 0);
+    expect(normalizeDisplayRefreshHz(-1), 0);
+    expect(normalizeDisplayRefreshHz(double.nan), 0);
+    expect(normalizeDisplayRefreshHz(double.infinity), 0);
+    expect(normalizeDisplayRefreshHz(1000), 1000);
+    expect(normalizeDisplayRefreshHz(1001), 0);
+    expect(currentDisplayRefreshHz(), greaterThan(0));
+  });
 
   test(
     'later core output samples replace kind and tier without moving playback',

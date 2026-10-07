@@ -668,8 +668,32 @@ void enhancement_contract() {
   const auto unknown_refresh = enhancement_resolved(
       enhancement_request(2, 0, 0, 0, 0, 0, 0),
       enhancement_facts(0, 30.0, 1), none);
-  assert(unknown_refresh.effective_interpolation == 2);
-  assert(unknown_refresh.output_frame_rate == 60.0);
+  assert(unknown_refresh.requested_interpolation == 2);
+  assert(unknown_refresh.effective_interpolation == 0);
+  assert(unknown_refresh.reason_interpolation ==
+         RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP);
+  assert(unknown_refresh.output_frame_rate == 30.0);
+  assert(unknown_refresh.interpolation_backend ==
+         RILLIGHT_CORE_INTERP_BACKEND_NONE);
+  const auto sixty_on_sixty = enhancement_resolved(
+      enhancement_request(2, 0, 0, 0, 0, 0, 60),
+      enhancement_facts(0, 60.0, 1), none);
+  assert(sixty_on_sixty.effective_interpolation == 0);
+  assert(sixty_on_sixty.reason_interpolation ==
+         RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP);
+  assert(sixty_on_sixty.output_frame_rate == 60.0);
+  const auto film_on_thirty = enhancement_resolved(
+      enhancement_request(2, 0, 0, 0, 0, 0, 30),
+      enhancement_facts(0, 24.0, 1), none);
+  assert(film_on_thirty.effective_interpolation == 0);
+  assert(film_on_thirty.reason_interpolation ==
+         RILLIGHT_CORE_ENHANCE_REASON_REFRESH_CAP);
+  assert(film_on_thirty.output_frame_rate == 24.0);
+  const auto thirty_on_sixty = enhancement_resolved(
+      enhancement_request(2, 0, 0, 0, 0, 0, 60),
+      enhancement_facts(0, 30.0, 1), none);
+  assert(thirty_on_sixty.effective_interpolation == 2);
+  assert(thirty_on_sixty.output_frame_rate == 60.0);
 
   RillightCoreEnhancementStatus untouched{};
   untouched.struct_size = sizeof(untouched);
@@ -743,7 +767,7 @@ void enhancement_contract() {
   assert(after_reject.requested_super_resolution ==
          prior.requested_super_resolution);
 
-  const auto selected = enhancement_request(2, 2, 0, 40, 30, 0, 0);
+  const auto selected = enhancement_request(2, 2, 0, 40, 30, 0, 120);
   assert(rillight_core_configure_enhancement(core, &selected) == 0);
   auto active = snapshot(core);
   assert(active.requested_interpolation == 2);
@@ -778,7 +802,7 @@ void enhancement_contract() {
   assert(rillight_core_configure_enhancement(core, &selected) == 0);
   assert(snapshot(core).effective_interpolation == 0);
   assert(snapshot(core).effective_denoise == 0);
-  const auto changed = enhancement_request(2, 2, 0, 40, 31, 0, 0);
+  const auto changed = enhancement_request(2, 2, 0, 40, 31, 0, 120);
   assert(rillight_core_configure_enhancement(core, &changed) == 0);
   active = snapshot(core);
   assert(active.effective_interpolation == 2);
@@ -921,7 +945,7 @@ void enhancement_contract() {
                if (channel == 3) return 255;
                return x < 15 ? 0 : 255;
              });
-  const auto blend = enhancement_request(2, 0, 0, 0, 0, 0, 0);
+  const auto blend = enhancement_request(2, 0, 0, 0, 0, 0, 60);
   std::vector<uint8_t> blend_dst(motion_now.size(), 0x11);
   std::vector<uint8_t> blend_mid(motion_now.size(), 0x5A);
   mid_bytes = -1;

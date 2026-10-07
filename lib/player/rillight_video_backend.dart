@@ -1,6 +1,7 @@
 import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,28 @@ import 'cache/cache_limits.dart';
 
 typedef CorePlayerFactory = Future<CorePlayer> Function();
 
+typedef DisplayRefreshHzReader = int Function();
+
+/// Hertz for [rate]. Zero means unknown or outside the core's 1..1000 range.
+/// Fractional panels such as 59.94 round to the nominal rate.
+@visibleForTesting
+int normalizeDisplayRefreshHz(double rate) {
+  if (!rate.isFinite || rate <= 0) return 0;
+  final hz = rate.round();
+  if (hz <= 0 || hz > 1000) return 0;
+  return hz;
+}
+
+/// Refresh of the current view. Zero when that view does not report one.
+@visibleForTesting
+int currentDisplayRefreshHz() {
+  final dispatcher = PlatformDispatcher.instance;
+  final views = dispatcher.views;
+  final view = dispatcher.implicitView ?? (views.isEmpty ? null : views.first);
+  if (view == null) return 0;
+  return normalizeDisplayRefreshHz(view.display.refreshRate);
+}
+
 /// A single app contract for the owned FFmpeg core on desktop and Android.
 /// Source credentials stay inside the transport isolate; native code sees
 /// only one sealed loopback URL for each registered resource.
@@ -40,9 +63,11 @@ class RillightVideoBackend extends VideoBackend
     PlayerSettingsStore? settingsStore,
     CorePlayerFactory? createPlayer,
     Directory? diskCacheDirectory,
+    DisplayRefreshHzReader? readDisplayRefreshHz,
   }) : _settingsStore = settingsStore,
        _createPlayer = createPlayer ?? CorePlayer.create,
        _diskCacheDirectory = diskCacheDirectory,
+       _readDisplayRefreshHz = readDisplayRefreshHz ?? currentDisplayRefreshHz,
        _player = Platform.isAndroid && createPlayer == null
            ? AndroidCorePlayer()
            : null;
@@ -98,6 +123,7 @@ class RillightVideoBackend extends VideoBackend
   PlayerSettingsStore? _settingsStore;
   final CorePlayerFactory _createPlayer;
   final Directory? _diskCacheDirectory;
+  final DisplayRefreshHzReader _readDisplayRefreshHz;
   final _events = StreamController<VideoBackendEvent>.broadcast();
   final _nativeEvents = StreamController<Map<String, dynamic>>.broadcast();
   CorePlayer? _player;
@@ -253,13 +279,22 @@ class RillightVideoBackend extends VideoBackend
     return _outputStatus;
   }
 
+  int _displayRefreshHz() {
+    final hz = _readDisplayRefreshHz();
+    if (hz <= 0 || hz > 1000) return 0;
+    return hz;
+  }
+
   @override
   Future<void> applyVideoEnhancement(
     VideoEnhancementSelection selection,
   ) async {
     final generation = _generation;
     final token = ++_outputFollowUp;
-    await _command('enhancement', selection.toCoreArgs());
+    await _command(
+      'enhancement',
+      selection.toCoreArgs(displayRefreshHz: _displayRefreshHz()),
+    );
     if (_disposed || generation != _generation) return;
     // configure_enhancement updates the request immediately. video_output_kind
     // and audio_delivery are rewritten when the next frame is enqueued.
@@ -677,7 +712,12 @@ class RillightVideoBackend extends VideoBackend
       selectedAudioIndex = result['audioIndex'] as int?;
       selectedSubtitleIndex = result['subtitleIndex'] as int?;
       _noteOutput(result, generation);
-      await _command('enhancement', settings.videoEnhancement.toCoreArgs());
+      await _command(
+        'enhancement',
+        settings.videoEnhancement.toCoreArgs(
+          displayRefreshHz: _displayRefreshHz(),
+        ),
+      );
       if (_disposed || generation != _generation) return;
       _opened = true;
       _openPhase = 'opened';
