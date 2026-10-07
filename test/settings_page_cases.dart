@@ -408,4 +408,33 @@ void main() {
     );
     expect((await store.read()).acceptLeaveNativeDolby, isNot(isTrue));
   }, tags: ['integration']);
+
+  testWidgets('settings use available does not save leaving native dolby', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore(
+      const PlayerSettings(
+        volume: 40,
+        frameInterpolation: FrameInterpolation.doubleRate,
+        denoise: 8,
+        playbackRate: 1.25,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    await pumpPage(tester, store: store);
+    await expandSection(tester, '实际输出');
+    expect(find.textContaining('未在播放，实际输出未知'), findsWidgets);
+    final useAvailable = find.byKey(const Key('playback-output-use-available'));
+    await tester.ensureVisible(useAvailable);
+    expect(tester.widget<TextButton>(useAvailable).onPressed, isNotNull);
+    await tester.tap(useAvailable);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('playback-confirm-leave-dolby')), findsNothing);
+    final saved = await store.read();
+    expect(saved.acceptLeaveNativeDolby, isFalse);
+    expect(saved.frameInterpolation, FrameInterpolation.doubleRate);
+    expect(saved.denoise, 8);
+    expect(saved.volume, 40);
+    expect(saved.playbackRate, 1.25);
+  }, tags: ['integration']);
 }

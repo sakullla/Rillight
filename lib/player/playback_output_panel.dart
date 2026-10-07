@@ -16,7 +16,6 @@ class PlaybackOutputPanel extends StatefulWidget {
     this.playbackRate = 1,
     this.onDisable,
     this.onKeepOutput,
-    this.onUseAvailable,
     this.onRetry,
     this.onRefresh,
     this.onSelect,
@@ -27,7 +26,6 @@ class PlaybackOutputPanel extends StatefulWidget {
   final double playbackRate;
   final Future<void> Function()? onDisable;
   final Future<void> Function()? onKeepOutput;
-  final Future<void> Function()? onUseAvailable;
   final Future<void> Function()? onRetry;
   final Future<void> Function()? onRefresh;
 
@@ -196,7 +194,7 @@ class _PlaybackOutputPanelState extends State<PlaybackOutputPanel> {
             _action(
               'playback-output-use-available',
               l10n.playbackEnhanceUseAvailable,
-              widget.onUseAvailable,
+              widget.onSelect == null ? null : _useAvailable,
             ),
             _action(
               'playback-output-retry',
@@ -384,6 +382,37 @@ class _PlaybackOutputPanelState extends State<PlaybackOutputPanel> {
     );
   }
 
+  /// Saves leaving native Dolby only after this sample is native Dolby and
+  /// the user confirms the explanation. Cancel, and any unsampled or other
+  /// output, leave the saved choice and the current output unchanged.
+  Future<void> _useAvailable() async {
+    final select = widget.onSelect;
+    if (_confirming || select == null || !mounted) return;
+    if (!playbackOutputIsNativeDolby(widget.status)) return;
+    setState(() => _confirming = true);
+    try {
+      final accepted = await _confirm(
+        'playback-confirm-leave-dolby',
+        AppLocalizations.of(context).playbackEnhanceLeaveDolby,
+      );
+      if (!accepted || !mounted) return;
+      if (!playbackOutputIsNativeDolby(widget.status)) return;
+      final saved = widget.saved;
+      await select(
+        VideoEnhancementSelection(
+          interpolation: saved.interpolation,
+          anime4k: saved.anime4k,
+          superResolution: saved.superResolution,
+          denoise: saved.denoise,
+          sharpen: saved.sharpen,
+          acceptLeaveNativeDolby: true,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _confirming = false);
+    }
+  }
+
   Future<void> _select({
     FrameInterpolation? interpolation,
     Anime4kLevel? anime4k,
@@ -525,7 +554,6 @@ class PlaybackOutputPanelView extends StatelessWidget {
         playbackRate: controller.playbackRate,
         onDisable: controller.disableVideoEnhancement,
         onKeepOutput: controller.keepCurrentVideoOutput,
-        onUseAvailable: controller.useAvailableVideoOutput,
         onRetry: controller.retryVideoOutput,
         onRefresh: controller.refreshOutputStatus,
         onSelect: controller.selectVideoEnhancement,

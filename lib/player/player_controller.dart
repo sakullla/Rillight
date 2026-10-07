@@ -411,19 +411,10 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
-  Future<void> useAvailableVideoOutput() async {
-    final current = videoEnhancement;
-    await _applyEnhancement(
-      VideoEnhancementSelection(
-        interpolation: current.interpolation,
-        anime4k: current.anime4k,
-        superResolution: current.superResolution,
-        denoise: current.denoise,
-        sharpen: current.sharpen,
-        acceptLeaveNativeDolby: true,
-      ),
-    );
-  }
+  /// Does not persist leaving native Dolby. The output panel shows the
+  /// explanation and saves acceptance only after confirm on a native Dolby
+  /// sample. An unsampled settings page or any other sample must not write it.
+  Future<void> useAvailableVideoOutput() async {}
 
   Future<void> retryVideoOutput() =>
       _applyEnhancement(videoEnhancement, clearOverload: true);

@@ -576,19 +576,6 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         );
                       },
-                      onUseAvailable: () {
-                        final current = _settings.videoEnhancement;
-                        return _saveEnhancement(
-                          VideoEnhancementSelection(
-                            interpolation: current.interpolation,
-                            anime4k: current.anime4k,
-                            superResolution: current.superResolution,
-                            denoise: current.denoise,
-                            sharpen: current.sharpen,
-                            acceptLeaveNativeDolby: true,
-                          ),
-                        );
-                      },
                       onSelect: _loaded ? _saveEnhancement : null,
                     ),
                   ],

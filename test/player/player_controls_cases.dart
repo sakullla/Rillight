@@ -22,6 +22,7 @@ import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:rillight/player/phone_player_controls.dart';
+import 'package:rillight/player/playback_output_panel.dart';
 import 'package:rillight/player/playback_settings_menu.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/playback_state.dart';
@@ -2120,6 +2121,245 @@ void main() {
     await controller.selectVideoEnhancement(selection);
     expect(backend.clearOverload, isFalse);
   });
+
+  test('useAvailableVideoOutput does not save leaving native dolby', () async {
+    final video = FakeVideoBackend()
+      ..isPlaying = true
+      ..position = const Duration(seconds: 12)
+      ..rate = 1.5;
+    final store = MemoryPlayerSettingsStore(
+      const PlayerSettings(
+        volume: 40,
+        frameInterpolation: FrameInterpolation.doubleRate,
+        denoise: 8,
+        playbackRate: 1.25,
+        acceptLeaveNativeDolby: false,
+      ),
+    );
+    final controller = PlayerController(
+      client: EmbyClient(device: _device),
+      itemId: 'synthetic',
+      backend: video,
+      window: PlayerWindow(),
+      settingsStore: store,
+    );
+    addTearDown(controller.dispose);
+    controller.loading = false;
+    controller.playbackRate = 1.25;
+    controller.position = const Duration(seconds: 12);
+    controller.isPlaying = true;
+    controller.videoEnhancement = const VideoEnhancementSelection(
+      interpolation: FrameInterpolation.doubleRate,
+      anime4k: Anime4kLevel.off,
+      superResolution: SuperResolution.off,
+      denoise: 8,
+      sharpen: 0,
+      acceptLeaveNativeDolby: false,
+    );
+
+    Future<void> staysUnaccepted(PlaybackOutputStatus status) async {
+      await controller.useAvailableVideoOutput();
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isFalse);
+      expect(
+        controller.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(controller.videoEnhancement.denoise, 8);
+      expect(controller.outputStatus, status);
+      expect(controller.playbackRate, 1.25);
+      expect(controller.position, const Duration(seconds: 12));
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      expect(video.rate, 1.5);
+      final saved = await store.read();
+      expect(saved.acceptLeaveNativeDolby, isFalse);
+      expect(saved.frameInterpolation, FrameInterpolation.doubleRate);
+      expect(saved.denoise, 8);
+      expect(saved.volume, 40);
+    }
+
+    await staysUnaccepted(PlaybackOutputStatus.unknown);
+    final sdr = PlaybackOutputStatus.fromCoreMap({
+      'dolbyVisionProfile': 0,
+      'videoOutputKind': 1,
+      'audioDelivery': 1,
+    });
+    controller.applyObservedOutput(sdr);
+    await staysUnaccepted(sdr);
+    final scrgb = PlaybackOutputStatus.fromCoreMap({
+      'dolbyVisionProfile': 5,
+      'videoOutputKind': 3,
+      'audioDelivery': 4,
+      'outputColorSpace': 'scRGB',
+    });
+    controller.applyObservedOutput(scrgb);
+    await staysUnaccepted(scrgb);
+    final native = PlaybackOutputStatus.fromCoreMap({
+      'dolbyVisionProfile': 5,
+      'videoOutputKind': 3,
+      'audioDelivery': 4,
+      'audioChannels': 8,
+    });
+    controller.applyObservedOutput(native);
+    await staysUnaccepted(native);
+  });
+
+  testWidgets(
+    'use available output asks before leaving a native dolby sample',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final video = FakeVideoBackend()
+        ..isPlaying = true
+        ..position = const Duration(seconds: 12)
+        ..rate = 1.5;
+      final store = MemoryPlayerSettingsStore(
+        const PlayerSettings(
+          volume: 40,
+          frameInterpolation: FrameInterpolation.doubleRate,
+          denoise: 8,
+          playbackRate: 1.25,
+          acceptLeaveNativeDolby: false,
+        ),
+      );
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'synthetic',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: store,
+      );
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      controller.playbackRate = 1.25;
+      controller.position = const Duration(seconds: 12);
+      controller.isPlaying = true;
+      controller.videoEnhancement = const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.doubleRate,
+        anime4k: Anime4kLevel.off,
+        superResolution: SuperResolution.off,
+        denoise: 8,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: PlaybackOutputPanelView(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final useAvailable = find.byKey(
+        const Key('playback-output-use-available'),
+      );
+      Future<void> tapUseAvailable() async {
+        await tester.ensureVisible(useAvailable);
+        expect(tester.widget<TextButton>(useAvailable).onPressed, isNotNull);
+        await tester.tap(useAvailable);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+
+      await tapUseAvailable();
+      expect(
+        find.byKey(const Key('playback-confirm-leave-dolby')),
+        findsNothing,
+      );
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isFalse);
+      expect(controller.outputStatus.sampled, isFalse);
+      expect((await store.read()).acceptLeaveNativeDolby, isFalse);
+
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 8,
+          'videoOutputKind': 1,
+          'audioDelivery': 2,
+          'audioChannels': 2,
+        }),
+      );
+      await tester.pump();
+      await tapUseAvailable();
+      expect(
+        find.byKey(const Key('playback-confirm-leave-dolby')),
+        findsNothing,
+      );
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isFalse);
+      expect(controller.outputStatus.videoOutputKind, 1);
+      expect(
+        (await store.read()).frameInterpolation,
+        FrameInterpolation.doubleRate,
+      );
+
+      final native = PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 3,
+        'audioDelivery': 4,
+        'audioChannels': 8,
+        'audioAtmos': 1,
+      });
+      controller.applyObservedOutput(native);
+      await tester.pump();
+      await tapUseAvailable();
+      expect(find.byKey(const Key('playback-confirm-exclusive')), findsNothing);
+      expect(
+        find.byKey(const Key('playback-confirm-leave-dolby')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('离开原生杜比视界'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('playback-confirm-leave-dolby-cancel')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isFalse);
+      expect(
+        controller.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(controller.videoEnhancement.denoise, 8);
+      expect(controller.outputStatus, native);
+      expect(controller.playbackRate, 1.25);
+      expect(controller.position, const Duration(seconds: 12));
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      expect(video.rate, 1.5);
+      expect((await store.read()).acceptLeaveNativeDolby, isFalse);
+      expect((await store.read()).volume, 40);
+
+      await tapUseAvailable();
+      await tester.tap(
+        find.byKey(const Key('playback-confirm-leave-dolby-accept')),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isTrue);
+      expect(
+        controller.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(controller.videoEnhancement.denoise, 8);
+      expect(controller.outputStatus.videoOutputKind, 3);
+      expect(controller.outputStatus.audioDelivery, 4);
+      expect(controller.playbackRate, 1.25);
+      expect(controller.position, const Duration(seconds: 12));
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      final saved = await store.read();
+      expect(saved.acceptLeaveNativeDolby, isTrue);
+      expect(saved.frameInterpolation, FrameInterpolation.doubleRate);
+      expect(saved.denoise, 8);
+      expect(saved.volume, 40);
+    },
+  );
 }
 
 void _withEpisodeStreams(
