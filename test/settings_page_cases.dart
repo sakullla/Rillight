@@ -335,4 +335,77 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('settings output choices save enhancement and cancel leaves it', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore(
+      const PlayerSettings(
+        volume: 40,
+        superResolution: SuperResolution.x2,
+        denoise: 5,
+      ),
+    );
+    await pumpPage(tester, store: store);
+    await expandSection(tester, '实际输出');
+    expect(find.byKey(const Key('playback-enhance-choices')), findsOneWidget);
+    expect(find.byKey(const Key('playback-output-frame-rate')), findsNothing);
+
+    final anime = find.byKey(const Key('playback-select-anime4k-strong'));
+    await tester.ensureVisible(anime);
+    await tester.tap(anime);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('playback-confirm-exclusive')), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('playback-confirm-exclusive-cancel')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect((await store.read()).superResolution, SuperResolution.x2);
+    expect((await store.read()).anime4k, isNull);
+    expect((await store.read()).volume, 40);
+
+    await tester.ensureVisible(anime);
+    await tester.tap(anime);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(
+      find.byKey(const Key('playback-confirm-exclusive-accept')),
+    );
+    await tester.pumpAndSettle();
+    final saved = await store.read();
+    expect(saved.anime4k, Anime4kLevel.strong);
+    expect(saved.superResolution, SuperResolution.off);
+    expect(saved.denoise, 5);
+    expect(saved.volume, 40);
+    expect(find.byKey(const Key('playback-confirm-leave-dolby')), findsNothing);
+
+    final denoise = tester.widget<Slider>(
+      find.byKey(const Key('playback-select-denoise')),
+    );
+    denoise.onChangeEnd!(25);
+    await tester.pumpAndSettle();
+    expect((await store.read()).denoise, 25);
+    expect((await store.read()).sharpen, 0);
+    final sharpen = tester.widget<Slider>(
+      find.byKey(const Key('playback-select-sharpen')),
+    );
+    sharpen.onChangeEnd!(15);
+    await tester.pumpAndSettle();
+    expect((await store.read()).denoise, 25);
+    expect((await store.read()).sharpen, 15);
+    expect((await store.read()).anime4k, Anime4kLevel.strong);
+    final doubled = find.byKey(
+      const Key('playback-select-interpolation-double'),
+    );
+    await tester.ensureVisible(doubled);
+    await tester.tap(doubled);
+    await tester.pumpAndSettle();
+    expect(
+      (await store.read()).frameInterpolation,
+      FrameInterpolation.doubleRate,
+    );
+    expect((await store.read()).acceptLeaveNativeDolby, isNot(isTrue));
+  }, tags: ['integration']);
 }

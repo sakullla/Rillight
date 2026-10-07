@@ -32,6 +32,7 @@ class PlaybackOutputStatus {
     this.requestedSharpen = 0,
     this.effectiveSharpen = 0,
     this.reasonSharpen = 0,
+    this.outputFrameRate = 0,
   });
 
   static const unknown = PlaybackOutputStatus();
@@ -67,8 +68,18 @@ class PlaybackOutputStatus {
   final int effectiveSharpen;
   final int reasonSharpen;
 
+  /// Target display rate from the core. Zero means the sample did not report one.
+  final double outputFrameRate;
+
   static int _int(Object? value, int fallback) =>
       value is num ? value.toInt() : fallback;
+
+  static double _rate(Object? value) {
+    if (value is! num) return 0;
+    final rate = value.toDouble();
+    if (!rate.isFinite || rate <= 0) return 0;
+    return rate;
+  }
 
   static bool? _flag(Object? value) {
     if (value is bool) return value;
@@ -112,6 +123,7 @@ class PlaybackOutputStatus {
       requestedSharpen: _int(raw['requestedSharpen'], 0),
       effectiveSharpen: _int(raw['effectiveSharpen'], 0),
       reasonSharpen: _int(raw['reasonSharpen'], 0),
+      outputFrameRate: _rate(raw['outputFrameRate']),
     );
   }
 
@@ -146,6 +158,7 @@ class PlaybackOutputStatus {
       requestedSharpen: _int(args['sharpen'], 0),
       effectiveSharpen: effectiveSharpen,
       reasonSharpen: reasonSharpen,
+      outputFrameRate: outputFrameRate,
     );
   }
 
@@ -177,7 +190,8 @@ class PlaybackOutputStatus {
         other.reasonDenoise == reasonDenoise &&
         other.requestedSharpen == requestedSharpen &&
         other.effectiveSharpen == effectiveSharpen &&
-        other.reasonSharpen == reasonSharpen;
+        other.reasonSharpen == reasonSharpen &&
+        other.outputFrameRate == outputFrameRate;
   }
 
   @override
@@ -208,7 +222,22 @@ class PlaybackOutputStatus {
     requestedSharpen,
     effectiveSharpen,
     reasonSharpen,
+    outputFrameRate,
   ]);
+}
+
+/// Native Dolby is kind 3. scRGB is HDR presentation, not native Dolby.
+bool playbackOutputIsNativeDolby(PlaybackOutputStatus status) {
+  if (!status.sampled || status.outputColorSpace == 'scRGB') return false;
+  return status.videoOutputKind == 3;
+}
+
+/// Empty when the core did not report a positive finite rate.
+String playbackFrameRateText(double rate) {
+  if (!rate.isFinite || rate <= 0) return '';
+  final nearest = rate.roundToDouble();
+  if ((rate - nearest).abs() < 0.05) return nearest.toInt().toString();
+  return rate.toStringAsFixed(2);
 }
 
 /// Actual video path. scRGB, EDR and SDR tone maps are never native Dolby.
@@ -389,5 +418,6 @@ bool playbackOutputFrameChanged(
       before.reasonDenoise != next.reasonDenoise ||
       before.requestedSharpen != next.requestedSharpen ||
       before.effectiveSharpen != next.effectiveSharpen ||
-      before.reasonSharpen != next.reasonSharpen;
+      before.reasonSharpen != next.reasonSharpen ||
+      before.outputFrameRate != next.outputFrameRate;
 }

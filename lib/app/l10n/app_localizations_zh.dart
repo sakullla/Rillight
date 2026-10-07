@@ -1120,6 +1120,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playbackEnhanceReasonMismatch => '生效值与请求不一致。';
 
   @override
+  String playbackEnhanceFrameRate(String rate) {
+    return '目标显示帧率 $rate fps';
+  }
+
+  @override
+  String get playbackEnhanceReplaceSuper =>
+      'Anime4K 与通用超分不能同时生效。继续会关闭通用超分。取消则不改当前画面和输出。';
+
+  @override
+  String get playbackEnhanceReplaceAnime =>
+      'Anime4K 与通用超分不能同时生效。继续会关闭 Anime4K。取消则不改当前画面和输出。';
+
+  @override
+  String get playbackEnhanceLeaveDolby =>
+      '打开增强会离开原生杜比视界，画面改用当前设备能显示的输出。取消则不改当前画面和输出。';
+
+  @override
+  String get playbackEnhanceConfirm => '继续';
+
+  @override
   String get alwaysOnTop => '窗口置顶';
 
   @override

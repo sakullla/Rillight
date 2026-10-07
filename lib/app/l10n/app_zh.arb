@@ -1101,6 +1101,16 @@
   "playbackEnhanceReasonNoPicture": "还没有可处理的画面。",
   "playbackEnhanceReasonCapacity": "Anime4K 与通用超分不能同时生效。",
   "playbackEnhanceReasonMismatch": "生效值与请求不一致。",
+  "playbackEnhanceFrameRate": "目标显示帧率 {rate} fps",
+  "@playbackEnhanceFrameRate": {
+    "placeholders": {
+      "rate": {"type": "String"}
+    }
+  },
+  "playbackEnhanceReplaceSuper": "Anime4K 与通用超分不能同时生效。继续会关闭通用超分。取消则不改当前画面和输出。",
+  "playbackEnhanceReplaceAnime": "Anime4K 与通用超分不能同时生效。继续会关闭 Anime4K。取消则不改当前画面和输出。",
+  "playbackEnhanceLeaveDolby": "打开增强会离开原生杜比视界，画面改用当前设备能显示的输出。取消则不改当前画面和输出。",
+  "playbackEnhanceConfirm": "继续",
   "alwaysOnTop": "窗口置顶",
   "@alwaysOnTop": {
     "description": "Keep the player window above other windows."

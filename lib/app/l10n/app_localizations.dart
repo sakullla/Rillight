@@ -2224,6 +2224,36 @@ abstract class AppLocalizations {
   /// **'生效值与请求不一致。'**
   String get playbackEnhanceReasonMismatch;
 
+  /// No description provided for @playbackEnhanceFrameRate.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标显示帧率 {rate} fps'**
+  String playbackEnhanceFrameRate(String rate);
+
+  /// No description provided for @playbackEnhanceReplaceSuper.
+  ///
+  /// In zh, this message translates to:
+  /// **'Anime4K 与通用超分不能同时生效。继续会关闭通用超分。取消则不改当前画面和输出。'**
+  String get playbackEnhanceReplaceSuper;
+
+  /// No description provided for @playbackEnhanceReplaceAnime.
+  ///
+  /// In zh, this message translates to:
+  /// **'Anime4K 与通用超分不能同时生效。继续会关闭 Anime4K。取消则不改当前画面和输出。'**
+  String get playbackEnhanceReplaceAnime;
+
+  /// No description provided for @playbackEnhanceLeaveDolby.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开增强会离开原生杜比视界，画面改用当前设备能显示的输出。取消则不改当前画面和输出。'**
+  String get playbackEnhanceLeaveDolby;
+
+  /// No description provided for @playbackEnhanceConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续'**
+  String get playbackEnhanceConfirm;
+
   /// Keep the player window above other windows.
   ///
   /// In zh, this message translates to:

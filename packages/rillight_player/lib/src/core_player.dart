@@ -202,6 +202,7 @@ class CoreOutputSample {
     required this.reasonSuperResolution,
     required this.reasonDenoise,
     required this.reasonSharpen,
+    required this.outputFrameRate,
   });
 
   factory CoreOutputSample.fromSnapshot({
@@ -230,6 +231,9 @@ class CoreOutputSample {
       final value = enhancement[key];
       return value is num ? value.toInt() : fallback;
     }
+
+    final reportedRate = enhancement['outputFrameRate'];
+    final outputFrameRate = reportedRate is num ? reportedRate.toDouble() : 0.0;
 
     return CoreOutputSample(
       dolbyVisionProfile: dolbyVisionProfile,
@@ -268,6 +272,9 @@ class CoreOutputSample {
       reasonSuperResolution: picked('reasonSuperResolution', 0),
       reasonDenoise: picked('reasonDenoise', 0),
       reasonSharpen: picked('reasonSharpen', 0),
+      outputFrameRate: outputFrameRate.isFinite && outputFrameRate > 0
+          ? outputFrameRate
+          : 0,
     );
   }
 
@@ -295,6 +302,7 @@ class CoreOutputSample {
   final int reasonSuperResolution;
   final int reasonDenoise;
   final int reasonSharpen;
+  final double outputFrameRate;
 
   Map<String, Object> toMap() => {
     'dolbyVisionProfile': dolbyVisionProfile,
@@ -321,6 +329,7 @@ class CoreOutputSample {
     'reasonSuperResolution': reasonSuperResolution,
     'reasonDenoise': reasonDenoise,
     'reasonSharpen': reasonSharpen,
+    'outputFrameRate': outputFrameRate,
   };
 
   @override
@@ -349,7 +358,8 @@ class CoreOutputSample {
         other.reasonAnime4k == reasonAnime4k &&
         other.reasonSuperResolution == reasonSuperResolution &&
         other.reasonDenoise == reasonDenoise &&
-        other.reasonSharpen == reasonSharpen;
+        other.reasonSharpen == reasonSharpen &&
+        other.outputFrameRate == outputFrameRate;
   }
 
   @override
@@ -378,6 +388,7 @@ class CoreOutputSample {
     reasonSuperResolution,
     reasonDenoise,
     reasonSharpen,
+    outputFrameRate,
   ]);
 }
 
@@ -822,8 +833,8 @@ class DesktopCorePlayer
     _CoreSnapshot snapshot,
   ) {
     final enhancement = _enhancementOrEmpty();
-    // Frame rate and backend ids stay on the command result. The epoch is
-    // assigned from the same merged sample the tick publishes.
+    // Backend ids stay on the command result. The tick sample also carries
+    // outputFrameRate so a later frame does not drop the target rate.
     mapped.addAll(enhancement);
     final sample = _outputSample(snapshot, enhancement);
     mapped['outputEpoch'] = _observeOutput(sample);

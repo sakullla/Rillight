@@ -427,6 +427,12 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> retryVideoOutput() => _applyEnhancement(videoEnhancement);
 
+  /// Persists a confirmed enhancement choice. Callers explain mutual exclusion
+  /// and leaving native Dolby first; cancel must not reach this method.
+  Future<void> selectVideoEnhancement(VideoEnhancementSelection selection) {
+    return _applyEnhancement(selection);
+  }
+
   Future<void> _applyEnhancement(VideoEnhancementSelection selection) async {
     final previousStatus = outputStatus;
     videoEnhancement = selection;

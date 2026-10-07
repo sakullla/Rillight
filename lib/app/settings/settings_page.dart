@@ -589,6 +589,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         );
                       },
+                      onSelect: _loaded ? _saveEnhancement : null,
                     ),
                   ],
                 ),

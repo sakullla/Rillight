@@ -1665,6 +1665,332 @@ void main() {
     },
   );
 
+  test('output status reads the core target frame rate', () {
+    final missing = PlaybackOutputStatus.fromCoreMap({
+      'dolbyVisionProfile': 8,
+      'videoOutputKind': 1,
+      'audioDelivery': 1,
+    });
+    expect(missing.outputFrameRate, 0);
+    expect(playbackFrameRateText(0), isEmpty);
+    expect(playbackFrameRateText(47.952), '48');
+    expect(playbackFrameRateText(59.94), '59.94');
+    final doubled = PlaybackOutputStatus.fromCoreMap({
+      'dolbyVisionProfile': 8,
+      'videoOutputKind': 1,
+      'audioDelivery': 1,
+      'effectiveInterpolation': 2,
+      'outputFrameRate': 47.952,
+      'catalogVideo': '杜比视界',
+    });
+    expect(doubled.outputFrameRate, 47.952);
+    expect(
+      doubled
+          .applying(
+            const VideoEnhancementSelection(
+              interpolation: FrameInterpolation.off,
+              anime4k: Anime4kLevel.off,
+              superResolution: SuperResolution.off,
+              denoise: 0,
+              sharpen: 0,
+              acceptLeaveNativeDolby: false,
+            ),
+          )
+          .outputFrameRate,
+      47.952,
+    );
+    expect(
+      playbackOutputFrameChanged(
+        doubled,
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 8,
+          'videoOutputKind': 1,
+          'audioDelivery': 1,
+          'effectiveInterpolation': 2,
+          'outputFrameRate': 60,
+        }),
+      ),
+      isTrue,
+    );
+    expect(playbackOutputIsNativeDolby(doubled), isFalse);
+    expect(
+      playbackOutputIsNativeDolby(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 5,
+          'videoOutputKind': 3,
+          'audioDelivery': 4,
+          'outputColorSpace': 'scRGB',
+        }),
+      ),
+      isFalse,
+    );
+    expect(
+      playbackOutputIsNativeDolby(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 5,
+          'videoOutputKind': 3,
+          'audioDelivery': 4,
+        }),
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets(
+    'playback settings can choose enhancement and cancel keeps the picture',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final video = FakeVideoBackend()
+        ..isPlaying = true
+        ..position = const Duration(seconds: 12)
+        ..rate = 1.5;
+      final controller = PlayerController(
+        client: EmbyClient(device: _device),
+        itemId: 'synthetic',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(
+          const PlayerSettings(
+            volume: 40,
+            anime4k: Anime4kLevel.light,
+            playbackRate: 1.25,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+      controller.loading = false;
+      controller.playbackRate = 1.25;
+      controller.videoEnhancement = const VideoEnhancementSelection(
+        interpolation: FrameInterpolation.off,
+        anime4k: Anime4kLevel.light,
+        superResolution: SuperResolution.off,
+        denoise: 0,
+        sharpen: 0,
+        acceptLeaveNativeDolby: false,
+      );
+      final nativeDolby = PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 3,
+        'audioDelivery': 4,
+        'audioChannels': 8,
+        'audioAtmos': 1,
+        'effectiveInterpolation': 0,
+        'outputFrameRate': 24,
+      });
+      controller.applyObservedOutput(nativeDolby);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: Scaffold(body: PlaybackSettingsMenu(controller: controller)),
+        ),
+      );
+      await tester.tap(find.byKey(PlayerKeys.more));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const Key('player-output-section')));
+      await tester.pump();
+      expect(find.byKey(const Key('playback-enhance-choices')), findsOneWidget);
+      expect(find.text('目标显示帧率 24 fps'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        isNot(contains('24 fps')),
+      );
+
+      final before = controller.outputStatus;
+      final replace = find.byKey(const Key('playback-select-super-x2'));
+      await tester.ensureVisible(replace);
+      await tester.tap(replace);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.byKey(const Key('playback-confirm-exclusive')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const Key('playback-confirm-exclusive-cancel')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(controller.videoEnhancement.anime4k, Anime4kLevel.light);
+      expect(controller.videoEnhancement.superResolution, SuperResolution.off);
+      expect(controller.outputStatus, before);
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      expect(video.rate, 1.5);
+
+      await tester.ensureVisible(replace);
+      await tester.tap(replace);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(
+        find.byKey(const Key('playback-confirm-exclusive-accept')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.byKey(const Key('playback-confirm-leave-dolby')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const Key('playback-confirm-leave-dolby-cancel')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(controller.videoEnhancement.anime4k, Anime4kLevel.light);
+      expect(controller.videoEnhancement.superResolution, SuperResolution.off);
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isFalse);
+      expect(controller.outputStatus, before);
+      expect(controller.outputStatus.videoOutputKind, 3);
+
+      final doubled = find.byKey(
+        const Key('playback-select-interpolation-double'),
+      );
+      await tester.ensureVisible(doubled);
+      await tester.tap(doubled);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(
+        find.byKey(const Key('playback-confirm-leave-dolby-accept')),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        controller.videoEnhancement.interpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(controller.videoEnhancement.acceptLeaveNativeDolby, isTrue);
+      expect(controller.videoEnhancement.anime4k, Anime4kLevel.light);
+      expect(
+        (await controller.settingsStore!.read()).frameInterpolation,
+        FrameInterpolation.doubleRate,
+      );
+      expect(video.isPlaying, isTrue);
+      expect(video.position, const Duration(seconds: 12));
+      controller.applyObservedOutput(
+        PlaybackOutputStatus.fromCoreMap({
+          'dolbyVisionProfile': 5,
+          'videoOutputKind': 1,
+          'audioDelivery': 1,
+          'audioChannels': 2,
+          'requestedInterpolation': 2,
+          'effectiveInterpolation': 2,
+          'outputFrameRate': 47.952,
+        }),
+      );
+      await tester.pump();
+      expect(find.textContaining('目标显示帧率 48 fps'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const Key('playback-enhance-interpolation')),
+            )
+            .data,
+        contains('生效 双倍 · 48 fps'),
+      );
+    },
+  );
+
+  testWidgets('phone playback panel can turn super resolution on', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final video = FakeVideoBackend()
+      ..isPlaying = true
+      ..position = const Duration(seconds: 12);
+    final controller = PlayerController(
+      client: EmbyClient(device: _device),
+      itemId: 'synthetic',
+      backend: video,
+      window: PlayerWindow(),
+      settingsStore: MemoryPlayerSettingsStore(
+        const PlayerSettings(volume: 40, sharpen: 12),
+      ),
+    );
+    final interaction = PhonePlayerInteraction();
+    addTearDown(interaction.dispose);
+    addTearDown(controller.dispose);
+    controller.loading = false;
+    controller.isPlaying = true;
+    controller.duration = const Duration(minutes: 20);
+    controller.position = const Duration(seconds: 12);
+    controller.videoEnhancement = const VideoEnhancementSelection(
+      interpolation: FrameInterpolation.off,
+      anime4k: Anime4kLevel.off,
+      superResolution: SuperResolution.off,
+      denoise: 0,
+      sharpen: 12,
+      acceptLeaveNativeDolby: false,
+    );
+    controller.applyObservedOutput(
+      PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 0,
+        'videoOutputKind': 1,
+        'audioDelivery': 1,
+        'audioChannels': 2,
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: Scaffold(
+          body: PhonePlayerControls(
+            controller: controller,
+            danmaku: null,
+            interaction: interaction,
+            onClose: () {},
+            onOpenDanmakuPanel: () {},
+            onOpenDanmakuSearch: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('mobile-player-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final section = find.byKey(const ValueKey('mobile-player-section-output'));
+    await tester.ensureVisible(section);
+    await tester.tap(section);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('playback-enhance-choices')), findsOneWidget);
+    final choice = find.byKey(const Key('playback-select-super-x2'));
+    await tester.ensureVisible(choice);
+    await tester.tap(choice);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('playback-confirm-exclusive')), findsNothing);
+    expect(controller.videoEnhancement.superResolution, SuperResolution.x2);
+    expect(controller.videoEnhancement.sharpen, 12);
+    expect(controller.outputStatus.videoOutputKind, 1);
+    expect(video.isPlaying, isTrue);
+    expect(video.position, const Duration(seconds: 12));
+    final sharpen = tester.widget<Slider>(
+      find.byKey(const Key('playback-select-sharpen')),
+    );
+    sharpen.onChangeEnd!(30);
+    await tester.pump();
+    await tester.pump();
+    expect(controller.videoEnhancement.sharpen, 30);
+    expect(controller.videoEnhancement.denoise, 0);
+    expect(controller.videoEnhancement.superResolution, SuperResolution.x2);
+    expect(video.isPlaying, isTrue);
+  });
+
   test('closing enhancement does not clear the last effective tier', () {
     final status = PlaybackOutputStatus.fromCoreMap({
       'dolbyVisionProfile': 5,

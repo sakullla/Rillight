@@ -75,5 +75,57 @@ void main() {
     expect(resolved.effectiveInterpolation, 0);
     expect(resolved.requestedInterpolation, 2);
     expect(resolved.reasonInterpolation, 4);
+    expect(resolved.outputFrameRate, 0);
+  });
+
+  test('published sample keeps a positive target frame rate', () {
+    final resolved = CoreOutputSample.fromSnapshot(
+      dolbyVisionProfile: 0,
+      dolbyVisionCompatibility: -1,
+      videoOutputKind: 1,
+      doviReconstruction: 0,
+      audioDelivery: 1,
+      audioChannels: 2,
+      audioLayout: 0,
+      audioAtmos: 0,
+      audioCodecId: 0,
+      requestedInterpolation: 2,
+      effectiveInterpolation: 2,
+      requestedAnime4k: 0,
+      effectiveAnime4k: 0,
+      requestedSuperResolution: 0,
+      effectiveSuperResolution: 0,
+      requestedDenoise: 0,
+      effectiveDenoise: 0,
+      requestedSharpen: 0,
+      effectiveSharpen: 0,
+      enhancement: {'outputFrameRate': 47.952},
+    );
+    expect(resolved.outputFrameRate, 47.952);
+    expect(resolved.toMap()['outputFrameRate'], 47.952);
+    final again = CoreOutputSample.fromSnapshot(
+      dolbyVisionProfile: 0,
+      dolbyVisionCompatibility: -1,
+      videoOutputKind: 1,
+      doviReconstruction: 0,
+      audioDelivery: 1,
+      audioChannels: 2,
+      audioLayout: 0,
+      audioAtmos: 0,
+      audioCodecId: 0,
+      requestedInterpolation: 2,
+      effectiveInterpolation: 2,
+      requestedAnime4k: 0,
+      effectiveAnime4k: 0,
+      requestedSuperResolution: 0,
+      effectiveSuperResolution: 0,
+      requestedDenoise: 0,
+      effectiveDenoise: 0,
+      requestedSharpen: 0,
+      effectiveSharpen: 0,
+      enhancement: {'outputFrameRate': 0},
+    );
+    expect(again.outputFrameRate, 0);
+    expect(resolved == again, isFalse);
   });
 }
