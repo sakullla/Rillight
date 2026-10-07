@@ -135,6 +135,9 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
     );
     final deadline = DateTime.now().add(const Duration(seconds: 65));
     while (!finished && DateTime.now().isBefore(deadline)) {
+      // The helper's parent timeout is 15s, but nested flutter test startup
+      // often takes longer. Keep the mailbox alive until ready is visible.
+      await launch.protocol!.heartbeat();
       final ready = await launch.protocol!.read('ready', consume: false);
       if (ready != null) {
         final id = ready['pid'] as int;
