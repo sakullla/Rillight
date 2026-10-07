@@ -31,6 +31,7 @@ void main() {
       final proxy = await PlaybackHttpProxy.create(
         cache: cache,
         sessionBuffering: true,
+        verifiedSnapshotTtl: const Duration(milliseconds: 400),
       );
       final client = HttpClient();
       try {
@@ -57,7 +58,7 @@ void main() {
           const Duration(seconds: 4, milliseconds: 1),
         );
         expect(proxy.diagnostics['cachedTimeRanges'], expected);
-        await Future<void>.delayed(const Duration(milliseconds: 5100));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
         await proxy.refreshTimeline(const Duration(seconds: 4));
         expect(proxy.diagnostics['cachedTimeRanges'], isEmpty);
         await cache.resize(
@@ -97,6 +98,7 @@ void main() {
       final proxy = await PlaybackHttpProxy.create(
         cache: cache,
         sessionBuffering: true,
+        verifiedSnapshotTtl: const Duration(milliseconds: 400),
       );
       final client = HttpClient();
       try {
@@ -123,7 +125,7 @@ void main() {
           const Duration(seconds: 4, milliseconds: 1),
         );
         expect(proxy.diagnostics['cachedByteRanges'], expected);
-        await Future<void>.delayed(const Duration(milliseconds: 5100));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
         await proxy.refreshTimeline(const Duration(seconds: 4));
         expect(proxy.diagnostics['cachedByteRanges'], isEmpty);
         await cache.resize(

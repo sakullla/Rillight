@@ -162,6 +162,19 @@ void main() {
   });
 
   test('network hint requires buffering and respects dismissal', () async {
+    await controller.disposeAsync();
+    controller.dispose();
+    controller = PlayerController(
+      client: client,
+      itemId: 'movie-up',
+      backend: backend,
+      window: PlayerWindow(),
+      settingsStore: settings,
+      snapshotStore: snapshots,
+      stoppedTimeout: const Duration(milliseconds: 10),
+      networkSlowAfter: const Duration(milliseconds: 40),
+      onClose: () => closed++,
+    );
     await controller.start();
     final playback = controller.resolved!;
     controller.resolved = ResolvedPlayback(
@@ -175,13 +188,13 @@ void main() {
       itemId: playback.itemId,
     );
     backend.emitEvent(VideoEventKind.cacheSpeed, 0);
-    await Future<void>.delayed(const Duration(milliseconds: 6100));
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     backend.emitEvent(VideoEventKind.cacheSpeed, 0);
     await Future<void>.delayed(Duration.zero);
     expect(controller.networkSlow, isFalse);
 
     backend.emitBuffering(true);
-    await Future<void>.delayed(const Duration(milliseconds: 6100));
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     backend.emitEvent(VideoEventKind.cacheSpeed, 0);
     await Future<void>.delayed(Duration.zero);
     expect(controller.networkSlow, isTrue);
@@ -191,7 +204,7 @@ void main() {
 
     controller.dismissNetworkSlowHint();
     backend.emitBuffering(true);
-    await Future<void>.delayed(const Duration(milliseconds: 6100));
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     backend.emitEvent(VideoEventKind.cacheSpeed, 0);
     await Future<void>.delayed(Duration.zero);
     expect(controller.networkSlow, isFalse);

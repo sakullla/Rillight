@@ -139,6 +139,7 @@ class PlayerController extends ChangeNotifier {
     this.progressFailBannerFor = const Duration(seconds: 4),
     this.controlsHideAfter = const Duration(seconds: 5),
     this.nextEpisodeCountdown = const Duration(seconds: 10),
+    this.networkSlowAfter = const Duration(seconds: 6),
     this.seekStep = const Duration(seconds: 10),
     Duration? recoveryTimeout,
     Duration? recoveryOpenTimeout,
@@ -235,6 +236,9 @@ class PlayerController extends ChangeNotifier {
   final Duration progressFailBannerFor;
   final Duration controlsHideAfter;
   final Duration nextEpisodeCountdown;
+
+  /// How long buffering must stay below the expected bitrate before the hint.
+  final Duration networkSlowAfter;
   final Duration seekStep;
 
   /// Total wall-clock budget for a retry or media-source change.
@@ -3440,8 +3444,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     _slowSince ??= DateTime.now();
-    networkSlow =
-        DateTime.now().difference(_slowSince!) >= const Duration(seconds: 6);
+    networkSlow = DateTime.now().difference(_slowSince!) >= networkSlowAfter;
   }
 
   void dismissNetworkSlowHint() {

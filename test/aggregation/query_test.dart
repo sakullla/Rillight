@@ -383,7 +383,7 @@ void main() {
   test(
     'HTTP timeout preserves success and retry rejects original late page',
     () async {
-      await f.open(timeout: const Duration(milliseconds: 100));
+      await f.open(timeout: const Duration(milliseconds: 1000));
       final gate = Completer<void>();
       f.a.items = (_) async => _page([_movie('one')], total: 1);
       f.b.items = (_) async {

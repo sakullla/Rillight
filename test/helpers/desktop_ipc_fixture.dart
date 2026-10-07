@@ -44,10 +44,17 @@ void main() {
           if (await tester.runAsync(() => protocol.parentExpired()) == true) {
             return;
           }
-          if (await tester.runAsync(() => protocol.read('start')) != null) {
+          final started = await tester.runAsync(
+            () => protocol.read('start', consume: false),
+          );
+          if (started != null) {
             payload = await readLaunch();
-            adopted = true;
-            break;
+            // start can land before the host's launch rewrite is visible.
+            if (payload['source'] is Map) {
+              await tester.runAsync(() => protocol.read('start'));
+              adopted = true;
+              break;
+            }
           }
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 20)),

@@ -42,6 +42,11 @@ class PlaybackHttpProxy {
     this.continuousTransfers,
     this.onStreamChanged,
     Future<SessionByteCache>? pendingCache,
+    this.mediaHeaderTimeout,
+    this.otherHeaderTimeout,
+    this.bodyStallTimeout,
+    this.verifiedSnapshotTtl,
+    this.integrityRecheck,
   ) : _secret = List.generate(
         24,
         (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
@@ -73,6 +78,22 @@ class PlaybackHttpProxy {
   final int readAheadBytes;
   final int readAheadConcurrency;
   final bool continuousTransfers;
+
+  /// Header budget for a media response. One fast response must not shrink it.
+  final Duration mediaHeaderTimeout;
+
+  /// Header budget for playlists, subtitles and other non-media responses.
+  final Duration otherHeaderTimeout;
+
+  /// How long a live body may go quiet before the transfer is retired.
+  final Duration bodyStallTimeout;
+
+  /// How long a verified timeline or byte snapshot stays visible while busy.
+  final Duration verifiedSnapshotTtl;
+
+  /// Minimum gap before another checksum pass of an unchanged snapshot.
+  final Duration integrityRecheck;
+
   SessionReadAhead? _readAhead;
   final _readAheadBypass = <String>{};
   MatroskaCacheIndex? _timelineIndex;
@@ -345,7 +366,7 @@ class PlaybackHttpProxy {
     final verified = _lastByteIntegrityCheck;
     if (!_byteCoverageCurrent ||
         verified == null ||
-        DateTime.now().difference(verified) > const Duration(seconds: 5)) {
+        DateTime.now().difference(verified) > verifiedSnapshotTtl) {
       _clearByteCoverage();
     }
   }
@@ -514,6 +535,11 @@ class PlaybackHttpProxy {
     int readAheadConcurrency = 1,
     bool continuousTransfers = false,
     FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged,
+    Duration mediaHeaderTimeout = const Duration(seconds: 45),
+    Duration otherHeaderTimeout = const Duration(seconds: 20),
+    Duration bodyStallTimeout = const Duration(seconds: 15),
+    Duration verifiedSnapshotTtl = const Duration(seconds: 5),
+    Duration integrityRecheck = const Duration(seconds: 2),
   }) async => PlaybackHttpProxy._(
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
     origin,
@@ -526,6 +552,11 @@ class PlaybackHttpProxy {
     continuousTransfers,
     onStreamChanged,
     cache is Future<SessionByteCache> ? cache : null,
+    mediaHeaderTimeout,
+    otherHeaderTimeout,
+    bodyStallTimeout,
+    verifiedSnapshotTtl,
+    integrityRecheck,
   );
 
   Duration bufferedEnd(Duration position, Duration demuxerEnd) {
@@ -577,7 +608,7 @@ class PlaybackHttpProxy {
     // uncommitted RAM eviction must not blank the whole display between scans.
     // A persistent inability to verify expires the last snapshot.
     if (last == null ||
-        DateTime.now().difference(last) > const Duration(seconds: 5) ||
+        DateTime.now().difference(last) > verifiedSnapshotTtl ||
         cache?.diagnostics['closed'] == true) {
       _cachedTimeline = const [];
     }
@@ -594,7 +625,7 @@ class PlaybackHttpProxy {
         _responseByteIdentity == buffered.buffer.resource &&
         _responseIntegrityAt != null &&
         DateTime.now().difference(_responseIntegrityAt!) <
-            const Duration(seconds: 5) &&
+            verifiedSnapshotTtl &&
         _responseByteRanges.every(
           (range) =>
               cache!.firstMissingOffset(
@@ -613,8 +644,7 @@ class PlaybackHttpProxy {
     if (_responseByteIdentity == buffered.buffer.resource &&
         _responseIntegrityRevision == cache!.revision &&
         _responseIntegrityAt != null &&
-        DateTime.now().difference(_responseIntegrityAt!) <
-            const Duration(seconds: 2)) {
+        DateTime.now().difference(_responseIntegrityAt!) < integrityRecheck) {
       return;
     }
     _refreshingResponseBytes = true;
@@ -651,7 +681,7 @@ class PlaybackHttpProxy {
         _byteRevision == revision &&
         _lastByteIntegrityCheck != null &&
         DateTime.now().difference(_lastByteIntegrityCheck!) <
-            const Duration(seconds: 2)) {
+            integrityRecheck) {
       return;
     }
     _refreshingBytes = true;
@@ -734,7 +764,7 @@ class PlaybackHttpProxy {
         (!verifyChecksum ||
             lastIntegrityCheck != null &&
                 DateTime.now().difference(lastIntegrityCheck) <
-                    const Duration(seconds: 2))) {
+                    integrityRecheck)) {
       return;
     }
     if (!_reserveCacheWorkspace(1024 * 1024)) return;
@@ -1643,7 +1673,7 @@ class PlaybackHttpProxy {
         // transfer at full speed. Keep a bounded budget without learning a
         // shorter deadline from one healthy response.
         final media = _roles[read.resourceKey] == PlaybackResourceRole.media;
-        final headerDeadline = Duration(seconds: media ? 45 : 20);
+        final headerDeadline = media ? mediaHeaderTimeout : otherHeaderTimeout;
         final response = await _observeUpstream(
           'headers',
           () => request.close().timeout(
@@ -1791,7 +1821,7 @@ class PlaybackHttpProxy {
       final result = await Future.any<Object?>([
         iterator.moveNext(),
         read.cancelledFuture.then<Object?>((_) => null),
-      ]).timeout(const Duration(seconds: 15));
+      ]).timeout(bodyStallTimeout);
       if (result == null) read.check();
       return result as bool;
     } on TimeoutException {

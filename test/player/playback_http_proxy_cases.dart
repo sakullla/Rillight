@@ -147,7 +147,10 @@ void main() {
   }
   test('body stall gives slow recovery headers their full budget', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final proxy = await PlaybackHttpProxy.create();
+    final proxy = await PlaybackHttpProxy.create(
+      bodyStallTimeout: const Duration(milliseconds: 200),
+      mediaHeaderTimeout: const Duration(milliseconds: 400),
+    );
     final client = HttpClient();
     final release = Completer<void>();
     var requests = 0;
@@ -168,7 +171,7 @@ void main() {
           await output.flush();
           await release.future;
         } else {
-          await Future<void>.delayed(const Duration(seconds: 9));
+          await Future<void>.delayed(const Duration(milliseconds: 80));
           output.add([2, 3, 4]);
         }
         await output.close();
@@ -196,12 +199,15 @@ void main() {
     'slow first media headers are not reset by a short speculative deadline',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final proxy = await PlaybackHttpProxy.create();
+      final proxy = await PlaybackHttpProxy.create(
+        mediaHeaderTimeout: const Duration(milliseconds: 400),
+        otherHeaderTimeout: const Duration(milliseconds: 160),
+      );
       final client = HttpClient();
       var requests = 0;
       server.listen((request) async {
         requests++;
-        await Future<void>.delayed(const Duration(seconds: 31));
+        await Future<void>.delayed(const Duration(milliseconds: 250));
         request.response.contentLength = 4;
         request.response.add([1, 2, 3, 4]);
         await request.response.close();
@@ -209,7 +215,7 @@ void main() {
       try {
         final response = await (await client.getUrl(
           proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
-        )).close().timeout(const Duration(seconds: 35));
+        )).close().timeout(const Duration(milliseconds: 1500));
         expect(
           await response.fold<List<int>>(
             [],
@@ -224,14 +230,16 @@ void main() {
         await server.close(force: true);
       }
     },
-    timeout: const Timeout(Duration(seconds: 40)),
+    timeout: const Timeout(Duration(seconds: 5)),
   );
 
   test(
     'slow progressing startup body keeps its single origin response',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final proxy = await PlaybackHttpProxy.create();
+      final proxy = await PlaybackHttpProxy.create(
+        bodyStallTimeout: const Duration(milliseconds: 200),
+      );
       final client = HttpClient();
       var requests = 0;
       const chunkSize = 64 * 1024;
@@ -240,7 +248,9 @@ void main() {
         request.response.bufferOutput = false;
         request.response.contentLength = 4 * chunkSize;
         for (var chunk = 0; chunk < 4; chunk++) {
-          if (chunk > 0) await Future<void>.delayed(const Duration(seconds: 6));
+          if (chunk > 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 80));
+          }
           request.response.add(
             Uint8List(chunkSize)..fillRange(0, chunkSize, chunk),
           );
@@ -751,7 +761,9 @@ void main() {
 
   test('zero-byte body stall resumes after the body deadline', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final proxy = await PlaybackHttpProxy.create();
+    final proxy = await PlaybackHttpProxy.create(
+      bodyStallTimeout: const Duration(milliseconds: 200),
+    );
     final client = HttpClient();
     final stalled = <Socket>[];
     var requests = 0;
@@ -784,7 +796,10 @@ void main() {
       final watch = Stopwatch()..start();
       final response = await (await client.getUrl(url)).close();
       expect(await response.transform(utf8.decoder).join(), 'abcdefghijkl');
-      expect(watch.elapsed, greaterThanOrEqualTo(const Duration(seconds: 15)));
+      expect(
+        watch.elapsed,
+        greaterThanOrEqualTo(const Duration(milliseconds: 180)),
+      );
       expect(requests, 2);
       expect(proxy.diagnostics['recoveries'], 1);
     } finally {
@@ -795,7 +810,7 @@ void main() {
       }
       await upstream.close(force: true);
     }
-  }, timeout: const Timeout(Duration(seconds: 30)));
+  }, timeout: const Timeout(Duration(seconds: 5)));
 
   test('zero-byte untagged body restarts before forwarding bytes', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -1411,7 +1426,9 @@ void main() {
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final client = HttpClient();
-      final proxy = await PlaybackHttpProxy.create();
+      final proxy = await PlaybackHttpProxy.create(
+        mediaHeaderTimeout: const Duration(milliseconds: 400),
+      );
       final ports = <int>[];
       final held = <HttpResponse>[];
       server.listen((request) async {
@@ -1424,7 +1441,7 @@ void main() {
         if (ports.length == 3) {
           // The bounded deadline must still replace a silent connection
           // and allow the replacement to return its headers.
-          await Future<void>.delayed(const Duration(seconds: 6));
+          await Future<void>.delayed(const Duration(milliseconds: 80));
         }
         final range = MediaByteRange.resolve(
           request.headers.value('range'),
@@ -1456,13 +1473,13 @@ void main() {
 
         expect(await read(0), [7, 7, 7, 7]);
         final watch = Stopwatch()..start();
-        expect(await read(4).timeout(const Duration(seconds: 58)), [
+        expect(await read(4).timeout(const Duration(milliseconds: 2000)), [
           7,
           7,
           7,
           7,
         ]);
-        expect(watch.elapsed, lessThan(const Duration(seconds: 58)));
+        expect(watch.elapsed, lessThan(const Duration(milliseconds: 2000)));
         expect(ports.length, 3);
         expect(ports[2], isNot(ports[1]));
         expect(proxy.diagnostics['recoveryAttempts'], 1);
@@ -1475,7 +1492,7 @@ void main() {
         await server.close(force: true);
       }
     },
-    timeout: const Timeout(Duration(seconds: 65)),
+    timeout: const Timeout(Duration(seconds: 5)),
   );
 
   test(
@@ -1483,12 +1500,15 @@ void main() {
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final client = HttpClient();
-      final proxy = await PlaybackHttpProxy.create();
+      final proxy = await PlaybackHttpProxy.create(
+        mediaHeaderTimeout: const Duration(milliseconds: 400),
+        otherHeaderTimeout: const Duration(milliseconds: 160),
+      );
       final ports = <int>[];
       server.listen((request) async {
         ports.add(request.connectionInfo!.remotePort);
         if (ports.length == 2) {
-          await Future<void>.delayed(const Duration(seconds: 31));
+          await Future<void>.delayed(const Duration(milliseconds: 250));
         }
         final range = MediaByteRange.resolve(
           request.headers.value('range'),
@@ -1520,13 +1540,13 @@ void main() {
 
         expect(await read(0), [7, 7, 7, 7]);
         final watch = Stopwatch()..start();
-        expect(await read(4).timeout(const Duration(seconds: 36)), [
+        expect(await read(4).timeout(const Duration(milliseconds: 1500)), [
           7,
           7,
           7,
           7,
         ]);
-        expect(watch.elapsed, lessThan(const Duration(seconds: 36)));
+        expect(watch.elapsed, lessThan(const Duration(milliseconds: 1500)));
         expect(ports.length, 2);
         expect(proxy.diagnostics['recoveryAttempts'], 0);
       } finally {
@@ -1535,7 +1555,7 @@ void main() {
         await server.close(force: true);
       }
     },
-    timeout: const Timeout(Duration(seconds: 65)),
+    timeout: const Timeout(Duration(seconds: 5)),
   );
 
   test('502 retry leaves the connection pinned to an unhealthy node', () async {
@@ -1788,6 +1808,8 @@ void main() {
         disk: true,
         sessionBuffering: true,
         readAheadBytes: 2 * 1024 * 1024,
+        verifiedSnapshotTtl: const Duration(milliseconds: 1000),
+        integrityRecheck: const Duration(milliseconds: 40),
       );
       fixture.binaryBody = _paddedProgressiveMp4();
       await fixture.readBytes('bytes=0-2097151');
@@ -1813,7 +1835,7 @@ void main() {
         pendingBytes: 0,
         diskBytes: 64 * 1024 * 1024,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
       await fixture.proxy.refreshTimeline(duration);
       expect(
         fixture.proxy.bufferedEnd(
@@ -1822,7 +1844,7 @@ void main() {
         ),
         duration,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 3100));
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
       await fixture.proxy.refreshTimeline(duration);
       expect(
         fixture.proxy.bufferedEnd(
@@ -1833,7 +1855,7 @@ void main() {
       );
       expect(fixture.cache.diagnostics['degradation'], null);
       await fixture.cache.close();
-      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
       await fixture.proxy.refreshTimeline(duration);
       expect(
         fixture.proxy.bufferedEnd(
@@ -1851,6 +1873,7 @@ void main() {
       disk: true,
       sessionBuffering: true,
       readAheadBytes: 2 * 1024 * 1024,
+      integrityRecheck: const Duration(milliseconds: 40),
     );
     fixture.binaryBody = _paddedProgressiveMp4();
     await fixture.readBytes('bytes=0-2097151');
@@ -1883,7 +1906,7 @@ void main() {
         DateTime.now().add(const Duration(seconds: 2)),
       );
     }
-    await Future<void>.delayed(const Duration(milliseconds: 2100));
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     for (var attempt = 0; attempt < 10; attempt++) {
       await fixture.proxy.refreshTimeline(duration);
       if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isEmpty) {
@@ -3737,6 +3760,8 @@ class _CacheFixture {
     int readAheadBytes = 0,
     int readAheadConcurrency = 1,
     bool continuousTransfers = false,
+    Duration verifiedSnapshotTtl = const Duration(seconds: 5),
+    Duration integrityRecheck = const Duration(seconds: 2),
   }) async {
     final root = disk
         ? await Directory.systemTemp.createTemp('rillight-proxy-test-')
@@ -3758,6 +3783,8 @@ class _CacheFixture {
       readAheadBytes: readAheadBytes,
       readAheadConcurrency: readAheadConcurrency,
       continuousTransfers: continuousTransfers,
+      verifiedSnapshotTtl: verifiedSnapshotTtl,
+      integrityRecheck: integrityRecheck,
     );
     addTearDown(() async {
       fixture.client.close(force: true);
