@@ -46,18 +46,26 @@ class _Source {
   bool failCatalog = false;
   bool failResume = false;
   bool failFavorites = false;
+  bool forbidPublicInfo = false;
   int nextUpStatus = 200;
   bool rich = true;
+  final List<({Uri uri, String? userAgent, String? token})> seen = [];
 
   Future<void> open() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((request) async {
       requests.add(request.uri);
+      seen.add((
+        uri: request.uri,
+        userAgent: request.headers.value(HttpHeaders.userAgentHeader),
+        token: request.headers.value('x-emby-token'),
+      ));
       final path = request.uri.path;
       Object data = {'Id': 'user-$id', 'Name': 'user'};
       var code = 200;
       if (path.endsWith('/System/Info/Public')) {
         data = {'Id': id, 'ServerName': name};
+        if (forbidPublicInfo) code = 403;
       } else if (path.endsWith('/Items/Resume')) {
         code = failCatalog || failResume ? 500 : 200;
         data = _page(
@@ -196,6 +204,7 @@ class _Harness {
   Future<void> start({
     bool includeLoggedOut = false,
     bool includePrivate = false,
+    String? userAgent,
   }) async {
     final alpha = await add('alpha', 'Alpha');
     final beta = await add('beta', 'Beta');
@@ -230,6 +239,7 @@ class _Harness {
                 participates: false,
                 scopeKnown: false,
                 libraryIds: const [],
+                userAgent: userAgent,
                 lines: [ServerLine(id: 'line', address: source.address)],
               ),
           ],
@@ -520,5 +530,52 @@ void main() {
       'ep-9',
       'ep-3',
     ]);
+  });
+
+  test('stored token is reused with the configured user agent', () async {
+    final harness = _Harness();
+    await harness.start(userAgent: 'Youno/1.0');
+    addTearDown(harness.close);
+    final alpha = harness.source('alpha');
+    final beta = harness.source('beta');
+    alpha.forbidPublicInfo = true;
+    beta.forbidPublicInfo = true;
+    beta.rich = false;
+
+    await harness.loader.load();
+
+    expect(harness.loader.servers.map((item) => item.serverId), [
+      'alpha',
+      'beta',
+    ]);
+    expect(harness.loader.servers.first.continueWatching.error, isNull);
+    expect(harness.loader.servers.first.continueWatching.items, isNotEmpty);
+    final first = await harness.registry.ensureSession('alpha');
+    final second = await harness.registry.ensureSession('alpha');
+    expect(identical(first.client, second.client), isTrue);
+    await harness.loader.load();
+
+    for (final source in [alpha, beta]) {
+      expect(
+        source.seen.where(
+          (item) => item.uri.path.endsWith('/System/Info/Public'),
+        ),
+        isEmpty,
+      );
+      expect(
+        source.seen.where(
+          (item) => item.uri.path.endsWith('/Users/user-${source.id}'),
+        ),
+        isEmpty,
+      );
+      final resumes = source.seen.where(
+        (item) => item.uri.path.endsWith('/Items/Resume'),
+      );
+      expect(resumes, isNotEmpty);
+      for (final item in resumes) {
+        expect(item.userAgent, 'Youno/1.0');
+        expect(item.token, 'token-${source.id}');
+      }
+    }
   });
 }

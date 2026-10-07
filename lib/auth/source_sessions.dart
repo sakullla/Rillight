@@ -609,6 +609,7 @@ class SourceSessionRegistry {
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
     final client = createClient();
+    client.setUserAgent(server.userAgent);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Login client must be independent');
     }
@@ -687,6 +688,111 @@ class SourceSessionRegistry {
     return {for (final view in views) view.id: view.name};
   }
 
+  /// 已保存的访问令牌直接挂上，并带上该服务器的 User-Agent。
+  /// 内存里已有同一令牌的会话则复用，不再请求公开信息或重新登录。
+  Future<SourceSession> ensureSession(String id) async {
+    final server = _allowed(id);
+    final scope = _scopes[id] ?? 0;
+    final generation = access.generation;
+    _requireCurrent(server, scope, generation);
+    final reused = await _reuse(server, scope, generation);
+    if (reused != null) return reused;
+    final pending = _sessionAcquisitions[id];
+    if (pending != null) return pending;
+    final created = _attachStoredSession(server, scope, generation);
+    _sessionAcquisitions[id] = created;
+    try {
+      return await created;
+    } finally {
+      if (identical(_sessionAcquisitions[id], created)) {
+        _sessionAcquisitions.remove(id);
+      }
+    }
+  }
+
+  Future<SourceSession?> _reuse(
+    SavedServer server,
+    int scope,
+    int generation,
+  ) async {
+    final session = _sessions[server.id];
+    if (session == null ||
+        session.account.region != server.region ||
+        !session.client.hasSession) {
+      return null;
+    }
+    final stored = await credentials.read(server.id);
+    _requireCurrent(server, scope, generation);
+    if (stored == null ||
+        session.client.accessToken != stored.accessToken ||
+        session.client.userId != stored.userId ||
+        session.account.userId != stored.userId) {
+      return null;
+    }
+    if (session.client.customUserAgent != server.normalizedUserAgent) {
+      session.client.setUserAgent(server.userAgent);
+    }
+    return identical(_sessions[server.id], session) ? session : null;
+  }
+
+  Future<SourceSession> _attachStoredSession(
+    SavedServer server,
+    int scope,
+    int generation,
+  ) async {
+    final client = createClient();
+    client.setUserAgent(server.userAgent);
+    if (_sessions.values.any((s) => identical(s.client, client))) {
+      throw StateError('Client factory must be independent');
+    }
+    try {
+      final stored = await credentials.read(server.id);
+      _requireCurrent(server, scope, generation);
+      final reused = await _reuse(server, scope, generation);
+      if (reused != null) {
+        client.clearSession();
+        return reused;
+      }
+      if (stored == null) throw StateError('Login required');
+      client.attachSession(
+        baseUrl: Uri.parse(server.baseUrl),
+        accessToken: stored.accessToken,
+        userId: stored.userId,
+        userAgent: server.userAgent,
+      );
+      if ((_scopes[server.id] ?? 0) != scope ||
+          _allowed(server.id).region != server.region ||
+          (server.region == AccessRegion.private &&
+              generation != access.generation)) {
+        throw StateError('Access revoked');
+      }
+      final session = SourceSession._(
+        SourceAccount(
+          region: server.region,
+          configuredServerId: server.id,
+          verifiedServerId: server.verifiedServerId ?? server.id,
+          userId: stored.userId,
+        ),
+        client,
+        ++_revision,
+      );
+      _sessions.remove(server.id)?.client.clearSession();
+      _sessions[server.id] = session;
+      client.onSessionExpired = () {
+        if (identical(_sessions[server.id], session)) {
+          _sessions.remove(server.id);
+          _invalidate(server.id);
+        }
+        client.clearSession();
+      };
+      _requireCurrent(server, scope, generation);
+      return session;
+    } catch (_) {
+      client.clearSession();
+      rethrow;
+    }
+  }
+
   Future<SourceSession> authenticate(String id) async {
     final server = _allowed(id);
     final scope = _scopes[id] ?? 0;
@@ -695,6 +801,7 @@ class SourceSessionRegistry {
     final attempt = (_authAttempts[id] ?? 0) + 1;
     _authAttempts[id] = attempt;
     final client = createClient();
+    client.setUserAgent(server.userAgent);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Client factory must be independent');
     }
@@ -830,6 +937,7 @@ class SourceSessionRegistry {
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
     final client = createClient();
+    client.setUserAgent(server.userAgent);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Check client must be independent');
     }

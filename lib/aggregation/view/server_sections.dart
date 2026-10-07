@@ -201,7 +201,7 @@ class ServerSectionsLoader extends ChangeNotifier {
   Future<ServerSections?> _fetch(SavedServer server) async {
     final SourceSession session;
     try {
-      session = await registry.authenticate(server.id);
+      session = await registry.ensureSession(server.id);
     } on StateError catch (error) {
       if (error.message == 'Login required') {
         return null;
