@@ -4,6 +4,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/cache/directory_inventory.dart';
 
 void main() {
+  test('POSIX inventory does not follow file or directory links', () {
+    final root = Directory.systemTemp.createTempSync(
+      'rillight-inventory-link-',
+    );
+    try {
+      final file = File('${root.path}/block')..writeAsBytesSync([1, 2, 3]);
+      Link('${root.path}/file-link').createSync(file.path);
+      Link('${root.path}/dir-link').createSync(root.path);
+      final inventory = readCacheDirectory(root, maxEntries: 3);
+      expect(inventory.entries.whereType<Link>(), hasLength(2));
+      expect(inventory.stats.values.single.size, 3);
+      expect(
+        () => readCacheDirectory(
+          Directory('${root.path}/dir-link'),
+          maxEntries: 3,
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+    } finally {
+      root.deleteSync(recursive: true);
+    }
+  }, skip: Platform.isWindows);
+
   test('repeated dense inventories remain complete', () {
     final root = Directory.systemTemp.createTempSync(
       'rillight-inventory-dense-',
@@ -42,6 +65,12 @@ void main() {
           first.stats.values.single.modified.microsecondsSinceEpoch,
           file.lastModifiedSync().microsecondsSinceEpoch,
         );
+        if (!Platform.isWindows) {
+          expect(
+            first.stats.values.single.changedMicros,
+            file.statSync().changed.microsecondsSinceEpoch,
+          );
+        }
         file.writeAsBytesSync([9]);
         final second = readCacheDirectory(root, maxEntries: 2);
         expect(second.stats.values.single.size, 1);

@@ -18,6 +18,57 @@ ADDED = "\n".join(line[1:] for line in PATCH.read_text().splitlines()
 
 
 class AndroidDoviPatchTest(unittest.TestCase):
+    def test_dolby_decoder_selection_requires_matching_profile(self):
+        patch = NATIVE / "patches/ffmpeg-android-dovi-codec-selection.patch"
+        added = "\n".join(line[1:] for line in patch.read_text().splitlines()
+                          if line.startswith("+") and not line.startswith("+++"))
+        helper = "static char *mediacodec_find_dolby_decoder(" + added.split(
+            "static char *mediacodec_find_dolby_decoder(", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
+        self.compile_run("dolby_selection", r'''
+#include <assert.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+typedef struct { int unused; } AVCodecContext;
+typedef struct { int present; int32_t profile; } FFAMediaFormat;
+static int queries;
+static int ff_AMediaFormat_getInt32(FFAMediaFormat *format, const char *key, int32_t *out) {
+    assert(!strcmp(key, "profile"));
+    *out = format->profile;
+    return format->present;
+}
+static char *ff_AMediaCodecList_getCodecNameByType(const char *mime, int profile,
+                                                 int encoder, void *context) {
+    assert(!strcmp(mime, "video/dolby-vision") && !encoder && context);
+    ++queries;
+    // The first MIME match is AVC; Profile 5 belongs to the HEVC entry.
+    if (profile < 0 || profile == 512) return "avc-dolby";
+    if (profile == 32) return "hevc-dolby";
+    return NULL;
+}
+''' + helper + r'''
+int main(void) {
+    AVCodecContext codec = {0};
+    FFAMediaFormat format = {1, 32};
+    assert(!strcmp(mediacodec_find_dolby_decoder(&codec, &format), "hevc-dolby"));
+    format.profile = 512;
+    assert(!strcmp(mediacodec_find_dolby_decoder(&codec, &format), "avc-dolby"));
+    format.profile = 256; // Missing advertised capability must stay missing.
+    assert(mediacodec_find_dolby_decoder(&codec, &format) == NULL);
+    assert(queries == 3);
+    format.present = 0; format.profile = 32;
+    assert(mediacodec_find_dolby_decoder(&codec, &format) == NULL);
+    format.present = 1;
+    const int invalid[] = {0, -1, 2 | 32};
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        format.profile = invalid[i];
+        assert(mediacodec_find_dolby_decoder(&codec, &format) == NULL);
+    }
+    assert(queries == 3);
+    return 0;
+}
+''')
+
     def compile_run(self, name, source):
         compiler = os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
         if not compiler and Path("C:/msys64/mingw64/bin/gcc.exe").is_file():

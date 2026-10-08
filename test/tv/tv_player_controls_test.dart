@@ -34,8 +34,14 @@ void main() {
     Size size = const Size(960, 540),
     String itemId = 'movie-inception',
     String? extraLine,
+    bool multipleSources = false,
   }) async {
     final server = FakeEmbyServer();
+    if (multipleSources) {
+      server.items.firstWhere((i) => i.id == itemId).extraSources = const [
+        FakeMediaSource(id: 'alternate', name: 'HDR60 alternate'),
+      ];
+    }
     final auth = AuthController.memory(
       client: EmbyClient(
         device: const EmbyDeviceInfo(
@@ -122,12 +128,17 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 3));
     expect(current.controlsVisible, isFalse);
+    expect(
+      find.byKey(const Key('tv-player-gradient'), skipOffstage: false),
+      findsNothing,
+    );
     backend.emitBuffering(false);
     await tester.pump();
     expect(current.controlsVisible, isFalse);
     await current.togglePlay();
     await tester.pump();
     expect(current.controlsVisible, isTrue);
+    expect(find.byKey(const Key('tv-player-gradient')), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
@@ -290,6 +301,47 @@ void main() {
       await key(tester, LogicalKeyboardKey.select);
       expect(video.isPlaying, isTrue);
       expect(tester.takeException(), isNull);
+      await finish(tester);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'TV source target retains focus while opening and ignores repeated selection',
+    (tester) async {
+      final video = _SourceSwitchBackend();
+      final c = await start(
+        tester,
+        video,
+        reducedMotion: true,
+        multipleSources: true,
+      );
+      await tester.pumpAndSettle();
+      c.onUserActivity();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tv-player-source')));
+      await tester.pumpAndSettle();
+      final target = find.byKey(const ValueKey('source-alternate'));
+      await tester.ensureVisible(target);
+      video.gate = Completer<void>();
+      await tester.tap(target);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final node = FocusManager.instance.primaryFocus;
+      expect(c.loading, isTrue);
+      expect(node?.canRequestFocus, isTrue);
+      expect(
+        node?.context?.findAncestorWidgetOfExactType<TvAction>()?.key,
+        target.evaluate().single.widget.key,
+      );
+      final opens = video.attempts;
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pump();
+      expect(video.attempts, opens);
+      video.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(c.loading, isFalse);
+      expect(FocusManager.instance.primaryFocus, same(node));
       await finish(tester);
     },
     tags: ['integration'],
@@ -569,4 +621,15 @@ class _DelayedBackend extends FakeVideoBackend {
   @override
   Widget buildView({Key? key}) =>
       const ColoredBox(key: Key('native-view'), color: Colors.blue);
+}
+
+class _SourceSwitchBackend extends FakeVideoBackend {
+  Completer<void>? gate;
+  int attempts = 0;
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    attempts++;
+    await gate?.future;
+    await super.open(request);
+  }
 }

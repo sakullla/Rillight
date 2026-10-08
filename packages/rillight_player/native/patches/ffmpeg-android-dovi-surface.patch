@@ -1,0 +1,50 @@
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -73,6 +73,7 @@
+     int dolby_profile;
+     int export_dovi;
+     int dovi_8bit;
++    int dovi_surface;
+     int64_t discard_before_us;
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     DOVIContext dovi;
+@@ -171,7 +172,8 @@
+         if (entry->pts_us != pts_us)
+             continue;
+         if (frame->format != AV_PIX_FMT_P010LE &&
+-            frame->format != AV_PIX_FMT_NV12) {
++            frame->format != AV_PIX_FMT_NV12 &&
++            !(s->dovi_surface && frame->format == AV_PIX_FMT_MEDIACODEC)) {
+             av_frame_unref(frame);
+             return AVERROR_INVALIDDATA;
+         }
+@@ -582,7 +584,8 @@
+         s->dovi.cfg = *(AVDOVIDecoderConfigurationRecord *)side->data;
+         /* Keep P010 by default; NV12 permits RPU color conversion on codecs
+          * which expose only 8-bit byte output. Never discard the RPU. */
+-        ff_AMediaFormat_setInt32(format, "color-format", s->dovi_8bit ? 21 : 54);
++        if (!s->dovi_surface)
++            ff_AMediaFormat_setInt32(format, "color-format", s->dovi_8bit ? 21 : 54);
+ #else
+         ret = AVERROR(ENOSYS);
+         goto done;
+@@ -784,6 +787,8 @@
+ static const AVOption ff_mediacodec_vdec_options[] = {
+     { "discard_before", "Skip P010 copying before this presentation timestamp in microseconds",
+                        OFFSET(discard_before_us), AV_OPT_TYPE_INT64, {.i64 = -1}, -1, INT64_MAX, VD },
++    { "dovi_surface", "Export timestamp-matched Dolby RPU with private Surface output",
++                      OFFSET(dovi_surface), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "dovi_8bit", "Use NV12 for timestamp-matched Dolby RPU output",
+                       OFFSET(dovi_8bit), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "export_dovi", "Export timestamp-matched Profile 5 RPU with P010 byte buffers",
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -1082,7 +1082,7 @@
+         }
+ 
+         if (info.size) {
+-            if (!s->surface && s->discard_before_us >= 0 &&
++            if (s->discard_before_us >= 0 &&
+                 info.presentationTimeUs < s->discard_before_us) {
+                 // Reference decoding remains active; no CPU plane allocation,
+                 // 4K copy or output frame is needed before the seek target.

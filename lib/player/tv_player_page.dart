@@ -331,6 +331,19 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     final c = controller!, l = AppLocalizations.of(context);
     final origin = FocusManager.instance.primaryFocus;
     c.setControlsPinned(true);
+    // Keep the remote target mounted/focusable while opening another source.
+    // A disabled action drops focus; autofocus does not run again on re-enable.
+    var applying = false;
+    Future<void> apply(Future<void> Function() operation) async {
+      if (applying || c.loading) return;
+      applying = true;
+      try {
+        await operation();
+      } finally {
+        applying = false;
+      }
+    }
+
     final title = switch (panel) {
       _TvPanel.tracks => l.mobileTracks,
       _TvPanel.quality => l.quality,
@@ -425,9 +438,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                       .first),
                                       selected:
                                           c.audioStreamIndex == track.index,
-                                      onPressed: c.loading
-                                          ? null
-                                          : () => c.setAudio(track.index),
+                                      onPressed: () =>
+                                          apply(() => c.setAudio(track.index)),
                                       child: _choiceLabel(
                                         track.label,
                                         selected:
@@ -448,9 +460,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                   c.subtitleStreamIndex,
                                             )),
                                     selected: c.subtitleStreamIndex == null,
-                                    onPressed: c.loading
-                                        ? null
-                                        : () => c.setSubtitle(null),
+                                    onPressed: () =>
+                                        apply(() => c.setSubtitle(null)),
                                     child: _choiceLabel(
                                       l.subtitleOff,
                                       selected: c.subtitleStreamIndex == null,
@@ -466,9 +477,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                           c.subtitleStreamIndex == track.index,
                                       selected:
                                           c.subtitleStreamIndex == track.index,
-                                      onPressed: c.loading
-                                          ? null
-                                          : () => c.setSubtitle(track.index),
+                                      onPressed: () => apply(
+                                        () => c.setSubtitle(track.index),
+                                      ),
                                       child: _choiceLabel(
                                         track.label,
                                         selected:
@@ -555,15 +566,12 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                             source == c.mediaSources.first),
                                     selected:
                                         c.activeMediaSourceId == source.id,
-                                    onPressed: c.loading
-                                        ? null
-                                        : () async {
-                                            await c.switchMediaVersion(
-                                              source.id,
-                                            );
-                                          },
+                                    onPressed: () => apply(
+                                      () => c.switchMediaVersion(source.id),
+                                    ),
                                     child: _choiceLabel(
-                                      source.name ?? source.id,
+                                      source.presentation.headline,
+                                      detail: source.presentation.detail,
                                       selected:
                                           c.activeMediaSourceId == source.id,
                                     ),
@@ -581,9 +589,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                             bitrate ==
                                                 c.availableBitrates.first),
                                     selected: c.maxStreamingBitrate == bitrate,
-                                    onPressed: c.loading
-                                        ? null
-                                        : () => c.setMaxBitrate(bitrate),
+                                    onPressed: () =>
+                                        apply(() => c.setMaxBitrate(bitrate)),
                                     child: _choiceLabel(
                                       playerQualityLabel(l, bitrate),
                                       selected:
@@ -626,9 +633,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     key: ValueKey('tv-rate-$rate'),
                                     autofocus: rate == c.playbackRate,
                                     selected: c.playbackRate == rate,
-                                    onPressed: c.loading
-                                        ? null
-                                        : () => c.setRate(rate),
+                                    onPressed: () =>
+                                        apply(() => c.setRate(rate)),
                                     child: _choiceLabel(
                                       '${rate}x',
                                       selected: c.playbackRate == rate,
@@ -714,11 +720,25 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     }
   }
 
-  Widget _choiceLabel(String text, {required bool selected}) {
+  Widget _choiceLabel(String text, {required bool selected, String? detail}) {
     return Row(
       children: [
         Expanded(
-          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
+              if (detail != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: context.tvdp(12)),
+                ),
+              ],
+            ],
+          ),
         ),
         if (selected) ...[
           SizedBox(width: context.tvdp(10)),
@@ -1154,6 +1174,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       _failed ||
                       c.progressSyncFailed ||
                       c.trackFailure != null;
+                  // Offstage still rebuilds and lays out its child on every
+                  // position/cache notification. Keep the native video sibling
+                  // mounted, but do no control layout while it is hidden.
+                  if (!visible) return const SizedBox.shrink();
                   final ready = !c.loading && !_failed;
                   final status = c.loading
                       ? l.playerLoading
@@ -1172,16 +1196,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       : c.isPlaying
                       ? l.playerPlaying
                       : l.pause;
-                  return Offstage(
-                    offstage: !visible,
-                    child: ExcludeFocus(
-                      excluding: !visible,
-                      child: TickerMode(
-                        enabled: visible,
-                        child: _overlay(context, c, l, status, ready),
-                      ),
-                    ),
-                  );
+                  return _overlay(context, c, l, status, ready);
                 },
               ),
               ListenableBuilder(

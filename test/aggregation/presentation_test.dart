@@ -531,6 +531,11 @@ Future<void> _switchMappedEpisode(
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // WebSocket caches its HTTP client on first use. Initialize it under the
+  // widget binding's HTTP override, before any runAsync enters the real zone.
+  // These catalog fixtures use synthetic .test hosts, never real DNS/sockets.
+  WebSocket.userAgent = 'Rillight synthetic catalog tests';
   testWidgets(
     'B album save chooser receipt cannot save bytes after source migration',
     (tester) async {

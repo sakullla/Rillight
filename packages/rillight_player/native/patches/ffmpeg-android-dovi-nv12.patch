@@ -1,0 +1,40 @@
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -72,6 +72,7 @@
+     char *codec_mime;
+     int dolby_profile;
+     int export_dovi;
++    int dovi_8bit;
+     int64_t discard_before_us;
+ #if CONFIG_HEVC_MEDIACODEC_DECODER
+     DOVIContext dovi;
+@@ -169,7 +170,8 @@
+         AVFrameSideData *side;
+         if (entry->pts_us != pts_us)
+             continue;
+-        if (frame->format != AV_PIX_FMT_P010LE) {
++        if (frame->format != AV_PIX_FMT_P010LE &&
++            frame->format != AV_PIX_FMT_NV12) {
+             av_frame_unref(frame);
+             return AVERROR_INVALIDDATA;
+         }
+@@ -578,7 +580,9 @@
+         }
+         s->dovi.logctx = avctx;
+         s->dovi.cfg = *(AVDOVIDecoderConfigurationRecord *)side->data;
+-        ff_AMediaFormat_setInt32(format, "color-format", 54); // COLOR_FormatYUVP010
++        /* Keep P010 by default; NV12 permits RPU color conversion on codecs
++         * which expose only 8-bit byte output. Never discard the RPU. */
++        ff_AMediaFormat_setInt32(format, "color-format", s->dovi_8bit ? 21 : 54);
+ #else
+         ret = AVERROR(ENOSYS);
+         goto done;
+@@ -780,6 +784,8 @@
+ static const AVOption ff_mediacodec_vdec_options[] = {
+     { "discard_before", "Skip P010 copying before this presentation timestamp in microseconds",
+                        OFFSET(discard_before_us), AV_OPT_TYPE_INT64, {.i64 = -1}, -1, INT64_MAX, VD },
++    { "dovi_8bit", "Use NV12 for timestamp-matched Dolby RPU output",
++                      OFFSET(dovi_8bit), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "export_dovi", "Export timestamp-matched Profile 5 RPU with P010 byte buffers",
+                     OFFSET(export_dovi), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, VD },
+     { "dolby_profile", "Android Dolby Vision CodecProfileLevel bitmask",

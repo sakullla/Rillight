@@ -15,8 +15,14 @@ if (!coreAbis || coreAbis.toSet().size() != coreAbis.size ||
 android {
     namespace = 'com.rillight.player'
     compileSdk = 36
+    buildFeatures { buildConfig = true }
     defaultConfig {
         minSdk = 24
+        // Native tunneling is retained for device experiments. Its color and
+        // playback lifecycle checks are not yet release-qualified.
+        buildConfigField 'boolean', 'EXPERIMENTAL_NATIVE_TUNNEL',
+            providers.gradleProperty('rillightExperimentalNativeTunnel')
+                .map { it == 'true' ? 'true' : 'false' }.getOrElse('false')
         consumerProguardFiles 'consumer-rules.pro'
         ndk { abiFilters.addAll(coreAbis) }
         externalNativeBuild {

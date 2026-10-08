@@ -15,6 +15,7 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../native"
 add_library(rillight_android_core SHARED src/main/cpp/core_bridge.cpp)
 target_compile_features(rillight_android_core PRIVATE cxx_std_17)
 target_include_directories(rillight_android_core PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../native/core")
+  "${CMAKE_CURRENT_SOURCE_DIR}/../native/core"
+  "${RILLIGHT_CORE_PREFIX}/include")
 target_compile_options(rillight_android_core PRIVATE -Wall -Wextra -Werror)
-target_link_libraries(rillight_android_core PRIVATE rillight_core android log)
+target_link_libraries(rillight_android_core PRIVATE rillight_core ${avcodec_library} android log)

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <dlfcn.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 
@@ -13,9 +14,20 @@
 #include <vector>
 
 #include "rillight_core.h"
+#include "android_tunnel.h"
 #include "decoder_probe.h"
 #include "media_io_roles.h"
 #include "rgba_surface_copy.h"
+
+extern "C" {
+#include <libavcodec/jni.h>
+}
+
+extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *) {
+  // NDK decoding still needs the VM for MediaCodecList profile discovery.
+  // MIME alone cannot distinguish HEVC, AVC and AV1 Dolby Vision decoders.
+  return av_jni_set_java_vm(vm, nullptr) == 0 ? JNI_VERSION_1_6 : JNI_ERR;
+}
 
 namespace {
 struct AttachedEnv {
@@ -41,6 +53,82 @@ struct AttachedEnv {
     env = attachment->env;
   }
   JNIEnv *env = nullptr;
+};
+
+struct JavaTunnelSink final : AndroidTunnelSink {
+  JavaVM* vm;
+  jobject peer;
+  jmethodID queue, rendered, close;
+  JavaTunnelSink(JavaVM* vm, JNIEnv* env, jobject local) : vm(vm) {
+    peer = env->NewGlobalRef(local);
+    jclass cls = env->GetObjectClass(local);
+    queue = env->GetMethodID(cls, "queue", "(Ljava/nio/ByteBuffer;J)I");
+    rendered = env->GetMethodID(cls, "rendered", "()J");
+    close = env->GetMethodID(cls, "close", "()V");
+    env->DeleteLocalRef(cls);
+  }
+  ~JavaTunnelSink() override {
+    AttachedEnv thread(vm);
+    if (auto* env = thread.env) {
+      env->CallVoidMethod(peer, close);
+      if (env->ExceptionCheck()) env->ExceptionClear();
+      env->DeleteGlobalRef(peer);
+    }
+  }
+  int Queue(const uint8_t* data, int size, int64_t pts) override {
+    AttachedEnv thread(vm); auto* env = thread.env;
+    if (!env) return -1;
+    jobject bytes = data ? env->NewDirectByteBuffer(const_cast<uint8_t*>(data), size) : nullptr;
+    if (data && !bytes) { env->ExceptionClear(); return -1; }
+    const int result = env->CallIntMethod(peer, queue, bytes, static_cast<jlong>(pts));
+    if (bytes) env->DeleteLocalRef(bytes);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return -1; }
+    return result;
+  }
+  int64_t Rendered() override {
+    AttachedEnv thread(vm); auto* env = thread.env;
+    if (!env) return -1;
+    const auto result = env->CallLongMethod(peer, rendered);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return -1; }
+    return result;
+  }
+};
+
+struct JavaTunnelFactory final : AndroidTunnelFactory {
+  JavaVM* vm;
+  jobject peer;
+  jmethodID open;
+  JavaTunnelFactory(JNIEnv* env, jobject local) {
+    env->GetJavaVM(&vm); peer = env->NewGlobalRef(local);
+    jclass cls = env->GetObjectClass(local);
+    open = env->GetMethodID(cls, "open",
+        "(Landroid/view/Surface;IIIILjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;I)Lcom/rillight/player/CoreTunnelDecoder;");
+    env->DeleteLocalRef(cls);
+  }
+  ~JavaTunnelFactory() override {
+    AttachedEnv thread(vm);
+    if (thread.env) thread.env->DeleteGlobalRef(peer);
+  }
+  std::shared_ptr<AndroidTunnelSink> Open(void* window, int width, int height,
+      int profile, int level, const std::vector<uint8_t>& csd,
+      const std::vector<uint8_t>& config, int rate) override {
+    AttachedEnv thread(vm); auto* env = thread.env;
+    if (!env || !open) return {};
+    using ToSurface = jobject (*)(JNIEnv*, ANativeWindow*);
+    static const auto to_surface = reinterpret_cast<ToSurface>(dlsym(RTLD_DEFAULT, "ANativeWindow_toSurface"));
+    jobject surface = to_surface ? to_surface(env, static_cast<ANativeWindow*>(window)) : nullptr;
+    jobject init = env->NewDirectByteBuffer(const_cast<uint8_t*>(csd.data()), csd.size());
+    jobject dv = env->NewDirectByteBuffer(const_cast<uint8_t*>(config.data()), config.size());
+    jobject sink = surface && init && dv ? env->CallObjectMethod(peer, open,
+        surface, width, height, profile, level, init, dv, rate) : nullptr;
+    if (env->ExceptionCheck()) { env->ExceptionClear(); sink = nullptr; }
+    if (surface) env->DeleteLocalRef(surface);
+    if (init) env->DeleteLocalRef(init);
+    if (dv) env->DeleteLocalRef(dv);
+    std::shared_ptr<AndroidTunnelSink> result;
+    if (sink) { result = std::make_shared<JavaTunnelSink>(vm, env, sink); env->DeleteLocalRef(sink); }
+    return result;
+  }
 };
 
 struct Source {
@@ -424,9 +512,10 @@ Java_com_rillight_player_CoreNative_track(JNIEnv *env, jobject, jlong handle,
     return nullptr;
   jint values[] = {track.stream_index, track.type, track.codec_id,
                    static_cast<jint>(track.decoder_hardware_capabilities),
-                   static_cast<jint>(track.actual_hardware), track.is_external};
-  jintArray result = env->NewIntArray(6);
-  if (result) env->SetIntArrayRegion(result, 0, 6, values);
+                   static_cast<jint>(track.actual_hardware), track.is_external,
+                   rillight_core_has_decoder(track.codec_name)};
+  jintArray result = env->NewIntArray(7);
+  if (result) env->SetIntArrayRegion(result, 0, 7, values);
   return result;
 }
 JNIEXPORT jstring JNICALL
@@ -551,7 +640,10 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
         latest.session_id == frame->session_id && latest.timeline_version == frame->timeline_version;
     const int rendered = !current ? -1 : frame->type == RILLIGHT_CORE_VIDEO_ANDROID_P010
         ? rillight_core_render_android_color_frame(frame, window, hdr_supported == JNI_TRUE)
+        : frame->type == RILLIGHT_CORE_VIDEO_ANDROID_TUNNEL ? 0
         : rillight_core_render_mediacodec_frame(frame);
+    if (current && rillight_core_report_android_presentation(core, frame, rendered == 0) == 1)
+      rillight_core_release_android_color_renderer();
     ANativeWindow_release(window);
     if (rendered != 0) {
       rillight_core_release_frame(frame);
@@ -590,6 +682,15 @@ Java_com_rillight_player_CoreNative_renderVideo(JNIEnv *env, jobject,
   auto *result = numbers(env, values, sizeof(values) / sizeof(values[0]));
   rillight_core_release_frame(frame);
   return result;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_configureTunnel(JNIEnv* env, jobject,
+    jlong handle, jobject factory, jint profiles) {
+  if (!handle) return -1;
+  auto peer = factory ? std::make_shared<JavaTunnelFactory>(env, factory) : nullptr;
+  if (env->ExceptionCheck()) { env->ExceptionClear(); return -1; }
+  return rillight_core_android_tunnel_factory(bridge(handle)->core, peer, profiles);
 }
 
 JNIEXPORT jint JNICALL

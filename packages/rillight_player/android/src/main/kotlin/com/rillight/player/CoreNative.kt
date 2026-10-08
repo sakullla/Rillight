@@ -23,6 +23,7 @@ internal object CoreNative {
     external fun create(factory: CoreIoFactory): Long
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
+    external fun configureTunnel(handle: Long, factory: CoreTunnelFactory?, profiles: Int): Int
     external fun configureExternalAudioSpeed(handle: Long, enabled: Boolean): Int
     external fun videoOutputSize(handle: Long, width: Int, height: Int): Int
     external fun outputSurface(handle: Long, surface: Surface?, doviProfiles: Int): Int

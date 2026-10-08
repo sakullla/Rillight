@@ -173,6 +173,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v7
+
       - name: Download packages
         uses: actions/download-artifact@v7
         with:
@@ -188,10 +191,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          notes=()
+          if [ -f "docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            notes=(--notes-file "docs/releases/${GITHUB_REF_NAME}.md")
+          fi
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Rillight ${GITHUB_REF_NAME}" \
             --draft \
+            "${notes[@]}" \
             --generate-notes
 
   verify-release:

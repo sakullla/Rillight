@@ -30,6 +30,7 @@ internal class CorePlayback(
     private val send: (String, String, Any) -> Unit,
 ) : SurfaceOwner {
     private data class Running(val handle: Long, val generation: Int,
+                               val preparedAudio: CoreAudioOutput? = null,
                                val alive: AtomicBoolean = AtomicBoolean(true),
                                var thread: Thread? = null,
                                var audioThread: Thread? = null,
@@ -57,6 +58,15 @@ internal class CorePlayback(
                 .fold(0) { profiles, level -> profiles or level.profile }
         }.getOrDefault(0)
     }
+    private fun outputDoviProfiles(): Int {
+        val display = view?.display ?: context.getSystemService(DisplayManager::class.java)
+            ?.getDisplay(Display.DEFAULT_DISPLAY)
+        // A Dolby decoder alone does not establish a Dolby display path. On
+        // HDR10/SDR outputs the core uses HEVC hardware plus per-frame RPU
+        // conversion instead of presenting Profile 5 IPT as ordinary YUV.
+        return if (display?.hdrCapabilities?.supportedHdrTypes
+                ?.contains(Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION) == true) doviProfiles else 0
+    }
     @Volatile private var viewport = Pair(0, 0)
     private var audioOutput: CoreAudioOutput? = null
     private var running: Running? = null
@@ -74,6 +84,7 @@ internal class CorePlayback(
     }
     private var serverStreams = emptyList<ServerStream>()
     private var mapping = emptyMap<Int, Int>()
+    private var unsupportedAudio = emptySet<Int>()
     @Volatile private var desiredPaused = false
     @Volatile private var audioReady = false
     private var renderedFirst = false
@@ -199,6 +210,7 @@ internal class CorePlayback(
         buffering = false
         lastPlaying = false
         mapping = emptyMap()
+        unsupportedAudio = emptySet()
         lastHardware = null
         this.preferredHardware = preferredHardware
         lastDecoderCheckMs = 0L
@@ -221,6 +233,11 @@ internal class CorePlayback(
                 handler.post { if (generation.get() == revision) fail("Native core unavailable") }
                 return@execute
             }
+            val tunnelProfiles = if (BuildConfig.EXPERIMENTAL_NATIVE_TUNNEL &&
+                !desiredPaused && !textureVideo && preferredHardware == 8 &&
+                Build.VERSION.SDK_INT >= 26) CoreTunnelFactory.supportedProfiles() else 0
+            val preparedAudio = if (tunnelProfiles != 0)
+                runCatching { CoreAudioOutput(tunneled = true) }.getOrNull() else null
             val accepted = try {
                 // Wait off the UI thread for the mounted native view's Surface.
                 var target = synchronized(surfaceLock) { surface }
@@ -229,27 +246,32 @@ internal class CorePlayback(
                     target = synchronized(surfaceLock) { surface }
                 }
                 generation.get() == revision && target?.isValid == true &&
-                    CoreNative.outputSurface(handle, target, doviProfiles) == 0 &&
+                    CoreNative.outputSurface(handle, target, outputDoviProfiles()) == 0 &&
                     CoreNative.configureHardware(handle, preferredHardware, true) == 0 &&
                     CoreNative.configureExternalAudioSpeed(handle, true) == 0 &&
+                    CoreNative.configureTunnel(handle,
+                        preparedAudio?.let { CoreTunnelFactory(it.sessionId) },
+                        if (preparedAudio != null) tunnelProfiles else 0) == 0 &&
                     CoreNative.open(handle, address, initialStartUs, operation.incrementAndGet()) == 0 &&
                     (!desiredPaused || CoreNative.play(handle, false, operation.incrementAndGet()) == 0)
             } catch (error: Throwable) {
                 CoreNative.destroy(handle)
+                preparedAudio?.release()
                 handler.post { if (generation.get() == revision) fail(error.message ?: "Native open failed") }
                 return@execute
             }
             if (!accepted || generation.get() != revision) {
                 CoreNative.destroy(handle)
+                preparedAudio?.release()
                 if (!accepted) handler.post { if (generation.get() == revision) fail("Core rejected media open") }
                 return@execute
             }
             handler.post {
                 if (generation.get() != revision) {
-                    serial.execute { CoreNative.destroy(handle) }
+                    serial.execute { CoreNative.destroy(handle); preparedAudio?.release() }
                     return@post
                 }
-                val active = Running(handle, revision)
+                val active = Running(handle, revision, preparedAudio)
                 running = active
                 if (desiredPaused) {
                     CoreNative.play(handle, false, operation.incrementAndGet())
@@ -457,13 +479,15 @@ internal class CorePlayback(
 
     // AudioTrack owns a dedicated feeder: a blocked surface must never delay PCM.
     private fun pumpAudio(active: Running) {
-        var audio: CoreAudioOutput? = null
+        var audio: CoreAudioOutput? = active.preparedAudio
         var pending: CoreAudioFrame? = null
         var pendingOffset = 0
         var timeline = -1L
         var audioClockActive = false
         try {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+            audio?.setVolume(volume)
+            synchronized(outputLock) { audioOutput = audio }
             while (active.alive.get() && generation.get() == active.generation) {
                 var submittedAudio = false
                 val snap = CoreNative.snapshot(active.handle) ?: throw IllegalStateException("Core snapshot unavailable")
@@ -583,7 +607,7 @@ internal class CorePlayback(
                         ?.getDisplay(Display.DEFAULT_DISPLAY)
                     hdrDisplaySupported = display?.hdrCapabilities?.supportedHdrTypes
                         ?.contains(Display.HdrCapabilities.HDR_TYPE_HDR10) == true
-                    CoreNative.outputSurface(active.handle, videoSurface, doviProfiles)
+                    CoreNative.outputSurface(active.handle, videoSurface, outputDoviProfiles())
                     outputSurfaceRevision = surfaceState.second
                     hintedFrameRate = 0f
                 }
@@ -764,6 +788,8 @@ internal class CorePlayback(
             if (chosen != null) { result[server.index] = chosen.first[0]; used += chosen.first[0] }
         }
         mapping = result
+        unsupportedAudio = tracks.filter { it.first[1] == 2 && it.first.getOrNull(6) != 1 }
+            .map { it.first[0] }.toSet()
     }
 
     private fun emitDecoderIfChanged(video: IntArray) {
@@ -783,9 +809,13 @@ internal class CorePlayback(
         } ?: 0
         val audioIndex = snap?.get(6)?.toInt()?.let { native -> mapping.entries.firstOrNull { it.value == native }?.key }
         val subtitleIndex = snap?.get(7)?.toInt()?.let { native -> mapping.entries.firstOrNull { it.value == native }?.key }
-        val playableAudio = serverStreams.filter { it.type == "Audio" && it.index in mapping }.map { it.index }
+        val playableAudio = serverStreams.filter {
+            it.type == "Audio" && it.index in mapping && mapping[it.index] !in unsupportedAudio
+        }.map { it.index }
         val playableText = serverStreams.filter { it.type == "Subtitle" && it.index in mapping }.map { it.index }
-        val rejectedAudio = serverStreams.filter { it.type == "Audio" && it.index !in mapping }.map { it.index }
+        val rejectedAudio = serverStreams.filter {
+            it.type == "Audio" && (it.index !in mapping || mapping[it.index] in unsupportedAudio)
+        }.map { it.index }
         val rejectedText = serverStreams.filter { it.type == "Subtitle" && !it.external && it.index !in mapping }.map { it.index }
         val containerIds = handle?.let(CoreNative::containerTrackIds)
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,

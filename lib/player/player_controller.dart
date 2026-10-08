@@ -3789,9 +3789,11 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      if (preference?.failure == null &&
+      if (!strictTracks &&
+          preference?.failure == null &&
           preference?.selected != null &&
-          explicitVersion == null) {
+          (explicitVersion == null ||
+              explicitVersion == preference!.selected!.source.mediaSourceId)) {
         final settings = preference!.preference!.settings;
         final line = preference.preference!.lineId;
         // A temporary playback address is not the saved line. Later episodes
@@ -3904,7 +3906,11 @@ class PlayerController extends ChangeNotifier {
           ) ??
           compatibleDefaultAudio;
       final int? selectedSubtitle;
-      if (subtitleOff) {
+      if (subtitleOff ||
+          (!strictTracks &&
+              subtitle == null &&
+              preferredSubtitleStreamIndex == null &&
+              memory?.subtitleOff == true)) {
         selectedSubtitle = null;
       } else {
         selectedSubtitle =

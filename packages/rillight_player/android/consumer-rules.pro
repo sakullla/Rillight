@@ -17,3 +17,6 @@
 -keep class com.rillight.player.CoreVideoOverlay {
     public <init>(int, int, int, int, int, int, byte[]);
 }
+
+-keep class com.rillight.player.CoreTunnelFactory { public *; }
+-keep class com.rillight.player.CoreTunnelDecoder { public *; }

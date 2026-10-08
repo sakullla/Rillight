@@ -503,8 +503,23 @@ String _nonce() {
 
 String _join(String parent, String child) =>
     '$parent${Platform.pathSeparator}$child';
-String _name(FileSystemEntity entity) =>
-    entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+String _name(FileSystemEntity entity) {
+  // Quota scans call this for every block. URI conversion percent-encodes and
+  // decodes the whole path on every call, despite needing only the basename.
+  final path = entity.path;
+  bool separator(int i) =>
+      path.codeUnitAt(i) == 47 ||
+      (Platform.isWindows && path.codeUnitAt(i) == 92);
+  var end = path.length;
+  while (end > 0 && separator(end - 1)) {
+    end--;
+  }
+  var start = end;
+  while (start > 0 && !separator(start - 1)) {
+    start--;
+  }
+  return path.substring(start, end);
+}
 
 class _Lease {
   _Lease(this.directory, this.lock, this.limit, this.sessionLimit);
@@ -721,12 +736,10 @@ Map<String, Object?> _verifyTokenFiles(
   // Verify one new block per snapshot. Repeated snapshots advance through a
   // large cache without a burst of disk reads during seek or track changes.
   var remaining = maxCacheBlockBytes;
-  final regular = directory.isEmpty
-      ? <String>{}
-      : readCacheDirectory(
-          Directory(directory),
-          maxEntries: _maxCacheFiles,
-        ).entries.whereType<File>().map((file) => file.path).toSet();
+  final inventory = readCacheDirectory(
+    Directory(directory),
+    maxEntries: _maxCacheFiles,
+  );
   for (final token in tokens) {
     if (!_blockPattern.hasMatch(token)) continue;
     final length = int.parse(token.split('-')[1]);
@@ -734,10 +747,18 @@ Map<String, Object?> _verifyTokenFiles(
     final file = File(_join(directory, token));
     if (!known.containsKey(file.path) && remaining < length) continue;
     try {
-      if (!regular.contains(file.path)) continue;
-      final stat = file.statSync();
-      if (stat.size != length) continue;
-      final fingerprint = _blockFingerprint(stat);
+      final stat = inventory.stats[file.path];
+      if (stat == null || stat.size != length) continue;
+      // POSIX directory enumeration already fstats every entry without
+      // following links. Reuse that fresh identity instead of dispatching a
+      // second Dart stat and constructing three local DateTimes per block.
+      final fingerprint = stat.changedMicros == null
+          ? _blockFingerprint(file.statSync())
+          : (
+              stat.size,
+              stat.modified.microsecondsSinceEpoch,
+              stat.changedMicros!,
+            );
       if (known[file.path] != fingerprint) {
         if (remaining < length) continue;
         remaining -= length;
@@ -955,16 +976,28 @@ class _DiskStore {
       _candidateDirectories().where((dir) => _metadata(dir) != null).toList();
 
   List<FileSystemEntity> _entries(Directory directory) {
-    final cached = _entryInventory[directory.path];
+    // Directory enumeration and Directory.fromUri spell the trailing separator
+    // differently. They still share one inventory for this lock transaction.
+    final uri = directory.absolute.uri.normalizePath();
+    final key = uri
+        .replace(
+          pathSegments: uri.pathSegments.where((part) => part.isNotEmpty),
+        )
+        .toString();
+    final cached = _entryInventory[key];
     if (cached != null) return cached;
     final inventory = readCacheDirectory(directory, maxEntries: _maxCacheFiles);
     _statInventory.addAll(inventory.stats);
-    return _entryInventory[directory.path] = inventory.entries;
+    return _entryInventory[key] = inventory.entries;
   }
 
   CacheFileStat _stat(File file) => _statInventory.putIfAbsent(file.path, () {
     final stat = file.statSync();
-    return (size: stat.size, modified: stat.modified);
+    return (
+      size: stat.size,
+      modified: stat.modified,
+      changedMicros: stat.changed.microsecondsSinceEpoch,
+    );
   });
 
   void _changed(File file) {
@@ -1244,13 +1277,15 @@ class _DiskStore {
     // The writer just calculated the CRC and published these immutable bytes.
     // Share its fingerprint with the verifier instead of re-reading every new
     // block at only 1 MiB per UI refresh. Every snapshot still checks the stat.
-    final stamp = _blockFingerprint(
-      File(_join(lease.directory.path, token)).statSync(),
-    );
+    final publishedStat = File(_join(lease.directory.path, token)).statSync();
+    final stamp = _blockFingerprint(publishedStat);
     return {
       'token': token,
       'fingerprint': [stamp.$1, stamp.$2, stamp.$3],
-      'stats': _stats(),
+      // The quota lock is still held and this write added exactly one file.
+      // Account for its real size without a second full directory scan. The
+      // next command always starts with a fresh inventory under the lock.
+      'stats': _stats(knownUsage: reserved - bytes.length + publishedStat.size),
     };
   }
 
@@ -1446,8 +1481,8 @@ class _DiskStore {
     await directory.delete();
   }
 
-  Map<String, Object?> _stats() {
-    final usage = _usage();
+  Map<String, Object?> _stats({int? knownUsage}) {
+    final usage = knownUsage ?? _usage();
     _peak = max(_peak, usage);
     return {
       'diskBytes': usage,

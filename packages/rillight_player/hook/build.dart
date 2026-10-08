@@ -8,7 +8,7 @@ void main(List<String> args) async {
     await CBuilder.library(
       name: 'rillight_crc32',
       assetName: 'src/crc32_bindings.dart',
-      sources: ['native/checksum/crc32.c'],
+      sources: ['native/checksum/crc32.c', 'native/cache/directory.c'],
       std: 'c11',
     ).run(input: input, output: output);
     output.dependencies.add(

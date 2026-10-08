@@ -43,7 +43,7 @@ import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
 class _Client extends EmbyClient {
-  _Client(this.reports)
+  _Client(this.reports, {this.trackChoices = false})
     : super(
         device: const EmbyDeviceInfo(
           clientName: 'test',
@@ -53,6 +53,7 @@ class _Client extends EmbyClient {
         ),
       );
   final List<PlaybackReport> reports;
+  final bool trackChoices;
   final progressReports = <PlaybackReport>[];
   bool failProgress = false;
   bool failStopped = false;
@@ -61,7 +62,7 @@ class _Client extends EmbyClient {
   bool offerNext = false;
   @override
   EmbyClient withRequestGuard(void Function() guard) {
-    final probe = _Client(reports);
+    final probe = _Client(reports, trackChoices: trackChoices);
     probe.attachSession(
       baseUrl: baseUrl!,
       accessToken: accessToken!,
@@ -137,6 +138,16 @@ class _Client extends EmbyClient {
             'RunTimeTicks': 120 * kEmbyTicksPerSecond,
             'MediaStreams': [
               {'Index': id == 'v' ? 1 : 7, 'Type': 'Audio', 'Language': 'jpn'},
+              if (trackChoices) ...[
+                {'Index': 8, 'Type': 'Audio', 'Language': 'eng'},
+                {
+                  'Index': 9,
+                  'Type': 'Subtitle',
+                  'Language': 'eng',
+                  'Codec': 'srt',
+                  'IsDefault': true,
+                },
+              ],
             ],
           },
       ],
@@ -341,6 +352,8 @@ void main() {
   Future<void> setup({
     bool private = false,
     String itemId = 'movie',
+    bool trackChoices = false,
+    String? preferredSource,
     _Backend? videoBackend,
     WidgetTester? widgetTester,
   }) async {
@@ -395,7 +408,7 @@ void main() {
       access: access,
       store: store,
       credentials: credentials,
-      createClient: () => _Client(reports),
+      createClient: () => _Client(reports, trackChoices: trackChoices),
     );
     await registry.load();
     account = (await registry.authenticate('a')).account;
@@ -417,6 +430,7 @@ void main() {
     controller = PlayerController(
       client: auth.client,
       itemId: itemId,
+      preferredMediaSourceId: preferredSource,
       backend: backend,
       window: PlayerWindow(),
       runtime: runtime,
@@ -443,6 +457,33 @@ void main() {
     }
 
     addTearDown(cleanup);
+  }
+
+  for (final explicitSource in <String?>[null, 'v', 'v2']) {
+    test('scoped track memory with explicit source $explicitSource', () async {
+      await setup(trackChoices: true, preferredSource: explicitSource);
+      await runtime.history.savePreference(
+        SourcePreference(
+          owner: SourceReference(account: account, itemId: 'movie'),
+          target: SourceReference(
+            account: account,
+            itemId: 'movie',
+            mediaSourceId: 'v',
+          ),
+          libraryId: 'library',
+          lineId: 'line',
+          settings: const PlayerSeriesPreference(
+            audioLanguage: 'eng',
+            subtitleOff: true,
+          ),
+        ),
+      );
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(controller.resolved?.mediaSource.id, explicitSource ?? 'v');
+      expect(controller.audioStreamIndex, explicitSource == 'v2' ? 7 : 8);
+      expect(controller.subtitleStreamIndex, explicitSource == 'v2' ? 9 : null);
+    });
   }
 
   test(
