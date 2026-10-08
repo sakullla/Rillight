@@ -13,6 +13,46 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CoreInputTest {
+    @Test fun interleavedTracksReuseResponsesAcrossSmallForwardGaps() {
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val nextChunk = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val server = LocalHttpServer { headers, output ->
+            requests.incrementAndGet()
+            val start = headers.getValue("range").removePrefix("bytes=").substringBefore('-').toInt()
+            replyHeader(output, 206, 256 * 1024, "bytes $start-${start + 256 * 1024 - 1}/${4 * 1024 * 1024}")
+            output.write(ByteArray(8192) { ((start + it) % 251).toByte() })
+            output.flush()
+            nextChunk.await(5, TimeUnit.SECONDS)
+            output.write(ByteArray(8192) { ((start + 8192 + it) % 251).toByte() })
+            output.flush()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            val tracks = listOf(1024 * 1024, 2 * 1024 * 1024)
+            fun checkAt(position: Int) {
+                assertEquals(position.toLong(), input.seek(position.toLong(), 0))
+                val bytes = ByteArray(1024)
+                val count = input.read(bytes, bytes.size)
+                org.junit.Assert.assertTrue(count in 1..bytes.size)
+                org.junit.Assert.assertArrayEquals(
+                    ByteArray(count) { ((position + it) % 251).toByte() }, bytes.copyOf(count))
+            }
+            for (track in tracks) checkAt(track)
+            // Neither socket has the next packet yet. The demuxer skips over
+            // bytes belonging to another track within the existing response.
+            nextChunk.countDown()
+            for (track in tracks) checkAt(track + 8192 + 1024)
+            assertEquals(2, requests.get())
+        } finally {
+            nextChunk.countDown()
+            release.countDown()
+            input.close()
+            server.close()
+        }
+    }
+
     @Test fun fragmentedInterleavedTracksKeepTheirLoopbackResponses() {
         val requests = java.util.concurrent.atomic.AtomicInteger()
         val release = CountDownLatch(1)

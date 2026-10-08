@@ -1,0 +1,18 @@
+diff --git a/libavformat/seek.c b/libavformat/seek.c
+index c0d94371..d141c56f 100644
+--- a/libavformat/seek.c
++++ b/libavformat/seek.c
+@@ -182,6 +182,13 @@ void ff_configure_buffers_for_index(AVFormatContext *s, int64_t time_tolerance)
+ 
+     av_assert0(time_tolerance >= 0);
+ 
++    /* Rillight's custom AVIO owns bounded read windows and seek caching.
++     * Do not scan every pair of stream indexes to tune an assumed network
++     * protocol, or grow its AVIO buffer independently of that policy. The
++     * sample indexes and timestamps themselves remain unchanged. */
++    if (s->flags & AVFMT_FLAG_CUSTOM_IO)
++        return;
++
+     if (!proto) {
+         av_log(s, AV_LOG_INFO,
+                "Protocol name not provided, cannot determine if input is local or "

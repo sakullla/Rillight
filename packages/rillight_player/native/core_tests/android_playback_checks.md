@@ -240,3 +240,83 @@ defaults to false, including tag builds. Ordinary releases retain the compatible
 decoder/color path; the experimental path is not advertised as a Dolby color
 fix. In-app pause, seeking, rate changes, end-of-stream and surface lifecycle
 still require validation before enabling it by default.
+
+### Android prefetch investigation after v0.1.46, 2026-10-08
+
+On the same Android 14 device, the production application and ADB remained
+responsive during investigation of a reported playback freeze. The captured
+player was paused; this does not explain all of the reported stalls. No fatal
+exception or ANR was observed in that capture. Closing playback reduced sampled
+process PSS from approximately 547 MiB to 192 MiB. Device temperature samples
+reached 74.5 C during subsequent tests; physical fan noise was not verified.
+
+The Android producer uses the retained disk quota (2 GiB by default) as its
+forward read-ahead window. A 32 MiB cap was tried, but the observations below
+were inconsistent. That policy change was withdrawn on 2026-10-09 at the user's
+request. Phone and TV retain the original configured read-ahead quota and single
+upstream producer. These trials do not establish a prefetch-size root cause.
+
+Short profile-build samples used the same 2160p HEVC Main10 HDR 60 fps MP4 with
+AAC stereo selected. All successful samples reported actual `mediacodec` use.
+The baseline first reported playback at 20.56 s; a separate instrumented run
+spent 10.45 s opening the container and read 19,144,704 bytes before decoder
+opening completed at 11.60 s. The complete-MP4-header fast path was used, so
+these measurements do not support blaming `avformat_find_stream_info`.
+
+With a validation override of 32 MiB, the player first reported playback at
+15.91 s and advanced 41.33 media seconds over 41.51 wall seconds. A second
+trial, using a temporary default without native/Java timing logs,
+first reported playback at 12.58 s but advanced only 28.67 media seconds over
+43.01 wall seconds. Starting positions, cache state and temperature were not
+controlled across these samples. Playback remains variable; neither stable
+60 fps nor a fan/thermal improvement is established. System captures cannot
+verify the physical HDR video layer, and the user was not watching this run.
+
+Media pause and playback exit were observed to work. A complete seek/lifecycle
+regression was not completed. The 26 targeted runtime-options/backend tests and
+Flutter static analysis passed, and the ARM32 profile validation APK built and
+installed successfully. The signed production v0.1.46 installation was retained;
+these trials used only the disposable validation package. Validation playback
+was stopped after sampling. Startup delay and repeated optional cache-timeline
+index failures remain investigation items, not verified fixes.
+
+### MP4 input and container-open follow-up, 2026-10-09
+
+All following device runs restored the original 2 GiB forward quota. Reading
+the source on the host showed a front-loaded 19,144,634-byte `moov`, including
+a 10,187,890-byte cover box. Its direct host range read took about 1.04 s.
+Android input tracing showed one continuous connection through the header;
+repeated header connection setup was not the cause. One run spent 5.40 s in
+input calls by 18,876,879 bytes / 7.17 s wall time, with further time spent
+inside container initialization after the header bytes arrived.
+
+Two independent changes were retained:
+
+- CoreInput can advance up to 64 KiB within a current or parked HTTP response.
+  Selected MP4 tracks can have small gaps between packets. Previously only an
+  exact position match reused that response, causing repeated local requests.
+  The fragmented two-track regression failed with four requests before the
+  change and passed with two afterwards, checking the returned bytes. Distant
+  seeks still use bounded ranges; interruption remains checked during draining.
+- The Android SDK's locked FFmpeg patch skips cross-track network-buffer tuning
+  for custom AVIO. The owned input already manages read windows. The skipped
+  heuristic scans pairs of stream indexes and can enlarge the AVIO buffer;
+  sample indexes, timestamps, edit lists and cover parsing are unchanged.
+  Desktop SDK patch sets are unchanged. No device model or media ID is encoded
+  in either fix.
+
+In the same ARM32 profile application with the input fix, adding the SDK patch
+reduced container-open timing from 12.337 s to 6.432 s, and decoder-ready timing
+from 13.739 s to 7.746 s. The sampled first-playing event changed from 17.60 s to
+10.97 s. The latter run advanced 34.016 media seconds over 51.78 wall seconds,
+so stable 60 fps and complete stutter resolution are explicitly not established.
+Temperature and upstream cache conditions were not held fixed between runs.
+Actual decoder status remained `mediacodec`, with no sampled player error.
+
+The ARM32 FFmpeg and libass SDK were rebuilt through the locked builders and
+passed source/library verification including subtitle support. The APK's
+`libavformat.so` matched the verified SDK bytes. Source-lock tests passed (3),
+and CoreInput tests passed (13). After removing temporary Java/native timing
+logs, all Android plugin unit tests passed (46); the profile APK was rebuilt
+and installed in the validation package. Other Android ABIs and physical HDR frame output
+were not validated in these runs; physical fan noise remains unverified.

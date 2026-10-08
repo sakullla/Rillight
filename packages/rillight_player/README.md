@@ -41,6 +41,11 @@ Android also enables the additive external-audio-speed API: AudioTrack applies
 tempo with pitch preservation to source-rate PCM, so speed changes preserve
 video/RPU and audio queues. Its clock reports source-sample media duration;
 desktop adapters retain the default FFmpeg atempo path.
+Android's owned custom I/O also manages its own bounded read windows. Its SDK
+patch skips FFmpeg's cross-track network-buffer tuning for custom AVIO, while
+retaining the sample indexes, timestamps and edit lists. Short forward gaps
+within retained HTTP responses reuse the connection; distant seeks still use
+bounded ranges. These changes do not reduce the configured disk/read-ahead quota.
 Run `python packages/rillight_player/native/android_dovi_patch_test.py` for
 the locked helper checks; actual decoding/color/performance require a device.
 Each SDK prefix must carry `rillight-core-dependencies.json` with
