@@ -1,6 +1,7 @@
 * text=auto eol=lf
 # Unified diffs represent a blank context line with one literal space.
 packages/rillight_player/native/patches/*.patch whitespace=-blank-at-eol
+packages/rillight_player/macos/rillight_player/Sources/rillight_player/include/rillight_player/rillight_core.h linguist-generated=true sakullla-review=generated
 .metadata linguist-generated=true sakullla-review=generated
 pubspec.lock linguist-generated=true sakullla-review=generated
 lib/app/l10n/app_localizations.dart linguist-generated=true sakullla-review=generated

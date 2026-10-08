@@ -3927,7 +3927,7 @@ int rillight_core_render_mediacodec_frame(const RillightCoreFrame* frame) {
   // that media timestamp through on some codecs and breaks display pacing.
   const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
       Clock::now().time_since_epoch()).count();
-  const auto present_ns = std::max(now_ns,
+  const auto present_ns = std::max<int64_t>(now_ns,
       static_cast<const VideoOutputFrame*>(frame)->presentation_time_ns);
   return av_mediacodec_render_buffer_at_time(
       reinterpret_cast<AVMediaCodecBuffer*>(decoded->data[3]), present_ns);

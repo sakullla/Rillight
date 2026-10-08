@@ -870,13 +870,20 @@ void main() {
         ).writeAsString(jsonEncode({'action': 'lines'})),
       );
       Map<String, dynamic>? lineReceipt;
-      for (var i = 0; i < 400 && lineReceipt == null; i++) {
+      final menuDeadline = DateTime.now().add(const Duration(seconds: 12));
+      while (lineReceipt == null && DateTime.now().isBefore(menuDeadline)) {
         await tester.pump(const Duration(milliseconds: 30));
         lineReceipt = await tester.runAsync<Map<String, dynamic>?>(() async {
           final file = File(
             '${control.protocols[pid]!.directory.path}/synthetic-menu-receipt.json',
           );
-          return consumeSyntheticMessage(file);
+          final receipt = await consumeSyntheticMessage(file);
+          // The helper polls in a real process; fake Flutter time cannot
+          // guarantee it has processed the menu request under parallel load.
+          if (receipt == null) {
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+          }
+          return receipt;
         });
       }
       expect(lineReceipt, isNotNull, reason: control.output.toString());

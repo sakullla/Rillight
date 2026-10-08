@@ -8,9 +8,39 @@ import tempfile
 import os
 import subprocess
 import unittest
+import sys
 from unittest.mock import patch
 
 import linux_release_checks as checks
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'linux/packaging'))
+import wait_for_window
+
+
+class WindowDiscoveryTests(unittest.TestCase):
+    def test_retries_search_and_pid_races_and_rejects_other_process(self):
+        responses = [
+            (1, '9'),  # BadWindow during search: partial output is not usable.
+            (0, '10 11 12'),
+            (1, ''),  # Window 10 disappeared before PID lookup.
+            (0, '111'), (0, '112'),
+        ]
+        def run(args, **kwargs):
+            code, stdout = responses.pop(0)
+            return subprocess.CompletedProcess(args, code, stdout, '')
+        with patch.object(wait_for_window.subprocess, 'run', side_effect=run), \
+                patch.object(wait_for_window.os, 'readlink', side_effect=[
+                    '/usr/bin/unrelated', '/opt/rillight/rillight']), \
+                patch.object(wait_for_window.time, 'sleep'):
+            self.assertEqual(wait_for_window.find_window(
+                'class', '.*rillight.*', '/opt/rillight/rillight'), ('12', '112'))
+        self.assertEqual(responses, [])
+
+    def test_missing_window_fails_instead_of_passing(self):
+        with patch.object(wait_for_window.time, 'monotonic', side_effect=[0, 2]), \
+                patch.object(wait_for_window.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'No live'):
+                wait_for_window.find_window('name', 'diagnostic', '/usr/bin/zenity', 1)
+            run.assert_not_called()
 
 
 def write_elf(path, needed=(), soname=None, runpath='$ORIGIN', rpath=None):

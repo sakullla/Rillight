@@ -47,11 +47,15 @@ typedef enum RillightCoreFrameType {
   RILLIGHT_CORE_AUDIO_S16 = 2,
   RILLIGHT_CORE_VIDEO_D3D11 = 3,
   RILLIGHT_CORE_VIDEO_MEDIACODEC = 4,
+  /* Owned Android color presentation: retained P010/NV12 planes or a private
+   * MediaCodec Surface with per-frame Dolby RPU metadata. Not CPU RGBA. */
   RILLIGHT_CORE_VIDEO_ANDROID_P010 = 5,
   /* Tightly packed little-endian RGBA16F. 1.0 is SDR white; values above 1.0
    * are highlights. take_frame(VIDEO_RGBA) also returns this type when the
    * macOS EDR sink is enabled. Callers must branch on frame->type. */
-  RILLIGHT_CORE_VIDEO_RGBA16F = 6
+  RILLIGHT_CORE_VIDEO_RGBA16F = 6,
+  /* Presentation receipt only: pixels are already displayed by the tunnel. */
+  RILLIGHT_CORE_VIDEO_ANDROID_TUNNEL = 7
 } RillightCoreFrameType;
 
 typedef enum RillightCoreTrackType {
@@ -238,6 +242,12 @@ RILLIGHT_CORE_API int rillight_core_set_android_window(RillightCore *core,
                                                       uint32_t dovi_profiles);
 RILLIGHT_CORE_API int rillight_core_render_mediacodec_frame(
     const RillightCoreFrame *frame);
+/* Report current Android hardware presentation results. Three consecutive
+ * failures request one software/keyframe recovery when fallback is enabled.
+ * Stale session/timeline results are ignored. Returns 1 when recovery starts;
+ * the caller must release its EGL renderer before presenting software RGBA. */
+RILLIGHT_CORE_API int rillight_core_report_android_presentation(
+    RillightCore *core, const RillightCoreFrame *frame, int succeeded);
 /* Owned GLES presentation on the caller's output thread. Release on the same
  * thread before returning the Surface. HDR requires display/EGL support. */
 RILLIGHT_CORE_API int rillight_core_render_android_color_frame(
