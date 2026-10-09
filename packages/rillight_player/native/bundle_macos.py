@@ -81,7 +81,7 @@ def bundle(app_path: Path, *, root: Path = ROOT, record: dict | None = None) -> 
     for name in sorted(names):
         subprocess.check_call(["codesign", "--force", "--sign", identity,
                                "--timestamp=none", str(destination / name)])
-    # FindAsset reads the directory that contains librillight_core.dylib.
+    # Remove enhancement models left by older application bundles.
     remove_enhancement_runtime(destination)
     record = dict(record)
     record["bundled_libraries_sha256"] = {

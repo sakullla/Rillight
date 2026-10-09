@@ -3,6 +3,7 @@ import array
 from contextlib import ExitStack
 import json
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -19,6 +20,29 @@ import android_release_checks as checks
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_frame_constructor_audit_and_keep_rules_match_native_calls(self):
+        android = Path(__file__).resolve().parents[1] / 'packages/rillight_player/android'
+        bridge = (android / 'src/main/cpp/core_bridge.cpp').read_text(encoding='utf-8')
+        rules = (android / 'consumer-rules.pro').read_text(encoding='utf-8')
+        descriptors = {'long': 'J', 'int': 'I', 'boolean': 'Z', 'byte[]': '[B'}
+        for name in ('CoreAudioFrame', 'CoreVideoOverlay'):
+            with self.subTest(name=name):
+                native = re.search(
+                    rf'FindClass\("com/rillight/player/{name}"\);\s*'
+                    r'jmethodID ctor = cls \? env->GetMethodID\(cls, "<init>", "([^"]+)"\)',
+                    bridge)
+                self.assertIsNotNone(native)
+                signature = native.group(1)
+                self.assertIn(('<init>', signature), checks.JNI_CALLBACKS[name])
+                kept = re.search(
+                    rf'-keep class com\.rillight\.player\.{name}\s*\{{\s*'
+                    r'public <init>\(([^)]*)\);', rules)
+                self.assertIsNotNone(kept)
+                keep_signature = '(' + ''.join(
+                    descriptors[param.strip()] for param in kept.group(1).split(',')
+                ) + ')V'
+                self.assertEqual(keep_signature, signature)
+
     def test_legacy_immersive_button_requires_explicit_cling_context(self):
         with tempfile.TemporaryDirectory() as temp:
             device = object.__new__(Device)

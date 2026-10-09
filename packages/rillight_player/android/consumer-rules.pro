@@ -12,7 +12,7 @@
     public void interrupt();
 }
 -keep class com.rillight.player.CoreAudioFrame {
-    public <init>(long, long, long, byte[]);
+    public <init>(long, long, long, byte[], int, int, int, boolean, int);
 }
 -keep class com.rillight.player.CoreVideoOverlay {
     public <init>(int, int, int, int, int, int, byte[]);

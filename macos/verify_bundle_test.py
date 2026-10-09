@@ -152,36 +152,35 @@ class PrepareTest(unittest.TestCase):
                     fixture.prefix, fixture.core, sha(b'owned-core'), fixture.root)
             self.assertFalse(stale.exists())
 
-    def test_built_core_weights_are_staged_and_copied_beside_the_dylib(self):
+    def test_legacy_core_weights_are_not_staged_or_bundled(self):
         with tempfile.TemporaryDirectory() as temp:
             fixture = PreparedFixture(temp)
             weight = fixture.core.parent / 'rife-v4.6' / 'flownet.bin'
             weight.parent.mkdir()
             weight.write_bytes(b'weight')
 
-            def fake_install(source, destination):
-                target = Path(destination) / 'rife-v4.6' / 'flownet.bin'
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes((Path(source) / 'rife-v4.6' / 'flownet.bin').read_bytes())
-
+            staged = fixture.root / 'macos/Libraries/rife-v4.6/flownet.bin'
+            staged.parent.mkdir(parents=True)
+            staged.write_bytes(b'stale')
             with patch('prepare_macos.verify', return_value=[]), \
-                 patch('prepare_macos.architectures', return_value={'x86_64', 'arm64'}), \
-                 patch('build_core_dependencies.install_enhancement_runtime',
-                       side_effect=fake_install):
+                 patch('prepare_macos.architectures', return_value={'x86_64', 'arm64'}):
                 record = prepare_macos.prepare(
                     fixture.prefix, fixture.core, sha(b'owned-core'), fixture.root)
-                staged = fixture.root / 'macos/Libraries/rife-v4.6/flownet.bin'
-                self.assertEqual(staged.read_bytes(), b'weight')
+                self.assertFalse(staged.exists())
                 app = fixture.root / 'candidate.app'
                 (app / 'Contents/MacOS').mkdir(parents=True)
                 (app / 'Contents/MacOS/rillight').write_bytes(b'executable')
+                copied = app / 'Contents/Frameworks/rife-v4.6/flownet.bin'
+                copied.parent.mkdir(parents=True)
+                copied.write_bytes(b'stale')
                 with patch.dict('os.environ',
                                 {'RILLIGHT_MACOS_CORE_PREFIX': str(fixture.prefix)}), \
                      patch('bundle_macos.audit_binary'), \
                      patch('bundle_macos.subprocess.check_call'):
                     bundle(app, root=fixture.root, record=record)
-            copied = app / 'Contents/Frameworks/rife-v4.6/flownet.bin'
-            self.assertEqual(copied.read_bytes(), b'weight')
+            self.assertFalse(copied.exists())
+            self.assertEqual((app / 'Contents/Frameworks' /
+                              fixture.core.name).read_bytes(), b'owned-core')
 
     def test_hash_or_missing_architecture_rejects_core(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -99,7 +99,7 @@ inline bool ProbeDefaultSink(int *channels, uint32_t *accept) {
         if (info->formats) {
           for (uint8_t index = 0; index < info->n_formats; ++index) {
             const pa_encoding_t encoding =
-                pa_format_info_get_encoding(info->formats[index]);
+                info->formats[index]->encoding;
             if (encoding == PA_ENCODING_EAC3_IEC61937)
               probe->accept |= RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
             if (encoding == PA_ENCODING_TRUEHD_IEC61937)
@@ -345,10 +345,9 @@ class PulseOutput {
       stream_ = pa_stream_new(context_, "Media", &spec, &map);
     } else {
       pa_format_info *info = pa_format_info_new();
-      pa_format_info_set_encoding(
-          info, kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
-                    ? PA_ENCODING_TRUEHD_IEC61937
-                    : PA_ENCODING_EAC3_IEC61937);
+      info->encoding = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
+                           ? PA_ENCODING_TRUEHD_IEC61937
+                           : PA_ENCODING_EAC3_IEC61937;
       pa_format_info_set_rate(info, 48000);
       pa_format_info_set_channels(info, channels);
       pa_format_info *formats[] = {info};
@@ -442,7 +441,7 @@ class PulseOutput {
                 if (info->formats) {
                   for (uint8_t index = 0; index < info->n_formats; ++index) {
                     const pa_encoding_t encoding =
-                        pa_format_info_get_encoding(info->formats[index]);
+                        info->formats[index]->encoding;
                     if (encoding == PA_ENCODING_EAC3_IEC61937)
                       accept |= RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
                     if (encoding == PA_ENCODING_TRUEHD_IEC61937)
