@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -28,11 +29,12 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final gutter = PresentationScope.pageGutterOf(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.page,
+      padding: EdgeInsets.fromLTRB(
+        gutter,
         AppSpacing.md,
-        AppSpacing.page,
+        gutter,
         AppSpacing.sm,
       ),
       child: Column(
@@ -141,13 +143,12 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
       },
     );
     if (widget.compact) {
+      // 桌面嵌在标题旁信息栏里，与标题左对齐；手机直接排在页面上，取页面边距。
+      final inset = PresentationScope.isPhoneOf(context)
+          ? PresentationScope.pageGutterOf(context)
+          : 0.0;
       return Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.sm,
-          AppSpacing.md,
-          0,
-        ),
+        padding: EdgeInsets.fromLTRB(inset, AppSpacing.sm, inset, 0),
         child: body,
       );
     }

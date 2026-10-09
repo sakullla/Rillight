@@ -31,6 +31,7 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/detail_repository.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
+import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -52,6 +53,9 @@ class ItemDetailPage extends StatefulWidget {
 
   /// 头部左侧海报/缩略图区。
   static const posterKey = Key('detail-poster');
+
+  /// 头部标题。年份与评分移到标题下的元信息行，与手机详情一致。
+  static const titleKey = Key('detail-title');
 
   /// 头部最小高度(不含顶栏叠加),骨架与真实头部共用同一算法。
   static double headerHeightFor(double width, double viewportHeight) {
@@ -2596,7 +2600,11 @@ class _DetailInfo extends StatelessWidget {
             seasonId: item.seasonId ?? item.parentId,
           ),
         SelectableText(
-          itemTitle(item),
+          item.name,
+          key: ItemDetailPage.titleKey,
+          // 不设 minLines 时多行 SelectableText 恒占满 maxLines 的高度，
+          // 单行标题下方会空出一整行。
+          minLines: 1,
           maxLines: 2,
           style:
               (compact
@@ -2665,15 +2673,18 @@ class _MetaRow extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
+    // 取色主题的 primaryContainer 与前景色有时几乎同色，集标会看不清。
+    // 改用半透明前景色底，压在任何剧照上都读得出。
     final style = theme.textTheme.labelMedium?.copyWith(
-      color: scheme.onPrimaryContainer,
+      color: scheme.onSurface,
+      fontWeight: FontWeight.w600,
       letterSpacing: 0.2,
     );
     Widget chip(String text) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: scheme.primaryContainer,
+          color: scheme.onSurface.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(text, style: style),
@@ -2706,7 +2717,9 @@ class _MetaRow extends StatelessWidget {
         ? seasonEpisodeCode(listed) ?? episodeLabel(listed)
         : null;
 
+    final year = item.productionYear;
     final facts = <String>[
+      if (!item.isEpisode && year != null && year > 0) '$year',
       ?runtime,
       if (item.isEpisode && item.premiereDate != null)
         l10n.premiereDate(formatDateYmd(item.premiereDate!)),
@@ -2718,6 +2731,7 @@ class _MetaRow extends StatelessWidget {
       if (item.canResume)
         l10n.playbackProgress((item.playbackProgress * 100).round()),
     ];
+    final rating = item.isEpisode ? null : item.communityRating;
     final actions = <Widget>[
       if (item.isEpisode)
         locateChip(
@@ -2745,12 +2759,22 @@ class _MetaRow extends StatelessWidget {
             runSpacing: AppSpacing.xs,
             children: actions,
           ),
-        if (facts.isNotEmpty) ...[
+        if (facts.isNotEmpty || rating != null) ...[
           if (actions.isNotEmpty) const SizedBox(height: AppSpacing.xs),
-          Text(
-            facts.join(' · '),
-            key: item.canResume ? CatalogKeys.resumeProgress : null,
-            style: factStyle,
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xxs,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (facts.isNotEmpty)
+                Text(
+                  facts.join(' · '),
+                  key: item.canResume ? CatalogKeys.resumeProgress : null,
+                  style: factStyle,
+                ),
+              if (rating != null)
+                HeroRatingBadge(rating: rating, onScrim: false),
+            ],
           ),
         ],
       ],

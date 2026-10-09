@@ -1033,38 +1033,50 @@ class _Header extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ?heading,
-          if (loadedCount != null) ...[
-            const SizedBox(height: AppSpacing.xxs),
-            Text(
-              l10n.browseLoaded(loadedCount!),
-              style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+          // 刷新是偶尔才用的维护动作，收在标题行右端的安静图标里；
+          // 下方工具条只留筛选和排序两个浏览控件。
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ?heading,
+                    if (loadedCount != null) ...[
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        l10n.browseLoaded(loadedCount!),
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              if (onRefresh != null)
+                IconButton(
+                  key: gridRefreshKey,
+                  tooltip: l10n.refresh,
+                  color: colorScheme.onSurfaceVariant,
+                  onPressed: refreshing ? null : onRefresh,
+                  icon: refreshing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded),
+                ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.sm),
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.xs,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (onRefresh != null)
-                _HeaderChip(
-                  child: IconButton(
-                    key: gridRefreshKey,
-                    tooltip: l10n.refresh,
-                    visualDensity: VisualDensity.compact,
-                    onPressed: refreshing ? null : onRefresh,
-                    icon: refreshing
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh_rounded),
-                  ),
-                ),
               if (filters != null && onFiltersChanged != null)
                 _FilterBar(
                   filters: filters!,

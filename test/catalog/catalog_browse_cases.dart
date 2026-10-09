@@ -268,7 +268,10 @@ void main() {
       await tester.ensureVisible(movie);
       await tester.tap(movie);
       await settle(tester);
-      expect(find.text('Inception (2010)'), findsOneWidget);
+      expect(
+        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        'Inception',
+      );
       expect(
         find.text(
           'A thief who steals corporate secrets through dream-sharing.',
@@ -304,7 +307,10 @@ void main() {
       await settle(tester);
       await tester.tap(find.text('老友记'));
       await settle(tester);
-      expect(find.text('老友记 (1994)'), findsOneWidget);
+      expect(
+        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        '老友记',
+      );
       expect(find.byKey(EpisodeOverviewSection.textKey), findsOneWidget);
       expect(find.text('简介'), findsNothing);
       expect(find.text('Six friends living in New York.'), findsOneWidget);
@@ -354,7 +360,10 @@ void main() {
       );
       await tapBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
       await settle(tester);
-      expect(find.text('老友记 (1994)'), findsOneWidget);
+      expect(
+        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        '老友记',
+      );
 
       await goHome(tester);
       expect(find.byKey(CatalogKeys.resumeRow), findsOneWidget);
@@ -421,7 +430,10 @@ void main() {
       await tester.tap(overlayHit);
       await settle(tester);
       expect(find.byKey(SearchOverlay.closeKey), findsNothing);
-      expect(find.text('Inception (2010)'), findsOneWidget);
+      expect(
+        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        'Inception',
+      );
 
       await _tapDetailBack(tester);
       await settle(tester);

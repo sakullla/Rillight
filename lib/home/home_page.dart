@@ -126,10 +126,13 @@ class _HomePageState extends State<HomePage> {
     if (host != slot) {
       return null;
     }
+    // 与「更多」同一层级的次要色，不和分区标题抢视线。
     return IconButton(
       key: homeRefreshKey,
       tooltip: l10n.refresh,
       visualDensity: VisualDensity.compact,
+      iconSize: 20,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
       onPressed: _refreshing ? null : _refresh,
       icon: _refreshing
           ? const SizedBox(
