@@ -89,7 +89,12 @@ void main() {
         isTrue,
       );
       final scroll = tester.state<ScrollableState>(
-        find.descendant(of: content, matching: find.byType(Scrollable)).first,
+        find
+            .descendant(
+              of: find.descendant(of: content, matching: find.byType(ListView)),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       expect(scroll.position.pixels, greaterThan(0));
       scroll.position.jumpTo(0);

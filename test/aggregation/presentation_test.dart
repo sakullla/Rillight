@@ -648,11 +648,15 @@ void main() {
           await tester.tap(find.byType(NavigationDestination).at(1));
         }
         await _settle(tester);
-        expect(
-          find.byKey(const Key('aggregation-source-management')),
-          findsNothing,
+        final management = find.byKey(
+          const Key('aggregation-source-management'),
         );
-        showSourceManagement(tester.element(find.byType(AggregationPage)));
+        if (environment.isTv) {
+          expect(management, findsNothing);
+          showSourceManagement(tester.element(find.byType(AggregationPage)));
+        } else {
+          await tester.tap(management);
+        }
         await _settle(tester);
         expect(find.byType(SourceManagement), findsOneWidget);
         final check = find.byKey(
@@ -1816,13 +1820,14 @@ void main() {
         expect(find.text('继续播放'), findsWidgets);
         expect(find.text('收藏'), findsWidgets);
         expect(find.text('媒体库'), findsWidgets);
+        // 新聚合页头部恢复管理/私密入口;TV 走独立焦点路径,不渲染这两个键。
         expect(
           find.byKey(const Key('aggregation-source-management')),
-          findsNothing,
+          environment.isTv ? findsNothing : findsOneWidget,
         );
         expect(
           find.byKey(const Key('aggregation-private-entry')),
-          findsNothing,
+          environment.isTv ? findsNothing : findsOneWidget,
         );
         expect(find.text('查找同源'), findsNothing);
         expect(find.text('媒体库范围'), findsNothing);

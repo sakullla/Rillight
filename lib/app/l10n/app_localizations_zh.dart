@@ -821,6 +821,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get subtitleOff => '关闭字幕';
 
   @override
+  String get subtitleMetaExternal => '外挂';
+
+  @override
+  String get subtitleMetaEmbedded => '内嵌';
+
+  @override
+  String get trackMetaDefault => '默认';
+
+  @override
+  String trackPickerCount(int count) {
+    return '共 $count 条';
+  }
+
+  @override
   String get subtitleBitmapBurnIn => '该字幕为位图，将请求服务器烧录';
 
   @override

@@ -1642,6 +1642,30 @@ abstract class AppLocalizations {
   /// **'关闭字幕'**
   String get subtitleOff;
 
+  /// Badge marking an external sidecar subtitle file.
+  ///
+  /// In zh, this message translates to:
+  /// **'外挂'**
+  String get subtitleMetaExternal;
+
+  /// Badge marking an in-container subtitle stream.
+  ///
+  /// In zh, this message translates to:
+  /// **'内嵌'**
+  String get subtitleMetaEmbedded;
+
+  /// Badge marking the server-default track.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认'**
+  String get trackMetaDefault;
+
+  /// Option count above a dense track or media source picker.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 条'**
+  String trackPickerCount(int count);
+
   /// Notice when PGS/bitmap subtitles are burned in by the server.
   ///
   /// In zh, this message translates to:

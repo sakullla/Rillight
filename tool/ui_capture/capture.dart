@@ -35,6 +35,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
+import 'package:rillight/player/track_picker.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
 
@@ -537,6 +538,74 @@ void main() {
             backend.emitError('Synthetic playback failure');
             await capture.advance(400);
             await capture.save('player-error');
+            if (config.$1 == 'desktop' || config.$1 == 'phone') {
+              // 密集条目:60 条字幕 + 20 个片源,验证选择器的搜索与滚动。
+              await openExtra('movie-dense');
+              if (config.$1 == 'desktop') {
+                final denseMouse = await tester.createGesture(
+                  kind: PointerDeviceKind.mouse,
+                );
+                await denseMouse.addPointer(location: Offset.zero);
+                await denseMouse.moveTo(
+                  tester.getCenter(find.byKey(PlayerKeys.subtitle)),
+                );
+                await capture.advance(200);
+                await capture.save('player-dense-controls');
+                await capture.tap(PlayerKeys.subtitle);
+                await capture.save('player-dense-subtitles');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey),
+                  'eng',
+                );
+                await capture.advance(300);
+                await capture.save('player-dense-subtitles-search');
+                await capture.tap(const Key('player-subtitle-close'));
+                // 等 MenuAnchor 的外层点击拦截随关闭动画退场,再开设置菜单。
+                await capture.advance(500);
+                await capture.tap(PlayerKeys.more);
+                // 分类条是横向懒构建列表,末端分区先滚进视口再点。
+                final categories = find.byKey(
+                  const Key('player-settings-categories'),
+                );
+                await tester.drag(categories, const Offset(-600, 0));
+                await capture.advance(300);
+                await capture.tap(PlayerKeys.mediaSource);
+                await capture.save('player-dense-sources');
+                await tester.enterText(find.byKey(kTrackPickerSearchKey), '4k');
+                await capture.advance(300);
+                await capture.save('player-dense-sources-search');
+                await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+                await capture.advance(250);
+                await denseMouse.removePointer();
+              } else {
+                await capture.revealPhoneControls();
+                await capture.save('player-dense-controls');
+                await capture.tap(const Key('mobile-player-more'));
+                await capture.tap(const Key('mobile-player-section-tracks'));
+                await capture.save('player-dense-tracks');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey),
+                  'eng',
+                );
+                await capture.advance(300);
+                await capture.save('player-dense-tracks-search');
+                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await capture.advance(200);
+                await capture.tap(const Key('mobile-player-panel-back'));
+                await capture.tap(const Key('mobile-player-source-entry'));
+                await capture.save('player-dense-source');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey),
+                  '1080',
+                );
+                await capture.advance(300);
+                await capture.save('player-dense-source-search');
+                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await capture.advance(200);
+                await capture.tap(const Key('mobile-player-panel-back'));
+                await capture.tap(const Key('mobile-player-panel-close'));
+              }
+            }
           }
           if (config.$1 == 'desktop') {
             await tester.sendKeyEvent(LogicalKeyboardKey.escape);

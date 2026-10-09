@@ -859,6 +859,27 @@
   "@subtitleOff": {
     "description": "Disable subtitles."
   },
+  "subtitleMetaExternal": "外挂",
+  "@subtitleMetaExternal": {
+    "description": "Badge marking an external sidecar subtitle file."
+  },
+  "subtitleMetaEmbedded": "内嵌",
+  "@subtitleMetaEmbedded": {
+    "description": "Badge marking an in-container subtitle stream."
+  },
+  "trackMetaDefault": "默认",
+  "@trackMetaDefault": {
+    "description": "Badge marking the server-default track."
+  },
+  "trackPickerCount": "共 {count} 条",
+  "@trackPickerCount": {
+    "description": "Option count above a dense track or media source picker.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "subtitleBitmapBurnIn": "该字幕为位图，将请求服务器烧录",
   "@subtitleBitmapBurnIn": {
     "description": "Notice when PGS/bitmap subtitles are burned in by the server."

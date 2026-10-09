@@ -9,12 +9,14 @@ import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
+import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/phone_subtitle_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/track_picker.dart';
 
 enum _SettingsSection { speed, skip, subtitles, audio, quality, source }
 
@@ -314,6 +316,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               enabled: !_pending && !c.loading,
               onSelected: (rate) => unawaited(_apply(() => c.setRate(rate))),
             )
+          else if (_isListSection(section))
+            Expanded(child: _listPicker(context, section))
           else
             ..._controls(context, section),
         ],
@@ -370,13 +374,88 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             ),
           ),
           Expanded(
-            child: SingleChildScrollView(
-              key: ValueKey('player-settings-content-${section.name}'),
-              primary: false,
-              child: content,
-            ),
+            // 音轨/片源等列表分区自带滚动与搜索,不再套外层滚轴。
+            child: _isListSection(section)
+                ? KeyedSubtree(
+                    key: ValueKey('player-settings-content-${section.name}'),
+                    child: content,
+                  )
+                : SingleChildScrollView(
+                    key: ValueKey('player-settings-content-${section.name}'),
+                    primary: false,
+                    child: content,
+                  ),
           ),
         ],
+      ),
+    );
+  }
+
+  bool _isListSection(_SettingsSection section) =>
+      section == _SettingsSection.audio || section == _SettingsSection.source;
+
+  /// 长列表分区:超阈值自动出现搜索框,选项懒构建。
+  Widget _listPicker(BuildContext context, _SettingsSection section) {
+    final c = widget.controller;
+    final enabled = !_pending && !c.loading;
+    switch (section) {
+      case _SettingsSection.audio:
+        return TrackPickerList(
+          options: [
+            for (final track in c.selectableAudioTracks)
+              TrackPickerOption(
+                title: Text(
+                  track.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: _trackMeta(context, track),
+                searchText:
+                    '${track.label} ${track.language ?? ''} '
+                    '${track.codec ?? ''} ${track.displayTitle ?? ''}',
+                selected: track.index == c.audioStreamIndex,
+                onTap: enabled
+                    ? () => unawaited(_apply(() => c.setAudio(track.index)))
+                    : null,
+              ),
+          ],
+        );
+      case _SettingsSection.source:
+        return TrackPickerList(
+          options: [
+            for (final source in c.mediaSources)
+              TrackPickerOption(
+                title: MediaSourceMenuTile(view: source.presentation),
+                searchText:
+                    '${source.name ?? ''} ${source.id} '
+                    '${source.presentation.headline} '
+                    '${source.presentation.detail ?? ''}',
+                selected: source.id == c.resolved?.mediaSource.id,
+                onTap: enabled
+                    ? () => unawaited(
+                        _apply(() async {
+                          await c.switchMediaVersion(source.id);
+                        }),
+                      )
+                    : null,
+              ),
+          ],
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget? _trackMeta(BuildContext context, MediaStreamInfo track) {
+    final meta = trackMetaLabel(AppLocalizations.of(context), track);
+    if (meta.isEmpty) return null;
+    final theme = Theme.of(context);
+    return Text(
+      meta,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurface.withValues(alpha: .68),
       ),
     );
   }
@@ -413,17 +492,6 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             ),
           ),
         ];
-      case _SettingsSection.audio:
-        return [
-          for (final track in c.selectableAudioTracks)
-            _choice(
-              Text(track.label, maxLines: 2, overflow: TextOverflow.ellipsis),
-              track.index == c.audioStreamIndex,
-              enabled
-                  ? () => unawaited(_apply(() => c.setAudio(track.index)))
-                  : null,
-            ),
-        ];
       case _SettingsSection.quality:
         return [
           for (final bitrate in c.availableBitrates)
@@ -435,21 +503,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                   : null,
             ),
         ];
-      case _SettingsSection.source:
-        return [
-          for (final source in c.mediaSources)
-            _choice(
-              MediaSourceMenuTile(view: source.presentation),
-              source.id == c.resolved?.mediaSource.id,
-              enabled
-                  ? () => unawaited(
-                      _apply(() async {
-                        await c.switchMediaVersion(source.id);
-                      }),
-                    )
-                  : null,
-            ),
-        ];
+      default:
+        return const [];
     }
   }
 

@@ -48,6 +48,128 @@ FakeDandanplayClient captureDanmakuClient() => FakeDandanplayClient()
     ),
   ];
 
+/// 密集场景语言表:每种语言生成「内嵌 + 外挂」两条,共 60 条字幕。
+const _denseSubtitleSpecs = <(String, String)>[
+  ('chi', '简体中文'),
+  ('chi', '繁体中文'),
+  ('eng', 'English'),
+  ('jpn', '日本語'),
+  ('kor', '한국어'),
+  ('fra', 'Français'),
+  ('deu', 'Deutsch'),
+  ('spa', 'Español'),
+  ('por', 'Português'),
+  ('ita', 'Italiano'),
+  ('rus', 'Русский'),
+  ('ara', 'العربية'),
+  ('tha', 'ภาษาไทย'),
+  ('vie', 'Tiếng Việt'),
+  ('ind', 'Bahasa Indonesia'),
+  ('msa', 'Bahasa Melayu'),
+  ('nld', 'Nederlands'),
+  ('swe', 'Svenska'),
+  ('nor', 'Norsk'),
+  ('dan', 'Dansk'),
+  ('fin', 'Suomi'),
+  ('pol', 'Polski'),
+  ('ces', 'Čeština'),
+  ('tur', 'Türkçe'),
+  ('ukr', 'Українська'),
+  ('ron', 'Română'),
+  ('ell', 'Ελληνικά'),
+  ('heb', 'עברית'),
+  ('hin', 'हिन्दी'),
+  ('fas', 'فارسی'),
+];
+
+/// 60 条字幕轨:30 种语言 × 内嵌/外挂,混入 PGS 位图轨。
+List<FakeMediaStream> _denseStreams() => [
+  const FakeMediaStream(
+    index: 0,
+    type: 'Video',
+    codec: 'hevc',
+    displayTitle: '4K HEVC HDR',
+    width: 3840,
+    height: 2160,
+  ),
+  const FakeMediaStream(
+    index: 1,
+    type: 'Audio',
+    codec: 'truehd',
+    language: 'eng',
+    displayTitle: 'English · TrueHD Atmos 7.1',
+    isDefault: true,
+    channels: 8,
+  ),
+  const FakeMediaStream(
+    index: 2,
+    type: 'Audio',
+    codec: 'dts',
+    language: 'chi',
+    displayTitle: '国语 · DTS-HD MA 5.1',
+    channels: 6,
+  ),
+  const FakeMediaStream(
+    index: 3,
+    type: 'Audio',
+    codec: 'aac',
+    language: 'jpn',
+    displayTitle: '日本語 · AAC 2.0',
+    channels: 2,
+  ),
+  const FakeMediaStream(
+    index: 4,
+    type: 'Audio',
+    codec: 'flac',
+    language: 'eng',
+    displayTitle: 'English · FLAC commentary',
+    channels: 2,
+  ),
+  for (final (i, spec) in _denseSubtitleSpecs.indexed) ...[
+    FakeMediaStream(
+      index: 5 + i * 2,
+      type: 'Subtitle',
+      codec: i % 5 == 4 ? 'pgs' : 'subrip',
+      language: spec.$1,
+      displayTitle: '${spec.$2} · 内嵌',
+      isDefault: i == 0,
+      isTextSubtitleStream: i % 5 != 4,
+    ),
+    FakeMediaStream(
+      index: 6 + i * 2,
+      type: 'Subtitle',
+      codec: 'subrip',
+      language: spec.$1,
+      displayTitle: '${spec.$2} · 外挂',
+      isExternal: true,
+      isTextSubtitleStream: true,
+    ),
+  ],
+];
+
+/// 20 个片源:主源 + 19 个多版本(画质/组名/容量各异)。
+const _denseSourceNames = <String>[
+  '2160p.HDR.BluRay.REMUX.HEVC.DTS-SonyHD',
+  '2160p.DoVi.WEB-DL.AV1.Atmos-NetHub',
+  '1080p.BluRay.x264.DTS-LineTV',
+  '1080p.WEB-DL.H264.AAC-HuoVer',
+  '1080p.HDR.WEBRip.H265.EAC3-FangXin',
+  '720p.HDTV.H264.AAC-OldRip',
+  '1080p.BluRay.REMUX.AVC.TrueHD-KeJi',
+  '2160p.HDR10+.BluRay.HEVC.DDP5.1-WeiLai',
+  '1080p.WEB-DL.AV1.AAC-MiniSee',
+  '720p.WEBRip.H264.AAC-FastDL',
+  '2160p.SDR.BluRay.HEVC.DTSMA-Archive',
+  '1080p.HDTV.AVC.AAC-LiveHD',
+  '1080p.BluRay.x265.EAC3-YinHua',
+  '720p.BluRay.H264.FLAC-Classic',
+  '2160p.DoVi.BluRay.REMUX.AV1-Galaxy',
+  '1080p.WEB-DL.H264.DD-JellyGrp',
+  '480p.DVDRip.XviD.MP3-Legacy',
+  '1080p.AMZN.WEB-DL.H265.DDP-StreamHQ',
+  '1080p.NF.WEB-DL.AV1.EAC3-FlixHub',
+];
+
 FakeEmbyServer captureServer() {
   const streams = [
     FakeMediaStream(
@@ -173,6 +295,30 @@ FakeEmbyServer captureServer() {
       mediaStreams: streams,
     ),
   ]);
+  final denseStreams = _denseStreams();
+  server.items.add(
+    FakeEmbyItem(
+      id: 'movie-dense',
+      name: '环太平洋 · 多版本典藏',
+      type: 'Movie',
+      parentId: 'view-movies',
+      productionYear: 2013,
+      runTimeTicks: 54000000000,
+      primaryImageTag: 'tag-dense',
+      overview: '验收用条目:六十条字幕轨与二十个片源版本。',
+      genres: const ['科幻', '动作'],
+      communityRating: 7.7,
+      mediaStreams: denseStreams,
+      extraSources: [
+        for (final name in _denseSourceNames)
+          FakeMediaSource(
+            id: 'movie-dense-${name.split('.').first}-${name.split('-').last}',
+            name: name,
+            mediaStreams: denseStreams,
+          ),
+      ],
+    ),
+  );
   return server;
 }
 

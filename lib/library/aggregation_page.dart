@@ -1558,7 +1558,26 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
               AppSpacing.page,
               4,
             ),
-            child: _segments(l),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: _segments(l),
+                  ),
+                ),
+                IconButton(
+                  key: const Key('aggregation-source-management'),
+                  tooltip: l.sourceManagement,
+                  onPressed: () => showSourceManagement(
+                    context,
+                    region: AccessRegion.ordinary,
+                  ),
+                  icon: const Icon(Icons.tune),
+                ),
+                const PrivateRegionButton(),
+              ],
+            ),
           ),
           Expanded(child: _body(context, loader, servers, rows)),
         ],
