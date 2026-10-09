@@ -4,6 +4,8 @@ Currently this builder supports native Linux. Cross-platform prefixes must be
 produced by target-specific builders and pass verify_core_dependencies.py.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
