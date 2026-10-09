@@ -11,7 +11,7 @@ import shutil
 import subprocess
 
 from build_core_dependencies import (
-    fetch_source, install_enhancement_runtime, locked_ffmpeg_patches)
+    fetch_source, remove_enhancement_runtime, locked_ffmpeg_patches)
 from verify_core_dependencies import ROOT, SPEC, digest, verify
 
 
@@ -156,7 +156,7 @@ def main() -> None:
           shlex.join(['cmake', '--build', unix(core_build), '--target', 'rillight_core',
                       '--parallel', str(args.jobs)]))
     shutil.copy2(core_build / 'librillight_core.dll', prefix / 'bin/librillight_core.dll')
-    install_enhancement_runtime(core_build, prefix / 'bin')
+    remove_enhancement_runtime(prefix / 'bin')
     copy_runtime_dependencies(prefix, mingw)
     record_libraries(prefix, marker)
     errors = verify(prefix, 'windows-x64', require_subtitles=True)

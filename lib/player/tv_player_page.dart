@@ -500,15 +500,16 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                           'tv-subtitle-size-${size.name}',
                                         ),
                                         selected:
+                                            !c
+                                                .phoneSubtitleSettings
+                                                .originalAss &&
                                             c.phoneSubtitleSettings.size ==
-                                            size,
+                                                size,
                                         onPressed: () =>
                                             c.setPhoneSubtitleSettings(
                                               PhoneSubtitleSettings(
                                                 size: size,
-                                                originalAss: c
-                                                    .phoneSubtitleSettings
-                                                    .originalAss,
+                                                originalAss: false,
                                               ),
                                             ),
                                         child: _choiceLabel(
@@ -523,8 +524,11 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                               l.phoneSubtitleExtraLarge,
                                           },
                                           selected:
+                                              !c
+                                                  .phoneSubtitleSettings
+                                                  .originalAss &&
                                               c.phoneSubtitleSettings.size ==
-                                              size,
+                                                  size,
                                         ),
                                       ),
                                     TvAction(

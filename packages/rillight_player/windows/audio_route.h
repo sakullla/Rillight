@@ -42,6 +42,9 @@ struct RouteObservation {
   int mix_channels = 0;
   ExclusiveProbe eac3 = ExclusiveProbe::kUnprobed;
   ExclusiveProbe truehd = ExclusiveProbe::kUnprobed;
+  ExclusiveProbe ac3 = ExclusiveProbe::kUnprobed;
+  ExclusiveProbe dts = ExclusiveProbe::kUnprobed;
+  ExclusiveProbe dtshd = ExclusiveProbe::kUnprobed;
 };
 
 struct RouteCommit {
@@ -128,6 +131,9 @@ inline RouteCommit DecideAudioRoute(int previous_channels,
   };
   apply(observed.eac3, RILLIGHT_CORE_AUDIO_ACCEPT_EAC3);
   apply(observed.truehd, RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD);
+  apply(observed.ac3, RILLIGHT_CORE_AUDIO_ACCEPT_AC3);
+  apply(observed.dts, RILLIGHT_CORE_AUDIO_ACCEPT_DTS);
+  apply(observed.dtshd, RILLIGHT_CORE_AUDIO_ACCEPT_DTSHD);
   const int channels = observed.mix_known
                            ? PcmChannelTarget(observed.mix_channels)
                            : kept_channels;

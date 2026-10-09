@@ -416,6 +416,16 @@ void main() {
               await capture.tap(entry.$2);
               await capture.save('player-settings-${entry.$1}');
             }
+            await tester.scrollUntilVisible(
+              find.byKey(const Key('player-output-section')),
+              200,
+              scrollable: find.descendant(
+                of: find.byKey(const Key('player-settings-categories')),
+                matching: find.byType(Scrollable),
+              ),
+            );
+            await capture.tap(const Key('player-output-section'));
+            await capture.save('player-settings-output');
             await tester.sendKeyEvent(LogicalKeyboardKey.escape);
             await capture.advance(250);
             await capture.tap(PlayerKeys.subtitle);
@@ -472,6 +482,7 @@ void main() {
               'source',
               'skip',
               'speed',
+              'output',
             ]) {
               final key = Key('tv-player-$section');
               if (find.byKey(key).evaluate().isEmpty) continue;
@@ -771,6 +782,7 @@ class CaptureSession {
       'tracks',
       'quality',
       'picture',
+      'output',
       'skip',
       'danmaku',
     ]) {

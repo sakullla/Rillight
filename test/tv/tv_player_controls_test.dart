@@ -611,7 +611,7 @@ void main() {
   );
 
   testWidgets(
-    'TV output panel shows the core sample and can turn enhancement off',
+    'TV output panel shows actual output without enhancement controls',
     (tester) async {
       final video = FakeVideoBackend()..isPlaying = true;
       final c = await start(tester, video);
@@ -649,7 +649,7 @@ void main() {
       expect(picture, isNot(contains('杜比')));
       expect(audio, contains('6 声道 PCM'));
       expect(audio, isNot(contains('Atmos')));
-      expect(find.textContaining('已降低生效档'), findsOneWidget);
+      expect(find.byKey(const Key('playback-enhance-choices')), findsNothing);
       c.applyObservedOutput(
         PlaybackOutputStatus.fromCoreMap({
           'dolbyVisionProfile': 8,
@@ -680,97 +680,10 @@ void main() {
       );
       expect(video.isPlaying, playing);
       expect(video.position, position);
-      final disable = find.byKey(const Key('playback-output-disable'));
-      await tester.ensureVisible(disable);
-      await tester.tap(disable);
-      await tester.pump();
-      await tester.pump();
-      expect(video.isPlaying, playing);
-      expect(video.position, position);
-      expect(c.videoEnhancement.superResolution, SuperResolution.off);
-      expect(c.videoEnhancement.interpolation, FrameInterpolation.off);
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const Key('playback-enhance-super-resolution')),
-            )
-            .data,
-        contains('请求 关闭'),
-      );
-      final retry = find.byKey(const Key('playback-output-retry'));
-      await tester.ensureVisible(retry);
-      await tester.tap(retry);
-      await tester.pump();
-      expect(video.isPlaying, playing);
-      expect(video.position, position);
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const Key('playback-enhance-super-resolution')),
-            )
-            .data,
-        contains('请求 关闭'),
-      );
       await finish(tester);
     },
     tags: ['integration'],
   );
-
-  testWidgets('TV output page can choose double interpolation and sharpen', (
-    tester,
-  ) async {
-    final video = FakeVideoBackend()..isPlaying = true;
-    final c = await start(tester, video);
-    await tester.pumpAndSettle();
-    final playing = video.isPlaying;
-    final position = video.position;
-    c.applyObservedOutput(
-      PlaybackOutputStatus.fromCoreMap({
-        'dolbyVisionProfile': 0,
-        'videoOutputKind': 1,
-        'audioDelivery': 2,
-        'audioChannels': 2,
-        'effectiveInterpolation': 2,
-        'outputFrameRate': 48,
-      }),
-    );
-    c.onUserActivity();
-    await tester.pump();
-    await tester.ensureVisible(find.byKey(const Key('tv-player-output')));
-    await tester.tap(find.byKey(const Key('tv-player-output')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('playback-enhance-choices')), findsOneWidget);
-    expect(find.textContaining('目标显示帧率 48 fps'), findsOneWidget);
-    expect(
-      tester
-          .widget<Text>(find.byKey(const Key('playback-enhance-interpolation')))
-          .data,
-      contains('生效 双倍 · 48 fps'),
-    );
-    final doubled = find.byKey(
-      const Key('playback-select-interpolation-double'),
-    );
-    await tester.ensureVisible(doubled);
-    await tester.tap(doubled);
-    await tester.pump();
-    await tester.pump();
-    expect(find.byKey(const Key('playback-confirm-leave-dolby')), findsNothing);
-    expect(c.videoEnhancement.interpolation, FrameInterpolation.doubleRate);
-    expect(video.isPlaying, playing);
-    expect(video.position, position);
-    final sharpen = tester.widget<Slider>(
-      find.byKey(const Key('playback-select-sharpen')),
-    );
-    sharpen.onChangeEnd!(20);
-    await tester.pump();
-    await tester.pump();
-    expect(c.videoEnhancement.sharpen, 20);
-    expect(c.videoEnhancement.denoise, 0);
-    expect(c.videoEnhancement.interpolation, FrameInterpolation.doubleRate);
-    expect(c.outputStatus.videoOutputKind, 1);
-    expect(video.isPlaying, playing);
-    await finish(tester);
-  }, tags: ['integration']);
 }
 
 class _DelayedBackend extends FakeVideoBackend {

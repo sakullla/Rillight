@@ -261,190 +261,28 @@ void main() {
   );
 
   testWidgets(
-    'output section shows unknown actuals and saved enhancement requests',
+    'output settings retain status without retired enhancement controls',
     (tester) async {
       final store = MemoryPlayerSettingsStore(
-        const PlayerSettings(
-          volume: 40,
-          frameInterpolation: FrameInterpolation.doubleRate,
-          anime4k: Anime4kLevel.strong,
-          denoise: 40,
-          acceptLeaveNativeDolby: true,
-        ),
+        PlayerSettings.fromJson({
+          'frameInterpolation': 'double',
+          'anime4k': 'strong',
+          'superResolution': 'x2',
+          'denoise': 100,
+          'sharpen': 100,
+        }),
       );
       await pumpPage(tester, store: store);
       await expandSection(tester, '实际输出');
-      final picture = tester
-          .widget<Text>(find.byKey(const Key('playback-output-video')))
-          .data!;
-      final audio = tester
-          .widget<Text>(find.byKey(const Key('playback-output-audio')))
-          .data!;
-      expect(picture, contains('未知'));
-      expect(picture, isNot(contains('杜比')));
-      expect(audio, contains('未知'));
-      expect(audio, isNot(contains('Atmos')));
-      expect(find.textContaining('未在播放，实际输出未知'), findsWidgets);
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const Key('playback-enhance-interpolation')),
-            )
-            .data,
-        contains('请求 双倍'),
-      );
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const Key('playback-enhance-interpolation')),
-            )
-            .data,
-        contains('生效 未知'),
-      );
-      expect(
-        tester
-            .widget<Text>(find.byKey(const Key('playback-enhance-denoise')))
-            .data,
-        contains('请求 40'),
-      );
-
-      await tester.tap(find.byKey(const Key('playback-output-keep')));
-      await tester.pumpAndSettle();
-      expect((await store.read()).acceptLeaveNativeDolby, isFalse);
-      expect(
-        (await store.read()).frameInterpolation,
-        FrameInterpolation.doubleRate,
-      );
-      expect((await store.read()).volume, 40);
-
-      await tester.tap(find.byKey(const Key('playback-output-disable')));
-      await tester.pumpAndSettle();
-      final saved = await store.read();
-      expect(saved.frameInterpolation, FrameInterpolation.off);
-      expect(saved.anime4k, Anime4kLevel.off);
-      expect(saved.denoise, 0);
-      expect(saved.volume, 40);
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const Key('playback-enhance-interpolation')),
-            )
-            .data,
-        contains('请求 关闭'),
-      );
-      expect(
-        tester
-            .widget<Text>(
-              find.byKey(const Key('playback-enhance-interpolation')),
-            )
-            .data,
-        contains('生效 未知'),
-      );
+      expect(find.byKey(const Key('playback-output-video')), findsOneWidget);
+      expect(find.byKey(const Key('playback-output-audio')), findsOneWidget);
+      expect(find.byKey(const Key('playback-enhance-choices')), findsNothing);
+      for (final text in ['Anime4K', '通用超分', '降噪', '锐化', '补帧']) {
+        expect(find.text(text), findsNothing);
+      }
     },
     tags: ['integration'],
   );
-
-  testWidgets('settings output choices save enhancement and cancel leaves it', (
-    tester,
-  ) async {
-    final store = MemoryPlayerSettingsStore(
-      const PlayerSettings(
-        volume: 40,
-        superResolution: SuperResolution.x2,
-        denoise: 5,
-      ),
-    );
-    await pumpPage(tester, store: store);
-    await expandSection(tester, '实际输出');
-    expect(find.byKey(const Key('playback-enhance-choices')), findsOneWidget);
-    expect(find.byKey(const Key('playback-output-frame-rate')), findsNothing);
-
-    final anime = find.byKey(const Key('playback-select-anime4k-strong'));
-    await tester.ensureVisible(anime);
-    await tester.tap(anime);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byKey(const Key('playback-confirm-exclusive')), findsOneWidget);
-    await tester.tap(
-      find.byKey(const Key('playback-confirm-exclusive-cancel')),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect((await store.read()).superResolution, SuperResolution.x2);
-    expect((await store.read()).anime4k, isNull);
-    expect((await store.read()).volume, 40);
-
-    await tester.ensureVisible(anime);
-    await tester.tap(anime);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(
-      find.byKey(const Key('playback-confirm-exclusive-accept')),
-    );
-    await tester.pumpAndSettle();
-    final saved = await store.read();
-    expect(saved.anime4k, Anime4kLevel.strong);
-    expect(saved.superResolution, SuperResolution.off);
-    expect(saved.denoise, 5);
-    expect(saved.volume, 40);
-    expect(find.byKey(const Key('playback-confirm-leave-dolby')), findsNothing);
-
-    final denoise = tester.widget<Slider>(
-      find.byKey(const Key('playback-select-denoise')),
-    );
-    denoise.onChangeEnd!(25);
-    await tester.pumpAndSettle();
-    expect((await store.read()).denoise, 25);
-    expect((await store.read()).sharpen, 0);
-    final sharpen = tester.widget<Slider>(
-      find.byKey(const Key('playback-select-sharpen')),
-    );
-    sharpen.onChangeEnd!(15);
-    await tester.pumpAndSettle();
-    expect((await store.read()).denoise, 25);
-    expect((await store.read()).sharpen, 15);
-    expect((await store.read()).anime4k, Anime4kLevel.strong);
-    final doubled = find.byKey(
-      const Key('playback-select-interpolation-double'),
-    );
-    await tester.ensureVisible(doubled);
-    await tester.tap(doubled);
-    await tester.pumpAndSettle();
-    expect(
-      (await store.read()).frameInterpolation,
-      FrameInterpolation.doubleRate,
-    );
-    expect((await store.read()).acceptLeaveNativeDolby, isNot(isTrue));
-  }, tags: ['integration']);
-
-  testWidgets('settings use available does not save leaving native dolby', (
-    tester,
-  ) async {
-    final store = MemoryPlayerSettingsStore(
-      const PlayerSettings(
-        volume: 40,
-        frameInterpolation: FrameInterpolation.doubleRate,
-        denoise: 8,
-        playbackRate: 1.25,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-    await pumpPage(tester, store: store);
-    await expandSection(tester, '实际输出');
-    expect(find.textContaining('未在播放，实际输出未知'), findsWidgets);
-    final useAvailable = find.byKey(const Key('playback-output-use-available'));
-    await tester.ensureVisible(useAvailable);
-    expect(tester.widget<TextButton>(useAvailable).onPressed, isNotNull);
-    await tester.tap(useAvailable);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('playback-confirm-leave-dolby')), findsNothing);
-    final saved = await store.read();
-    expect(saved.acceptLeaveNativeDolby, isFalse);
-    expect(saved.frameInterpolation, FrameInterpolation.doubleRate);
-    expect(saved.denoise, 8);
-    expect(saved.volume, 40);
-    expect(saved.playbackRate, 1.25);
-  }, tags: ['integration']);
 
   testWidgets('decoder backend is hidden when the platform has one choice', (
     tester,

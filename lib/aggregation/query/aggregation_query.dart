@@ -173,6 +173,8 @@ class AggregationQueryController extends ChangeNotifier {
   final Map<String, SourceAccount> _accounts = {};
   final Map<String, Future<SourceAccount>> _authenticating = {};
   final WorkIndex _index = WorkIndex();
+  bool _indexDirty = false;
+  List<WorkGroup>? _sortedWorks;
 
   /// Source-based scroll anchor survives reliable group merges. UI resolves
   /// it with resolveAnchor after loading more; revoked sources clear it.
@@ -217,9 +219,12 @@ class AggregationQueryController extends ChangeNotifier {
   }
 
   void _sanitize() {
+    final before = _states.length;
     _states.removeWhere((key, state) => !_selected(key));
+    if (_states.length != before) _indexDirty = true;
     for (final state in _states.values) {
       if (state.permit != null && !state.permit!.isValid) {
+        if (state.items.isNotEmpty) _indexDirty = true;
         state.items.clear();
         state.total = null;
         state.hasMore = true;
@@ -228,7 +233,7 @@ class AggregationQueryController extends ChangeNotifier {
         }
       }
     }
-    _rebuild();
+    if (_indexDirty) _rebuild();
   }
 
   void _rebuild() {
@@ -236,6 +241,8 @@ class AggregationQueryController extends ChangeNotifier {
     final refs = items.map((i) => i.reference).toSet();
     _index.removeWhere((r) => !refs.contains(r));
     _index.upsert(items.map((i) => i.work));
+    _indexDirty = false;
+    _sortedWorks = null;
     if (anchor != null && _index.groupFor(anchor!) == null) anchor = null;
   }
 
@@ -255,34 +262,49 @@ class AggregationQueryController extends ChangeNotifier {
 
   List<WorkGroup> get works {
     _sanitize();
+    final cached = _sortedWorks;
+    if (cached != null) return cached;
     final groups = _index.groups.toList();
     final facts = {for (final s in _states.values) ...s.items};
     final scope = _scope;
+    final byDate =
+        scope?.mode == QueryMode.recent || scope?.sortBy == 'DateCreated';
+    final dates = <WorkGroup, int>{
+      if (byDate)
+        for (final group in groups)
+          group:
+              group.sources
+                  .map((s) => facts[s.reference]?.item.dateCreated)
+                  .whereType<DateTime>()
+                  .fold<DateTime?>(
+                    null,
+                    (a, b) => a == null || b.isAfter(a) ? b : a,
+                  )
+                  ?.millisecondsSinceEpoch ??
+              -1,
+    };
+    final titles = <WorkGroup, String>{
+      if (!byDate && scope?.sortBy != 'ProductionYear')
+        for (final group in groups)
+          group: group.sources.first.title.toLowerCase(),
+    };
     groups.sort((a, b) {
       int order;
-      if (scope?.mode == QueryMode.recent || scope?.sortBy == 'DateCreated') {
-        DateTime? date(WorkGroup g) => g.sources
-            .map((s) => facts[s.reference]?.item.dateCreated)
-            .whereType<DateTime>()
-            .fold<DateTime?>(null, (a, b) => a == null || b.isAfter(a) ? b : a);
-        order = (date(a)?.millisecondsSinceEpoch ?? -1).compareTo(
-          date(b)?.millisecondsSinceEpoch ?? -1,
-        );
+      if (byDate) {
+        order = dates[a]!.compareTo(dates[b]!);
       } else if (scope?.sortBy == 'ProductionYear') {
         order = (a.sources.first.year ?? -1).compareTo(
           b.sources.first.year ?? -1,
         );
       } else {
-        order = a.sources.first.title.toLowerCase().compareTo(
-          b.sources.first.title.toLowerCase(),
-        );
+        order = titles[a]!.compareTo(titles[b]!);
       }
       if (scope?.descending == true || scope?.mode == QueryMode.recent) {
         order = -order;
       }
       return order == 0 ? a.key.compareTo(b.key) : order;
     });
-    return List.unmodifiable(groups);
+    return _sortedWorks = List.unmodifiable(groups);
   }
 
   WorkGroup? resolveAnchor(SourceReference reference) {
@@ -365,6 +387,8 @@ class AggregationQueryController extends ChangeNotifier {
     _states.clear();
     _authenticating.clear();
     _index.removeWhere((_) => true);
+    _indexDirty = false;
+    _sortedWorks = null;
     if (registry.access.allows(scope.region) &&
         !(scope.mode == QueryMode.search && scope.keyword.trim().isEmpty)) {
       for (final server in registry.project(scope.region)) {
@@ -443,6 +467,7 @@ class AggregationQueryController extends ChangeNotifier {
     if (state.permit?.isValid == false) {
       state.cursor = 0;
       state.items.clear();
+      _indexDirty = true;
       state.total = null;
       state.permit = null;
     }
@@ -537,6 +562,7 @@ class AggregationQueryController extends ChangeNotifier {
         accepted[ref] = result;
       }
       state.items.addAll(accepted);
+      _indexDirty = true;
       state.cursor += page.items.length;
       state.total = page.totalRecordCount;
       state.hasMore = page.hasMore(
@@ -569,6 +595,8 @@ class AggregationQueryController extends ChangeNotifier {
     _authenticating.clear();
     anchor = null;
     _index.removeWhere((_) => true);
+    _indexDirty = false;
+    _sortedWorks = null;
     if (!_disposed) notifyListeners();
   }
 
@@ -589,6 +617,9 @@ class AggregationQueryController extends ChangeNotifier {
     _states.clear();
     _accounts.clear();
     _authenticating.clear();
+    _index.removeWhere((_) => true);
+    _indexDirty = false;
+    _sortedWorks = null;
     super.dispose();
   }
 }

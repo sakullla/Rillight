@@ -4,7 +4,6 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_output_status.dart';
-import 'package:rillight/player/player_settings.dart';
 
 class VideoOpenRequest {
   const VideoOpenRequest({
@@ -146,13 +145,6 @@ enum VideoEventKind {
 abstract interface class VideoBackendOutputReport {
   PlaybackOutputStatus get outputStatus;
   Future<PlaybackOutputStatus> refreshOutputStatus();
-
-  /// [clearOverload] is playback retry. The same request without it keeps
-  /// an overload downgrade.
-  Future<void> applyVideoEnhancement(
-    VideoEnhancementSelection selection, {
-    bool clearOverload = false,
-  });
 }
 
 /// The backend preserves the originating open's identity, including late events.

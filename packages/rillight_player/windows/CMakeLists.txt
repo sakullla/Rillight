@@ -60,20 +60,10 @@ install(CODE "file(REMOVE_RECURSE \"${RILLIGHT_RUNTIME_NOTICES}/licenses\")"
         COMPONENT Runtime)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../native/licenses/"
         DESTINATION "${RILLIGHT_RUNTIME_NOTICES}/licenses" COMPONENT Runtime)
-# Weights stay beside the loaded core DLL. install(FILES) would flatten rife-v4.6/.
-set(RILLIGHT_ENHANCEMENT_BIN "${RILLIGHT_CORE_PREFIX_WINDOWS_X64}/bin")
-install(CODE "
-  set(_enhancement_bin \"${RILLIGHT_ENHANCEMENT_BIN}\")
-  if(EXISTS \"\${_enhancement_bin}/rife-v4.6/flownet.bin\")
-    file(COPY \"\${_enhancement_bin}/rife-v4.6\"
-         DESTINATION \"$<TARGET_FILE_DIR:${BINARY_NAME}>\")
-    file(COPY \"\${_enhancement_bin}/realesr-general-x4v3.param\"
-         DESTINATION \"$<TARGET_FILE_DIR:${BINARY_NAME}>\")
-    file(COPY \"\${_enhancement_bin}/realesr-general-x4v3.bin\"
-         DESTINATION \"$<TARGET_FILE_DIR:${BINARY_NAME}>\")
-  endif()
-  if(EXISTS \"\${_enhancement_bin}/shaders/anime4k\")
-    file(COPY \"\${_enhancement_bin}/shaders\"
-         DESTINATION \"$<TARGET_FILE_DIR:${BINARY_NAME}>\")
-  endif()
-" COMPONENT Runtime)
+# Remove assets left in an incremental bundle by versions with enhancement.
+install(CODE "file(REMOVE_RECURSE
+  \"$<TARGET_FILE_DIR:${BINARY_NAME}>/rife-v4.6\"
+  \"$<TARGET_FILE_DIR:${BINARY_NAME}>/shaders/anime4k\"
+  \"$<TARGET_FILE_DIR:${BINARY_NAME}>/realesr-general-x4v3.param\"
+  \"$<TARGET_FILE_DIR:${BINARY_NAME}>/realesr-general-x4v3.bin\")"
+  COMPONENT Runtime)

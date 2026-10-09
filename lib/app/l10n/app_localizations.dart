@@ -1972,7 +1972,7 @@ abstract class AppLocalizations {
   /// **'播放设置'**
   String get playerPlaybackSettings;
 
-  /// Player and settings section for the real video, audio and enhancement state.
+  /// Player and settings section for actual video and audio output.
   ///
   /// In zh, this message translates to:
   /// **'实际输出'**
@@ -2176,155 +2176,11 @@ abstract class AppLocalizations {
   /// **'Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。'**
   String get playbackOutputProfile5MissingRpu;
 
-  /// No description provided for @playbackEnhanceInterpolation.
-  ///
-  /// In zh, this message translates to:
-  /// **'插帧'**
-  String get playbackEnhanceInterpolation;
-
-  /// No description provided for @playbackEnhanceAnime4k.
-  ///
-  /// In zh, this message translates to:
-  /// **'Anime4K'**
-  String get playbackEnhanceAnime4k;
-
-  /// No description provided for @playbackEnhanceSuperResolution.
-  ///
-  /// In zh, this message translates to:
-  /// **'通用超分'**
-  String get playbackEnhanceSuperResolution;
-
-  /// No description provided for @playbackEnhanceDenoise.
-  ///
-  /// In zh, this message translates to:
-  /// **'降噪'**
-  String get playbackEnhanceDenoise;
-
-  /// No description provided for @playbackEnhanceSharpen.
-  ///
-  /// In zh, this message translates to:
-  /// **'锐化'**
-  String get playbackEnhanceSharpen;
-
-  /// No description provided for @playbackEnhanceDouble.
-  ///
-  /// In zh, this message translates to:
-  /// **'双倍'**
-  String get playbackEnhanceDouble;
-
-  /// No description provided for @playbackEnhanceLight.
-  ///
-  /// In zh, this message translates to:
-  /// **'轻'**
-  String get playbackEnhanceLight;
-
-  /// No description provided for @playbackEnhanceStrong.
-  ///
-  /// In zh, this message translates to:
-  /// **'强'**
-  String get playbackEnhanceStrong;
-
-  /// No description provided for @playbackEnhanceX2.
-  ///
-  /// In zh, this message translates to:
-  /// **'2 倍'**
-  String get playbackEnhanceX2;
-
-  /// No description provided for @playbackEnhanceDisable.
-  ///
-  /// In zh, this message translates to:
-  /// **'关闭增强'**
-  String get playbackEnhanceDisable;
-
-  /// No description provided for @playbackEnhanceKeepOutput.
-  ///
-  /// In zh, this message translates to:
-  /// **'留在当前输出'**
-  String get playbackEnhanceKeepOutput;
-
-  /// No description provided for @playbackEnhanceUseAvailable.
-  ///
-  /// In zh, this message translates to:
-  /// **'改用可用输出'**
-  String get playbackEnhanceUseAvailable;
-
-  /// No description provided for @playbackEnhanceRetry.
-  ///
-  /// In zh, this message translates to:
-  /// **'重试'**
-  String get playbackEnhanceRetry;
-
-  /// No description provided for @playbackEnhanceReasonNativeDolby.
-  ///
-  /// In zh, this message translates to:
-  /// **'原生杜比视界生效，这项增强未运行。'**
-  String get playbackEnhanceReasonNativeDolby;
-
-  /// No description provided for @playbackEnhanceReasonModel.
-  ///
-  /// In zh, this message translates to:
-  /// **'模型或着色器不可用，继续原画。'**
-  String get playbackEnhanceReasonModel;
-
-  /// No description provided for @playbackEnhanceReasonOverload.
-  ///
-  /// In zh, this message translates to:
-  /// **'连续达不到帧期限，已降低生效档。已保存的选择未改。'**
-  String get playbackEnhanceReasonOverload;
-
-  /// No description provided for @playbackEnhanceReasonRefresh.
-  ///
-  /// In zh, this message translates to:
-  /// **'受显示器刷新率限制，未按请求生效。'**
-  String get playbackEnhanceReasonRefresh;
-
-  /// No description provided for @playbackEnhanceReasonNoPicture.
-  ///
-  /// In zh, this message translates to:
-  /// **'还没有可处理的画面。'**
-  String get playbackEnhanceReasonNoPicture;
-
-  /// No description provided for @playbackEnhanceReasonCapacity.
-  ///
-  /// In zh, this message translates to:
-  /// **'画面尺寸或缓冲放不下放大，因此未生效且原画继续。'**
-  String get playbackEnhanceReasonCapacity;
-
-  /// No description provided for @playbackEnhanceReasonMismatch.
-  ///
-  /// In zh, this message translates to:
-  /// **'生效值与请求不一致。'**
-  String get playbackEnhanceReasonMismatch;
-
-  /// No description provided for @playbackEnhanceFrameRate.
+  /// No description provided for @playbackOutputFrameRate.
   ///
   /// In zh, this message translates to:
   /// **'目标显示帧率 {rate} fps'**
-  String playbackEnhanceFrameRate(String rate);
-
-  /// No description provided for @playbackEnhanceReplaceSuper.
-  ///
-  /// In zh, this message translates to:
-  /// **'Anime4K 与通用超分不能同时生效。继续会关闭通用超分。取消则不改当前画面和输出。'**
-  String get playbackEnhanceReplaceSuper;
-
-  /// No description provided for @playbackEnhanceReplaceAnime.
-  ///
-  /// In zh, this message translates to:
-  /// **'Anime4K 与通用超分不能同时生效。继续会关闭 Anime4K。取消则不改当前画面和输出。'**
-  String get playbackEnhanceReplaceAnime;
-
-  /// No description provided for @playbackEnhanceLeaveDolby.
-  ///
-  /// In zh, this message translates to:
-  /// **'打开增强会离开原生杜比视界，画面改用当前设备能显示的输出。取消则不改当前画面和输出。'**
-  String get playbackEnhanceLeaveDolby;
-
-  /// No description provided for @playbackEnhanceConfirm.
-  ///
-  /// In zh, this message translates to:
-  /// **'继续'**
-  String get playbackEnhanceConfirm;
+  String playbackOutputFrameRate(String rate);
 
   /// Keep the player window above other windows.
   ///
@@ -3583,7 +3439,7 @@ abstract class AppLocalizations {
   /// No description provided for @phoneSubtitleOriginalHint.
   ///
   /// In zh, this message translates to:
-  /// **'保留作者的字号与特效'**
+  /// **'保留作者字号与特效；选择上方字号将关闭此项'**
   String get phoneSubtitleOriginalHint;
 
   /// No description provided for @phoneSubtitleUnavailable.

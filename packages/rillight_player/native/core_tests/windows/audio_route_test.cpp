@@ -1,4 +1,6 @@
 #include "../../../windows/audio_route.h"
+#include "../../../windows/audio_transport.h"
+#include "../../core/iec61937_pack.h"
 
 #include <audioclient.h>
 
@@ -17,6 +19,58 @@ void expect_kept(const rillight_windows::RouteCommit& commit, int channels,
 }  // namespace
 
 int main() {
+  using namespace rillight_windows;
+  for (int kind : {RILLIGHT_CORE_PASSTHROUGH_AC3, RILLIGHT_CORE_PASSTHROUGH_EAC3,
+                   RILLIGHT_CORE_PASSTHROUGH_DTS, RILLIGHT_CORE_PASSTHROUGH_DTSHD,
+                   RILLIGHT_CORE_PASSTHROUGH_TRUEHD}) {
+    const auto bit = rillight_passthrough_accept_bit(kind);
+    for (int channels : {2, 6, 8}) {
+      const auto accepted = rillight_audio_contract(channels, kind, 8, bit, 0, 1);
+      assert(accepted.passthrough && accepted.channels == channels && !accepted.atmos);
+      assert(!rillight_audio_contract(channels, kind, 8, 0, 1, 1).passthrough);
+      assert(!rillight_audio_contract(channels, kind, 8, bit, 1, 1.25).passthrough);
+    }
+    RouteObservation observed; observed.endpoint_present = true;
+    observed.ac3 = observed.eac3 = observed.dts = observed.dtshd = observed.truehd = ExclusiveProbe::kAccepted;
+    assert((DecideAudioRoute(2, 0, observed).accepted_passthrough & bit) != 0);
+    observed.endpoint_lost = true;
+    assert(DecideAudioRoute(2, bit, observed).accepted_passthrough == 0);
+  }
+  assert(!rillight_audio_contract(2, RILLIGHT_CORE_PASSTHROUGH_EAC3, 8,
+      RILLIGHT_CORE_AUDIO_ACCEPT_EAC3, 1, 1).atmos);
+  assert(EncodedTransport(RILLIGHT_CORE_PASSTHROUGH_EAC3, 44100).rate == 176400);
+  assert(EncodedTransport(RILLIGHT_CORE_PASSTHROUGH_AC3, 32000).rate == 32000);
+  assert(EncodedTransport(RILLIGHT_CORE_PASSTHROUGH_DTS, 48000, 1024).period_bytes == 4096);
+  assert(EncodedTransport(RILLIGHT_CORE_PASSTHROUGH_DTSHD, 48000, 512).period_bytes == 32768);
+  assert(EncodedTransport(RILLIGHT_CORE_PASSTHROUGH_DTSHD, 44100, 512).period_bytes == 0);
+  assert(EncodedTransport(RILLIGHT_CORE_PASSTHROUGH_DTS, 48000, 123).period_bytes == 0);
+  RillightIec61937Mux mux;
+  std::vector<uint8_t> packet(128), burst;
+  packet[0] = 0x0b; packet[1] = 0x77; packet[5] = 8 << 3;
+  assert(mux.push_ac3(packet.data(), 128, &burst) == 1);
+  assert(burst.size() == 6144 && burst[4] == 1 && burst[6] == 0 && burst[7] == 4);
+  assert(mux.push_ac3(packet.data(), 3, &burst) == -1);
+  for (int samples : {512, 1024, 2048}) {
+    packet.assign(128, 0);
+    packet[0] = 0x7f; packet[1] = 0xfe; packet[2] = 0x80; packet[3] = 1;
+    const int blocks = samples / 32 - 1;
+    packet[4] = static_cast<uint8_t>(blocks >> 6); packet[5] = static_cast<uint8_t>((blocks & 63) << 2);
+    packet[6] = 7; packet[7] = 0xf0; packet[8] = 13 << 2;
+    assert(mux.push_dts(packet.data(), 128, false, &burst) == 1);
+    assert(burst.size() == static_cast<size_t>(samples * 4));
+    assert(burst[6] == 0 && burst[7] == 4);
+    const auto be = burst;
+    for (size_t i = 0; i < packet.size(); i += 2) std::swap(packet[i], packet[i + 1]);
+    assert(mux.push_dts(packet.data(), 128, false, &burst) == 1 && burst == be);
+    for (size_t i = 0; i < packet.size(); i += 2) std::swap(packet[i], packet[i + 1]);
+    packet.resize(256);
+    assert(mux.push_dts(packet.data(), 256, false, &burst) == -1);
+    if (samples <= 1024) {
+      assert(mux.push_dts(packet.data(), 256, true, &burst) == 1);
+      assert(burst[4] == 0x11 && burst.size() == static_cast<size_t>(samples * 64));
+    }
+  }
+
   static_assert(static_cast<uint32_t>(AUDCLNT_E_DEVICE_IN_USE) == 0x8889000Au);
   static_assert(static_cast<uint32_t>(AUDCLNT_E_UNSUPPORTED_FORMAT) ==
                 0x88890008u);

@@ -15,7 +15,7 @@ import re
 import shutil
 import subprocess
 
-from build_core_dependencies import install_enhancement_runtime
+from build_core_dependencies import remove_enhancement_runtime
 from verify_core_dependencies import SPEC, verify
 
 
@@ -72,7 +72,7 @@ def main() -> None:
     temporary = published.with_suffix(".dll.new")
     shutil.copyfile(built, temporary)
     os.replace(temporary, published)
-    install_enhancement_runtime(build, prefix / "bin")
+    remove_enhancement_runtime(prefix / "bin")
     marker_file = prefix / "rillight-core-dependencies.json"
     marker = json.loads(marker_file.read_text(encoding="utf-8"))
     marker["libraries"]["bin/librillight_core.dll"] = digest(published)

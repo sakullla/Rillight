@@ -80,7 +80,11 @@ typedef enum RillightCoreAudioDelivery {
 typedef enum RillightCorePassthroughKind {
   RILLIGHT_CORE_PASSTHROUGH_NONE = 0,
   RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC = 1,
-  RILLIGHT_CORE_PASSTHROUGH_TRUEHD = 2
+  RILLIGHT_CORE_PASSTHROUGH_TRUEHD = 2,
+  RILLIGHT_CORE_PASSTHROUGH_EAC3 = 3,
+  RILLIGHT_CORE_PASSTHROUGH_AC3 = 4,
+  RILLIGHT_CORE_PASSTHROUGH_DTS = 5,
+  RILLIGHT_CORE_PASSTHROUGH_DTSHD = 6
 } RillightCorePassthroughKind;
 
 typedef enum RillightCoreVideoOutputKind {
@@ -105,6 +109,9 @@ typedef enum RillightCoreDoviReconstruction {
 #define RILLIGHT_CORE_DOVI_PROFILE_NONE 0
 #define RILLIGHT_CORE_AUDIO_ACCEPT_EAC3 1u
 #define RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD 2u
+#define RILLIGHT_CORE_AUDIO_ACCEPT_AC3 4u
+#define RILLIGHT_CORE_AUDIO_ACCEPT_DTS 8u
+#define RILLIGHT_CORE_AUDIO_ACCEPT_DTSHD 16u
 
 typedef enum RillightCoreTrackType {
   RILLIGHT_CORE_TRACK_VIDEO = 1,
@@ -318,7 +325,7 @@ RILLIGHT_CORE_API int rillight_core_configure_hardware(
     RillightCore *core, RillightCoreHardware preference,
     int allow_software_fallback);
 /* Device PCM capacity and compressed formats the sink can actually open.
- * max_pcm_channels is 1..8. accepted_passthrough is EAC3 and/or TRUEHD.
+ * max_pcm_channels is 1..8. accepted_passthrough is a mask of RILLIGHT_CORE_AUDIO_ACCEPT_* formats.
  * reports_atmos must be 0 or 1 and is copied to the snapshot only while a
  * compressed passthrough frame is produced. Allowed outside CLOSING. A changed
  * channel count or accept mask drops queued audio; the sink flushes its device
@@ -453,23 +460,14 @@ typedef struct RillightCoreEnhancementStatus {
   double output_frame_rate;
 } RillightCoreEnhancementStatus;
 
-/* Allowed outside CLOSING. Identical requests keep an overload downgrade.
- * A changed request restores the selected stages and still does not write the
- * media URL, duration, or audio speed. A display_refresh_hz change recomputes
- * interpolation and does not clear the scale-capacity latch. That latch is
- * updated only by processing the current picture. */
+/* Deprecated ABI 10 compatibility. Only all-off requests are accepted.
+ * Nonzero requests fail without changing playback or the decoder. */
 RILLIGHT_CORE_API int rillight_core_configure_enhancement(
     RillightCore *core, const RillightCoreEnhancementRequest *request);
-/* Clears this session's overload downgrade and resolves request again, even
- * when it matches. display_refresh_hz is the current display. Zero, or a
- * positive rate below twice the source frame rate, leaves double
- * interpolation inactive. Does not clear the scale-capacity latch or write
- * the media URL, duration, or speed. */
+/* Same disabled-feature contract as configure_enhancement. */
 RILLIGHT_CORE_API int rillight_core_retry_enhancement(
     RillightCore *core, const RillightCoreEnhancementRequest *request);
-/* met is 0 or 1. monotonic_us is a caller clock. One continuous second of
- * misses drops interpolation, then upscaling, then denoise and sharpen.
- * Requested values stay put. */
+/* Compatibility no-op; validates pointer, met and monotonic_us only. */
 RILLIGHT_CORE_API int rillight_core_note_frame_deadline(
     RillightCore *core, int met, int64_t monotonic_us);
 RILLIGHT_CORE_API int rillight_core_enhancement_status(
@@ -479,8 +477,7 @@ RILLIGHT_CORE_API int rillight_enhancement_resolve(
     const RillightCoreEnhancementFacts *facts,
     const RillightCoreEnhancementLoad *load,
     RillightCoreEnhancementStatus *status);
-/* RGBA8 only. previous may be null. Subtitle bytes are not accepted.
- * dst and midpoint are tightly packed. midpoint_bytes is 0 on a hard cut. */
+/* Removed pixel processor. Always returns -1 without touching buffers. */
 RILLIGHT_CORE_API int rillight_enhancement_process_rgba(
     const RillightCoreEnhancementRequest *request,
     const RillightCoreEnhancementFacts *facts,
@@ -488,8 +485,7 @@ RILLIGHT_CORE_API int rillight_enhancement_process_rgba(
     int height, int stride, const uint8_t *previous, int previous_stride,
     uint8_t *dst, int dst_capacity, int *out_width, int *out_height,
     uint8_t *midpoint, int midpoint_capacity, int *midpoint_bytes);
-/* kind 0 is RIFE, 1 is Anime4K GLSL, 2 is Real-ESRGAN. 1 means the pinned
- * weights loaded. A missing model stays inactive. */
+/* Removed models. Always returns 0 for every kind. */
 RILLIGHT_CORE_API int rillight_enhancement_model_ready(int kind);
 /* Optional Windows GPU sink, enabled while idle; disabling it is allowed
  * during playback to recover from unavailable cross-adapter sharing.

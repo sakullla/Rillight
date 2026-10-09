@@ -213,6 +213,50 @@ void main() {
   });
 
   test(
+    'query getters reuse groups until data changes and clear them on membership loss',
+    () async {
+      await f.open();
+      f.a.items = (request) async {
+        final cursor = int.parse(
+          request.uri.queryParameters['StartIndex'] ?? '0',
+        );
+        return _page([_movie('film-$cursor', provider: '$cursor')], total: 2);
+      };
+      await f.query.start(
+        QueryScope(
+          region: AccessRegion.ordinary,
+          serverIds: {'a'},
+          pageSize: 1,
+        ),
+      );
+      final first = f.query.works;
+      expect(first, hasLength(1));
+      for (var i = 0; i < 20; i++) {
+        expect(f.query.sources, hasLength(1));
+        expect(f.query.items, hasLength(1));
+        expect(f.query.summary, QuerySummary.available);
+        expect(f.query.works, same(first));
+        expect(
+          f.query.resolveAnchor(first.single.sources.single.reference),
+          same(first.single),
+        );
+      }
+      await f.query.loadMoreServer('a');
+      final updated = f.query.works;
+      expect(updated, hasLength(2));
+      expect(updated, isNot(same(first)));
+      await f.access.setPin('1234', '1234', (_) async {});
+      await f.access.unlock('1234');
+      await f.registry.move('a', AccessRegion.private);
+      expect(f.query.works, isEmpty);
+      expect(
+        f.query.resolveAnchor(first.single.sources.single.reference),
+        isNull,
+      );
+    },
+  );
+
+  test(
     'two independent controllers reuse existing playback permit without authentication or session replacement',
     () async {
       await f.open();
@@ -893,7 +937,9 @@ void main() {
       final short = SameSourceQueryController(
         registry: f.registry,
         history: f.history,
-        timeout: const Duration(milliseconds: 100),
+        // Allow loopback HTTP scheduling under the parallel full suite.
+        // The unresolved gate below still deterministically forces a timeout.
+        timeout: const Duration(seconds: 1),
       );
       addTearDown(short.dispose);
       short.query.useAccount(

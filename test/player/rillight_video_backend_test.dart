@@ -20,7 +20,6 @@ class _CoreDriver implements CorePlayer {
   Map<String, Object?> lastArgs = const {};
   final commands = <String>[];
   Map<String, Object?>? enhancementArgs;
-  Map<String, Object?>? deadlineArgs;
   int actualHardware = 0;
 
   @override
@@ -51,7 +50,6 @@ class _CoreDriver implements CorePlayer {
   ]) async {
     commands.add(method);
     if (method == 'enhancement') enhancementArgs = args;
-    if (method == 'frameDeadline') deadlineArgs = args;
     lastCommand = method;
     lastArgs = args;
     return {
@@ -191,49 +189,6 @@ class _TrackIdCoreDriver extends _CoreDriver {
   };
 }
 
-class _FrameOutputCoreDriver extends _CoreDriver {
-  @override
-  Future<Map<String, dynamic>> command(
-    String method, [
-    Map<String, Object?> args = const {},
-  ]) async {
-    final base = await super.command(method, args);
-    if (method == 'enhancement') {
-      return {
-        ...base,
-        'dolbyVisionProfile': 7,
-        'dolbyVisionCompatibility': 6,
-        'videoOutputKind': 3,
-        'audioDelivery': 4,
-        'audioChannels': 8,
-        'audioAtmos': 1,
-        'requestedInterpolation': 2,
-        'effectiveInterpolation': 2,
-        'reasonInterpolation': 1,
-      };
-    }
-    if (method == 'outputStatus') {
-      return {
-        ...base,
-        'dolbyVisionProfile': 7,
-        'dolbyVisionCompatibility': 6,
-        'videoOutputKind': 1,
-        'doviReconstruction': 3,
-        'audioDelivery': 3,
-        'audioChannels': 6,
-        'audioAtmos': 0,
-        'requestedInterpolation': 2,
-        'effectiveInterpolation': 0,
-        'reasonInterpolation': 4,
-        'outputColorSpace': 'scRGB',
-        'hdrOutput': false,
-        'hdrDisplayActive': false,
-      };
-    }
-    return base;
-  }
-}
-
 class _StaleOutputCoreDriver extends _CoreDriver {
   Map<String, dynamic> _fields({
     required int kind,
@@ -266,12 +221,6 @@ class _StaleOutputCoreDriver extends _CoreDriver {
     Map<String, Object?> args = const {},
   ]) async {
     final base = await super.command(method, args);
-    if (method == 'enhancement') {
-      return {
-        ...base,
-        ..._fields(kind: 3, delivery: 4, effective: 2, reason: 1, epoch: 1),
-      };
-    }
     if (method == 'outputStatus') {
       // The command captured native Dolby before this yield. The frame path
       // publishes SDR while that result is still in flight.
@@ -285,60 +234,6 @@ class _StaleOutputCoreDriver extends _CoreDriver {
       return {
         ...base,
         ..._fields(kind: 3, delivery: 4, effective: 2, reason: 1, epoch: 1),
-      };
-    }
-    return base;
-  }
-}
-
-class _LateFrameCoreDriver extends _CoreDriver {
-  int outputReads = 0;
-
-  Map<String, dynamic> _fields({
-    required int kind,
-    required int epoch,
-    required int effective,
-    required int delivery,
-    required int reason,
-  }) {
-    return {
-      'dolbyVisionProfile': 7,
-      'dolbyVisionCompatibility': 6,
-      'videoOutputKind': kind,
-      'audioDelivery': delivery,
-      'audioChannels': kind == 3 ? 8 : 6,
-      'audioAtmos': kind == 3 ? 1 : 0,
-      'requestedInterpolation': 2,
-      'effectiveInterpolation': effective,
-      'reasonInterpolation': reason,
-      'outputEpoch': epoch,
-    };
-  }
-
-  @override
-  Future<Map<String, dynamic>> command(
-    String method, [
-    Map<String, Object?> args = const {},
-  ]) async {
-    final base = await super.command(method, args);
-    if (method == 'enhancement') {
-      return {
-        ...base,
-        ..._fields(kind: 3, delivery: 4, epoch: 1, effective: 2, reason: 1),
-      };
-    }
-    if (method == 'outputStatus') {
-      outputReads++;
-      emit('position', 1000 + outputReads * 100);
-      if (outputReads < 3) {
-        return {
-          ...base,
-          ..._fields(kind: 3, delivery: 4, epoch: 1, effective: 2, reason: 1),
-        };
-      }
-      return {
-        ...base,
-        ..._fields(kind: 1, delivery: 3, epoch: 2, effective: 0, reason: 4),
       };
     }
     return base;
@@ -1225,267 +1120,6 @@ void main() {
   });
 
   test(
-    'saved enhancement is applied on open and deadlines do not rewrite it',
-    () async {
-      final directory = await Directory.systemTemp.createTemp(
-        'rillight-enhancement-open-',
-      );
-      addTearDown(() => directory.delete(recursive: true));
-      final file = File('${directory.path}/settings.json');
-      final store = FilePlayerSettingsStore(file);
-      await store.write(
-        const PlayerSettings(
-          frameInterpolation: FrameInterpolation.doubleRate,
-          anime4k: Anime4kLevel.light,
-          denoise: 40,
-          sharpen: 0,
-          acceptLeaveNativeDolby: false,
-        ),
-      );
-      final before = await file.readAsString();
-      final driver = _CoreDriver();
-      final backend = RillightVideoBackend(
-        settingsStore: store,
-        diskCacheDirectory: isolatedCache,
-        createPlayer: () async => driver,
-      );
-      addTearDown(backend.dispose);
-      await backend.open(
-        VideoOpenRequest(
-          sessionId: 41,
-          url: Uri.parse('http://127.0.0.1:1/synthetic.mp4'),
-        ),
-      );
-      final sealed = driver.request!.url;
-      expect(driver.commands, contains('enhancement'));
-      expect(driver.enhancementArgs, {
-        'interpolation': 2,
-        'anime4k': 1,
-        'superResolution': 0,
-        'denoise': 40,
-        'sharpen': 0,
-        'acceptLeaveNativeDolby': false,
-        'displayRefreshHz': currentDisplayRefreshHz(),
-      });
-      await backend.noteVideoFrameDeadline(met: false, monotonicUs: 0);
-      await backend.noteVideoFrameDeadline(met: false, monotonicUs: 1000000);
-      expect(driver.deadlineArgs, {'met': false, 'monotonicUs': 1000000});
-      expect(driver.request!.url, sealed);
-      expect(await file.readAsString(), before);
-      final saved = await store.read();
-      expect(
-        saved.videoEnhancement.interpolation,
-        FrameInterpolation.doubleRate,
-      );
-      expect(saved.videoEnhancement.anime4k, Anime4kLevel.light);
-      expect(saved.toJson().containsKey('effectiveInterpolation'), isFalse);
-
-      final defaults = _CoreDriver();
-      final plainCache = await Directory(
-        '${directory.path}/plain-cache',
-      ).create();
-      final plain = RillightVideoBackend(
-        settingsStore: MemoryPlayerSettingsStore(),
-        diskCacheDirectory: plainCache,
-        createPlayer: () async => defaults,
-      );
-      addTearDown(plain.dispose);
-      await plain.open(
-        VideoOpenRequest(
-          sessionId: 42,
-          url: Uri.parse('http://127.0.0.1:1/plain.mp4'),
-        ),
-      );
-      expect(defaults.enhancementArgs, {
-        'interpolation': 0,
-        'anime4k': 0,
-        'superResolution': 0,
-        'denoise': 0,
-        'sharpen': 0,
-        'acceptLeaveNativeDolby': false,
-        'displayRefreshHz': currentDisplayRefreshHz(),
-      });
-    },
-  );
-
-  test('open and apply pass the current display refresh', () async {
-    var hz = 144;
-    final driver = _CoreDriver();
-    final backend = RillightVideoBackend(
-      settingsStore: MemoryPlayerSettingsStore(),
-      diskCacheDirectory: isolatedCache,
-      createPlayer: () async => driver,
-      readDisplayRefreshHz: () => hz,
-    );
-    addTearDown(backend.dispose);
-    await backend.open(
-      VideoOpenRequest(
-        sessionId: 47,
-        url: Uri.parse('http://127.0.0.1:1/refresh.mp4'),
-      ),
-    );
-    expect(driver.enhancementArgs?['displayRefreshHz'], 144);
-    hz = 30;
-    await backend.applyVideoEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.doubleRate,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-    expect(driver.enhancementArgs?['displayRefreshHz'], 30);
-    hz = 0;
-    await backend.applyVideoEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.doubleRate,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-    expect(driver.enhancementArgs?['displayRefreshHz'], 0);
-  });
-
-  test('retry marks clearOverload and ordinary apply does not', () async {
-    var hz = 120;
-    final driver = _CoreDriver();
-    final backend = RillightVideoBackend(
-      settingsStore: MemoryPlayerSettingsStore(),
-      diskCacheDirectory: isolatedCache,
-      createPlayer: () async => driver,
-      readDisplayRefreshHz: () => hz,
-    );
-    addTearDown(backend.dispose);
-    await backend.open(
-      VideoOpenRequest(
-        sessionId: 48,
-        url: Uri.parse('http://127.0.0.1:1/retry.mp4'),
-      ),
-    );
-    const selection = VideoEnhancementSelection(
-      interpolation: FrameInterpolation.doubleRate,
-      anime4k: Anime4kLevel.light,
-      superResolution: SuperResolution.off,
-      denoise: 20,
-      sharpen: 10,
-      acceptLeaveNativeDolby: false,
-    );
-    await backend.applyVideoEnhancement(selection);
-    expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
-    expect(driver.enhancementArgs?['displayRefreshHz'], 120);
-    hz = 50;
-    await backend.applyVideoEnhancement(selection, clearOverload: true);
-    expect(driver.enhancementArgs?['clearOverload'], isTrue);
-    expect(driver.enhancementArgs?['displayRefreshHz'], 50);
-    expect(driver.enhancementArgs?['interpolation'], 2);
-    expect(driver.enhancementArgs?['anime4k'], 1);
-    await backend.applyVideoEnhancement(selection);
-    expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
-    expect(driver.enhancementArgs?['displayRefreshHz'], 50);
-  });
-
-  test(
-    'screen, refresh, and resume reconfigure the current enhancement',
-    () async {
-      TestWidgetsFlutterBinding.ensureInitialized();
-      var hz = 144;
-      var displayId = 7;
-      final driver = _CoreDriver();
-      final backend = RillightVideoBackend(
-        settingsStore: MemoryPlayerSettingsStore(
-          const PlayerSettings(
-            frameInterpolation: FrameInterpolation.doubleRate,
-          ),
-        ),
-        diskCacheDirectory: isolatedCache,
-        createPlayer: () async => driver,
-        readDisplayRefreshHz: () => hz,
-        readDisplayId: () => displayId,
-      );
-      addTearDown(backend.dispose);
-      await backend.open(
-        VideoOpenRequest(
-          sessionId: 49,
-          url: Uri.parse('http://127.0.0.1:1/display.mp4'),
-        ),
-      );
-      int enhancementCount() =>
-          driver.commands.where((method) => method == 'enhancement').length;
-      expect(driver.enhancementArgs?['displayRefreshHz'], 144);
-      expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
-      final opened = enhancementCount();
-
-      WidgetsBinding.instance.handleMetricsChanged();
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), opened);
-
-      hz = 60;
-      WidgetsBinding.instance.handleMetricsChanged();
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), opened + 1);
-      expect(driver.enhancementArgs?['displayRefreshHz'], 60);
-      expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
-      expect(driver.enhancementArgs?['interpolation'], 2);
-
-      WidgetsBinding.instance.handleMetricsChanged();
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), opened + 1);
-
-      displayId = 8;
-      WidgetsBinding.instance.handleMetricsChanged();
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), opened + 2);
-      expect(driver.enhancementArgs?['displayRefreshHz'], 60);
-
-      WidgetsBinding.instance.handleAppLifecycleStateChanged(
-        AppLifecycleState.resumed,
-      );
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), opened + 3);
-      expect(driver.enhancementArgs?['displayRefreshHz'], 60);
-
-      hz = 0;
-      WidgetsBinding.instance.handleAppLifecycleStateChanged(
-        AppLifecycleState.resumed,
-      );
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), opened + 4);
-      expect(driver.enhancementArgs?['displayRefreshHz'], 0);
-      expect(driver.enhancementArgs?['interpolation'], 2);
-      expect(driver.enhancementArgs?.containsKey('clearOverload'), isFalse);
-
-      final afterResume = enhancementCount();
-      await backend.stop();
-      hz = 144;
-      displayId = 9;
-      WidgetsBinding.instance.handleMetricsChanged();
-      WidgetsBinding.instance.handleAppLifecycleStateChanged(
-        AppLifecycleState.resumed,
-      );
-      await backend.debugPendingDisplayReconfigure;
-      expect(enhancementCount(), afterResume);
-    },
-  );
-
-  test('display refresh rounds nominal rates and drops unknown ones', () {
-    expect(normalizeDisplayRefreshHz(59.94), 60);
-    expect(normalizeDisplayRefreshHz(47.95), 48);
-    expect(normalizeDisplayRefreshHz(60), 60);
-    expect(normalizeDisplayRefreshHz(0), 0);
-    expect(normalizeDisplayRefreshHz(-1), 0);
-    expect(normalizeDisplayRefreshHz(double.nan), 0);
-    expect(normalizeDisplayRefreshHz(double.infinity), 0);
-    expect(normalizeDisplayRefreshHz(1000), 1000);
-    expect(normalizeDisplayRefreshHz(1001), 0);
-    expect(currentDisplayRefreshHz(), greaterThan(0));
-  });
-
-  test(
     'later core output samples replace kind and tier without moving playback',
     () async {
       final driver = _CoreDriver();
@@ -1541,69 +1175,7 @@ void main() {
       expect(backend.isPlaying, isFalse);
     },
   );
-
-  test('enhancement waits for the frame that rewrites video kind', () async {
-    final driver = _FrameOutputCoreDriver();
-    final backend = RillightVideoBackend(
-      settingsStore: MemoryPlayerSettingsStore(),
-      diskCacheDirectory: isolatedCache,
-      createPlayer: () async => driver,
-    );
-    addTearDown(backend.dispose);
-    await backend.open(
-      VideoOpenRequest(
-        sessionId: 44,
-        url: Uri.parse('http://127.0.0.1:1/frame.mp4'),
-      ),
-    );
-    expect(backend.outputStatus.videoOutputKind, 3);
-    final position = backend.position;
-    await backend.applyVideoEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.off,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-    expect(backend.outputStatus.videoOutputKind, 1);
-    expect(backend.outputStatus.audioDelivery, 3);
-    expect(backend.outputStatus.effectiveInterpolation, 0);
-    expect(backend.outputStatus.reasonInterpolation, 4);
-    expect(backend.outputStatus.outputColorSpace, 'scRGB');
-    expect(backend.position, position);
-    expect(driver.commands.where((method) => method == 'outputStatus'), [
-      'outputStatus',
-    ]);
-
-    driver.emit('playing', true);
-    await backend.applyVideoEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.doubleRate,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: true,
-      ),
-    );
-    expect(backend.isPlaying, isTrue);
-    expect(backend.outputStatus.videoOutputKind, 3);
-    for (
-      var attempt = 0;
-      attempt < 8 && backend.outputStatus.videoOutputKind != 1;
-      attempt++
-    ) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(backend.outputStatus.videoOutputKind, 1);
-    expect(backend.outputStatus.reasonInterpolation, 4);
-    expect(backend.position, position);
-  });
-
-  test('stale output refresh does not cover a newer frame sample', () async {
+  test('stale output refresh cannot overwrite a newer frame sample', () async {
     final driver = _StaleOutputCoreDriver();
     final backend = RillightVideoBackend(
       settingsStore: MemoryPlayerSettingsStore(),
@@ -1613,68 +1185,13 @@ void main() {
     addTearDown(backend.dispose);
     await backend.open(
       VideoOpenRequest(
-        sessionId: 45,
-        url: Uri.parse('http://127.0.0.1:1/stale.mp4'),
+        sessionId: 44,
+        url: Uri.parse('http://127.0.0.1:1/output.mp4'),
       ),
     );
-    await backend.applyVideoEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.off,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
+    await backend.refreshOutputStatus();
     expect(backend.outputStatus.videoOutputKind, 1);
     expect(backend.outputStatus.audioDelivery, 3);
-    expect(backend.outputStatus.effectiveInterpolation, 0);
-    expect(backend.outputStatus.reasonInterpolation, 4);
-    expect(backend.outputStatus.audioAtmos, isFalse);
-    expect(backend.outputStatus.outputColorSpace, 'scRGB');
-    expect(backend.outputStatus.hdrDisplayActive, isTrue);
-    expect(backend.position, const Duration(milliseconds: 2400));
-  });
-
-  test('playing follow-up waits for output fields, not position', () async {
-    final driver = _LateFrameCoreDriver();
-    final backend = RillightVideoBackend(
-      settingsStore: MemoryPlayerSettingsStore(),
-      diskCacheDirectory: isolatedCache,
-      createPlayer: () async => driver,
-    );
-    addTearDown(backend.dispose);
-    await backend.open(
-      VideoOpenRequest(
-        sessionId: 46,
-        url: Uri.parse('http://127.0.0.1:1/late-frame.mp4'),
-      ),
-    );
-    driver.emit('playing', true);
-    await backend.applyVideoEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.off,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: true,
-      ),
-    );
-    expect(backend.isPlaying, isTrue);
-    expect(backend.outputStatus.videoOutputKind, 3);
-    for (
-      var attempt = 0;
-      attempt < 20 && backend.outputStatus.videoOutputKind != 1;
-      attempt++
-    ) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(driver.outputReads, greaterThanOrEqualTo(3));
-    expect(backend.outputStatus.videoOutputKind, 1);
-    expect(backend.outputStatus.audioDelivery, 3);
-    expect(backend.outputStatus.effectiveInterpolation, 0);
-    expect(backend.outputStatus.reasonInterpolation, 4);
+    expect(driver.commands, isNot(contains('enhancement')));
   });
 }

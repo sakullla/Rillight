@@ -400,6 +400,7 @@ class CatalogCache {
   String? _serverId;
   String? _userId;
   final LinkedHashMap<String, _CatalogMemoryEntry> _memory = LinkedHashMap();
+  final Map<String, Future<CatalogCacheHit?>> _diskReads = {};
 
   CatalogDiskStore? _diskStore;
   bool _diskResolved = false;
@@ -420,6 +421,7 @@ class CatalogCache {
   /// 测试注入磁盘存储;传入 null 表示已解析且禁用磁盘层。
   @visibleForTesting
   void debugSetDiskStore(CatalogDiskStore? store) {
+    _diskReads.clear();
     _diskConfiguration++;
     _diskStore = store;
     _diskResolved = true;
@@ -435,6 +437,7 @@ class CatalogCache {
     _serverId = null;
     _userId = null;
     _writeGeneration++;
+    _diskReads.clear();
     _pendingWrites.clear();
     lastDiskWriteError = null;
     diskWriteFailures = droppedDiskWrites = 0;
@@ -459,6 +462,7 @@ class CatalogCache {
     _userId = userId;
     _memory.clear();
     _writeGeneration++;
+    _diskReads.clear();
     _pendingWrites.clear();
   }
 
@@ -467,6 +471,7 @@ class CatalogCache {
     _userId = null;
     _memory.clear();
     _writeGeneration++;
+    _diskReads.clear();
     _pendingWrites.clear();
   }
 
@@ -510,21 +515,45 @@ class CatalogCache {
     if (store == null) {
       return null;
     }
+    final existing = _diskReads[key];
+    if (existing != null) return existing;
+    late final Future<CatalogCacheHit?> pending;
+    pending =
+        _readDisk(
+          store,
+          key,
+          request,
+          generation,
+          () => identical(_diskReads[key], pending),
+        ).whenComplete(() {
+          if (identical(_diskReads[key], pending)) _diskReads.remove(key);
+        });
+    _diskReads[key] = pending;
+    return pending;
+  }
+
+  Future<CatalogCacheHit?> _readDisk(
+    CatalogDiskStore store,
+    String key,
+    CatalogRequest request,
+    int generation,
+    bool Function() isCurrent,
+  ) async {
     try {
       final raw = await store.read(key);
-      if (raw == null) {
+      // A live write, invalidation, or session change retires this disk read.
+      // It must neither replace newer memory nor delete a newly written file.
+      if (raw == null ||
+          !isCurrent() ||
+          !hasSession ||
+          key != _key(request) ||
+          generation != _writeGeneration) {
         return null;
       }
-      final hit = _decodeEntry(raw, now);
+      final hit = _decodeEntry(raw, clock());
       if (hit == null) {
         // 过期或损坏的磁盘条目惰性清除。
         unawaited(_removeDiskQuiet(store, key));
-        return null;
-      }
-      // An in-flight read from an old account must never repopulate memory.
-      if (!hasSession ||
-          key != _key(request) ||
-          generation != _writeGeneration) {
         return null;
       }
       _storeMemory(key, hit.json, hit.storedAt);
@@ -568,6 +597,7 @@ class CatalogCache {
     }
     final key = _key(request);
     final storedAt = clock();
+    _diskReads.remove(key);
     _storeMemory(key, json, storedAt);
     final body = jsonEncode({
       'storedAt': storedAt.toIso8601String(),
@@ -645,6 +675,7 @@ class CatalogCache {
   /// (存储不支持前缀删除或删除失败时静默,仍有 TTL 兜底)。
   Future<void> invalidatePrefix(String prefix) async {
     _writeGeneration++;
+    _diskReads.clear();
     _memory.removeWhere((key, _) => key.startsWith(prefix));
     _pendingWrites.removeWhere((key, _) => key.startsWith(prefix));
     // Writes already in progress finish before removal, so invalidation cannot

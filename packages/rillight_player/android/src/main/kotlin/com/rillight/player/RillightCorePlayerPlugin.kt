@@ -58,7 +58,6 @@ class RillightCorePlayerPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     private val owners = mutableMapOf<String, CorePlayback>()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        EnhancementFiles.install(binding.applicationContext)
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, "rillight/android_core")
         channel.setMethodCallHandler(this)

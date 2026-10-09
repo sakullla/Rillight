@@ -217,25 +217,6 @@ class _SettingsPageState extends State<SettingsPage> {
         phoneSubtitles: const PhoneSubtitleSettings(),
         skipIntroEnabled: true,
         skipOutroEnabled: true,
-        frameInterpolation: FrameInterpolation.off,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-  }
-
-  Future<void> _saveEnhancement(VideoEnhancementSelection selection) {
-    return _save(
-      PlayerSettings(
-        frameInterpolation: selection.interpolation,
-        anime4k: selection.anime4k,
-        superResolution: selection.superResolution,
-        denoise: selection.denoise,
-        sharpen: selection.sharpen,
-        acceptLeaveNativeDolby: selection.acceptLeaveNativeDolby,
       ),
     );
   }
@@ -513,34 +494,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: l10n.playbackOutputSection,
                   subtitle: l10n.playbackOutputIdle,
                   children: [
-                    PlaybackOutputPanel(
+                    const PlaybackOutputPanel(
                       status: PlaybackOutputStatus.unknown,
-                      saved: _settings.videoEnhancement,
-                      playbackRate: _settings.effectivePlaybackRate,
-                      onDisable: () => _saveEnhancement(
-                        const VideoEnhancementSelection(
-                          interpolation: FrameInterpolation.off,
-                          anime4k: Anime4kLevel.off,
-                          superResolution: SuperResolution.off,
-                          denoise: 0,
-                          sharpen: 0,
-                          acceptLeaveNativeDolby: false,
-                        ),
-                      ),
-                      onKeepOutput: () {
-                        final current = _settings.videoEnhancement;
-                        return _saveEnhancement(
-                          VideoEnhancementSelection(
-                            interpolation: current.interpolation,
-                            anime4k: current.anime4k,
-                            superResolution: current.superResolution,
-                            denoise: current.denoise,
-                            sharpen: current.sharpen,
-                            acceptLeaveNativeDolby: false,
-                          ),
-                        );
-                      },
-                      onSelect: _loaded ? _saveEnhancement : null,
                     ),
                   ],
                 ),
@@ -697,13 +652,6 @@ PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
     skipIntroEnabled: patch.skipIntroEnabled ?? current.skipIntroEnabled,
     skipOutroEnabled: patch.skipOutroEnabled ?? current.skipOutroEnabled,
     phoneSubtitles: patch.phoneSubtitles ?? current.phoneSubtitles,
-    frameInterpolation: patch.frameInterpolation ?? current.frameInterpolation,
-    anime4k: patch.anime4k ?? current.anime4k,
-    superResolution: patch.superResolution ?? current.superResolution,
-    denoise: patch.denoise ?? current.denoise,
-    sharpen: patch.sharpen ?? current.sharpen,
-    acceptLeaveNativeDolby:
-        patch.acceptLeaveNativeDolby ?? current.acceptLeaveNativeDolby,
     seriesPreferences: patch.seriesPreferences.isNotEmpty
         ? patch.seriesPreferences
         : current.seriesPreferences,

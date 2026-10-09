@@ -154,6 +154,25 @@ class PlayerProcessProtocol {
     if (!_ownsDirectory) {
       throw StateError('Only the launching host owns this mailbox');
     }
+    // The child may have exited while Windows or an in-flight mailbox read
+    // still holds a handle. Retry only transient sharing/deletion races;
+    // cleanup must remain bounded and permanent permission errors propagate.
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await _disposeFiles(preserveSnapshot: preserveSnapshot);
+        return;
+      } on FileSystemException catch (error) {
+        if (!Platform.isWindows ||
+            !const {32, 33, 145}.contains(error.osError?.errorCode) ||
+            attempt >= 7) {
+          rethrow;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 20 * (attempt + 1)));
+      }
+    }
+  }
+
+  Future<void> _disposeFiles({required bool preserveSnapshot}) async {
     if (preserveSnapshot &&
         await File('${directory.path}/snapshot.json').exists()) {
       for (final name in [

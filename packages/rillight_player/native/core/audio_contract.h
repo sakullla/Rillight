@@ -6,9 +6,19 @@
 #include <cstddef>
 #include <cstdint>
 
-// Pure negotiation for tests and the decode loop. Passthrough is only E-AC-3
-// JOC or TrueHD, and only while speed is 1 and the sink accepted that format.
-// Atmos is a receiver flag, never a label for PCM.
+// Sink acceptance describes the compressed format, independently of channel
+// count. PCM sources and unaccepted formats never acquire a passthrough label.
+inline uint32_t rillight_passthrough_accept_bit(int kind) {
+  switch (kind) {
+    case RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC:
+    case RILLIGHT_CORE_PASSTHROUGH_EAC3: return RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
+    case RILLIGHT_CORE_PASSTHROUGH_TRUEHD: return RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD;
+    case RILLIGHT_CORE_PASSTHROUGH_AC3: return RILLIGHT_CORE_AUDIO_ACCEPT_AC3;
+    case RILLIGHT_CORE_PASSTHROUGH_DTS: return RILLIGHT_CORE_AUDIO_ACCEPT_DTS;
+    case RILLIGHT_CORE_PASSTHROUGH_DTSHD: return RILLIGHT_CORE_AUDIO_ACCEPT_DTSHD;
+    default: return 0;
+  }
+}
 
 struct RillightAudioContract {
   int delivery;
@@ -37,24 +47,21 @@ inline RillightAudioContract rillight_audio_contract(
   out.delivery = RILLIGHT_CORE_AUDIO_DELIVERY_PCM_STEREO;
   const int device = max_pcm_channels < 1 ? 2 : max_pcm_channels;
   const int speed_ok = speed > 0.999 && speed < 1.001;
-  // A native stereo source stays ordinary stereo PCM. Accept bits and an
-  // Atmos report must not relabel it as passthrough or original Dolby.
-  if (source_channels <= 2) return out;
-  const int joc = passthrough_kind == RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
-                  (accepted & RILLIGHT_CORE_AUDIO_ACCEPT_EAC3) != 0 && speed_ok;
-  const int truehd = passthrough_kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD &&
-                     (accepted & RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD) != 0 &&
-                     speed_ok;
-  if (joc || truehd) {
+  const bool accepted_format =
+      (accepted & rillight_passthrough_accept_bit(passthrough_kind)) != 0;
+  if (accepted_format && speed_ok) {
     const int channels = source_channels > 0 ? source_channels : 2;
     out.delivery = RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH;
     out.passthrough = 1;
-    out.atmos = reports_atmos ? 1 : 0;
+    out.atmos = reports_atmos &&
+        (passthrough_kind == RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC ||
+         passthrough_kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD) ? 1 : 0;
     out.channels = channels;
     out.layout = rillight_layout_for_channels(channels);
     out.ffmpeg_layout = nullptr;
     return out;
   }
+  if (source_channels <= 2) return out;
   if (device >= 8 && source_channels >= 8) {
     out.delivery = RILLIGHT_CORE_AUDIO_DELIVERY_PCM_MULTICHANNEL;
     out.channels = 8;

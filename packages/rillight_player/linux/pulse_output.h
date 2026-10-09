@@ -221,6 +221,7 @@ class PulseOutput {
   bool EnsurePassthrough(int kind) {
     if (passthrough_rejected_) return false;
     if (kind != RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
+        kind != RILLIGHT_CORE_PASSTHROUGH_EAC3 &&
         kind != RILLIGHT_CORE_PASSTHROUGH_TRUEHD) {
       passthrough_rejected_ = true;
       return false;
@@ -380,6 +381,7 @@ class PulseOutput {
   }
   void RejectPassthrough(int kind) {
     if (kind != RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
+        kind != RILLIGHT_CORE_PASSTHROUGH_EAC3 &&
         kind != RILLIGHT_CORE_PASSTHROUGH_TRUEHD)
       kind = passthrough_kind_ != 0 ? passthrough_kind_
                                     : RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC;

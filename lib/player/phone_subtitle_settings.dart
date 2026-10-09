@@ -42,12 +42,9 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
                   PhoneSubtitleSize.large => l.phoneSubtitleLarge,
                   PhoneSubtitleSize.extraLarge => l.phoneSubtitleExtraLarge,
                 },
-                selected: value.size == size,
+                selected: !value.originalAss && value.size == size,
                 onPressed: () => onChanged(
-                  PhoneSubtitleSettings(
-                    size: size,
-                    originalAss: value.originalAss,
-                  ),
+                  PhoneSubtitleSettings(size: size, originalAss: false),
                 ),
               ),
           ],

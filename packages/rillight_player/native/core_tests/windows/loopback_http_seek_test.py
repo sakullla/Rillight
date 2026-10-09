@@ -1,6 +1,7 @@
 """Exercise the published native loopback core across an interrupted HTTP read.
 
 Run with --core and --media from a verified Windows SDK and generated MP4.
+The seek scenario requires at least 16 seconds of media.
 """
 
 import argparse
@@ -29,6 +30,18 @@ class Snapshot(ctypes.Structure):
         ("playback_speed", ctypes.c_double), ("preferred_hardware", ctypes.c_uint32),
         ("allow_software_fallback", ctypes.c_int),
         ("external_subtitle_pending", ctypes.c_int),
+        # ABI 10 requires the complete output/enhancement snapshot size even
+        # though this probe only inspects timeline and first-frame fields.
+        *[(name, ctypes.c_int) for name in (
+            "dolby_vision_profile", "video_output_kind", "audio_delivery",
+            "audio_channels", "audio_layout", "audio_atmos", "audio_codec_id",
+            "requested_interpolation", "effective_interpolation",
+            "requested_anime4k", "effective_anime4k",
+            "requested_super_resolution", "effective_super_resolution",
+            "requested_denoise", "effective_denoise",
+            "requested_sharpen", "effective_sharpen", "dovi_reconstruction",
+            "dolby_vision_compatibility",
+        )],
     ]
 
 
@@ -232,6 +245,8 @@ def main():
                                 f"state={current.state} error={current.ffmpeg_error}")
                         drain()
                         time.sleep(0.01)
+                if current.duration_us < 16_000_000:
+                    raise AssertionError("Seek fixture must be at least 16 seconds long")
                 for operation in range(4 if args.subtitle else 3, 23):
                     target = (2_000_000, 8_000_000, 14_000_000)[operation % 3]
                     gate_release.clear()

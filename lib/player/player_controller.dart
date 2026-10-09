@@ -142,6 +142,7 @@ class PlayerController extends ChangeNotifier {
     this.nextEpisodeCountdown = const Duration(seconds: 10),
     this.networkSlowAfter = const Duration(seconds: 6),
     this.seekStep = const Duration(seconds: 10),
+    this.seekTimeout = const Duration(seconds: 12),
     Duration? recoveryTimeout,
     Duration? recoveryOpenTimeout,
     this.onClose,
@@ -254,6 +255,7 @@ class PlayerController extends ChangeNotifier {
   /// How long buffering must stay below the expected bitrate before the hint.
   final Duration networkSlowAfter;
   final Duration seekStep;
+  final Duration seekTimeout;
 
   /// Total wall-clock budget for a retry or media-source change.
   final Duration recoveryTimeout;
@@ -371,14 +373,6 @@ class PlayerController extends ChangeNotifier {
   int _volumeRevision = 0;
   int _rateRevision = 0;
   double playbackRate = 1.0;
-  VideoEnhancementSelection videoEnhancement = const VideoEnhancementSelection(
-    interpolation: FrameInterpolation.off,
-    anime4k: Anime4kLevel.off,
-    superResolution: SuperResolution.off,
-    denoise: 0,
-    sharpen: 0,
-    acceptLeaveNativeDolby: false,
-  );
   PlaybackOutputStatus outputStatus = PlaybackOutputStatus.unknown;
 
   /// Test and backend hook. Does not pause, seek, or change the Android
@@ -399,94 +393,6 @@ class PlayerController extends ChangeNotifier {
       applyObservedOutput(next);
     } catch (_) {
       // A failed status read leaves the last sample and the playing session.
-    }
-  }
-
-  Future<void> disableVideoEnhancement() {
-    return _applyEnhancement(
-      const VideoEnhancementSelection(
-        interpolation: FrameInterpolation.off,
-        anime4k: Anime4kLevel.off,
-        superResolution: SuperResolution.off,
-        denoise: 0,
-        sharpen: 0,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-  }
-
-  Future<void> keepCurrentVideoOutput() async {
-    final current = videoEnhancement;
-    await _applyEnhancement(
-      VideoEnhancementSelection(
-        interpolation: current.interpolation,
-        anime4k: current.anime4k,
-        superResolution: current.superResolution,
-        denoise: current.denoise,
-        sharpen: current.sharpen,
-        acceptLeaveNativeDolby: false,
-      ),
-    );
-  }
-
-  /// Does not persist leaving native Dolby. The output panel shows the
-  /// explanation and saves acceptance only after confirm on a native Dolby
-  /// sample. An unsampled settings page or any other sample must not write it.
-  Future<void> useAvailableVideoOutput() async {}
-
-  Future<void> retryVideoOutput() =>
-      _applyEnhancement(videoEnhancement, clearOverload: true);
-
-  /// Persists a confirmed enhancement choice. Callers explain mutual exclusion
-  /// and leaving native Dolby first; cancel must not reach this method.
-  Future<void> selectVideoEnhancement(VideoEnhancementSelection selection) {
-    return _applyEnhancement(selection);
-  }
-
-  Future<void> _applyEnhancement(
-    VideoEnhancementSelection selection, {
-    bool clearOverload = false,
-  }) async {
-    final previousStatus = outputStatus;
-    videoEnhancement = selection;
-    if (outputStatus.sampled) {
-      outputStatus = outputStatus.applying(selection);
-    }
-    _emit();
-    try {
-      await (await _settings()).writePatch(
-        PlayerSettings(
-          frameInterpolation: selection.interpolation,
-          anime4k: selection.anime4k,
-          superResolution: selection.superResolution,
-          denoise: selection.denoise,
-          sharpen: selection.sharpen,
-          acceptLeaveNativeDolby: selection.acceptLeaveNativeDolby,
-        ),
-      );
-    } catch (_) {}
-    final report = backend;
-    if (_disposed ||
-        !_canSendPlaybackParameters ||
-        report is! VideoBackendOutputReport) {
-      return;
-    }
-    try {
-      await (report as VideoBackendOutputReport).applyVideoEnhancement(
-        selection,
-        clearOverload: clearOverload,
-      );
-    } catch (_) {
-      // The saved choice remains. A rejected command must not pretend the
-      // previous effective tier already dropped.
-      if (!_disposed && outputStatus != previousStatus) {
-        outputStatus = previousStatus;
-        _emit();
-      }
-      return;
-    }
-    if (!_disposed) {
-      applyObservedOutput((report as VideoBackendOutputReport).outputStatus);
     }
   }
 
@@ -1104,6 +1010,7 @@ class PlayerController extends ChangeNotifier {
     int? switchStartTicks,
     int? switchAudio,
     int? switchSubtitle,
+    bool? paused,
   }) {
     if (_disposed ||
         _operations.isClosed ||
@@ -1129,7 +1036,8 @@ class PlayerController extends ChangeNotifier {
             startTicks: switchStartTicks ?? ticksFromDuration(position),
             audio: switchPlan == null ? audioStreamIndex : switchAudio,
             subtitle: switchPlan == null ? subtitleStreamIndex : switchSubtitle,
-            paused: switchPlan?.paused ?? (!isPlaying && !disconnected),
+            paused:
+                paused ?? switchPlan?.paused ?? (!isPlaying && !disconnected),
           );
     final priorRetirement = replacing ? _nativeRetirement : null;
     if (replacing) {
@@ -1292,6 +1200,7 @@ class PlayerController extends ChangeNotifier {
       loading = false;
       isPlaying = false;
       state.phase = PlaybackPhase.failed;
+      state.buffering = false;
       error = PlayerErrorKind.load;
       disconnectDetail = 'Playback recovery timed out during $stage';
       resolved = previous;
@@ -1301,6 +1210,7 @@ class PlayerController extends ChangeNotifier {
       loading = false;
       isPlaying = false;
       state.phase = PlaybackPhase.failed;
+      state.buffering = false;
       error = PlayerErrorKind.load;
       disconnectDetail = 'Playback recovery failed during $stage: $failure';
       resolved = previous;
@@ -1410,15 +1320,35 @@ class PlayerController extends ChangeNotifier {
     }
     final operation = _operations.current;
     if (operation == null) return;
+    final revision = ++_seekRevision;
     _prefixYield = true;
     _seekInFlight = true;
+    var failed = false;
     try {
-      await _operations.run(operation, () => backend.seek(target));
+      // Keep the actual command in the coordinator after the UI deadline.
+      // Recovery must retire that command before another native open starts.
+      await _operations
+          .run(operation, () => backend.seek(target))
+          .timeout(seekTimeout);
+    } catch (_) {
+      failed = true;
     } finally {
-      _seekInFlight = false;
-      _prefixYield = false;
+      if (revision == _seekRevision) {
+        _seekInFlight = false;
+        _prefixYield = false;
+      }
     }
-    if (!_accepts(operation)) return;
+    if (!_accepts(operation) || revision != _seekRevision) return;
+    if (failed) {
+      // A rejected/expired seek can leave the core in RECOVERING forever.
+      // Try one bounded reopen at the requested point. Transient playing=false
+      // during the seek must not turn this recovery into a user pause.
+      await _recover(
+        switchStartTicks: ticksFromDuration(target),
+        paused: _pauseIntent,
+      );
+      return;
+    }
     _setPosition(target);
     _emit();
     await _reportProgress(eventName: 'Seek');
@@ -1462,7 +1392,9 @@ class PlayerController extends ChangeNotifier {
     final viewport = SubtitlePresentation(
       displayWidth: width,
       displayHeight: height,
-      fontSize: (landscape ? 24 : 20) * textScale,
+      // Scale with the displayed picture, not its encoded resolution or DPI.
+      // Keep phone/PiP readability while allowing desktop and TV to grow.
+      fontSize: math.max(landscape ? 24.0 : 20.0, height * 0.045) * textScale,
       safeHorizontal: safeHorizontal.clamp(0, width * 0.49),
       safeVertical: safeVertical.clamp(0, height * 0.49),
     );
@@ -2665,6 +2597,7 @@ class PlayerController extends ChangeNotifier {
   int _switchInspection = 0;
   bool _hostSwitchPending = false;
   bool _seekInFlight = false;
+  int _seekRevision = 0;
 
   Future<void> _inspectHostSwitch(Map<String, dynamic> target) async {
     if (_revoked || resolved == null || switchDispatcher == null) {
@@ -5430,7 +5363,6 @@ class PlayerController extends ChangeNotifier {
       if (subtitleRevision == _subtitleSettingsRevision) {
         phoneSubtitleSettings = settings.effectivePhoneSubtitles;
       }
-      videoEnhancement = settings.videoEnhancement;
       skipIntroEnabled = settings.isSkipIntroEnabled;
       skipOutroEnabled = settings.isSkipOutroEnabled;
       _seriesPreferences = !_scopedPlayback

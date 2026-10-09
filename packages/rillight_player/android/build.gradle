@@ -44,7 +44,6 @@ android {
     }
     sourceSets {
         main.jniLibs.srcDirs += [layout.buildDirectory.dir('generated/coreJni').get().asFile]
-        main.assets.srcDirs += [layout.buildDirectory.dir('generated/enhancement-assets').get().asFile]
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -76,27 +75,4 @@ def stageCoreJni = tasks.register('stageCoreJniLibs') {
 }
 tasks.configureEach {
     if (name.startsWith('merge') && name.endsWith('JniLibFolders')) dependsOn(stageCoreJni)
-}
-
-// MediaCodec byte frames need the pinned weights as real files. jniLibs only
-// packages shared libraries, so the plugin extracts this asset tree at startup.
-def enhancementStageRoot = layout.buildDirectory.dir('enhancement-stage')
-def stageEnhancementAssets = tasks.register('stageEnhancementAssets', Exec) {
-    def script = file("${projectDir}/../native/build_core_dependencies.py")
-    inputs.file(script)
-    inputs.file(file("${projectDir}/../native/core_dependencies.json"))
-    outputs.dir(enhancementStageRoot)
-    commandLine 'python', script.absolutePath, '--stage-enhancement-only',
-        '--enhancement-root', enhancementStageRoot.get().asFile.absolutePath
-}
-def copyEnhancementAssets = tasks.register('copyEnhancementAssets', Copy) {
-    dependsOn(stageEnhancementAssets)
-    into layout.buildDirectory.dir('generated/enhancement-assets/enhancement')
-    from(layout.buildDirectory.dir('enhancement-stage/enhancement-models'))
-    from(file("${projectDir}/../native/core/shaders/anime4k")) {
-        into 'shaders/anime4k'
-    }
-}
-tasks.configureEach {
-    if (name.startsWith('merge') && name.endsWith('Assets')) dependsOn(copyEnhancementAssets)
 }

@@ -1408,5 +1408,8 @@
     "platforms": [
       "tv"
     ]
-  }
+  },
+{"id": "player-settings-output", "feature": "player", "platforms": ["desktop", "phone", "tv"]},
+{"id": "player-settings-output-focus", "feature": "player", "platforms": ["tv"]},
+{"id": "player-landscape-settings-output", "feature": "player", "platforms": ["phone"]}
 ]

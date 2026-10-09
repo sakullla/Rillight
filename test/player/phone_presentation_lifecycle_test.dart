@@ -197,7 +197,7 @@ void main() {
       }),
     );
     c.settingsStore = MemoryPlayerSettingsStore();
-    await c.disableVideoEnhancement();
+    await c.refreshOutputStatus();
     await tester.pump();
     expect(c.outputStatus.effectiveInterpolation, 2);
     expect(c.outputStatus.videoOutputKind, 1);

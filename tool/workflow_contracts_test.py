@@ -26,18 +26,8 @@ echo sdk > "$1/lib/test.dylib"
         self.write('bin/cmake', '''
 test "${FAIL_CORE:-0}" != 1 || exit 8
 if [ "$1" = --build ]; then
-  mkdir -p build/macos-core/rife-v4.6 build/macos-core/shaders/anime4k
+  mkdir -p build/macos-core
   echo core > build/macos-core/librillight_core.dylib
-  if [ "${OMIT_WEIGHTS:-0}" != 1 ]; then
-    echo weight > build/macos-core/rife-v4.6/flownet.bin
-    echo param > build/macos-core/rife-v4.6/flownet.param
-    echo srbin > build/macos-core/realesr-general-x4v3.bin
-    echo srparam > build/macos-core/realesr-general-x4v3.param
-    for name in Anime4K_Restore_CNN_M.glsl Anime4K_Restore_CNN_VL.glsl \
-                Anime4K_Upscale_CNN_x2_M.glsl Anime4K_Upscale_CNN_x2_VL.glsl; do
-      echo shader > "build/macos-core/shaders/anime4k/$name"
-    done
-  fi
 fi
 ''')
         self.write('bin/python3', '''
@@ -45,15 +35,10 @@ echo "$*" >> verified-commands.txt
 case "$*" in
   *prepare_macos.py*)
     root="build/macos-native-inputs"
-    test -f "$root/rife-v4.6/flownet.bin"
-    test -f "$root/rife-v4.6/flownet.param"
-    test -f "$root/realesr-general-x4v3.bin"
-    test -f "$root/realesr-general-x4v3.param"
-    test -f "$root/shaders/anime4k/Anime4K_Restore_CNN_M.glsl"
-    test -f "$root/shaders/anime4k/Anime4K_Restore_CNN_VL.glsl"
-    test -f "$root/shaders/anime4k/Anime4K_Upscale_CNN_x2_M.glsl"
-    test -f "$root/shaders/anime4k/Anime4K_Upscale_CNN_x2_VL.glsl"
-    echo weights-beside-dylib >> verified-commands.txt
+    test ! -e "$root/rife-v4.6"
+    test ! -e "$root/shaders/anime4k"
+    test ! -e "$root/realesr-general-x4v3.bin"
+    echo no-enhancement-assets >> verified-commands.txt
     ;;
 esac
 ''')
@@ -96,22 +81,7 @@ esac
                               (self.root / 'environment').read_text())
                 commands = (self.root / 'verified-commands.txt').read_text()
                 self.assertIn('--target macos-universal --require-subtitles', commands)
-                self.assertIn('weights-beside-dylib', commands)
-                published = evidence
-                self.assertEqual((published / 'rife-v4.6/flownet.bin').read_text().strip(),
-                                 'weight')
-                self.assertEqual((published / 'rife-v4.6/flownet.param').read_text().strip(),
-                                 'param')
-                self.assertEqual((published / 'realesr-general-x4v3.bin').read_text().strip(),
-                                 'srbin')
-                self.assertEqual((published / 'realesr-general-x4v3.param').read_text().strip(),
-                                 'srparam')
-                for name in ('Anime4K_Restore_CNN_M.glsl',
-                             'Anime4K_Restore_CNN_VL.glsl',
-                             'Anime4K_Upscale_CNN_x2_M.glsl',
-                             'Anime4K_Upscale_CNN_x2_VL.glsl'):
-                    shader = published / 'shaders/anime4k' / name
-                    self.assertEqual(shader.read_text().strip(), 'shader', name)
+                self.assertIn('no-enhancement-assets', commands)
 
     def test_failed_sdk_build_does_not_publish_a_core(self):
         result = self.provision('refs/tags/v1.2.3', FAIL_SDK='1')
@@ -124,15 +94,16 @@ esac
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'environment').exists())
 
-    def test_missing_post_build_weights_are_not_published(self):
-        result = self.provision('refs/tags/v1.2.3', OMIT_WEIGHTS='1')
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('Pinned enhancement file missing', result.stderr)
-        self.assertFalse((self.root / 'environment').exists())
-        self.assertFalse((self.root / 'verified-commands.txt').exists())
-        published = self.root / 'build/macos-native-inputs'
-        self.assertFalse((published / 'librillight_core.dylib').exists())
-        self.assertFalse((published / 'rife-v4.6/flownet.bin').exists())
+    def test_incremental_publish_removes_legacy_assets(self):
+        evidence = self.root / 'build/macos-native-inputs'
+        self.write('build/macos-native-inputs/rife-v4.6/flownet.bin', 'old')
+        self.write('build/macos-native-inputs/shaders/anime4k/old.glsl', 'old')
+        self.write('build/macos-native-inputs/realesr-general-x4v3.bin', 'old')
+        result = self.provision('refs/tags/v1.2.3')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((evidence / 'rife-v4.6').exists())
+        self.assertFalse((evidence / 'shaders/anime4k').exists())
+        self.assertFalse((evidence / 'realesr-general-x4v3.bin').exists())
 
 
 if __name__ == '__main__':

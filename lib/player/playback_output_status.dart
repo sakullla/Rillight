@@ -1,5 +1,4 @@
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/player/player_settings.dart';
 
 /// Observed picture and sound after reconstruction. Catalog tags are not
 /// fields here: a Dolby Vision or Atmos name never becomes [videoOutputKind]
@@ -124,41 +123,6 @@ class PlaybackOutputStatus {
       effectiveSharpen: _int(raw['effectiveSharpen'], 0),
       reasonSharpen: _int(raw['reasonSharpen'], 0),
       outputFrameRate: _rate(raw['outputFrameRate']),
-    );
-  }
-
-  /// Saved choice becomes the request. Effective tiers and reasons stay on the
-  /// last core sample until a later frame publishes them.
-  PlaybackOutputStatus applying(VideoEnhancementSelection selection) {
-    final args = selection.toCoreArgs();
-    return PlaybackOutputStatus(
-      sampled: sampled,
-      dolbyVisionProfile: dolbyVisionProfile,
-      dolbyVisionCompatibility: dolbyVisionCompatibility,
-      videoOutputKind: videoOutputKind,
-      doviReconstruction: doviReconstruction,
-      audioDelivery: audioDelivery,
-      audioChannels: audioChannels,
-      audioAtmos: audioAtmos,
-      hdrDisplayActive: hdrDisplayActive,
-      outputColorSpace: outputColorSpace,
-      hdrOutput: hdrOutput,
-      requestedInterpolation: _int(args['interpolation'], 0),
-      effectiveInterpolation: effectiveInterpolation,
-      reasonInterpolation: reasonInterpolation,
-      requestedAnime4k: _int(args['anime4k'], 0),
-      effectiveAnime4k: effectiveAnime4k,
-      reasonAnime4k: reasonAnime4k,
-      requestedSuperResolution: _int(args['superResolution'], 0),
-      effectiveSuperResolution: effectiveSuperResolution,
-      reasonSuperResolution: reasonSuperResolution,
-      requestedDenoise: _int(args['denoise'], 0),
-      effectiveDenoise: effectiveDenoise,
-      reasonDenoise: reasonDenoise,
-      requestedSharpen: _int(args['sharpen'], 0),
-      effectiveSharpen: effectiveSharpen,
-      reasonSharpen: reasonSharpen,
-      outputFrameRate: outputFrameRate,
     );
   }
 
@@ -313,36 +277,6 @@ String playbackSourceLabel(AppLocalizations l10n, PlaybackOutputStatus status) {
   return recon.isEmpty ? source : '$source · $recon';
 }
 
-String playbackEnhanceLevel(
-  AppLocalizations l10n,
-  String kind,
-  int value, {
-  required bool known,
-}) {
-  if (!known) return l10n.playbackOutputUnknown;
-  if (value == 0) return l10n.playerSettingOff;
-  return switch (kind) {
-    'interpolation' when value == 2 => l10n.playbackEnhanceDouble,
-    'anime4k' when value == 1 => l10n.playbackEnhanceLight,
-    'anime4k' when value == 2 => l10n.playbackEnhanceStrong,
-    'super' when value == 2 => l10n.playbackEnhanceX2,
-    'strength' => '$value',
-    _ => l10n.playbackOutputUnknown,
-  };
-}
-
-String? playbackEnhanceReason(AppLocalizations l10n, int reason) {
-  return switch (reason) {
-    2 => l10n.playbackEnhanceReasonNativeDolby,
-    3 => l10n.playbackEnhanceReasonModel,
-    4 => l10n.playbackEnhanceReasonOverload,
-    5 => l10n.playbackEnhanceReasonRefresh,
-    6 => l10n.playbackEnhanceReasonNoPicture,
-    7 => l10n.playbackEnhanceReasonCapacity,
-    _ => null,
-  };
-}
-
 /// Chinese explanations for a mismatch, a fallback, or a blocked passthrough.
 List<String> playbackOutputReasons(
   AppLocalizations l10n,
@@ -359,28 +293,6 @@ List<String> playbackOutputReasons(
   if (status.doviReconstruction == 3) {
     lines.add(l10n.playbackOutputBaseFallback);
   }
-  void add(int requested, int effective, int reason) {
-    final named = playbackEnhanceReason(l10n, reason);
-    if (named != null && (requested != 0 || effective != 0)) {
-      lines.add(named);
-      return;
-    }
-    if (requested != effective) lines.add(l10n.playbackEnhanceReasonMismatch);
-  }
-
-  add(
-    status.requestedInterpolation,
-    status.effectiveInterpolation,
-    status.reasonInterpolation,
-  );
-  add(status.requestedAnime4k, status.effectiveAnime4k, status.reasonAnime4k);
-  add(
-    status.requestedSuperResolution,
-    status.effectiveSuperResolution,
-    status.reasonSuperResolution,
-  );
-  add(status.requestedDenoise, status.effectiveDenoise, status.reasonDenoise);
-  add(status.requestedSharpen, status.effectiveSharpen, status.reasonSharpen);
   final pcm =
       status.audioDelivery == 1 ||
       status.audioDelivery == 2 ||
@@ -391,7 +303,7 @@ List<String> playbackOutputReasons(
   return lines;
 }
 
-/// True when a later frame rewrote kind, delivery, or an enhancement tier.
+/// True when a later frame rewrote the observed output.
 bool playbackOutputFrameChanged(
   PlaybackOutputStatus before,
   PlaybackOutputStatus next,

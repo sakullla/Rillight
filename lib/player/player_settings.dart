@@ -14,55 +14,6 @@ enum HardwareDecodingMode { auto, on, off }
 /// 硬件解码后端:auto 走平台默认,其余为 mpv hwdec 值。
 enum HardwareDecoderBackend { auto, d3d11va, nvdec, videotoolbox }
 
-/// 插帧。JSON 用 `double` 表示两倍,因为 `double` 不能做枚举名。
-enum FrameInterpolation { off, doubleRate }
-
-/// Anime4K 档位。light 是 v4.0.1 Mode A (Fast) 2 倍链，strong 是 Mode A (HQ) 2 倍链。
-enum Anime4kLevel { off, light, strong }
-
-/// 通用超分。x2 用 realesr-general-x4v3 再降到 2 倍；权重缺失时请求仍可保存，生效保持关闭。
-enum SuperResolution { off, x2 }
-
-/// 已保存的增强选择。生效档不在这里,过载或原生杜比可以低于选择。
-class VideoEnhancementSelection {
-  const VideoEnhancementSelection({
-    required this.interpolation,
-    required this.anime4k,
-    required this.superResolution,
-    required this.denoise,
-    required this.sharpen,
-    required this.acceptLeaveNativeDolby,
-  });
-
-  final FrameInterpolation interpolation;
-  final Anime4kLevel anime4k;
-  final SuperResolution superResolution;
-  final int denoise;
-  final int sharpen;
-  final bool acceptLeaveNativeDolby;
-
-  /// [displayRefreshHz] is the current display. Zero is unknown; the core
-  /// then keeps double interpolation inactive. [clearOverload] is playback
-  /// retry only. Ordinary repeats omit it so a downgrade can stay.
-  Map<String, Object?> toCoreArgs({
-    int displayRefreshHz = 0,
-    bool clearOverload = false,
-  }) => {
-    'interpolation': interpolation == FrameInterpolation.doubleRate ? 2 : 0,
-    'anime4k': switch (anime4k) {
-      Anime4kLevel.off => 0,
-      Anime4kLevel.light => 1,
-      Anime4kLevel.strong => 2,
-    },
-    'superResolution': superResolution == SuperResolution.x2 ? 2 : 0,
-    'denoise': denoise,
-    'sharpen': sharpen,
-    'acceptLeaveNativeDolby': acceptLeaveNativeDolby,
-    'displayRefreshHz': displayRefreshHz,
-    if (clearOverload) 'clearOverload': true,
-  };
-}
-
 enum PhoneSubtitleSize {
   small(0.85),
   standard(1),
@@ -197,12 +148,6 @@ class PlayerSettings {
     this.appearanceStyle,
     this.skipIntroEnabled,
     this.skipOutroEnabled,
-    this.frameInterpolation,
-    this.anime4k,
-    this.superResolution,
-    this.denoise,
-    this.sharpen,
-    this.acceptLeaveNativeDolby,
   });
 
   /// 音量百分比;100 为原片 0 dB,超过 100 为额外增益。
@@ -260,78 +205,6 @@ class PlayerSettings {
   bool get isSkipIntroEnabled => skipIntroEnabled ?? true;
   bool get isSkipOutroEnabled => skipOutroEnabled ?? true;
 
-  /// null 表示未配置,读取为关闭,并且不参与合并写。
-  final FrameInterpolation? frameInterpolation;
-  final Anime4kLevel? anime4k;
-  final SuperResolution? superResolution;
-  final int? denoise;
-  final int? sharpen;
-  final bool? acceptLeaveNativeDolby;
-
-  VideoEnhancementSelection get videoEnhancement {
-    final scales = _exclusiveScales(anime4k, superResolution);
-    return VideoEnhancementSelection(
-      interpolation: frameInterpolation ?? FrameInterpolation.off,
-      anime4k: scales.$1,
-      superResolution: scales.$2,
-      denoise: (denoise ?? 0).clamp(0, 100),
-      sharpen: (sharpen ?? 0).clamp(0, 100),
-      acceptLeaveNativeDolby: acceptLeaveNativeDolby ?? false,
-    );
-  }
-
-  PlayerSettings selectingAnime4k(Anime4kLevel value) {
-    return _withEnhancement(
-      anime4k: value,
-      superResolution: value == Anime4kLevel.off
-          ? superResolution
-          : SuperResolution.off,
-    );
-  }
-
-  PlayerSettings selectingSuperResolution(SuperResolution value) {
-    return _withEnhancement(
-      anime4k: value == SuperResolution.off ? anime4k : Anime4kLevel.off,
-      superResolution: value,
-    );
-  }
-
-  PlayerSettings _withEnhancement({
-    FrameInterpolation? frameInterpolation,
-    Anime4kLevel? anime4k,
-    SuperResolution? superResolution,
-    int? denoise,
-    int? sharpen,
-    bool? acceptLeaveNativeDolby,
-  }) {
-    return PlayerSettings(
-      volume: volume,
-      phoneSubtitles: phoneSubtitles,
-      diskCacheLimitMiB: diskCacheLimitMiB,
-      hardwareDecoding: hardwareDecoding,
-      hardwareDecoder: hardwareDecoder,
-      playbackRate: playbackRate,
-      seriesPreferences: seriesPreferences,
-      itemPreferences: itemPreferences,
-      danmakuEnabled: danmakuEnabled,
-      danmakuDisplay: danmakuDisplay,
-      danmakuServer: danmakuServer,
-      danmakuToken: danmakuToken,
-      danmakuAppId: danmakuAppId,
-      danmakuSeriesMemories: danmakuSeriesMemories,
-      appearanceStyle: appearanceStyle,
-      skipIntroEnabled: skipIntroEnabled,
-      skipOutroEnabled: skipOutroEnabled,
-      frameInterpolation: frameInterpolation ?? this.frameInterpolation,
-      anime4k: anime4k ?? this.anime4k,
-      superResolution: superResolution ?? this.superResolution,
-      denoise: denoise ?? this.denoise,
-      sharpen: sharpen ?? this.sharpen,
-      acceptLeaveNativeDolby:
-          acceptLeaveNativeDolby ?? this.acceptLeaveNativeDolby,
-    );
-  }
-
   int get clampedVolume => (volume ?? 100).clamp(0, volumeMax);
 
   double get effectivePlaybackRate {
@@ -378,28 +251,6 @@ class PlayerSettings {
     if (appearanceStyle != null) 'appearanceStyle': appearanceStyle,
     if (skipIntroEnabled != null) 'skipIntroEnabled': skipIntroEnabled,
     if (skipOutroEnabled != null) 'skipOutroEnabled': skipOutroEnabled,
-    if (frameInterpolation != null)
-      'frameInterpolation': frameInterpolation == FrameInterpolation.doubleRate
-          ? 'double'
-          : 'off',
-    if (anime4k != null)
-      'anime4k':
-          anime4k != Anime4kLevel.off &&
-              superResolution != null &&
-              superResolution != SuperResolution.off
-          ? Anime4kLevel.off.name
-          : anime4k!.name,
-    if (superResolution != null)
-      'superResolution':
-          superResolution != SuperResolution.off &&
-              anime4k != null &&
-              anime4k != Anime4kLevel.off
-          ? SuperResolution.off.name
-          : superResolution!.name,
-    if (denoise != null) 'denoise': denoise!.clamp(0, 100),
-    if (sharpen != null) 'sharpen': sharpen!.clamp(0, 100),
-    if (acceptLeaveNativeDolby != null)
-      'acceptLeaveNativeDolby': acceptLeaveNativeDolby,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> json) {
@@ -459,67 +310,8 @@ class PlayerSettings {
       appearanceStyle: json['appearanceStyle'] is String
           ? json['appearanceStyle'] as String
           : null,
-      frameInterpolation: _readInterpolation(json['frameInterpolation']),
-      anime4k: _storedAnime(json),
-      superResolution: _storedSuper(json),
-      denoise: _readStrength(json['denoise']),
-      sharpen: _readStrength(json['sharpen']),
-      acceptLeaveNativeDolby: json['acceptLeaveNativeDolby'] is bool
-          ? json['acceptLeaveNativeDolby'] as bool
-          : null,
     );
   }
-}
-
-FrameInterpolation? _readInterpolation(dynamic raw) {
-  if (raw == 'off') return FrameInterpolation.off;
-  if (raw == 'double') return FrameInterpolation.doubleRate;
-  return null;
-}
-
-int? _readStrength(dynamic raw) {
-  final value = _readInt(raw);
-  if (value == null) return null;
-  return value.clamp(0, 100);
-}
-
-bool _scalesConflict(Anime4kLevel? anime, SuperResolution? superResolution) {
-  return anime != null &&
-      anime != Anime4kLevel.off &&
-      superResolution != null &&
-      superResolution != SuperResolution.off;
-}
-
-Anime4kLevel? _storedAnime(Map<String, dynamic> json) {
-  final anime = _readEnum(Anime4kLevel.values, json['anime4k']);
-  final superResolution = _readEnum(
-    SuperResolution.values,
-    json['superResolution'],
-  );
-  if (_scalesConflict(anime, superResolution)) return Anime4kLevel.off;
-  return anime;
-}
-
-SuperResolution? _storedSuper(Map<String, dynamic> json) {
-  final anime = _readEnum(Anime4kLevel.values, json['anime4k']);
-  final superResolution = _readEnum(
-    SuperResolution.values,
-    json['superResolution'],
-  );
-  if (_scalesConflict(anime, superResolution)) return SuperResolution.off;
-  return superResolution;
-}
-
-(Anime4kLevel, SuperResolution) _exclusiveScales(
-  Anime4kLevel? anime,
-  SuperResolution? superResolution,
-) {
-  final animeLevel = anime ?? Anime4kLevel.off;
-  final superLevel = superResolution ?? SuperResolution.off;
-  if (animeLevel != Anime4kLevel.off && superLevel != SuperResolution.off) {
-    return (Anime4kLevel.off, SuperResolution.off);
-  }
-  return (animeLevel, superLevel);
 }
 
 int? _readInt(dynamic raw) {
@@ -694,6 +486,17 @@ class FilePlayerSettingsStore extends PlayerSettingsStore {
       } on FormatException {
         // A corrupt JSON file can be repaired; an I/O failure must not turn an
         // unreadable existing configuration into a partial replacement.
+      }
+      // Retired enhancement preferences must not survive a settings rewrite.
+      for (final key in const [
+        'frameInterpolation',
+        'anime4k',
+        'superResolution',
+        'denoise',
+        'sharpen',
+        'acceptLeaveNativeDolby',
+      ]) {
+        merged.remove(key);
       }
       for (final entry in settings.toJson().entries) {
         final existing = merged[entry.key];

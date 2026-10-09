@@ -224,6 +224,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.phoneSubtitleSettings.originalAss, isTrue);
     expect((await store.read()).effectivePhoneSubtitles.originalAss, isTrue);
+    await tester.tap(find.byKey(const ValueKey('phone-subtitle-extraLarge')));
+    await tester.pumpAndSettle();
+    expect(controller.phoneSubtitleSettings.originalAss, isFalse);
+    expect((await store.read()).effectivePhoneSubtitles.originalAss, isFalse);
   });
 
   testWidgets('desktop playback quality uses the same option grid as speed', (

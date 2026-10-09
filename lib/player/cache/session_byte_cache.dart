@@ -27,12 +27,21 @@ class CacheRangeLease {
 
   Future<CacheRead?> read(int offset, {int maxLength = 64 * 1024}) async {
     if (_closed || _cache._closed) return null;
-    final block = _blocks
-        .where(
-          (b) => b.key.offset <= offset && offset < b.key.offset + b.length,
-        )
-        .firstOrNull;
-    if (block == null) return null;
+    // Acquisition advances to each selected block's end, so ends are strictly
+    // increasing even when blocks overlap. Find the same first covering block.
+    var low = 0, high = _blocks.length;
+    while (low < high) {
+      final middle = low + ((high - low) >> 1);
+      final candidate = _blocks[middle];
+      if (candidate.key.offset + candidate.length <= offset) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    if (low == _blocks.length) return null;
+    final block = _blocks[low];
+    if (block.key.offset > offset) return null;
     var bytes = block.memory;
     var source = CacheReadSource.memory;
     if (bytes == null) {
@@ -724,27 +733,47 @@ class SessionByteCache {
       return null;
     }
     final blocks = <_ProtectedBlock>[];
+    // Build the available intersections once. Preserve insertion-order ties
+    // while selecting the furthest end, as the former exhaustive scan did.
+    final candidates = <(_ProtectedBlock block, int order)>[];
+    var order = 0;
+    for (final item in _entries.entries) {
+      final currentOrder = order++;
+      if (item.key.resource != resource ||
+          item.key.generation != generation ||
+          item.key.offset >= offset + length ||
+          item.key.offset + item.value.length <= offset) {
+        continue;
+      }
+      final memory = _memory[item.key];
+      if (memory == null && item.value.diskToken == null) continue;
+      candidates.add((
+        _ProtectedBlock(
+          item.key,
+          item.value.length,
+          memory,
+          item.value.diskToken,
+        ),
+        currentOrder,
+      ));
+    }
+    candidates.sort((a, b) => a.$1.key.offset.compareTo(b.$1.key.offset));
+    var cursor = 0;
     var position = offset;
     while (position < offset + length) {
       _ProtectedBlock? selected;
-      for (final item in _entries.entries) {
-        if (item.key.resource != resource ||
-            item.key.generation != generation ||
-            item.key.offset > position ||
-            item.key.offset + item.value.length <= position) {
-          continue;
-        }
-        final memory = _memory[item.key];
-        if (memory == null && item.value.diskToken == null) continue;
+      var selectedOrder = 0;
+      while (cursor < candidates.length &&
+          candidates[cursor].$1.key.offset <= position) {
+        final (block, blockOrder) = candidates[cursor++];
+        final end = block.key.offset + block.length;
+        if (end <= position) continue;
         if (selected == null ||
-            item.key.offset + item.value.length >
-                selected.key.offset + selected.length) {
-          selected = _ProtectedBlock(
-            item.key,
-            item.value.length,
-            memory,
-            item.value.diskToken,
-          );
+            end > selected.key.offset + selected.length ||
+            (end == selected.key.offset + selected.length &&
+                blockOrder < selectedOrder)) {
+          selected = block;
+          selectedOrder = blockOrder;
         }
       }
       if (selected == null) return null;

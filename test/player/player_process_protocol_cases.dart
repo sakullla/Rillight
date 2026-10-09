@@ -119,4 +119,20 @@ void main() {
       expect(await first.read('close'), isNull);
     },
   );
+  test('mailbox disposal tolerates a transient Windows reader lock', () async {
+    await first.writeLaunch({'accessToken': 'synthetic'});
+    final reader = await first.launchFile.open(mode: FileMode.read);
+    final released = Future<void>.delayed(
+      const Duration(milliseconds: 100),
+      () async {
+        await reader.close();
+      },
+    );
+    try {
+      await expectLater(first.dispose(), completes);
+      expect(await first.directory.exists(), isFalse);
+    } finally {
+      await released;
+    }
+  }, skip: !Platform.isWindows);
 }

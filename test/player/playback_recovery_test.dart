@@ -74,10 +74,29 @@ class _RecoveryBackend extends FakeVideoBackend
   final List<String> nativeOrder = [];
   final List<double> volumeCommands = [];
   final List<double> rateCommands = [];
+  Object? seekFailure;
+  Completer<void>? seekGate;
+  bool cancelSeekOnStop = true;
+
+  @override
+  Future<void> seek(Duration value) async {
+    final failure = seekFailure;
+    final gate = seekGate;
+    if (failure == null && gate == null) return super.seek(value);
+    emitEvent(VideoEventKind.buffering, true);
+    emitEvent(VideoEventKind.playing, false);
+    await gate?.future;
+    if (failure != null) throw failure;
+    await super.seek(value);
+  }
 
   @override
   Future<void> stop() async {
     stopCount++;
+    final gate = seekGate;
+    if (cancelSeekOnStop && gate != null && !gate.isCompleted) {
+      gate.complete();
+    }
     await stopGate?.future;
     await super.stop();
     nativeOrder.add('stop');
@@ -196,6 +215,7 @@ void main() {
       backend: backend,
       window: PlayerWindow(),
       recoveryTimeout: const Duration(milliseconds: 300),
+      seekTimeout: const Duration(milliseconds: 40),
       disposeTimeout: const Duration(milliseconds: 50),
       snapshotStore: MemoryPlaybackSessionSnapshotStore(),
       settingsStore: settings,
@@ -218,6 +238,10 @@ void main() {
         gate.complete();
       }
       backend.openGate = null;
+      if (backend.seekGate case final gate? when !gate.isCompleted) {
+        gate.complete();
+      }
+      backend.seekGate = null;
       if (metadataGate case final gate? when !gate.isCompleted) {
         gate.complete();
       }
@@ -233,6 +257,137 @@ void main() {
       await controller.disposeAsync();
       controller.dispose();
     });
+  });
+
+  for (final paused in [false, true]) {
+    test(
+      'next episode intro seek failure recovers with paused=$paused',
+      () async {
+        final episode = server.items.firstWhere(
+          (i) => i.id == 'episode-friends-s1e2',
+        );
+        episode.chapters = const [
+          FakeChapter(
+            name: 'Intro',
+            startPositionTicks: 0,
+            markerType: 'IntroStart',
+          ),
+          FakeChapter(
+            name: 'Intro End',
+            startPositionTicks: 1140000000,
+            markerType: 'IntroEnd',
+          ),
+        ];
+        controller.nextEpisode = NextEpisodeOffer(
+          item: await controller.client.getItem(episode.id),
+        );
+        await controller.playNextEpisode();
+        expect(controller.loading, isFalse);
+        expect(controller.isPlaying, isTrue);
+        if (paused) await controller.togglePlay();
+        expect(controller.activeSkipSegment, isNotNull);
+        final opened = backend.openCount;
+        backend.seekFailure = TimeoutException('Core did not confirm seek');
+        await controller.skipCurrentSegment();
+        expect(backend.openCount, opened + 1);
+        expect(backend.openedStart, const Duration(seconds: 114));
+        expect(backend.openedPaused, paused);
+        expect(controller.itemId, episode.id);
+        expect(controller.loading, isFalse);
+        expect(controller.isRecovering, isFalse);
+        expect(controller.error, isNull);
+        expect(controller.state.buffering, isFalse);
+        expect(controller.isPlaying, !paused);
+      },
+    );
+  }
+
+  test(
+    'failed seek recovery terminates with a retryable error if reopen fails',
+    () async {
+      backend.seekFailure = StateError('Core command failed');
+      backend.rejectedSource = 'movie-up';
+      final opened = backend.openBegins;
+      await controller.seekTo(const Duration(seconds: 114));
+      expect(backend.openBegins, opened + 1);
+      expect(controller.loading, isFalse);
+      expect(controller.state.phase, PlaybackPhase.failed);
+      expect(controller.error, isNotNull);
+      expect(controller.state.buffering, isFalse);
+      backend.rejectedSource = null;
+      await controller.retryPlayback();
+      expect(controller.error, isNull);
+    },
+  );
+
+  test(
+    'seek without a reply is cancelled before reopening at its target',
+    () async {
+      backend.seekGate = Completer<void>();
+      final opened = backend.openCount;
+      await controller.seekTo(const Duration(seconds: 114));
+      expect(backend.seekGate!.isCompleted, isTrue);
+      expect(backend.openCount, opened + 1);
+      expect(backend.openedStart, const Duration(seconds: 114));
+      expect(controller.isPlaying, isTrue);
+      expect(controller.error, isNull);
+    },
+  );
+
+  test(
+    'unretired seek fails boundedly without opening a second native session',
+    () async {
+      backend.seekGate = Completer<void>();
+      backend.cancelSeekOnStop = false;
+      final opened = backend.openBegins;
+      await controller
+          .seekTo(const Duration(seconds: 114))
+          .timeout(const Duration(seconds: 2));
+      expect(backend.openBegins, opened);
+      expect(controller.loading, isFalse);
+      expect(controller.isRecovering, isFalse);
+      expect(controller.state.phase, PlaybackPhase.failed);
+      expect(controller.disconnectDetail, contains('timed out during stop'));
+      expect(controller.state.buffering, isFalse);
+    },
+  );
+
+  test(
+    'a newer seek supersedes a delayed seek failure in the same episode',
+    () async {
+      final gate = Completer<void>();
+      backend.seekGate = gate;
+      backend.seekFailure = TimeoutException('Old seek');
+      final opened = backend.openCount;
+      final old = controller.seekTo(const Duration(seconds: 114));
+      await Future<void>.delayed(Duration.zero);
+      backend.seekGate = null;
+      backend.seekFailure = null;
+      final latest = controller.seekTo(const Duration(seconds: 180));
+      gate.complete();
+      await Future.wait([old, latest]);
+      expect(backend.openCount, opened);
+      expect(controller.position, const Duration(seconds: 180));
+      expect(controller.error, isNull);
+    },
+  );
+
+  test('a delayed seek failure cannot reopen a superseded episode', () async {
+    final gate = Completer<void>();
+    backend.seekGate = gate;
+    backend.seekFailure = TimeoutException('Old episode');
+    final opened = backend.openCount;
+    controller.nextEpisode = NextEpisodeOffer(
+      item: await controller.client.getItem('episode-friends-s1e2'),
+    );
+    final old = controller.seekTo(const Duration(seconds: 114));
+    await Future<void>.delayed(Duration.zero);
+    final next = controller.playNextEpisode();
+    await Future.wait([old, next]);
+    expect(backend.openCount, opened + 1);
+    expect(controller.itemId, 'episode-friends-s1e2');
+    expect(backend.openedStart, Duration.zero);
+    expect(controller.error, isNull);
   });
 
   for (final selectedSubtitle in <int?>[null, 3]) {

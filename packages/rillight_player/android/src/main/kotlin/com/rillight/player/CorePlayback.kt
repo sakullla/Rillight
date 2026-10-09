@@ -406,28 +406,6 @@ internal class CorePlayback(
                     if (code == 0) { beginTrack(result, -1, true, handle); return }
                     code
                 }
-                "enhancement" -> {
-                    val refresh = (args["displayRefreshHz"] as? Number)?.toInt() ?: 0
-                    val interpolation = (args["interpolation"] as? Number)?.toInt() ?: 0
-                    val anime4k = (args["anime4k"] as? Number)?.toInt() ?: 0
-                    val superResolution = (args["superResolution"] as? Number)?.toInt() ?: 0
-                    val denoise = (args["denoise"] as? Number)?.toInt() ?: 0
-                    val sharpen = (args["sharpen"] as? Number)?.toInt() ?: 0
-                    val acceptLeave = if (args["acceptLeaveNativeDolby"] == true) 1 else 0
-                    if (args["clearOverload"] == true) {
-                        CoreNative.retryEnhancement(
-                            handle, interpolation, anime4k, superResolution,
-                            denoise, sharpen, acceptLeave, refresh)
-                    } else {
-                        CoreNative.configureEnhancement(
-                            handle, interpolation, anime4k, superResolution,
-                            denoise, sharpen, acceptLeave, refresh)
-                    }
-                }
-                "frameDeadline" -> CoreNative.noteFrameDeadline(
-                    handle,
-                    if (args["met"] == true) 1 else 0,
-                    (args["monotonicUs"] as? Number)?.toLong() ?: -1L)
                 "subtitleUri" -> {
                     val url = args["url"] as? String
                     if (url == null || CoreIoFactory(context).open(url) == null) {
@@ -954,7 +932,7 @@ internal class CorePlayback(
         }.map { it.index }
         val rejectedText = serverStreams.filter { it.type == "Subtitle" && !it.external && it.index !in mapping }.map { it.index }
         val containerIds = handle?.let(CoreNative::containerTrackIds)
-        val reasons = handle?.let(CoreNative::enhancementStatus)
+        val reasons: IntArray? = null
         val epoch = outputClock.observe(snap, reasons)
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,
             "subtitleIndex" to subtitleIndex, "playableAudio" to playableAudio,
@@ -984,25 +962,7 @@ internal class CorePlayback(
             "doviReconstruction" to (snap?.getOrNull(34)?.toInt() ?: 0),
             "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1),
             "outputEpoch" to epoch) +
-            enhancementFields(handle, reasons)
-    }
-
-    private fun enhancementFields(handle: Long?, status: IntArray?): Map<String, Any> {
-        if (handle == null || status == null) return emptyMap()
-        fun at(index: Int) = status.getOrNull(index) ?: 0
-        return mapOf(
-            "reasonInterpolation" to at(10),
-            "reasonAnime4k" to at(11),
-            "reasonSuperResolution" to at(12),
-            "reasonDenoise" to at(13),
-            "reasonSharpen" to at(14),
-            "interpolationBackend" to at(15),
-            "anime4kBackend" to at(16),
-            "superResolutionBackend" to at(17),
-            "leftNativeDolby" to at(18),
-            "sourceFrameRate" to CoreNative.videoFrameRate(handle),
-            "outputFrameRate" to CoreNative.outputFrameRate(handle),
-        )
+            mapOf("outputFrameRate" to (handle?.let(CoreNative::outputFrameRate) ?: 0.0))
     }
 
     private fun refreshAudioRoute() {

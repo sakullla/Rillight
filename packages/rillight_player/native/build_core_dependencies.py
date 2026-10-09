@@ -2,8 +2,6 @@
 
 Currently this builder supports native Linux. Cross-platform prefixes must be
 produced by target-specific builders and pass verify_core_dependencies.py.
-``--stage-enhancement-only`` clones pinned ncnn and downloads the hash-matched
-RIFE v4.6 and realesr-general-x4v3 weights. A missing or mismatched file fails.
 """
 
 import argparse
@@ -81,153 +79,24 @@ def fetch_source(source: Path, repository: str, commit: str, tag: str) -> None:
         raise RuntimeError(f"Source tree has local changes: {source}")
 
 
-def require_pinned_file(path: Path, record: dict, label: str) -> None:
-    if not path.is_file():
-        raise RuntimeError(f"Missing enhancement file: {label}")
-    actual = sha256(path)
-    size = path.stat().st_size
-    if actual != record["sha256"] or size != record["bytes"]:
-        raise RuntimeError(
-            f"Enhancement pin mismatch: {label} sha256={actual} bytes={size}")
-
-
-def enhancement_dirs(root: Path | None = None) -> tuple[Path, Path]:
-    base = root if root is not None else ROOT.parents[2] / "build"
-    return base / "enhancement-src" / "ncnn", base / "enhancement-models"
-
-
-def verify_anime4k_shaders() -> None:
-    spec = SPEC["enhancement"]["anime4k"]["shaders"]
-    shader_dir = ROOT / "core" / "shaders" / "anime4k"
-    for name, record in spec.items():
-        require_pinned_file(shader_dir / name, record, name)
-
-
-def verify_enhancement_models(model_root: Path) -> list[str]:
-    spec = SPEC["enhancement"]
-    files = dict(spec["rife"]["files"])
-    files.update(spec["realesrgan"]["ncnn_weights"]["files"])
-    if len(files) != 4:
-        raise RuntimeError("Enhancement model pin is incomplete")
-    checked: list[str] = []
-    for relative, record in files.items():
-        require_pinned_file(model_root / Path(relative), record, relative)
-        checked.append(relative)
-    return checked
-
-
-def download_verified(url: str, dest: Path, record: dict, label: str) -> None:
-    if dest.is_file():
-        try:
-            require_pinned_file(dest, record, label)
-            return
-        except RuntimeError:
-            dest.unlink()
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    partial = dest.with_name(dest.name + ".partial")
-    request = urllib.request.Request(url, headers={"User-Agent": "rillight-core"})
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response, partial.open("wb") as output:
-            shutil.copyfileobj(response, output)
-        require_pinned_file(partial, record, label)
-    except Exception:
-        partial.unlink(missing_ok=True)
-        raise
-    partial.replace(dest)
-
-
-def stage_ncnn(ncnn_dir: Path) -> None:
-    spec = SPEC["enhancement"]["ncnn"]
-    if ncnn_dir.exists() and not (ncnn_dir / ".git").is_dir():
-        shutil.rmtree(ncnn_dir)
-    ncnn_dir.parent.mkdir(parents=True, exist_ok=True)
-    fetch_source(ncnn_dir, spec["repository"], spec["commit"], spec["version"])
-    if not (ncnn_dir / "CMakeLists.txt").is_file():
-        raise RuntimeError(f"Pinned ncnn has no CMake project: {ncnn_dir}")
-
-
-def stage_model_files(model_root: Path) -> list[str]:
-    spec = SPEC["enhancement"]
-    model_root.mkdir(parents=True, exist_ok=True)
-    rife = spec["rife"]
-    for relative, record in rife["files"].items():
-        url = (f"https://raw.githubusercontent.com/nihui/rife-ncnn-vulkan/"
-               f"{rife['commit']}/models/{relative}")
-        download_verified(url, model_root / Path(relative), record, relative)
-    for name, record in spec["realesrgan"]["ncnn_weights"]["files"].items():
-        download_verified(record["url"], model_root / name, record, name)
-    return verify_enhancement_models(model_root)
-
-
-def stage_enhancement(root: Path | None = None) -> tuple[Path, Path]:
-    verify_anime4k_shaders()
-    ncnn_dir, model_root = enhancement_dirs(root)
-    stage_ncnn(ncnn_dir)
-    checked = stage_model_files(model_root)
-    print(f"Enhancement staged: ncnn {SPEC['enhancement']['ncnn']['commit']} "
-          f"and {len(checked)} model files")
-    return ncnn_dir, model_root
-
-
 ENHANCEMENT_RUNTIME_PATHS = (
     "rife-v4.6",
-    "shaders",
+    "shaders/anime4k",
     "realesr-general-x4v3.param",
     "realesr-general-x4v3.bin",
 )
 
 
 def remove_enhancement_runtime(destination: Path) -> None:
+    destination = destination.resolve()
     for relative in ENHANCEMENT_RUNTIME_PATHS:
         path = destination / relative
+        if not path.is_symlink() and destination not in path.resolve().parents:
+            raise RuntimeError("Legacy asset escapes the package directory")
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
         elif path.is_file() or path.is_symlink():
             path.unlink()
-
-
-def stage_core_enhancement(source: Path, destination: Path) -> bool:
-    """Put pinned weights beside a library, or clear a stale copy.
-
-    A core build that did not produce flownet.bin leaves enhancement inactive.
-    A partial or retargeted tree is removed so an old layout cannot linger.
-    """
-    source = source.resolve()
-    destination = destination.resolve()
-    if (source == destination or source in destination.parents or
-            destination in source.parents):
-        raise RuntimeError("enhancement destination must be outside the source tree")
-    remove_enhancement_runtime(destination)
-    if not (source / "rife-v4.6" / "flownet.bin").is_file():
-        return False
-    install_enhancement_runtime(source, destination)
-    return True
-
-
-def install_enhancement_runtime(source_dir: Path, destination: Path) -> None:
-    """Copy hash-pinned weights and Anime4K shaders next to a built library."""
-    names = [
-        "rife-v4.6/flownet.param",
-        "rife-v4.6/flownet.bin",
-        "realesr-general-x4v3.param",
-        "realesr-general-x4v3.bin",
-    ]
-    records = dict(SPEC["enhancement"]["rife"]["files"])
-    records.update(SPEC["enhancement"]["realesrgan"]["ncnn_weights"]["files"])
-    for relative in names:
-        source = source_dir / Path(relative)
-        require_pinned_file(source, records[relative], relative)
-        dest = destination / Path(relative)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, dest)
-    shader_dir = source_dir / "shaders" / "anime4k"
-    shaders = SPEC["enhancement"]["anime4k"]["shaders"]
-    for name, record in shaders.items():
-        source = shader_dir / name
-        require_pinned_file(source, record, name)
-        dest = destination / "shaders" / "anime4k" / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, dest)
 
 
 def main() -> int:
@@ -237,19 +106,11 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     parser.add_argument("--with-libass", action="store_true",
                         help="build pinned libass 0.17.5 for ASS/SSA composition")
-    parser.add_argument("--stage-enhancement-only", action="store_true",
-                        help="clone pinned ncnn and fetch hash-matched model files")
-    parser.add_argument("--enhancement-root", type=Path,
-                        help="parent of enhancement-src and enhancement-models")
     args = parser.parse_args()
-    if args.stage_enhancement_only:
-        stage_enhancement(args.enhancement_root.resolve() if args.enhancement_root else None)
-        return 0
     if args.prefix is None or args.work is None:
         parser.error("--prefix and --work are required")
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         parser.error("native builder currently supports Linux x86_64 only")
-    stage_enhancement(args.enhancement_root.resolve() if args.enhancement_root else None)
     prefix = args.prefix.resolve()
     work = args.work.resolve()
     if prefix == work or prefix in work.parents or work in prefix.parents:

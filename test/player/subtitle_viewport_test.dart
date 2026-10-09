@@ -84,6 +84,19 @@ void main() {
       await controller.setPhoneSubtitleSettings(
         const PhoneSubtitleSettings(size: PhoneSubtitleSize.extraLarge),
       );
+      await controller.updateSubtitleViewport(
+        width: 1920,
+        height: 1080,
+        landscape: true,
+      );
+      expect(backend.subtitlePresentation!.fontSize, closeTo(48.6, 0.001));
+      expect(backend.subtitlePresentation!.userScale, 1.5);
+      await controller.updateSubtitleViewport(
+        width: 2560,
+        height: 1440,
+        landscape: true,
+      );
+      expect(backend.subtitlePresentation!.fontSize, closeTo(64.8, 0.001));
       await controller.disposeAsync();
       controller.dispose();
       auth.dispose();

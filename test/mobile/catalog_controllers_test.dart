@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -10,6 +11,23 @@ import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/search/search_controller.dart';
 import '../emby/fake_emby_server.dart';
+
+class _SlowReadStore implements CatalogDiskStore {
+  final started = Completer<void>();
+  final release = Completer<String?>();
+  @override
+  Future<String?> read(String key) {
+    if (!started.isCompleted) started.complete();
+    return release.future;
+  }
+
+  @override
+  Future<void> write(String key, String body) async {}
+  @override
+  Future<void> remove(String key) async {}
+  @override
+  Future<void> clear() async {}
+}
 
 void main() {
   late FakeEmbyServer server;
@@ -58,6 +76,140 @@ void main() {
   tearDown(() {
     auth.dispose();
   });
+
+  test(
+    'browse delivers live results without waiting for a blocked disk read',
+    () async {
+      final disk = _SlowReadStore();
+      cache.debugSetDiskStore(disk);
+      final browse = BrowseController(
+        auth: auth,
+        cache: cache,
+        parentId: 'view-movies',
+      );
+      addTearDown(browse.dispose);
+      addTearDown(() {
+        if (!disk.release.isCompleted) disk.release.complete(null);
+      });
+      final loading = browse.load();
+      await disk.started.future;
+      await loading.timeout(const Duration(seconds: 2));
+      expect(disk.release.isCompleted, isFalse);
+      expect(browse.items, isNotEmpty);
+      expect(browse.loading, isFalse);
+      expect(browse.error, isNull);
+      disk.release.complete(null);
+    },
+  );
+
+  test(
+    'browse still shows a late disk page after an immediate network failure',
+    () async {
+      final disk = _SlowReadStore();
+      cache.debugSetDiskStore(disk);
+      server.itemsStatus = 503;
+      final browse = BrowseController(
+        auth: auth,
+        cache: cache,
+        parentId: 'view-movies',
+      );
+      addTearDown(browse.dispose);
+      addTearDown(() {
+        if (!disk.release.isCompleted) disk.release.complete(null);
+      });
+      final loading = browse.load();
+      await disk.started.future;
+      await loading;
+      expect(browse.error, isNotNull);
+      disk.release.complete(
+        jsonEncode({
+          'storedAt': DateTime.now().toIso8601String(),
+          'data': {
+            'Items': [
+              {'Id': 'offline', 'Name': 'Offline', 'Type': 'Movie'},
+            ],
+            'TotalRecordCount': 60,
+          },
+        }),
+      );
+      for (var i = 0; i < 20 && browse.items.isEmpty; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(browse.items.single.id, 'offline');
+      expect(browse.loading, isFalse);
+      expect(browse.error, isNotNull);
+      final requests = server.requests.length;
+      await browse.load(more: true);
+      expect(server.requests.length, requests);
+    },
+  );
+
+  test(
+    'browse does not page from a cached cursor before live refresh completes',
+    () async {
+      cache.debugSetDiskStore(null);
+      final request = catalogItemsRequest(
+        userId: auth.client.userId!,
+        parentId: 'view-movies',
+        recursive: true,
+        includeItemTypes: 'Movie,Series',
+        limit: BrowseController.pageSize,
+        startIndex: 0,
+        sortBy: 'DateLastContentAdded',
+        sortOrder: 'Descending',
+      );
+      await cache.write(request, {
+        'Items': [
+          for (var i = 0; i < BrowseController.pageSize; i++)
+            {'Id': 'cached-$i', 'Name': 'Cached', 'Type': 'Movie'},
+        ],
+        'TotalRecordCount': 180,
+      });
+      final arrived = Completer<void>(), release = Completer<void>();
+      final requests = <int>[];
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) async {
+            if (options.uri.queryParameters['ParentId'] == 'view-movies') {
+              requests.add(
+                int.parse(options.uri.queryParameters['StartIndex'] ?? '0'),
+              );
+              if (!arrived.isCompleted) arrived.complete();
+              await release.future;
+            }
+            handler.next(options);
+          },
+        ),
+      );
+      addTearDown(() {
+        if (!release.isCompleted) release.complete();
+      });
+      final browse = BrowseController(
+        auth: auth,
+        cache: cache,
+        parentId: 'view-movies',
+      );
+      addTearDown(browse.dispose);
+      final cachedVisible = Completer<void>();
+      browse.addListener(() {
+        if (browse.items.isNotEmpty && !cachedVisible.isCompleted) {
+          cachedVisible.complete();
+        }
+      });
+      final loading = browse.load();
+      await arrived.future;
+      await cachedVisible.future.timeout(const Duration(seconds: 2));
+      expect(browse.items.first.id, 'cached-0');
+      await browse.load(more: true);
+      expect(requests, [0]);
+      release.complete();
+      await loading;
+      expect(
+        browse.items.any((item) => item.id.startsWith('cached-')),
+        isFalse,
+      );
+    },
+  );
   Future<void> loadDetailReady(DetailController detail) async {
     await detail.load();
     bool ready() =>

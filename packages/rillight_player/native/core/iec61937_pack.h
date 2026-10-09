@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include "dts_burst.h"
 
 // Little-endian IEC 61937 bursts, matching FFmpeg's default SPDIF muxer.
 // WASAPI exclusive and Pulse IEC encodings consume this layout. A negative
@@ -39,6 +40,7 @@ inline bool rillight_iec_finish(std::vector<uint8_t> *out, uint16_t data_type,
 }
 
 struct RillightIec61937Mux {
+  static constexpr int kAc3Period = 6144;
   static constexpr int kEac3Period = 24576;
   static constexpr int kTrueHdPeriod = 61440;
   static constexpr int kMatFrame = 61424;
@@ -65,6 +67,54 @@ struct RillightIec61937Mux {
     truehd_samples = truehd_prev_size = truehd_presync = 0;
     truehd_prev_time = 0;
     truehd_have_time = false;
+  }
+
+  int push_ac3(const uint8_t* data, int size, std::vector<uint8_t>* burst) {
+    if (!data || size < 7 || data[0] != 0x0b || data[1] != 0x77 ||
+        (data[5] >> 3) > 10) return -1;
+    if (!rillight_iec_finish(burst, 1 | ((data[5] & 7) << 8), data, size,
+                             kAc3Period)) return -1;
+    // AC3 and DTS I-III use bit counts; EAC3/TrueHD use byte counts.
+    (*burst)[6] = static_cast<uint8_t>(size * 8);
+    (*burst)[7] = static_cast<uint8_t>((size * 8) >> 8);
+    return 1;
+  }
+
+  int push_dts(const uint8_t* data, int size, bool hd,
+               std::vector<uint8_t>* burst) {
+    const auto header = rillight_dts_header(data, size);
+    if (!burst || !header.samples) return -1;
+    if (hd) {
+      const int period = rillight_dtshd_period(header);
+      if (!period || size > 65535 || size + 20 > period) return -1;
+      int subtype = 0;
+      for (int frames = 512; frames < period / 4; frames *= 2) ++subtype;
+      std::vector<uint8_t> payload{1, 0, 0, 0, 0, 0, 0, 0, 0xfe, 0xfe,
+          static_cast<uint8_t>(size >> 8), static_cast<uint8_t>(size)};
+      payload.insert(payload.end(), data, data + size);
+      if (!rillight_iec_finish(burst, static_cast<uint16_t>(0x11 | (subtype << 8)), payload.data(),
+                               static_cast<int>(payload.size()), period)) return -1;
+      const int length = ((static_cast<int>(payload.size()) + 23) & ~15) - 8;
+      (*burst)[6] = static_cast<uint8_t>(length);
+      (*burst)[7] = static_cast<uint8_t>(length >> 8);
+      return 1;
+    }
+    // Do not silently discard an HD extension while claiming original audio.
+    if (header.core_bytes != size) return -1;
+    const int period = header.samples * 4;
+    if (size == period) {
+      burst->assign(data, data + size);
+      if (!header.little_endian)
+        for (int i = 0; i + 1 < size; i += 2) std::swap((*burst)[i], (*burst)[i + 1]);
+      return 1;
+    }
+    const int type = header.samples == 512 ? 0x0b : header.samples == 1024 ? 0x0c : 0x0d;
+    if (!rillight_iec_finish(burst, static_cast<uint16_t>(type), data, size, period)) return -1;
+    if (header.little_endian)
+      for (int i = 8; i + 1 < 8 + size; i += 2) std::swap((*burst)[i], (*burst)[i + 1]);
+    (*burst)[6] = static_cast<uint8_t>(size * 8);
+    (*burst)[7] = static_cast<uint8_t>((size * 8) >> 8);
+    return 1;
   }
 
   // 1 when *burst holds one period, 0 when more access units are required.

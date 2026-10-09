@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
@@ -25,6 +27,7 @@ class BrowseController extends ChangeNotifier {
 
   List<EmbyItem> items = const [];
   bool loading = false, loadingMore = false, hasMore = false;
+  bool _liveFirstPageReady = false;
   String? type, watch, genre;
   int? year;
   List<int> years = const [];
@@ -43,6 +46,7 @@ class BrowseController extends ChangeNotifier {
     items = const [];
     _offset = 0;
     loading = loadingMore = hasMore = false;
+    _liveFirstPageReady = false;
     error = null;
     notifyListeners();
   }
@@ -96,12 +100,15 @@ class BrowseController extends ChangeNotifier {
   }
 
   Future<void> load({bool more = false}) async {
-    if (more && (loading || loadingMore || !hasMore)) return;
+    if (more && (loading || loadingMore || !hasMore || !_liveFirstPageReady)) {
+      return;
+    }
     final revision = more ? _revision : ++_revision;
     final offset = more ? _offset : 0;
     if (!more) {
       _offset = 0;
       hasMore = false;
+      _liveFirstPageReady = false;
     }
     if (more) {
       loadingMore = true;
@@ -110,20 +117,30 @@ class BrowseController extends ChangeNotifier {
     }
     error = null;
     notifyListeners();
+    if (!_owns(revision)) return;
     final request = _request(offset);
+    // Start the live request before a potentially slow or unavailable disk read.
+    final network = cache.fetch(auth.client, request);
+    var livePageApplied = false;
     // 首屏先画缓存，再后台重拉。已有条目时不拿较短的缓存页盖住，失败也留着。
     if (!more && items.isEmpty) {
-      final hit = await cache.lookup(request);
-      if (!_owns(revision)) return;
-      if (hit != null) {
-        _apply(parseCatalogPage(hit.json), offset, more: false);
-        loading = false;
-        notifyListeners();
-      }
+      unawaited(() async {
+        try {
+          final hit = await cache.lookupWhenReady(request);
+          if (!_owns(revision) || livePageApplied || hit == null) return;
+          _apply(parseCatalogPage(hit.json), offset, more: false);
+          loading = false;
+          notifyListeners();
+        } catch (_) {
+          // A damaged cached page must not prevent delivery of the live page.
+        }
+      }());
     }
     try {
-      final page = parseCatalogPage(await cache.fetch(auth.client, request));
+      final page = parseCatalogPage(await network);
       if (!_owns(revision)) return;
+      livePageApplied = true;
+      if (!more) _liveFirstPageReady = true;
       _apply(page, offset, more: more);
     } catch (failure) {
       if (!_owns(revision)) return;

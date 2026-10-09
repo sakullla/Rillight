@@ -1090,7 +1090,7 @@
   },
   "playbackOutputSection": "实际输出",
   "@playbackOutputSection": {
-    "description": "Player and settings section for the real video, audio and enhancement state."
+    "description": "Player and settings section for actual video and audio output."
   },
   "playbackOutputSource": "片源",
   "playbackOutputVideo": "实际视频输出",
@@ -1101,13 +1101,17 @@
   "playbackOutputProfile": "杜比视界 Profile {profile}",
   "@playbackOutputProfile": {
     "placeholders": {
-      "profile": {"type": "int"}
+      "profile": {
+        "type": "int"
+      }
     }
   },
   "playbackOutputBaseLayer": "基础层 {layer}",
   "@playbackOutputBaseLayer": {
     "placeholders": {
-      "layer": {"type": "String"}
+      "layer": {
+        "type": "String"
+      }
     }
   },
   "playbackOutputBaseHdr10": "HDR10",
@@ -1129,7 +1133,9 @@
   "playbackOutputAudioChannels": "{channels} 声道 PCM",
   "@playbackOutputAudioChannels": {
     "placeholders": {
-      "channels": {"type": "int"}
+      "channels": {
+        "type": "int"
+      }
     }
   },
   "playbackOutputAudioPassthrough": "压缩透传",
@@ -1140,36 +1146,14 @@
   "playbackOutputSpeedPcm": "倍速播放时压缩透传不可用，当前输出为 PCM。",
   "playbackOutputBaseFallback": "残差合成失败，当前是基础层回退，不是 FEL 完成。",
   "playbackOutputProfile5MissingRpu": "Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。",
-  "playbackEnhanceInterpolation": "插帧",
-  "playbackEnhanceAnime4k": "Anime4K",
-  "playbackEnhanceSuperResolution": "通用超分",
-  "playbackEnhanceDenoise": "降噪",
-  "playbackEnhanceSharpen": "锐化",
-  "playbackEnhanceDouble": "双倍",
-  "playbackEnhanceLight": "轻",
-  "playbackEnhanceStrong": "强",
-  "playbackEnhanceX2": "2 倍",
-  "playbackEnhanceDisable": "关闭增强",
-  "playbackEnhanceKeepOutput": "留在当前输出",
-  "playbackEnhanceUseAvailable": "改用可用输出",
-  "playbackEnhanceRetry": "重试",
-  "playbackEnhanceReasonNativeDolby": "原生杜比视界生效，这项增强未运行。",
-  "playbackEnhanceReasonModel": "模型或着色器不可用，继续原画。",
-  "playbackEnhanceReasonOverload": "连续达不到帧期限，已降低生效档。已保存的选择未改。",
-  "playbackEnhanceReasonRefresh": "受显示器刷新率限制，未按请求生效。",
-  "playbackEnhanceReasonNoPicture": "还没有可处理的画面。",
-  "playbackEnhanceReasonCapacity": "画面尺寸或缓冲放不下放大，因此未生效且原画继续。",
-  "playbackEnhanceReasonMismatch": "生效值与请求不一致。",
-  "playbackEnhanceFrameRate": "目标显示帧率 {rate} fps",
-  "@playbackEnhanceFrameRate": {
+  "playbackOutputFrameRate": "目标显示帧率 {rate} fps",
+  "@playbackOutputFrameRate": {
     "placeholders": {
-      "rate": {"type": "String"}
+      "rate": {
+        "type": "String"
+      }
     }
   },
-  "playbackEnhanceReplaceSuper": "Anime4K 与通用超分不能同时生效。继续会关闭通用超分。取消则不改当前画面和输出。",
-  "playbackEnhanceReplaceAnime": "Anime4K 与通用超分不能同时生效。继续会关闭 Anime4K。取消则不改当前画面和输出。",
-  "playbackEnhanceLeaveDolby": "打开增强会离开原生杜比视界，画面改用当前设备能显示的输出。取消则不改当前画面和输出。",
-  "playbackEnhanceConfirm": "继续",
   "alwaysOnTop": "窗口置顶",
   "@alwaysOnTop": {
     "description": "Keep the player window above other windows."
@@ -1856,7 +1840,7 @@
   "phoneSubtitleLarge": "大",
   "phoneSubtitleExtraLarge": "特大",
   "phoneSubtitleOriginal": "原始 ASS 样式",
-  "phoneSubtitleOriginalHint": "保留作者的字号与特效",
+  "phoneSubtitleOriginalHint": "保留作者字号与特效；选择上方字号将关闭此项",
   "phoneSubtitleUnavailable": "当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整",
   "phonePictureInPicture": "画中画",
   "phonePipUnavailable": "当前设备或系统设置不支持画中画",

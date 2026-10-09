@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -61,6 +62,24 @@ class _BlockingDiskStore extends _FakeDiskStore {
   }
 }
 
+class _PausedReadDiskStore extends _FakeDiskStore {
+  final result = Completer<String?>();
+  int reads = 0;
+  int removals = 0;
+
+  @override
+  Future<String?> read(String key) {
+    reads++;
+    return result.future;
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    removals++;
+    await super.remove(key);
+  }
+}
+
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -89,6 +108,85 @@ void main() {
     cache.attachSession(serverId: 'server-a', userId: 'user-alice');
     return cache;
   }
+
+  test('concurrent cold lookups share one disk read and decode', () async {
+    final disk = _PausedReadDiskStore();
+    final cache = newCache(disk);
+    final request = catalogResumeRequest(userId: 'user-alice');
+    final pending = List.generate(20, (_) => cache.lookup(request));
+    expect(disk.reads, 1);
+    disk.result.complete(
+      jsonEncode({
+        'storedAt': DateTime.now().toIso8601String(),
+        'data': {'Items': <Object>[]},
+      }),
+    );
+    final hits = await Future.wait(pending);
+    expect(hits.first, isNotNull);
+    expect(hits.every((hit) => identical(hit, hits.first)), isTrue);
+    await cache.lookup(request);
+    expect(disk.reads, 1);
+  });
+
+  for (final expired in [false, true]) {
+    test(
+      'late disk read cannot overwrite or remove live data (expired=$expired)',
+      () async {
+        final disk = _PausedReadDiskStore();
+        final cache = newCache(disk);
+        final request = catalogResumeRequest(userId: 'user-alice');
+        final pending = cache.lookup(request);
+        await cache.write(request, {'version': 'live'});
+        await cache.flushPendingWrites();
+        disk.result.complete(
+          jsonEncode({
+            'storedAt': (expired ? DateTime(2000) : DateTime.now())
+                .toIso8601String(),
+            'data': {'version': 'stale'},
+          }),
+        );
+        expect(await pending, isNull);
+        expect((await cache.lookup(request))!.json, {'version': 'live'});
+        expect(disk.removals, 0);
+        expect(jsonDecode(disk.files.values.single)['data'], {
+          'version': 'live',
+        });
+      },
+    );
+  }
+
+  test('coalesced disk read is retired on account change', () async {
+    final disk = _PausedReadDiskStore();
+    final cache = newCache(disk);
+    final request = catalogResumeRequest(userId: 'user-alice');
+    final pending = cache.lookup(request);
+    cache.attachSession(serverId: 'server-a', userId: 'user-bob');
+    disk.result.complete(
+      jsonEncode({
+        'storedAt': DateTime.now().toIso8601String(),
+        'data': {'owner': 'alice'},
+      }),
+    );
+    expect(await pending, isNull);
+  });
+
+  test('disk TTL is checked on receipt after a slow read', () async {
+    final disk = _PausedReadDiskStore();
+    final cache = newCache(disk);
+    final storedAt = DateTime(2026, 1, 1);
+    var now = storedAt;
+    cache.clock = () => now;
+    final pending = cache.lookup(catalogResumeRequest(userId: 'user-alice'));
+    now = storedAt.add(CatalogCache.defaultTtl);
+    disk.result.complete(
+      jsonEncode({
+        'storedAt': storedAt.toIso8601String(),
+        'data': {'version': 'expired'},
+      }),
+    );
+    expect(await pending, isNull);
+    expect(disk.removals, 1);
+  });
 
   test(
     'cache keys include serverId and userId and do not cross sessions',

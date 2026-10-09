@@ -63,9 +63,12 @@ Map<String, String> normalizeProviderIds(Map<String, String> input) {
   return Map.unmodifiable(result);
 }
 
+final _imdbId = RegExp(r'^tt\d+$');
+final _numericId = RegExp(r'^[1-9]\d*$');
+
 bool _reliable(String provider, String value) => switch (provider) {
-  'imdb' => RegExp(r'^tt\d+$').hasMatch(value),
-  'tmdb' || 'tvdb' || 'tvmaze' => RegExp(r'^[1-9]\d*$').hasMatch(value),
+  'imdb' => _imdbId.hasMatch(value),
+  'tmdb' || 'tvdb' || 'tvmaze' => _numericId.hasMatch(value),
   _ => false,
 };
 
@@ -173,16 +176,25 @@ class WorkGroup {
   WorkGroup._(List<WorkSource> sources, {String? stableKey})
     : sources = List.unmodifiable(sources),
       key = stableKey ?? sources.first.reference.key,
-      confirmations = List.unmodifiable([
-        for (var i = 0; i < sources.length; i++)
-          for (var j = i + 1; j < sources.length; j++)
-            if (compareWorks(sources[i], sources[j]).confirmed)
-              ConfirmedLink(
-                sources[i].reference,
-                sources[j].reference,
-                compareWorks(sources[i], sources[j]),
-              ),
-      ]);
+      confirmations = List.unmodifiable(_confirmations(sources));
+
+  static Iterable<ConfirmedLink> _confirmations(
+    List<WorkSource> sources,
+  ) sync* {
+    for (var i = 0; i < sources.length; i++) {
+      for (var j = i + 1; j < sources.length; j++) {
+        final decision = compareWorks(sources[i], sources[j]);
+        if (decision.confirmed) {
+          yield ConfirmedLink(
+            sources[i].reference,
+            sources[j].reference,
+            decision,
+          );
+        }
+      }
+    }
+  }
+
   final String key;
   final List<WorkSource> sources;
   final List<ConfirmedLink> confirmations;
@@ -204,6 +216,9 @@ class WorkGroup {
 /// irrelevant. Consumers keep anchors/history by source, resolving via groupFor.
 class WorkIndex {
   final Map<SourceReference, WorkSource> _sources = {};
+  final Map<SourceReference, WorkGroup> _byReference = {};
+  final Map<SourceReference, WorkGroup?> _byItem = {};
+  final Map<String, WorkGroup> _byKey = {};
   List<WorkGroup> _groups = const [];
   List<WorkGroup> get groups => _groups;
   void upsert(Iterable<WorkSource> sources) {
@@ -214,27 +229,22 @@ class WorkIndex {
   }
 
   void removeWhere(bool Function(SourceReference reference) predicate) {
+    final before = _sources.length;
     _sources.removeWhere((key, _) => predicate(key));
-    _rebuild();
+    if (_sources.length != before) _rebuild();
   }
 
   /// Resolve a full version anchor exactly, never via its item projection.
   /// Item-only anchors resolve only when all matching sources share one group;
   /// conflicting versions make such an anchor ambiguous, even if an explicit
   /// item-only source is present in one of those groups.
-  WorkGroup? groupFor(SourceReference ref) {
-    final matches = _groups.where((g) => g.contains(ref)).iterator;
-    if (!matches.moveNext()) return null;
-    final group = matches.current;
-    return matches.moveNext() ? null : group;
-  }
+  WorkGroup? groupFor(SourceReference ref) =>
+      ref.mediaSourceId == null ? _byItem[ref] : _byReference[ref];
 
   /// All keys are source anchors, including retired group keys after a merge.
   /// A split resolves the old key only to its actual source's new group; this
   /// cannot duplicate or transfer source-specific viewing records.
-  WorkGroup? groupForKey(String key) => _groups
-      .where((g) => g.sources.any((s) => s.reference.key == key))
-      .firstOrNull;
+  WorkGroup? groupForKey(String key) => _byKey[key];
   List<WorkSource> candidatesFor(WorkSource source) => List.unmodifiable(
     _sources.values.where(
       (other) =>
@@ -242,20 +252,60 @@ class WorkIndex {
           compareWorks(source, other).kind == MatchKind.candidate,
     ),
   );
+
+  // A confirmed edge requires one of these exact facts. They only narrow the
+  // candidates: compareWorks still checks every pair for conflicting facts.
+  static Iterable<Object> _evidence(WorkSource source) sync* {
+    if (source.type != 'Movie' && source.type != 'Series') return;
+    final region = source.reference.account.region;
+    yield (region, source.type, source.reference.item);
+    for (final entry in source.providerIds.entries) {
+      if (_reliable(entry.key, entry.value)) {
+        yield (region, source.type, entry.key, entry.value);
+      }
+    }
+  }
+
+  static bool _compatible(List<WorkSource> a, List<WorkSource> b) {
+    var confirmed = false;
+    for (final left in a) {
+      for (final right in b) {
+        final decision = compareWorks(left, right);
+        if (decision.kind == MatchKind.conflict) return false;
+        confirmed |= decision.confirmed;
+      }
+    }
+    return confirmed;
+  }
+
   void _rebuild() {
+    final keys = {
+      for (final source in _sources.values)
+        source.reference: source.reference.key,
+    };
     final ordered = _sources.values.toList()
-      ..sort((a, b) => a.reference.key.compareTo(b.reference.key));
+      ..sort((a, b) => keys[a.reference]!.compareTo(keys[b.reference]!));
     final groups = <List<WorkSource>>[];
+    final evidence = <Set<Object>>[];
+    final postings = <Object, Set<int>>{};
     for (final source in ordered) {
-      final compatible = groups.where((group) {
-        final decisions = group.map((s) => compareWorks(s, source)).toList();
-        return decisions.every((d) => d.kind != MatchKind.conflict) &&
-            decisions.any((d) => d.confirmed);
-      }).firstOrNull;
+      final facts = _evidence(source).toSet();
+      final candidates = <int>{
+        for (final fact in facts) ...?postings[fact],
+      }.toList()..sort();
+      final compatible = candidates
+          .where((id) => _compatible(groups[id], [source]))
+          .firstOrNull;
+      final id = compatible ?? groups.length;
       if (compatible == null) {
         groups.add([source]);
+        evidence.add(facts);
       } else {
-        compatible.add(source);
+        groups[id].add(source);
+        evidence[id].addAll(facts);
+      }
+      for (final fact in facts) {
+        (postings[fact] ??= {}).add(id);
       }
     }
     // Merge compatible disconnected partitions if a later member bridges them.
@@ -264,17 +314,24 @@ class WorkIndex {
     while (changed) {
       changed = false;
       for (var i = 0; i < groups.length && !changed; i++) {
-        for (var j = i + 1; j < groups.length; j++) {
-          final decisions = [
-            for (final a in groups[i])
-              for (final b in groups[j]) compareWorks(a, b),
-          ];
-          if (decisions.every((d) => d.kind != MatchKind.conflict) &&
-              decisions.any((d) => d.confirmed)) {
-            groups[i].addAll(groups.removeAt(j));
+        if (groups[i].isEmpty) continue;
+        final candidates = <int>{
+          for (final fact in evidence[i]) ...postings[fact]!,
+        }.where((id) => id > i).toList()..sort();
+        for (final j in candidates) {
+          if (_compatible(groups[i], groups[j])) {
+            groups[i].addAll(groups[j]);
+            groups[j].clear();
             groups[i].sort(
-              (a, b) => a.reference.key.compareTo(b.reference.key),
+              (a, b) => keys[a.reference]!.compareTo(keys[b.reference]!),
             );
+            for (final fact in evidence[j]) {
+              postings[fact]!
+                ..remove(j)
+                ..add(i);
+            }
+            evidence[i].addAll(evidence[j]);
+            evidence[j].clear();
             changed = true;
             break;
           }
@@ -283,16 +340,32 @@ class WorkIndex {
     }
     final previousKeys = _groups.map((g) => g.key).toSet();
     _groups = List.unmodifiable(
-      groups.map((sources) {
+      groups.where((sources) => sources.isNotEmpty).map((sources) {
         final retained =
             sources
-                .map((s) => s.reference.key)
+                .map((s) => keys[s.reference]!)
                 .where(previousKeys.contains)
                 .toList()
               ..sort();
         return WorkGroup._(sources, stableKey: retained.firstOrNull);
       }),
     );
+    _byReference.clear();
+    _byItem.clear();
+    _byKey.clear();
+    for (final group in _groups) {
+      for (final source in group.sources) {
+        final ref = source.reference;
+        _byReference[ref] = group;
+        _byKey[keys[ref]!] = group;
+        final item = ref.item;
+        if (!_byItem.containsKey(item)) {
+          _byItem[item] = group;
+        } else if (!identical(_byItem[item], group)) {
+          _byItem[item] = null;
+        }
+      }
+    }
   }
 }
 

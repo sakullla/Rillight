@@ -396,6 +396,11 @@ InkBounds render_fixture(const char *text, AVCodecID codec, bool plane,
 
 void layout_presentation_test() {
   const char *chinese = "这是一段较长的中文字幕，用来确认字号增大后自动换行而不会超出视频区域";
+  const auto mov_small = render_fixture("字幕测试", AV_CODEC_ID_MOV_TEXT, false);
+  const auto mov_large = render_fixture("字幕测试", AV_CODEC_ID_MOV_TEXT, false, false, 1.5);
+  const auto mov_original = render_fixture("字幕测试", AV_CODEC_ID_MOV_TEXT, false, true, 1.5);
+  assert(mov_large.height() > mov_small.height() * 1.25);
+  assert(mov_original.height() == mov_large.height());
   const auto line = render_fixture("字幕测试", AV_CODEC_ID_SUBRIP, false);
   const auto wrapped = render_fixture(chinese, AV_CODEC_ID_SUBRIP, false);
   assert(wrapped.height() > line.height() * 2);

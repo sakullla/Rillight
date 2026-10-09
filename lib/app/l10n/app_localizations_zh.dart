@@ -1102,84 +1102,9 @@ class AppLocalizationsZh extends AppLocalizations {
       'Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。';
 
   @override
-  String get playbackEnhanceInterpolation => '插帧';
-
-  @override
-  String get playbackEnhanceAnime4k => 'Anime4K';
-
-  @override
-  String get playbackEnhanceSuperResolution => '通用超分';
-
-  @override
-  String get playbackEnhanceDenoise => '降噪';
-
-  @override
-  String get playbackEnhanceSharpen => '锐化';
-
-  @override
-  String get playbackEnhanceDouble => '双倍';
-
-  @override
-  String get playbackEnhanceLight => '轻';
-
-  @override
-  String get playbackEnhanceStrong => '强';
-
-  @override
-  String get playbackEnhanceX2 => '2 倍';
-
-  @override
-  String get playbackEnhanceDisable => '关闭增强';
-
-  @override
-  String get playbackEnhanceKeepOutput => '留在当前输出';
-
-  @override
-  String get playbackEnhanceUseAvailable => '改用可用输出';
-
-  @override
-  String get playbackEnhanceRetry => '重试';
-
-  @override
-  String get playbackEnhanceReasonNativeDolby => '原生杜比视界生效，这项增强未运行。';
-
-  @override
-  String get playbackEnhanceReasonModel => '模型或着色器不可用，继续原画。';
-
-  @override
-  String get playbackEnhanceReasonOverload => '连续达不到帧期限，已降低生效档。已保存的选择未改。';
-
-  @override
-  String get playbackEnhanceReasonRefresh => '受显示器刷新率限制，未按请求生效。';
-
-  @override
-  String get playbackEnhanceReasonNoPicture => '还没有可处理的画面。';
-
-  @override
-  String get playbackEnhanceReasonCapacity => '画面尺寸或缓冲放不下放大，因此未生效且原画继续。';
-
-  @override
-  String get playbackEnhanceReasonMismatch => '生效值与请求不一致。';
-
-  @override
-  String playbackEnhanceFrameRate(String rate) {
+  String playbackOutputFrameRate(String rate) {
     return '目标显示帧率 $rate fps';
   }
-
-  @override
-  String get playbackEnhanceReplaceSuper =>
-      'Anime4K 与通用超分不能同时生效。继续会关闭通用超分。取消则不改当前画面和输出。';
-
-  @override
-  String get playbackEnhanceReplaceAnime =>
-      'Anime4K 与通用超分不能同时生效。继续会关闭 Anime4K。取消则不改当前画面和输出。';
-
-  @override
-  String get playbackEnhanceLeaveDolby =>
-      '打开增强会离开原生杜比视界，画面改用当前设备能显示的输出。取消则不改当前画面和输出。';
-
-  @override
-  String get playbackEnhanceConfirm => '继续';
 
   @override
   String get alwaysOnTop => '窗口置顶';
@@ -1837,7 +1762,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneSubtitleOriginal => '原始 ASS 样式';
 
   @override
-  String get phoneSubtitleOriginalHint => '保留作者的字号与特效';
+  String get phoneSubtitleOriginalHint => '保留作者字号与特效；选择上方字号将关闭此项';
 
   @override
   String get phoneSubtitleUnavailable => '当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整';

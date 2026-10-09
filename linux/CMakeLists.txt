@@ -106,23 +106,6 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
-# After the bundle wipe above. The player plugin cannot install these itself:
-# its install() is recorded first and the wipe would delete the weights.
-install(CODE "
-  set(_enhancement_src \"$<TARGET_FILE_DIR:rillight_core>\")
-  set(_enhancement_dst \"\$ENV{DESTDIR}${INSTALL_BUNDLE_LIB_DIR}\")
-  if(EXISTS \"\${_enhancement_src}/rife-v4.6/flownet.bin\")
-    file(COPY \"\${_enhancement_src}/rife-v4.6\" DESTINATION \"\${_enhancement_dst}\")
-    file(COPY \"\${_enhancement_src}/realesr-general-x4v3.param\"
-         DESTINATION \"\${_enhancement_dst}\")
-    file(COPY \"\${_enhancement_src}/realesr-general-x4v3.bin\"
-         DESTINATION \"\${_enhancement_dst}\")
-  endif()
-  if(EXISTS \"\${_enhancement_src}/shaders/anime4k\")
-    file(COPY \"\${_enhancement_src}/shaders\" DESTINATION \"\${_enhancement_dst}\")
-  endif()
-" COMPONENT Runtime)
-
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
