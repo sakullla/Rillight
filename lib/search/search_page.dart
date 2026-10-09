@@ -168,23 +168,48 @@ class _SearchPageState extends State<SearchPage> {
               focusNode: widget.focusNode,
               autofocus: widget.autofocus,
               textInputAction: TextInputAction.search,
-              style: Theme.of(context).textTheme.titleMedium,
               decoration: InputDecoration(
                 hintText: l10n.searchHint,
                 prefixIcon: const Icon(Icons.search),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg,
-                  vertical: AppSpacing.md,
+                suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _query,
+                  builder: (context, value, _) {
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (value.text.isNotEmpty)
+                          IconButton(
+                            key: const Key('catalog-search-clear'),
+                            tooltip: MaterialLocalizations.of(
+                              context,
+                            ).deleteButtonTooltip,
+                            onPressed: () {
+                              _query.clear();
+                              _submit('');
+                            },
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        IconButton(
+                          key: CatalogKeys.searchSubmit,
+                          tooltip: l10n.search,
+                          onPressed: _loading ? null : () => _submit(),
+                          icon: _loading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.arrow_forward_rounded),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
               onSubmitted: (value) => _submit(value),
             ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          FilledButton(
-            key: CatalogKeys.searchSubmit,
-            onPressed: _loading ? null : () => _submit(),
-            child: Text(l10n.search),
           ),
           CatalogFilterButton(
             watch: _search.watch,
@@ -294,10 +319,7 @@ class _SearchPageState extends State<SearchPage> {
                         screenWidth: screenWidth,
                         availableWidth:
                             constraints.maxWidth - AppSpacing.page * 2,
-                        labelExtent: MediaShelf.posterLabelExtentFor(
-                          context,
-                          showProgress: false,
-                        ),
+                        labelExtent: MediaShelf.posterLabelExtentFor(context),
                       ),
                       itemCount: _items.length + (_loadingMore ? 1 : 0),
                       itemBuilder: (context, index) {

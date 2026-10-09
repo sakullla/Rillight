@@ -463,7 +463,6 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   List<Widget> _controls(BuildContext context, _SettingsSection section) {
     final c = widget.controller;
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
     final enabled = !_pending && !c.loading;
     switch (section) {
       case _SettingsSection.speed:
@@ -482,56 +481,26 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           ),
         ];
       case _SettingsSection.skip:
-        return [
-          PlaybackSkipSettings(controller: c, compact: true),
-          const SizedBox(height: 12),
-          Text(
-            l10n.playerSkipSettingsSaved,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ];
+        return [PlaybackSkipSettings(controller: c, compact: true)];
       case _SettingsSection.quality:
         return [
-          for (final bitrate in c.availableBitrates)
-            _choice(
-              Text(playerQualityLabel(l10n, bitrate)),
-              bitrate == c.maxStreamingBitrate,
-              enabled
-                  ? () => unawaited(_apply(() => c.setMaxBitrate(bitrate)))
-                  : null,
-            ),
+          PlayerOptionGrid(
+            options: [
+              for (final bitrate in c.availableBitrates)
+                PlayerOption(
+                  key: ValueKey('player-quality-$bitrate'),
+                  label: playerQualityLabel(l10n, bitrate),
+                  selected: bitrate == c.maxStreamingBitrate,
+                  onPressed: enabled
+                      ? () => unawaited(_apply(() => c.setMaxBitrate(bitrate)))
+                      : null,
+                ),
+            ],
+          ),
         ];
       default:
         return const [];
     }
-  }
-
-  Widget _choice(Widget label, bool selected, VoidCallback? onPressed) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: RevealSelected(
-        selected: selected,
-        child: ListTile(
-          selected: selected,
-          selectedTileColor: scheme.surfaceBright,
-          selectedColor: scheme.onSurface,
-          iconColor: scheme.onSurfaceVariant,
-          textColor: scheme.onSurface,
-          shape: const StadiumBorder(),
-          minTileHeight: 44,
-          visualDensity: VisualDensity.compact,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-          title: label,
-          trailing: selected
-              ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurface)
-              : const SizedBox(width: 18),
-          onTap: onPressed,
-        ),
-      ),
-    );
   }
 }
 

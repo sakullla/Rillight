@@ -635,7 +635,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byKey(const Key('aggregation-keyword')),
-          matching: find.byIcon(Icons.search),
+          matching: find.byIcon(Icons.arrow_forward_rounded),
         ),
       );
       await tester.pumpAndSettle();

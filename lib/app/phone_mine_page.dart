@@ -155,7 +155,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   radius: 28,
                   backgroundColor: scheme.secondaryContainer,
                   child: Icon(
-                    Icons.person,
+                    Icons.person_rounded,
                     size: 32,
                     color: scheme.onSecondaryContainer,
                   ),
@@ -222,15 +222,15 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.dns_outlined),
                 title: Text(l10n.phoneServerManagement),
-                subtitle: Text(l10n.phoneServerManagementHint),
-                trailing: const Icon(Icons.chevron_right),
+                trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: _lines,
               ),
               ListTile(
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.add),
+                leading: const Icon(Icons.add_rounded),
                 title: Text(l10n.mobileAddServer),
+                trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => context.push('${AppRoutes.connect}?add=1'),
               ),
               ListTile(
@@ -248,8 +248,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 key: PhoneMinePage.privateKey,
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.lock_outline),
+                leading: const Icon(Icons.lock_outline_rounded),
                 title: Text(l10n.aggregationPrivate),
+                trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () async {
                   if (await SessionActions.ensurePrivateAccess(context) &&
                       context.mounted) {
@@ -257,27 +258,12 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   }
                 },
               ),
-              const SizedBox(height: AppSpacing.sm),
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(AppSpacing.huge),
-                ),
-                onPressed: auth.isBusy ? null : auth.logout,
-                child: Text(l10n.logout),
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          _group(
-            context,
-            title: '',
-            children: [
               ListTile(
                 key: PhoneMinePage.settingsKey,
+                minTileHeight: AppSpacing.huge,
+                contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.tune_rounded),
                 title: Text(l10n.settings),
-                subtitle: Text(l10n.settingsCategoriesHint),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -290,6 +276,13 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                     ),
                   ),
                 ),
+              ),
+              ListTile(
+                minTileHeight: AppSpacing.huge,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.logout_rounded, color: scheme.error),
+                title: Text(l10n.logout, style: TextStyle(color: scheme.error)),
+                onTap: auth.isBusy ? null : auth.logout,
               ),
             ],
           ),

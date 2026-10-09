@@ -388,7 +388,7 @@ void main() {
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.byType(AppEmptyView), findsNothing);
     expect(find.text('货架加载失败'), findsOneWidget);
-    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
     expect(find.byIcon(Icons.inbox_outlined), findsNothing);
     expect(find.text('重试'), findsOneWidget);
     expect(find.byKey(homeRefreshKey), findsOneWidget);

@@ -274,6 +274,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get retry => '重试';
 
   @override
+  String get refresh => '刷新';
+
+  @override
   String get posterPlaceholder => '封面不可用';
 
   @override
@@ -1451,13 +1454,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkipIntro => '片头提示';
 
   @override
-  String get settingsSkipIntroHint => '显示跳过片头按钮，需手动点击；关闭后完整播放片头';
+  String get settingsSkipIntroHint => '手动跳过片头';
 
   @override
   String get settingsSkipOutro => '片尾提示';
 
   @override
-  String get settingsSkipOutroHint => '显示跳过或下一集提示；关闭后等播放结束再提示下一集';
+  String get settingsSkipOutroHint => '片尾可跳过或进入下一集';
 
   @override
   String get playerSkipSettings => '片头与片尾';

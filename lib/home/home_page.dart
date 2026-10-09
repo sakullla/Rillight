@@ -128,7 +128,7 @@ class _HomePageState extends State<HomePage> {
     }
     return IconButton(
       key: homeRefreshKey,
-      tooltip: l10n.retry,
+      tooltip: l10n.refresh,
       visualDensity: VisualDensity.compact,
       onPressed: _refreshing ? null : _refresh,
       icon: _refreshing
@@ -137,7 +137,7 @@ class _HomePageState extends State<HomePage> {
               height: 18,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const Icon(Icons.refresh),
+          : const Icon(Icons.refresh_rounded),
     );
   }
 

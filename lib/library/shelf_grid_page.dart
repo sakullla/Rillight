@@ -12,6 +12,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -773,10 +774,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                       context,
                       customCard: _episodes,
                     )
-                  : MediaShelf.posterLabelExtentFor(
-                      context,
-                      showProgress: false,
-                    ),
+                  : MediaShelf.posterLabelExtentFor(context),
             );
             return MediaImageScrollListener(
               child: CustomScrollView(
@@ -1051,23 +1049,23 @@ class _Header extends StatelessWidget {
             runSpacing: AppSpacing.xs,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (onRefresh != null) ...[
-                IconButton(
-                  key: gridRefreshKey,
-                  tooltip: l10n.retry,
-                  visualDensity: VisualDensity.compact,
-                  onPressed: refreshing ? null : onRefresh,
-                  icon: refreshing
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh),
+              if (onRefresh != null)
+                _HeaderChip(
+                  child: IconButton(
+                    key: gridRefreshKey,
+                    tooltip: l10n.refresh,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: refreshing ? null : onRefresh,
+                    icon: refreshing
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                  ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
-              if (filters != null && onFiltersChanged != null) ...[
+              if (filters != null && onFiltersChanged != null)
                 _FilterBar(
                   filters: filters!,
                   typeFilterable: typeFilterable,
@@ -1075,8 +1073,6 @@ class _Header extends StatelessWidget {
                   genreOptions: genreOptions,
                   onChanged: onFiltersChanged!,
                 ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
               if (showSort) ...[
                 PopupMenuButton<CatalogSort>(
                   key: CatalogKeys.sortBy,
@@ -1275,12 +1271,7 @@ class _FilterBar extends StatelessWidget {
     required String label,
     required VoidCallback onDeleted,
   }) {
-    return InputChip(
-      visualDensity: VisualDensity.compact,
-      label: Text(label),
-      onDeleted: onDeleted,
-      deleteIcon: const Icon(Icons.close_rounded, size: 16),
-    );
+    return RemovablePill(label: label, onDeleted: onDeleted);
   }
 }
 

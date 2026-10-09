@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -1384,7 +1385,7 @@ void main() {
       await enterSection(tester, 'picture');
       expect(
         tester
-            .widget<ChoiceChip>(
+            .widget<OptionPill>(
               find.byKey(const Key('mobile-player-scale-fit')),
             )
             .selected,
@@ -1396,7 +1397,7 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<ChoiceChip>(
+            .widget<OptionPill>(
               find.byKey(const Key('mobile-player-scale-fill')),
             )
             .selected,
@@ -1983,7 +1984,7 @@ void main() {
         expect(options.bottom, closeTo(size.height, .2));
         expect(options.height, lessThan(size.height * .8));
       }
-      await tester.tap(find.widgetWithText(ChoiceChip, '1.5x'));
+      await tester.tap(find.byKey(const ValueKey('player-rate-1.5')));
       await tester.pump();
       expect(current.playbackRate, 1.5);
       await tester.tap(find.byKey(const Key('mobile-player-panel-back')));
@@ -2012,7 +2013,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('来源'), findsNothing);
-      expect(find.byType(ChoiceChip), findsWidgets);
+      expect(find.text('最高可用'), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsNothing);
       await tester.binding.handlePopRoute();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));

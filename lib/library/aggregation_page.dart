@@ -22,6 +22,7 @@ import '../app/theme/tokens.dart';
 import '../app/tv_top_nav.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/app_empty_view.dart';
+import '../app/widgets/option_pill.dart';
 import '../auth/auth_controller.dart';
 import '../auth/server_list_store.dart';
 import '../emby/emby_client.dart';
@@ -1825,10 +1826,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
   double _libraryExtent(BuildContext context) {
     final screen = MediaQuery.sizeOf(context).width;
     final image = MediaShelf.wideCardWidthFor(screen) * 9 / 16;
-    final labels = MediaShelf.posterLabelExtentFor(
-      context,
-      showProgress: false,
-    );
+    final labels = MediaShelf.posterLabelExtentFor(context);
     return ((image + labels) * MediaShelf.hoverScale).ceilToDouble();
   }
 
@@ -2105,11 +2103,40 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             autofocus: widget.focusNode == null,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              labelText: l.searchHint,
-              suffixIcon: IconButton(
-                tooltip: l.search,
-                onPressed: _submit,
-                icon: const Icon(Icons.search),
+              hintText: l.searchHint,
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _keyword,
+                builder: (context, value, _) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (value.text.isNotEmpty)
+                        IconButton(
+                          tooltip: MaterialLocalizations.of(
+                            context,
+                          ).deleteButtonTooltip,
+                          onPressed: () {
+                            _keyword.clear();
+                            _submit();
+                          },
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      IconButton(
+                        tooltip: l.search,
+                        onPressed: _submit,
+                        icon: _searching
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.arrow_forward_rounded),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
             onSubmitted: (_) => _submit(),
@@ -2156,16 +2183,20 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                       runSpacing: 8,
                       children: [
                         for (final server in servers)
-                          FilterChip(
+                          OptionPill(
                             key: ValueKey(
                               'aggregation-search-server-${server.id}',
                             ),
-                            label: Text(server.displayName),
+                            label: server.displayName,
                             selected:
                                 _servers == null ||
                                 _servers!.contains(server.id),
-                            onSelected: (selected) =>
-                                _toggleServer(servers, server.id, selected),
+                            onPressed: () {
+                              final selected =
+                                  _servers == null ||
+                                  _servers!.contains(server.id);
+                              _toggleServer(servers, server.id, !selected);
+                            },
                           ),
                       ],
                     ),

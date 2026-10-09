@@ -144,8 +144,8 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(0, 48),
               foregroundColor: Colors.white,
-              backgroundColor: Colors.white.withValues(alpha: .14),
-              side: BorderSide(color: Colors.white.withValues(alpha: .55)),
+              backgroundColor: Colors.white.withValues(alpha: .16),
+              side: BorderSide(color: Colors.white.withValues(alpha: .28)),
             ),
             child: Text(l10n.details),
           )

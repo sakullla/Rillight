@@ -387,16 +387,27 @@ class MobileEmptyState extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: Column(
             children: [
-              Icon(
-                Icons.movie_outlined,
-                size: AppSpacing.huge,
-                color: scheme.onSurfaceVariant,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHigh,
+                  shape: BoxShape.circle,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Icon(
+                    Icons.movie_outlined,
+                    size: 28,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.md),
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
               ),
               if (action != null) ...[
                 const SizedBox(height: AppSpacing.md),
@@ -438,12 +449,21 @@ class MobileFailureState extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: Column(
             children: [
-              Icon(
-                Icons.error_outline,
-                size: AppSpacing.huge,
-                color: scheme.error,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.errorContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Icon(
+                    Icons.error_outline_rounded,
+                    size: 28,
+                    color: scheme.onErrorContainer,
+                  ),
+                ),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.md),
               Text(
                 message,
                 textAlign: TextAlign.center,

@@ -4,6 +4,7 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -421,13 +422,11 @@ class MobileSeriesPage extends StatelessWidget {
                   const SizedBox(width: AppSpacing.xs),
               itemBuilder: (context, index) {
                 final season = seasons[index];
-                return ChoiceChip(
+                return OptionPill(
                   key: CatalogKeys.season(season.id),
-                  label: Text(season.name),
+                  label: season.name,
                   selected: season.id == seasonId,
-                  onSelected: (selected) {
-                    if (selected) onSelectSeason(season.id);
-                  },
+                  onPressed: () => onSelectSeason(season.id),
                 );
               },
             ),

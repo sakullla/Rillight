@@ -616,6 +616,12 @@ abstract class AppLocalizations {
   /// **'重试'**
   String get retry;
 
+  /// Reload the current list or home rows. This is a manual refresh, not a failure retry.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新'**
+  String get refresh;
+
   /// Accessible label for a missing or failed cover image.
   ///
   /// In zh, this message translates to:
@@ -2857,7 +2863,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSkipIntroHint.
   ///
   /// In zh, this message translates to:
-  /// **'显示跳过片头按钮，需手动点击；关闭后完整播放片头'**
+  /// **'手动跳过片头'**
   String get settingsSkipIntroHint;
 
   /// No description provided for @settingsSkipOutro.
@@ -2869,7 +2875,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSkipOutroHint.
   ///
   /// In zh, this message translates to:
-  /// **'显示跳过或下一集提示；关闭后等播放结束再提示下一集'**
+  /// **'片尾可跳过或进入下一集'**
   String get settingsSkipOutroHint;
 
   /// No description provided for @playerSkipSettings.

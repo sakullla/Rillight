@@ -13,26 +13,69 @@ String playerQualityLabel(AppLocalizations l10n, int bitrate) =>
     ? l10n.qualityAuto
     : l10n.qualityMbps(bitrate ~/ 1000000);
 
-/// 倍速胶囊。选中只加勾和细边，保持和未选中一样的高度。
-ChipThemeData playerChoiceChipTheme(ThemeData theme) {
-  final scheme = theme.colorScheme;
-  final label = theme.textTheme.labelLarge;
-  return ChipThemeData(
-    backgroundColor: scheme.surfaceContainerHighest,
-    selectedColor: scheme.surfaceBright,
-    disabledColor: scheme.surfaceContainerHighest.withValues(alpha: .4),
-    checkmarkColor: scheme.onSurface,
-    labelStyle: label?.copyWith(color: scheme.onSurface),
-    secondaryLabelStyle: label?.copyWith(
-      color: scheme.onSurface,
-      fontWeight: FontWeight.w700,
-    ),
-    side: BorderSide(color: scheme.outline.withValues(alpha: .55)),
-    shape: const StadiumBorder(),
-    padding: const EdgeInsets.symmetric(horizontal: 2),
-    labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-    showCheckmark: true,
-  );
+/// 互斥选项。格子固定 40 高，窄面板减少列数，避免勾和文字挤出格子。
+class PlayerOption {
+  const PlayerOption({
+    required this.label,
+    required this.selected,
+    this.onPressed,
+    this.key,
+  });
+
+  final Key? key;
+  final String label;
+  final bool selected;
+  final VoidCallback? onPressed;
+}
+
+class PlayerOptionGrid extends StatelessWidget {
+  const PlayerOptionGrid({super.key, required this.options});
+
+  final List<PlayerOption> options;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const spacing = 8.0;
+        const cellHeight = 40.0;
+        var columns = constraints.maxWidth >= 336
+            ? 4
+            : constraints.maxWidth >= 248
+            ? 3
+            : 2;
+        if (options.length > 1 &&
+            options.length % columns == 1 &&
+            columns > 2) {
+          columns -= 1;
+        }
+        return GridView.builder(
+          shrinkWrap: true,
+          primary: false,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: options.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: spacing,
+            crossAxisSpacing: spacing,
+            mainAxisExtent: cellHeight,
+          ),
+          itemBuilder: (context, index) {
+            final option = options[index];
+            return RevealSelected(
+              selected: option.selected,
+              child: PlayerRateCell(
+                key: option.key,
+                label: option.label,
+                selected: option.selected,
+                onPressed: option.onPressed,
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 /// 倍速选项。格子固定 40 高，不随面板剩余高度拉长。
@@ -50,37 +93,16 @@ class PlayerRateGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const spacing = 8.0;
-        const cellHeight = 40.0;
-        final columns = constraints.maxWidth >= 280 ? 4 : 2;
-        final grid = GridView.builder(
-          shrinkWrap: true,
-          primary: false,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: kPlaybackRateLadder.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            mainAxisSpacing: spacing,
-            crossAxisSpacing: spacing,
-            mainAxisExtent: cellHeight,
+    return PlayerOptionGrid(
+      options: [
+        for (final rate in kPlaybackRateLadder)
+          PlayerOption(
+            key: ValueKey('player-rate-$rate'),
+            label: playerRateLabel(rate),
+            selected: rate == selected,
+            onPressed: enabled ? () => onSelected(rate) : null,
           ),
-          itemBuilder: (context, index) {
-            final rate = kPlaybackRateLadder[index];
-            return RevealSelected(
-              selected: rate == selected,
-              child: PlayerRateCell(
-                key: ValueKey('player-rate-$rate'),
-                label: playerRateLabel(rate),
-                selected: rate == selected,
-                onPressed: enabled ? () => onSelected(rate) : null,
-              ),
-            );
-          },
-        );
-        return grid;
-      },
+      ],
     );
   }
 }
@@ -120,21 +142,29 @@ class PlayerRateCell extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: onPressed,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (selected) ...[
-                  Icon(Icons.check_rounded, size: 16, color: foreground),
-                  const SizedBox(width: 4),
-                ],
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: foreground,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (selected) ...[
+                      Icon(Icons.check_rounded, size: 16, color: foreground),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: foreground,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/settings/settings_page.dart';
+import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/player_runtime_options.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
 
 void main() {
@@ -51,36 +53,34 @@ void main() {
 
     await expandSection(tester, '播放');
 
-    // 读:控件回显已存设置。
+    // 读:选项格回显已存设置。
     expect(
       tester
-          .widget<DropdownButton<int>>(
-            find.byKey(SettingsPage.diskCacheLimitKey),
+          .widget<PlayerRateCell>(
+            find.byKey(const ValueKey('settings-cache-4096')),
           )
-          .value,
-      4096,
+          .selected,
+      isTrue,
     );
     expect(
       tester
-          .widget<DropdownButton<HardwareDecodingMode>>(
-            find.byKey(SettingsPage.hardwareDecodingKey),
+          .widget<PlayerRateCell>(
+            find.byKey(const ValueKey('settings-decoding-off')),
           )
-          .value,
-      HardwareDecodingMode.off,
+          .selected,
+      isTrue,
     );
     expect(
       tester
-          .widget<DropdownButton<HardwareDecoderBackend>>(
-            find.byKey(SettingsPage.decoderBackendKey),
+          .widget<PlayerRateCell>(
+            find.byKey(const ValueKey('settings-backend-auto')),
           )
-          .value,
-      HardwareDecoderBackend.auto,
+          .selected,
+      isTrue,
     );
 
-    // 写:切换磁盘缓冲上限并落盘回显。
-    await tester.tap(find.byKey(SettingsPage.diskCacheLimitKey));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('1.0 GB').last);
+    // 写:点选磁盘缓冲上限并落盘回显。
+    await tester.tap(find.byKey(const ValueKey('settings-cache-1024')));
     await tester.pumpAndSettle();
 
     final settings = await store.read();
@@ -89,11 +89,11 @@ void main() {
     expect(settings.hardwareDecoding, HardwareDecodingMode.off);
     expect(
       tester
-          .widget<DropdownButton<int>>(
-            find.byKey(SettingsPage.diskCacheLimitKey),
+          .widget<PlayerRateCell>(
+            find.byKey(const ValueKey('settings-cache-1024')),
           )
-          .value,
-      1024,
+          .selected,
+      isTrue,
     );
   }, tags: ['integration']);
 
@@ -205,12 +205,19 @@ void main() {
   testWidgets(
     'danmaku shows preview and folds advanced options on narrow page',
     (tester) async {
-      await pumpPage(tester, store: MemoryPlayerSettingsStore());
+      final store = MemoryPlayerSettingsStore();
+      await pumpPage(tester, store: store);
       tester.view.physicalSize = const Size(360, 1600);
       await tester.pumpAndSettle();
       await expandSection(tester, '弹幕配置');
       expect(find.text('样式预览'), findsOneWidget);
       expect(find.text('一起看剧，弹幕也清晰舒适'), findsOneWidget);
+      expect(find.byType(FilterChip), findsNothing);
+      final scroll = find.byKey(DanmakuKeys.typeScroll);
+      await tester.ensureVisible(scroll);
+      await tester.tap(scroll);
+      await tester.pumpAndSettle();
+      expect((await store.read()).danmakuDisplay?.showScroll, isFalse);
       final advanced = find.byKey(const ValueKey('danmaku-advanced-settings'));
       await tester.ensureVisible(advanced);
       await tester.tap(

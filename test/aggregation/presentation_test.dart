@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/source_route_extra_codec.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
@@ -3064,6 +3065,8 @@ void main() {
     expect(find.byType(FilterChip), findsNothing);
     await tester.tap(find.byKey(const Key('aggregation-search-filters')));
     await _settle(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(OptionPill), findsWidgets);
     expect(
       find.byKey(ValueKey('aggregation-search-server-${f.aId}')),
       findsOneWidget,

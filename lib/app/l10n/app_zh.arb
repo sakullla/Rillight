@@ -100,6 +100,10 @@
   "@retry": {
     "description": "Retry action after a visible failure."
   },
+  "refresh": "刷新",
+  "@refresh": {
+    "description": "Reload the current list or home rows. This is a manual refresh, not a failure retry."
+  },
   "posterPlaceholder": "封面不可用",
   "@posterPlaceholder": {
     "description": "Accessible label for a missing or failed cover image."
@@ -1629,9 +1633,9 @@
   "settingsPlaybackSummary": "倍速、片头片尾、缓冲与硬件解码",
   "settingsDanmakuDisplaySummary": "字号、不透明度、显示区域与屏蔽词",
   "settingsSkipIntro": "片头提示",
-  "settingsSkipIntroHint": "显示跳过片头按钮，需手动点击；关闭后完整播放片头",
+  "settingsSkipIntroHint": "手动跳过片头",
   "settingsSkipOutro": "片尾提示",
-  "settingsSkipOutroHint": "显示跳过或下一集提示；关闭后等播放结束再提示下一集",
+  "settingsSkipOutroHint": "片尾可跳过或进入下一集",
   "playerSkipSettings": "片头与片尾",
   "playerSettingOn": "开启",
   "playerSettingOff": "关闭",

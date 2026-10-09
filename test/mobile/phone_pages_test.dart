@@ -18,6 +18,7 @@ import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -1383,10 +1384,10 @@ void main() {
         expect(find.byType(MobileDetailPage), findsOneWidget);
         expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
         expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
-        expect(find.byType(ChoiceChip), findsNWidgets(2));
+        expect(find.byType(OptionPill), findsNWidgets(2));
         expect(
           tester
-              .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '第 2 季'))
+              .widget<OptionPill>(find.widgetWithText(OptionPill, '第 2 季'))
               .selected,
           isTrue,
         );
@@ -1414,7 +1415,7 @@ void main() {
         expect(backend.position, const Duration(minutes: 5));
         await closePlayer(tester);
         expect(find.byType(MobilePlayerPage), findsNothing);
-        expect(find.widgetWithText(ChoiceChip, '第 2 季'), findsOneWidget);
+        expect(find.widgetWithText(OptionPill, '第 2 季'), findsOneWidget);
 
         await tester.tap(find.text('第 1 季'));
         await tester.pumpAndSettle();
@@ -1428,7 +1429,7 @@ void main() {
         await tester.ensureVisible(find.text('The One with the Resume').first);
         await tester.tap(find.text('The One with the Resume').first);
         await tester.pumpAndSettle();
-        expect(find.byType(ChoiceChip), findsNothing);
+        expect(find.byType(OptionPill), findsNothing);
         expect(find.text('Halfway through season two.'), findsOneWidget);
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
         expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
@@ -1438,7 +1439,7 @@ void main() {
         expect(find.text('The next night.'), findsOneWidget);
         await tester.tap(find.byKey(CatalogKeys.seriesLink));
         await tester.pumpAndSettle();
-        expect(find.widgetWithText(ChoiceChip, '第 2 季'), findsOneWidget);
+        expect(find.widgetWithText(OptionPill, '第 2 季'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -2117,6 +2118,11 @@ void main() {
         expect(find.text('line-b.test:8096'), findsOneWidget);
         expect(find.text('账户与服务器'), findsOneWidget);
         expect(find.byKey(PhoneMinePage.settingsKey), findsOneWidget);
+        expect(find.text('展开分类调整设置，再次点击可收起。修改会自动保存。'), findsNothing);
+        expect(
+          tester.getTopLeft(find.byKey(PhoneMinePage.settingsKey)).dy,
+          lessThan(tester.getTopLeft(find.text('退出登录')).dy),
+        );
         expect(find.text('我的'), findsWidgets);
         expect(
           tester.getTopLeft(find.byKey(PhoneMinePage.userKey)).dy,
@@ -2125,10 +2131,6 @@ void main() {
         expect(
           tester.getTopLeft(find.byKey(PhoneMinePage.currentLineKey)).dy,
           lessThan(tester.getTopLeft(find.text('退出登录')).dy),
-        );
-        expect(
-          tester.getTopLeft(find.text('退出登录')).dy,
-          lessThan(tester.getTopLeft(find.byKey(PhoneMinePage.settingsKey)).dy),
         );
 
         final target = auth.savedServers.single.lines.firstWhere(
@@ -2222,9 +2224,7 @@ void main() {
       expect(find.text('硬件解码'), findsNothing);
       await _openMineSettings(tester, '播放');
       expect(find.byKey(SettingsPage.diskCacheLimitKey), findsOneWidget);
-      final rate = find.byKey(const Key('settings-playback-rate'));
-      await _mineTap(tester, rate);
-      await _mineTap(tester, find.text('1.5x').last);
+      await _mineTap(tester, find.byKey(const ValueKey('player-rate-1.5')));
 
       final saved = await store.read();
       expect(saved.playbackRate, 1.5);

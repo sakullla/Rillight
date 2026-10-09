@@ -538,25 +538,30 @@ class _WideCard extends StatelessWidget {
                       children: [
                         _sharedPosterImage(item, shared),
                         if (item.canResume)
-                          Positioned(
-                            left: 8,
-                            bottom: 8,
-                            child: IconButton.filled(
-                              key: Key('phone-resume-play-${item.id}'),
-                              tooltip: l10n.resumePlay,
-                              style: IconButton.styleFrom(
-                                minimumSize: const Size(48, 48),
-                                backgroundColor: theme.colorScheme.primary,
-                                foregroundColor: theme.colorScheme.onPrimary,
-                              ),
-                              onPressed: () => context.push<void>(
-                                '/play/${item.id}',
-                                extra: PlayerOpenRequest(
-                                  itemId: item.id,
-                                  autoResume: true,
+                          Positioned.fill(
+                            child: Center(
+                              child: IconButton(
+                                key: Key('phone-resume-play-${item.id}'),
+                                tooltip: l10n.resumePlay,
+                                style: IconButton.styleFrom(
+                                  minimumSize: const Size(48, 48),
+                                  fixedSize: const Size(48, 48),
+                                  padding: EdgeInsets.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: Colors.black,
+                                  shape: const CircleBorder(),
                                 ),
+                                onPressed: () => context.push<void>(
+                                  '/play/${item.id}',
+                                  extra: PlayerOpenRequest(
+                                    itemId: item.id,
+                                    autoResume: true,
+                                  ),
+                                ),
+                                icon: const Icon(Icons.play_arrow_rounded),
                               ),
-                              icon: const Icon(Icons.play_arrow_rounded),
                             ),
                           ),
 
@@ -603,7 +608,7 @@ class _WideCard extends StatelessWidget {
                                         width: 28,
                                         height: 28,
                                         child: Icon(
-                                          Icons.close,
+                                          Icons.close_rounded,
                                           size: 16,
                                           color: Colors.white,
                                         ),

@@ -2644,7 +2644,7 @@ class _DetailInfo extends StatelessWidget {
   }
 }
 
-/// 头部元信息行:集标、时长、季集数与观看进度。
+/// 头部元信息:可点的集标单独成胶囊,时长、日期、季集数与进度收成一行。
 class _MetaRow extends StatelessWidget {
   const _MetaRow({
     required this.item,
@@ -2664,16 +2664,16 @@ class _MetaRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final style = Theme.of(context).textTheme.labelMedium?.copyWith(
-      color: scheme.onSurface,
+    final theme = Theme.of(context);
+    final style = theme.textTheme.labelMedium?.copyWith(
+      color: scheme.onPrimaryContainer,
       letterSpacing: 0.2,
     );
-    Widget chip(String text, {Key? key}) {
+    Widget chip(String text) {
       return Container(
-        key: key,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHigh.withValues(alpha: 0.7),
+          color: scheme.primaryContainer,
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(text, style: style),
@@ -2706,36 +2706,53 @@ class _MetaRow extends StatelessWidget {
         ? seasonEpisodeCode(listed) ?? episodeLabel(listed)
         : null;
 
-    return Wrap(
-      spacing: AppSpacing.sm,
-      runSpacing: AppSpacing.xs,
+    final facts = <String>[
+      ?runtime,
+      if (item.isEpisode && item.premiereDate != null)
+        l10n.premiereDate(formatDateYmd(item.premiereDate!)),
+      if (item.isEpisode && item.dateCreated != null)
+        l10n.dateAddedOn(formatDateYmd(item.dateCreated!)),
+      if (item.isSeries && seasonCount > 0) l10n.seasonCount(seasonCount),
+      if (item.childCount != null && item.isSeries)
+        l10n.episodeCount(item.childCount!),
+      if (item.canResume)
+        l10n.playbackProgress((item.playbackProgress * 100).round()),
+    ];
+    final actions = <Widget>[
+      if (item.isEpisode)
+        locateChip(
+          seasonEpisodeCode(item) ?? episodeLabel(item),
+          onTap: onLocateEpisode,
+        ),
+      if (item.isSeries && playCode != null)
+        locateChip(
+          playCode,
+          onTap: onLocateEpisode,
+          tooltip: l10n.locateEpisode,
+          key: CatalogKeys.playTarget,
+        ),
+    ];
+    final factStyle = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+      height: 1.45,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (item.isEpisode)
-          locateChip(
-            seasonEpisodeCode(item) ?? episodeLabel(item),
-            onTap: onLocateEpisode,
+        if (actions.isNotEmpty)
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
+            children: actions,
           ),
-        if (item.isSeries && playCode != null)
-          locateChip(
-            playCode,
-            onTap: onLocateEpisode,
-            tooltip: l10n.locateEpisode,
-            key: CatalogKeys.playTarget,
+        if (facts.isNotEmpty) ...[
+          if (actions.isNotEmpty) const SizedBox(height: AppSpacing.xs),
+          Text(
+            facts.join(' · '),
+            key: item.canResume ? CatalogKeys.resumeProgress : null,
+            style: factStyle,
           ),
-        if (runtime != null) chip(runtime!),
-        if (item.isEpisode && item.premiereDate != null)
-          chip(l10n.premiereDate(formatDateYmd(item.premiereDate!))),
-        if (item.isEpisode && item.dateCreated != null)
-          chip(l10n.dateAddedOn(formatDateYmd(item.dateCreated!))),
-        if (item.isSeries && seasonCount > 0)
-          chip(l10n.seasonCount(seasonCount)),
-        if (item.childCount != null && item.isSeries)
-          chip(l10n.episodeCount(item.childCount!)),
-        if (item.canResume)
-          chip(
-            l10n.playbackProgress((item.playbackProgress * 100).round()),
-            key: CatalogKeys.resumeProgress,
-          ),
+        ],
       ],
     );
   }
@@ -2747,7 +2764,7 @@ const _subtitleOffToken = -1;
 ButtonStyle _detailGhostButtonStyle(ColorScheme scheme) {
   return OutlinedButton.styleFrom(
     foregroundColor: scheme.onSurface,
-    side: BorderSide(color: scheme.onSurface.withValues(alpha: 0.42)),
+    side: BorderSide(color: scheme.onSurface.withValues(alpha: 0.22)),
     minimumSize: const Size(0, 48),
     padding: const EdgeInsets.symmetric(
       horizontal: AppSpacing.lg,

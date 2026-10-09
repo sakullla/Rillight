@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' show DisplayFeature, DisplayFeatureType;
 
 import 'package:flutter/material.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -584,25 +585,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                alignment: WrapAlignment.spaceBetween,
-                spacing: 12,
-                runSpacing: 4,
-                children: [clock, cache],
-              ),
-            ),
-            const SizedBox(height: 8),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 12,
+              runSpacing: 2,
+              children: [clock, cache],
+            ),
+            const SizedBox(height: 4),
+            Row(
               children: [
                 _shortcut(
                   'mobile-player-speed',
                   Icons.speed,
-                  '${c.playbackRate}x',
+                  playerRateLabel(c.playbackRate),
                   () => _openMore(section: 'speed'),
                 ),
                 if (c.canSwitchAudioTrack || c.canConfigureSubtitles)
@@ -639,25 +635,29 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     String label,
     Future<void> Function() action,
   ) {
-    return Padding(
-      key: ValueKey('shortcut-shell-$key'),
-      padding: EdgeInsets.zero,
-      child: TextButton.icon(
+    return Expanded(
+      child: TextButton(
         key: Key(key),
         style: TextButton.styleFrom(
           foregroundColor: Colors.white,
-          minimumSize: const Size(48, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          backgroundColor: Colors.white.withValues(alpha: .14),
-          side: BorderSide(color: Colors.white.withValues(alpha: .22)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-          ),
+          minimumSize: const Size(48, 56),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: _controller.loading ? null : () => unawaited(action()),
-        icon: Icon(icon, size: 20),
-        label: Text(label, style: const TextStyle(fontSize: 14)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, height: 1.1),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1189,45 +1189,25 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                             Text(l.mobileTrackUnavailable),
                         ],
                         if (section == 'quality')
-                          ChipTheme(
-                            data: playerChoiceChipTheme(theme),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final bitrate in c.availableBitrates)
-                                  ChoiceChip(
-                                    key: ValueKey('mobile-quality-$bitrate'),
-                                    label: Text(playerQualityLabel(l, bitrate)),
-                                    selected: c.maxStreamingBitrate == bitrate,
-                                    showCheckmark: false,
-                                    onSelected: c.loading
-                                        ? null
-                                        : (_) => unawaited(
-                                            c.setMaxBitrate(bitrate),
-                                          ),
-                                  ),
-                              ],
-                            ),
+                          PlayerOptionGrid(
+                            options: [
+                              for (final bitrate in c.availableBitrates)
+                                PlayerOption(
+                                  key: ValueKey('mobile-quality-$bitrate'),
+                                  label: playerQualityLabel(l, bitrate),
+                                  selected: c.maxStreamingBitrate == bitrate,
+                                  onPressed: c.loading
+                                      ? null
+                                      : () =>
+                                            unawaited(c.setMaxBitrate(bitrate)),
+                                ),
+                            ],
                           ),
                         if (section == 'speed')
-                          ChipTheme(
-                            data: playerChoiceChipTheme(theme),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final rate in kPlaybackRateLadder)
-                                  ChoiceChip(
-                                    label: Text('${rate}x'),
-                                    selected: c.playbackRate == rate,
-                                    showCheckmark: false,
-                                    onSelected: c.loading
-                                        ? null
-                                        : (_) => c.setRate(rate),
-                                  ),
-                              ],
-                            ),
+                          PlayerRateGrid(
+                            selected: c.playbackRate,
+                            enabled: !c.loading,
+                            onSelected: (rate) => unawaited(c.setRate(rate)),
                           ),
                         const SizedBox(height: 8),
                         Align(
@@ -1367,29 +1347,23 @@ class _VideoScaleChoicesState extends State<_VideoScaleChoices> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    return ChipTheme(
-      data: playerChoiceChipTheme(theme),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          ChoiceChip(
-            key: const Key('mobile-player-scale-fit'),
-            label: Text(l.playerFit),
-            selected: !_fill,
-            showCheckmark: false,
-            onSelected: (_) => _select(false),
-          ),
-          ChoiceChip(
-            key: const Key('mobile-player-scale-fill'),
-            label: Text(l.playerFill),
-            selected: _fill,
-            showCheckmark: false,
-            onSelected: (_) => _select(true),
-          ),
-        ],
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        OptionPill(
+          key: const Key('mobile-player-scale-fit'),
+          label: l.playerFit,
+          selected: !_fill,
+          onPressed: () => _select(false),
+        ),
+        OptionPill(
+          key: const Key('mobile-player-scale-fill'),
+          label: l.playerFill,
+          selected: _fill,
+          onPressed: () => _select(true),
+        ),
+      ],
     );
   }
 }

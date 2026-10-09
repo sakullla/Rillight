@@ -600,17 +600,23 @@ extension PageCaptures on CaptureSession {
     }
     await tap(const ValueKey('settings-section-外观'));
     await save('settings-appearance-expanded');
-    await modal(SettingsPage.appearanceKey, 'settings-appearance');
+    await tester.ensureVisible(find.byKey(SettingsPage.appearanceKey));
+    await advance(200);
+    await save('settings-appearance');
     await tap(const ValueKey('settings-section-外观'));
     await tap(const ValueKey('settings-section-播放'));
     await save('settings-playback-expanded');
+    await tester.ensureVisible(find.byKey(const Key('settings-playback-rate')));
+    await advance(200);
+    await save('settings-speed');
     for (final entry in [
-      (const Key('settings-playback-rate'), 'speed'),
       (SettingsPage.diskCacheLimitKey, 'cache'),
       (SettingsPage.hardwareDecodingKey, 'decoding'),
       (SettingsPage.decoderBackendKey, 'decoder'),
     ]) {
-      await modal(entry.$1, 'settings-${entry.$2}');
+      await tester.ensureVisible(find.byKey(entry.$1));
+      await advance(200);
+      await save('settings-${entry.$2}');
     }
     await tap(const ValueKey('settings-section-播放'));
     await tap(const ValueKey('settings-section-弹幕配置'));

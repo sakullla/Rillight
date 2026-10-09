@@ -14,6 +14,7 @@ import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/seek_preview.dart';
@@ -207,6 +208,57 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.phoneSubtitleSettings.originalAss, isTrue);
     expect((await store.read()).effectivePhoneSubtitles.originalAss, isTrue);
+  });
+
+  testWidgets('desktop playback quality uses the same option grid as speed', (
+    tester,
+  ) async {
+    const source = PlaybackMediaSource(
+      id: 'one',
+      supportsTranscoding: true,
+      bitrate: 30000000,
+    );
+    controller.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/movie'),
+      playSessionId: 'session',
+      mediaSource: source,
+      itemId: 'current',
+    );
+    controller.mediaSources = const [source];
+    await tester.pumpWidget(app(PlaybackSettingsMenu(controller: controller)));
+    await tester.tap(find.byKey(PlayerKeys.more));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(PlayerKeys.quality),
+      80,
+      scrollable: find.descendant(
+        of: find.byKey(const Key('player-settings-categories')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.tap(find.byKey(PlayerKeys.quality));
+    await tester.pumpAndSettle();
+
+    final selected = find.byKey(const ValueKey('player-quality-140000000'));
+    final alternate = find.byKey(const ValueKey('player-quality-8000000'));
+    expect(tester.widget<PlayerRateCell>(selected).selected, isTrue);
+    expect(tester.widget<PlayerRateCell>(alternate).selected, isFalse);
+    expect(find.text('最高可用'), findsNWidgets(2));
+    expect(find.byType(ListTile), findsNothing);
+    final panel = tester.getRect(
+      find.byKey(const Key('player-settings-panel')),
+    );
+    final last = tester.getRect(
+      find.byKey(const ValueKey('player-quality-1000000')),
+    );
+    expect(last.bottom, lessThanOrEqualTo(panel.bottom + .5));
+    expect(last.top, greaterThanOrEqualTo(panel.top));
+
+    await tester.tap(find.byKey(const Key('player-skip-settings-section')));
+    await tester.pumpAndSettle();
+    expect(find.text('自动保存，应用于所有视频'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
 
 /// Shared preference editor. The playback host decides track capability.
@@ -30,21 +31,19 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
           ),
           const SizedBox(height: 8),
         ],
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
+        PlayerOptionGrid(
+          options: [
             for (final size in PhoneSubtitleSize.values)
-              ChoiceChip(
+              PlayerOption(
                 key: ValueKey('phone-subtitle-${size.name}'),
-                label: Text(switch (size) {
+                label: switch (size) {
                   PhoneSubtitleSize.small => l.phoneSubtitleSmall,
                   PhoneSubtitleSize.standard => l.phoneSubtitleStandard,
                   PhoneSubtitleSize.large => l.phoneSubtitleLarge,
                   PhoneSubtitleSize.extraLarge => l.phoneSubtitleExtraLarge,
-                }),
+                },
                 selected: value.size == size,
-                onSelected: (_) => onChanged(
+                onPressed: () => onChanged(
                   PhoneSubtitleSettings(
                     size: size,
                     originalAss: value.originalAss,

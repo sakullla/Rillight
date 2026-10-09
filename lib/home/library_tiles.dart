@@ -321,14 +321,15 @@ class LibraryCardFace extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.all(AppSpacing.sm),
               child: Align(
-                alignment: Alignment.bottomCenter,
+                alignment: Alignment.bottomLeft,
                 child: Text(
                   library.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
+                  textAlign: TextAlign.start,
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: Colors.white,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),

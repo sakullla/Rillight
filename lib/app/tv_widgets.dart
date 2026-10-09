@@ -1154,8 +1154,6 @@ class _TvCardState extends State<TvCard> {
                       preferBackdrop: widget.preferBackdrop ?? false,
                     ),
                   ),
-                  if (played && !widget.current)
-                    ColoredBox(color: Colors.black.withValues(alpha: .3)),
                   if (progress > 0 && !played)
                     Positioned(
                       left: 0,
@@ -1210,8 +1208,8 @@ class _TvCardState extends State<TvCard> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: focused ? scheme.onSurface : scheme.onSurfaceVariant,
-                  fontWeight: focused ? FontWeight.w600 : FontWeight.w500,
+                  color: scheme.onSurface,
+                  fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),
               if (subtitle != null && subtitle.isNotEmpty)

@@ -750,27 +750,40 @@ class _DetailPlayActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final toolStyle = IconButton.styleFrom(
+      minimumSize: const Size(48, 48),
+      fixedSize: const Size(48, 48),
+      padding: EdgeInsets.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      backgroundColor: scheme.surfaceContainerHigh,
+      foregroundColor: scheme.onSurface,
+      shape: const CircleBorder(),
+    );
     final extras = <Widget>[
       if (showRestart)
         IconButton(
           key: const Key('phone-detail-play-start'),
           tooltip: l.playFromStart,
+          style: toolStyle,
           onPressed: onRestart,
-          icon: const Icon(Icons.replay),
+          icon: const Icon(Icons.replay_rounded),
         ),
       if (onPrevious != null)
         IconButton(
           key: CatalogKeys.previousEpisode,
           tooltip: l.previousEpisode,
+          style: toolStyle,
           onPressed: onPrevious,
-          icon: const Icon(Icons.skip_previous),
+          icon: const Icon(Icons.skip_previous_rounded),
         ),
       if (onNext != null)
         IconButton(
           key: CatalogKeys.nextEpisode,
           tooltip: l.nextEpisode,
+          style: toolStyle,
           onPressed: onNext,
-          icon: const Icon(Icons.skip_next),
+          icon: const Icon(Icons.skip_next_rounded),
         ),
     ];
     return Row(

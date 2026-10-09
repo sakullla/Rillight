@@ -375,11 +375,12 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final thumbWidth = EpisodeRow.thumbWidthFor(viewport);
     final thumbHeight = thumbWidth * 9 / 16;
     final control = 36.0 * AppViewport.readingScaleOf(viewport);
+    final revealed = _hovered || _focused;
     final fill = selected
         ? scheme.surfaceContainerHigh
-        : _hovered
+        : revealed
         ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
-        : scheme.surfaceContainerHighest.withValues(alpha: 0.28);
+        : Colors.transparent;
     final actionStyle = IconButton.styleFrom(
       minimumSize: Size(control, control),
       padding: EdgeInsets.all(6 * control / 36),
@@ -501,10 +502,17 @@ class _EpisodeRowState extends State<EpisodeRow> {
                               : scheme.onSurfaceVariant,
                         ),
                       ),
-                      IconButton.filled(
+                      IconButton(
                         key: CatalogKeys.episodePlay(item.id),
                         tooltip: playLabel,
-                        style: actionStyle,
+                        style: actionStyle.copyWith(
+                          backgroundColor: WidgetStatePropertyAll(
+                            revealed ? scheme.onSurface : Colors.transparent,
+                          ),
+                          foregroundColor: WidgetStatePropertyAll(
+                            revealed ? scheme.surface : scheme.onSurface,
+                          ),
+                        ),
                         onPressed: widget.onPlay,
                         icon: const Icon(Icons.play_arrow_rounded),
                       ),
@@ -580,13 +588,7 @@ class _EpisodeThumb extends StatelessWidget {
             IgnorePointer(
               child: AnimatedContainer(
                 duration: fade,
-                color: Colors.black.withValues(
-                  alpha: hovered
-                      ? .32
-                      : played && !selected
-                      ? .36
-                      : 0,
-                ),
+                color: Colors.black.withValues(alpha: hovered ? .32 : 0),
               ),
             ),
             if (runtime != null)
