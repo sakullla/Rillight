@@ -30,4 +30,23 @@ void main() {
       'S1E155',
     );
   });
+
+  test('numbered episode titles do not repeat a number already named', () {
+    EmbyItem episode(String name, int? number) => EmbyItem.fromJson({
+      'Id': 'ep',
+      'Name': name,
+      'Type': 'Episode',
+      'IndexNumber': ?number,
+    });
+
+    expect(numberedEpisodeTitle(episode('勇者的相遇', 1)), '1. 勇者的相遇');
+    expect(numberedEpisodeTitle(episode('第 3 集 · 重逢', 3)), '第 3 集 · 重逢');
+    expect(numberedEpisodeTitle(episode('第3话', 3)), '第3话');
+    expect(numberedEpisodeTitle(episode('EP03 Pilot', 3)), 'EP03 Pilot');
+    expect(numberedEpisodeTitle(episode('03', 3)), '03');
+    // 集名里的数字不是本集集数时仍加编号。
+    expect(numberedEpisodeTitle(episode('第 2 集', 3)), '3. 第 2 集');
+    expect(numberedEpisodeTitle(episode('1984', 2)), '2. 1984');
+    expect(numberedEpisodeTitle(episode('无编号', null)), '无编号');
+  });
 }

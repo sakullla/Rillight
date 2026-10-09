@@ -137,8 +137,7 @@ class EpisodeThumbCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final height = width * 9 / 16;
     final progress = item.playbackProgress;
-    final number = item.indexNumber;
-    final title = number == null ? item.name : '$number. ${item.name}';
+    final title = numberedEpisodeTitle(item);
     return SizedBox(
       width: width,
       child: _HoverHighlight(

@@ -618,6 +618,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+  testWidgets('search runs after a typing pause without a submit button', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    await start(tester, server);
+    await login(tester, server);
+    await tester.tap(find.text('搜索').last);
+    await tester.pumpAndSettle();
+    final field = find.byKey(const Key('aggregation-keyword'));
+    expect(
+      find.descendant(
+        of: field,
+        matching: find.byIcon(Icons.arrow_forward_rounded),
+      ),
+      findsNothing,
+    );
+
+    // 拼音组字期间不查询。
+    await tester.showKeyboard(field);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'inc',
+        selection: TextSelection.collapsed(offset: 3),
+        composing: TextRange(start: 0, end: 3),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(PosterCard), findsNothing);
+
+    await tester.enterText(field, 'Inception');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(PosterCard), findsNothing);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    expect(find.byType(PosterCard), findsWidgets);
+
+    // 清空即回到空态。
+    await tester.tap(find.byKey(const Key('aggregation-search-clear')));
+    await tester.pumpAndSettle();
+    expect(find.byType(PosterCard), findsNothing);
+  }, tags: ['integration']);
+
   testWidgets(
     'search revokes old keyword results, retries source and isolates expired login',
     (tester) async {
@@ -632,12 +675,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(PosterCard), findsWidgets);
       server.searchStatus = 503;
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const Key('aggregation-keyword')),
-          matching: find.byIcon(Icons.arrow_forward_rounded),
-        ),
-      );
+      // 搜索框已无单独的提交钮：回到输入框再按一次搜索键重查同一片名。
+      await tester.showKeyboard(field);
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
       expect(find.text('重试'), findsWidgets);

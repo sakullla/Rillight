@@ -1,14 +1,6 @@
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/emby/emby_models.dart';
 
-String itemTitle(EmbyItem item) {
-  final year = item.productionYear;
-  if (year != null && year > 0) {
-    return '${item.name} ($year)';
-  }
-  return item.name;
-}
-
 String? runtimeLabel(AppLocalizations l10n, EmbyItem item) {
   final ticks = item.runTimeTicks;
   if (ticks == null || ticks <= 0) {
@@ -46,6 +38,25 @@ String chapterClock(int startPositionTicks) {
   }
   return '${minutes.toString().padLeft(2, '0')}:${remain.toString().padLeft(2, '0')}';
 }
+
+/// 分集列表标题「N. 集名」。集名本身已以同一集数开头（「第 3 集」「EP03」
+/// 「03 …」）时直接用集名，不再显示成「3. 第 3 集」。
+String numberedEpisodeTitle(EmbyItem item) {
+  final number = item.indexNumber;
+  if (number == null) {
+    return item.name;
+  }
+  final match = _leadingEpisodeNumber.firstMatch(item.name.trim());
+  final leading = match == null
+      ? null
+      : int.tryParse(match.group(1) ?? match.group(2) ?? match.group(3)!);
+  return leading == number ? item.name : '$number. ${item.name}';
+}
+
+final _leadingEpisodeNumber = RegExp(
+  r'^(?:第\s*(\d+)\s*[集话話期]|(?:episode|ep|e)\s*\.?\s*(\d+)|(\d+)(?!\d))',
+  caseSensitive: false,
+);
 
 String? seasonEpisodeCode(EmbyItem item) {
   final season = item.parentIndexNumber;

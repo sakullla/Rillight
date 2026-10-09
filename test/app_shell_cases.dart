@@ -483,14 +483,22 @@ void main() {
         await tester.tap(find.byTooltip('搜索'));
         await settle(tester);
         expect(find.byKey(SearchOverlay.closeKey), findsOneWidget);
-        expect(find.byKey(AppShell.searchBackKey), findsOneWidget);
+        // 关闭钮与搜索框同一行，不再另设一个效果相同的返回钮。
+        expect(find.byKey(const Key('search-overlay-back')), findsNothing);
+        expect(
+          tester.getCenter(find.byKey(SearchOverlay.closeKey)).dy,
+          moreOrLessEquals(
+            tester.getCenter(find.byKey(const Key('aggregation-keyword'))).dy,
+            epsilon: 1,
+          ),
+        );
         await tester.enterText(
           find.byKey(const Key('aggregation-keyword')),
           'Inception',
         );
         await settle(tester);
         expect(path(), AppRoutes.home);
-        await tester.tap(find.byKey(AppShell.searchBackKey));
+        await tester.tap(find.byKey(SearchOverlay.closeKey));
         await settle(tester);
         expect(find.byKey(SearchOverlay.closeKey), findsNothing);
         expect(find.byType(HomePage), findsOneWidget);
@@ -518,17 +526,11 @@ void main() {
         await settle(tester);
         expect(
           tester
-              .widget<IconButton>(find.byKey(AppShell.searchBackKey))
-              .onPressed,
-          isNotNull,
-        );
-        expect(
-          tester
               .widget<IconButton>(find.byKey(SearchOverlay.closeKey))
               .onPressed,
           isNotNull,
         );
-        await tester.tap(find.byKey(AppShell.searchBackKey));
+        await tester.tap(find.byKey(SearchOverlay.closeKey));
         await settle(tester);
         expect(find.byKey(SearchOverlay.closeKey), findsNothing);
         expect(find.byType(LibraryPage), findsOneWidget);

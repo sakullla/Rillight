@@ -45,9 +45,6 @@ class AppShell extends StatefulWidget {
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
   static const topBarHeight = 40.0;
 
-  /// 桌面搜索覆盖层里的返回。只关闭覆盖层，不弹出底下的路由。
-  static const searchBackKey = Key('search-overlay-back');
-
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
   static const topFadeHeight = 36.0;
 
@@ -277,46 +274,21 @@ class _AppShellState extends State<AppShell> {
                     Positioned.fill(
                       child: Material(
                         child: SafeArea(
-                          child: Column(
-                            children: [
-                              Padding(
-                                padding: EdgeInsets.only(
-                                  top: AppShell.topBarHeight,
-                                  right: windowChromeTrailingInset(),
-                                ),
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      key: AppShell.searchBackKey,
-                                      tooltip: MaterialLocalizations.of(
-                                        context,
-                                      ).backButtonTooltip,
-                                      onPressed: _closeSearch,
-                                      icon: const Icon(Icons.arrow_back),
-                                    ),
-                                    const Spacer(),
-                                    IconButton(
-                                      tooltip: MaterialLocalizations.of(
-                                        context,
-                                      ).closeButtonTooltip,
-                                      key: SearchOverlay.closeKey,
-                                      onPressed: _closeSearch,
-                                      icon: const Icon(Icons.close),
-                                    ),
-                                  ],
-                                ),
+                          // 让出窗口标题栏；关闭钮与搜索框排在同一行，
+                          // 不再单占一行放重复的返回和关闭。
+                          child: Padding(
+                            padding: const EdgeInsets.only(
+                              top: AppShell.topBarHeight,
+                            ),
+                            child: SearchRouteGuard(
+                              onPop: _closeSearch,
+                              child: AggregationPage(
+                                search: true,
+                                searchFocusNode: _searchQueryFocus,
+                                searchClearsTopBar: false,
+                                onCloseSearch: _closeSearch,
                               ),
-                              Expanded(
-                                child: SearchRouteGuard(
-                                  onPop: _closeSearch,
-                                  child: AggregationPage(
-                                    search: true,
-                                    searchFocusNode: _searchQueryFocus,
-                                    searchClearsTopBar: false,
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
@@ -437,17 +409,20 @@ class _TopBar extends StatelessWidget {
           Material(
             key: AppShell.topBarKey,
             type: MaterialType.transparency,
+            // 左侧多让 12：导航文字（自带 12 内边距）正好落在页面 24 边距上，
+            // 与下方标题、海报对齐；返回钮的图标也贴近这条竖线。
             child: Padding(
-              padding: EdgeInsets.only(left: leading, right: trailing),
+              padding: EdgeInsets.only(
+                left: leading + AppSpacing.sm,
+                right: trailing,
+              ),
               child: Row(
                 children: [
                   if (canPop ||
                       (location != AppRoutes.home &&
                           !AppRoutes.showsBrowseNav(location)))
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xs,
-                      ),
+                      padding: const EdgeInsets.only(right: AppSpacing.xs),
                       child: ScrimIconButton(
                         key: CatalogKeys.back,
                         tooltip: !canPop

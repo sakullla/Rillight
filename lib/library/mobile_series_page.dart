@@ -176,10 +176,11 @@ class PhoneDetailCaption extends StatelessWidget {
           color: theme.colorScheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
+        // 左右与分集、分区标题同取手机页面边距，整页内容落在同一条竖线上。
         padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
           AppSpacing.lg,
-          AppSpacing.lg,
-          AppSpacing.lg,
+          AppSpacing.md,
           AppSpacing.xxs,
         ),
         child: Column(

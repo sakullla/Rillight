@@ -355,8 +355,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final scheme = theme.colorScheme;
     final item = widget.item;
     final selected = widget.selected;
-    final number = item.indexNumber;
-    final title = number == null ? item.name : '$number. ${item.name}';
+    final title = numberedEpisodeTitle(item);
     final progress = item.playbackProgress;
     final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
     final played = item.userData.played;

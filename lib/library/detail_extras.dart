@@ -150,13 +150,12 @@ class DetailExternalLinks extends StatelessWidget {
       );
     }
     final l10n = AppLocalizations.of(context);
+    // 桌面详情已包在页面边距里，不再叠加一层缩进。
+    final inset = PresentationScope.isPhoneOf(context)
+        ? PresentationScope.pageGutterOf(context)
+        : 0.0;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.lg,
-        AppSpacing.md,
-        AppSpacing.sm,
-      ),
+      padding: EdgeInsets.fromLTRB(inset, AppSpacing.lg, inset, AppSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -454,12 +453,20 @@ class DetailAlbumStrip extends StatelessWidget {
     }
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    // 桌面和电视由调用方包好页面边距；手机直接排在页面上，标题取页面边距，
+    // 横条贴边滚动、首张与标题对齐。
+    final inset = PresentationScope.isPhoneOf(context)
+        ? PresentationScope.pageGutterOf(context)
+        : 0.0;
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(l10n.phoneAlbum, style: theme.textTheme.titleMedium),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: inset),
+            child: Text(l10n.phoneAlbum, style: theme.textTheme.titleMedium),
+          ),
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
             height: thumbnailWidth * 9 / 16,
@@ -468,6 +475,7 @@ class DetailAlbumStrip extends StatelessWidget {
               itemId: album.itemId,
               tags: album.tags,
               thumbnailWidth: thumbnailWidth,
+              inset: inset,
               origin: DetailSourceScope.maybeOf(context),
               policy: DetailSourceScope.imagePolicyOf(context),
               client: DetailSourceScope.clientOf(context),
@@ -520,6 +528,7 @@ class _AlbumRail extends StatefulWidget {
     required this.client,
     required this.origin,
     required this.policy,
+    this.inset = 0,
   });
 
   final EmbyClient client;
@@ -528,6 +537,7 @@ class _AlbumRail extends StatefulWidget {
   final String itemId;
   final List<String> tags;
   final double thumbnailWidth;
+  final double inset;
   final ValueChanged<int> onOpen;
 
   @override
@@ -630,6 +640,7 @@ class _AlbumRailState extends State<_AlbumRail> {
             child: ListView.separated(
               controller: _controller,
               scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: widget.inset),
               itemCount: widget.tags.length,
               separatorBuilder: (context, index) =>
                   const SizedBox(width: AppSpacing.sm),

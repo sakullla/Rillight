@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:rillight/app/theme/tokens.dart';
 
 enum AppPresentation { desktop, androidPhone, androidTv }
 
@@ -61,6 +62,20 @@ class PresentationScope extends InheritedWidget {
   static PresentationEnvironment of(BuildContext context) => context
       .dependOnInheritedWidgetOfExactType<PresentationScope>()!
       .environment;
+
+  static PresentationEnvironment? maybeOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<PresentationScope>()
+      ?.environment;
+
+  /// 手机界面。没有作用域的独立组件测试按桌面处理。
+  static bool isPhoneOf(BuildContext context) =>
+      maybeOf(context)?.presentation == AppPresentation.androidPhone;
+
+  /// 页面左右边距：手机 16，桌面与电视 [AppSpacing.page]。
+  ///
+  /// 详情页共用分区据此与标题、操作按钮落在同一条竖线上。
+  static double pageGutterOf(BuildContext context) =>
+      isPhoneOf(context) ? AppSpacing.md : AppSpacing.page;
 
   @override
   bool updateShouldNotify(PresentationScope oldWidget) =>

@@ -29,6 +29,7 @@ import '../emby/emby_client.dart';
 import '../emby/emby_errors.dart';
 import '../home/media_shelf.dart';
 import '../search/search_action.dart';
+import '../search/search_overlay.dart';
 import '../media_image/media_image.dart';
 import '../player/playback_runtime.dart';
 import '../player/player_bindings.dart';
@@ -106,8 +107,12 @@ class AggregationPage extends StatefulWidget {
     this.initialType,
     this.searchFocusNode,
     this.searchClearsTopBar = true,
+    this.onCloseSearch,
   });
   final FocusNode? searchFocusNode;
+
+  /// 桌面搜索覆盖层的关闭动作，按钮排在搜索框同一行末尾。
+  final VoidCallback? onCloseSearch;
 
   /// 路由页从窗口顶开始，搜索栏要避开桌面顶栏。覆盖层自己已经让出顶栏。
   final bool searchClearsTopBar;
@@ -348,6 +353,7 @@ class _AggregationPageState extends State<AggregationPage> {
           ? _AggregationSearch(
               focusNode: widget.searchFocusNode,
               clearOfDesktopBar: widget.searchClearsTopBar,
+              onClose: widget.onCloseSearch,
             )
           : const _AggregationBrowse();
     }
@@ -1882,10 +1888,15 @@ class _SearchHit {
 }
 
 class _AggregationSearch extends StatefulWidget {
-  const _AggregationSearch({this.focusNode, this.clearOfDesktopBar = true});
+  const _AggregationSearch({
+    this.focusNode,
+    this.clearOfDesktopBar = true,
+    this.onClose,
+  });
 
   final FocusNode? focusNode;
   final bool clearOfDesktopBar;
+  final VoidCallback? onClose;
 
   @override
   State<_AggregationSearch> createState() => _AggregationSearchState();
@@ -1898,6 +1909,35 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   String _term = '';
   bool _searching = false;
   bool _filtersOpen = false;
+
+  /// 边输入边搜：停顿片刻后自动查询，回车/搜索键立即查询。
+  static const _typingPause = Duration(milliseconds: 450);
+  Timer? _typing;
+  String _typed = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _keyword.addListener(_keywordChanged);
+  }
+
+  void _keywordChanged() {
+    final value = _keyword.value;
+    // 拼音输入法组字期间的字母不是要搜的词。
+    if (value.composing.isValid && !value.composing.isCollapsed) return;
+    final term = value.text.trim();
+    // 光标移动也会通知，只在文字变化时重新计时。
+    if (term == _typed) return;
+    _typed = term;
+    _typing?.cancel();
+    if (term.isEmpty) {
+      unawaited(_submit());
+      return;
+    }
+    _typing = Timer(_typingPause, () {
+      if (mounted && term != _term) unawaited(_submit());
+    });
+  }
 
   /// null 表示全部已登录服务器。收起筛选时仍沿用这里的选择。
   Set<String>? _servers;
@@ -1930,12 +1970,15 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   @override
   void dispose() {
     _auth?.removeListener(_serversChanged);
+    _typing?.cancel();
     _keyword.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
+    _typing?.cancel();
     final term = _keyword.text.trim();
+    _typed = term;
     if (term.isEmpty) {
       setState(() {
         _term = '';
@@ -2108,33 +2151,28 @@ class _AggregationSearchState extends State<_AggregationSearch> {
               suffixIcon: ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _keyword,
                 builder: (context, value, _) {
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (value.text.isNotEmpty)
-                        IconButton(
-                          tooltip: MaterialLocalizations.of(
-                            context,
-                          ).deleteButtonTooltip,
-                          onPressed: () {
-                            _keyword.clear();
-                            _submit();
-                          },
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                      IconButton(
-                        tooltip: l.search,
-                        onPressed: _submit,
-                        icon: _searching
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.arrow_forward_rounded),
+                  // 输入即搜，不再单设提交按钮；查询中以转圈代替清除钮。
+                  if (_searching && value.text.isNotEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.all(15),
+                      child: SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                    ],
+                    );
+                  }
+                  if (value.text.isEmpty) return const SizedBox.shrink();
+                  return IconButton(
+                    key: const Key('aggregation-search-clear'),
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).deleteButtonTooltip,
+                    onPressed: () {
+                      _keyword.clear();
+                      _submit();
+                      widget.focusNode?.requestFocus();
+                    },
+                    icon: const Icon(Icons.close_rounded),
                   );
                 },
               ),
@@ -2146,10 +2184,11 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
+            // 桌面搜索框与下方结果分区同取 24 页边距，左缘对齐。
             padding: EdgeInsets.fromLTRB(
-              16,
+              presentation.isDesktop ? AppSpacing.page : 16,
               presentation.isDesktop && widget.clearOfDesktopBar ? 64 : 12,
-              16,
+              presentation.isDesktop ? AppSpacing.md : 16,
               8,
             ),
             child: Column(
@@ -2160,18 +2199,30 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                     if (!presentation.isDesktop)
                       BackButton(onPressed: () => context.pop()),
                     Expanded(child: field),
-                    if (servers.isNotEmpty)
+                    if (servers.isNotEmpty) ...[
+                      const SizedBox(width: AppSpacing.xxs),
                       IconButton(
                         key: const Key('aggregation-search-filters'),
                         tooltip: l.searchServerFilter,
+                        isSelected: _filtersOpen || _servers != null,
                         onPressed: () =>
                             setState(() => _filtersOpen = !_filtersOpen),
                         icon: Icon(
-                          Icons.filter_list,
+                          Icons.filter_list_rounded,
                           color: _servers == null
                               ? null
                               : Theme.of(context).colorScheme.primary,
                         ),
+                      ),
+                    ],
+                    if (widget.onClose != null)
+                      IconButton(
+                        key: SearchOverlay.closeKey,
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).closeButtonTooltip,
+                        onPressed: widget.onClose,
+                        icon: const Icon(Icons.close_rounded),
                       ),
                   ],
                 ),
@@ -2393,6 +2444,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     return ListView(
       key: const PageStorageKey('aggregation-search'),
       children: [
+        const SizedBox(height: AppSpacing.xs),
         if (failed > 0 && failed < visible.length)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),

@@ -275,7 +275,10 @@ void main() {
       expect(() => auth.notifyListeners(), returnsNormally);
       expect(app.router.state.uri.path, '/item/movie-up');
       expect(find.byType(ItemDetailPage), findsOneWidget);
-      expect(find.text('飞屋环游记 (2009)'), findsOneWidget);
+      expect(
+        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        '飞屋环游记',
+      );
 
       final back = find.byKey(CatalogKeys.back);
       expect(back, findsOneWidget);
