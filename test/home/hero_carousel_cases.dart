@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -28,12 +29,16 @@ void main() {
           name: 'Movie A',
           type: 'Movie',
           backdropImageTag: 'art-a',
+          productionYear: 2024,
+          communityRating: 8.5,
         ),
         EmbyItem(
           id: 'movie-b',
           name: 'Movie B',
           type: 'Movie',
           primaryImageTag: 'poster-b',
+          productionYear: 2025,
+          communityRating: 8.6,
         ),
       ],
     );
@@ -365,6 +370,109 @@ void main() {
       expect(find.text('Movie B'), findsOneWidget);
       await unmount(tester);
     });
+  });
+
+  group('phone swipe area', () {
+    testWidgets('play and details taps still open the selected item', (
+      tester,
+    ) async {
+      HeroAutoRotate.debugForceAutoRotate = false;
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => Scaffold(body: PhoneHero(catalog: catalog)),
+          ),
+          for (final action in ['item', 'play'])
+            GoRoute(
+              path: '/$action/:id',
+              builder: (_, state) =>
+                  Scaffold(body: Text('$action ${state.pathParameters['id']}')),
+            ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: router,
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.text('Movie A'), const Offset(-180, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('hero-resume-movie-b')));
+      await tester.pumpAndSettle();
+      expect(find.text('play movie-b'), findsOneWidget);
+      router.pop();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('详情'));
+      await tester.pumpAndSettle();
+      expect(find.text('item movie-b'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await unmount(tester);
+    });
+
+    for (final area in ['title', 'metadata', 'play', 'details', 'poster']) {
+      testWidgets('swiping $area changes pages in both directions', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final scroll = ScrollController();
+        addTearDown(scroll.dispose);
+        await tester.pumpWidget(
+          wrap(
+            SingleChildScrollView(
+              controller: scroll,
+              child: Column(
+                children: [
+                  PhoneHero(catalog: catalog),
+                  const SizedBox(height: 1200),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        Finder target(bool second) => switch (area) {
+          'title' => find.text(second ? 'Movie B' : 'Movie A'),
+          'metadata' => find.text(second ? '2025' : '2024'),
+          'play' => find.byKey(
+            ValueKey('hero-resume-movie-${second ? 'b' : 'a'}'),
+          ),
+          'details' => find.text('详情'),
+          _ => find.byKey(PhoneHero.openKey),
+        };
+        // Start on the actual text/button, not the poster PageView.
+        await tester.drag(target(false), const Offset(-180, 0));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text('Movie B'), findsOneWidget);
+        expect(find.text('Movie A'), findsNothing);
+        expect(scroll.offset, 0);
+        await tester.drag(target(true), const Offset(180, 0));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text('Movie A'), findsOneWidget);
+        expect(find.text('Movie B'), findsNothing);
+        // The same area must still let the containing home page scroll.
+        await tester.drag(target(false), const Offset(0, -150));
+        await tester.pump();
+        expect(scroll.offset, greaterThan(50));
+        expect(find.text('Movie A'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await unmount(tester);
+      });
+    }
   });
 
   group('phone auto rotate', () {

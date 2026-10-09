@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -112,11 +113,13 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   /// A finger is on the banner: page changes come from the user, not the timer.
   bool _touching = false;
   PageController _page = PageController();
+  Drag? _bannerDrag;
   List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
   @override
   void dispose() {
     cancelAutoRotate();
+    _cancelBannerDrag();
     _page.dispose();
     super.dispose();
   }
@@ -125,10 +128,33 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   /// 停在同一页的控制器,旧控制器等 PageView 解绑后再释放。
   PageController _controllerFor(double fraction) {
     if ((_page.viewportFraction - fraction).abs() < .001) return _page;
+    _cancelBannerDrag();
     final old = _page;
     _page = PageController(initialPage: _index, viewportFraction: fraction);
     WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
     return _page;
+  }
+
+  // Text, actions and gaps use the same paging physics as the posters.
+  // The PageView's own recognizer wins on posters; vertical scrolling and
+  // button taps still compete normally in the gesture arena.
+  void _startBannerDrag(DragStartDetails details) {
+    _cancelBannerDrag();
+    if (_page.hasClients) {
+      _bannerDrag = _page.position.drag(details, () => _bannerDrag = null);
+    }
+  }
+
+  void _endBannerDrag(DragEndDetails details) {
+    final drag = _bannerDrag;
+    _bannerDrag = null;
+    drag?.end(details);
+  }
+
+  void _cancelBannerDrag() {
+    final drag = _bannerDrag;
+    _bannerDrag = null;
+    drag?.cancel();
   }
 
   /// 邻卡按离中心的距离缩小并压暗,当前卡保持原大。
@@ -238,7 +264,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
             items[(index - 1 + items.length) % items.length],
           ],
         }..remove(item);
-        return Listener(
+        final banner = Listener(
           key: PhoneHero.bannerKey,
           onPointerDown: (_) {
             _touching = true;
@@ -365,6 +391,16 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
               ),
             ],
           ),
+        );
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: items.length > 1 ? _startBannerDrag : null,
+          onHorizontalDragUpdate: items.length > 1
+              ? (details) => _bannerDrag?.update(details)
+              : null,
+          onHorizontalDragEnd: items.length > 1 ? _endBannerDrag : null,
+          onHorizontalDragCancel: items.length > 1 ? _cancelBannerDrag : null,
+          child: banner,
         );
       },
     );
