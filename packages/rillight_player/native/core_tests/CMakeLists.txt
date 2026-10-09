@@ -15,6 +15,17 @@ else()
 endif()
 add_test(NAME rillight_video_enhancer COMMAND rillight_video_enhancer_test)
 
+add_executable(rillight_anime4k_sampling_test anime4k_sampling_test.cpp)
+target_compile_definitions(rillight_anime4k_sampling_test PRIVATE
+  "RILLIGHT_ANIME4K_DIR=\"${rillight_anime4k_dir}\"")
+target_link_libraries(rillight_anime4k_sampling_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+if(MSVC)
+  target_compile_options(rillight_anime4k_sampling_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_anime4k_sampling_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_anime4k_sampling COMMAND rillight_anime4k_sampling_test)
+
 add_executable(rillight_dts_packet_recovery_test dts_packet_recovery_test.cpp)
 if(MSVC)
   target_compile_options(rillight_dts_packet_recovery_test PRIVATE /W4 /WX /UNDEBUG)

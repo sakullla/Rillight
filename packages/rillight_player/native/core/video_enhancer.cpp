@@ -166,6 +166,49 @@ void Sharpen(VideoQualityEnhancer::Image* image, int strength, float ceiling) {
   image->rgb.swap(out);
 }
 
+// For SDR sharpening alone, keep pixels in their native byte representation.
+// Three RGB scanlines replace full-frame float RGB/alpha and filter buffers.
+void SharpenRgba(const uint8_t* src, int width, int height, int stride,
+                 int strength, QualityProcessResult* result) {
+  const size_t row_size = static_cast<size_t>(width) * 3;
+  std::vector<int> rows(row_size * 3);
+  const float amount = static_cast<float>(strength) / 100.0f * 1.2f;
+  result->width = width;
+  result->height = height;
+  result->stride = width * 4;
+  result->current.resize(static_cast<size_t>(result->stride) * height);
+  auto horizontal = [&](int y) {
+    const uint8_t* source = src + static_cast<ptrdiff_t>(y) * stride;
+    int* dest = rows.data() + static_cast<size_t>(y % 3) * row_size;
+    for (int x = 0; x < width; ++x) {
+      const int left = std::max(0, x - 1) * 4;
+      const int right = std::min(width - 1, x + 1) * 4;
+      for (int c = 0; c < 3; ++c)
+        dest[x * 3 + c] = source[left + c] + source[x * 4 + c] + source[right + c];
+    }
+  };
+  horizontal(0);
+  for (int y = 0; y < height; ++y) {
+    if (y + 1 < height) horizontal(y + 1);
+    const int* above = rows.data() + static_cast<size_t>(std::max(0, y - 1) % 3) * row_size;
+    const int* center = rows.data() + static_cast<size_t>(y % 3) * row_size;
+    const int* below = rows.data() + static_cast<size_t>(std::min(height - 1, y + 1) % 3) * row_size;
+    const uint8_t* source = src + static_cast<ptrdiff_t>(y) * stride;
+    uint8_t* dest = result->current.data() + static_cast<size_t>(y) * result->stride;
+    for (int x = 0; x < width; ++x) {
+      for (int c = 0; c < 3; ++c) {
+        const int index = x * 3 + c;
+        const float blur = static_cast<float>(above[index] + center[index] + below[index]) / 9.0f;
+        const float value = static_cast<float>(source[x * 4 + c]);
+        const float sharpened = std::clamp(value + amount * (value - blur), 0.0f, 255.0f);
+        dest[x * 4 + c] = static_cast<uint8_t>(sharpened + 0.5f);
+      }
+      dest[x * 4 + 3] = source[x * 4 + 3];
+    }
+  }
+  result->changed = true;
+}
+
 void Encode(const VideoQualityEnhancer::Image& image, int bytes_per_pixel,
             float ceiling, std::vector<uint8_t>* bytes, int* stride) {
   *stride = image.width * bytes_per_pixel;
@@ -463,6 +506,12 @@ bool VideoQualityEnhancer::Process(
     result->width = width;
     result->height = height;
     result->stride = width * bytes_per_pixel;
+    return true;
+  }
+  if (bytes_per_pixel == 4 && !interp && status_.effective_denoise == 0 &&
+      status_.effective_anime4k == 0 && status_.effective_super_resolution == 0) {
+    SharpenRgba(src, width, height, stride, status_.effective_sharpen, result);
+    retained_ = {};
     return true;
   }
   const float ceiling = bytes_per_pixel == 4 ? 1.0f : 8.0f;

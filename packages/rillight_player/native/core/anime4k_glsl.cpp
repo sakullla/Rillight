@@ -521,6 +521,47 @@ bool RunPass(const Pass& pass, std::map<std::string, Plane>* planes, int output_
   if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return false;
   const auto main = planes->find("MAIN");
   if (main == planes->end()) return false;
+  // Resolve textures and sampling coordinates once per pass. Preserve the
+  // original float operation order, including normalized-coordinate rounding.
+  struct BoundTerm {
+    const Plane* texture = nullptr;
+    std::vector<float> x;
+    std::vector<float> y;
+  };
+  std::vector<BoundTerm> bound(pass.terms.size());
+  const Plane* shuffle_sources[4] = {};
+  if (pass.shuffle) {
+    if (pass.shuffle_taps.size() != 4) return false;
+    for (size_t channel = 0; channel < 4; ++channel) {
+      const auto source = planes->find(pass.shuffle_taps[channel]);
+      if (source == planes->end()) return false;
+      shuffle_sources[channel] = &source->second;
+    }
+  } else {
+    for (size_t index = 0; index < pass.terms.size(); ++index) {
+      const Term& term = pass.terms[index];
+      if (term.bias) continue;
+      const auto texture = planes->find(term.texture);
+      if (texture == planes->end() || texture->second.width <= 0 ||
+          texture->second.height <= 0) return false;
+      BoundTerm& item = bound[index];
+      item.texture = &texture->second;
+      item.x.resize(width);
+      item.y.resize(height);
+      const float texture_width = static_cast<float>(item.texture->width);
+      const float texture_height = static_cast<float>(item.texture->height);
+      for (int x = 0; x < width; ++x) {
+        const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(width) +
+                         term.dx / texture_width;
+        item.x[x] = nx * texture_width - 0.5f;
+      }
+      for (int y = 0; y < height; ++y) {
+        const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(height) +
+                         term.dy / texture_height;
+        item.y[y] = ny * texture_height - 0.5f;
+      }
+    }
+  }
   Plane produced;
   produced.width = width;
   produced.height = height;
@@ -531,26 +572,19 @@ bool RunPass(const Pass& pass, std::map<std::string, Plane>* planes, int output_
       Vec4 result;
       if (pass.shuffle) {
         for (int channel = 0; channel < 4; ++channel) {
-          const auto source =
-              planes->find(pass.shuffle_taps[static_cast<size_t>(channel)]);
-          if (source == planes->end()) return false;
           result.value[channel] =
-              ShuffleChannel(source->second, width, height, x, y);
+              ShuffleChannel(*shuffle_sources[channel], width, height, x, y);
         }
       } else {
-        for (const Term& term : pass.terms) {
+        for (size_t index = 0; index < pass.terms.size(); ++index) {
+          const Term& term = pass.terms[index];
           if (term.bias) {
             for (int channel = 0; channel < 4; ++channel)
               result.value[channel] += term.bias_value[channel];
             continue;
           }
-          const auto texture = planes->find(term.texture);
-          if (texture == planes->end() || texture->second.width <= 0) return false;
-          const float nx = (static_cast<float>(x) + 0.5f) / static_cast<float>(width) +
-                           term.dx / static_cast<float>(texture->second.width);
-          const float ny = (static_cast<float>(y) + 0.5f) / static_cast<float>(height) +
-                           term.dy / static_cast<float>(texture->second.height);
-          Vec4 sample = SampleNormalized(texture->second, nx, ny);
+          const BoundTerm& item = bound[index];
+          Vec4 sample = SamplePlane(*item.texture, item.x[x], item.y[y]);
           if (term.relu > 0) {
             for (float& channel : sample.value) channel = std::max(channel, 0.0f);
           } else if (term.relu < 0) {
@@ -621,13 +655,13 @@ bool RunChain(const ShaderChain& chain, Plane* main, const std::vector<float>& a
   const int output_width = main->width * 2;
   const int output_height = main->height * 2;
   std::map<std::string, Plane> planes;
-  planes.emplace("MAIN", *main);
+  planes.emplace("MAIN", std::move(*main));
   for (const Pass& pass : chain.passes) {
     if (!RunPass(pass, &planes, output_width, output_height)) return false;
   }
   const auto produced = planes.find("MAIN");
   if (produced == planes.end()) return false;
-  *main = produced->second;
+  *main = std::move(produced->second);
   KeepAlpha(main, alpha, alpha_width, alpha_height);
   return true;
 }

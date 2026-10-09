@@ -35,7 +35,7 @@ auto Request(int sharpen = 0) {
   return request;
 }
 
-void CheckSharpen(int width, int height, int strength) {
+void CheckSharpen(int width, int height, int strength, bool interpolate = false) {
   const int stride = width * 4 + 7;
   std::vector<uint8_t> src(static_cast<size_t>(stride) * height);
   uint32_t random = 42;
@@ -44,7 +44,11 @@ void CheckSharpen(int width, int height, int strength) {
     byte = static_cast<uint8_t>(random >> 24);
   }
   rillight::VideoQualityEnhancer enhancer;
-  assert(enhancer.Configure(Request(strength)) == 0);
+  auto request = Request(strength);
+  request.interpolation = interpolate ? 2 : 0;
+  request.display_refresh_hz = 120;
+  assert(enhancer.Configure(request) == 0);
+  enhancer.UpdatePlaybackFacts(0, 30);
   rillight::QualityProcessResult result;
   assert(enhancer.Process(src.data(), width, height, stride, 4, 0, 1,
                           nullptr, 0, 128u << 20, &result));
@@ -63,11 +67,15 @@ void CheckSharpen(int width, int height, int strength) {
         const float amount = strength / 100.0f * 1.2f;
         const int expected = static_cast<int>(std::lround(std::clamp(
             value + amount * (value - sum / 9), 0.0f, 1.0f) * 255));
-        // The separable sum can differ by one quantization step at a half tie.
+        // Integer/separable sums can differ from normalized floats at a half tie.
         assert(std::abs(actual - expected) <= 1);
       }
     }
   }
+  // The float path must remain active when sharpening and interpolation mix.
+  assert(enhancer.Process(src.data(), width, height, stride, 4, 10, 1,
+                          nullptr, 0, 128u << 20, &result));
+  assert(result.has_midpoint == interpolate);
 }
 
 void CheckHalfSubnormals() {
@@ -117,8 +125,8 @@ void CheckInvalidFacts() {
   load.drop_spatial = 0; assert(process() == 0);
 }
 
-void Benchmark() {
-  const int width = 1920, height = 1080;
+void Benchmark(bool uhd) {
+  const int width = uhd ? 3840 : 1920, height = uhd ? 2160 : 1080;
   std::vector<uint8_t> src(width * height * 4);
   for (size_t i = 0; i < src.size(); ++i) src[i] = static_cast<uint8_t>(i * 71);
   rillight::VideoQualityEnhancer enhancer;
@@ -133,12 +141,13 @@ void Benchmark() {
         std::chrono::steady_clock::now() - start).count();
   }
   std::sort(std::begin(samples), std::end(samples));
-  std::printf("1080p RGBA sharpen median %.3f ms, 15 frames after 3 warmups\n", samples[7]);
+  std::printf("%dx%d RGBA sharpen median %.3f ms, 15 frames after 3 warmups\n",
+              width, height, samples[7]);
 }
 }
 
-int main(int argc, char**) {
-  if (argc > 1) { Benchmark(); return 0; }
+int main(int argc, char** argv) {
+  if (argc > 1) { Benchmark(std::strcmp(argv[1], "--benchmark-4k") == 0); return 0; }
   assert(std::filesystem::is_directory(rillight::EnhancementModuleDirectory()));
 #if defined(_WIN32)
   const auto override_before = rillight::EnhancementOverrideDirectory();
@@ -153,11 +162,13 @@ int main(int argc, char**) {
   assert(!enhancer.NeedsReconstructedPicture());
   enhancer.UpdatePlaybackFacts(0, 30);
   assert(rillight::model_queries == 0);
-  for (int strength : {1, 35, 100})
+  for (int strength = 1; strength <= 100; ++strength)
     for (const auto& size : {std::pair{1, 1}, std::pair{1, 17}, std::pair{19, 1},
                              std::pair{2, 2}, std::pair{17, 23}})
       CheckSharpen(size.first, size.second, strength);
   assert(rillight::model_queries == 0);
+  CheckSharpen(257, 129, 35);
+  CheckSharpen(17, 23, 35, true);
   CheckHalfSubnormals();
   CheckTemporal();
   CheckInvalidFacts();
