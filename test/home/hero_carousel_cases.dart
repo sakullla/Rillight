@@ -68,6 +68,7 @@ void main() {
     for (final size in const [
       Size(1024, 768),
       Size(1440, 900),
+      Size(1440, 960),
       Size(1920, 1080),
     ]) {
       testWidgets('full-bleed stage keeps cinematic proportions at $size', (
@@ -104,6 +105,7 @@ void main() {
         // Neither a thin letterbox strip nor the whole first screen.
         expect(card.width / card.height, inInclusiveRange(1.6, 2.8));
         expect(card.height, lessThan(size.height * .8));
+        expect(card.height, greaterThanOrEqualTo(size.height * .63));
 
         final title = tester.getRect(find.text('Movie a'));
         final textBlock = tester.getRect(

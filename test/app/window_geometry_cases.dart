@@ -3,30 +3,53 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/window_geometry.dart';
 
 void main() {
-  test('1080p work area uses about 70% and stays 16:9', () {
+  test('1080p browser keeps its width and gains height at 3:2', () {
     final size = adaptiveWindowSizeFor(const Size(1920, 1080));
     expect(size.width, 1344);
-    expect(size.height, 756);
+    expect(size.height, 896);
   });
 
-  test('4K at 150% scaling is capped near 1440x810', () {
+  test('4K at 150% scaling uses logical pixels near 1440x960', () {
     final size = adaptiveWindowSizeFor(const Size(2560, 1440));
     expect(size.width, lessThanOrEqualTo(kMaxDefaultWindowSize.width));
     expect(size.height, lessThanOrEqualTo(kMaxDefaultWindowSize.height));
     expect(size.width, 1408);
-    expect(size.height, 792);
+    expect(size.height, 939);
   });
 
-  test('4K at 100% scaling is capped at 1440x810 not 85% of the desktop', () {
+  test('4K at 100% scaling is capped at 1440x960', () {
     final size = adaptiveWindowSizeFor(const Size(3840, 2160));
     expect(size, kMaxDefaultWindowSize);
   });
 
   test('adaptive size shrinks when the work area is short', () {
     final size = adaptiveWindowSizeFor(const Size(1920, 800));
-    expect(size.height, lessThanOrEqualTo(800 * 0.70));
+    expect(size.height, 800 * .90);
+    expect(size.width, 1344);
+  });
+
+  test('small logical work areas do not throw or exceed the screen', () {
+    for (final work in [const Size(800, 500), const Size(640, 360)]) {
+      final size = adaptiveWindowSizeFor(work);
+      expect(size.width, lessThanOrEqualTo(work.width));
+      expect(size.height, lessThanOrEqualTo(work.height));
+    }
+  });
+
+  test('invalid display measurements use the fallback', () {
+    for (final work in [
+      Size.zero,
+      const Size(double.nan, 1080),
+      const Size(1920, double.infinity),
+    ]) {
+      expect(adaptiveWindowSizeFor(work), kMinWindowSize);
+    }
+  });
+
+  test('short player window retains the existing 16:9 policy', () {
+    final size = adaptivePlayerWindowSizeFor(const Size(1920, 800));
+    expect(size.height, 560);
     expect(size.width, closeTo(size.height * 16 / 9, 1));
-    expect(size.width, lessThanOrEqualTo(1920));
   });
 
   test('adaptive size never drops below the minimum window', () {

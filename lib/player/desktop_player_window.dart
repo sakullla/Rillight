@@ -1614,6 +1614,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       await applyAdaptiveWindowSize(
         minimumSize: kMinPlayerWindowSize,
         maximumSize: kMaxPlayerWindowSize,
+        playerWindow: true,
       );
       await windowManager.setTitle(_playerWindowTitle);
       await windowManager.show();

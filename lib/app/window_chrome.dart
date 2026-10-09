@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -71,11 +73,20 @@ double windowChromeTrailingInset([TargetPlatform? platform]) {
 Future<void> applyAdaptiveWindowSize({
   Size minimumSize = kMinWindowSize,
   Size maximumSize = kMaxDefaultWindowSize,
+  bool playerWindow = false,
 }) async {
-  await windowManager.setMinimumSize(minimumSize);
-  await windowManager.setSize(
-    await resolveAdaptiveWindowSize(minSize: minimumSize, maxSize: maximumSize),
+  final initialSize = await resolveAdaptiveWindowSize(
+    minSize: minimumSize,
+    maxSize: maximumSize,
+    playerWindow: playerWindow,
   );
+  await windowManager.setMinimumSize(
+    Size(
+      math.min(minimumSize.width, initialSize.width),
+      math.min(minimumSize.height, initialSize.height),
+    ),
+  );
+  await windowManager.setSize(initialSize);
   await windowManager.center();
 }
 

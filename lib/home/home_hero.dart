@@ -31,13 +31,12 @@ class HomeHero extends StatefulWidget {
   final double topOverlap;
   static const maxFeatured = 5;
 
-  /// 舞台总高(含顶栏叠加区):约占视口 56%,让第一条货架在首屏多露出一截;
-  /// 宽高比夹在 1.9:1 与 2.7:1 之间,16:9 背景图不会被压成细长横条,
-  /// 超宽屏也不至于整屏都是横幅。
+  /// 舞台总高(含顶栏叠加区):首选视口 68%,仍露出下一条货架。
+  /// 通常落在 16:9 到 2.4:1;短屏和超宽屏以视口上限为先。
   static double heightFor(double width, {double? viewportHeight}) {
     final viewport = viewportHeight ?? 900;
-    final preferred = (viewport * .56).clamp(width / 2.7, width / 1.9);
-    return math.min(preferred, viewport * .72).clamp(360.0, 1200.0);
+    final preferred = (viewport * .68).clamp(width / 2.4, width * 9 / 16);
+    return math.min(preferred, viewport * .76).clamp(360.0, 1200.0);
   }
 
   static bool showsOverview(double width, {double? viewportHeight}) =>

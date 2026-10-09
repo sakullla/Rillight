@@ -34,10 +34,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   const double scale = dpi == 0 ? 1.0 : dpi / 96.0;
   const int work_w = static_cast<int>((work.right - work.left) / scale);
   const int work_h = static_cast<int>((work.bottom - work.top) / scale);
-  // Match lib/app/window_geometry.dart. Browse caps at 1440x810; the
+  // Match lib/app/window_geometry.dart. Browse caps at 1440x960; the
   // standalone player is a popup and caps at 1280x720.
   const int kMaxDefaultW = is_player ? 1280 : 1440;
-  const int kMaxDefaultH = is_player ? 720 : 810;
+  const int kMaxDefaultH = is_player ? 720 : 960;
   const int kMinW = is_player ? 800 : 960;
   const int kMinH = is_player ? 450 : 540;
   double fraction = 0.90;
@@ -52,14 +52,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (width > kMaxDefaultW) {
     width = kMaxDefaultW;
   }
-  int height = static_cast<int>(width * 9.0 / 16.0);
-  int max_h = static_cast<int>(work_h * fraction);
+  const double aspect = is_player ? 16.0 / 9.0 : 3.0 / 2.0;
+  int height = static_cast<int>(width / aspect);
+  int max_h = static_cast<int>(work_h * (is_player ? fraction : 0.90));
   if (max_h > kMaxDefaultH) {
     max_h = kMaxDefaultH;
   }
   if (height > max_h) {
     height = max_h;
-    width = static_cast<int>(height * 16.0 / 9.0);
+    if (is_player) width = static_cast<int>(height * aspect);
   }
   if (width > work_w) {
     width = work_w;
