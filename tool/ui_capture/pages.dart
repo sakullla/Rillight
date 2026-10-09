@@ -17,11 +17,12 @@ import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/search/search_overlay.dart';
+import 'package:rillight/player/player_host_command.dart';
+import 'package:rillight/aggregation/identity/media_identity.dart';
 
 import '../../test/emby/fake_emby_server.dart';
 import 'capture.dart';
 import 'fixtures.dart';
-import 'package:rillight/auth/region_access.dart';
 
 extension PageCaptures on CaptureSession {
   Future<void> activate(Finder finder) async {
@@ -47,12 +48,14 @@ extension PageCaptures on CaptureSession {
       (widget) => widget is ModalBarrier && widget.dismissible,
     );
     if (barriers.evaluate().isNotEmpty) {
-      // AppShell handles Escape before popup routes. Use the real outside
-      // barrier, rather than leaving a menu mounted across router.go calls.
+      // AppShell 会先吃掉 Escape;屏障四角又可能被窗口 chrome 或
+      // 弹出层本体盖住。让承载屏障的 Navigator 弹出顶层路由,
+      // 与真实关闭路径等价且不受遮挡影响。
       final barrier = barriers.last;
       final dismissedElement = tester.element(barrier);
-      final rect = tester.getRect(barrier);
-      await tester.tapAt(rect.topLeft + const Offset(5, 5));
+      final navigator = Navigator.maybeOf(dismissedElement);
+      expect(navigator, isNotNull);
+      await navigator!.maybePop();
       await advance(350);
       expect(
         dismissedElement.mounted,
@@ -95,40 +98,75 @@ extension PageCaptures on CaptureSession {
       }
       await advance(1200);
       await save('aggregation-ready');
-      await tap(const Key('aggregation-source-management'));
-      await save('aggregation-management');
-      await activate(find.widgetWithText(ListTile, '私密区域'));
-      await save('aggregation-pin-setup');
-      await tester.enterText(find.byKey(const Key('private-pin')), '1234');
-      await tester.enterText(
-        find.byKey(const Key('private-pin-confirm')),
-        '5678',
-      );
-      await tap(const Key('private-unlock'));
-      await save('aggregation-pin-error');
-      await tap(const Key('private-pin-cancel'));
-      await tap(const Key('source-management-close'));
-      final sources = auth.sources.project(AccessRegion.ordinary);
-      await activate(
-        find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
-      );
-      await advance(600);
-      await save('aggregation-single-source');
-      await activate(
-        find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
-      );
-      await save('aggregation-empty-scope');
-      await activate(find.widgetWithText(FilterChip, '全部普通来源'));
-      await advance(900);
-      await activate(find.widgetWithText(TextButton, '查找同源 · 2').first);
-      await advance(900);
-      await save('aggregation-comparison');
-      await dismiss();
-      adapter.failAggregationMirror = true;
-      await activate(find.widgetWithText(FilterChip, '全部普通来源'));
-      await advance(1000);
-      await save('aggregation-partial-failure');
-      adapter.failAggregationMirror = false;
+      // TV 聚合页是分段 + 卡片行的新版本,没有来源管理与私密区入口。
+      if (platform != 'tv') {
+        await tap(const Key('aggregation-source-management'));
+        await save('aggregation-management');
+        await activate(find.widgetWithText(ListTile, '私密区域'));
+        await save('aggregation-pin-setup');
+        await tester.enterText(find.byKey(const Key('private-pin')), '1234');
+        await tester.enterText(
+          find.byKey(const Key('private-pin-confirm')),
+          '5678',
+        );
+        await tap(const Key('private-unlock'));
+        await save('aggregation-pin-error');
+        await tap(const Key('private-pin-cancel'));
+        await tap(const Key('source-management-close'));
+        await tap(const Key('aggregation-segment-favorites'));
+        await save('aggregation-segment-favorites');
+        await tap(const Key('aggregation-segment-libraries'));
+        await save('aggregation-segment-libraries');
+        // 来源裁剪/同源比较只在旧版跨服务器聚合页上,从命令路由进入。
+        final sources = auth.sources.project(AccessRegion.ordinary);
+        final account = (await tester.runAsync(
+          () async =>
+              (await auth.sources.authenticate(sources.first.id)).account,
+        ))!;
+        app.router.go(
+          '/shelf/items',
+          extra: PlayerHostOpenItemCommand(
+            itemId: 'movie-up',
+            source: SourceReference(account: account, itemId: 'movie-up'),
+            libraryId: 'view-movies',
+            regionGeneration: auth.regionAccess.generation,
+          ),
+        );
+        await advance(1200);
+        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await advance(600);
+        await activate(
+          find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
+        );
+        await advance(600);
+        await save('aggregation-single-source');
+        await activate(
+          find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
+        );
+        await save('aggregation-empty-scope');
+        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await advance(900);
+        await activate(find.widgetWithText(TextButton, '查找同源 · 2').first);
+        await advance(900);
+        await save('aggregation-comparison');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await advance(350);
+        adapter.failAggregationMirror = true;
+        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await advance(1000);
+        await save('aggregation-partial-failure');
+        adapter.failAggregationMirror = false;
+        if (platform == 'phone') {
+          // /aggregation 只有桌面路由;先回首页再经底部导航进聚合页。
+          app.router.go('/');
+          await advance(900);
+          await activate(find.byType(NavigationDestination).at(1));
+        } else {
+          app.router.go('/aggregation');
+          await advance(900);
+        }
+        await tap(const Key('aggregation-segment-continue'));
+      }
       if (platform == 'desktop') {
         app.router.go('/search');
         await advance(700);
@@ -191,7 +229,11 @@ extension PageCaptures on CaptureSession {
     }
     if (wants('library')) {
       await route(app, '/library/view-movies', 'library-movies');
-      await aggregationFilterStates();
+      if (platform == 'tv') {
+        await filterStates(const Key('tv-library-filter'), 'tv-library');
+      } else {
+        await aggregationFilterStates();
+      }
       await route(app, '/library/view-tv', 'library-series');
       await route(app, '/shelf/resume', 'shelf-continue-watching');
       await route(app, '/shelf/nextup', 'shelf-next-up');
@@ -382,39 +424,38 @@ extension PageCaptures on CaptureSession {
     await tap(Key('$prefix-cancel'));
   }
 
+  /// 片库筛选面板:桌面对话框、手机底表共用 [LibraryFilterPanel] 的分区键。
   Future<void> aggregationFilterStates() async {
-    await activate(find.text('媒体库范围'));
+    final phone = platform == 'phone';
+    final prefix = phone ? 'phone-library' : 'catalog-grid-filter';
+    await tap(Key(phone ? 'phone-library-filter' : 'catalog-grid-filter-menu'));
     await save('library-filters');
-    if (platform == 'phone') {
+    if (phone) {
       tester.platformDispatcher.textScaleFactorTestValue = 2;
       await advance(350);
       await save('library-filters-text-200');
       tester.platformDispatcher.clearTextScaleFactorTestValue();
       await advance(350);
     }
-    await activate(find.byType(DropdownButton<bool>));
-    await save('library-filters-watch');
-    // The shell owns Escape; dismiss the dropdown through its real barrier.
-    await tester.tapAt(const Offset(5, 5));
-    await advance(350);
-    expect(find.text('已看'), findsNothing);
-    await activate(find.byKey(const Key('aggregation-genre')));
-    await save('library-filters-genre');
-    if (platform == 'tv') {
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await advance(350);
+    for (final section in ['watch', 'genre', 'year']) {
+      await tap(Key('$prefix-section-$section'));
+      await save('library-filters-$section');
     }
-    await activate(find.byKey(const Key('aggregation-year')));
-    await save('library-filters-year');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await advance(350);
-    await activate(find.byType(DropdownButton<String>).at(1));
-    if (platform == 'desktop') await save('library-sort');
-    if (platform != 'desktop') await save('library-filters-sorting');
-    await activate(find.text('标题').last);
-    await activate(find.byType(DropdownButton<bool>));
-    await activate(find.text('未看').last);
+    if (phone) {
+      // 排序只在手机筛选面板里;桌面仍是页头的排序下拉。
+      await tap(const Key('phone-library-section-sort'));
+      await save('library-filters-sorting');
+    }
+    await tap(Key('$prefix-section-watch'));
+    await tap(Key('$prefix-watch-IsUnplayed'));
     await save('library-filters-selected');
+    await tap(Key('$prefix-cancel'));
+    if (platform == 'desktop') {
+      await tap(CatalogKeys.sortBy);
+      await save('library-sort');
+      // 点已选排序项:无重查,菜单确定关闭(左上角屏障点会命中窗口 chrome)。
+      await tap(CatalogKeys.sortOption('DateLastContentAdded'));
+    }
   }
 
   Future<void> searchPages(RillightApp app) async {
@@ -448,8 +489,10 @@ extension PageCaptures on CaptureSession {
     await advance(700);
     await save('search-empty');
     if (platform != 'tv') {
-      await activate(find.text('媒体库范围'));
+      // 桌面/手机搜索都是 _AggregationSearch,筛选是来源开关而非弹层。
+      await tap(const Key('aggregation-search-filters'));
       await save('search-filter');
+      await tap(const Key('aggregation-search-filters'));
     }
     if (platform == 'desktop') await tap(SearchOverlay.closeKey);
   }
@@ -557,17 +600,25 @@ extension PageCaptures on CaptureSession {
     }
     await tap(const ValueKey('settings-section-外观'));
     await save('settings-appearance-expanded');
-    await modal(SettingsPage.appearanceKey, 'settings-appearance');
+    await tester.ensureVisible(find.byKey(SettingsPage.appearanceKey));
+    await advance(200);
+    await save('settings-appearance');
     await tap(const ValueKey('settings-section-外观'));
     await tap(const ValueKey('settings-section-播放'));
     await save('settings-playback-expanded');
+    await tester.ensureVisible(find.byKey(const Key('settings-playback-rate')));
+    await advance(200);
+    await save('settings-speed');
     for (final entry in [
-      (const Key('settings-playback-rate'), 'speed'),
       (SettingsPage.diskCacheLimitKey, 'cache'),
       (SettingsPage.hardwareDecodingKey, 'decoding'),
       (SettingsPage.decoderBackendKey, 'decoder'),
     ]) {
-      await modal(entry.$1, 'settings-${entry.$2}');
+      final target = find.byKey(entry.$1);
+      if (target.evaluate().isEmpty) continue;
+      await tester.ensureVisible(target);
+      await advance(200);
+      await save('settings-${entry.$2}');
     }
     await tap(const ValueKey('settings-section-播放'));
     await tap(const ValueKey('settings-section-弹幕配置'));

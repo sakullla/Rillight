@@ -57,8 +57,8 @@ class MobilePlayerPage extends StatefulWidget {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
 
-  /// Replaceable landscape request. Null uses [SystemChrome] and restores
-  /// portrait after playback.
+  /// Replaceable picture orientation. Null follows the video's own size and
+  /// does not force portrait while the player is still visible.
   final PhoneOrientation? orientation;
 
   /// Replaceable status and navigation bar hide. Null uses
@@ -232,6 +232,13 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
           (raw['density'] as num?)?.toDouble() ?? media.devicePixelRatio;
       final width = (raw['width'] as num?)?.toDouble();
       final height = (raw['height'] as num?)?.toDouble();
+      final picture = videoPictureIsLandscape(
+        (raw['contentWidth'] as num?)?.round(),
+        (raw['contentHeight'] as num?)?.round(),
+      );
+      if (picture != null && !_closing) {
+        unawaited(_orientation?.applyPicture(landscape: picture));
+      }
       if (width == null || height == null || density <= 0) return;
       final landscape = media.size.width > media.size.height;
       final base = landscape ? 24.0 : 20.0;
@@ -305,11 +312,14 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _bars = widget.systemBars ?? PhoneSystemBars();
     _wake = widget.wakeLock ?? PhonePlaybackWakeLock();
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
+    final matched = serverMatchingPlayback(auth, auth.client.baseUrl);
     final created = PlayerController(
       runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
+      playbackLineSnapshot: matched?.lines ?? const [],
+      verifiedPlaybackServerId: matched?.verifiedServerId,
       itemId: widget.itemId,
       backend: bindings.createBackend?.call() ?? RillightVideoBackend(),
       window: bindings.window ?? PlayerWindow(),
@@ -349,8 +359,27 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
 
   bool _revocationExitScheduled = false;
 
+  void _applyVideoPicture(PlayerController current) {
+    final source = current.resolved?.mediaSource;
+    if (source == null) return;
+    MediaStreamInfo? video;
+    for (final stream in source.mediaStreams) {
+      if (stream.isVideo) {
+        video = stream;
+        break;
+      }
+    }
+    final landscape = videoPictureIsLandscape(
+      source.width ?? video?.width,
+      source.height ?? video?.height,
+    );
+    if (landscape == null) return;
+    unawaited(_orientation?.applyPicture(landscape: landscape));
+  }
+
   void _onPlayback() {
     final current = controller;
+    if (current != null && !_closing) _applyVideoPicture(current);
     if (current?.permissionRevoked == true) {
       if (!_revocationExitScheduled) {
         _revocationExitScheduled = true;
@@ -477,10 +506,32 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       if (!current!.origin!.permit.isValid) unawaited(_close());
       return;
     }
-    if (_identity !=
-        (auth.client.baseUrl, auth.client.userId, auth.client.accessToken)) {
-      unawaited(_close());
+    final next = (
+      auth.client.baseUrl,
+      auth.client.userId,
+      auth.client.accessToken,
+    );
+    final previous = _identity;
+    final sameAccount =
+        previous is (Uri?, String?, String?) &&
+        next.$2 == previous.$2 &&
+        next.$3 == previous.$3;
+    final keepLine =
+        sameAccount &&
+        (next.$1 == previous.$1 ||
+            (current?.isConfiguredPlaybackUrl(next.$1) ?? false));
+    if (keepLine) {
+      _identity = next;
+      final matched = serverMatchingPlayback(auth, next.$1);
+      if (current != null && matched != null) {
+        current.bindPlaybackLineSnapshot(
+          matched.lines,
+          verifiedServerId: matched.verifiedServerId,
+        );
+      }
+      return;
     }
+    unawaited(_close());
   }
 
   Future<void> _close({String? viewSeriesId, String? seasonId}) async {
@@ -497,10 +548,14 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     final navigator = Navigator.of(context);
     _lifecycle?.dispose();
     await _bars?.restore();
-    await _orientation?.leavePlayback();
     await _wake?.hold(false);
     await controller?.close();
-    if (!mounted || route == null || !route.isActive) return;
+    if (!mounted || route == null || !route.isActive) {
+      // The route is already gone, so releasing orientation cannot reflow
+      // the player into portrait on top of the page underneath.
+      await _orientation?.leavePlayback();
+      return;
+    }
     final failed = controller?.progressSyncFailed == true;
     if (failed) {
       ScaffoldMessenger.of(context).showSnackBar(

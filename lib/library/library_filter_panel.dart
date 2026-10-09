@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
 /// A staged filter editor. Categories and actions stay visible while options
@@ -319,7 +320,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   Widget _summary(String label, VoidCallback change) => Padding(
     padding: const EdgeInsets.only(right: 8),
-    child: InputChip(label: Text(label), onDeleted: () => setState(change)),
+    child: RemovablePill(label: label, onDeleted: () => setState(change)),
   );
 
   Widget _category((String, String, IconData) entry, {required bool wide}) {
@@ -520,22 +521,11 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                         ),
                       )
                     else
-                      FilterChip(
+                      OptionPill(
                         key: _key('$_section-${option.$1}'),
-                        label: Text(option.$2),
+                        label: option.$2,
                         selected: option.$3,
-                        selectedColor: theme.colorScheme.primaryContainer,
-                        checkmarkColor: theme.colorScheme.onPrimaryContainer,
-                        showCheckmark: true,
-                        onSelected: (_) => setState(option.$4),
-                        materialTapTargetSize: MaterialTapTargetSize.padded,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        onPressed: () => setState(option.$4),
                       ),
                   if (options.isEmpty ||
                       (_section == 'genre' &&

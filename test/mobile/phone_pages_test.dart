@@ -18,6 +18,7 @@ import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -300,7 +301,7 @@ void main() {
       expect(theme.navigationRailTheme, isNotNull);
     });
 
-    testWidgets('banner prefers continue watching and switches only by swipe', (
+    testWidgets('banner showcases latest titles and switches only by swipe', (
       tester,
     ) async {
       _usePhoneSurface(tester);
@@ -333,32 +334,46 @@ void main() {
       await tester.pump();
 
       expect(find.byType(HomeHero), findsNothing);
-      // 继续观看优先、按 id 去重、上限 5:movie-f 与 series-h 落选。
-      expect(find.byKey(PhoneHero.itemKey('episode-a')), findsOneWidget);
+      // 只取最近入库的电影/剧集交错、按 id 去重、上限 5:观看记录里的
+      // episode-a 不进轮播,movie-f 落选。
+      expect(find.byKey(PhoneHero.itemKey('episode-a')), findsNothing);
       expect(find.byKey(PhoneHero.itemKey('movie-f')), findsNothing);
-      expect(find.byKey(PhoneHero.itemKey('series-h')), findsNothing);
+      expect(find.byKey(PhoneHero.itemKey('series-h')), findsOneWidget);
       expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
       expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
-      expect(find.text('继续播放'), findsWidgets);
-      final hero = find.byKey(PhoneHero.itemKey('episode-a'));
-      final resume = find.descendant(of: hero, matching: find.text('继续播放'));
-      final detail = find.descendant(of: hero, matching: find.text('详情'));
+      // 轮播不展示用户使用记录:没有进度百分比,也没有「继续播放」。
+      final banner = find.byKey(PhoneHero.bannerKey);
       expect(
-        tester.getCenter(resume).dy,
+        find.descendant(of: banner, matching: find.textContaining('已看')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: banner, matching: find.text('继续播放')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: banner, matching: find.text('最新电影')),
+        findsOneWidget,
+      );
+      final title = find.descendant(of: banner, matching: find.text('乙电影'));
+      expect(title, findsOneWidget);
+      final play = find.descendant(of: banner, matching: find.text('播放'));
+      final detail = find.descendant(of: banner, matching: find.text('详情'));
+      expect(play, findsOneWidget);
+      expect(
+        tester.getCenter(play).dy,
         closeTo(tester.getCenter(detail).dy, 1),
       );
-      expect(find.text('已看 40%'), findsWidgets);
+      // 文字与按钮落在海报下方,不压在图片上。
+      expect(
+        tester.getTopLeft(title).dy,
+        greaterThan(tester.getBottomLeft(find.byKey(PhoneHero.openKey)).dy),
+      );
       expect(find.byTooltip('暂停轮播'), findsNothing);
       // 横幅只留标题和元信息行，不再叠剧情简介。
       expect(find.textContaining('剧情简介'), findsNothing);
 
-      const featured = [
-        'episode-a',
-        'movie-b',
-        'movie-c',
-        'movie-d',
-        'movie-e',
-      ];
+      const featured = ['movie-b', 'series-h', 'movie-c', 'movie-d', 'movie-e'];
       String? alignedHero() {
         final banner = tester.getRect(find.byKey(PhoneHero.bannerKey));
         for (final id in featured) {
@@ -375,20 +390,24 @@ void main() {
       }
 
       // 测试环境默认关闭自动轮换:停留再久也停在当前条。
-      expect(alignedHero(), 'episode-a');
+      expect(alignedHero(), 'movie-b');
       await tester.pump(const Duration(seconds: 7));
-      expect(alignedHero(), 'episode-a');
+      expect(alignedHero(), 'movie-b');
 
-      // 手动滑动切换到下一条。
+      // 手动滑动切换到下一条:剧集条目,引导标签随之变化。
       await tester.drag(find.byKey(PhoneHero.bannerKey), const Offset(-260, 0));
       await tester.pump();
       // PageView 弹簧归位动画跑完再判定。
       await tester.pump(const Duration(seconds: 1));
-      expect(alignedHero(), 'movie-b');
+      expect(alignedHero(), 'series-h');
+      expect(
+        find.descendant(of: banner, matching: find.text('最新剧集')),
+        findsOneWidget,
+      );
 
       // 滑动后同样不恢复自动轮换(测试门未开启)。
       await tester.pump(const Duration(seconds: 7));
-      expect(alignedHero(), 'movie-b');
+      expect(alignedHero(), 'series-h');
       expect(tester.takeException(), isNull);
     });
 
@@ -404,7 +423,7 @@ void main() {
         expect(find.byKey(const Key('phone-home-edit-page')), findsOneWidget);
         expect(find.text('轮播图'), findsOneWidget);
         expect(
-          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'),
+          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'),
           findsOneWidget,
         );
 
@@ -495,65 +514,57 @@ void main() {
       expect(scale.scale, AppMobileCard.pressScale);
     });
 
-    testWidgets(
-      'handoff flies unchanged then loaded artwork supersedes its stale tag',
-      (tester) async {
-        await _pumpMotionHome(tester);
-        await _homeUntil(
-          tester,
-          find.byKey(CatalogKeys.item('movie-inception')),
-        );
-        // 同一海报 id 只允许一个 Hero,否则 flight 会歧义。
-        expect(
-          find.byWidgetPredicate(
-            (widget) =>
-                widget is Hero &&
-                widget.tag ==
-                    PhoneMotion.imageTag(
-                      'movie-inception',
-                      preferBackdrop: false,
-                    ),
-          ),
-          findsOneWidget,
-        );
-        final poster = find.byKey(CatalogKeys.item('movie-inception'));
-        final posterImage = tester.widget<MediaImage>(
-          find.descendant(of: poster, matching: find.byType(MediaImage)),
-        );
+    testWidgets('handoff keeps the tapped image after the detail item loads', (
+      tester,
+    ) async {
+      await _pumpMotionHome(tester);
+      await _homeUntil(tester, find.byKey(CatalogKeys.item('movie-inception')));
+      // 同一海报 id 只允许一个 Hero,否则 flight 会歧义。
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Hero &&
+              widget.tag ==
+                  PhoneMotion.imageTag(
+                    'movie-inception',
+                    preferBackdrop: false,
+                  ),
+        ),
+        findsOneWidget,
+      );
+      final poster = find.byKey(CatalogKeys.item('movie-inception'));
+      final posterImage = tester.widget<MediaImage>(
+        find.descendant(of: poster, matching: find.byType(MediaImage)),
+      );
 
-        await tester.tap(poster);
-        await _homeUntil(tester, find.byKey(PhoneItemBanner.bannerKey));
-        _expectSameImage(tester, posterImage, onstage: true);
-        expect(
-          find.byWidgetPredicate(
-            (widget) =>
-                widget is Hero &&
-                widget.tag ==
-                    PhoneMotion.imageTag(
-                      'movie-inception',
-                      preferBackdrop: false,
-                    ),
-          ),
-          findsWidgets,
-        );
+      await tester.tap(poster);
+      await _homeUntil(tester, find.byKey(PhoneItemBanner.bannerKey));
+      _expectSameImage(tester, posterImage, onstage: true);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Hero &&
+              widget.tag ==
+                  PhoneMotion.imageTag(
+                    'movie-inception',
+                    preferBackdrop: false,
+                  ),
+        ),
+        findsWidgets,
+      );
 
-        await _homeSettle(tester);
-        expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
-        final landed = _bannerImage(tester);
-        expect(landed.item.id, posterImage.item.id);
-        expect(landed.preferBackdrop, isTrue);
-        expect(landed.maxWidth, PhoneMotion.pageRequestWidth);
-        expect(landed.item.primaryImageTag, 'tag-inception');
-        expect(
-          landed.item.primaryImageTag,
-          isNot(posterImage.item.primaryImageTag),
-        );
-        final play = find.byKey(const Key('mobile-detail-play'));
-        expect(tester.widget<FilledButton>(play).onPressed, isNotNull);
-        expect(find.text('Inception'), findsWidgets);
-        expect(tester.takeException(), isNull);
-      },
-    );
+      await _homeSettle(tester);
+      expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
+      final landed = _bannerImage(tester);
+      expect(landed.item.id, posterImage.item.id);
+      expect(landed.preferBackdrop, posterImage.preferBackdrop);
+      expect(landed.maxWidth, posterImage.maxWidth);
+      expect(landed.item.primaryImageTag, posterImage.item.primaryImageTag);
+      final play = find.byKey(const Key('mobile-detail-play'));
+      expect(tester.widget<FilledButton>(play).onPressed, isNotNull);
+      expect(find.text('Inception'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets('reduced motion keeps the banner and the primary action', (
       tester,
@@ -567,17 +578,32 @@ void main() {
         tester.widget<GestureDetector>(find.byKey(PhoneHero.openKey)).onTap,
         isNotNull,
       );
+      final banner = find.byKey(PhoneHero.bannerKey);
+      // 续播记录只留在「继续观看」行,轮播里不显示进度。
       expect(find.text('已看 40%'), findsWidgets);
+      expect(
+        find.descendant(of: banner, matching: find.text('已看 40%')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: banner, matching: find.text('播放')),
+        findsOneWidget,
+      );
 
       await tester.pump(const Duration(seconds: 7));
       expect(find.byKey(PhoneHero.itemKey('movie-inception')), findsOneWidget);
-      expect(find.text('已看 40%'), findsWidgets);
 
       await tester.tap(find.byKey(PhoneHero.openKey));
       await _homeSettle(tester);
       expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
-      expect(_bannerImage(tester).preferBackdrop, isTrue);
-      expect(_bannerImage(tester).maxWidth, PhoneMotion.pageRequestWidth);
+      expect(_bannerImage(tester).preferBackdrop, isFalse);
+      expect(
+        _bannerImage(tester).maxWidth,
+        (PhoneHero.posterWidthFor(
+          360,
+          viewportHeight: 1600,
+        )).round().clamp(400, 800),
+      );
       expect(find.textContaining('dream-sharing'), findsOneWidget);
       expect(find.textContaining('2010'), findsOneWidget);
       expect(
@@ -759,7 +785,9 @@ void main() {
         expect(find.text('已看 40%'), findsWidgets);
         expect(find.text('继续观看'), findsOneWidget);
 
-        await tester.tap(find.byKey(CatalogKeys.item('movie-inception')));
+        final resumeCard = find.byKey(CatalogKeys.item('movie-inception'));
+        await _showOnHome(tester, resumeCard);
+        await tester.tap(resumeCard);
         await _homeSettle(tester);
         expect(find.byType(MobilePlayerPage), findsNothing);
         expect(
@@ -1356,10 +1384,10 @@ void main() {
         expect(find.byType(MobileDetailPage), findsOneWidget);
         expect(find.byKey(PhoneItemBanner.bannerKey), findsOneWidget);
         expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
-        expect(find.byType(ChoiceChip), findsNWidgets(2));
+        expect(find.byType(OptionPill), findsNWidgets(2));
         expect(
           tester
-              .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '第 2 季'))
+              .widget<OptionPill>(find.widgetWithText(OptionPill, '第 2 季'))
               .selected,
           isTrue,
         );
@@ -1387,7 +1415,7 @@ void main() {
         expect(backend.position, const Duration(minutes: 5));
         await closePlayer(tester);
         expect(find.byType(MobilePlayerPage), findsNothing);
-        expect(find.widgetWithText(ChoiceChip, '第 2 季'), findsOneWidget);
+        expect(find.widgetWithText(OptionPill, '第 2 季'), findsOneWidget);
 
         await tester.tap(find.text('第 1 季'));
         await tester.pumpAndSettle();
@@ -1401,7 +1429,7 @@ void main() {
         await tester.ensureVisible(find.text('The One with the Resume').first);
         await tester.tap(find.text('The One with the Resume').first);
         await tester.pumpAndSettle();
-        expect(find.byType(ChoiceChip), findsNothing);
+        expect(find.byType(OptionPill), findsNothing);
         expect(find.text('Halfway through season two.'), findsOneWidget);
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
         expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
@@ -1411,7 +1439,7 @@ void main() {
         expect(find.text('The next night.'), findsOneWidget);
         await tester.tap(find.byKey(CatalogKeys.seriesLink));
         await tester.pumpAndSettle();
-        expect(find.widgetWithText(ChoiceChip, '第 2 季'), findsOneWidget);
+        expect(find.widgetWithText(OptionPill, '第 2 季'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -2090,6 +2118,11 @@ void main() {
         expect(find.text('line-b.test:8096'), findsOneWidget);
         expect(find.text('账户与服务器'), findsOneWidget);
         expect(find.byKey(PhoneMinePage.settingsKey), findsOneWidget);
+        expect(find.text('展开分类调整设置，再次点击可收起。修改会自动保存。'), findsNothing);
+        expect(
+          tester.getTopLeft(find.byKey(PhoneMinePage.settingsKey)).dy,
+          lessThan(tester.getTopLeft(find.text('退出登录')).dy),
+        );
         expect(find.text('我的'), findsWidgets);
         expect(
           tester.getTopLeft(find.byKey(PhoneMinePage.userKey)).dy,
@@ -2098,10 +2131,6 @@ void main() {
         expect(
           tester.getTopLeft(find.byKey(PhoneMinePage.currentLineKey)).dy,
           lessThan(tester.getTopLeft(find.text('退出登录')).dy),
-        );
-        expect(
-          tester.getTopLeft(find.text('退出登录')).dy,
-          lessThan(tester.getTopLeft(find.byKey(PhoneMinePage.settingsKey)).dy),
         );
 
         final target = auth.savedServers.single.lines.firstWhere(
@@ -2195,9 +2224,7 @@ void main() {
       expect(find.text('硬件解码'), findsNothing);
       await _openMineSettings(tester, '播放');
       expect(find.byKey(SettingsPage.diskCacheLimitKey), findsOneWidget);
-      final rate = find.byKey(const Key('settings-playback-rate'));
-      await _mineTap(tester, rate);
-      await _mineTap(tester, find.text('1.5x').last);
+      await _mineTap(tester, find.byKey(const ValueKey('player-rate-1.5')));
 
       final saved = await store.read();
       expect(saved.playbackRate, 1.5);

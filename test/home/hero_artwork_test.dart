@@ -85,24 +85,39 @@ void main() {
     final imageAuth = AuthController.memory(client: client);
     addTearDown(imageAuth.dispose);
     HeroArtworkData? resolved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthScope(
-          controller: imageAuth,
-          child: HeroArtwork(
-            sources: const HeroArtworkSources(
-              [ItemImageRef(itemId: 'title', type: 'Backdrop', tag: 'small')],
-              [ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
-            ),
-            requestWidth: 800,
-            onResolved: (data) => resolved = data,
+    Widget subject({bool prefetch = false}) => MaterialApp(
+      home: AuthScope(
+        controller: imageAuth,
+        child: HeroArtwork(
+          sources: const HeroArtworkSources(
+            [ItemImageRef(itemId: 'title', type: 'Backdrop', tag: 'small')],
+            [ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
           ),
+          requestWidth: 800,
+          prefetch: prefetch,
+          onResolved: (data) => resolved = data,
         ),
       ),
     );
+    await tester.pumpWidget(subject());
     await _pumpUntil(tester, () => resolved != null);
     expect(resolved!.poster, isFalse);
     expect(client.requests, [('Backdrop', 800)]);
+
+    // A carousel slide that comes back shows its cached art on the very first
+    // frame instead of flashing the placeholder while an async load resolves.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(subject());
+    expect(find.byType(Image), findsOneWidget);
+    expect(client.requests, [('Backdrop', 800)]);
+
+    // Prefetch paints nothing and never reports a layout to the parent.
+    resolved = null;
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(subject(prefetch: true));
+    await tester.pump();
+    expect(find.byType(Image), findsNothing);
+    expect(resolved, isNull);
     await tester.pumpWidget(const SizedBox());
   });
   test(
@@ -288,27 +303,42 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('hero-resume-episode')));
+    // 续播条目不进轮播:首帧是最新电影,没有观看进度与「继续播放」。
+    expect(find.byKey(const ValueKey('hero-resume-episode')), findsNothing);
+    expect(find.textContaining('已看'), findsNothing);
+    expect(find.text('继续播放'), findsNothing);
+    expect(find.text('最新电影'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('hero-resume-movie')));
     await tester.pumpAndSettle();
-    expect(host.current?.itemId, 'episode');
+    expect(host.current?.itemId, 'movie');
     expect(router.canPop(), isFalse);
     final target = find.byKey(const Key('home-hero-details-target'));
     await tester.tapAt(tester.getTopRight(target) + const Offset(-40, 80));
     await tester.pumpAndSettle();
-    expect(find.text('Details episode'), findsOneWidget);
+    expect(find.text('Details movie'), findsOneWidget);
     router.pop();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Resume episode').first);
+    await tester.tap(find.text('Movie').first);
     await tester.pumpAndSettle();
-    expect(find.text('Details episode'), findsOneWidget);
+    expect(find.text('Details movie'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
-  test('resume episodes and series appear only once per title', () {
-    expect(featuredHomeItems(catalog).map((item) => item.id), [
-      'episode',
-      'movie',
-    ]);
-  });
+  test(
+    'latest movies and series alternate; resume rows never feed the hero',
+    () {
+      expect(featuredHomeItems(catalog).map((item) => item.id), [
+        'movie',
+        'series',
+      ]);
+      catalog.nextUp = const CatalogRowState(items: [episode]);
+      expect(featuredHomeItems(catalog).map((item) => item.id), [
+        'movie',
+        'series',
+      ]);
+      catalog.latestMovies = const CatalogRowState();
+      expect(featuredHomeItems(catalog).map((item) => item.id), ['series']);
+    },
+  );
 
   test('poster-only titles stay featured; artless titles are excluded', () {
     catalog.resume = const CatalogRowState();
@@ -429,14 +459,21 @@ void main() {
             ? find.byKey(PhoneHero.bannerKey)
             : find.byKey(const Key('home-hero-card'));
         expect(
-          find.descendant(of: caption, matching: find.text('Series')),
+          find.descendant(of: caption, matching: find.text('Movie')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: caption, matching: find.text('最新电影')),
           findsOneWidget,
         );
         expect(find.byKey(CatalogKeys.heroDot(1)), findsOneWidget);
         if (phone) {
+          // 手机轮播高度与骨架屏使用的估算一致,顶栏延伸 56 以内。
+          final expected =
+              56 + PhoneHero.contentHeightFor(width, viewportHeight: 900);
           expect(
             tester.getSize(find.byKey(PhoneHero.bannerKey)).height,
-            lessThan(width * 5 / 4 + 56),
+            inInclusiveRange(expected, expected + 24),
           );
           expect(
             find.descendant(of: caption, matching: find.byType(HeroArtwork)),
@@ -446,7 +483,11 @@ void main() {
         await tester.tap(find.byKey(CatalogKeys.heroDot(1)));
         await tester.pumpAndSettle();
         expect(
-          find.descendant(of: caption, matching: find.text('Movie')),
+          find.descendant(of: caption, matching: find.text('Series')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: caption, matching: find.text('最新剧集')),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);

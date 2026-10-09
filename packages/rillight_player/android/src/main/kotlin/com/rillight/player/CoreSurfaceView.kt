@@ -6,20 +6,23 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.SurfaceTexture
 import android.view.Gravity
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import java.nio.ByteBuffer
 import kotlin.math.roundToInt
 
-/** Hybrid-composed native layer: HDR decoder buffers never enter an SDR texture. */
+/** Native HDR layer, with an SDR-only texture workaround for affected firmware. */
 internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner) : FrameLayout(context),
-    SurfaceHolder.Callback {
-    private val video = SurfaceView(context)
+    SurfaceHolder.Callback, TextureView.SurfaceTextureListener {
+    private var video: View = SurfaceView(context)
+    private var textureSurface: Surface? = null
     private val subtitles = SubtitlePlane(context)
     private var widthPx = 0
     private var heightPx = 0
@@ -36,9 +39,22 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         video.isFocusable = false
         video.isFocusableInTouchMode = false
-        video.holder.addCallback(this)
+        (video as SurfaceView).holder.addCallback(this)
         addView(video, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
         addView(subtitles, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    fun useTextureOutput(enabled: Boolean) {
+        if (enabled == (video is TextureView)) return
+        owner.setSurface(null)
+        releaseVideoCallbacks()
+        removeView(video)
+        video = if (enabled) TextureView(context).also { it.surfaceTextureListener = this }
+                else SurfaceView(context).also { it.holder.addCallback(this) }
+        video.isFocusable = false
+        video.isFocusableInTouchMode = false
+        addView(video, 0, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
+        updateGeometry()
     }
 
     fun scale(mode: String?) { fill = mode == "fill"; updateGeometry() }
@@ -85,6 +101,7 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
         subtitles.invalidate()
         val margins = subtitleCropMargins(desiredWidth, desiredHeight, width, height, rotation)
         owner.videoGeometry(mapOf("width" to desiredWidth, "height" to desiredHeight,
+            "contentWidth" to effectiveWidth, "contentHeight" to effectiveHeight,
             "visibleWidth" to minOf(width.toFloat(), effectiveWidth * factor),
             "visibleHeight" to minOf(height.toFloat(), effectiveHeight * factor),
             "safeHorizontal" to margins.first,
@@ -102,9 +119,30 @@ internal class CoreSurfaceView(context: Context, private val owner: SurfaceOwner
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
     override fun surfaceDestroyed(holder: SurfaceHolder) { owner.setSurface(null); clearOverlay() }
 
+    override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+        textureSurface = Surface(texture)
+        owner.setSurface(textureSurface)
+    }
+    override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
+    override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+    override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+        owner.setSurface(null)
+        textureSurface?.release()
+        textureSurface = null
+        clearOverlay()
+        return true
+    }
+
+    private fun releaseVideoCallbacks() {
+        (video as? SurfaceView)?.holder?.removeCallback(this)
+        (video as? TextureView)?.surfaceTextureListener = null
+        textureSurface?.release()
+        textureSurface = null
+    }
+
     fun detach(clearOwner: Boolean = true) {
         if (clearOwner) owner.setSurface(null)
-        video.holder.removeCallback(this)
+        releaseVideoCallbacks()
         clearOverlay()
     }
 

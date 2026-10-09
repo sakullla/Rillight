@@ -12,8 +12,6 @@ import 'package:rillight/library/shelf_sort.dart';
 /// 每个片库在首页只预览一屏多一点，完整列表从标题进入。
 const int libraryLatestPreview = 12;
 
-final _libraryLatestLoads = _LoadGate(2);
-
 /// 一个片库的最近添加。各端共用这一次请求，画面由 [builder] 决定。
 class LibraryLatestData extends StatefulWidget {
   const LibraryLatestData({
@@ -109,9 +107,7 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
       sortOrder: CatalogSort.initial.sortOrder,
       fields: EmbyClient.homePosterFields,
     );
-    final network = _libraryLatestLoads.run<Object?>(
-      () async => owns() ? catalog.cache.fetch(catalog.client, request) : null,
-    );
+    final network = catalog.loadLibraryPreview(request);
     unawaited(network.then<void>((_) {}, onError: (Object _) {}));
     unawaited(() async {
       try {
@@ -135,11 +131,11 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
     }());
     try {
       final items = await network;
-      if (!owns() || items == null) {
+      if (!owns()) {
         return;
       }
       setState(() {
-        _items = parseCatalogPage(items).items;
+        _items = items;
         _loading = false;
         _error = null;
       });
@@ -182,31 +178,4 @@ String _latestTypes(EmbyItem library) {
     'tvshows' => 'Series',
     _ => 'Movie,Series',
   };
-}
-
-class _LoadGate {
-  _LoadGate(this._limit);
-
-  final int _limit;
-  var _active = 0;
-  final _waiters = <Completer<void>>[];
-
-  Future<T> run<T>(Future<T> Function() job) async {
-    if (_active >= _limit) {
-      final ticket = Completer<void>();
-      _waiters.add(ticket);
-      await ticket.future;
-    } else {
-      _active++;
-    }
-    try {
-      return await job();
-    } finally {
-      if (_waiters.isNotEmpty) {
-        _waiters.removeAt(0).complete();
-      } else {
-        _active--;
-      }
-    }
-  }
 }

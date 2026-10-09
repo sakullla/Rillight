@@ -4,11 +4,13 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
@@ -409,24 +411,25 @@ class MobileSeriesPage extends StatelessWidget {
           height:
               48 *
               (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1, 2),
-          child: ListView.separated(
-            key: const Key('phone-season-list'),
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            itemCount: seasons.length,
-            separatorBuilder: (context, index) =>
-                const SizedBox(width: AppSpacing.xs),
-            itemBuilder: (context, index) {
-              final season = seasons[index];
-              return ChoiceChip(
-                key: CatalogKeys.season(season.id),
-                label: Text(season.name),
-                selected: season.id == seasonId,
-                onSelected: (selected) {
-                  if (selected) onSelectSeason(season.id);
-                },
-              );
-            },
+          child: DetachedHorizontalScroll(
+            builder: (controller) => ListView.separated(
+              controller: controller,
+              key: const Key('phone-season-list'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              itemCount: seasons.length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.xs),
+              itemBuilder: (context, index) {
+                final season = seasons[index];
+                return OptionPill(
+                  key: CatalogKeys.season(season.id),
+                  label: season.name,
+                  selected: season.id == seasonId,
+                  onPressed: () => onSelectSeason(season.id),
+                );
+              },
+            ),
           ),
         ),
       if (episodes.isNotEmpty || episodesLoading)
@@ -468,15 +471,20 @@ class MobileSeriesPage extends StatelessWidget {
             final cardHeight = cardWidth * 9 / 16;
             return SizedBox(
               height: cardHeight,
-              child: ListView.separated(
-                key: const Key('phone-season-episode-placeholder'),
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                itemCount: cardWidth <= 0 ? 0 : 3,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(width: AppSpacing.sm),
-                itemBuilder: (context, index) =>
-                    SkeletonBlock(width: cardWidth, height: cardHeight),
+              child: DetachedHorizontalScroll(
+                builder: (controller) => ListView.separated(
+                  controller: controller,
+                  key: const Key('phone-season-episode-placeholder'),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
+                  itemCount: cardWidth <= 0 ? 0 : 3,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: AppSpacing.sm),
+                  itemBuilder: (context, index) =>
+                      SkeletonBlock(width: cardWidth, height: cardHeight),
+                ),
               ),
             );
           },
@@ -920,25 +928,28 @@ class _SimilarRow extends StatelessWidget {
         ),
         SizedBox(
           height: 128 * 1.5 + phonePosterCardLabelExtent(context),
-          child: ListView.separated(
-            key: CatalogKeys.similarRow,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            itemCount: items.length,
-            separatorBuilder: (context, index) =>
-                const SizedBox(width: AppSpacing.sm),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return SizedBox(
-                width: 128,
-                child: PhonePosterCard(
-                  item: item,
-                  pressKey: CatalogKeys.item(item.id),
-                  imageMaxWidth: 320,
-                  onTap: () => onOpenItem(item.id),
-                ),
-              );
-            },
+          child: DetachedHorizontalScroll(
+            builder: (controller) => ListView.separated(
+              controller: controller,
+              key: CatalogKeys.similarRow,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              itemCount: items.length,
+              separatorBuilder: (context, index) =>
+                  const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return SizedBox(
+                  width: 128,
+                  child: PhonePosterCard(
+                    item: item,
+                    pressKey: CatalogKeys.item(item.id),
+                    imageMaxWidth: 320,
+                    onTap: () => onOpenItem(item.id),
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ],

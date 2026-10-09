@@ -451,6 +451,108 @@ void main() {
       },
       tags: ['integration'],
     );
+
+    testWidgets(
+      'search closes in place and private entry stays hidden in the account menu',
+      (tester) async {
+        final auth = await _connect(tester);
+        final app = await _sourceApp(tester, auth as SyntheticSourceAuth);
+        await tester.pumpWidget(app);
+        await settle(tester);
+
+        expect(
+          find.descendant(
+            of: find.byKey(AppShell.topBarKey),
+            matching: find.byKey(const Key('session-source-management')),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(AppShell.topBarKey),
+            matching: find.byKey(const Key('aggregation-private-entry')),
+          ),
+          findsNothing,
+        );
+        expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
+
+        String path() => GoRouter.of(
+          tester.element(find.byKey(AppShell.topBarKey)),
+        ).state.uri.path;
+
+        await tester.tap(find.byTooltip('搜索'));
+        await settle(tester);
+        expect(find.byKey(SearchOverlay.closeKey), findsOneWidget);
+        expect(find.byKey(AppShell.searchBackKey), findsOneWidget);
+        await tester.enterText(
+          find.byKey(const Key('aggregation-keyword')),
+          'Inception',
+        );
+        await settle(tester);
+        expect(path(), AppRoutes.home);
+        await tester.tap(find.byKey(AppShell.searchBackKey));
+        await settle(tester);
+        expect(find.byKey(SearchOverlay.closeKey), findsNothing);
+        expect(find.byType(HomePage), findsOneWidget);
+        expect(path(), AppRoutes.home);
+
+        await revealHomeLibrary(tester, 'view-movies');
+        await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
+        await settle(tester);
+        expect(path(), AppRoutes.library('view-movies'));
+        await tester.tap(find.byTooltip('搜索'));
+        await settle(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await settle(tester);
+        expect(find.byKey(SearchOverlay.closeKey), findsNothing);
+        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(path(), AppRoutes.library('view-movies'));
+
+        await tester.tap(find.byTooltip('搜索'));
+        await settle(tester);
+        await tester.tap(find.byKey(SearchOverlay.closeKey));
+        await settle(tester);
+        expect(path(), AppRoutes.library('view-movies'));
+
+        await tester.tap(find.byTooltip('搜索'));
+        await settle(tester);
+        expect(
+          tester
+              .widget<IconButton>(find.byKey(AppShell.searchBackKey))
+              .onPressed,
+          isNotNull,
+        );
+        expect(
+          tester
+              .widget<IconButton>(find.byKey(SearchOverlay.closeKey))
+              .onPressed,
+          isNotNull,
+        );
+        await tester.tap(find.byKey(AppShell.searchBackKey));
+        await settle(tester);
+        expect(find.byKey(SearchOverlay.closeKey), findsNothing);
+        expect(find.byType(LibraryPage), findsOneWidget);
+        expect(path(), AppRoutes.library('view-movies'));
+
+        await tester.runAsync(() async {
+          await auth.setPrivatePin('1234', '1234');
+          await auth.regionAccess.unlock('1234');
+        });
+        await tester.tap(find.byKey(SessionActions.serverMenuKey));
+        await settle(tester);
+        expect(find.byKey(SessionActions.addServerKey), findsOneWidget);
+        expect(
+          find.byKey(ServerSwitcherDialog.changePasswordKey),
+          findsOneWidget,
+        );
+        expect(find.text('退出登录'), findsOneWidget);
+        expect(find.byKey(ServerSwitcherDialog.privateKey), findsNothing);
+        expect(find.byType(ServerSwitcherDialog), findsOneWidget);
+        expect(path(), AppRoutes.library('view-movies'));
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
   });
 }
 

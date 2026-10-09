@@ -7,6 +7,9 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
+import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/aggregation/identity/media_identity.dart';
+import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/tv_home_page.dart';
@@ -117,8 +120,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
-    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
-    await key(tester, LogicalKeyboardKey.arrowDown);
+    // 表单卡里 User-Agent 下面就是连接按钮;外观选项在左栏。
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);
@@ -185,16 +187,17 @@ void main() {
       var direction = LogicalKeyboardKey.arrowDown;
       final focus = FocusManager.instance.primaryFocus;
       if (target.evaluate().isNotEmpty && focus?.context != null) {
-        final destination = tester.getRect(target).center;
-        final current = focus!.rect.center;
-        final delta = destination - current;
-        direction = delta.dy.abs() > delta.dx.abs()
-            ? (delta.dy > 0
-                  ? LogicalKeyboardKey.arrowDown
-                  : LogicalKeyboardKey.arrowUp)
-            : (delta.dx > 0
-                  ? LogicalKeyboardKey.arrowRight
-                  : LogicalKeyboardKey.arrowLeft);
+        final destination = tester.getRect(target);
+        final current = focus!.rect;
+        // Enter the target's row before traversing horizontally. Wide shelf
+        // headings otherwise make center-distance heuristics leave the pane.
+        direction = destination.top >= current.bottom
+            ? LogicalKeyboardKey.arrowDown
+            : destination.bottom <= current.top
+            ? LogicalKeyboardKey.arrowUp
+            : destination.center.dx > current.center.dx
+            ? LogicalKeyboardKey.arrowRight
+            : LogicalKeyboardKey.arrowLeft;
       }
       await key(tester, direction);
     }
@@ -206,7 +209,7 @@ void main() {
   }
 
   Future<void> focusTitle(WidgetTester tester, String title) =>
-      focusTarget(tester, find.widgetWithText(TextButton, title), title);
+      focusTarget(tester, find.widgetWithText(TvCard, title), title);
 
   testWidgets('snapshot recovery retry is reachable from navigation', (
     tester,
@@ -375,19 +378,33 @@ void main() {
             ),
         ],
       );
-      await start(tester, server);
+      final (app, _) = await start(tester, server);
       await login(tester, server);
       final catalog = CatalogScope.of(tester.element(find.byType(TvShell)));
-      await key(tester, LogicalKeyboardKey.arrowRight);
-      await key(tester, LogicalKeyboardKey.select);
+      final registry = app.auth.sources;
+      final account = (await tester.runAsync(
+        () => registry.acquireAccount(
+          app.auth.session!.server.id,
+          region: AccessRegion.ordinary,
+          libraryId: 'view-movies',
+        ),
+      ))!;
+      final permit = registry.permit(account, libraryId: 'view-movies');
+      // The ordinary aggregation tab now shows server shelves. Query filters
+      // and pagination remain on the source-scoped shelf route.
+      app.router.push(
+        '/shelf/library?parentId=view-movies',
+        extra: PlayerHostOpenItemCommand(
+          itemId: 'view-movies',
+          source: SourceReference(account: account, itemId: 'view-movies'),
+          libraryId: 'view-movies',
+          regionGeneration: permit.regionGeneration,
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(find.byType(AggregationPage), findsOneWidget);
-      // Down enters the registered year field; its type dropdown is above.
-      await key(tester, LogicalKeyboardKey.arrowDown);
       final types = find.widgetWithText(DropdownButton<String>, '全部类型');
-      for (var step = 0; step < 8 && !focusedWithin(types); step++) {
-        await key(tester, LogicalKeyboardKey.arrowLeft);
-      }
-      expect(focusedWithin(types), isTrue);
+      await focusTarget(tester, types, '全部类型');
       await key(tester, LogicalKeyboardKey.select);
       expect(find.text('电影'), findsWidgets);
       expect(focusedAction(), findsOneWidget);
@@ -407,6 +424,11 @@ void main() {
         );
       }
       expect(more, findsOneWidget);
+      // Approach the source's pagination action from the sort column;
+      // directly below the leftmost genre field is the first poster.
+      for (var step = 0; step < 3; step++) {
+        await key(tester, LogicalKeyboardKey.arrowRight);
+      }
       await focusTarget(tester, more, '加载此来源更多');
       expect(focusedLabel(tester), '加载此来源更多');
       await key(tester, LogicalKeyboardKey.select);
@@ -449,6 +471,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowRight);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(AggregationPage), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowDown);
     await focusTitle(tester, 'Inception');
     expect(focusedLabel(tester), contains('Inception'));
     final card = FocusManager.instance.primaryFocus;

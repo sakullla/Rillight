@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -20,6 +22,9 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/library/detail_source_scope.dart';
+import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/library/server_library_page.dart';
+import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -87,8 +92,17 @@ class _Transport implements HttpClientAdapter {
       data = {
         'Id': id,
         'Name': '$host-$id-detail',
-        'Type': id == 'library' ? 'CollectionFolder' : 'Movie',
-        if (id != 'library') 'ParentId': 'library',
+        'Type': switch (id) {
+          'library' => 'CollectionFolder',
+          'episode-no-parent' => 'Episode',
+          'season-no-parent' => 'Season',
+          'series' => 'Series',
+          _ => 'Movie',
+        },
+        if (id == 'episode-no-parent') 'SeasonId': 'season-no-parent',
+        if (id.endsWith('-no-parent')) 'SeriesId': 'series',
+        if (id != 'library' && !id.endsWith('-no-parent'))
+          'ParentId': 'library',
         if (id != 'library') 'ImageTags': {'Primary': 'synthetic-$host'},
       };
     }
@@ -106,6 +120,163 @@ class _Transport implements HttpClientAdapter {
 }
 
 void main() {
+  testWidgets(
+    'server shelf play and detail retain source and concrete parent',
+    (tester) async {
+      final transport = _Transport();
+      EmbyClient client() => EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'test',
+          deviceId: 'source-card',
+          version: '1',
+        ),
+        dio: Dio()..httpClientAdapter = transport,
+      );
+      final store = MemoryServerListStore(
+        ServerListSnapshot(
+          lastServerId: 'a',
+          servers: [
+            for (final id in ['a', 'b'])
+              SavedServer(
+                id: id,
+                name: id,
+                username: 'synthetic',
+                libraryIds: const ['library'],
+                scopeKnown: true,
+                lines: [ServerLine(id: 'line', address: 'https://$id')],
+              ),
+          ],
+        ),
+      );
+      final credentials = MemoryCredentialStore({
+        for (final id in ['a', 'b'])
+          id: StoredCredentials(
+            accessToken: 'token-$id',
+            userId: 'user-$id',
+            username: 'synthetic',
+          ),
+      });
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: credentials,
+        createClient: client,
+      );
+      await tester.runAsync(registry.load);
+      final account = (await tester.runAsync(
+        () => registry.authenticate('b'),
+      ))!.account;
+      final auth = AuthController(
+        client: client(),
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      await tester.runAsync(auth.restore);
+      final host = OverlayPlayerWindowHost();
+      const item = EmbyItem(
+        id: 'episode-no-parent',
+        name: 'Episode',
+        type: 'Episode',
+        parentId: 'virtual-resume-folder',
+        seriesId: 'series',
+      );
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, _) => Scaffold(
+              body: Center(
+                child: scopeServerPosters(
+                  account: account,
+                  serverId: 'b',
+                  child: PosterCard(
+                    item: item,
+                    wide: true,
+                    onTap: () =>
+                        openServerItem(context, account: account, item: item),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: '/item/:id',
+            builder: (context, state) => SourceDetailGate(
+              auth: auth,
+              itemId: state.pathParameters['id']!,
+              command: state.extra as PlayerHostOpenItemCommand,
+              showComparison: false,
+              child: Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('source-detail-ready'),
+                      PosterCard(item: item, wide: true, onTap: () {}),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        AuthScope(
+          controller: auth,
+          child: PlayerWindowScope(
+            host: host,
+            child: MaterialApp.router(
+              routerConfig: router,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await pointer.addPointer(location: Offset.zero);
+      await pointer.moveTo(tester.getCenter(find.byType(PosterCard)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(PosterCard.playButtonKey(item.id)));
+      await tester.pumpAndSettle();
+      expect(host.current?.source?.account, account);
+      expect(host.current?.itemId, item.id);
+      expect(host.current?.libraryId, 'season-no-parent');
+      expect(host.current?.autoResume, isTrue);
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(PosterCard)) + const Offset(12, 12),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('source-detail-ready'), findsOneWidget);
+      expect(
+        (router.state.extra as PlayerHostOpenItemCommand).libraryId,
+        'season-no-parent',
+      );
+      expect(auth.session?.server.id, 'a');
+      await host.close();
+      await pointer.moveTo(tester.getCenter(find.byType(PosterCard)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(PosterCard.playButtonKey(item.id)));
+      await tester.pumpAndSettle();
+      expect(host.current?.source?.account, account);
+      expect(host.current?.libraryId, 'season-no-parent');
+      expect(
+        transport.requests.where(
+          (r) => r.uri.host == 'a' && r.path.endsWith('/Items/${item.id}'),
+        ),
+        isEmpty,
+      );
+      await pointer.removePointer();
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      host.dispose();
+      auth.dispose();
+    },
+  );
   testWidgets(
     'private B gate keeps poster and chapters off disk and evicts only B on lock',
     (tester) async {
@@ -335,8 +506,20 @@ void main() {
             ),
           );
         }
-        await Future<void>.delayed(const Duration(milliseconds: 20));
       });
+      // Pump both the widget zone and real transport until dispatch, rather
+      // than assuming the Windows runner completes it within 20 ms.
+      for (var frame = 0; frame < 100; frame++) {
+        if (transport.requests.any(
+          (r) => r.uri.path.endsWith('/Images/Chapter/1'),
+        )) {
+          break;
+        }
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
       expect(
         transport.requests.where(
           (r) => r.uri.path.contains('/Items/late-poster/Images/'),
@@ -451,7 +634,7 @@ void main() {
     PresentationEnvironment.phone,
     PresentationEnvironment.tv,
   ]) {
-    for (final id in ['same-id', 'different-b-id']) {
+    for (final id in ['same-id', 'different-b-id', 'episode-no-parent']) {
       testWidgets(
         '${environment.presentation.name} Auth A receives B detail $id without naked-ID fallback',
         (tester) async {
@@ -541,7 +724,7 @@ void main() {
           expect(auth.session!.server.id, 'a');
           // Source-local cards remain usable, but unadapted bare-ID shelf
           // expansion must not leave this scope and request selected Auth A.
-          if (environment.isDesktop) {
+          if (environment.isDesktop && id != 'episode-no-parent') {
             final similarShelf = tester.widget<MediaShelf>(
               find.byWidgetPredicate(
                 (widget) =>
@@ -550,7 +733,7 @@ void main() {
               ),
             );
             expect(similarShelf.onMore, isNull);
-          } else if (!environment.isTv) {
+          } else if (!environment.isTv && id != 'episode-no-parent') {
             final more = tester.widget<TextButton>(
               find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar)),
             );
@@ -661,4 +844,151 @@ void main() {
       );
     }
   }
+
+  testWidgets(
+    'source detail keeps showComparison off across a related item and shows it without the query',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      MediaImageCache.instance.clearMemory();
+      MediaImageCache.instance.debugSetDiskStore(_ImageDisk());
+      addTearDown(() {
+        MediaImageCache.instance.clearMemory();
+        MediaImageCache.instance.debugSetDiskStore(null);
+      });
+      final transport = _Transport();
+      EmbyClient client() => EmbyClient(
+        device: const EmbyDeviceInfo(
+          clientName: 'test',
+          deviceName: 'test',
+          deviceId: 'detail',
+          version: '1',
+        ),
+        dio: Dio()..httpClientAdapter = transport,
+      );
+      final store = MemoryServerListStore(
+        ServerListSnapshot(
+          lastServerId: 'a',
+          servers: [
+            for (final server in ['a', 'b'])
+              SavedServer(
+                id: server,
+                name: server,
+                username: 'synthetic',
+                libraryIds: const ['library'],
+                scopeKnown: true,
+                lines: [ServerLine(id: 'line', address: 'https://$server')],
+              ),
+          ],
+        ),
+      );
+      final credentials = MemoryCredentialStore({
+        for (final server in ['a', 'b'])
+          server: StoredCredentials(
+            accessToken: 'token-$server',
+            userId: 'user-$server',
+            username: 'synthetic',
+          ),
+      });
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: credentials,
+        createClient: client,
+      );
+      await tester.runAsync(registry.load);
+      final account = (await tester.runAsync(
+        () => registry.authenticate('b'),
+      ))!.account;
+      final auth = AuthController(
+        client: client(),
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      await tester.runAsync(auth.restore);
+      final router = createAppRouter(
+        auth: auth,
+        environment: PresentationEnvironment.desktop,
+      );
+      await tester.pumpWidget(
+        RillightApp(
+          auth: auth,
+          router: router,
+          environment: PresentationEnvironment.desktop,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final permit = registry.permit(account, libraryId: 'library');
+      PlayerHostOpenItemCommand commandFor(String itemId) =>
+          PlayerHostOpenItemCommand(
+            itemId: itemId,
+            source: SourceReference(account: account, itemId: itemId),
+            libraryId: 'library',
+            regionGeneration: permit.regionGeneration,
+          );
+      router.go(
+        AppRoutes.item('movie', showComparison: false),
+        extra: commandFor('movie'),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('查找同源'), findsNothing);
+      expect(
+        tester
+            .widget<SourceDetailGate>(find.byType(SourceDetailGate))
+            .showComparison,
+        isFalse,
+      );
+      final similar = find.byKey(CatalogKeys.item('similar'));
+      await tester.ensureVisible(similar);
+      await tester.pump();
+      await tester.tap(similar);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(router.state.uri.path, '/item/similar');
+      expect(router.state.uri.queryParameters['showComparison'], '0');
+      expect(find.text('查找同源'), findsNothing);
+      expect(
+        tester
+            .widgetList<SourceDetailGate>(find.byType(SourceDetailGate))
+            .last
+            .showComparison,
+        isFalse,
+      );
+      router.go(AppRoutes.item('movie'), extra: commandFor('movie'));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        router.state.uri.queryParameters.containsKey('showComparison'),
+        isFalse,
+      );
+      expect(find.text('查找同源'), findsOneWidget);
+      expect(
+        tester
+            .widget<SourceDetailGate>(find.byType(SourceDetailGate))
+            .showComparison,
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      auth.dispose();
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+      }
+    },
+    tags: ['integration'],
+  );
 }

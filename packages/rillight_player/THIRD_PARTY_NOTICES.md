@@ -43,6 +43,14 @@ pin alone does not certify that a bundled binary came from that source.
   were copied from the pinned source commits. The actual linked source and
   license closure must still be checked against each packaged ABI.
 
+- **Chromium CRC32 PCLMUL folding**: the x86 IEEE checksum kernel is adapted
+  from [Chromium 134.0.6998.35](https://github.com/chromium/chromium/blob/134.0.6998.35/third_party/zlib/crc32_simd.c)
+  (upstream file SHA256 `96551ac987306d6dcc4fda16f3677b996b0368975e3758d26bda282192804e6d`).
+  Copyright 2017 The Chromium Authors, [BSD-3-Clause](native/licenses/chromium-crc32-BSD-3-Clause.txt).
+  The standalone adaptation only changes types, naming, alignment and the
+  function-local ISA target. It is compiled from candidate source as a Dart
+  native asset on all platforms; ARM uses the owned CRC32-instruction path.
+
 Windows, macOS, Linux and Android may additionally use system hardware decode
 and output APIs. The release bundle's exact dependency list, loaded versions,
 source and license material must be checked for that target. A 2026-09-26

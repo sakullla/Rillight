@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/source_route_extra_codec.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
@@ -17,6 +18,7 @@ import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
@@ -28,8 +30,11 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/player_host_command.dart';
-import 'package:rillight/aggregation/query/aggregation_query.dart'
-    show SourceReference;
+import 'package:rillight/aggregation/query/aggregation_query.dart';
+import 'package:rillight/aggregation/query/same_source_query.dart';
+import 'package:rillight/library/episode_mapping_dialog.dart';
+import 'package:rillight/library/poster_card.dart';
+import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -45,6 +50,7 @@ import 'package:rillight/auth/source_management.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_mailbox.dart';
 
 class _Movie extends FakeEmbyItem {
   _Movie()
@@ -104,12 +110,34 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
   final Map<int, PlayerProcessProtocol> protocols = {};
   final Set<int> alive = {};
   final StringBuffer output = StringBuffer();
+
+  // This fixture exercises cold, simulated player windows. It does not host
+  // the native prewarmed-engine entry point (covered by process-control tests).
+  @override
+  Future<void> prepare({required String executable}) async {}
+
   @override
   Future<int> launch(String executable, String payloadPath) async {
     final json =
         jsonDecode(await File(payloadPath).readAsString())
             as Map<String, dynamic>;
     final launch = PlayerWindowLaunch.fromJson(json);
+    // Flutter copies native assets into build/native_assets before each test
+    // invocation. Windows cannot replace a DLL loaded by the parent suite.
+    // Give only this child a private Flutter config/output directory; keep its
+    // source, SDK, native hooks and IPC protocol identical to the parent.
+    Directory? childConfig;
+    if (Platform.isWindows) {
+      childConfig = await Directory.systemTemp.createTemp(
+        'rillight-ipc-config-',
+      );
+      await File('${childConfig.path}/.flutter_settings').writeAsString(
+        jsonEncode({
+          'build-dir':
+              'build/ipc-helper-$pid-${DateTime.now().microsecondsSinceEpoch}',
+        }),
+      );
+    }
     final child = await Process.start(
       'flutter',
       [
@@ -119,7 +147,10 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
         'expanded',
         'test/helpers/desktop_ipc_fixture.dart',
       ],
-      environment: {'RILLIGHT_TEST_LAUNCH': payloadPath},
+      environment: {
+        'RILLIGHT_TEST_LAUNCH': payloadPath,
+        if (childConfig != null) 'APPDATA': childConfig.path,
+      },
       // Flutter is a .bat entrypoint on Windows; direct CreateProcess cannot
       // resolve it as an executable without the command shell.
       runInShell: Platform.isWindows,
@@ -128,15 +159,17 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
     child.stderr.transform(utf8.decoder).listen(output.write);
     var finished = false;
     unawaited(
-      child.exitCode.then((_) {
+      child.exitCode.then((_) async {
         finished = true;
         alive.removeWhere((id) => children[id] == child);
+        await childConfig?.delete(recursive: true);
       }),
     );
     final deadline = DateTime.now().add(const Duration(seconds: 65));
     while (!finished && DateTime.now().isBefore(deadline)) {
-      // The helper's parent timeout is 15s, but nested flutter test startup
-      // often takes longer. Keep the mailbox alive until ready is visible.
+      // Unlike native CreateProcess, this launch waits for Flutter to compile
+      // the child. Keep the parent's lease alive during that wait; otherwise
+      // a compilation over 15 seconds makes the child immediately self-close.
       await launch.protocol!.heartbeat();
       final ready = await launch.protocol!.read('ready', consume: false);
       if (ready != null) {
@@ -298,6 +331,28 @@ Future<void> _settle(WidgetTester tester) async {
   }
 }
 
+Future<void> _drive(WidgetTester tester, Future<void> work) async {
+  var finished = false;
+  Object? failure;
+  unawaited(
+    work.then(
+      (_) => finished = true,
+      onError: (Object error) {
+        failure = error;
+        finished = true;
+      },
+    ),
+  );
+  for (var frame = 0; frame < 80 && !finished; frame++) {
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+  if (failure != null) throw failure!;
+  if (!finished) throw StateError('playback switch did not finish');
+}
+
 Future<void> _finishRevocation(
   WidgetTester tester,
   Future<void> transaction,
@@ -323,6 +378,34 @@ Future<void> _finishRevocation(
   if (failure != null) throw failure!;
 }
 
+Future<void> _openOwnedDetail(
+  WidgetTester tester,
+  _Fixture f,
+  RillightApp app, {
+  required String serverId,
+  required String itemId,
+  String libraryId = 'view-movies',
+}) async {
+  final account = await tester.runAsync(
+    () => f.auth.sources.acquireAccount(
+      serverId,
+      region: AccessRegion.ordinary,
+      libraryId: libraryId,
+    ),
+  );
+  final permit = f.auth.sources.permit(account!, libraryId: libraryId);
+  app.router.go(
+    '/item/$itemId',
+    extra: PlayerHostOpenItemCommand(
+      itemId: itemId,
+      source: SourceReference(account: account, itemId: itemId),
+      libraryId: libraryId,
+      regionGeneration: permit.regionGeneration,
+    ),
+  );
+  await _settle(tester);
+}
+
 Future<Uint8List> _png(Color color) async {
   final recorder = ui.PictureRecorder();
   Canvas(
@@ -336,7 +419,124 @@ Future<Uint8List> _png(Color color) async {
   return data!.buffer.asUint8List();
 }
 
+Future<void> _confirmSwitch(PlayerController controller) async {
+  final plan = controller.switchConfirmation;
+  if (plan == null) return;
+  await controller.confirmMediaSourceSwitch(
+    SwitchResumeChoice.beginning,
+    acceptDefaultAudio: plan.audioNeedsChoice,
+    turnSubtitlesOff: plan.subtitleNeedsChoice,
+  );
+}
+
+Future<SameSourceQueryController> _comparisons(
+  PlayerController controller,
+) async {
+  final origin = controller.origin!;
+  final runtime = controller.runtime!;
+  final dto = await origin.permit.dispatch(
+    (client) => client.getItem(origin.work.itemId),
+  );
+  final comparison = SameSourceQueryController(
+    registry: runtime.registry,
+    history: runtime.history,
+  );
+  await comparison.start(
+    origin: QueryItem(origin.work, origin.libraryId, dto),
+    scope: QueryScope(region: origin.source.account.region),
+  );
+  return comparison;
+}
+
+Future<void> _switchConfirmedServer(
+  PlayerController controller,
+  String serverId,
+) async {
+  final origin = controller.origin!;
+  final runtime = controller.runtime!;
+  final comparison = await _comparisons(controller);
+  try {
+    final candidate = comparison.comparisons.firstWhere(
+      (item) =>
+          item.decision.confirmed &&
+          item.source.reference.account.configuredServerId == serverId,
+    );
+    final target = await runtime.resolve(
+      PlayerOpenRequest(
+        itemId: candidate.source.reference.itemId,
+        source: candidate.source.reference,
+        work: candidate.source.reference.item,
+        libraryId: candidate.source.libraryId,
+        regionGeneration: origin.permit.regionGeneration,
+      ),
+    );
+    final info = await target.permit.dispatch(
+      (client) => client.getPlaybackInfo(itemId: target.source.itemId),
+    );
+    await controller.switchConfirmedSource(
+      candidate,
+      info.mediaSources.first.id,
+    );
+    await _confirmSwitch(controller);
+  } finally {
+    comparison.dispose();
+  }
+}
+
+Future<void> _switchMappedEpisode(
+  PlayerController controller,
+  String serverId,
+) async {
+  final origin = controller.origin!;
+  final runtime = controller.runtime!;
+  final item = controller.item!;
+  final comparison = await _comparisons(controller);
+  try {
+    final candidate = comparison.comparisons.firstWhere(
+      (entry) =>
+          entry.decision.confirmed &&
+          entry.source.reference.account.configuredServerId == serverId,
+    );
+    await comparison.lookupEpisode(
+      target: candidate.source,
+      episode: withConfirmedEpisodeMapping(
+        EpisodeSource.fromEmby(origin.source, item),
+      ),
+      verifiedNumberingScheme: userConfirmedEpisodeNumbering,
+    );
+    final result = comparison.episodes
+        .where((entry) => entry.target == candidate.source.reference)
+        .first;
+    final reference = result.lookup.source!.reference;
+    final target = await runtime.resolve(
+      PlayerOpenRequest(
+        itemId: reference.itemId,
+        source: reference,
+        work: candidate.source.reference.item,
+        libraryId: candidate.source.libraryId,
+        regionGeneration: origin.permit.regionGeneration,
+      ),
+    );
+    final info = await target.permit.dispatch(
+      (client) => client.getPlaybackInfo(itemId: target.source.itemId),
+    );
+    await controller.switchConfirmedSource(
+      candidate,
+      info.mediaSources.first.id,
+      episode: result,
+    );
+    await _confirmSwitch(controller);
+  } finally {
+    comparison.dispose();
+  }
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  // WebSocket caches its HTTP client on first use. Initialize it under the
+  // widget binding's HTTP override, before any runAsync enters the real zone.
+  // These catalog fixtures use synthetic .test hosts, never real DNS/sockets.
+  WebSocket.userAgent = 'Rillight synthetic catalog tests';
   testWidgets(
     'B album save chooser receipt cannot save bytes after source migration',
     (tester) async {
@@ -350,12 +550,13 @@ void main() {
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final album = find.byType(DetailAlbumStrip);
       await tester.ensureVisible(album);
       await _settle(tester);
@@ -426,10 +627,7 @@ void main() {
           await f.auth.sources.renameLine(f.aId, saved.lines.last.id, '备用线路');
           session = await f.auth.sources.authenticate(f.aId);
         });
-        final permit = f.auth.sources.permit(
-          session.account,
-          libraryId: 'view-movies',
-        );
+        f.auth.sources.permit(session.account, libraryId: 'view-movies');
         final activeClient = f.auth.client;
         final activeUrl = activeClient.baseUrl;
         tester.view.physicalSize = environment.isTv
@@ -451,9 +649,15 @@ void main() {
           await tester.tap(find.byType(NavigationDestination).at(1));
         }
         await _settle(tester);
-        await tester.tap(
-          find.byKey(const Key('aggregation-source-management')),
+        final management = find.byKey(
+          const Key('aggregation-source-management'),
         );
+        if (environment.isTv) {
+          expect(management, findsNothing);
+          showSourceManagement(tester.element(find.byType(AggregationPage)));
+        } else {
+          await tester.tap(management);
+        }
         await _settle(tester);
         expect(find.byType(SourceManagement), findsOneWidget);
         final check = find.byKey(
@@ -501,8 +705,13 @@ void main() {
           findsOneWidget,
         );
         expect(updated.activeLineId, saved.activeLineId);
-        expect(permit.isValid, isTrue);
-        expect(session.client.hasSession, isTrue);
+        expect(
+          f.auth.sources
+              .permit(session.account, libraryId: 'view-movies')
+              .isValid,
+          isTrue,
+        );
+        expect(session.account.configuredServerId, f.aId);
         expect(f.auth.client, same(activeClient));
         expect(f.auth.client.baseUrl, activeUrl);
         expect(
@@ -565,7 +774,7 @@ void main() {
     );
   }
   testWidgets(
-    'desktop actual helper menu file IPC switches B to A viewing receipt then migration busy private lock rejects old writer token',
+    'desktop helper hides lines on one server then private lock rejects a stale writer',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
@@ -610,12 +819,13 @@ void main() {
       await _settle(tester);
       await tester.tap(find.text('聚合').first);
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final play = find.widgetWithText(FilledButton, '播放').first;
       await tester.ensureVisible(play);
       await tester.tap(play);
@@ -657,38 +867,37 @@ void main() {
         lessThan(positions.indexOf(110000000)),
         reason: 'positions=$positions\n${control.output}',
       );
-      // Drive the actual SourceSwitchMenu in the isolated Flutter helper. Its
-      // controller sends real file RPC; the main process retains one writer.
+      // A one-line server hides 线路. The helper must not offer another server,
+      // a version, or a timeline confirmation.
       await tester.runAsync(
         () => File(
           '${control.protocols[pid]!.directory.path}/synthetic-menu.json',
-        ).writeAsString(jsonEncode({'action': 'switch', 'targetId': f.aId})),
+        ).writeAsString(jsonEncode({'action': 'lines'})),
       );
-      for (var i = 0; i < 1200; i++) {
+      Map<String, dynamic>? lineReceipt;
+      final menuDeadline = DateTime.now().add(const Duration(seconds: 12));
+      while (lineReceipt == null && DateTime.now().isBefore(menuDeadline)) {
         await tester.pump(const Duration(milliseconds: 30));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 30)),
-        );
-        if (f.history
-            .records(AccessRegion.ordinary)
-            .any(
-              (r) =>
-                  r.source.account.configuredServerId == f.aId &&
-                  r.positionTicks == 70000000,
-            )) {
-          break;
-        }
+        lineReceipt = await tester.runAsync<Map<String, dynamic>?>(() async {
+          final file = File(
+            '${control.protocols[pid]!.directory.path}/synthetic-menu-receipt.json',
+          );
+          final receipt = await consumeSyntheticMessage(file);
+          // The helper polls in a real process; fake Flutter time cannot
+          // guarantee it has processed the menu request under parallel load.
+          if (receipt == null) {
+            await Future<void>.delayed(const Duration(milliseconds: 30));
+          }
+          return receipt;
+        });
       }
+      expect(lineReceipt, isNotNull, reason: control.output.toString());
+      expect(lineReceipt!['lines'], lessThan(2));
       expect(
         host.current?.source?.account.configuredServerId,
-        f.aId,
+        f.bId,
         reason: control.output.toString(),
       );
-      final targetRecord = f.history.records(AccessRegion.ordinary).first;
-      expect(targetRecord.source.account.configuredServerId, f.aId);
-      expect(targetRecord.source.itemId, 'shared-id');
-      expect(targetRecord.source.mediaSourceId, 'shared-id');
-      expect(targetRecord.positionTicks, 70000000);
       expect(
         f.history
             .records(AccessRegion.ordinary)
@@ -699,6 +908,23 @@ void main() {
             ),
         isTrue,
       );
+      expect(
+        f.history
+            .records(AccessRegion.ordinary)
+            .every((r) => r.source.account.configuredServerId != f.aId),
+        isTrue,
+      );
+      late Future<void> closingPlayback;
+      await tester.runAsync(() async {
+        closingPlayback = host.close();
+      });
+      for (var i = 0; i < 120 && host.current != null; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 30)),
+        );
+      }
+      await tester.runAsync(() => closingPlayback);
       await tester.runAsync(() async {
         await f.auth.setPrivatePin('1234', '1234');
         await f.auth.regionAccess.unlock('1234');
@@ -732,7 +958,12 @@ void main() {
       await _settle(tester);
       await tester.ensureVisible(find.widgetWithText(FilledButton, '播放').first);
       await tester.tap(find.widgetWithText(FilledButton, '播放').first);
-      for (var i = 0; i < 1200; i++) {
+      // The real helper launch allows 70 seconds, including native asset and
+      // Flutter compilation. Its observation deadline must not expire first.
+      final privateHelperDeadline = DateTime.now().add(
+        const Duration(seconds: 80),
+      );
+      while (DateTime.now().isBefore(privateHelperDeadline)) {
         await tester.pump(const Duration(milliseconds: 30));
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 30)),
@@ -743,7 +974,9 @@ void main() {
           break;
         }
       }
-      final privateRecord = f.history.records(AccessRegion.private).first;
+      final privateRecords = f.history.records(AccessRegion.private);
+      expect(privateRecords, isNotEmpty, reason: control.output.toString());
+      final privateRecord = privateRecords.first;
       expect(
         privateRecord.source.account.configuredServerId,
         f.aId,
@@ -796,11 +1029,18 @@ void main() {
           ).writeAsString(jsonEncode(command)),
         );
         Map<String, dynamic>? receipt;
-        for (var frame = 0; frame < 80 && receipt == null; frame++) {
+        final receiptDeadline = DateTime.now().add(const Duration(seconds: 4));
+        while (receipt == null && DateTime.now().isBefore(receiptDeadline)) {
           await tester.pump(const Duration(milliseconds: 50));
-          receipt = await tester.runAsync<Map<String, dynamic>?>(
-            () => privateEndpoint.read('lock-reply'),
-          );
+          receipt = await tester.runAsync<Map<String, dynamic>?>(() async {
+            final reply = await privateEndpoint.read('lock-reply');
+            // The helper is a real process; pumping Flutter's fake clock
+            // alone does not give its filesystem polling time to run.
+            if (reply == null) {
+              await Future<void>.delayed(const Duration(milliseconds: 30));
+            }
+            return reply;
+          });
         }
         expect(receipt?['sequence'], command['sequence']);
         expect(receipt?['accepted'], isFalse, reason: 'Invalid lock $index');
@@ -893,19 +1133,13 @@ void main() {
       });
       await tester.pumpWidget(app);
       await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      final cardFocus = FocusManager.instance.primaryFocus;
-      for (var frame = 0; frame < 8; frame++) {
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(FocusManager.instance.primaryFocus, same(cardFocus));
-      }
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       expect(find.byType(TvDetailPage), findsOneWidget);
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await _settle(tester);
@@ -967,14 +1201,13 @@ void main() {
       });
       await tester.pumpWidget(app);
       await _settle(tester);
-      await tester.tap(find.byType(NavigationDestination).at(1));
-      await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       await tester.ensureVisible(find.byKey(const Key('mobile-detail-play')));
       await tester.tap(find.byKey(const Key('mobile-detail-play')));
       await _settle(tester);
@@ -992,40 +1225,10 @@ void main() {
             .configuredServerId,
         f.bId,
       );
-      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      expect(find.text('手动切换'), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
+      await _drive(tester, _switchConfirmedServer(c, f.aId));
       await _settle(tester);
-      await tester.ensureVisible(find.byKey(const Key('player-manual-switch')));
-      await tester.tap(find.byKey(const Key('player-manual-switch')));
-      await _settle(tester);
-      expect(find.byType(SourceSwitchMenu), findsOneWidget);
-      final target = find.byWidgetPredicate(
-        (w) =>
-            w is ListTile &&
-            w.key is ValueKey<String> &&
-            (w.key as ValueKey<String>).value.startsWith(
-              'switch-target-${f.aId}-',
-            ),
-      );
-      await tester.ensureVisible(target);
-      await tester.tap(target);
-      await _settle(tester);
-      if (c.switchConfirmation != null) {
-        if (c.switchConfirmation!.audioNeedsChoice) {
-          final choice = find.byType(CheckboxListTile).first;
-          await tester.ensureVisible(choice);
-          await tester.tap(choice);
-          await _settle(tester);
-        }
-        if (c.switchConfirmation!.subtitleNeedsChoice) {
-          final choice = find.byType(CheckboxListTile).last;
-          await tester.ensureVisible(choice);
-          await tester.tap(choice);
-          await _settle(tester);
-        }
-        await tester.ensureVisible(find.text('从头播放'));
-        await tester.tap(find.text('从头播放'));
-        await _settle(tester);
-      }
       // Opening a target is pending, not proof of viewing. The actual backend
       // observation commits active provenance and the sole writer's record.
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 11));
@@ -1048,8 +1251,6 @@ void main() {
         isTrue,
       );
       // Changing the selected ordinary account must not retarget playback A.
-      await tester.tap(find.text('取消').last);
-      await _settle(tester);
       await tester.runAsync(() => f.auth.switchTo(f.bId));
       await _settle(tester);
       expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -1070,7 +1271,7 @@ void main() {
       debugPrint('T7 phone: A membership revoked');
       await _settle(tester);
       expect(backend.isPlaying, isFalse);
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       debugPrint('T7 phone: entering private A');
       app.router.go('/private');
       await _settle(tester);
@@ -1081,21 +1282,18 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-detail-play')));
       await _settle(tester);
       expect(backend.isPlaying, isTrue);
-      await tester.tap(find.byKey(const Key('mobile-player-more')));
-      await _settle(tester);
-      await tester.ensureVisible(find.byKey(const Key('player-manual-switch')));
-      await tester.tap(find.byKey(const Key('player-manual-switch')));
-      await _settle(tester);
+      expect(find.byKey(const Key('player-lock-private')), findsNothing);
       debugPrint('T7 phone: locking actual private player');
-      await tester.runAsync(
-        () => tester.tap(find.byKey(const Key('player-lock-private'))),
-      );
+      final privatePlayer = tester
+          .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+          .controller!;
+      await tester.runAsync(privatePlayer.lockPrivateRegion);
       debugPrint('T7 phone: lock tap dispatched');
       await _settle(tester);
       debugPrint('T7 phone: lock frame settled');
       expect(f.auth.regionAccess.allows(AccessRegion.private), isFalse);
       expect(backend.isPlaying, isFalse);
-      expect(find.byType(SourceSwitchMenu), findsNothing);
+      expect(find.byType(PlaybackLineMenu), findsNothing);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
       await _settle(tester);
       debugPrint('T7 phone: rejected late frame');
@@ -1127,12 +1325,13 @@ void main() {
       await _settle(tester);
       await tester.tap(find.byType(NavigationDestination).at(1));
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final play = find.byKey(const Key('mobile-detail-play'));
       await tester.ensureVisible(play);
       await tester.pump();
@@ -1249,12 +1448,13 @@ void main() {
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       final album = find.byType(DetailAlbumStrip);
       await tester.ensureVisible(album);
       await _settle(tester);
@@ -1378,75 +1578,21 @@ void main() {
         control!.context!.findAncestorWidgetOfExactType<AggregationPage>(),
         isNotNull,
       );
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _settle(tester);
+      expect(find.text('继续播放'), findsWidgets);
+      expect(find.text('收藏'), findsWidgets);
+      expect(find.text('媒体库'), findsWidgets);
       expect(
-        find.byType(ItemDetailPage),
+        find.byKey(const Key('aggregation-source-management')),
         findsNothing,
-      ); // TV uses its own detail tree.
-      expect(find.byType(DetailSourceScope), findsWidgets);
-      app.router.pop();
-      await _settle(tester);
-      expect(FocusManager.instance.primaryFocus, same(control));
-      for (var i = 0; i < 8; i++) {
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(FocusManager.instance.primaryFocus, same(control));
-      }
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _settle(tester);
-      final compareNode = FocusManager.instance.primaryFocus;
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _settle(tester);
-      expect(find.byType(Dialog), findsOneWidget);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await _settle(tester);
-      expect(find.byType(Dialog), findsNothing);
-      expect(FocusManager.instance.primaryFocus, same(compareNode));
-      for (var i = 0; i < 6; i++) {
-        if (FocusManager.instance.primaryFocus?.context
-                ?.findAncestorWidgetOfExactType<FilterChip>() !=
-            null) {
-          break;
-        }
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-        await _settle(tester);
-      }
-      final chip = FocusManager.instance.primaryFocus?.context
-          ?.findAncestorWidgetOfExactType<FilterChip>();
-      expect(chip, isNotNull);
-      for (var i = 0; i < 3; i++) {
-        if (FocusManager.instance.primaryFocus?.context
-                ?.findAncestorWidgetOfExactType<FilterChip>()
-                ?.key ==
-            ValueKey('aggregation-source-${f.bId}')) {
-          break;
-        }
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await _settle(tester);
-      }
-      expect(
-        FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<FilterChip>()
-            ?.key,
-        ValueKey('aggregation-source-${f.bId}'),
       );
-      final chipNode = FocusManager.instance.primaryFocus;
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      expect(find.byKey(const Key('aggregation-private-entry')), findsNothing);
+      expect(find.text('查找同源'), findsNothing);
+      expect(find.byType(FilterChip), findsNothing);
+      await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
       await _settle(tester);
-      for (var i = 0; i < 8; i++) {
-        await tester.pump(const Duration(milliseconds: 80));
-        expect(FocusManager.instance.primaryFocus, same(chipNode));
-      }
-      expect(
-        tester
-            .widget<FilterChip>(
-              find.byKey(ValueKey('aggregation-source-${f.bId}')),
-            )
-            .selected,
-        isFalse,
-      );
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.byType(ItemDetailPage), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -1480,16 +1626,23 @@ void main() {
       expect(input, findsNothing);
       await openSearch();
       await tester.enterText(input, '合成');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.byType(FilterChip), findsNothing);
+      expect(find.text('媒体库范围'), findsNothing);
       await tester.ensureVisible(find.text('合成作品').last);
       await tester.pump();
       await tester.tap(find.text('合成作品').last);
       await _settle(tester);
       expect(input, findsNothing);
       expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(f.auth.session!.server.id, f.aId);
       app.router.pop();
       await _settle(tester);
-      expect(find.text('查找同源 · 2'), findsOneWidget);
+      expect(find.text('继续播放'), findsWidgets);
+      expect(find.text('查找同源'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -1638,12 +1791,13 @@ void main() {
     PresentationEnvironment.tv,
   ]) {
     testWidgets(
-      '${environment.presentation.name} real entry merges allowed sources, filters first, and keeps successful sibling on retry',
+      '${environment.presentation.name} real entry shows server rows and retries only the failed server',
       (tester) async {
         isolateImageCache();
         final f = _Fixture();
         await tester.runAsync(f.open);
         addTearDown(f.close);
+        f.b.viewsStatus = 503;
         tester.view.physicalSize = environment.isTv
             ? const Size(1920, 1080)
             : environment.isDesktop
@@ -1664,60 +1818,51 @@ void main() {
         }
         await _settle(tester);
         expect(find.byType(AggregationPage), findsOneWidget);
-        expect(find.text('查找同源 · 2'), findsOneWidget);
-        final bFilter = find.byKey(ValueKey('aggregation-source-${f.bId}'));
-        if (environment.isTv) {
-          final focus = find
-              .descendant(of: bFilter, matching: find.byType(Focus))
-              .first;
-          Focus.of(
-            tester.element(
-              find
-                  .descendant(of: focus, matching: find.byType(Semantics))
-                  .first,
-            ),
-          ).requestFocus();
-          await tester.pump();
-          await tester.sendKeyEvent(LogicalKeyboardKey.select);
-        } else {
-          await tester.tap(bFilter);
-        }
-        await _settle(tester);
-        expect(find.text('查找同源 · 1'), findsOneWidget);
-        await tester.tap(find.byKey(ValueKey('aggregation-source-${f.aId}')));
-        await _settle(tester);
-        expect(find.text('未选择可参与的服务或媒体库'), findsOneWidget);
-        f.b.itemsStatus = 503;
-        await tester.tap(find.widgetWithText(FilterChip, '全部普通来源'));
-        await _settle(tester);
-        expect(find.text('部分来源失败，已保留成功结果'), findsOneWidget);
-        expect(find.textContaining('已加载作品: 1'), findsOneWidget);
-        f.b.itemsStatus = null;
-        await tester.ensureVisible(find.text('重试此来源'));
-        await tester.pump();
-        await tester.tap(find.text('重试此来源'));
-        await _settle(tester);
-        await tester.scrollUntilVisible(
-          find.text('查找同源 · 2'),
-          120,
-          scrollable: find
-              .descendant(
-                of: find.byType(AggregationPage),
-                matching: find.byType(Scrollable),
-              )
-              .first,
+        expect(find.text('继续播放'), findsWidgets);
+        expect(find.text('收藏'), findsWidgets);
+        expect(find.text('媒体库'), findsWidgets);
+        // 新聚合页头部恢复管理/私密入口;TV 走独立焦点路径,不渲染这两个键。
+        expect(
+          find.byKey(const Key('aggregation-source-management')),
+          environment.isTv ? findsNothing : findsOneWidget,
         );
-        expect(find.text('查找同源 · 2'), findsOneWidget);
-        await tester.ensureVisible(find.text('查找同源 · 2'));
-        await tester.pump();
-        await tester.tap(find.text('查找同源 · 2'));
+        expect(
+          find.byKey(const Key('aggregation-private-entry')),
+          environment.isTv ? findsNothing : findsOneWidget,
+        );
+        expect(find.text('查找同源'), findsNothing);
+        expect(find.text('媒体库范围'), findsNothing);
+        expect(find.byType(FilterChip), findsNothing);
+        await tester.tap(
+          find.byKey(const Key('aggregation-segment-libraries')),
+        );
         await _settle(tester);
-        expect(find.byType(AlertDialog), findsOneWidget);
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        expect(find.text('来源 A'), findsOneWidget);
+        expect(find.text('来源 B'), findsOneWidget);
+        expect(find.text('电影'), findsWidgets);
+        final libraryImage = tester.widget<MediaImage>(
+          find.byType(MediaImage).first,
+        );
+        expect(libraryImage.preferBackdrop, isFalse);
+        expect(libraryImage.height, libraryImage.width! * 9 / 16);
+        expect(find.text('重试'), findsOneWidget);
+        f.b.viewsStatus = null;
+        await tester.tap(find.text('重试'));
         await _settle(tester);
-        expect(find.byType(AlertDialog), findsNothing);
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        expect(FocusManager.instance.primaryFocus, isNotNull);
+        expect(find.text('来源 A'), findsOneWidget);
+        expect(find.text('来源 B'), findsOneWidget);
+        expect(find.text('重试'), findsNothing);
+        final selected = f.auth.session!.server.id;
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+            matching: find.text('电影'),
+          ),
+        );
+        await _settle(tester);
+        expect(find.byType(ServerLibraryPage), findsOneWidget);
+        expect(f.auth.session!.server.id, selected);
+        expect(find.text('合成作品'), findsWidgets);
         app.router.go('/library/view-movies');
         await _settle(tester);
         expect(find.byType(AggregationPage), findsNothing);
@@ -1737,7 +1882,6 @@ void main() {
       await tester.runAsync(f.open);
       addTearDown(f.close);
       late SourceReference source;
-      late WatchSession session;
       await tester.runAsync(() async {
         final account = await f.auth.sources.acquireAccount(
           f.bId,
@@ -1749,7 +1893,7 @@ void main() {
           itemId: 'shared-id',
           mediaSourceId: 'recorded-version',
         );
-        session = await f.history.beginSession(
+        await f.history.beginSession(
           source: source,
           work: source.item,
           libraryId: 'view-movies',
@@ -1765,34 +1909,38 @@ void main() {
           snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         ),
       );
+      f.a.items.first.playbackPositionTicks = 150000000;
+      f.a.items.first.productionYear = 2010;
+      f.b.items.first.playbackPositionTicks = 350000000;
+      f.b.items.first.productionYear = 2011;
       await tester.pumpWidget(app);
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.tap(find.widgetWithText(ChoiceChip, '继续观看'));
-      await _settle(tester);
-      final resume = find.byTooltip('从本机记录的实际来源继续');
-      expect(resume, findsNothing);
-      await tester.runAsync(
-        () => f.history.observe(
-          session: session,
-          eventSequence: 1,
-          positionTicks: 170000000,
-          actuallyPlaying: true,
-          timeline: const WatchTimeline(durationTicks: 600000000),
-        ),
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
+      expect(
+        tester
+            .widgetList<PosterCard>(find.byType(PosterCard))
+            .map((card) => card.item.productionYear),
+        containsAll([2010, 2011]),
       );
-      await _settle(tester);
-      expect(resume, findsOneWidget);
-      await tester.ensureVisible(resume);
+      expect(find.byTooltip('从本机记录的实际来源继续'), findsNothing);
+      final poster = find.descendant(
+        of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+        matching: find.text('合成作品'),
+      );
+      await tester.ensureVisible(poster);
       await tester.pump();
-      await tester.tap(resume);
+      await tester.tap(poster);
       await _settle(tester);
-      expect(host.current!.source, source);
-      expect(host.current!.work, source.item);
-      expect(host.current!.libraryId, 'view-movies');
-      expect(host.current!.startTimeTicks, 170000000);
-      expect(host.current!.mediaSourceId, 'recorded-version');
+      expect(
+        DetailSourceScope.maybeOf(
+          tester.element(find.byType(ItemDetailPage)),
+        )!.source.account.configuredServerId,
+        f.bId,
+      );
+      expect(host.current, isNull);
       expect(f.auth.session!.server.id, f.aId);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -1809,24 +1957,29 @@ void main() {
       await tester.runAsync(f.open);
       addTearDown(f.close);
       f.a.items.first.playbackPositionTicks = 150000000;
+      f.a.items.first.productionYear = 1999;
       f.b.items.first.playbackPositionTicks = 350000000;
+      f.b.items.first.productionYear = 2001;
       f.b.items.first.overview = 'B续播来源';
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      await tester.tap(find.widgetWithText(ChoiceChip, '继续观看'));
-      await _settle(tester);
-      await tester.ensureVisible(find.text('合成作品'));
+      expect(
+        tester
+            .widgetList<PosterCard>(find.byType(PosterCard))
+            .map((card) => card.item.productionYear),
+        containsAll([1999, 2001]),
+      );
+      expect(find.textContaining('不取最大进度'), findsNothing);
+      final poster = find.descendant(
+        of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+        matching: find.text('合成作品'),
+      );
+      await tester.ensureVisible(poster);
       await tester.pump();
-      await tester.tap(find.text('合成作品'));
-      await _settle(tester);
-      expect(find.textContaining('不取最大进度'), findsOneWidget);
-      expect(find.text('来源 A · 15s'), findsOneWidget);
-      expect(find.text('来源 B · 35s'), findsOneWidget);
-      expect(find.byType(ItemDetailPage), findsNothing);
-      await tester.tap(find.text('来源 B · 35s'));
+      await tester.tap(poster);
       await _settle(tester);
       expect(find.text('B续播来源'), findsOneWidget);
       expect(
@@ -1986,24 +2139,19 @@ void main() {
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/aggregation');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 2'));
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 2'));
-      await _settle(tester);
-      expect(find.textContaining('已确认来源'), findsOneWidget);
-      await tester.tap(find.textContaining('已确认来源'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       expect(find.text('B实际来源正文'), findsOneWidget);
       final origin = DetailSourceScope.maybeOf(
         tester.element(find.byType(ItemDetailPage)),
       );
       expect(origin!.source.account.configuredServerId, f.bId);
       expect(f.auth.session!.server.id, f.aId);
-      app.router.pop();
-      await _settle(tester);
-      expect(find.text('查找同源 · 2'), findsOneWidget);
       app.router.go('/item/shared-id');
       await _settle(tester);
       expect(
@@ -2035,11 +2183,14 @@ void main() {
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/aggregation');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('查找同源 · 1').first);
-      await tester.pump();
-      await tester.tap(find.text('查找同源 · 1').first);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '查找同源'));
       await _settle(tester);
       expect(find.textContaining('待辨认候选'), findsOneWidget);
       expect(find.textContaining('已确认来源'), findsNothing);
@@ -2286,41 +2437,28 @@ void main() {
               .configuredServerId,
           f.bId,
         );
-        if (!environment.isTv) {
-          await tester.tap(find.byKey(const Key('mobile-player-more')));
-          await _settle(tester);
-        }
-        await tester.ensureVisible(
-          find.byKey(const Key('player-manual-switch')),
-        );
-        await tester.pump();
-        await tester.tap(find.byKey(const Key('player-manual-switch')));
-        await _settle(tester);
+        expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+        expect(find.byKey(const Key('player-lock-private')), findsNothing);
+        expect(find.text('手动切换'), findsNothing);
+        final c = environment.isTv
+            ? tester
+                  .state<TvPlayerPageState>(find.byType(TvPlayerPage))
+                  .controller!
+            : tester
+                  .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+                  .controller!;
         adapter.blockedAuthority = f.b.baseUrl.authority;
         adapter.blockedSuffix = '/PlaybackInfo';
-        final version = find.byKey(
-          const ValueKey('switch-version-private-alternate'),
-        );
-        await tester.ensureVisible(version);
-        await tester.pump();
-        await tester.tap(version);
-        await _settle(tester);
+        final switching = c.switchMediaSource('private-alternate');
+        for (var frame = 0; frame < 40 && !adapter.entered; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
         expect(adapter.entered, isTrue);
         expect(adapter.gate.isCompleted, isFalse);
-        expect(
-          find.descendant(
-            of: find.byType(SourceSwitchMenu),
-            matching: find.byType(LinearProgressIndicator),
-          ),
-          findsOneWidget,
-        );
-        final lock = find.byKey(const Key('player-lock-private'));
-        expect(
-          tester.widget<FilledButton>(lock).onPressed,
-          isNotNull,
-          reason: 'Safety lock must not depend on completing catalogue IO',
-        );
-        await tester.tap(lock);
+        unawaited(c.lockPrivateRegion());
         for (
           var frame = 0;
           frame < 100 && f.auth.regionAccess.state != PrivateAccessState.locked;
@@ -2340,9 +2478,10 @@ void main() {
         expect(backend.isPlaying, isFalse);
         // Revocation removes the redacted imperative dialog on the next frame.
         await _settle(tester);
-        expect(find.byType(SourceSwitchMenu), findsNothing);
+        expect(find.byType(PlaybackLineMenu), findsNothing);
         expect(adapter.gate.isCompleted, isFalse);
         adapter.gate.complete();
+        await _drive(tester, switching);
         await _settle(tester);
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
         await _settle(tester);
@@ -2463,43 +2602,10 @@ void main() {
                   .controller!;
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
         await _settle(tester);
-        if (!environment.isTv) {
-          await tester.tap(find.byKey(const Key('mobile-player-more')));
-          await _settle(tester);
-        }
-        await tester.ensureVisible(
-          find.byKey(const Key('player-manual-switch')),
-        );
-        await tester.tap(find.byKey(const Key('player-manual-switch')));
+        expect(find.text('手动切换'), findsNothing);
+        expect(find.byType(PlaybackLineMenu), findsNothing);
+        await _drive(tester, _switchMappedEpisode(c, f.bId));
         await _settle(tester);
-        expect(find.byType(SourceSwitchMenu), findsOneWidget);
-        final mapping = find.byKey(ValueKey('switch-episode-map-${f.bId}'));
-        await tester.ensureVisible(mapping);
-        await tester.tap(mapping);
-        await _settle(tester);
-        await tester.tap(find.byKey(const Key('episode-mapping-confirm')));
-        await _settle(tester);
-        final version = find.byKey(
-          ValueKey('switch-target-${f.bId}-episode-b-2'),
-        );
-        expect(version, findsOneWidget);
-        await tester.ensureVisible(version);
-        await tester.tap(version);
-        await _settle(tester);
-        if (c.switchConfirmation != null) {
-          if (c.switchConfirmation!.audioNeedsChoice) {
-            await tester.ensureVisible(find.byType(CheckboxListTile).first);
-            await tester.tap(find.byType(CheckboxListTile).first);
-          }
-          if (c.switchConfirmation!.subtitleNeedsChoice) {
-            await tester.ensureVisible(find.byType(CheckboxListTile).last);
-            await tester.tap(find.byType(CheckboxListTile).last);
-          }
-          await _settle(tester);
-          await tester.ensureVisible(find.text('从头播放'));
-          await tester.tap(find.text('从头播放'));
-          await _settle(tester);
-        }
         expect(c.origin!.source.itemId, 'episode-b-2');
         expect(c.origin!.source.account.configuredServerId, f.bId);
         expect(
@@ -2891,15 +2997,31 @@ void main() {
       await _settle(tester);
       app.router.go('/search');
       await _settle(tester);
+      expect(find.text('输入片名后搜索'), findsOneWidget);
+      expect(find.byType(FilterChip), findsNothing);
+      expect(find.text('媒体库范围'), findsNothing);
+      expect(find.byKey(const Key('aggregation-year')), findsNothing);
+      expect(find.byKey(const Key('aggregation-genre')), findsNothing);
+      await tester.enterText(find.byKey(const Key('aggregation-keyword')), ' ');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      expect(
+        f.a.requests.where((request) => request.contains('SearchTerm=')),
+        isEmpty,
+      );
+      expect(
+        f.b.requests.where((request) => request.contains('SearchTerm=')),
+        isEmpty,
+      );
+      expect(find.text('输入片名后搜索'), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('aggregation-keyword')),
         '合成',
       );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
-      expect(find.text('查找同源 · 1'), findsOneWidget);
-      await tester.tap(find.widgetWithText(FilterChip, '全部普通来源'));
-      await _settle(tester);
-      expect(find.text('查找同源 · 2'), findsOneWidget);
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsOneWidget);
       await tester.runAsync(() async {
         await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
         await f.auth.regionAccess.unlock('1234');
@@ -2914,22 +3036,268 @@ void main() {
             .widget<TextField>(find.byKey(const Key('aggregation-keyword')))
             .controller!
             .text,
-        isEmpty,
-      );
-      expect(find.text('查找同源 · 2'), findsNothing);
-      await tester.enterText(
-        find.byKey(const Key('aggregation-keyword')),
         '合成',
       );
-      await _settle(tester);
-      expect(find.text('查找同源 · 1'), findsOneWidget);
+      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 B'), findsNothing);
       await tester.runAsync(() => f.auth.regionAccess.lock());
       await _settle(tester);
-      expect(find.text('查找同源 · 1'), findsOneWidget);
+      expect(find.text('来源 A'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
     tags: ['integration'],
   );
+
+  testWidgets('desktop search keeps server filters hidden until opened', (
+    tester,
+  ) async {
+    isolateImageCache();
+    final f = _Fixture();
+    await tester.runAsync(f.open);
+    addTearDown(f.close);
+    final app = f.app(PresentationEnvironment.desktop);
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    app.router.go('/search');
+    await _settle(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    await tester.tap(find.byKey(const Key('aggregation-search-filters')));
+    await _settle(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(OptionPill), findsWidgets);
+    expect(
+      find.byKey(ValueKey('aggregation-search-server-${f.aId}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey('aggregation-search-server-${f.bId}')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(ValueKey('aggregation-search-server-${f.bId}')),
+    );
+    await _settle(tester);
+    await tester.enterText(find.byKey(const Key('aggregation-keyword')), '合成');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await _settle(tester);
+    expect(
+      f.a.requests.where((request) => request.contains('SearchTerm=')),
+      isNotEmpty,
+    );
+    expect(
+      f.b.requests.where((request) => request.contains('SearchTerm=')),
+      isEmpty,
+    );
+    expect(find.byKey(ValueKey('aggregation-search-${f.aId}')), findsOneWidget);
+    expect(find.byKey(ValueKey('aggregation-search-${f.bId}')), findsNothing);
+    await tester.tap(find.byKey(const Key('aggregation-search-filters')));
+    await _settle(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.text('来源 A'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+  }, tags: ['integration']);
+
+  testWidgets(
+    'each server poster uses that session and opened details hide comparison',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      f.a.items.first
+        ..playbackPositionTicks = 100
+        ..primaryImageTag = 'a-poster';
+      f.b.items.first
+        ..playbackPositionTicks = 200
+        ..primaryImageTag = 'b-poster';
+      for (final view in f.a.views) {
+        if (view.id == 'view-movies') view.primaryImageTag = 'a-library';
+      }
+      for (final view in f.b.views) {
+        if (view.id == 'view-movies') view.primaryImageTag = 'b-library';
+      }
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isFalse,
+      );
+      app.router.go('/aggregation');
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-server-${f.aId}'), f.aId);
+      expect(_posterServer(tester, 'aggregation-server-${f.bId}'), f.bId);
+      expect(
+        f.a.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-server-${f.bId}'), f.bId);
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/view-movies/Images/'),
+        ),
+        isTrue,
+      );
+      app.router.go(
+        '/server/${Uri.encodeComponent(f.bId)}/library/view-movies',
+      );
+      await _settle(tester);
+      expect(find.byType(ServerLibraryPage), findsOneWidget);
+      final gridImage = find.descendant(
+        of: find.byType(ServerLibraryPage),
+        matching: find.byType(MediaImage),
+      );
+      expect(gridImage, findsWidgets);
+      expect(
+        DetailSourceScope.maybeOf(
+          tester.element(gridImage.first),
+        )!.source.account.configuredServerId,
+        f.bId,
+      );
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      app.router.go('/search');
+      await _settle(tester);
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        '合成',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-search-${f.bId}'), f.bId);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-search-${f.bId}')),
+          matching: find.text('合成作品'),
+        ),
+      );
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(app.router.state.uri.queryParameters['showComparison'], '0');
+      expect(
+        tester
+            .widget<SourceDetailGate>(find.byType(SourceDetailGate))
+            .showComparison,
+        isFalse,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'unscoped server detail stays open after auth and region notifications',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(() => f.open(configure: false));
+      addTearDown(f.close);
+      f.b.items.first
+        ..playbackPositionTicks = 200
+        ..primaryImageTag = 'b-poster';
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      final homeImages = f.a.requests
+          .where((request) => request.contains('/Items/shared-id/Images/'))
+          .length;
+      app.router.go('/aggregation');
+      await _settle(tester);
+      expect(_posterServer(tester, 'aggregation-server-${f.bId}'), f.bId);
+      expect(
+        f.b.requests.any(
+          (request) => request.contains('/Items/shared-id/Images/'),
+        ),
+        isTrue,
+      );
+      expect(
+        f.a.requests
+            .where((request) => request.contains('/Items/shared-id/Images/'))
+            .length,
+        homeImages,
+      );
+      await tester.ensureVisible(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+          matching: find.text('合成作品'),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
+          matching: find.text('合成作品'),
+        ),
+      );
+      await _settle(tester);
+      expect(
+        find.byType(ItemDetailPage),
+        findsOneWidget,
+        reason: app.router.state.uri.toString(),
+      );
+      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(
+        DetailSourceScope.maybeOf(
+          tester.element(find.byType(ItemDetailPage)),
+        )!.source.account.configuredServerId,
+        f.bId,
+      );
+      await tester.runAsync(() => f.auth.selectSavedServer(f.aId));
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(app.router.state.uri.path, '/item/shared-id');
+      await tester.runAsync(() => f.auth.setPrivatePin('1234', '1234'));
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(app.router.state.uri.path, '/item/shared-id');
+      expect(find.byType(SourceComparisonAction), findsNothing);
+      expect(f.auth.session!.server.id, f.aId);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+}
+
+String _posterServer(WidgetTester tester, String shelfKey) {
+  final image = find.descendant(
+    of: find.byKey(ValueKey(shelfKey)),
+    matching: find.byType(MediaImage),
+  );
+  expect(image, findsWidgets);
+  return DetailSourceScope.maybeOf(
+    tester.element(image.first),
+  )!.source.account.configuredServerId;
 }

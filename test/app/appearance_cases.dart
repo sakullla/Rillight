@@ -13,6 +13,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -179,16 +180,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<DropdownButton<AppearanceStyle>>(
-            find.byKey(SettingsPage.appearanceKey),
+          .widget<PlayerRateCell>(
+            find.byKey(const ValueKey('settings-appearance-dark')),
           )
-          .value,
-      AppearanceStyle.dark,
+          .selected,
+      isTrue,
     );
 
-    await tester.tap(find.byKey(SettingsPage.appearanceKey));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('浅色').last);
+    await tester.tap(find.byKey(const ValueKey('settings-appearance-light')));
     await tester.pumpAndSettle();
 
     expect(controller.style, AppearanceStyle.light);

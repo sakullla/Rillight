@@ -208,6 +208,24 @@ abstract class AppLocalizations {
   /// **'手动切换'**
   String get switchManual;
 
+  /// No description provided for @playbackLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路'**
+  String get playbackLine;
+
+  /// No description provided for @playbackLineInUse.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在使用'**
+  String get playbackLineInUse;
+
+  /// No description provided for @playbackLineFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路切换失败，已继续使用原来的线路：{reason}'**
+  String playbackLineFailed(String reason);
+
   /// No description provided for @switchLine.
   ///
   /// In zh, this message translates to:
@@ -597,6 +615,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'重试'**
   String get retry;
+
+  /// Reload the current list or home rows. This is a manual refresh, not a failure retry.
+  ///
+  /// In zh, this message translates to:
+  /// **'刷新'**
+  String get refresh;
 
   /// Accessible label for a missing or failed cover image.
   ///
@@ -1009,7 +1033,7 @@ abstract class AppLocalizations {
   /// Home section of movie and TV library tiles.
   ///
   /// In zh, this message translates to:
-  /// **'片库'**
+  /// **'媒体库'**
   String get libraries;
 
   /// Action to choose which libraries appear in the top bar and their order.
@@ -1021,7 +1045,7 @@ abstract class AppLocalizations {
   /// Explains the pin limit in the customize-nav dialog.
   ///
   /// In zh, this message translates to:
-  /// **'最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。'**
+  /// **'最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页媒体库。'**
   String customizeNavHint(int count);
 
   /// Save customized library navigation.
@@ -1065,6 +1089,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'输入片名后搜索'**
   String get searchEmptyQuery;
+
+  /// Opens the server list used to limit a search. Hidden until chosen.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器'**
+  String get searchServerFilter;
 
   /// Empty-success copy after a completed search with no hits.
   ///
@@ -1396,10 +1426,28 @@ abstract class AppLocalizations {
   /// **'详情'**
   String get details;
 
+  /// Home hero kicker above a recently added movie title.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新电影'**
+  String get heroNewMovie;
+
+  /// Home hero kicker above a recently updated series title.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新剧集'**
+  String get heroNewSeries;
+
+  /// Accessibility label for the current home hero slide.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {index} 项，共 {count} 项'**
+  String heroItemOf(int index, int count);
+
   /// No description provided for @browseEmpty.
   ///
   /// In zh, this message translates to:
-  /// **'暂无可浏览的内容，请刷新或从片库开始浏览。'**
+  /// **'暂无可浏览的内容，请刷新或从媒体库开始浏览。'**
   String get browseEmpty;
 
   /// No description provided for @browseLoaded.
@@ -1599,6 +1647,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'关闭字幕'**
   String get subtitleOff;
+
+  /// Badge marking an external sidecar subtitle file.
+  ///
+  /// In zh, this message translates to:
+  /// **'外挂'**
+  String get subtitleMetaExternal;
+
+  /// Badge marking an in-container subtitle stream.
+  ///
+  /// In zh, this message translates to:
+  /// **'内嵌'**
+  String get subtitleMetaEmbedded;
+
+  /// Badge marking the server-default track.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认'**
+  String get trackMetaDefault;
+
+  /// Option count above a dense track or media source picker.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 条'**
+  String trackPickerCount(int count);
 
   /// Notice when PGS/bitmap subtitles are burned in by the server.
   ///
@@ -2812,6 +2884,36 @@ abstract class AppLocalizations {
   /// **'其他'**
   String get tvSettingsOther;
 
+  /// 电视设置里标记当前登录的服务器
+  ///
+  /// In zh, this message translates to:
+  /// **'当前'**
+  String get tvSettingsCurrent;
+
+  /// 电视首页行尾进入完整列表的卡片
+  ///
+  /// In zh, this message translates to:
+  /// **'查看全部'**
+  String get tvViewAll;
+
+  /// 电视登录页左侧的一句说明
+  ///
+  /// In zh, this message translates to:
+  /// **'输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。'**
+  String get tvConnectHint;
+
+  /// 电视登录表单与手机辅助连接之间的分隔
+  ///
+  /// In zh, this message translates to:
+  /// **'或'**
+  String get tvConnectOr;
+
+  /// 电视登录表单里的可选 UA 字段
+  ///
+  /// In zh, this message translates to:
+  /// **'User-Agent(可选)'**
+  String get tvUserAgentOptional;
+
   /// No description provided for @mobileAddServer.
   ///
   /// In zh, this message translates to:
@@ -3001,7 +3103,7 @@ abstract class AppLocalizations {
   /// Explains that the home editor does not change the libraries tab.
   ///
   /// In zh, this message translates to:
-  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。'**
+  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'**
   String get phoneHomeEditHint;
 
   /// Home section label for the featured carousel.
@@ -3031,7 +3133,7 @@ abstract class AppLocalizations {
   /// Phone home section label for the library shortcut row.
   ///
   /// In zh, this message translates to:
-  /// **'片库入口'**
+  /// **'媒体库'**
   String get phoneHomeSectionLibraries;
 
   /// Phone home row and editor label for one library. The row itself is recently added items.
@@ -3115,7 +3217,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSkipIntroHint.
   ///
   /// In zh, this message translates to:
-  /// **'显示跳过片头按钮，需手动点击；关闭后完整播放片头'**
+  /// **'手动跳过片头'**
   String get settingsSkipIntroHint;
 
   /// No description provided for @settingsSkipOutro.
@@ -3127,7 +3229,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSkipOutroHint.
   ///
   /// In zh, this message translates to:
-  /// **'显示跳过或下一集提示；关闭后等播放结束再提示下一集'**
+  /// **'片尾可跳过或进入下一集'**
   String get settingsSkipOutroHint;
 
   /// No description provided for @playerSkipSettings.
@@ -3427,7 +3529,7 @@ abstract class AppLocalizations {
   /// No description provided for @phoneLibraryBrowse.
   ///
   /// In zh, this message translates to:
-  /// **'浏览片库'**
+  /// **'浏览媒体库'**
   String get phoneLibraryBrowse;
 
   /// No description provided for @phoneSearchHint.
@@ -3445,7 +3547,7 @@ abstract class AppLocalizations {
   /// No description provided for @phoneSubtitleSize.
   ///
   /// In zh, this message translates to:
-  /// **'手机字幕大小'**
+  /// **'字幕大小'**
   String get phoneSubtitleSize;
 
   /// No description provided for @phoneSubtitleSmall.
@@ -3475,13 +3577,13 @@ abstract class AppLocalizations {
   /// No description provided for @phoneSubtitleOriginal.
   ///
   /// In zh, this message translates to:
-  /// **'使用原始 ASS 样式'**
+  /// **'原始 ASS 样式'**
   String get phoneSubtitleOriginal;
 
   /// No description provided for @phoneSubtitleOriginalHint.
   ///
   /// In zh, this message translates to:
-  /// **'保留字幕作者的字号与特效排版'**
+  /// **'保留作者的字号与特效'**
   String get phoneSubtitleOriginalHint;
 
   /// No description provided for @phoneSubtitleUnavailable.

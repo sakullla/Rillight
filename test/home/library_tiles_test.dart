@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/library_tiles.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/app/theme/tokens.dart';
 
@@ -93,6 +94,99 @@ void main() {
     expect(
       tester.getRect(find.byKey(CatalogKeys.library('lib-7'))).top,
       closeTo(first.top, 1),
+    );
+  });
+
+  testWidgets('home library cards match aggregation wide cards', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: LibraryTiles(
+            libraries: [
+              for (var index = 0; index < 4; index++)
+                EmbyItem(
+                  id: 'lib-$index',
+                  name: '库$index',
+                  type: 'CollectionFolder',
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    final card = tester.getSize(find.byKey(CatalogKeys.library('lib-0')));
+    final width = MediaShelf.wideCardWidthFor(1920);
+    expect(card.width, closeTo(width, 0.5));
+    expect(card.height, closeTo(width * 9 / 16, 1));
+    expect(find.byKey(CatalogKeys.shelfScrollRight('libraries')), findsNothing);
+    expect(find.byKey(CatalogKeys.shelfScrollLeft('libraries')), findsNothing);
+  });
+
+  testWidgets('overflowing library rail pages with the side buttons', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: LibraryTiles(
+            libraries: [
+              for (var index = 0; index < 8; index++)
+                EmbyItem(
+                  id: 'lib-$index',
+                  name: '库$index',
+                  type: 'CollectionFolder',
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final right = find.byKey(CatalogKeys.shelfScrollRight('libraries'));
+    expect(right, findsOneWidget);
+    expect(find.byKey(CatalogKeys.shelfScrollLeft('libraries')), findsNothing);
+    final scrollable = find.descendant(
+      of: find.byKey(CatalogKeys.librariesMenu),
+      matching: find.byType(Scrollable),
+    );
+
+    await tester.tap(right);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(CatalogKeys.shelfScrollLeft('libraries')),
+      findsOneWidget,
+    );
+    expect(
+      tester.state<ScrollableState>(scrollable).position.pixels,
+      greaterThan(40),
+    );
+
+    await tester.tap(find.byKey(CatalogKeys.shelfScrollLeft('libraries')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getRect(find.byKey(CatalogKeys.library('lib-0'))).left,
+      closeTo(AppSpacing.page, 1),
     );
   });
 }

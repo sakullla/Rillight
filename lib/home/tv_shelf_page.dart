@@ -15,10 +15,28 @@ import 'package:rillight/library/shelf_sort.dart';
 
 /// 电视首页分栏的完整列表。标题上的箭头进到这里。
 class TvShelfPage extends StatefulWidget {
-  const TvShelfPage({super.key, required this.source, this.title = ''});
+  const TvShelfPage({
+    super.key,
+    required this.source,
+    this.title = '',
+    this.client,
+    this.parentId,
+    this.includeItemTypes,
+    this.onOpen,
+  });
 
   final String source;
   final String title;
+
+  /// 其他服务器的会话:不切换首页服务器,也不写入当前服务器的目录缓存。
+  final EmbyClient? client;
+
+  /// `items` 来源的片库与类型。
+  final String? parentId;
+  final String? includeItemTypes;
+
+  /// 覆盖默认的打开详情(其他服务器的条目要带来源)。
+  final void Function(EmbyItem item)? onOpen;
 
   factory TvShelfPage.fromState(GoRouterState state) {
     return TvShelfPage(
@@ -139,6 +157,16 @@ class _TvShelfPageState extends State<TvShelfPage> {
         sortBy: sort.sortBy,
         sortOrder: sort.sortOrder,
       ),
+      'items' => catalogItemsRequest(
+        userId: userId,
+        parentId: widget.parentId,
+        includeItemTypes: widget.includeItemTypes,
+        recursive: true,
+        limit: _pageSize,
+        startIndex: startIndex,
+        sortBy: sort.sortBy,
+        sortOrder: sort.sortOrder,
+      ),
       'latest-series' => catalogItemsRequest(
         userId: userId,
         includeItemTypes: 'Series',
@@ -164,12 +192,17 @@ class _TvShelfPageState extends State<TvShelfPage> {
     if (more && (_loadingMore || _refreshing || !_hasMore)) return;
     final generation = more ? _generation : ++_generation;
     final identity = _identity;
-    final client = AuthScope.of(context).client;
+    final override = widget.client;
+    final client = override ?? AuthScope.of(context).client;
     final cache = CatalogScope.of(context).cache;
     final start = more ? _fetched : 0;
     final request = _request(client, start);
     final keep = !more && _items.isNotEmpty;
-    final network = cache.fetch(client, request);
+    final Future<Object> network = override != null
+        ? override
+              .getJson(request.path, queryParameters: request.query)
+              .then<Object>((json) => json as Object)
+        : cache.fetch(client, request);
     unawaited(network.then<void>((_) {}, onError: (Object _) {}));
     setState(() {
       if (more) {
@@ -183,7 +216,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
     });
     bool owns() =>
         mounted && generation == _generation && identity == _identity;
-    if (!more && !keep) {
+    if (!more && !keep && override == null) {
       unawaited(() async {
         try {
           final hit = await cache.lookupWhenReady(request);
@@ -252,55 +285,116 @@ class _TvShelfPageState extends State<TvShelfPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final width = MediaQuery.sizeOf(context).width;
-    return Scaffold(
-      body: CustomScrollView(
-        key: PageStorageKey('tv-shelf-${widget.source}'),
-        slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-              child: Text(
-                _title(l10n),
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-            ),
-          ),
-          if (_loading && _items.isEmpty)
-            const SliverToBoxAdapter(child: LinearProgressIndicator()),
-          if (_refreshing)
-            const SliverToBoxAdapter(child: LinearProgressIndicator()),
-          if (_error != null)
-            SliverToBoxAdapter(
-              child: TvFailure(error: _error!, retry: () => _load()),
-            ),
-          if (_refreshError != null)
-            SliverToBoxAdapter(
-              child: TvFailure(error: _refreshError!, retry: () => _load()),
-            ),
-          if (_items.isNotEmpty)
-            TvPosterSliver(
-              items: _items,
-              metrics: TvGrid.metricsFor(context, width),
-            ),
-          if (_pageError != null)
-            SliverToBoxAdapter(
-              child: TvFailure(
-                error: _pageError!,
-                retry: () => _load(more: true),
-              ),
-            ),
-          if (_hasMore && _pageError == null && _refreshError == null)
-            SliverToBoxAdapter(
-              child: TvAction(
-                onPressed: _loadingMore || _refreshing
-                    ? null
-                    : () => _load(more: true),
-                child: Text(l10n.mobileLoadMore),
-              ),
-            ),
-        ],
+    final s = TvDesign.scaleOf(context);
+    final padding = TvFrame.contentPadding(context);
+    final wide = widget.source == 'resume' || widget.source == 'nextup';
+    return TvFrame(
+      title: _title(l10n),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth - padding.horizontal;
+          final metrics = wide
+              ? _wideMetrics(context, width)
+              : TvGrid.metricsFor(context, width);
+          Widget box(Widget child) => SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: padding.left),
+            sliver: SliverToBoxAdapter(child: child),
+          );
+          return CustomScrollView(
+            key: PageStorageKey('tv-shelf-${widget.source}'),
+            slivers: [
+              if ((_loading && _items.isEmpty) || _refreshing)
+                box(const LinearProgressIndicator()),
+              if (_error != null)
+                box(TvFailure(error: _error!, retry: () => _load())),
+              if (_refreshError != null)
+                box(TvFailure(error: _refreshError!, retry: () => _load())),
+              if (!_loading && _error == null && _items.isEmpty)
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 240 * s,
+                    child: TvEmptyState(message: l10n.mobileEmpty),
+                  ),
+                ),
+              if (_items.isNotEmpty)
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    padding.left,
+                    10 * s,
+                    padding.right,
+                    0,
+                  ),
+                  sliver: SliverGrid(
+                    gridDelegate: metrics.delegate,
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final item = _items[index];
+                        return TvPoster(
+                          key: ValueKey(item.id),
+                          item: item,
+                          wide: wide,
+                          imageMaxWidth: metrics.imageMaxWidth,
+                          onPressed: widget.onOpen == null
+                              ? null
+                              : () => widget.onOpen!(item),
+                        );
+                      },
+                      childCount: _items.length,
+                      addAutomaticKeepAlives: false,
+                    ),
+                  ),
+                ),
+              if (_pageError != null)
+                box(
+                  TvFailure(error: _pageError!, retry: () => _load(more: true)),
+                ),
+              if (_hasMore && _pageError == null && _refreshError == null)
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    padding.left,
+                    20 * s,
+                    padding.right,
+                    padding.bottom,
+                  ),
+                  sliver: SliverToBoxAdapter(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TvAction(
+                        pill: true,
+                        leading: const Icon(Icons.expand_more_rounded),
+                        onPressed: _loadingMore || _refreshing
+                            ? null
+                            : () => _load(more: true),
+                        child: Text(l10n.mobileLoadMore),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  /// 继续观看与下一集用 16:9 卡,一行 4 张。
+  TvGridMetrics _wideMetrics(BuildContext context, double width) {
+    final s = TvDesign.scaleOf(context);
+    final gap = TvDesign.cardGap * s;
+    const columns = 4;
+    final cell = (width - gap * (columns - 1)) / columns;
+    final card = TvCardMetrics.of(
+      context,
+      wide: true,
+      width: cell,
+      subtitle: true,
+    );
+    return TvGridMetrics(
+      columns: columns,
+      imageMaxWidth: card.imageMaxWidth,
+      childAspectRatio: cell / card.height,
+      crossAxisSpacing: gap,
+      mainAxisSpacing: 22 * s,
     );
   }
 }

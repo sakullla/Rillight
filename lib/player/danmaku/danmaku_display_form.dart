@@ -3,6 +3,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 
 /// 弹幕显示表单的三种布局:播放器常用 / 播放器高级 / 设置页分组。
 enum DanmakuFormLayout { playerBasic, playerAdvanced, settings }
@@ -446,7 +448,6 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     if (compact) {
       return SizedBox(
         height: 32,
@@ -464,27 +465,7 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
         ),
       );
     }
-    final buttons = SegmentedButton<T>(
-      showSelectedIcon: false,
-      emptySelectionAllowed: false,
-      style: ButtonStyle(
-        visualDensity: VisualDensity.standard,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 4),
-        ),
-        minimumSize: const WidgetStatePropertyAll(Size(0, 40)),
-        textStyle: WidgetStatePropertyAll(theme.textTheme.labelSmall),
-      ),
-      segments: segments,
-      selected: {value},
-      onSelectionChanged: (selected) {
-        if (selected.isEmpty) {
-          return;
-        }
-        onChanged(selected.first);
-      },
-    );
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Column(
@@ -492,11 +473,29 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
         children: [
           Text(label, style: theme.textTheme.titleSmall),
           const SizedBox(height: AppSpacing.xs),
-          buttons,
+          PlayerOptionGrid(
+            options: [
+              for (final segment in segments)
+                PlayerOption(
+                  label: _segmentLabel(segment),
+                  selected: segment.value == value,
+                  onPressed: () => onChanged(segment.value),
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
+}
+
+String _segmentLabel<T extends Object>(ButtonSegment<T> segment) {
+  final label = segment.label;
+  if (label is Text) {
+    final data = label.data;
+    if (data != null) return data;
+  }
+  return '';
 }
 
 class _TypeRow extends StatelessWidget {
@@ -518,7 +517,6 @@ class _TypeRow extends StatelessWidget {
         key: DanmakuKeys.typeScroll,
         label: l10n.danmakuTypeScroll,
         selected: value.showScroll,
-        compact: compact,
         onSelected: (showScroll) =>
             onChanged(value.copyWith(showScroll: showScroll)),
       ),
@@ -526,14 +524,12 @@ class _TypeRow extends StatelessWidget {
         key: DanmakuKeys.typeTop,
         label: l10n.danmakuTypeTop,
         selected: value.showTop,
-        compact: compact,
         onSelected: (showTop) => onChanged(value.copyWith(showTop: showTop)),
       ),
       _TypeChip(
         key: DanmakuKeys.typeBottom,
         label: l10n.danmakuTypeBottom,
         selected: value.showBottom,
-        compact: compact,
         onSelected: (showBottom) =>
             onChanged(value.copyWith(showBottom: showBottom)),
       ),
@@ -541,7 +537,6 @@ class _TypeRow extends StatelessWidget {
         key: DanmakuKeys.typeColorful,
         label: l10n.danmakuColorful,
         selected: value.colorful,
-        compact: compact,
         onSelected: (colorful) => onChanged(value.copyWith(colorful: colorful)),
       ),
     ];
@@ -560,12 +555,18 @@ class _TypeRow extends StatelessWidget {
       );
     }
     return Padding(
+      key: DanmakuKeys.types,
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      child: Wrap(
-        key: DanmakuKeys.types,
-        spacing: AppSpacing.xxs,
-        runSpacing: AppSpacing.xxs,
-        children: chips,
+      child: PlayerOptionGrid(
+        options: [
+          for (final chip in chips)
+            PlayerOption(
+              key: chip.key,
+              label: chip.label,
+              selected: chip.selected,
+              onPressed: () => chip.onSelected(!chip.selected),
+            ),
+        ],
       ),
     );
   }
@@ -576,26 +577,15 @@ class _TypeChip extends StatelessWidget {
     super.key,
     required this.label,
     required this.selected,
-    required this.compact,
     required this.onSelected,
   });
 
   final String label;
   final bool selected;
-  final bool compact;
   final ValueChanged<bool> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    if (!compact) {
-      return FilterChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: onSelected,
-        visualDensity: VisualDensity.standard,
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      );
-    }
     final scheme = Theme.of(context).colorScheme;
     final selectedFill = scheme.onSurface.withValues(alpha: 0.92);
     final idleFill = scheme.onSurface.withValues(alpha: 0.08);
@@ -847,14 +837,11 @@ class _KeywordEditorState extends State<_KeywordEditor> {
       runSpacing: AppSpacing.xxs,
       children: [
         for (final keyword in widget.keywords)
-          InputChip(
+          RemovablePill(
             key: DanmakuKeys.keywordChip(keyword),
-            label: Text(keyword),
+            label: keyword,
+            compact: widget.compact,
             onDeleted: () => _remove(keyword),
-            visualDensity: widget.compact
-                ? VisualDensity.compact
-                : VisualDensity.standard,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
       ],
     );

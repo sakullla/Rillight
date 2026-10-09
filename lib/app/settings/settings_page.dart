@@ -16,6 +16,7 @@ import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/phone_subtitle_settings.dart';
+import 'package:rillight/player/player_setting_choices.dart';
 
 /// 设置页:展开/收起外观、播放与弹幕配置,按需调整二级选项。
 ///
@@ -51,9 +52,6 @@ class SettingsPage extends StatefulWidget {
 
   /// 设置正文限宽,避免标签贴左、控件贴窗沿。
   static const double columnMaxWidth = 680;
-
-  /// 播放选项下拉的统一宽度,避免「2.0 GB」和「自动」缩成一串长短不一的胶囊。
-  static const double choiceControlWidth = 176;
 
   /// 可选的磁盘缓冲上限档位(MiB)。
   static const diskCacheLimitChoices = <int>[512, 1024, 2048, 4096, 8192];
@@ -330,13 +328,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: AppSpacing.xl),
                 ],
-                Text(
-                  l10n.settingsCategoriesHint,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 20),
                 _SettingsSection(
                   icon: Icons.brightness_6_outlined,
                   title: l10n.settingsAppearance,
@@ -356,27 +347,21 @@ class _SettingsPageState extends State<SettingsPage> {
                               unawaited(nav.setFloating(value)),
                         ),
                       ),
-                    _SettingsChoiceRow(
-                      label: l10n.settingsAppearance,
-                      hint: l10n.settingsAppearanceHint,
-                      child: _SettingsDropdown<AppearanceStyle>(
-                        dropdownKey: SettingsPage.appearanceKey,
-                        value: appearance?.style ?? AppearanceStyle.system,
-                        items: [
-                          for (final value in AppearanceStyle.values)
-                            DropdownMenuItem(
-                              value: value,
-                              child: Text(value.label(l10n)),
-                            ),
-                        ],
-                        onChanged: appearance == null
-                            ? null
-                            : (value) {
-                                if (value != null) {
-                                  unawaited(appearance.setStyle(value));
-                                }
-                              },
-                      ),
+                    _SettingsOptionBlock(
+                      key: SettingsPage.appearanceKey,
+                      options: [
+                        for (final value in AppearanceStyle.values)
+                          PlayerOption(
+                            key: ValueKey('settings-appearance-${value.name}'),
+                            label: value.label(l10n),
+                            selected:
+                                (appearance?.style ?? AppearanceStyle.system) ==
+                                value,
+                            onPressed: appearance == null
+                                ? null
+                                : () => unawaited(appearance.setStyle(value)),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -406,38 +391,27 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     const Divider(),
-                    _SettingsChoiceRow(
-                      label: l10n.playbackRate,
-                      hint: l10n.settingsAppliesToNewPlayback,
-                      child: _SettingsDropdown<double>(
-                        dropdownKey: const Key('settings-playback-rate'),
-                        value: _settings.effectivePlaybackRate,
-                        items: [
-                          for (final rate in {
-                            .5,
-                            .75,
-                            1.0,
-                            1.25,
-                            1.5,
-                            2.0,
-                            2.5,
-                            3.0,
-                            _settings.effectivePlaybackRate,
-                          })
-                            DropdownMenuItem(
-                              value: rate,
-                              child: Text('${rate}x'),
+                    Padding(
+                      key: const Key('settings-playback-rate'),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            l10n.playbackRate,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          PlayerRateGrid(
+                            selected: _settings.effectivePlaybackRate,
+                            enabled: _loaded,
+                            onSelected: (value) => unawaited(
+                              _save(PlayerSettings(playbackRate: value)),
                             ),
+                          ),
                         ],
-                        onChanged: !_loaded
-                            ? null
-                            : (value) {
-                                if (value != null) {
-                                  unawaited(
-                                    _save(PlayerSettings(playbackRate: value)),
-                                  );
-                                }
-                              },
                       ),
                     ),
                     SwitchListTile.adaptive(
@@ -462,85 +436,75 @@ class _SettingsPageState extends State<SettingsPage> {
                               _save(PlayerSettings(skipOutroEnabled: value)),
                             ),
                     ),
-                    _SettingsChoiceRow(
+                    _SettingsOptionBlock(
+                      key: SettingsPage.diskCacheLimitKey,
                       label: l10n.settingsDiskCacheLimit,
-                      hint: l10n.settingsDiskCacheLimitHint,
-                      child: _SettingsDropdown<int>(
-                        dropdownKey: SettingsPage.diskCacheLimitKey,
-                        value: effectiveLimit,
-                        items: [
-                          for (final limit in limitChoices)
-                            DropdownMenuItem(
-                              value: limit,
-                              child: Text(l10n.settingsCacheSize(limit / 1024)),
-                            ),
-                        ],
-                        onChanged: _loaded
-                            ? (value) {
-                                if (value != null) {
-                                  _save(
-                                    PlayerSettings(diskCacheLimitMiB: value),
-                                  );
-                                }
-                              }
-                            : null,
-                      ),
+                      options: [
+                        for (final limit in limitChoices)
+                          PlayerOption(
+                            key: ValueKey('settings-cache-$limit'),
+                            label: l10n.settingsCacheSize(limit / 1024),
+                            selected: limit == effectiveLimit,
+                            onPressed: _loaded
+                                ? () => unawaited(
+                                    _save(
+                                      PlayerSettings(diskCacheLimitMiB: limit),
+                                    ),
+                                  )
+                                : null,
+                          ),
+                      ],
                     ),
-                    _SettingsChoiceRow(
+                    _SettingsOptionBlock(
+                      key: SettingsPage.hardwareDecodingKey,
                       label: l10n.settingsHardwareDecoding,
-                      hint: l10n.settingsHardwareDecodingHint,
-                      child: _SettingsDropdown<HardwareDecodingMode>(
-                        dropdownKey: SettingsPage.hardwareDecodingKey,
-                        value: decoding,
-                        items: [
-                          DropdownMenuItem(
-                            value: HardwareDecodingMode.auto,
-                            child: Text(l10n.settingsHardwareDecodingAuto),
+                      options: [
+                        for (final mode in HardwareDecodingMode.values)
+                          PlayerOption(
+                            key: ValueKey('settings-decoding-${mode.name}'),
+                            label: switch (mode) {
+                              HardwareDecodingMode.auto =>
+                                l10n.settingsHardwareDecodingAuto,
+                              HardwareDecodingMode.on =>
+                                l10n.settingsHardwareDecodingOn,
+                              HardwareDecodingMode.off =>
+                                l10n.settingsHardwareDecodingOff,
+                            },
+                            selected: mode == decoding,
+                            onPressed: _loaded
+                                ? () => unawaited(
+                                    _save(
+                                      PlayerSettings(hardwareDecoding: mode),
+                                    ),
+                                  )
+                                : null,
                           ),
-                          DropdownMenuItem(
-                            value: HardwareDecodingMode.on,
-                            child: Text(l10n.settingsHardwareDecodingOn),
-                          ),
-                          DropdownMenuItem(
-                            value: HardwareDecodingMode.off,
-                            child: Text(l10n.settingsHardwareDecodingOff),
-                          ),
-                        ],
-                        onChanged: _loaded
-                            ? (value) {
-                                if (value != null) {
-                                  _save(
-                                    PlayerSettings(hardwareDecoding: value),
-                                  );
-                                }
-                              }
-                            : null,
-                      ),
+                      ],
                     ),
-                    _SettingsChoiceRow(
-                      label: l10n.settingsDecoderBackend,
-                      hint: l10n.settingsDecoderBackendHint,
-                      child: _SettingsDropdown<HardwareDecoderBackend>(
-                        dropdownKey: SettingsPage.decoderBackendKey,
-                        value: backends.contains(backend)
-                            ? backend
-                            : HardwareDecoderBackend.auto,
-                        items: [
+                    if (backends.length > 1)
+                      _SettingsOptionBlock(
+                        key: SettingsPage.decoderBackendKey,
+                        label: l10n.settingsDecoderBackend,
+                        options: [
                           for (final value in backends)
-                            DropdownMenuItem(
-                              value: value,
-                              child: Text(_backendLabel(l10n, value)),
+                            PlayerOption(
+                              key: ValueKey('settings-backend-${value.name}'),
+                              label: _backendLabel(l10n, value),
+                              selected:
+                                  value ==
+                                  (backends.contains(backend)
+                                      ? backend
+                                      : HardwareDecoderBackend.auto),
+                              onPressed: _loaded
+                                  ? () => unawaited(
+                                      _save(
+                                        PlayerSettings(hardwareDecoder: value),
+                                      ),
+                                    )
+                                  : null,
                             ),
                         ],
-                        onChanged: _loaded && backends.length > 1
-                            ? (value) {
-                                if (value != null) {
-                                  _save(PlayerSettings(hardwareDecoder: value));
-                                }
-                              }
-                            : null,
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -786,10 +750,15 @@ class _SettingsSection extends StatelessWidget {
         onExpansionChanged: (expanded) {
           if (!expanded) FocusScope.of(context).unfocus();
         },
-        leading: CircleAvatar(
-          backgroundColor: scheme.surfaceContainerHighest,
-          foregroundColor: scheme.onSurface,
-          child: Icon(icon, size: 22),
+        leading: DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(AppRadii.sm),
+          ),
+          child: SizedBox.square(
+            dimension: 40,
+            child: Icon(icon, size: 20, color: scheme.onPrimaryContainer),
+          ),
         ),
         title: Text(title, style: theme.textTheme.titleMedium),
         subtitle: subtitle == null
@@ -811,11 +780,7 @@ class _SettingsSection extends StatelessWidget {
                 Align(alignment: Alignment.centerRight, child: trailing),
               const SizedBox(height: AppSpacing.sm),
               for (var i = 0; i < children.length; i++) ...[
-                if (i > 0)
-                  Divider(
-                    height: 1,
-                    color: scheme.outlineVariant.withValues(alpha: 0.8),
-                  ),
+                if (i > 0) const SizedBox(height: AppSpacing.sm),
                 children[i],
               ],
             ],
@@ -826,55 +791,26 @@ class _SettingsSection extends StatelessWidget {
   }
 }
 
-class _SettingsChoiceRow extends StatelessWidget {
-  const _SettingsChoiceRow({
-    required this.label,
-    required this.hint,
-    required this.child,
-  });
+class _SettingsOptionBlock extends StatelessWidget {
+  const _SettingsOptionBlock({super.key, this.label, required this.options});
 
-  final String label;
-  final String hint;
-  final Widget child;
+  final String? label;
+  final List<PlayerOption> options;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final description = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: theme.textTheme.titleSmall),
-        const SizedBox(height: 2),
-        Text(
-          hint,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
+    final title = label;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth < 400) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                description,
-                const SizedBox(height: AppSpacing.sm),
-                child,
-              ],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: description),
-              const SizedBox(width: AppSpacing.md),
-              SizedBox(width: SettingsPage.choiceControlWidth, child: child),
-            ],
-          );
-        },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (title != null) ...[
+            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          PlayerOptionGrid(options: options),
+        ],
       ),
     );
   }
@@ -898,54 +834,6 @@ class _SettingsField extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           child,
         ],
-      ),
-    );
-  }
-}
-
-class _SettingsDropdown<T> extends StatelessWidget {
-  const _SettingsDropdown({
-    required this.dropdownKey,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-  });
-
-  final Key dropdownKey;
-  final T value;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.inputDecorationTheme.fillColor ?? scheme.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<T>(
-            key: dropdownKey,
-            value: value,
-            isExpanded: true,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            alignment: AlignmentDirectional.centerStart,
-            icon: Icon(
-              Icons.expand_more_rounded,
-              color: scheme.onSurfaceVariant,
-            ),
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurface,
-            ),
-            items: items,
-            onChanged: onChanged,
-          ),
-        ),
       ),
     );
   }

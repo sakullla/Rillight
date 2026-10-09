@@ -21,65 +21,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.47.6'
-          channel: stable
-          cache: true
-
-      - name: Set up native build tools
-        id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          install: >-
-            git make diffutils
-            mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja mingw-w64-x86_64-meson
-            mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-fontconfig mingw-w64-x86_64-freetype
-            mingw-w64-x86_64-fribidi mingw-w64-x86_64-harfbuzz
-
-      - name: Identify native toolchain for the SDK cache
-        id: toolchain
-        shell: msys2 {0}
-        run: echo "packages=$(pacman -Q | sha256sum | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Windows media SDK
-        id: sdk-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ runner.temp }}/rillight-windows-sdk
-          key: windows-media-sdk-${{ runner.arch }}-${{ steps.toolchain.outputs.packages }}-${{ hashFiles('packages/rillight_player/native/*core_dependencies*', 'packages/rillight_player/native/build_windows_dependencies.py', 'packages/rillight_player/native/patches/**') }}
-
-      - name: Build Windows SDK and candidate core
-        shell: pwsh
-        env:
-          MSYS_ROOT: ${{ steps.msys2.outputs.msys2-location }}
-        run: |
-          $prefix = Join-Path $env:RUNNER_TEMP 'rillight-windows-sdk'
-          $work = Join-Path $env:RUNNER_TEMP 'rillight-windows-sdk-work'
-          python packages/rillight_player/native/build_windows_dependencies.py `
-            --prefix "$prefix" --work "$work" --msys-root "$env:MSYS_ROOT"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "RILLIGHT_CORE_PREFIX_WINDOWS_X64=$prefix" >> $env:GITHUB_ENV
-
-      - name: Save verified Windows SDK
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ runner.temp }}/rillight-windows-sdk
-          key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build Windows
-        run: flutter build windows --release --no-pub
-
-      - name: Audit Windows release bundle
-        run: python tool/verify_player_dependencies.py
+      - name: Build and audit Windows
+        uses: ./.github/actions/windows-build
 
       - name: Install Inno Setup
         shell: pwsh
@@ -230,6 +173,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v7
+
       - name: Download packages
         uses: actions/download-artifact@v7
         with:
@@ -245,10 +191,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          notes=()
+          if [ -f "docs/releases/${GITHUB_REF_NAME}.md" ]; then
+            notes=(--notes-file "docs/releases/${GITHUB_REF_NAME}.md")
+          fi
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Rillight ${GITHUB_REF_NAME}" \
             --draft \
+            "${notes[@]}" \
             --generate-notes
 
   verify-release:

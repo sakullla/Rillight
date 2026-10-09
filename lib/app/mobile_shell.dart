@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
@@ -220,7 +221,14 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                           ),
                           TickerMode(
                             enabled: _index == 2,
-                            child: const AggregationPage(search: true),
+                            child: SearchRouteGuard(
+                              canPop: true,
+                              onPop: () {
+                                FocusScope.of(context).unfocus();
+                                setState(() => _index = 0);
+                              },
+                              child: const AggregationPage(search: true),
+                            ),
                           ),
                         ],
                       ),

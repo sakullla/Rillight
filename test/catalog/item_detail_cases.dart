@@ -547,10 +547,18 @@ void main() {
       await pumpDetailOnly(tester);
 
       final row = find.byKey(CatalogKeys.episodesRow);
-      expect(_episodeCardIds(tester), hasLength(80));
-      expect(_episodeCardIds(tester).first, 'bulk-e1');
-      expect(_episodeCardIds(tester).last, 'bulk-e80');
+      expect(_loadedEpisodeIds(tester), hasLength(80));
+      expect(find.byType(EpisodeRow).evaluate().length, lessThan(20));
+      expect(_loadedEpisodeIds(tester).first, 'bulk-e1');
+      expect(_loadedEpisodeIds(tester).last, 'bulk-e80');
       final more = find.byKey(CatalogKeys.episodesLoadMore);
+      final pageScroll = find
+          .descendant(
+            of: find.byType(ItemDetailPage),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(more, 600, scrollable: pageScroll);
       expect(more, findsOneWidget);
       expect(tester.widget(more), isA<OutlinedButton>());
       expect(
@@ -564,9 +572,15 @@ void main() {
       await tester.tap(more);
       await settle(tester);
 
-      expect(_episodeCardIds(tester), hasLength(80));
-      expect(_episodeCardIds(tester).first, 'bulk-e1');
-      expect(_episodeCardIds(tester).last, 'bulk-e80');
+      expect(_loadedEpisodeIds(tester), hasLength(80));
+      expect(find.byType(EpisodeRow).evaluate().length, lessThan(20));
+      expect(_loadedEpisodeIds(tester).first, 'bulk-e1');
+      expect(_loadedEpisodeIds(tester).last, 'bulk-e80');
+      await tester.scrollUntilVisible(
+        find.textContaining('episode-window-failed'),
+        -600,
+        scrollable: pageScroll,
+      );
       expect(
         find.descendant(
           of: row,
@@ -578,7 +592,7 @@ void main() {
         find.descendant(of: row, matching: find.text('重试')),
         findsOneWidget,
       );
-      expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(find.byType(SnackBar), findsNothing);
 
       // 重试成功:追加下一窗且按 id 去重,分区内错误清空。
@@ -589,7 +603,7 @@ void main() {
       await tester.tap(retry);
       await settle(tester);
 
-      final ids = _episodeCardIds(tester);
+      final ids = _loadedEpisodeIds(tester);
       expect(ids, hasLength(100));
       expect(ids.toSet().length, 100);
       expect(ids.first, 'bulk-e1');
@@ -618,3 +632,9 @@ List<String> _episodeCardIds(WidgetTester tester) {
       card.item.id,
   ];
 }
+
+List<String> _loadedEpisodeIds(WidgetTester tester) => tester
+    .widget<EpisodeList>(find.byType(EpisodeList))
+    .episodes
+    .map((episode) => episode.id)
+    .toList();

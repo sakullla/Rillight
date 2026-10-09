@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
@@ -330,12 +331,12 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                         runSpacing: 8,
                         children: [
                           for (final server in auth.savedServers)
-                            ChoiceChip(
-                              label: Text(server.displayName),
+                            OptionPill(
+                              label: server.displayName,
                               selected: _draft?.selectedServerId == server.id,
-                              onSelected: auth.isBusy
+                              onPressed: auth.isBusy
                                   ? null
-                                  : (_) => setState(() => _select(server)),
+                                  : () => setState(() => _select(server)),
                             ),
                         ],
                       ),

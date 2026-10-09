@@ -1,3 +1,26 @@
+if(UNIX)
+  enable_language(C)
+  add_executable(rillight_cache_directory_test cache_directory_test.c)
+  target_compile_options(rillight_cache_directory_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  add_test(NAME rillight_cache_directory COMMAND rillight_cache_directory_test)
+endif()
+
+add_executable(rillight_dts_packet_recovery_test dts_packet_recovery_test.cpp)
+if(MSVC)
+  target_compile_options(rillight_dts_packet_recovery_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_dts_packet_recovery_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_dts_packet_recovery COMMAND rillight_dts_packet_recovery_test)
+
+add_executable(rillight_bitmap_subtitle_test bitmap_subtitle_test.cpp)
+if(MSVC)
+  target_compile_options(rillight_bitmap_subtitle_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_bitmap_subtitle_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_bitmap_subtitle COMMAND rillight_bitmap_subtitle_test)
+
 add_executable(rillight_h264_access_unit_test h264_access_unit_test.cpp)
 if(MSVC)
   target_compile_options(rillight_h264_access_unit_test PRIVATE /W4 /WX /UNDEBUG)
@@ -53,7 +76,27 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     endif()
   endif()
 endif()
-option(RILLIGHT_CORE_GPU_TESTS "Run color conversion on a real D3D11 or Metal device" OFF)
+option(RILLIGHT_CORE_GPU_TESTS "Run color conversion on a real GPU/device" OFF)
+if(ANDROID AND RILLIGHT_CORE_GPU_TESTS)
+  add_executable(rillight_android_color_pipeline_test
+    android_color_pipeline_test.cpp ../core/android_color_pipeline.cpp
+    ../core/android_dovi_surface.cpp ../core/portable_color_pipeline.cpp)
+  target_include_directories(rillight_android_color_pipeline_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
+  target_link_libraries(rillight_android_color_pipeline_test PRIVATE
+    ${avcodec_library} ${avutil_library} ${swscale_library} EGL GLESv3 android log mediandk dl Threads::Threads)
+  target_compile_options(rillight_android_color_pipeline_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  add_test(NAME rillight_android_color_pipeline COMMAND rillight_android_color_pipeline_test)
+  add_executable(rillight_android_runtime_fallback_test
+    android_runtime_fallback_test.cpp ../core/portable_color_pipeline.cpp
+    ../core/android_color_pipeline.cpp ../core/android_dovi_surface.cpp ../core/decoder_probe.cpp)
+  target_include_directories(rillight_android_runtime_fallback_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
+  target_compile_definitions(rillight_android_runtime_fallback_test PRIVATE RILLIGHT_HAVE_LIBASS=0)
+  target_compile_options(rillight_android_runtime_fallback_test PRIVATE -UNDEBUG)
+  target_link_libraries(rillight_android_runtime_fallback_test PRIVATE
+    ${avformat_library} ${avcodec_library} ${avfilter_library} ${avutil_library}
+    ${swscale_library} ${swresample_library} EGL GLESv3 android log mediandk dl Threads::Threads)
+  # Run manually with the generated fixture; do not require a private clip in CI.
+endif()
 if(APPLE AND RILLIGHT_CORE_GPU_TESTS)
   add_executable(rillight_macos_color_pipeline_test
     macos/color_pipeline_test.cpp ../core/macos_color_pipeline.mm

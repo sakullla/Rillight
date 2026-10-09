@@ -50,6 +50,8 @@ class ServerSwitcherDialog extends StatefulWidget {
   static const deleteCancelKey = Key('server-delete-cancel');
   static const changePasswordKey = Key('server-change-password');
 
+  static const privateKey = Key('server-switcher-private');
+
   static Key deleteKey(String serverId) => Key('server-delete-$serverId');
 
   static Key addLineKey(String serverId) => Key('server-add-line-$serverId');

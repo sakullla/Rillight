@@ -12,19 +12,13 @@ import java.util.concurrent.atomic.AtomicLong
 /** Only a sealed loopback transport or an app-private subtitle may reach FFmpeg. */
 internal class CoreIoFactory(context: Context) {
     private val privateRoot = File(context.applicationInfo.dataDir).canonicalFile
-    private val diagnostics = context.applicationInfo.flags and
-        android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
-
-    private fun trace(message: String) {
-        if (diagnostics) android.util.Log.i("RillightInput", message)
-    }
 
     fun open(raw: String): CoreInput? {
         val uri = try { URI(raw) } catch (_: Exception) { return null }
         if (uri.userInfo != null || uri.fragment != null) return null
         return when (uri.scheme?.lowercase()) {
             "http" -> if (uri.host == "127.0.0.1" && uri.port in 1..65535)
-                CoreInput(raw, null, ::trace) else null
+                CoreInput(raw, null) else null
             "file" -> {
                 val file = try { File(uri).canonicalFile } catch (_: Exception) { return null }
                 if (!file.isFile || !file.toPath().startsWith(privateRoot.toPath())) null
@@ -36,8 +30,7 @@ internal class CoreIoFactory(context: Context) {
 }
 
 /** AVIO-compatible input. interrupt() never waits for read/seek and is reusable. */
-internal class CoreInput(private val url: String?, private val file: File?,
-                         private val trace: (String) -> Unit = {}) {
+internal class CoreInput(private val url: String?, private val file: File?) {
     companion object { private val nextInputId = AtomicLong() }
     private val inputId = nextInputId.incrementAndGet().toString()
     private val epoch = AtomicLong()
@@ -61,6 +54,7 @@ internal class CoreInput(private val url: String?, private val file: File?,
     private val blocks = java.util.LinkedHashMap<Long, ReadWindow>(8, 0.75f, true)
     private var blockBytes = 256 * 1024
     private var previousWindowEnd = -1L
+    private var skipBuffer: ByteArray? = null
 
     fun read(buffer: ByteArray, size: Int): Int {
         if (size !in 1..buffer.size) return -22
@@ -106,12 +100,12 @@ internal class CoreInput(private val url: String?, private val file: File?,
     }
 
     fun interrupt() {
-        val revision = epoch.incrementAndGet()
-        val started = System.nanoTime()
-        trace("interrupt begin epoch=$revision")
+        epoch.incrementAndGet()
+
+
         // HttpURLConnection.disconnect() is a signal; do not acquire a read lock.
         for (request in connections.toList()) request.disconnect()
-        trace("interrupt end epoch=$revision ms=${(System.nanoTime() - started) / 1_000_000}")
+
     }
 
     fun close() {
@@ -132,8 +126,13 @@ internal class CoreInput(private val url: String?, private val file: File?,
 
     private fun ensureHttp(observed: Long) {
         retireInterrupted(observed)
-        if (input != null && httpPosition == position) return
-        val retained = parked.firstOrNull { it.position == position && it.epoch == observed }
+        if (input != null && canAdvance(httpPosition, responseRemaining)) {
+            advanceHttp(observed)
+            return
+        }
+        val retained = parked.filter {
+            it.epoch == observed && canAdvance(it.position, it.remaining)
+        }.maxByOrNull { it.position }
         if (retained != null) parked.remove(retained)
         if (input != null) {
             // Keep two bounded loopback responses across audio/video/subtitle
@@ -150,6 +149,7 @@ internal class CoreInput(private val url: String?, private val file: File?,
             connection = retained.connection; input = retained.input
             httpPosition = retained.position; responseRemaining = retained.remaining
             wholeResponse = retained.whole; connectionEpoch = retained.epoch
+            advanceHttp(observed)
             return
         }
         val request = URL(url).openConnection() as HttpURLConnection
@@ -173,11 +173,11 @@ internal class CoreInput(private val url: String?, private val file: File?,
         // proxy can hand it to the downloader, adding another network open.
         val bootstrap = position == 0L && total < 0 && blocks.isEmpty()
         request.setRequestProperty("Range", if (bootstrap) "bytes=0-" else "bytes=$position-$requestEnd")
-        val started = System.nanoTime()
-        trace("headers begin epoch=$observed offset=$position window=$blockBytes bootstrap=$bootstrap")
+
+
         if (epoch.get() != observed) { closeHttp(); throw java.io.InterruptedIOException() }
         val status = request.responseCode
-        trace("headers end epoch=$observed status=$status ms=${(System.nanoTime() - started) / 1_000_000}")
+
         if (epoch.get() != observed) { request.disconnect(); throw java.io.InterruptedIOException() }
         if (status !in 200..299 || (position > 0 && status != 206)) {
             request.disconnect()
@@ -198,6 +198,36 @@ internal class CoreInput(private val url: String?, private val file: File?,
         wholeResponse = status == 200
         connectionEpoch = observed
         if (epoch.get() != observed) { closeHttp(); throw java.io.InterruptedIOException() }
+    }
+
+    // MP4 packets for the selected track can have small gaps occupied by other
+    // tracks. Keep a current/parked response when the next packet is just ahead;
+    // exact-position matching otherwise pays another HTTP request per packet.
+    // Distant seeks still open their own bounded range instead of draining it.
+    private fun canAdvance(from: Long, remaining: Long): Boolean {
+        if (position < from) return false
+        val distance = position - from
+        return distance <= 64 * 1024 &&
+            (distance == 0L || remaining < 0 || distance < remaining)
+    }
+
+    private fun advanceHttp(observed: Long) {
+        if (httpPosition == position) return
+        val scratch = skipBuffer ?: ByteArray(8192).also { skipBuffer = it }
+        try {
+            while (httpPosition < position) {
+                if (epoch.get() != observed) throw java.io.InterruptedIOException()
+                val count = input!!.read(scratch, 0,
+                    minOf(scratch.size.toLong(), position - httpPosition).toInt())
+                if (count <= 0) throw java.io.EOFException()
+                httpPosition += count
+                if (responseRemaining >= 0) responseRemaining -= count
+            }
+            if (epoch.get() != observed) throw java.io.InterruptedIOException()
+        } catch (failure: java.io.IOException) {
+            closeHttp()
+            throw failure
+        }
     }
 
     private fun readHttp(buffer: ByteArray, size: Int, observed: Long): Int {
@@ -241,7 +271,7 @@ internal class CoreInput(private val url: String?, private val file: File?,
             val previousLength = window.length
             var count = previousLength
             val needed = minOf(pending.size - count, size) + count
-            val started = System.nanoTime()
+
             while (count < pending.size) {
                 val read = try {
                     // Only requested bytes may block. Opportunistic read-ahead
@@ -268,8 +298,6 @@ internal class CoreInput(private val url: String?, private val file: File?,
                 if (responseRemaining >= 0) responseRemaining -= read
             }
             if (responseRemaining == 0L) closeHttp()
-            val elapsedMs = (System.nanoTime() - started) / 1_000_000
-            if (elapsedMs >= 1000) trace("read epoch=$observed offset=$position bytes=${count - previousLength} ms=$elapsedMs")
             if (count == previousLength) {
                 if (total >= 0 && position < total) throw java.io.EOFException()
                 return -1

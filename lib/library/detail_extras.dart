@@ -63,6 +63,22 @@ class DetailGenreRow extends StatelessWidget {
     if (genres.isEmpty) {
       return const SizedBox.shrink();
     }
+    if (PresentationScope.of(context).isTv) {
+      // TV:胶囊按钮纳入 D-pad 焦点序列,选中进入该流派的片库。
+      final s = TvDesign.scaleOf(context);
+      return Wrap(
+        spacing: 8 * s,
+        runSpacing: 8 * s,
+        children: [
+          for (final genre in genres)
+            TvAction(
+              pill: true,
+              onPressed: () => openGenreShelf(context, item, genre),
+              child: Text(genre),
+            ),
+        ],
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.sm),
       child: Wrap(
@@ -120,6 +136,18 @@ class DetailExternalLinks extends StatelessWidget {
     ];
     if (visible.isEmpty) {
       return const SizedBox.shrink();
+    }
+    if (PresentationScope.of(context).isTv) {
+      // TV 由详情页给分区标题与留白,这里只排按钮。
+      final s = TvDesign.scaleOf(context);
+      return Wrap(
+        spacing: 8 * s,
+        runSpacing: 8 * s,
+        children: [
+          for (final link in visible)
+            _ExternalLinkButton(link: link, title: title),
+        ],
+      );
     }
     final l10n = AppLocalizations.of(context);
     return Padding(
@@ -192,14 +220,24 @@ class _ExternalLinkButton extends StatelessWidget {
       ],
     );
     if (PresentationScope.of(context).isTv) {
-      // TV:走 TvAction 纳入 D-pad 焦点序列,焦点视觉由 tv_widgets 统一。
-      return Tooltip(
-        message: label,
-        child: TvAction(
-          key: ValueKey('external-link-${link.url}'),
-          onPressed: () => _open(context),
-          child: content,
-        ),
+      // TV:胶囊按钮纳入 D-pad 焦点序列;文字随焦点反相,品牌图形保留原色。
+      final s = TvDesign.scaleOf(context);
+      return TvAction(
+        key: ValueKey('external-link-${link.url}'),
+        pill: true,
+        leading: mark?.svg != null
+            ? ProviderMarkIcon(mark: mark!, size: 16 * s)
+            : mark != null
+            ? Builder(
+                builder: (context) => ProviderMarkIcon(
+                  mark: mark,
+                  size: 16 * s,
+                  color: IconTheme.of(context).color,
+                ),
+              )
+            : const Icon(Icons.link_rounded),
+        onPressed: () => _open(context),
+        child: Text(name),
       );
     }
     return Tooltip(
@@ -508,7 +546,8 @@ class _AlbumRailState extends State<_AlbumRail> {
     }
   }
 
-  final _controller = ScrollController();
+  // 不读详情页的竖向 PageStorage，滚出视口再回来时不会贴到最右边。
+  final _controller = ScrollController(keepScrollOffset: false);
   var _canScrollLeft = false;
   var _canScrollRight = false;
 

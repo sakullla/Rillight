@@ -154,6 +154,7 @@ class SessionByteCache {
   /// or moving an immutable block between RAM and disk cannot retract coverage.
   int get coverageRevision => _coverageRevision;
   final _memory = <_BlockKey, Uint8List>{};
+  final _foregroundMemory = <_BlockKey>{};
   final _memoryPins = <_BlockKey, int>{};
   final _rangeLeases = <CacheRangeLease>{};
   int _acquiringLeases = 0;
@@ -513,7 +514,7 @@ class SessionByteCache {
       }
       source = CacheReadSource.disk;
       if (_closed || !identical(_entries[key], entry)) return null;
-      if (bytes != null) _retain(key, bytes);
+      if (bytes != null) _retain(key, bytes, foreground: true);
     }
     if (bytes == null) {
       if (confirmedMissing && _disk?.degradation != 'disk-timeout') {
@@ -521,6 +522,7 @@ class SessionByteCache {
       }
       return null;
     }
+    if (_memory.containsKey(key)) _foregroundMemory.add(key);
     _entries.remove(key);
     _entries[key] = entry;
     final start = offset - key.offset;
@@ -652,23 +654,29 @@ class SessionByteCache {
   }) {
     var position = offset;
     final end = offset + length;
-    while (position < end) {
-      var coveredUntil = position;
-      for (final entry in _entries.entries) {
-        if (entry.key.resource == resource &&
-            entry.key.generation == generation &&
-            entry.key.offset <= position &&
-            entry.key.offset + entry.value.length > coveredUntil &&
-            (_memory.containsKey(entry.key) ||
-                (entry.value.diskToken != null && _disk?.degradation == null) ||
-                entry.value.publication != null)) {
-          coveredUntil = entry.key.offset + entry.value.length;
-        }
+    if (position >= end) return null;
+    // The index is in LRU order, not byte order. Scanning it again for every
+    // covered block makes a full read-ahead window quadratic as playback runs.
+    // Sort its available intersections once, then merge in one forward pass.
+    final ranges = <(int start, int end)>[];
+    for (final entry in _entries.entries) {
+      if (entry.key.resource == resource &&
+          entry.key.generation == generation &&
+          entry.key.offset < end &&
+          entry.key.offset + entry.value.length > offset &&
+          (_memory.containsKey(entry.key) ||
+              (entry.value.diskToken != null && _disk?.degradation == null) ||
+              entry.value.publication != null)) {
+        ranges.add((entry.key.offset, entry.key.offset + entry.value.length));
       }
-      if (coveredUntil == position) return position;
-      position = coveredUntil;
     }
-    return null;
+    ranges.sort((a, b) => a.$1.compareTo(b.$1));
+    for (final range in ranges) {
+      if (range.$1 > position) return position;
+      if (range.$2 > position) position = range.$2;
+      if (position >= end) return null;
+    }
+    return position;
   }
 
   /// Used only after a miss, before committing a cached prefix. Fully evicted
@@ -839,19 +847,33 @@ class SessionByteCache {
     _coverageRevision++;
     await Future.wait(_rangeLeases.toList().map((lease) => lease.close()));
     _entries.clear();
+    _foregroundMemory.clear();
     _indexBytes = 0;
     _memory.clear();
     _memoryBytes = 0;
     await _disk?.close();
   }
 
-  void _retain(_BlockKey key, Uint8List bytes) {
+  void _retain(_BlockKey key, Uint8List bytes, {bool foreground = false}) {
     if (_memoryPins.containsKey(key)) return;
     _removeMemory(key);
     if (bytes.length > memoryLimitBytes) return;
     while (_memoryBytes + bytes.length > memoryLimitBytes) {
       final oldest = _memory.keys
-          .where((candidate) => !_memoryPins.containsKey(candidate))
+          .where(
+            (candidate) =>
+                !_memoryPins.containsKey(candidate) &&
+                // A fast disk prefetch must not evict foreground blocks being
+                // read in 64 KiB slices (audio/video may alternate blocks).
+                // Otherwise each slice can reload and checksum the same 4 MiB
+                // block. This only changes admission within the
+                // existing RAM budget; RAM-only/failing-disk caches still need
+                // to admit new bytes so a producer can make progress.
+                (foreground ||
+                    _disk == null ||
+                    _disk!.degradation != null ||
+                    !_foregroundMemory.contains(candidate)),
+          )
           .firstOrNull;
       if (oldest == null) return;
       _removeMemory(oldest);
@@ -865,6 +887,7 @@ class SessionByteCache {
 
   void _removeMemory(_BlockKey key) {
     if (_memoryPins.containsKey(key)) return;
+    _foregroundMemory.remove(key);
     final bytes = _memory.remove(key);
     if (bytes != null) {
       _memoryBytes -= bytes.length;
@@ -900,6 +923,7 @@ class SessionByteCache {
   }
 
   void _forget(_BlockKey key) {
+    _foregroundMemory.remove(key);
     if (_entries.remove(key) != null) {
       _indexBytes -= _indexCost(key);
       _revision++;

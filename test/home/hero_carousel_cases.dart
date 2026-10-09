@@ -1,7 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -27,12 +29,16 @@ void main() {
           name: 'Movie A',
           type: 'Movie',
           backdropImageTag: 'art-a',
+          productionYear: 2024,
+          communityRating: 8.5,
         ),
         EmbyItem(
           id: 'movie-b',
           name: 'Movie B',
           type: 'Movie',
           primaryImageTag: 'poster-b',
+          productionYear: 2025,
+          communityRating: 8.6,
         ),
       ],
     );
@@ -57,6 +63,107 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   }
+
+  group('desktop stage layout', () {
+    for (final size in const [
+      Size(1024, 768),
+      Size(1440, 900),
+      Size(1920, 1080),
+    ]) {
+      testWidgets('full-bleed stage keeps cinematic proportions at $size', (
+        tester,
+      ) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        catalog.latestMovies = CatalogRowState(
+          items: [
+            for (final id in ['a', 'b', 'c'])
+              EmbyItem(
+                id: 'movie-$id',
+                name: 'Movie $id',
+                type: 'Movie',
+                backdropImageTag: 'art-$id',
+                overview: '\u4e00\u6bb5\u5f88\u957f\u7684\u7b80\u4ecb' * 40,
+              ),
+          ],
+        );
+        await tester.pumpWidget(
+          wrap(
+            SingleChildScrollView(
+              child: HomeHero(catalog: catalog, topOverlap: 56),
+            ),
+          ),
+        );
+        await tester.pump();
+        final card = tester.getRect(find.byKey(const Key('home-hero-card')));
+        // Edge to edge, no side gutters or a box shape under the top bar.
+        expect(card.left, 0);
+        expect(card.width, size.width);
+        // Neither a thin letterbox strip nor the whole first screen.
+        expect(card.width / card.height, inInclusiveRange(1.6, 2.8));
+        expect(card.height, lessThan(size.height * .8));
+
+        final title = tester.getRect(find.text('Movie a'));
+        final textBlock = tester.getRect(
+          find.byKey(const ValueKey('home-hero-text-movie-a')),
+        );
+        // Overview wraps inside the text column instead of spanning the stage.
+        expect(
+          textBlock.width,
+          lessThanOrEqualTo(HomeHero.textBlockWidthFor(size.width) + .5),
+        );
+        // Copy is aligned with the shelf gutter and clear of the top bar.
+        expect(textBlock.left, AppSpacing.page);
+        expect(textBlock.top, greaterThan(56));
+        // Switch controls never sit on top of the title or copy.
+        for (final key in [CatalogKeys.heroPrev, CatalogKeys.heroNext]) {
+          final control = tester.getRect(find.byKey(key));
+          expect(control.overlaps(title), isFalse);
+          expect(control.overlaps(textBlock), isFalse);
+        }
+        expect(tester.takeException(), isNull);
+        await unmount(tester);
+      });
+    }
+
+    testWidgets('switching keeps one caption once the transition ends', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        wrap(
+          SingleChildScrollView(
+            child: HomeHero(catalog: catalog, topOverlap: 56),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(CatalogKeys.heroNext));
+      await tester.pump();
+      // Mid-transition the old caption has already faded out before the new
+      // one is fully in, so the two never print over each other at full ink.
+      await tester.pump(heroSlideDuration * .5);
+      final opacities = tester
+          .widgetList<FadeTransition>(
+            find.ancestor(
+              of: find.text('Movie A'),
+              matching: find.byType(FadeTransition),
+            ),
+          )
+          .map((fade) => fade.opacity.value);
+      expect(opacities.first, 0);
+      await tester.pump(heroBackdropDuration);
+      expect(find.text('Movie A'), findsNothing);
+      expect(find.text('Movie B'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await unmount(tester);
+    });
+  });
 
   group('desktop auto rotate', () {
     testWidgets(
@@ -263,6 +370,109 @@ void main() {
       expect(find.text('Movie B'), findsOneWidget);
       await unmount(tester);
     });
+  });
+
+  group('phone swipe area', () {
+    testWidgets('play and details taps still open the selected item', (
+      tester,
+    ) async {
+      HeroAutoRotate.debugForceAutoRotate = false;
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, _) => Scaffold(body: PhoneHero(catalog: catalog)),
+          ),
+          for (final action in ['item', 'play'])
+            GoRoute(
+              path: '/$action/:id',
+              builder: (_, state) =>
+                  Scaffold(body: Text('$action ${state.pathParameters['id']}')),
+            ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: router,
+          locale: const Locale('zh'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.text('Movie A'), const Offset(-180, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('hero-resume-movie-b')));
+      await tester.pumpAndSettle();
+      expect(find.text('play movie-b'), findsOneWidget);
+      router.pop();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('详情'));
+      await tester.pumpAndSettle();
+      expect(find.text('item movie-b'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await unmount(tester);
+    });
+
+    for (final area in ['title', 'metadata', 'play', 'details', 'poster']) {
+      testWidgets('swiping $area changes pages in both directions', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final scroll = ScrollController();
+        addTearDown(scroll.dispose);
+        await tester.pumpWidget(
+          wrap(
+            SingleChildScrollView(
+              controller: scroll,
+              child: Column(
+                children: [
+                  PhoneHero(catalog: catalog),
+                  const SizedBox(height: 1200),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        Finder target(bool second) => switch (area) {
+          'title' => find.text(second ? 'Movie B' : 'Movie A'),
+          'metadata' => find.text(second ? '2025' : '2024'),
+          'play' => find.byKey(
+            ValueKey('hero-resume-movie-${second ? 'b' : 'a'}'),
+          ),
+          'details' => find.text('详情'),
+          _ => find.byKey(PhoneHero.openKey),
+        };
+        // Start on the actual text/button, not the poster PageView.
+        await tester.drag(target(false), const Offset(-180, 0));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text('Movie B'), findsOneWidget);
+        expect(find.text('Movie A'), findsNothing);
+        expect(scroll.offset, 0);
+        await tester.drag(target(true), const Offset(180, 0));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.text('Movie A'), findsOneWidget);
+        expect(find.text('Movie B'), findsNothing);
+        // The same area must still let the containing home page scroll.
+        await tester.drag(target(false), const Offset(0, -150));
+        await tester.pump();
+        expect(scroll.offset, greaterThan(50));
+        expect(find.text('Movie A'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await unmount(tester);
+      });
+    }
   });
 
   group('phone auto rotate', () {

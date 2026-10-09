@@ -1,4 +1,3 @@
-import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -67,24 +66,18 @@ class PlayerStartupPreparation {
     payload = () async {
       try {
         final results = await Future.wait<Map<String, dynamic>?>([
-          client
-              .getJson(
-                '/Users/$userId/Items/$itemId',
-                queryParameters: {
-                  'Fields': EmbyClient.itemFields,
-                  'EnableImageTypes': EmbyClient.detailImageTypes,
-                },
-                cancelToken: _cancel,
-              )
-              .then((value) {
-                PlayerStartupTrace.record('metadata.itemReady');
-                return value;
-              }),
+          client.getJson(
+            '/Users/$userId/Items/$itemId',
+            queryParameters: {
+              'Fields': EmbyClient.itemFields,
+              'EnableImageTypes': EmbyClient.detailImageTypes,
+            },
+            cancelToken: _cancel,
+          ),
           client
               .getJson('/Users/$userId', cancelToken: _cancel)
               .then<Map<String, dynamic>?>((value) {
                 // Carry playback preferences only, not the user's full policy.
-                PlayerStartupTrace.record('metadata.userReady');
                 final user = EmbyUser.fromJson(value);
                 return {
                   'Id': user.id,

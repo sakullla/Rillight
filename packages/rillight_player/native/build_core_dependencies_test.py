@@ -27,6 +27,8 @@ class SourceLockTest(unittest.TestCase):
         self.assertIn("patches/ffmpeg-android-dolby-surface.patch", android)
         self.assertNotIn("patches/ffmpeg-android-dovi-rpu.patch", desktop)
         self.assertIn("patches/ffmpeg-android-dovi-rpu.patch", android)
+        self.assertNotIn("patches/ffmpeg-android-custom-io-buffering.patch", desktop)
+        self.assertIn("patches/ffmpeg-android-custom-io-buffering.patch", android)
         self.assertTrue(set(desktop) < set(android))
 
     def test_android_patch_union_rejects_extra_edits_and_preserves_index(self):

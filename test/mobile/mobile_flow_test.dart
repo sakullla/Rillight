@@ -13,7 +13,10 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/app/widgets/app_empty_view.dart';
+import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
+import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
@@ -24,6 +27,7 @@ import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/library_page.dart';
+import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
@@ -47,13 +51,16 @@ void main() {
     double scale = 1,
     FakeVideoBackend? backend,
     Set<String>? libraryIds,
+    List<FakeEmbyServer> extraServers = const [],
+    bool signedIn = false,
   }) async {
     tester.view.physicalSize = Size(width, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final catalog = [server, ...extraServers];
     final auth = SyntheticSourceAuth(
-      adapter: FakeEmbyAdapter([server]),
+      adapter: FakeEmbyAdapter(catalog),
       device: const EmbyDeviceInfo(
         clientName: 'test',
         deviceName: 'phone',
@@ -74,6 +81,20 @@ void main() {
         settingsStore: MemoryPlayerSettingsStore(),
       ),
     );
+    if (signedIn) {
+      await tester.runAsync(() async {
+        for (final item in catalog) {
+          final connected = await auth.connect(
+            address: item.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          if (!connected) {
+            throw StateError('signed-in fixture failed for ${item.baseUrl}');
+          }
+        }
+      });
+    }
     tester.platformDispatcher.textScaleFactorTestValue = scale;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await tester.pumpWidget(app);
@@ -162,19 +183,37 @@ void main() {
     tester,
   ) async {
     final server = FakeEmbyServer();
-    await start(tester, server);
-    await login(tester, server);
-    ScrollPosition position(String key, {bool offstage = false}) => tester
-        .state<ScrollableState>(
-          find
-              .descendant(
-                of: find.byKey(PageStorageKey(key), skipOffstage: !offstage),
-                matching: find.byType(Scrollable, skipOffstage: !offstage),
-                skipOffstage: !offstage,
-              )
-              .first,
-        )
-        .position;
+    // One continue-watching row fits in 360×800, so the outer list cannot
+    // scroll. Extra signed-in servers add vertical shelves.
+    await start(
+      tester,
+      server,
+      extraServers: [
+        for (var i = 2; i <= 3; i++)
+          FakeEmbyServer(
+            serverId: 'server-id-$i',
+            serverName: '来源 $i',
+            baseUrl: Uri.parse('http://emby-$i.test:8096'),
+          ),
+      ],
+      signedIn: true,
+    );
+    ScrollPosition position(String key, {bool offstage = false}) {
+      final elements = find
+          .descendant(
+            of: find.byKey(PageStorageKey(key), skipOffstage: !offstage),
+            matching: find.byType(Scrollable, skipOffstage: !offstage),
+            skipOffstage: !offstage,
+          )
+          .evaluate();
+      for (final element in elements) {
+        final scroll =
+            ((element as StatefulElement).state as ScrollableState).position;
+        if (scroll.axis == Axis.vertical) return scroll;
+      }
+      fail('no vertical scrollable for $key');
+    }
+
     bool transparent() =>
         tester.widget<AppBar>(find.byType(AppBar)).forceMaterialTransparency;
     expect(transparent(), isTrue);
@@ -193,16 +232,23 @@ void main() {
     expect(transparent(), isTrue);
     await tester.tap(find.text('聚合').last);
     await tester.pumpAndSettle();
-    final aggregation = position('aggregation');
-    expect(aggregation.maxScrollExtent, greaterThan(24));
-    aggregation.jumpTo(aggregation.maxScrollExtent);
-    await tester.pumpAndSettle();
+    expect(position('aggregation').maxScrollExtent, greaterThan(24));
     await tester.tap(find.text('首页').last);
     await tester.pumpAndSettle();
     expect(transparent(), isTrue);
     // Offstage IndexedStack children still issue scroll notifications. They
     // must not change home chrome, including ballistic dimension correction.
-    position('aggregation', offstage: true).jumpTo(100);
+    // Park away from the target first: the stack keeps the offset, and jumpTo
+    // does not notify when pixels already equal the destination.
+    final offstageAggregation = position('aggregation', offstage: true);
+    expect(offstageAggregation.maxScrollExtent, greaterThan(24));
+    final target = offstageAggregation.maxScrollExtent;
+    offstageAggregation.jumpTo(0);
+    final parked = offstageAggregation.pixels;
+    expect(parked, isNot(target));
+    offstageAggregation.jumpTo(target);
+    expect(offstageAggregation.pixels, isNot(parked));
+    expect(offstageAggregation.pixels, greaterThan(24));
     tester.view.physicalSize = const Size(800, 360);
     await tester.pumpAndSettle();
     expect(transparent(), isTrue);
@@ -227,9 +273,15 @@ void main() {
     );
     await login(tester, server);
     final catalog = CatalogScope.of(tester.element(find.byType(PhoneHome)));
+    // 轮播首帧是最新入库的电影,而不是继续观看条目。
     final item = PhoneHero.featuredItemsOf(catalog).first;
-    expect(item.canResume, isTrue);
+    expect(item.isMovie, isTrue);
+    expect(item.canResume, isFalse);
     final resume = find.byKey(ValueKey('hero-resume-${item.id}'));
+    expect(
+      find.descendant(of: resume, matching: find.text('播放')),
+      findsOneWidget,
+    );
     await tester.tap(resume);
     await tester.pumpAndSettle();
     expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -240,10 +292,7 @@ void main() {
         .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
         .controller!;
     expect(controller.itemId, item.id);
-    expect(
-      backend.openedStart,
-      Duration(microseconds: item.userData.playbackPositionTicks ~/ 10),
-    );
+    expect(backend.openedStart, Duration.zero);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 4));
@@ -274,6 +323,8 @@ void main() {
           isTextSubtitleStream: true,
         ),
       ];
+      server.items.firstWhere((item) => item.id == 'series-friends').favorite =
+          true;
       final (app, backend) = await start(
         tester,
         server,
@@ -292,6 +343,7 @@ void main() {
       await tester.pumpAndSettle();
       final field = find.byKey(const Key('aggregation-keyword'));
       await tester.enterText(field, 'Inception');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       tester.testTextInput.hide();
       tester.view.physicalSize = const Size(800, 360);
@@ -309,20 +361,7 @@ void main() {
       await tester.tap(find.text('聚合').last);
       await tester.pumpAndSettle();
       expect(find.byType(AggregationPage), findsOneWidget);
-      await tester.tap(find.byType(DropdownButton<String>).first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('剧集').last);
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('老友记'),
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const PageStorageKey('aggregation')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
+      await tester.tap(find.byKey(const Key('aggregation-segment-favorites')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('老友记'));
       await tester.pumpAndSettle();
@@ -340,24 +379,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(MobileShell), findsOneWidget);
       // Aggregation opens the source detail directly, without an intermediate
-      // library route. One back restores its filter and scroll state.
+      // library route. One back returns to the server rows.
       expect(find.byType(AggregationPage), findsOneWidget);
-      await tester.ensureVisible(find.byType(DropdownButton<String>).first);
+      await tester.tap(find.byKey(const Key('aggregation-segment-continue')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButton<String>).first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('电影').last);
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('Inception'),
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const PageStorageKey('aggregation')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
       await tester.ensureVisible(find.text('Inception').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Inception').first);
@@ -566,33 +591,22 @@ void main() {
   ) async {
     final server = FakeEmbyServer();
     await start(tester, server, libraryIds: {'view-movies'});
+    server.viewsStatus = 503;
     await login(tester, server);
     await tester.tap(find.text('聚合').last);
     await tester.pumpAndSettle();
     expect(find.byType(AggregationPage), findsOneWidget);
-    server.itemsStatus = 503;
-    await tester.tap(find.byType(DropdownButton<String>).first);
+    await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('电影').last);
+    expect(find.byType(AppErrorView), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    server.viewsStatus = null;
+    await tester.ensureVisible(find.text('重试'));
+    await tester.tap(find.text('重试'));
     await tester.pumpAndSettle();
-    expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
-    expect(find.text('重试此来源'), findsWidgets);
-    expect(find.text('所选范围没有匹配作品'), findsNothing);
-    server.itemsStatus = null;
-    await tester.tap(find.text('重试此来源').first);
-    await tester.pumpAndSettle();
-    expect(find.text('重试此来源'), findsNothing);
-    await tester.scrollUntilVisible(
-      find.text('Inception'),
-      200,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const PageStorageKey('aggregation')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    expect(find.text('Inception'), findsWidgets);
+    expect(find.text('重试'), findsNothing);
+    expect(find.byType(AppErrorView), findsNothing);
+    expect(find.text('电影'), findsWidgets);
     // Lazy cards started cache IO on their last mount. Drain real reads and
     // fake-time HTTP/image deadlines before the test-body invariant check.
     for (var i = 0; i < 3; i++) {
@@ -614,42 +628,41 @@ void main() {
       await tester.pumpAndSettle();
       final field = find.byKey(const Key('aggregation-keyword'));
       await tester.enterText(field, 'Inception');
-      await tester.pumpAndSettle();
-      server.searchStatus = 503;
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
-      expect(find.text('重试此来源'), findsWidgets);
-      // 再提交范围撤销旧卡片，不能以旧结果冒充当前成功。
-      expect(
-        find.byWidgetPredicate(
-          (widget) => widget.runtimeType.toString() == '_QueryCard',
+      expect(find.byType(PosterCard), findsWidgets);
+      server.searchStatus = 503;
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('aggregation-keyword')),
+          matching: find.byIcon(Icons.arrow_forward_rounded),
         ),
-        findsNothing,
       );
+      await tester.pumpAndSettle();
+      expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
+      expect(find.text('重试'), findsWidgets);
+      // 再次提交片名会撤掉上一轮海报，失败不能拿旧结果冒充成功。
+      expect(find.byType(PosterCard), findsNothing);
       server.searchStatus = null;
-      await tester.tap(find.text('重试此来源').first);
+      await tester.tap(find.text('重试').first);
       await tester.pumpAndSettle();
+      expect(find.byType(PosterCard), findsWidgets);
+      expect(find.text('重试'), findsNothing);
       await tester.enterText(field, 'no-such-movie');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      expect(find.text('所选范围没有匹配作品'), findsOneWidget);
+      expect(find.text('没有结果'), findsOneWidget);
+      expect(find.text('所选范围没有匹配作品'), findsNothing);
+      expect(find.text('未选择可参与的服务或媒体库'), findsNothing);
       server.expireAuthenticatedRequests = true;
       await tester.enterText(field, 'Inception');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(app.auth.isLoggedIn, isTrue);
       expect(find.byType(MobileShell), findsOneWidget);
-      // 注册表撤销过期来源，展示层同步清除关键词与贡献；
-      // 当前全局连接不被独立来源认证失败登出。
-      expect(tester.widget<TextField>(field).controller!.text, isEmpty);
-      expect(find.text('输入片名后搜索'), findsOneWidget);
-      expect(
-        find.byWidgetPredicate(
-          (widget) => widget.runtimeType.toString() == '_QueryCard',
-        ),
-        findsNothing,
-      );
+      // 来源登录过期只留在这一次搜索上，不把当前全局连接退出。
+      expect(find.text('重试'), findsWidgets);
+      expect(find.byType(PosterCard), findsNothing);
       expect(find.byKey(const Key('android-connect-submit')), findsNothing);
       final requestsAfterRevocation = server.requests.length;
       await tester.pump(const Duration(seconds: 1));
@@ -663,19 +676,16 @@ void main() {
     tags: ['integration'],
   );
   testWidgets(
-    'search keeps idle, empty, failure and page-failure screens distinct',
+    'search keeps idle, empty, no-result and failure screens distinct',
     (tester) async {
       final server = FakeEmbyServer(
         items: [
-          for (var i = 0; i < 55; i++)
+          for (var i = 0; i < 8; i++)
             FakeEmbyItem(
               id: 'page-$i',
               name: 'Page ${i.toString().padLeft(2, '0')}',
               type: 'Movie',
               parentId: 'view-movies',
-              playedPercentage: i == 0 ? 40 : null,
-              playbackPositionTicks: i == 0 ? 10000000 * 60 : 0,
-              runTimeTicks: 10000000 * 60 * 100,
             ),
         ],
       );
@@ -684,16 +694,6 @@ void main() {
       await tester.tap(find.text('搜索').last);
       await tester.pumpAndSettle();
       final field = find.byKey(const Key('aggregation-keyword'));
-      ScrollPosition scrollOf() => tester
-          .state<ScrollableState>(
-            find
-                .descendant(
-                  of: find.byKey(const PageStorageKey('aggregation-search')),
-                  matching: find.byType(Scrollable),
-                )
-                .first,
-          )
-          .position;
       int searchRequests() =>
           server.requests.where((line) => line.contains('SearchTerm=')).length;
 
@@ -701,96 +701,46 @@ void main() {
       expect(find.text('输入片名后搜索'), findsOneWidget);
       expect(find.text('没有结果'), findsNothing);
       expect(find.text('重试'), findsNothing);
+      expect(find.text('所选范围没有匹配作品'), findsNothing);
+      expect(find.text('未选择可参与的服务或媒体库'), findsNothing);
       expect(searchRequests(), 0);
 
       await tester.enterText(field, '   ');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(find.text('输入片名后搜索'), findsOneWidget);
       expect(searchRequests(), 0);
 
-      final beforeType = searchRequests();
+      final beforeMissing = searchRequests();
       await tester.enterText(field, 'missing-title');
-      // 聚合按关键词即时撤销旧结果；空范围与已查询空结果不同。
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      expect(find.text('所选范围没有匹配作品'), findsOneWidget);
+      expect(find.text('没有结果'), findsOneWidget);
       expect(find.text('输入片名后搜索'), findsNothing);
+      expect(find.text('所选范围没有匹配作品'), findsNothing);
+      expect(find.text('未选择可参与的服务或媒体库'), findsNothing);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
-      expect(find.text('重试此来源'), findsNothing);
-      expect(searchRequests(), beforeType + 1);
+      expect(find.text('重试'), findsNothing);
+      expect(searchRequests(), beforeMissing + 1);
 
       server.searchStatus = 503;
       await tester.enterText(field, 'Page');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
-      expect(find.text('重试此来源'), findsOneWidget);
-      expect(find.text('所选范围没有匹配作品'), findsNothing);
+      expect(find.text('重试'), findsOneWidget);
+      expect(find.text('没有结果'), findsNothing);
       expect(find.text('输入片名后搜索'), findsNothing);
+      expect(find.text('所选范围没有匹配作品'), findsNothing);
       expect(find.text('Page 00'), findsNothing);
       expect(find.byType(NavigationBar), findsOneWidget);
 
       server.searchStatus = null;
-      await tester.tap(find.text('重试此来源'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Page 00'));
+      await tester.tap(find.text('重试'));
       await tester.pumpAndSettle();
       expect(find.text('Page 00'), findsOneWidget);
+      expect(find.text('重试'), findsNothing);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
-
-      // A long result set only mounts cards near the viewport. Previously the
-      // nested shrink-wrapped grid built every result, including offscreen art.
-      expect(find.text('Page 49'), findsNothing);
-      final mountedCards = find
-          .byWidgetPredicate(
-            (widget) => widget.runtimeType.toString() == '_QueryCard',
-          )
-          .evaluate()
-          .length;
-      expect(mountedCards, greaterThan(0));
-      expect(mountedCards, lessThan(20));
-      final beforeMore = searchRequests();
-      server.searchStatus = 503;
-      // 逐来源分页控件在范围标题区，不在网格末尾。
-      scrollOf().jumpTo(0);
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('加载此来源更多'));
-      await tester.tap(find.text('加载此来源更多'));
-      await tester.pumpAndSettle();
-      expect(find.text('重试此来源'), findsOneWidget);
-      expect(find.text('所选范围没有匹配作品'), findsNothing);
-      expect(find.text('输入片名后搜索'), findsNothing);
-      scrollOf().jumpTo(scrollOf().maxScrollExtent);
-      await tester.pumpAndSettle();
-      expect(find.text('Page 49'), findsWidgets);
-      expect(find.text('Page 50'), findsNothing);
-      expect(searchRequests(), greaterThan(beforeMore));
-
-      scrollOf().jumpTo(0);
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('Page 00'),
-        200,
-        scrollable: find
-            .descendant(
-              of: find.byKey(const PageStorageKey('aggregation-search')),
-              matching: find.byType(Scrollable),
-            )
-            .first,
-      );
-      expect(find.text('Page 00'), findsOneWidget);
-
-      server.searchStatus = null;
-      scrollOf().jumpTo(0);
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('重试此来源'));
-      await tester.tap(find.text('重试此来源'));
-      await tester.pumpAndSettle();
-      expect(find.text('重试此来源'), findsNothing);
-      scrollOf().jumpTo(scrollOf().maxScrollExtent);
-      await tester.pumpAndSettle();
-      expect(find.text('Page 54'), findsWidgets);
-      // New lazy cards can launch their image HTTP futures after the final frame.
       await tester.pump(const Duration(seconds: 13));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -905,11 +855,85 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets(
+    'search page back and system back return home; mine opens private',
+    (tester) async {
+      final server = FakeEmbyServer();
+      final (app, _) = await start(tester, server);
+      await login(tester, server);
+
+      Future<void> openSearch() async {
+        await tester.tap(find.text('搜索').last);
+        await tester.pumpAndSettle();
+      }
+
+      Finder searchBack() => find.descendant(
+        of: find.byWidgetPredicate(
+          (widget) => widget is AggregationPage && widget.search,
+        ),
+        matching: find.byType(BackButton),
+      );
+
+      await openSearch();
+      expect(searchBack(), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        'Inception',
+      );
+      await tester.pump();
+      await tester.tap(searchBack());
+      await tester.pumpAndSettle();
+      expect(find.byType(MobileShell), findsOneWidget);
+      expect(
+        find.byKey(const PageStorageKey('mobile-home-scroll')),
+        findsOneWidget,
+      );
+      expect(app.router.state.uri.path, AppRoutes.home);
+
+      await openSearch();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const PageStorageKey('mobile-home-scroll')),
+        findsOneWidget,
+      );
+      expect(app.router.state.uri.path, AppRoutes.home);
+
+      await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(PhoneMinePage.changePasswordKey), findsOneWidget);
+      expect(find.text('连接其他服务器'), findsOneWidget);
+      expect(find.text('退出登录'), findsOneWidget);
+      expect(find.byKey(PhoneMinePage.privateKey), findsOneWidget);
+      await tester.runAsync(() async {
+        await app.auth.setPrivatePin('1234', '1234');
+        await app.auth.regionAccess.unlock('1234');
+      });
+      await tester.ensureVisible(find.byKey(PhoneMinePage.privateKey));
+      await tester.tap(find.byKey(PhoneMinePage.privateKey));
+      await tester.pumpAndSettle();
+      expect(app.router.state.uri.path, '/private');
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('empty catalog and unsupported media expose recoverable states', (
     tester,
   ) async {
     final server = FakeEmbyServer(items: [], views: []);
     final (app, backend) = await start(tester, server);
+    final navigator = Navigator.of(
+      tester.element(find.byType(AndroidConnectPage)),
+    );
+    navigator.push(
+      MaterialPageRoute<void>(builder: (context) => const AggregationPage()),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppEmptyView, '没有已登录的服务器'), findsOneWidget);
+    expect(find.widgetWithText(AppEmptyView, '添加服务器'), findsOneWidget);
+    navigator.pop();
+    await tester.pumpAndSettle();
     await login(tester, server);
     expect(find.text('暂无内容'), findsOneWidget);
     expect(find.byType(MobileEmptyState), findsOneWidget);
@@ -923,7 +947,8 @@ void main() {
     await tester.tap(find.text('聚合').last);
     await tester.pumpAndSettle();
     expect(find.byType(AggregationPage), findsOneWidget);
-    expect(find.text('未选择可参与的服务或媒体库'), findsOneWidget);
+    expect(find.widgetWithText(AppEmptyView, '所选范围没有匹配作品'), findsOneWidget);
+    expect(find.widgetWithText(AppEmptyView, '添加服务器'), findsNothing);
     expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
     // Declare a real synthetic library before testing an allowed but
     // unsupported stream; empty/unknown scope must never bypass the gate.
@@ -988,32 +1013,38 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       final list = find.byKey(const PageStorageKey('aggregation-search'));
-      await tester.drag(list, const Offset(0, -500));
+      ScrollPosition position() {
+        final elements = find
+            .descendant(of: list, matching: find.byType(Scrollable))
+            .evaluate();
+        ScrollPosition? chosen;
+        for (final element in elements) {
+          final scroll =
+              ((element as StatefulElement).state as ScrollableState).position;
+          if (scroll.axis != Axis.horizontal) continue;
+          chosen = scroll;
+          if (scroll.maxScrollExtent > 0) return scroll;
+        }
+        return chosen ??
+            ((elements.first as StatefulElement).state as ScrollableState)
+                .position;
+      }
+
+      final scroll = position();
+      final target = scroll.maxScrollExtent == 0
+          ? 0.0
+          : scroll.maxScrollExtent.clamp(0, 120).toDouble();
+      scroll.jumpTo(target);
       await tester.pumpAndSettle();
-      ScrollPosition position() => tester
-          .state<ScrollableState>(
-            find.descendant(of: list, matching: find.byType(Scrollable)).first,
-          )
-          .position;
       final before = position().pixels;
-      expect(before, greaterThan(100));
+      expect(before, target);
       // 离开搜索 tab 再回来:滚动位置保持(IndexedStack 状态保持)。
       await tester.tap(find.text('首页').last);
       await tester.pumpAndSettle();
       await tester.tap(find.text('搜索').last);
       await tester.pumpAndSettle();
       expect(position().pixels, before);
-      final mountedTitles = tester
-          .widgetList<Text>(
-            find.descendant(
-              of: find.byType(SliverGrid),
-              matching: find.byType(Text),
-            ),
-          )
-          .map((text) => text.data)
-          .whereType<String>()
-          .where((text) => text.startsWith('Scroll '));
-      final visibleTitle = find.text(mountedTitles.first);
+      final visibleTitle = find.text('Scroll 00');
       await tester.ensureVisible(visibleTitle);
       await tester.pumpAndSettle();
       final openedOffset = position().pixels;
@@ -1075,16 +1106,20 @@ void main() {
       final blocks = tester
           .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
           .toList();
+      // 轮播骨架是一张居中的 2:3 海报,与成品同形。
+      final heroPoster = PhoneHero.posterHeightFor(360, viewportHeight: 800);
       expect(
         blocks.where(
-          (block) => (block.width ?? 0) > 200 && (block.height ?? 0) > 100,
+          (block) =>
+              ((block.height ?? 0) - heroPoster).abs() < 0.1 &&
+              ((block.width ?? 0) - heroPoster * 2 / 3).abs() < 0.1,
         ),
-        isNotEmpty,
+        hasLength(1),
       );
       final posterWidth = phoneHomePosterCardWidth(360);
       expect(
         blocks
-            .where((block) => (block.width! - posterWidth).abs() < 0.1)
+            .where((block) => ((block.width ?? 0) - posterWidth).abs() < 0.1)
             .length,
         greaterThanOrEqualTo(3),
       );
@@ -1214,10 +1249,6 @@ void main() {
       await tester.tap(find.text('聚合').last);
       await tester.pumpAndSettle();
       expect(find.byType(AggregationPage), findsOneWidget);
-      await tester.tap(find.byType(DropdownButton<String>).first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('电影').last);
-      await tester.pumpAndSettle();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       expect(
@@ -1258,11 +1289,15 @@ void main() {
       final server = FakeEmbyServer();
       await start(tester, server);
       await login(tester, server);
+      // 取 tab 转场自己的 SlideTransition(最外层),页面内容里的滑入
+      // 动效(如轮播文字区)不算。
       SlideTransition slide() => tester.widget<SlideTransition>(
-        find.descendant(
-          of: find.byType(PhoneTabTransition),
-          matching: find.byType(SlideTransition),
-        ),
+        find
+            .descendant(
+              of: find.byType(PhoneTabTransition),
+              matching: find.byType(SlideTransition),
+            )
+            .first,
       );
 
       // 首次入场不播放,位置归零。

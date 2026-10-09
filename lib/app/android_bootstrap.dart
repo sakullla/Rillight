@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/playback_runtime.dart';
@@ -66,6 +67,7 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         setState(() => _detectionFailed = true);
         return;
       }
+      if (environment.isTv) configureTvPaintingImageCache();
       final auth = await (widget.createAuth ?? createProductionAuth)();
       if (!mounted) {
         auth.dispose();

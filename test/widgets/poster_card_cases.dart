@@ -71,10 +71,7 @@ void main() {
                       gridDelegate: ShelfGridPage.gridDelegateFor(
                         screenWidth: width,
                         availableWidth: width,
-                        labelExtent: MediaShelf.posterLabelExtentFor(
-                          context,
-                          showProgress: false,
-                        ),
+                        labelExtent: MediaShelf.posterLabelExtentFor(context),
                       ),
                       itemCount: 12,
                       itemBuilder: (context, index) => ShelfGridPage.gridCard(

@@ -15,6 +15,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -154,27 +155,48 @@ void main() {
         ),
         findsNothing,
       );
+      // 轮播只取最近入库的电影/剧集交错,不含继续观看;没有进度文案。
+      final heroCard = find.byKey(const Key('home-hero-card'));
       expect(
-        find.descendant(
-          of: find.byKey(const Key('home-hero-card')),
-          matching: find.text('8.8'),
-        ),
+        find.descendant(of: heroCard, matching: find.textContaining('已看')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: heroCard, matching: find.text('继续播放')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: heroCard, matching: find.text('最新电影')),
         findsOneWidget,
       );
-      const featuredOrder = ['Inception', '老友记', '飞屋环游记', '封面失败片'];
+      const featuredOrder = ['飞屋环游记', '老友记', '封面失败片', 'Inception'];
       for (final title in featuredOrder) {
         if (title != featuredOrder.first) {
           await tester.tap(find.byKey(CatalogKeys.heroNext));
           await tester.pump();
+          // 过渡仿真在时长严格大于 heroSlideDuration 时才算结束,
+          // 结束前新旧两页同时在树上。
+          await tester.pump(
+            heroSlideDuration + const Duration(milliseconds: 16),
+          );
         }
         expect(
-          find.descendant(
-            of: find.byKey(const Key('home-hero-card')),
-            matching: find.text(title),
-          ),
+          find.descendant(of: heroCard, matching: find.text(title)),
           findsOneWidget,
         );
         expect(find.text(title), findsWidgets);
+        expect(
+          find.descendant(
+            of: heroCard,
+            matching: find.text(title == '老友记' ? '最新剧集' : '最新电影'),
+          ),
+          findsOneWidget,
+        );
+        // 评分角标只在有社区评分的 Inception 页出现。
+        expect(
+          find.descendant(of: heroCard, matching: find.text('8.8')),
+          title == 'Inception' ? findsOneWidget : findsNothing,
+        );
       }
 
       expect(find.byKey(homeRefreshKey), findsOneWidget);
@@ -208,12 +230,10 @@ void main() {
 
       expect(resumeRequests(), greaterThan(before));
       // 刷新后轮到 movie-up 的轮播页显示新片名;先滚回顶部让轮播可见。
-      // 上文片名循环已把轮播停在第 4 页,再切 3 次回到 movie-up(第 3 页)。
-      await scrollBelowTopBar(tester, find.byKey(const Key('home-hero-card')));
-      for (var i = 0; i < 3; i++) {
-        await tester.tap(find.byKey(CatalogKeys.heroNext));
-        await tester.pump();
-      }
+      // 上文片名循环已把轮播停在第 4 页,再切 1 次绕回 movie-up(第 1 页)。
+      await scrollBelowTopBar(tester, heroCard);
+      await tester.tap(find.byKey(CatalogKeys.heroNext));
+      await tester.pump();
       expect(find.text('手动刷新后的电影'), findsWidgets);
       // 让滚动空闲等短计时器自然耗尽,避免测试结束时仍有 pending Timer。
       await tester.pump(const Duration(seconds: 1));
@@ -368,7 +388,7 @@ void main() {
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.byType(AppEmptyView), findsNothing);
     expect(find.text('货架加载失败'), findsOneWidget);
-    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
     expect(find.byIcon(Icons.inbox_outlined), findsNothing);
     expect(find.text('重试'), findsOneWidget);
     expect(find.byKey(homeRefreshKey), findsOneWidget);

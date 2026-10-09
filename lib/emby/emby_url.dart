@@ -1,3 +1,4 @@
+import 'package:punycoder/punycoder.dart';
 import 'package:rillight/emby/emby_errors.dart';
 
 /// Remove session token values without re-encoding a signed media query.
@@ -23,27 +24,37 @@ Uri normalizeEmbyBaseUrl(String input) {
     trimmed = 'http://$trimmed';
   }
 
-  final parsed = Uri.tryParse(trimmed);
-  if (parsed == null || parsed.host.isEmpty) {
+  try {
+    final parsed = Uri.parse(trimmed);
+    if (parsed.host.isEmpty ||
+        (parsed.scheme != 'http' && parsed.scheme != 'https')) {
+      throw const EmbyException(EmbyFailureKind.invalidAddress);
+    }
+
+    // Uri percent-encodes Unicode hosts, but the HTTP client needs DNS ASCII
+    // labels. Decode only the host, preserving escaped paths and IPv6 zones.
+    final host = parsed.host;
+    final asciiHost = !host.contains(':') && host.contains('%')
+        ? domainToAscii(Uri.decodeComponent(host))
+        : host;
+
+    var path = parsed.path;
+    if (path == '/') {
+      path = '';
+    } else if (path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+
+    return Uri(
+      scheme: parsed.scheme,
+      host: asciiHost,
+      port: parsed.hasPort ? parsed.port : null,
+      path: path,
+    );
+  } on FormatException {
+    // Do not surface parser diagnostics containing the user's server address.
     throw const EmbyException(EmbyFailureKind.invalidAddress);
   }
-  if (parsed.scheme != 'http' && parsed.scheme != 'https') {
-    throw const EmbyException(EmbyFailureKind.invalidAddress);
-  }
-
-  var path = parsed.path;
-  if (path == '/') {
-    path = '';
-  } else if (path.endsWith('/')) {
-    path = path.substring(0, path.length - 1);
-  }
-
-  return Uri(
-    scheme: parsed.scheme,
-    host: parsed.host,
-    port: parsed.hasPort ? parsed.port : null,
-    path: path,
-  );
 }
 
 Uri joinEmbyPath(Uri baseUrl, String path) {

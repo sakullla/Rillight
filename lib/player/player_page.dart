@@ -13,6 +13,7 @@ import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
@@ -36,6 +37,8 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_settings_menu.dart';
 import 'package:rillight/player/playback_control_scrims.dart';
 import 'package:rillight/player/seek_preview.dart';
+import 'package:rillight/player/subtitle_viewport.dart';
+import 'package:rillight/player/track_picker.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -95,6 +98,8 @@ class PlayerPage extends StatefulWidget {
     this.onClosed,
     this.onOpenItem,
     this.onOpenItemDetail,
+    this.playbackLines,
+    this.verifiedPlaybackServerId,
   });
 
   final String itemId;
@@ -112,6 +117,8 @@ class PlayerPage extends StatefulWidget {
     PlayerHostOpenItemCommand? command,
   })?
   onOpenItemDetail;
+  final List<ServerLine>? playbackLines;
+  final String? verifiedPlaybackServerId;
 
   @override
   State<PlayerPage> createState() => PlayerPageState();
@@ -163,8 +170,15 @@ class PlayerPageState extends State<PlayerPage> {
       return;
     }
     final bindings = PlayerScope.of(context);
+    final auth = AuthScope.of(context);
+    final matched = widget.playbackLines == null
+        ? serverMatchingPlayback(auth, auth.client.baseUrl)
+        : null;
     final created = PlayerController(
-      client: AuthScope.of(context).client,
+      client: auth.client,
+      playbackLineSnapshot: widget.playbackLines ?? matched?.lines ?? const [],
+      verifiedPlaybackServerId:
+          widget.verifiedPlaybackServerId ?? matched?.verifiedServerId,
       runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
       observationSink: bindings.observationSink,
       switchDispatcher: bindings.switchDispatcher,
@@ -602,6 +616,11 @@ class PlayerPageState extends State<PlayerPage> {
                           ),
                         ),
                       ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: SubtitleViewportReporter(controller: current),
+                        ),
+                      ),
                       if (current.loading)
                         const Positioned.fill(
                           child: IgnorePointer(
@@ -757,6 +776,14 @@ class PlayerPageState extends State<PlayerPage> {
                             l10n,
                             current.subtitleNotice!,
                           ),
+                        ),
+                      if (current.playbackLineFailure != null)
+                        _Banner(
+                          key: const ValueKey('playback-line-failure'),
+                          text: l10n.playbackLineFailed(
+                            current.playbackLineFailure!,
+                          ),
+                          onDismiss: current.dismissPlaybackLineFailure,
                         ),
                       if (current.trackFailure != null)
                         _Banner(
@@ -2330,30 +2357,7 @@ class _ControlsRow extends StatelessWidget {
             onPressed: onDanmakuSearch,
           ),
         if (controller.canConfigureSubtitles)
-          _ControlMenu<int>(
-            key: PlayerKeys.subtitle,
-            initialValue: controller.subtitleStreamIndex ?? _subtitleOffToken,
-            tooltip: l10n.subtitleTrack,
-            icon: controller.subtitleStreamIndex == null
-                ? Icons.closed_caption_off_rounded
-                : Icons.closed_caption_rounded,
-            onSelected: (value) {
-              controller.setSubtitle(value == _subtitleOffToken ? null : value);
-            },
-            items: [
-              CheckedPopupMenuItem(
-                value: _subtitleOffToken,
-                checked: controller.subtitleStreamIndex == null,
-                child: Text(l10n.subtitleOff),
-              ),
-              for (final track in controller.selectableSubtitleTracks)
-                CheckedPopupMenuItem(
-                  value: track.index,
-                  checked: track.index == controller.subtitleStreamIndex,
-                  child: Text(track.label),
-                ),
-            ],
-          ),
+          SubtitleTrackMenu(controller: controller),
         if (controller.canBrowseEpisodes)
           _PlayerIconButton(
             key: const Key('player-episodes'),
@@ -2966,75 +2970,6 @@ class _PlayerIconButton extends StatelessWidget {
         fixedSize: const Size(46, 46),
       ),
       icon: Icon(icon),
-    );
-  }
-}
-
-const _subtitleOffToken = -1;
-
-/// 倍速阶梯约 8 项需完整显示,避免菜单内滚动。
-/// 1080p 上保持原来的 280–420×480，更大的窗口按比例放大。
-BoxConstraints _controlMenuConstraintsFor(Size viewport) {
-  final maxWidth = AppViewport.fit(420, viewport.width - 48, viewport);
-  final minWidth = AppViewport.dp(280, viewport);
-  return BoxConstraints(
-    minWidth: minWidth < maxWidth ? minWidth : maxWidth,
-    maxWidth: maxWidth,
-    maxHeight: AppViewport.fit(480, viewport.height * 0.7, viewport),
-  );
-}
-
-/// 控制条右侧用图标打开菜单,长轨名只出现在弹出层。
-///
-/// 音轨/字幕/画质共用主题级 popupMenuTheme 外观,不做局部覆盖。
-class _ControlMenu<T> extends StatelessWidget {
-  const _ControlMenu({
-    super.key,
-    required this.tooltip,
-    required this.items,
-    required this.onSelected,
-    this.initialValue,
-    this.icon,
-    this.iconColor,
-    this.child,
-  }) : assert(icon != null || child != null);
-
-  final T? initialValue;
-  final String tooltip;
-  final IconData? icon;
-  final Color? iconColor;
-  final Widget? child;
-  final List<PopupMenuEntry<T>> items;
-  final ValueChanged<T> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    if (child != null) {
-      return PopupMenuButton<T>(
-        tooltip: tooltip,
-        initialValue: initialValue,
-        onSelected: (value) {
-          onSelected(value);
-        },
-        constraints: _controlMenuConstraintsFor(MediaQuery.sizeOf(context)),
-        padding: EdgeInsets.zero,
-        splashRadius: 20,
-        itemBuilder: (context) => items,
-        child: child,
-      );
-    }
-    return PopupMenuButton<T>(
-      tooltip: tooltip,
-      initialValue: initialValue,
-      onSelected: (value) {
-        onSelected(value);
-      },
-      constraints: _controlMenuConstraintsFor(MediaQuery.sizeOf(context)),
-      padding: EdgeInsets.zero,
-      splashRadius: 20,
-      icon: Icon(icon, color: iconColor ?? scheme.onSurface),
-      itemBuilder: (context) => items,
     );
   }
 }

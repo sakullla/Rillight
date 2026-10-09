@@ -291,13 +291,14 @@ void main() {
     () async {
       final original = _FakeWindowsProcess(42);
       var processByPid = original;
-      final control = WindowsPlayerProcessControl(
+      final control = _WindowsControlWithFakeActivation(
         spawnProcess: ({required executable, required payloadPath}) {
           _readyForWindowsChild(payloadPath, processByPid.pid);
           return processByPid;
         },
       );
       final pid = await control.spawn(executable: 'test', arguments: '{}');
+      expect(control.activationGrants, [pid]);
       expect(control.isAlive(pid), isTrue);
       original.alive = false;
       // A PID lookup now resolves to another process. The retained object must
@@ -323,7 +324,7 @@ void main() {
     'Windows termination waits on the original object and retains it until release',
     () async {
       final child = _FakeWindowsProcess(42)..exitOnTerminate = false;
-      final control = WindowsPlayerProcessControl(
+      final control = _WindowsControlWithFakeActivation(
         pollInterval: const Duration(milliseconds: 1),
         spawnProcess: ({required executable, required payloadPath}) {
           _readyForWindowsChild(payloadPath, child.pid);
@@ -331,6 +332,7 @@ void main() {
         },
       );
       final pid = await control.spawn(executable: 'test', arguments: '{}');
+      expect(control.activationGrants, [pid]);
       await expectLater(control.release(pid), throwsStateError);
       expect(control.activePids, [pid]);
       var terminated = false;
@@ -547,6 +549,17 @@ String _dartExecutable() {
     directory = directory.parent;
   }
   throw StateError('Dart SDK executable not found');
+}
+
+class _WindowsControlWithFakeActivation extends WindowsPlayerProcessControl {
+  _WindowsControlWithFakeActivation({super.pollInterval, super.spawnProcess});
+
+  final activationGrants = <int>[];
+
+  // Fake child handles must not call a host API, even on Windows: their PID
+  // does not identify a real player window. Retain the activation assertion.
+  @override
+  void grantActivation(int pid) => activationGrants.add(pid);
 }
 
 class _ControlledProcess extends DesktopPlayerProcessControl {

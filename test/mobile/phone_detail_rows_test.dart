@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -490,6 +491,15 @@ void main() {
       gate.complete();
       await tester.pumpAndSettle();
       expect(find.textContaining('dream-sharing'), findsOneWidget);
+      final settled = tester.widget<MediaImage>(
+        find.descendant(
+          of: find.byKey(PhoneItemBanner.bannerKey),
+          matching: find.byType(MediaImage),
+        ),
+      );
+      expect(settled.preferBackdrop, posterImage.preferBackdrop);
+      expect(settled.maxWidth, posterImage.maxWidth);
+      expect(settled.item.primaryImageTag, posterImage.item.primaryImageTag);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -848,6 +858,187 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'vertical detail scroll keeps season, cast, and similar rows at the left',
+    (tester) async {
+      _useSurface(tester, 400, 700);
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                final page = MobileSeriesPage(
+                  item: EmbyItem(
+                    id: 'series',
+                    name: '剧',
+                    type: 'Series',
+                    people: [
+                      for (var index = 0; index < 8; index++)
+                        ItemPerson(
+                          name: '演员$index',
+                          type: 'Actor',
+                          role: '角色$index',
+                        ),
+                    ],
+                  ),
+                  seasons: [
+                    for (var index = 1; index <= 12; index++)
+                      EmbyItem(
+                        id: 'season-$index',
+                        name: '第$index季',
+                        type: 'Season',
+                      ),
+                  ],
+                  seasonId: 'season-1',
+                  episodes: [
+                    for (var index = 0; index < 30; index++)
+                      EmbyItem(
+                        id: 'episode-$index',
+                        name: '第 $index 集',
+                        type: 'Episode',
+                      ),
+                  ],
+                  episodesLoading: false,
+                  episodeError: null,
+                  hasMore: false,
+                  playTargetId: null,
+                  similar: [
+                    for (var index = 0; index < 8; index++)
+                      EmbyItem(
+                        id: 'similar-$index',
+                        name: '类似$index',
+                        type: 'Series',
+                      ),
+                  ],
+                  onSelectSeason: _ignore,
+                  onOpenEpisode: _ignore,
+                  onRetryEpisodes: _noop,
+                  onLoadMore: _noop,
+                  onOpenItem: _ignore,
+                  onOpenSimilar: _noop,
+                );
+                return CustomScrollView(
+                  key: const PageStorageKey('detail-series'),
+                  controller: scroll,
+                  scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                  slivers: [
+                    ...page.buildSlivers(context),
+                    const SliverToBoxAdapter(child: SizedBox(height: 2400)),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('第1季'), findsOneWidget);
+      await tester.fling(
+        find.byType(CustomScrollView),
+        const Offset(0, -400),
+        8000,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('第1季'), findsNothing);
+
+      await tester.fling(
+        find.byType(CustomScrollView),
+        const Offset(0, 400),
+        8000,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('第1季'), findsOneWidget);
+      final season = tester.getTopLeft(find.text('第1季'));
+      expect(season.dx, inInclusiveRange(0, 80));
+
+      final max = scroll.position.maxScrollExtent;
+      scroll.jumpTo(max);
+      await tester.pump();
+      final similar = find.byKey(CatalogKeys.item('similar-0'));
+      final person = find.byKey(const ValueKey('episode-person-Actor-0'));
+      expect(similar, findsNothing);
+
+      var guard = 0;
+      while (similar.evaluate().isEmpty && scroll.offset > 0 && guard < 40) {
+        scroll.jumpTo((scroll.offset - 280).clamp(0, max));
+        await tester.pump();
+        guard++;
+      }
+      expect(similar, findsOneWidget);
+      expect(
+        tester.getTopLeft(similar).dx,
+        inInclusiveRange(0, 80),
+        reason: '更多类似 stayed on the left',
+      );
+
+      guard = 0;
+      while (person.evaluate().isEmpty && scroll.offset > 0 && guard < 40) {
+        scroll.jumpTo((scroll.offset - 280).clamp(0, max));
+        await tester.pump();
+        guard++;
+      }
+      expect(person, findsOneWidget);
+      expect(
+        tester.getTopLeft(person).dx,
+        inInclusiveRange(0, 80),
+        reason: '演员 stayed on the left',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('episode picker does not tint the loaded episode page', (
+    tester,
+  ) async {
+    final harness = await _startDetail(
+      tester,
+      width: 360,
+      reduceMotion: true,
+      prepare: (server) {
+        server.setSeasons('series-friends', const [
+          FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+        ]);
+        server.setEpisodes('series-friends', [
+          for (var index = 1; index <= 60; index++)
+            FakeEpisode(
+              id: 'episode-$index',
+              name: '第 $index 集',
+              seasonId: 'season-friends-1',
+              indexNumber: index,
+              parentIndexNumber: 1,
+              playbackPositionTicks: index == 29 ? 6000000000 : 0,
+              runTimeTicks: 36000000000,
+            ),
+        ]);
+      },
+    );
+    unawaited(harness.router.push('/item/series-friends'));
+    await tester.pumpAndSettle();
+    final picker = find.byKey(CatalogKeys.locateEpisode);
+    await Scrollable.ensureVisible(tester.element(picker), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+
+    final grid = find.byType(GridView);
+    expect(grid, findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '29'), findsOneWidget);
+    final tinted = tester
+        .widgetList<OutlinedButton>(
+          find.descendant(of: grid, matching: find.byType(OutlinedButton)),
+        )
+        .where((button) => button.style?.backgroundColor?.resolve({}) != null);
+    expect(tinted, isEmpty);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
 
 void _expectOnScreen(Rect rect, double width, double height) {

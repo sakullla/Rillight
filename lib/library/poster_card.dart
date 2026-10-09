@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -9,6 +7,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 
 class PosterCard extends StatelessWidget {
   const PosterCard({
@@ -18,6 +17,7 @@ class PosterCard extends StatelessWidget {
     this.showProgress = false,
     this.width = 120,
     this.wide = false,
+    this.preferBackdrop,
     this.hoverScale = 1.04,
     this.onRemoveFromResume,
   });
@@ -27,6 +27,9 @@ class PosterCard extends StatelessWidget {
   final bool showProgress;
   final double width;
   final bool wide;
+
+  /// 横卡默认用背景图。媒体库拼图是主图，需要横幅时传 false。
+  final bool? preferBackdrop;
   final double hoverScale;
   final ValueChanged<EmbyItem>? onRemoveFromResume;
 
@@ -36,7 +39,6 @@ class PosterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final height = wide ? width * 9 / 16 : width * 1.5;
-    final l10n = AppLocalizations.of(context);
     final progress = item.playbackProgress;
     final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
         ? item.seriesName!
@@ -69,7 +71,7 @@ class PosterCard extends StatelessWidget {
                           item: item,
                           width: width,
                           height: height,
-                          preferBackdrop: wide,
+                          preferBackdrop: preferBackdrop ?? wide,
                           maxWidth: wide ? 360 : 280,
                           fit: BoxFit.cover,
                         ),
@@ -107,15 +109,6 @@ class PosterCard extends StatelessWidget {
                     color: Theme.of(
                       context,
                     ).colorScheme.onSurface.withValues(alpha: 0.72),
-                  ),
-                ),
-              if (!wide && showProgress && item.canResume)
-                SizedBox(
-                  width: width,
-                  child: Text(
-                    l10n.playbackProgress((progress * 100).round()),
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
             ],
@@ -379,7 +372,7 @@ class _Caption extends StatelessWidget {
           text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
+          textAlign: TextAlign.start,
           style: style,
           strutStyle: StrutStyle.fromTextStyle(
             style ?? const TextStyle(),
@@ -459,8 +452,8 @@ class _PosterRevealOverlay extends StatelessWidget {
         '${item.productionYear}',
       ?runtimeLabel(l10n, item),
     ];
-    final overview = plainOverview(item.overview);
-    // 标题已经写在海报下方,浮层里不再叠一遍。
+    // 标题和简介留在卡片下方与详情页。浮层只放播放和一行元信息，
+    // 避免小海报上再叠一段看不清的简介。
     return IgnorePointer(
       ignoring: !revealed,
       child: AnimatedOpacity(
@@ -477,7 +470,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                 Colors.transparent,
                 Colors.black.withValues(alpha: 0.08),
                 Colors.black.withValues(
-                  alpha: showMeta || overview != null ? 0.72 : 0,
+                  alpha: showMeta && meta.isNotEmpty ? 0.62 : 0,
                 ),
               ],
             ),
@@ -512,12 +505,22 @@ class _PosterRevealOverlay extends StatelessWidget {
                         child: IconButton(
                           key: playKey,
                           tooltip: l10n.play,
-                          onPressed: () {
-                            unawaited(
-                              PlayerWindowScope.of(
-                                context,
-                              ).open(PlayerOpenRequest(itemId: item.id)),
-                            );
+                          onPressed: () async {
+                            final host = PlayerWindowScope.of(context);
+                            try {
+                              final request =
+                                  await DetailSourceScope.playbackRequest(
+                                    context,
+                                    item.id,
+                                  );
+                              if (!context.mounted) return;
+                              await host.open(request);
+                            } catch (_) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                SnackBar(content: Text(l10n.playbackFailed)),
+                              );
+                            }
                           },
                           style: IconButton.styleFrom(
                             backgroundColor: Colors.white,
@@ -529,7 +532,7 @@ class _PosterRevealOverlay extends StatelessWidget {
                           icon: const Icon(Icons.play_arrow_rounded, size: 32),
                         ),
                       ),
-                    if (showMeta || overview != null)
+                    if (showMeta && meta.isNotEmpty)
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Padding(
@@ -539,35 +542,14 @@ class _PosterRevealOverlay extends StatelessWidget {
                             AppSpacing.sm,
                             AppSpacing.sm,
                           ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (showMeta && meta.isNotEmpty) ...[
-                                Text(
-                                  meta.join(' · '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: Colors.white.withValues(alpha: 0.88),
-                                  ),
-                                ),
-                              ],
-                              if (overview != null) ...[
-                                if (showMeta && meta.isNotEmpty)
-                                  const SizedBox(height: AppSpacing.xxs),
-                                Text(
-                                  overview,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.start,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: Colors.white.withValues(alpha: 0.92),
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ],
-                            ],
+                          child: Text(
+                            meta.join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.92),
+                            ),
                           ),
                         ),
                       ),

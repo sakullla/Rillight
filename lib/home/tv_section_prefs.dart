@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
@@ -279,14 +278,9 @@ Future<void> showTvSectionEditor(BuildContext context) {
     useRootNavigator: false,
     builder: (context) {
       final viewport = MediaQuery.sizeOf(context);
-      var width = viewport.width - 96;
-      if (width > 760) {
-        width = 760;
-      }
-      var height = viewport.height - 96;
-      if (height > 900) {
-        height = 900;
-      }
+      final s = TvDesign.scaleOf(context);
+      final width = (viewport.width - 96 * s).clamp(0.0, 560 * s);
+      final height = (viewport.height - 54 * s).clamp(0.0, 480 * s);
       return Dialog(
         child: SizedBox(
           key: TvSectionEditor.editorKey,
@@ -396,24 +390,24 @@ class TvSectionEditor extends StatelessWidget {
         final names = {
           for (final library in libraries) library.id: library.name,
         };
+        final s = TvDesign.scaleOf(context);
         return Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.lg,
-            AppSpacing.md,
-            AppSpacing.md,
-          ),
+          padding: EdgeInsets.fromLTRB(20 * s, 20 * s, 20 * s, 16 * s),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
                 l10n.phoneHomeEdit,
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
-              const SizedBox(height: AppSpacing.sm),
+              SizedBox(height: 12 * s),
               Expanded(
                 child: ListView(
                   primary: false,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 4 * s,
+                    vertical: 2 * s,
+                  ),
                   children: [
                     for (var index = 0; index < order.length; index++)
                       _row(
@@ -428,10 +422,12 @@ class TvSectionEditor extends StatelessWidget {
                   ],
                 ),
               ),
+              SizedBox(height: 12 * s),
               Align(
                 alignment: Alignment.centerRight,
                 child: TvAction(
                   key: closeKey,
+                  pill: true,
                   focusNode: order.length < 2 ? initialFocus : null,
                   onPressed: () => Navigator.of(context).pop(),
                   child: Text(l10n.cancelAction),
@@ -471,47 +467,58 @@ class TvSectionEditor extends StatelessWidget {
   }) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final s = TvDesign.scaleOf(context);
     final visible = !controller.isHidden(id);
+    // 一行一个分区:显隐开关 + 名称,右侧上移/下移。上下键在同列间移动。
     return Padding(
       key: tileKey(id),
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: EdgeInsets.symmetric(vertical: 3 * s),
+      child: Row(
         children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: visible ? null : theme.colorScheme.onSurfaceVariant,
+          TvAction(
+            key: visibleKey(id),
+            variant: TvActionVariant.icon,
+            selected: visible,
+            onPressed: () => controller.setVisible(id, !visible),
+            child: Icon(
+              visible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
             ),
           ),
-          Row(
-            children: [
-              TvAction(
-                key: moveUpKey(id),
-                onPressed: index == 0
-                    ? null
-                    : () => controller.move(id, -1, libraries),
-                child: Text(l10n.tvSectionMoveUp),
+          SizedBox(width: 12 * s),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: visible ? null : theme.colorScheme.onSurfaceVariant,
+                decoration: visible ? null : TextDecoration.lineThrough,
               ),
-              TvAction(
-                key: moveDownKey(id),
-                focusNode: index == 0 && count > 1 ? initialFocus : null,
-                onPressed: index == count - 1
-                    ? null
-                    : () => controller.move(id, 1, libraries),
-                child: Text(l10n.tvSectionMoveDown),
-              ),
-              const Spacer(),
-              Switch(
-                key: visibleKey(id),
-                value: visible,
-                onChanged: (value) {
-                  unawaited(controller.setVisible(id, value));
-                },
-              ),
-            ],
+            ),
+          ),
+          TvAction(
+            key: moveUpKey(id),
+            variant: TvActionVariant.icon,
+            onPressed: index == 0
+                ? null
+                : () => controller.move(id, -1, libraries),
+            child: Semantics(
+              label: l10n.tvSectionMoveUp,
+              child: const Icon(Icons.arrow_upward_rounded),
+            ),
+          ),
+          SizedBox(width: 6 * s),
+          TvAction(
+            key: moveDownKey(id),
+            variant: TvActionVariant.icon,
+            focusNode: index == 0 && count > 1 ? initialFocus : null,
+            onPressed: index == count - 1
+                ? null
+                : () => controller.move(id, 1, libraries),
+            child: Semantics(
+              label: l10n.tvSectionMoveDown,
+              child: const Icon(Icons.arrow_downward_rounded),
+            ),
           ),
         ],
       ),

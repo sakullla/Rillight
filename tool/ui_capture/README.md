@@ -16,7 +16,7 @@ node tool/capture-ui.mjs --only server-delete-confirm --theme light
 node tool/capture-ui.mjs --only '*loading*' --list
 ```
 
-支持 `--platform all|desktop|phone|tv`、`--theme all|dark|light`，默认全部平台和两种主题。`--size` 为配置宽度，可指定 `360,412,1024,1440,1920`。`--feature` 支持下表功能名及对应中文别名。`--only` 支持一个或多个状态 ID、`*`/`?` 通配符，逗号分隔；与功能、平台、主题和尺寸筛选取交集。`--list` 列出当前筛选匹配的状态，不启动 Flutter；空结果会报错。
+支持 `--platform all|desktop|phone|tv`、`--theme all|dark|light`，默认全部平台和两种主题。`--size` 为配置宽度，可指定 `360,412,1024,1440,1920,3840`。TV 两档都按实机渲染：`1920` 是 1080p 面板（DPR 2），`3840` 是 4K 面板（DPR 4），逻辑画布都是 960×540，截图按物理像素输出，可直接对照实机截图与 4K 下的图片清晰度。`--feature` 支持下表功能名及对应中文别名。`--only` 支持一个或多个状态 ID、`*`/`?` 通配符，逗号分隔；与功能、平台、主题和尺寸筛选取交集。`--list` 列出当前筛选匹配的状态，不启动 Flutter；空结果会报错。
 
 默认输出到忽略目录 `build/ui-capture/`，每次生成独立运行目录，终端给出 `index.html`。截图索引支持平台、主题和状态过滤。`manifest.json` 保存尺寸、状态、字体、版本、结果与缺失清单；`capture.log` 保留完整日志。失败返回非零退出码，保留已完成截图。手机横屏的 `profileWidth` 仍是竖屏配置宽度，`width`/`height` 为图片实际尺寸。`theme` 是应用主题，`renderedTheme` 说明播放器固定使用深色。
 

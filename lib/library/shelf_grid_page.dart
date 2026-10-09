@@ -12,6 +12,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -61,6 +62,38 @@ Key gridFilterOption(String dimension, String value) =>
 
 /// 网格头部清除全部筛选按钮 key。
 const Key gridFilterClearKey = Key('catalog-grid-filter-clear');
+
+/// 其他服务器的片库网格使用该服务器会话，而不是首页当前会话。
+class ShelfClientOverride extends InheritedWidget {
+  const ShelfClientOverride({
+    super.key,
+    required this.client,
+    required super.child,
+  });
+
+  final EmbyClient client;
+
+  static EmbyClient? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ShelfClientOverride>()?.client;
+
+  @override
+  bool updateShouldNotify(ShelfClientOverride oldWidget) =>
+      client != oldWidget.client;
+}
+
+/// 片库海报的打开方式。未提供时仍进入当前会话的条目路由。
+class ShelfItemOpen extends InheritedWidget {
+  const ShelfItemOpen({super.key, required this.onOpen, required super.child});
+
+  final ValueChanged<EmbyItem> onOpen;
+
+  static ValueChanged<EmbyItem>? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ShelfItemOpen>()?.onOpen;
+
+  @override
+  bool updateShouldNotify(ShelfItemOpen oldWidget) =>
+      onOpen != oldWidget.onOpen;
+}
 
 class ShelfGridPage extends StatefulWidget {
   const ShelfGridPage({
@@ -238,10 +271,25 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   final Set<String> _knownGenres = {};
 
   CatalogCache? _scopeCache;
+  EmbyClient? _overrideClient;
+  final CatalogCache _isolatedCache = CatalogCache();
 
-  /// 目录缓存:无 CatalogScope 时用无会话实例降级直连。
-  CatalogCache get _cache =>
-      _scopeCache ??= CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
+  /// 目录缓存:其他服务器的网格不写入首页会话缓存。
+  CatalogCache get _cache {
+    if (_overrideClient != null) {
+      return _isolatedCache;
+    }
+    return _scopeCache ??=
+        CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
+  }
+
+  EmbyClient _activeClient() => _overrideClient ?? AuthScope.of(context).client;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _overrideClient = ShelfClientOverride.maybeOf(context);
+  }
 
   CatalogSort get _defaultSort => widget.includeItemTypes == 'Episode'
       ? CatalogSort.indexNumber
@@ -404,7 +452,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         _autoFills = 0;
       }
     });
-    final client = AuthScope.of(context).client;
+    final client = _activeClient();
     if (!preserveContent) {
       // 先显:命中缓存立即渲染,后台重拉完成后无感更新。
       final hit = await _cache.lookup(
@@ -482,11 +530,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       _pageError = null;
     });
     try {
-      final page = await _fetch(
-        AuthScope.of(context).client,
-        start,
-        ShelfGridPage.pageSize,
-      );
+      final page = await _fetch(_activeClient(), start, ShelfGridPage.pageSize);
       if (!mounted || gen != _loadGen) {
         return;
       }
@@ -730,10 +774,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                       context,
                       customCard: _episodes,
                     )
-                  : MediaShelf.posterLabelExtentFor(
-                      context,
-                      showProgress: false,
-                    ),
+                  : MediaShelf.posterLabelExtentFor(context),
             );
             return MediaImageScrollListener(
               child: CustomScrollView(
@@ -793,8 +834,14 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                                 context,
                                 item,
                                 wide: _wideGrid,
-                                onTap: () =>
-                                    context.push(AppRoutes.item(item.id)),
+                                onTap: () {
+                                  final open = ShelfItemOpen.maybeOf(context);
+                                  if (open != null) {
+                                    open(item);
+                                    return;
+                                  }
+                                  context.push(AppRoutes.item(item.id));
+                                },
                                 onRemoveFromResume: widget.source == 'resume'
                                     ? (entry) {
                                         unawaited(
@@ -1002,23 +1049,23 @@ class _Header extends StatelessWidget {
             runSpacing: AppSpacing.xs,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (onRefresh != null) ...[
-                IconButton(
-                  key: gridRefreshKey,
-                  tooltip: l10n.retry,
-                  visualDensity: VisualDensity.compact,
-                  onPressed: refreshing ? null : onRefresh,
-                  icon: refreshing
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh),
+              if (onRefresh != null)
+                _HeaderChip(
+                  child: IconButton(
+                    key: gridRefreshKey,
+                    tooltip: l10n.refresh,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: refreshing ? null : onRefresh,
+                    icon: refreshing
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                  ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
-              if (filters != null && onFiltersChanged != null) ...[
+              if (filters != null && onFiltersChanged != null)
                 _FilterBar(
                   filters: filters!,
                   typeFilterable: typeFilterable,
@@ -1026,8 +1073,6 @@ class _Header extends StatelessWidget {
                   genreOptions: genreOptions,
                   onChanged: onFiltersChanged!,
                 ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
               if (showSort) ...[
                 PopupMenuButton<CatalogSort>(
                   key: CatalogKeys.sortBy,
@@ -1207,7 +1252,10 @@ class _FilterBar extends StatelessWidget {
           final parentId = uri?.pathSegments.firstOrNull == 'library'
               ? uri!.pathSegments.last
               : uri?.queryParameters['parentId'];
-          return AuthScope.of(context).client.getLibraryGenres(parentId);
+          final client =
+              ShelfClientOverride.maybeOf(context) ??
+              AuthScope.of(context).client;
+          return client.getLibraryGenres(parentId);
         },
         typeFilterable: typeFilterable,
         onApply: (next, _) => onChanged(next),
@@ -1223,12 +1271,7 @@ class _FilterBar extends StatelessWidget {
     required String label,
     required VoidCallback onDeleted,
   }) {
-    return InputChip(
-      visualDensity: VisualDensity.compact,
-      label: Text(label),
-      onDeleted: onDeleted,
-      deleteIcon: const Icon(Icons.close_rounded, size: 16),
-    );
+    return RemovablePill(label: label, onDeleted: onDeleted);
   }
 }
 

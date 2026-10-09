@@ -159,7 +159,7 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
 ///
 /// 剩余宽度留白，下一张整页留在外面。滑到最后一页时卡片靠右，
 /// 右侧边距与行首相同。宽屏换行不走这里。
-class WholeCardStrip extends StatelessWidget {
+class WholeCardStrip extends StatefulWidget {
   const WholeCardStrip({
     super.key,
     required this.itemCount,
@@ -177,16 +177,32 @@ class WholeCardStrip extends StatelessWidget {
   final double margin;
   final IndexedWidgetBuilder itemBuilder;
 
+  @override
+  State<WholeCardStrip> createState() => _WholeCardStripState();
+}
+
+class _WholeCardStripState extends State<WholeCardStrip> {
+  // 不记住页码。详情页的竖向 PageStorage 会把这一条横滑甩到最后一页。
+  final _pages = PageController(keepPage: false);
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
   int _perPage(double viewport) {
-    final inner = viewport - margin * 2;
-    if (inner <= cardWidth || cardWidth <= 0) {
+    final inner = viewport - widget.margin * 2;
+    if (inner <= widget.cardWidth || widget.cardWidth <= 0) {
       return 1;
     }
-    var count = ((inner + gap) / (cardWidth + gap)).floor();
+    var count = ((inner + widget.gap) / (widget.cardWidth + widget.gap))
+        .floor();
     if (count < 1) {
       count = 1;
     }
-    while (count > 1 && count * cardWidth + (count - 1) * gap > inner + 0.1) {
+    while (count > 1 &&
+        count * widget.cardWidth + (count - 1) * widget.gap > inner + 0.1) {
       count--;
     }
     return count;
@@ -194,37 +210,38 @@ class WholeCardStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (itemCount <= 0) {
-      return SizedBox(height: height);
+    if (widget.itemCount <= 0) {
+      return SizedBox(height: widget.height);
     }
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = constraints.maxWidth;
         if (!viewport.isFinite || viewport <= 0) {
-          return SizedBox(height: height);
+          return SizedBox(height: widget.height);
         }
         final perPage = _perPage(viewport);
-        final pages = (itemCount + perPage - 1) ~/ perPage;
+        final pages = (widget.itemCount + perPage - 1) ~/ perPage;
         return SizedBox(
-          height: height,
+          height: widget.height,
           child: PageView.builder(
+            controller: _pages,
             itemCount: pages,
             padEnds: false,
             itemBuilder: (context, page) {
               final start = page * perPage;
-              final end = start + perPage > itemCount
-                  ? itemCount
+              final end = start + perPage > widget.itemCount
+                  ? widget.itemCount
                   : start + perPage;
               final children = <Widget>[];
               for (var index = start; index < end; index++) {
                 if (children.isNotEmpty) {
-                  children.add(SizedBox(width: gap));
+                  children.add(SizedBox(width: widget.gap));
                 }
-                children.add(itemBuilder(context, index));
+                children.add(widget.itemBuilder(context, index));
               }
               final alignEnd = pages > 1 && page == pages - 1;
               return Padding(
-                padding: EdgeInsets.symmetric(horizontal: margin),
+                padding: EdgeInsets.symmetric(horizontal: widget.margin),
                 child: Row(
                   mainAxisAlignment: alignEnd
                       ? MainAxisAlignment.end
@@ -629,6 +646,33 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
       return null;
     }
     return value.toUpperCase();
+  }
+
+  /// 紧凑摘要:视频、音频、字幕各一行,供电视详情的信息区使用。
+  static List<(String, String)> summary(
+    AppLocalizations l10n,
+    ItemMediaSource source,
+  ) {
+    String join(
+      Iterable<ItemMediaStream> streams,
+      String Function(ItemMediaStream) line,
+    ) => {
+      for (final stream in streams) line(stream),
+    }.where((value) => value.isNotEmpty).join('  ·  ');
+    final video = join(source.streams.where((s) => s.isVideo), _videoLine);
+    final audio = join(
+      source.streams.where((s) => s.isAudio),
+      (stream) => _audioLine(l10n, stream),
+    );
+    final subtitle = join(
+      source.streams.where((s) => s.isSubtitle),
+      _subtitleLine,
+    );
+    return [
+      if (video.isNotEmpty) (l10n.videoTrack, video),
+      if (audio.isNotEmpty) (l10n.audioTrack, audio),
+      if (subtitle.isNotEmpty) (l10n.subtitleTrack, subtitle),
+    ];
   }
 
   static String _videoLine(ItemMediaStream stream) {

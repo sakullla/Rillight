@@ -399,6 +399,7 @@ class EmbyItem {
     this.parentIndexNumber,
     this.primaryImageTag,
     this.thumbImageTag,
+    this.logoImageTag,
     this.backdropImageTag,
     this.backdropImageTags = const [],
     this.parentBackdropImageTags = const [],
@@ -441,6 +442,10 @@ class EmbyItem {
   final int? parentIndexNumber;
   final String? primaryImageTag;
   final String? thumbImageTag;
+
+  /// Transparent title artwork (`ImageTags.Logo`). Only requested for the
+  /// featured carousel rows; other lists leave it null.
+  final String? logoImageTag;
   final String? backdropImageTag;
   final List<String> backdropImageTags;
   final List<String> parentBackdropImageTags;
@@ -470,6 +475,20 @@ class EmbyItem {
   bool get isSeries => type == 'Series';
   bool get isSeason => type == 'Season';
   bool get isEpisode => type == 'Episode';
+
+  /// Some Emby responses omit ParentId for episodes/seasons but include the
+  /// concrete series hierarchy. Callers must still verify the library ancestor.
+  String? get hierarchyParentId {
+    for (final id in [
+      parentId,
+      if (isEpisode) seasonId,
+      if (isEpisode || isSeason) seriesId,
+    ]) {
+      if (id != null && id.isNotEmpty) return id;
+    }
+    return null;
+  }
+
   bool get isPhoto => type == 'Photo';
   bool get isPhotoAlbum => type == 'PhotoAlbum';
   bool get isPlayable => isMovie || isEpisode;
@@ -656,6 +675,7 @@ class EmbyItem {
     final primaryTag =
         _mapImageTag(tagMap, 'Primary') ?? _stringTag(json['PrimaryImageTag']);
     final thumbTag = _mapImageTag(tagMap, 'Thumb');
+    final logoTag = _mapImageTag(tagMap, 'Logo');
     final backdropTags = _listTags(json['BackdropImageTags']);
     final parentBackdropTags = _listTags(json['ParentBackdropImageTags']);
     final backdropTag =
@@ -686,6 +706,7 @@ class EmbyItem {
       parentIndexNumber: _asInt(json['ParentIndexNumber']),
       primaryImageTag: primaryTag,
       thumbImageTag: thumbTag,
+      logoImageTag: logoTag,
       backdropImageTag: backdropTag,
       backdropImageTags: backdropTags,
       parentBackdropImageTags: parentBackdropTags,
@@ -755,6 +776,7 @@ class EmbyItem {
       parentIndexNumber: parentIndexNumber,
       primaryImageTag: primaryImageTag,
       thumbImageTag: thumbImageTag,
+      logoImageTag: logoImageTag,
       backdropImageTag: backdropImageTag,
       backdropImageTags: backdropImageTags,
       parentBackdropImageTags: parentBackdropImageTags,

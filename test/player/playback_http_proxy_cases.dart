@@ -2616,6 +2616,14 @@ void main() {
               .length,
           1,
         );
+        // Serving the final bytes can precede the disk publication callback.
+        // Wait for the observed contract, not the response socket's completion.
+        final published = DateTime.now().add(const Duration(seconds: 5));
+        while (fixture.proxy.diagnostics['readAheadPublishedBytes'] !=
+                23 * mib &&
+            DateTime.now().isBefore(published)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
         expect(fixture.proxy.diagnostics['readAheadPublishedBytes'], 23 * mib);
       },
     );

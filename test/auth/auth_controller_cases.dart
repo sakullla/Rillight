@@ -59,6 +59,73 @@ void main() {
     expect(stored?.accessToken, isNotEmpty);
   });
 
+  test(
+    'internationalized server login persists and restores an ASCII URL',
+    () async {
+      final international = FakeEmbyServer(
+        baseUrl: Uri.parse('https://xn--fsqu00a.example:8920/proxy'),
+      );
+      adapter.add(international);
+      final credentials = MemoryCredentialStore();
+      final servers = MemoryServerListStore();
+      final auth = controller(credentials: credentials, servers: servers);
+      addTearDown(auth.dispose);
+
+      expect(
+        await auth.connect(
+          address: 'https://例子.example:8920/proxy/',
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+        isTrue,
+      );
+      expect(auth.failure, isNull);
+      expect(auth.client.baseUrl, international.baseUrl);
+      expect(
+        (await servers.load()).servers.single.baseUrl,
+        international.baseUrl.toString(),
+      );
+
+      final restored = controller(credentials: credentials, servers: servers);
+      addTearDown(restored.dispose);
+      await restored.restore();
+      expect(restored.isLoggedIn, isTrue);
+      expect(restored.client.baseUrl, international.baseUrl);
+      final info = await restored.client.getJson('/System/Info');
+      expect(info['ServerName'], international.serverName);
+    },
+  );
+
+  test('internationalized lines normalize on add, import and edit', () async {
+    final auth = controller();
+    addTearDown(auth.dispose);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(await auth.addLine(server.serverId, 'https://例子.example'), isTrue);
+    await auth.appendLines([
+      'https://xn--fsqu00a.example',
+      'https://例子.example/',
+    ]);
+    expect(auth.savedServers.single.lines, hasLength(2));
+    final line = auth.savedServers.single.lines.last;
+    expect(line.address, 'https://xn--fsqu00a.example');
+    expect(
+      await auth.updateLineAddress(
+        server.serverId,
+        line.id,
+        'https://BÜCHER.example',
+      ),
+      isTrue,
+    );
+    expect(
+      auth.savedServers.single.lines.last.address,
+      'https://xn--bcher-kva.example',
+    );
+  });
+
   test('wrong password stays signed out with a reason', () async {
     final auth = controller();
     await auth.connect(

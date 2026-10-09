@@ -44,7 +44,7 @@ void main() {
     debugOnRebuildDirtyWidget = null;
   });
 
-  Future<void> openMovieLibrary(WidgetTester tester) async {
+  Future<RillightApp> openMovieLibrary(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -80,6 +80,7 @@ void main() {
     await tester.pumpWidget(app);
     await settle(tester);
     expect(find.byType(ShelfGridPage), findsOneWidget);
+    return app;
   }
 
   ScrollPosition gridPosition(WidgetTester tester) {

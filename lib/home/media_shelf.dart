@@ -191,18 +191,11 @@ class MediaShelf extends StatefulWidget {
     return AppSpacing.xxs + title + lineHeightOf(context, textTheme.bodySmall);
   }
 
-  /// 竖版海报行的标签高度:xs 间距 + 标题 titleSmall,
-  /// [showProgress] 时再加一行进度 bodySmall。
-  static double posterLabelExtentFor(
-    BuildContext context, {
-    required bool showProgress,
-  }) {
-    final textTheme = Theme.of(context).textTheme;
-    var extent = AppSpacing.xs + lineHeightOf(context, textTheme.titleSmall);
-    if (showProgress) {
-      extent += lineHeightOf(context, textTheme.bodySmall);
-    }
-    return extent;
+  /// 竖版海报行的标签高度:xs 间距 + 一行标题。
+  /// 续播进度画在封面上，不另占标题行。
+  static double posterLabelExtentFor(BuildContext context) {
+    return AppSpacing.xs +
+        lineHeightOf(context, Theme.of(context).textTheme.titleSmall);
   }
 
   @override
@@ -227,10 +220,7 @@ class _MediaShelfState extends State<MediaShelf> {
                 customCard: widget.itemBuilder != null,
               )
         : MediaShelf.posterWidthFor(screenWidth) * 1.5 +
-              MediaShelf.posterLabelExtentFor(
-                context,
-                showProgress: widget.showProgress,
-              );
+              MediaShelf.posterLabelExtentFor(context);
     return (cardHeight * MediaShelf.hoverScale).ceilToDouble();
   }
 
@@ -386,16 +376,22 @@ class _MediaShelfState extends State<MediaShelf> {
                 ),
                 if (widget.headerAction != null) widget.headerAction!,
                 if (widget.onMore != null && widget.error == null)
-                  TextButton(
+                  TextButton.icon(
                     key: CatalogKeys.shelfMore(widget.shelfId),
                     onPressed: widget.onMore,
+                    iconAlignment: IconAlignment.end,
                     style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
                       foregroundColor: Theme.of(
                         context,
                       ).colorScheme.onSurfaceVariant,
                       textStyle: Theme.of(context).textTheme.labelLarge,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                      ),
                     ),
-                    child: Text(l10n.more),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                    label: Text(l10n.more),
                   ),
               ],
             ),

@@ -1,4 +1,3 @@
-import 'package:rillight/player/player_startup_trace.dart';
 import 'dart:async';
 import 'package:rillight/player/player_host_command.dart';
 import 'dart:convert';
@@ -23,7 +22,9 @@ import 'player_bindings.dart'
         PlaybackSwitchDispatcher,
         PlaybackReportOutcomeSink;
 import 'player_window_host.dart';
+import '../auth/auth_controller.dart';
 import '../auth/region_access.dart';
+import '../auth/server_list_store.dart';
 import '../aggregation/history/history_writer.dart';
 import '../aggregation/identity/media_identity.dart';
 import '../aggregation/query/same_source_query.dart';
@@ -157,6 +158,8 @@ class PlayerController extends ChangeNotifier {
     this.reportOutcomeSink,
     this.openRequest,
     this.routeLeaseKey,
+    this.playbackLineSnapshot = const [],
+    this.verifiedPlaybackServerId,
     this.nextPrefixFetch,
     Future<PlayerStartupData?>? startupData,
     PlaybackSessionSnapshotStore? snapshotStore,
@@ -207,6 +210,17 @@ class PlayerController extends ChangeNotifier {
   PlaybackOrigin? activeOrigin;
   String? activeLineId;
   String? pendingLineId;
+  List<ServerLine> playbackLineSnapshot;
+  String? verifiedPlaybackServerId;
+
+  /// Line remembered for source preference. A temporary playback line must not
+  /// replace it.
+  String? _preferenceLineId;
+  bool _ephemeralPlaybackLine = false;
+  bool _suspendLinePreference = false;
+  String? playbackLineFailure;
+  ({Uri baseUrl, String accessToken, String userId, String? userAgent})?
+  _sharedClientRestore;
   PlaybackOrigin? _switchTarget;
   EmbyItem? _switchTargetItem;
   ({
@@ -611,6 +625,27 @@ class PlayerController extends ChangeNotifier {
   /// 多个媒体源时才提供换源入口。
   bool get canSwitchMediaSource => mediaSources.length > 1;
 
+  bool get canChoosePlaybackLine => playbackLines.length >= 2;
+
+  bool isConfiguredPlaybackUrl(Uri? url) {
+    if (url == null) return false;
+    for (final line in playbackLines) {
+      if (Uri.tryParse(line.address) == url) return true;
+    }
+    return false;
+  }
+
+  void bindPlaybackLineSnapshot(
+    List<ServerLine> lines, {
+    String? verifiedServerId,
+  }) {
+    playbackLineSnapshot = List<ServerLine>.unmodifiable(lines);
+    if (verifiedServerId != null && verifiedServerId.isNotEmpty) {
+      verifiedPlaybackServerId = verifiedServerId;
+    }
+    _emit();
+  }
+
   Timer? _progressTimer;
   Timer? _progressFailBannerTimer;
   Timer? _subtitleNoticeTimer;
@@ -669,7 +704,10 @@ class PlayerController extends ChangeNotifier {
             )
             .lines;
         for (final line in lines) {
-          if (Uri.parse(line.address) == client.baseUrl) activeLineId = line.id;
+          if (Uri.parse(line.address) == client.baseUrl) {
+            activeLineId = line.id;
+            _preferenceLineId ??= activeLineId;
+          }
         }
       } catch (_) {
         loading = false;
@@ -680,7 +718,7 @@ class PlayerController extends ChangeNotifier {
         return;
       }
     }
-    PlayerStartupTrace.record('controller.start');
+
     final operation = _beginOperation();
     if (operation == null || _disposed) return;
     await _start(operation);
@@ -741,7 +779,7 @@ class PlayerController extends ChangeNotifier {
       if (_settingsSaveTimer != null) await _persistSettings();
       if (!_accepts(operation)) return;
       onStage?.call('catalog metadata');
-      PlayerStartupTrace.record('controller.catalog');
+
       late EmbyItem loadedItem;
       EmbyUser? loadedUser;
       await Future.wait<void>([
@@ -776,7 +814,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) {
         return;
       }
-      PlayerStartupTrace.record('controller.catalogReady');
+
       item = loadedItem;
       if (!item!.isPlayable) {
         error = PlayerErrorKind.notPlayable;
@@ -853,10 +891,6 @@ class PlayerController extends ChangeNotifier {
         onStage: onStage,
       );
     } on EmbyException catch (failure) {
-      PlayerStartupTrace.record(
-        'controller.catalogFailed.${failure.kind.name}',
-        {'status': failure.statusCode ?? 0},
-      );
       if (!_accepts(operation)) {
         return;
       }
@@ -866,9 +900,6 @@ class PlayerController extends ChangeNotifier {
       state.phase = PlaybackPhase.failed;
       _emit();
     } catch (failure) {
-      PlayerStartupTrace.record(
-        'controller.catalogFailed.${failure.runtimeType}',
-      );
       if (!_accepts(operation)) return;
       error = PlayerErrorKind.load;
       loading = false;
@@ -1223,7 +1254,7 @@ class PlayerController extends ChangeNotifier {
         // budget. Restoration is a separate bounded attempt, still owned by
         // this operation so cancellation and a newer switch take precedence.
         clock.reset();
-        PlayerStartupTrace.record('controller.restoringPreviousSource');
+
         resolved = previous;
         await _open(
           operation: operation,
@@ -1248,7 +1279,7 @@ class PlayerController extends ChangeNotifier {
       resolved = previous;
     } on TimeoutException {
       if (!_accepts(operation)) return;
-      PlayerStartupTrace.record('controller.recoveryTimeout.$stage');
+
       // Keep the command barrier and native handle owned until open/stop exits.
       _operations.invalidate();
       if (stage != 'stop' &&
@@ -1410,7 +1441,7 @@ class PlayerController extends ChangeNotifier {
         _transcodeSubtitleDelivery(stream) == TranscodeSubtitleDelivery.burnIn);
   }
 
-  /// Called only by phone layout, using the actual video display rectangle.
+  /// Uses the actual video display rectangle on every platform.
   /// PiP callers pass its actual rectangle; its short height caps font size.
   Future<void> updateSubtitleViewport({
     required double width,
@@ -1743,6 +1774,11 @@ class PlayerController extends ChangeNotifier {
     _emit();
   }
 
+  void dismissPlaybackLineFailure() {
+    playbackLineFailure = null;
+    _emit();
+  }
+
   Future<void> setMaxBitrate(int bitrate) async {
     if (_operations.isClosed || loading || bitrate == maxStreamingBitrate) {
       return;
@@ -1964,10 +2000,9 @@ class PlayerController extends ChangeNotifier {
     bool finishCurrent = false,
   }) async {
     final actual = origin;
-    final paused =
-        !playbackEnded &&
-        !_handlingCompleted &&
-        (loading ? _pauseIntent : !isPlaying);
+    // Native open and rate/seek recovery may finish before playing arrives,
+    // even after buffering clears. That observation is not a user pause.
+    final paused = !playbackEnded && !_handlingCompleted && _pauseIntent;
     if (runtime == null && switchDispatcher != null) {
       await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
       if (_disposed || _revoked) return;
@@ -2956,32 +2991,349 @@ class PlayerController extends ChangeNotifier {
     });
   }
 
-  Future<void> switchLine(String lineId) async {
-    if (runtime == null && switchDispatcher != null) {
-      await _inspectHostSwitch({'line': lineId});
-      return;
-    }
+  List<ServerLine> get playbackLines {
     final actual = origin;
+    final playback = runtime;
+    if (playback != null && actual != null) {
+      for (final server in playback.registry.project(
+        actual.source.account.region,
+      )) {
+        if (server.id == actual.source.account.configuredServerId) {
+          return server.lines;
+        }
+      }
+    }
+    return playbackLineSnapshot;
+  }
+
+  String? get playbackServerIdentity {
+    final fromOrigin = origin?.source.account.verifiedServerId;
+    if (fromOrigin != null && fromOrigin.isNotEmpty) return fromOrigin;
+    final known = verifiedPlaybackServerId;
+    if (known != null && known.isNotEmpty) return known;
+    return null;
+  }
+
+  bool playbackLineIsCurrent(ServerLine line) {
+    final current = client.baseUrl;
+    if (current == null) return false;
+    return Uri.tryParse(line.address) == current;
+  }
+
+  ServerLine? _playbackLineById(String lineId) {
+    for (final line in playbackLines) {
+      if (line.id == lineId) return line;
+    }
+    return null;
+  }
+
+  /// Selects another line of the server already playing. The saved current
+  /// line and source-preference line stay unchanged.
+  Future<void> switchLine(String lineId) async {
+    final line = _playbackLineById(lineId);
+    if (line == null) {
+      throw StateError('Playback line is not on this server');
+    }
+    if (playbackLineIsCurrent(line)) return;
+    playbackLineFailure = null;
+    try {
+      final actual = origin;
+      final current = resolved;
+      if (runtime != null && actual != null && current != null) {
+        final target = await runtime!.resolveLine(
+          actual,
+          lineId,
+          current.mediaSource.id,
+          timeout: recoveryTimeout,
+        );
+        if (_revoked ||
+            _disposed ||
+            !identical(origin, actual) ||
+            !identical(resolved, current)) {
+          return;
+        }
+        final plan = await _linePlan(target.client, current);
+        if (_revoked ||
+            _disposed ||
+            !identical(origin, actual) ||
+            !identical(resolved, current)) {
+          target.client.clearSession();
+          return;
+        }
+        await _reopenOnPlaybackLine(
+          lineId: lineId,
+          sourceId: current.mediaSource.id,
+          startTicks: plan.startTicks,
+          audio: plan.audio,
+          subtitle: plan.subtitle,
+          paused: plan.paused,
+          install: () {
+            target.permit.requireValid();
+            origin = target;
+            client = target.client;
+          },
+        );
+        return;
+      }
+      final plan = await _linePlan(await _preflightSessionLine(line), current);
+      if (_revoked || _disposed || !identical(resolved, current)) return;
+      final address = Uri.parse(line.address);
+      await _reopenOnPlaybackLine(
+        lineId: lineId,
+        sourceId: current!.mediaSource.id,
+        startTicks: plan.startTicks,
+        audio: plan.audio,
+        subtitle: plan.subtitle,
+        paused: plan.paused,
+        install: () {
+          client.attachSession(
+            baseUrl: address,
+            accessToken: client.accessToken!,
+            userId: client.userId!,
+            userAgent: client.customUserAgent,
+          );
+        },
+      );
+    } catch (error) {
+      playbackLineFailure ??= '$error';
+      _emit();
+      rethrow;
+    }
+  }
+
+  Future<EmbyClient> _preflightSessionLine(ServerLine line) async {
     final current = resolved;
-    if (runtime == null || actual == null || current == null) {
-      throw StateError('Scoped playback required');
+    final token = client.accessToken;
+    final userId = client.userId;
+    final base = client.baseUrl;
+    if (current == null || token == null || token.isEmpty || userId == null) {
+      throw StateError('Playback unavailable');
     }
-    final target = await runtime!.resolveLine(
-      actual,
-      lineId,
-      current.mediaSource.id,
-      timeout: recoveryTimeout,
+    if (base == null) throw StateError('Playback unavailable');
+    final address = Uri.parse(line.address);
+    final identity = await client
+        .getPublicInfo(address)
+        .timeout(recoveryTimeout);
+    final expected =
+        playbackServerIdentity ??
+        (await client.getPublicInfo(base).timeout(recoveryTimeout)).id;
+    if (identity.id != expected) {
+      throw StateError('Line ServerId mismatch');
+    }
+    final probe = client.withRequestGuard(() {});
+    probe.attachSession(
+      baseUrl: address,
+      accessToken: token,
+      userId: userId,
+      userAgent: client.customUserAgent,
     );
-    if (_revoked ||
-        _disposed ||
-        !identical(origin, actual) ||
-        !identical(resolved, current)) {
-      return;
+    try {
+      final user = await probe.getUser().timeout(recoveryTimeout);
+      if (user.id != userId) throw StateError('Line account mismatch');
+      final item = await probe.getItem(itemId).timeout(recoveryTimeout);
+      if (item.id != itemId) throw StateError('Line item mismatch');
+      final info = await probe
+          .getPlaybackInfo(itemId: item.id)
+          .timeout(recoveryTimeout);
+      if (!info.mediaSources.any(
+        (source) => source.id == current.mediaSource.id,
+      )) {
+        throw StateError('Line actual version missing');
+      }
+      return probe;
+    } catch (_) {
+      probe.clearSession();
+      rethrow;
     }
-    _switchTarget = target;
-    _switchTargetItem = item;
-    pendingLineId = lineId;
-    await switchMediaSource(current.mediaSource.id);
+  }
+
+  Future<({int startTicks, int? audio, int? subtitle, bool paused})> _linePlan(
+    EmbyClient next,
+    ResolvedPlayback? current,
+  ) async {
+    if (current == null) throw StateError('Playback unavailable');
+    final info = await _sourceRequest(
+      () => next.getPlaybackInfo(
+        itemId: itemId,
+        maxStreamingBitrate: maxStreamingBitrate,
+      ),
+    ).timeout(recoveryTimeout);
+    final targets = info.mediaSources.where(
+      (source) => source.id == current.mediaSource.id,
+    );
+    if (targets.length != 1) {
+      throw StateError('Line actual version missing');
+    }
+    final targetSource = targets.single;
+    final plan = PlaybackSwitchPlan.inspect(
+      original: current.mediaSource,
+      target: targetSource,
+      positionTicks: ticksFromDuration(position),
+      paused: !isPlaying,
+      maxStreamingBitrate: maxStreamingBitrate,
+      audioIndex: audioStreamIndex,
+      subtitleIndex: subtitleStreamIndex,
+      sameVersion: true,
+    );
+    int? match(List<MediaStreamInfo> tracks, int? index, int? byIndex) {
+      if (index == null) return null;
+      if (byIndex != null) return byIndex;
+      final old = current.mediaSource.streamByIndex(index);
+      final language = old?.language?.trim().toLowerCase();
+      if (old == null ||
+          language == null ||
+          language.isEmpty ||
+          language == 'und') {
+        return null;
+      }
+      final matches = tracks
+          .where((stream) => stream.language?.trim().toLowerCase() == language)
+          .toList();
+      return matches.length == 1 ? matches.single.index : null;
+    }
+
+    final startTicks =
+        plan.targetRuntimeTicks != null &&
+            plan.positionTicks >= plan.targetRuntimeTicks!
+        ? 0
+        : plan.positionTicks;
+    return (
+      startTicks: startTicks,
+      audio: match(
+        targetSource.audioStreams,
+        audioStreamIndex,
+        plan.audioNeedsChoice ? null : plan.audioIndex,
+      ),
+      subtitle: match(
+        targetSource.subtitleStreams,
+        subtitleStreamIndex,
+        plan.subtitleNeedsChoice ? null : plan.subtitleIndex,
+      ),
+      paused: plan.paused,
+    );
+  }
+
+  Future<void> _reopenOnPlaybackLine({
+    required String lineId,
+    required String sourceId,
+    required int startTicks,
+    required int? audio,
+    required int? subtitle,
+    required bool paused,
+    required void Function() install,
+  }) async {
+    final savedOrigin = origin;
+    final savedClient = client;
+    final savedUrl = client.baseUrl;
+    final savedToken = client.accessToken;
+    final savedUser = client.userId;
+    final savedAgent = client.customUserAgent;
+    final savedItem = item;
+    final savedItemId = itemId;
+    final savedAudio = audioStreamIndex;
+    final savedSubtitle = subtitleStreamIndex;
+    _preferenceLineId ??= activeLineId;
+    final stopped = _stopSession();
+    _operations.invalidate();
+    try {
+      await Future.wait([
+        stopped,
+        _operations.interrupt(backend.stop, ensureRetired: true),
+      ]).timeout(recoveryTimeout);
+      if (_disposed || _revoked) return;
+      install();
+      _ephemeralPlaybackLine = true;
+      pendingLineId = lineId;
+      final operation = _beginOperation();
+      if (operation == null) return;
+      _suspendLinePreference = true;
+      try {
+        await _open(
+          operation: operation,
+          startTicks: startTicks,
+          audio: audio,
+          subtitle: subtitle,
+          subtitleOff: subtitle == null,
+          requestedSourceId: sourceId,
+          startPaused: paused,
+          strictTracks: true,
+        ).timeout(recoveryOpenTimeout);
+      } finally {
+        _suspendLinePreference = false;
+      }
+      if (state.phase == PlaybackPhase.failed || error != null) {
+        throw StateError(disconnectDetail ?? 'Line open failed');
+      }
+      if (identical(savedClient, client) &&
+          savedUrl != null &&
+          savedToken != null &&
+          savedUser != null &&
+          savedUrl != client.baseUrl) {
+        _sharedClientRestore ??= (
+          baseUrl: savedUrl,
+          accessToken: savedToken,
+          userId: savedUser,
+          userAgent: savedAgent,
+        );
+      }
+    } catch (failure) {
+      if (_disposed || _revoked) return;
+      pendingLineId = null;
+      origin = savedOrigin;
+      client = savedClient;
+      item = savedItem;
+      itemId = savedItemId;
+      if (savedUrl != null && savedToken != null && savedUser != null) {
+        client.attachSession(
+          baseUrl: savedUrl,
+          accessToken: savedToken,
+          userId: savedUser,
+          userAgent: savedAgent,
+        );
+      }
+      final operation = _beginOperation();
+      if (operation != null) {
+        _suspendLinePreference = true;
+        try {
+          await _open(
+            operation: operation,
+            startTicks: startTicks,
+            audio: savedAudio,
+            subtitle: savedSubtitle,
+            subtitleOff: savedSubtitle == null,
+            requestedSourceId: sourceId,
+            startPaused: paused,
+            strictTracks: true,
+          ).timeout(recoveryOpenTimeout);
+        } catch (_) {
+          // The original line could not be opened again. The message below
+          // still reports the failed switch.
+        } finally {
+          _suspendLinePreference = false;
+        }
+      }
+      playbackLineFailure = '$failure';
+      if (state.phase != PlaybackPhase.failed && error == null) {
+        _emit();
+        return;
+      }
+      error = null;
+      loading = false;
+      state.phase = isPlaying ? PlaybackPhase.playing : PlaybackPhase.paused;
+      _emit();
+    }
+  }
+
+  void _restoreSharedPlaybackClient() {
+    final saved = _sharedClientRestore;
+    if (saved == null) return;
+    _sharedClientRestore = null;
+    client.attachSession(
+      baseUrl: saved.baseUrl,
+      accessToken: saved.accessToken,
+      userId: saved.userId,
+      userAgent: saved.userAgent,
+    );
   }
 
   Future<void> _commitSourceSwitch(
@@ -3114,6 +3466,13 @@ class PlayerController extends ChangeNotifier {
       await disposeAsync().timeout(disposeTimeout);
     } catch (_) {
       // mpv stop/dispose can hang on a live stream; the window must still close.
+      // Future.timeout does not cancel dispose, so a hung stop never reaches
+      // the restore inside _disposeResources.
+    } finally {
+      // A finished dispose already restored and cleared this record. A second
+      // call then leaves the session alone, including an independent runtime
+      // client that never stored one.
+      _restoreSharedPlaybackClient();
     }
     try {
       if (window.isFullScreen) await window.setFullScreen(false);
@@ -3134,9 +3493,15 @@ class PlayerController extends ChangeNotifier {
     state.phase = PlaybackPhase.idle;
     _emit();
     final stopped = _stopSession();
-    await _operations.interrupt(backend.stop);
-    await _operations.drained;
-    await stopped;
+    try {
+      await _operations.interrupt(backend.stop);
+      await _operations.drained;
+      await stopped;
+    } finally {
+      // Stop can fail after a shared-client line switch. Put the browsing
+      // session back on its previous address before this shutdown ends.
+      _restoreSharedPlaybackClient();
+    }
     await _persistSettings();
     if (window.isFullScreen) await window.setFullScreen(false);
   }
@@ -3186,16 +3551,22 @@ class PlayerController extends ChangeNotifier {
     }
     await _eventSub?.cancel();
     try {
-      await _operations.interrupt(backend.stop);
-    } finally {
-      await _operations.drained;
       try {
-        await backend.dispose();
+        await _operations.interrupt(backend.stop);
       } finally {
-        await _deleteSubtitleCache();
+        await _operations.drained;
+        try {
+          await backend.dispose();
+        } finally {
+          await _deleteSubtitleCache();
+        }
       }
+      await stopped;
+    } finally {
+      // close() still leaves the player when stop or dispose throws. Put the
+      // shared browsing session back before that exit, including on failure.
+      _restoreSharedPlaybackClient();
     }
-    await stopped;
     await _persistSettings();
     state.phase = PlaybackPhase.closed;
   }
@@ -3371,7 +3742,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     _sourceRenewalOperation = operation.id;
-    PlayerStartupTrace.record('controller.sourceRenewal');
+
     try {
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
@@ -3408,11 +3779,7 @@ class PlayerController extends ChangeNotifier {
       await (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
         next.streamUrl,
       );
-      PlayerStartupTrace.record('controller.sourceRenewalReady', {
-        'urlChanged': next.streamUrl == current.streamUrl ? 0 : 1,
-      });
     } catch (_) {
-      PlayerStartupTrace.record('controller.sourceRenewalFailed');
       // Renewal is optional while cached playback continues. Normal failure
       // reporting remains available if foreground bytes cannot be recovered.
     } finally {
@@ -3497,7 +3864,6 @@ class PlayerController extends ChangeNotifier {
     _emit();
 
     try {
-      PlayerStartupTrace.record('controller.playbackInfo');
       onStage?.call('metadata');
       // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
       // 这一个源,播放器就再也列不出其它版本;全部源在本地用
@@ -3527,7 +3893,7 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) {
         return;
       }
-      PlayerStartupTrace.record('controller.playbackInfoReady');
+
       mediaSources = info.mediaSources;
       if (runtime != null && origin != null) {
         preferenceResolution = runtime!.preference(
@@ -3550,12 +3916,16 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      if (preference?.failure == null &&
+      if (!strictTracks &&
+          preference?.failure == null &&
           preference?.selected != null &&
-          explicitVersion == null) {
+          (explicitVersion == null ||
+              explicitVersion == preference!.selected!.source.mediaSourceId)) {
         final settings = preference!.preference!.settings;
         final line = preference.preference!.lineId;
-        if (line != null && line != activeLineId) {
+        // A temporary playback address is not the saved line. Later episodes
+        // in this playback stay on that address; the saved line stays put.
+        if (line != null && line != activeLineId && !_ephemeralPlaybackLine) {
           await _failOpen(
             operation,
             detail: 'Saved line requires an explicit line switch',
@@ -3663,7 +4033,11 @@ class PlayerController extends ChangeNotifier {
           ) ??
           compatibleDefaultAudio;
       final int? selectedSubtitle;
-      if (subtitleOff) {
+      if (subtitleOff ||
+          (!strictTracks &&
+              subtitle == null &&
+              preferredSubtitleStreamIndex == null &&
+              memory?.subtitleOff == true)) {
         selectedSubtitle = null;
       } else {
         selectedSubtitle =
@@ -3697,24 +4071,7 @@ class PlayerController extends ChangeNotifier {
       Future<void>? started;
       final subtitleRevision = ++_trackRevision;
       _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
-      PlayerStartupTrace.record('controller.mediaRequest', {
-        'sameOrigin': next.streamUrl.origin == client.baseUrl!.origin ? 1 : 0,
-        'queryNeedsPreservation':
-            next.streamUrl.query ==
-                next.streamUrl
-                    .replace(queryParameters: next.streamUrl.queryParametersAll)
-                    .query
-            ? 0
-            : 1,
-        'explicitSource': requestedSourceId == null ? 0 : 1,
-        'urlSourceMatches':
-            next.streamUrl.queryParameters['MediaSourceId'] == null
-            ? -1
-            : next.streamUrl.queryParameters['MediaSourceId'] ==
-                  next.mediaSource.id
-            ? 1
-            : 0,
-      });
+
       onStage?.call('native open');
       await _operations.run(operation, () async {
         await backend.open(
@@ -3890,12 +4247,8 @@ class PlayerController extends ChangeNotifier {
         await _failOpen(operation, detail: failure.toString());
       }
     } on EmbyException catch (failure) {
-      PlayerStartupTrace.record('controller.openFailed.${failure.kind.name}', {
-        'status': failure.statusCode ?? 0,
-      });
       await _failOpen(operation, failure: failure);
     } catch (error) {
-      PlayerStartupTrace.record('controller.openFailed.${error.runtimeType}');
       await _failOpen(operation, detail: error.toString());
     }
   }
@@ -5165,6 +5518,10 @@ class PlayerController extends ChangeNotifier {
 
   /// 播放中选择音轨/字幕(含关闭)/码率后写入按剧记忆。
   Future<void> _persistSeriesPreference() async {
+    if (_suspendLinePreference || _ephemeralPlaybackLine) {
+      // A temporary playback line must not create or rewrite source preference.
+      if (_suspendLinePreference) return;
+    }
     if (_scopedPlayback) {
       if (runtime == null && observationSink != null) {
         scopedPreferencePending = true;
@@ -5195,7 +5552,7 @@ class PlayerController extends ChangeNotifier {
             mediaSourceId: version,
           ),
           libraryId: actual.libraryId,
-          lineId: activeLineId,
+          lineId: _ephemeralPlaybackLine ? _preferenceLineId : activeLineId,
           settings: PlayerSeriesPreference(
             audioLanguage: audio?.language,
             audioTitle: audio?.displayTitle,
@@ -5284,6 +5641,44 @@ class PlayerController extends ChangeNotifier {
     window.removeListener(_emit);
     super.dispose();
   }
+}
+
+/// Lines of the server whose address matches the current session.
+/// Session match wins; otherwise exactly one loaded server may match.
+({List<ServerLine> lines, String? verifiedServerId})? serverMatchingPlayback(
+  AuthController auth,
+  Uri? baseUrl,
+) {
+  if (baseUrl == null) return null;
+  bool matches(SavedServer server) {
+    for (final line in server.lines) {
+      if (Uri.tryParse(line.address) == baseUrl) return true;
+    }
+    return false;
+  }
+
+  final sessionServer = auth.session?.server;
+  SavedServer? server;
+  if (sessionServer != null && matches(sessionServer)) {
+    server = sessionServer;
+  } else {
+    final found = [
+      ...auth.sources.project(AccessRegion.ordinary),
+      ...auth.sources.project(AccessRegion.private),
+    ].where(matches).toList();
+    if (found.length == 1) server = found.single;
+  }
+  if (server == null) return null;
+  return (
+    lines: server.lines,
+    verifiedServerId: server.verifiedServerId ?? server.id,
+  );
+}
+
+String playbackLineLabel(ServerLine line) {
+  final nickname = line.nickname?.trim();
+  if (nickname != null && nickname.isNotEmpty) return nickname;
+  return line.hostLabel;
 }
 
 /// UI 音量百分比到 mpv volume。

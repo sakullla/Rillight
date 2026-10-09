@@ -2,6 +2,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/device_profile.dart';
 
 void main() {
+  test('verified DTS and PGS avoid unnecessary server transcoding', () {
+    for (final build in [androidDeviceProfile, ownedCoreDeviceProfile]) {
+      for (final dts in [false, true]) {
+        for (final pgs in [false, true]) {
+          final profile = build(h264: true, aac: true, dts: dts, pgs: pgs);
+          final direct = (profile['DirectPlayProfiles'] as List).single as Map;
+          expect(
+            (direct['AudioCodec'] as String).split(',').contains('dts'),
+            dts,
+          );
+          final subtitles = (profile['SubtitleProfiles'] as List).cast<Map>();
+          for (final format in ['pgs', 'pgssub']) {
+            expect(
+              subtitles.singleWhere((s) => s['Format'] == format)['Method'],
+              pgs ? 'Embed' : 'Encode',
+            );
+          }
+          expect(
+            subtitles.singleWhere((s) => s['Format'] == 'dvdsub')['Method'],
+            'Encode',
+          );
+          expect(
+            (profile['TranscodingProfiles'] as List).single['Protocol'],
+            'hls',
+          );
+        }
+      }
+    }
+  });
+
   test(
     'Android profile gates the verified baseline and offers HLS fallback',
     () {
@@ -142,8 +172,8 @@ void main() {
       final subtitles = (profile['SubtitleProfiles'] as List).cast<Map>();
       for (final format in ['ass', 'ssa']) {
         expect(
-          subtitles.singleWhere((s) => s['Format'] == format)['Method'],
-          'Embed',
+          subtitles.where((s) => s['Format'] == format).map((s) => s['Method']),
+          unorderedEquals(['External', 'Embed']),
         );
       }
       final absent = (build(h264: true, aac: true)['SubtitleProfiles'] as List)

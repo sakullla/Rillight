@@ -35,6 +35,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
+import 'package:rillight/player/track_picker.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
 
@@ -67,8 +68,12 @@ void main() {
     ('desktop', PresentationEnvironment.desktop, const Size(1024, 768)),
     ('phone', PresentationEnvironment.phone, const Size(360, 800)),
     ('phone', PresentationEnvironment.phone, const Size(412, 915)),
+    // Android TV 实机:1080p 面板 DPR 2、4K 面板 DPR 4,逻辑画布都是 960×540。
     ('tv', PresentationEnvironment.tv, const Size(1920, 1080)),
+    ('tv', PresentationEnvironment.tv, const Size(3840, 2160)),
   ];
+  double pixelRatioOf((String, PresentationEnvironment, Size) config) =>
+      config.$1 == 'tv' ? config.$3.width / 960 : 1;
   for (final config in configurations) {
     final profiles = Platform.environment['RILLIGHT_CAPTURE_PROFILES'];
     if (profiles != null &&
@@ -90,7 +95,7 @@ void main() {
       if (selectedTheme != 'all' && selectedTheme != theme) continue;
       testWidgets('${config.$1} ${config.$3} $theme', (tester) async {
         isolateImageCache();
-        tester.view.devicePixelRatio = 1;
+        tester.view.devicePixelRatio = pixelRatioOf(config);
         tester.view.physicalSize = config.$3;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
@@ -311,28 +316,16 @@ void main() {
           final catalog = CatalogScope.of(
             tester.element(find.byType(PhoneHero)),
           );
-          final originals = [
-            for (final item in server.items)
-              (
-                item,
-                item.played,
-                item.nextUp,
-                item.playbackPositionTicks,
-                item.playedPercentage,
-              ),
-          ];
-          for (final item in server.items) {
-            if (item.type == 'Movie') item.played = true;
-            if (item.type == 'Movie' || item.type == 'Episode') {
-              item.nextUp = false;
-              item.playbackPositionTicks = 0;
-              item.playedPercentage = 0;
-            }
-          }
-          await tester.runAsync(catalog.reloadHomeRows);
-          await capture.advance(700);
+          // 轮播只取最近入库的电影/剧集交错,与观看记录无关;用圆点切到
+          // 剧集页,主操作「播放」要先解析出该播的那一集。
+          final seriesPage = PhoneHero.featuredItemsOf(
+            catalog,
+          ).indexWhere((item) => item.id == 'series-friends');
+          expect(seriesPage, greaterThanOrEqualTo(0));
           await tester.ensureVisible(find.byKey(PhoneHero.bannerKey));
           await capture.advance(300);
+          await capture.tap(CatalogKeys.heroDot(seriesPage));
+          await capture.advance(700);
           await capture.save('home-series-featured');
           await capture.tap(const ValueKey('hero-resume-series-friends'));
           await capture.advance(1000);
@@ -345,13 +338,6 @@ void main() {
           await capture.save('player-from-series-hero');
           app.router.pop();
           await capture.advance(500);
-          for (final original in originals) {
-            original.$1.played = original.$2;
-            original.$1.nextUp = original.$3;
-            original.$1.playbackPositionTicks = original.$4;
-            original.$1.playedPercentage = original.$5;
-          }
-          await tester.runAsync(catalog.reloadHomeRows);
           backend = CaptureBackend();
         }
 
@@ -552,6 +538,74 @@ void main() {
             backend.emitError('Synthetic playback failure');
             await capture.advance(400);
             await capture.save('player-error');
+            if (config.$1 == 'desktop' || config.$1 == 'phone') {
+              // 密集条目:60 条字幕 + 20 个片源,验证选择器的搜索与滚动。
+              await openExtra('movie-dense');
+              if (config.$1 == 'desktop') {
+                final denseMouse = await tester.createGesture(
+                  kind: PointerDeviceKind.mouse,
+                );
+                await denseMouse.addPointer(location: Offset.zero);
+                await denseMouse.moveTo(
+                  tester.getCenter(find.byKey(PlayerKeys.subtitle)),
+                );
+                await capture.advance(200);
+                await capture.save('player-dense-controls');
+                await capture.tap(PlayerKeys.subtitle);
+                await capture.save('player-dense-subtitles');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey),
+                  'eng',
+                );
+                await capture.advance(300);
+                await capture.save('player-dense-subtitles-search');
+                await capture.tap(const Key('player-subtitle-close'));
+                // 等 MenuAnchor 的外层点击拦截随关闭动画退场,再开设置菜单。
+                await capture.advance(500);
+                await capture.tap(PlayerKeys.more);
+                // 分类条是横向懒构建列表,末端分区先滚进视口再点。
+                final categories = find.byKey(
+                  const Key('player-settings-categories'),
+                );
+                await tester.drag(categories, const Offset(-600, 0));
+                await capture.advance(300);
+                await capture.tap(PlayerKeys.mediaSource);
+                await capture.save('player-dense-sources');
+                await tester.enterText(find.byKey(kTrackPickerSearchKey), '4k');
+                await capture.advance(300);
+                await capture.save('player-dense-sources-search');
+                await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+                await capture.advance(250);
+                await denseMouse.removePointer();
+              } else {
+                await capture.revealPhoneControls();
+                await capture.save('player-dense-controls');
+                await capture.tap(const Key('mobile-player-more'));
+                await capture.tap(const Key('mobile-player-section-tracks'));
+                await capture.save('player-dense-tracks');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey),
+                  'eng',
+                );
+                await capture.advance(300);
+                await capture.save('player-dense-tracks-search');
+                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await capture.advance(200);
+                await capture.tap(const Key('mobile-player-panel-back'));
+                await capture.tap(const Key('mobile-player-source-entry'));
+                await capture.save('player-dense-source');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey),
+                  '1080',
+                );
+                await capture.advance(300);
+                await capture.save('player-dense-source-search');
+                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await capture.advance(200);
+                await capture.tap(const Key('mobile-player-panel-back'));
+                await capture.tap(const Key('mobile-player-panel-close'));
+              }
+            }
           }
           if (config.$1 == 'desktop') {
             await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -683,6 +737,19 @@ class CaptureSession {
     }
     var target = find.byKey(key);
     expect(target, findsOneWidget, reason: 'Missing capture interaction: $key');
+    // TV 导航在内容下滚后收起;像遥控器那样先把焦点送回导航,栏再展开。
+    if (key is ValueKey<String> && key.value.startsWith('tv-nav-')) {
+      tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: target,
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode
+          ?.requestFocus();
+      await advance(450);
+    }
     // ExpansionTile's whole render box includes its expanded children. Click
     // the header, otherwise a tall section's midpoint can hit a child instead.
     if (tester.widget(target) is ExpansionTile) {
@@ -747,7 +814,9 @@ class CaptureSession {
     await tester.runAsync(() async {
       final render =
           boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-      final image = await render.toImage();
+      final image = await render.toImage(
+        pixelRatio: tester.view.devicePixelRatio,
+      );
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
       await File('$out/$file').writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
@@ -985,10 +1054,13 @@ class CaptureSession {
         of: find.byKey(const Key('tv-connect-password')),
         matching: find.byType(Text),
       );
-      expect(passwordLabel, findsOneWidget);
-      final passwordText = tester.widget<Text>(passwordLabel).data ?? '';
-      expect(passwordText.contains('•'), isFalse);
-      expect(passwordText.contains(secret), isFalse);
+      // 标签与当前值是两行文字:都不能露出密码或掩码。
+      expect(passwordLabel, findsWidgets);
+      for (final text in tester.widgetList<Text>(passwordLabel)) {
+        final data = text.data ?? '';
+        expect(data.contains('•'), isFalse);
+        expect(data.contains(secret), isFalse);
+      }
       expect(find.textContaining(secret), findsNothing);
       if (shouldCapture('tv-lan-confirm')) {
         await Scrollable.ensureVisible(
@@ -1216,7 +1288,7 @@ _LanPhonePage _lanPhonePage(String html, String fingerprint) {
   expect(page.title, '灯川 Rillight');
   expect(page.intro, '证书指纹');
   expect(page.fingerprint, fingerprint);
-  expect(page.labels, ['服务器地址', '用户名', '密码']);
+  expect(page.labels, ['服务器地址', '用户名', '密码', 'User-Agent']);
   expect(page.submit, '提交到电视');
   return page;
 }

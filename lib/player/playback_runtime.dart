@@ -60,6 +60,27 @@ class PlaybackRuntime {
     );
   }
 
+  /// 范围许可。库未勾选时返回 null，调用方改用仍有效的服务器会话。
+  Future<(SourceAccount, OperationPermit)?> _scopedPlaybackPermit(
+    SourceReference source,
+    String library,
+  ) async {
+    try {
+      final account = await registry.acquireAccount(
+        source.account.configuredServerId,
+        region: source.account.region,
+        libraryId: library,
+      );
+      if (account != source.account) {
+        throw StateError('Playback account changed');
+      }
+      return (account, registry.permit(account, libraryId: library));
+    } on StateError catch (error) {
+      if (error.message != 'Source outside allowed scope') rethrow;
+      return null;
+    }
+  }
+
   Future<PlaybackOrigin> resolve(PlayerOpenRequest request) async {
     SourceReference? source = request.source;
     String? library = request.libraryId;
@@ -83,11 +104,11 @@ class PlaybackRuntime {
       final visited = <String>{};
       while (!allowed.single.libraryIds.contains(item.id)) {
         if (!visited.add(item.id) ||
-            item.parentId == null ||
+            item.hierarchyParentId == null ||
             visited.length > 32) {
           throw StateError('Cannot establish playback library membership');
         }
-        item = await permit.dispatch((c) => c.getItem(item.parentId!));
+        item = await permit.dispatch((c) => c.getItem(item.hierarchyParentId!));
       }
       library = item.id;
       source = SourceReference(
@@ -104,13 +125,13 @@ class PlaybackRuntime {
         request.regionGeneration != registry.access.generation) {
       throw StateError('Private playback route generation was revoked');
     }
-    final account = await registry.acquireAccount(
-      source.account.configuredServerId,
-      region: source.account.region,
-      libraryId: library,
-    );
-    if (account != source.account) throw StateError('Playback account changed');
-    final permit = registry.permit(account, libraryId: library);
+    // 已勾选的库走范围许可。聚合视界也会打开尚未勾选的库，那种条目只要求
+    // 该服务器会话仍然有效，和详情门的 sessionOnly 是同一条规则。
+    final scoped = await _scopedPlaybackPermit(source, library);
+    final account = scoped?.$1 ?? source.account;
+    final permit =
+        scoped?.$2 ??
+        registry.permit(account, libraryId: library, sessionOnly: true);
     // A decoded route is still only a value reference. Unlocking must not
     // reacquire the authority of a pre-lock private playback intent.
     if (account.region == AccessRegion.private &&
@@ -123,13 +144,15 @@ class PlaybackRuntime {
     final visited = <String>{};
     while (ancestor.id != library) {
       if (!visited.add(ancestor.id) ||
-          ancestor.parentId == null ||
+          ancestor.hierarchyParentId == null ||
           visited.length > 32) {
         throw StateError(
           'Playback item does not belong to the permitted library',
         );
       }
-      ancestor = await permit.dispatch((c) => c.getItem(ancestor.parentId!));
+      ancestor = await permit.dispatch(
+        (c) => c.getItem(ancestor.hierarchyParentId!),
+      );
     }
     final work =
         request.work ??

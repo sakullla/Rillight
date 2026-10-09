@@ -30,13 +30,15 @@ ANDROID_SYSTEM_LIBRARIES = {
     'libandroid.so', 'libc.so', 'libcamera2ndk.so', 'libdl.so', 'liblog.so',
     'libm.so', 'libmediandk.so', 'libnativewindow.so',
 }
-CORE_LIBRARIES = {'librillight_android_core.so', 'librillight_core.so', 'libass.so'}
+CORE_LIBRARIES = {'librillight_android_core.so', 'librillight_core.so',
+                  'librillight_crc32.so', 'libass.so'}
 CORE_NOTICE_FILES = (
     'THIRD_PARTY_NOTICES.md', 'core_dependencies.json',
     'licenses/FFmpeg-LGPL-2.1.txt', 'licenses/FFmpeg-GPL-2.0.txt',
     'licenses/libass-ISC.txt', 'licenses/FreeType-LICENSE.txt',
     'licenses/FreeType-FTL.txt', 'licenses/FriBidi-LGPL-2.1.txt',
     'licenses/HarfBuzz-Old-MIT.txt', 'licenses/libunibreak-Zlib.txt',
+    'licenses/chromium-crc32-BSD-3-Clause.txt',
 )
 ELF_MACHINES = {
     'arm64-v8a': 'AArch64',

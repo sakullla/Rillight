@@ -7,10 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
+import 'package:rillight/app/tv_top_nav.dart';
 import 'dart:async';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/hero_artwork.dart';
+import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/home/tv_section_prefs.dart';
@@ -114,8 +118,7 @@ void main() {
     await key(tester, LogicalKeyboardKey.arrowDown);
     await edit(tester, 'correct-horse');
     await key(tester, LogicalKeyboardKey.arrowDown);
-    // User-Agent 与提交之间隔了外观三态行,多按一次向下才到提交。
-    await key(tester, LogicalKeyboardKey.arrowDown);
+    // 表单卡里 User-Agent 下面就是连接按钮;外观选项在左栏。
     await key(tester, LogicalKeyboardKey.arrowDown);
     await key(tester, LogicalKeyboardKey.select);
     expect(find.byType(TvShell), findsOneWidget);
@@ -186,7 +189,7 @@ void main() {
   );
 
   testWidgets(
-    'focused TV action scales within 1.05-1.1 and shows a high-contrast ring of at least 4px',
+    'focused TV action scales within 1.05-1.1 and inverts to a high-contrast fill',
     (tester) async {
       final server = FakeEmbyServer();
       await start(tester, server);
@@ -208,13 +211,12 @@ void main() {
           matching: find.byType(AnimatedContainer),
         ),
       );
-      final border =
-          (focusedContainer.decoration as BoxDecoration).border! as Border;
-      expect(border.top.width, greaterThanOrEqualTo(4));
-      // 焦点环取主题前景色:深色主题是暖白,浅色主题是深色,均高对比。
+      // 聚焦反相为主题的反色实底(深色主题近白、浅色主题近黑),
+      // 与静止态的半透明底和页面底色对比度都远高于 3:1。
+      final scheme = Theme.of(tester.element(focusedAction())).colorScheme;
       expect(
-        border.top.color,
-        Theme.of(tester.element(focusedAction())).colorScheme.onSurface,
+        (focusedContainer.decoration as BoxDecoration).color,
+        scheme.inverseSurface,
       );
 
       // Unfocused action stays at rest scale.
@@ -242,6 +244,43 @@ void main() {
     expect(rect.width, 960);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'featured art covers the stage and switch controls stay in the safe area',
+    (tester) async {
+      final server = FakeEmbyServer();
+      await start(tester, server);
+      await login(tester, server);
+      final featured = find.byKey(TvHomeKeys.featured);
+      final stage = tester.getRect(featured);
+      // Validated promotional art covers the full width; a plain MediaImage
+      // used to keep its own aspect and leave bare bands on both sides.
+      expect(
+        find.descendant(of: featured, matching: find.byType(MediaImage)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: featured, matching: find.byType(HeroArtwork)),
+        findsWidgets,
+      );
+      final gutter = tvSafeGutter(stage.width);
+      final title = tester.getRect(find.byKey(TvHomeKeys.featuredTitle));
+      final play = tester.getRect(find.byKey(TvHomeKeys.featuredPlay));
+      for (final key in [TvHomeKeys.featuredPrev, TvHomeKeys.featuredNext]) {
+        final control = tester.getRect(find.byKey(key));
+        // Inside the overscan-safe gutter, never on the screen edge.
+        expect(control.left, greaterThanOrEqualTo(gutter - 1));
+        expect(control.right, lessThanOrEqualTo(stage.width - gutter + 1));
+        expect(control.bottom, lessThanOrEqualTo(stage.bottom));
+        // And clear of the title and primary actions.
+        expect(control.overlaps(title), isFalse);
+        expect(control.overlaps(play), isFalse);
+      }
+      expect(title.top, greaterThanOrEqualTo(TvTopNavBar.reserveHeight));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('poster row restores focus to the last focused item', (
     tester,
@@ -276,13 +315,13 @@ void main() {
     ) {
       await key(tester, LogicalKeyboardKey.arrowDown);
     }
-    expect(focusedLabel(tester), '飞屋环游记');
-
-    // Step to the other poster in this row. The shelf title is full width, so
-    // a further right-arrow leaves the row instead of finding another poster.
-    await key(tester, LogicalKeyboardKey.arrowLeft);
-    expect(find.descendant(of: row, matching: focusedAction()), findsOneWidget);
+    // 从 hero 的播放按钮下移,落在行首卡片。
     expect(focusedLabel(tester), 'Inception');
+
+    // 行内右移到另一张卡,再离开行、回来,应回到这张而不是行首。
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(find.descendant(of: row, matching: focusedAction()), findsOneWidget);
+    expect(focusedLabel(tester), '飞屋环游记');
     final remembered = FocusManager.instance.primaryFocus;
     final rememberedLabel = focusedLabel(tester);
 
@@ -329,8 +368,14 @@ void main() {
       );
 
       // Every vertical step keeps a live focus target down to the page bottom.
+      // 页尾「编辑首页」与「刷新」并排,到达后右移一次。
       for (var i = 0; i < 40 && focusedLabel(tester) != '刷新'; i++) {
-        await key(tester, LogicalKeyboardKey.arrowDown);
+        await key(
+          tester,
+          focusedLabel(tester) == '编辑首页'
+              ? LogicalKeyboardKey.arrowRight
+              : LogicalKeyboardKey.arrowDown,
+        );
         expect(focusedAction(), findsOneWidget);
       }
       expect(focusedLabel(tester), '刷新');
@@ -646,6 +691,29 @@ void main() {
       final server = FakeEmbyServer()..itemsStatus = 503;
       final (app, _) = await start(tester, server);
       await login(tester, server);
+      tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byKey(const PageStorageKey('tv-home')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position
+          .jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('tv-row-继续观看')),
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('tv-home')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tv-row-继续观看')), findsOneWidget);
       final moviesRetry = find.descendant(
         of: find.byKey(const Key('tv-library-view-movies')),
@@ -655,6 +723,16 @@ void main() {
         of: find.byKey(const Key('tv-library-view-tv')),
         matching: find.text('重试'),
       );
+      final resumeMore = find.byKey(
+        CatalogKeys.shelfMore(CatalogKeys.shelfResume),
+      );
+      await Scrollable.ensureVisible(tester.element(resumeMore), alignment: .5);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(resumeMore).dy,
+        greaterThanOrEqualTo(TvTopNavBar.reserveHeight),
+      );
+      expect(resumeMore.hitTestable(), findsOneWidget);
       await tester.tap(
         find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfResume)),
       );
@@ -703,6 +781,17 @@ void main() {
       await tester.scrollUntilVisible(seriesRetry, 400, scrollable: homeScroll);
       expect(seriesRetry, findsOneWidget);
       tester.state<ScrollableState>(homeScroll).position.jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('tv-row-继续观看')),
+        300,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const PageStorageKey('tv-home')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tv-row-继续观看')), findsOneWidget);
       expect(tester.takeException(), isNull);

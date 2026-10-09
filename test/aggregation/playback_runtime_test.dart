@@ -33,6 +33,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -42,7 +43,7 @@ import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
 class _Client extends EmbyClient {
-  _Client(this.reports)
+  _Client(this.reports, {this.trackChoices = false})
     : super(
         device: const EmbyDeviceInfo(
           clientName: 'test',
@@ -52,12 +53,25 @@ class _Client extends EmbyClient {
         ),
       );
   final List<PlaybackReport> reports;
+  final bool trackChoices;
   final progressReports = <PlaybackReport>[];
   bool failProgress = false;
   bool failStopped = false;
   int playbackRequests = 0;
   bool failPublic = false;
   bool offerNext = false;
+  @override
+  EmbyClient withRequestGuard(void Function() guard) {
+    final probe = _Client(reports, trackChoices: trackChoices);
+    probe.attachSession(
+      baseUrl: baseUrl!,
+      accessToken: accessToken!,
+      userId: userId!,
+      userAgent: customUserAgent,
+    );
+    return probe;
+  }
+
   @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
     if (failPublic) throw StateError('synthetic offline');
@@ -82,6 +96,10 @@ class _Client extends EmbyClient {
             ? 'CollectionFolder'
             : id.startsWith('episode')
             ? 'Episode'
+            : id == 'season'
+            ? 'Season'
+            : id == 'series'
+            ? 'Series'
             : 'Movie',
         if (id.startsWith('episode')) ...{
           'SeriesId': 'series',
@@ -89,7 +107,8 @@ class _Client extends EmbyClient {
           'ParentIndexNumber': 1,
           'IndexNumber': id == 'episode1' ? 1 : 2,
         },
-        if (id != 'library')
+        if (id == 'season') 'SeriesId': 'series',
+        if (id != 'library' && id != 'season' && id != 'episode-no-parent')
           'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
         'RunTimeTicks': 120 * kEmbyTicksPerSecond,
         'ProviderIds': {'Tmdb': '1'},
@@ -119,6 +138,16 @@ class _Client extends EmbyClient {
             'RunTimeTicks': 120 * kEmbyTicksPerSecond,
             'MediaStreams': [
               {'Index': id == 'v' ? 1 : 7, 'Type': 'Audio', 'Language': 'jpn'},
+              if (trackChoices) ...[
+                {'Index': 8, 'Type': 'Audio', 'Language': 'eng'},
+                {
+                  'Index': 9,
+                  'Type': 'Subtitle',
+                  'Language': 'eng',
+                  'Codec': 'srt',
+                  'IsDefault': true,
+                },
+              ],
             ],
           },
       ],
@@ -155,11 +184,35 @@ class _Backend extends FakeVideoBackend {
   Completer<void>? openEntered;
   Completer<void>? stopGate;
   bool stopEntered = false;
+  bool failStop = false;
+  bool failDispose = false;
+  Duration? hangStop;
+  bool stopFinished = false;
   @override
   Future<void> stop() async {
     stopEntered = true;
+    stopFinished = false;
+    final hang = hangStop;
+    if (hang != null) {
+      hangStop = null;
+      await Future<void>.delayed(hang);
+    }
+    stopFinished = true;
     await stopGate?.future;
+    if (failStop) {
+      failStop = false;
+      throw StateError('synthetic stop failure');
+    }
     await super.stop();
+  }
+
+  @override
+  Future<void> dispose() async {
+    if (failDispose) {
+      failDispose = false;
+      throw StateError('synthetic dispose failure');
+    }
+    await super.dispose();
   }
 
   @override
@@ -299,6 +352,8 @@ void main() {
   Future<void> setup({
     bool private = false,
     String itemId = 'movie',
+    bool trackChoices = false,
+    String? preferredSource,
     _Backend? videoBackend,
     WidgetTester? widgetTester,
   }) async {
@@ -353,7 +408,7 @@ void main() {
       access: access,
       store: store,
       credentials: credentials,
-      createClient: () => _Client(reports),
+      createClient: () => _Client(reports, trackChoices: trackChoices),
     );
     await registry.load();
     account = (await registry.authenticate('a')).account;
@@ -375,6 +430,7 @@ void main() {
     controller = PlayerController(
       client: auth.client,
       itemId: itemId,
+      preferredMediaSourceId: preferredSource,
       backend: backend,
       window: PlayerWindow(),
       runtime: runtime,
@@ -401,6 +457,33 @@ void main() {
     }
 
     addTearDown(cleanup);
+  }
+
+  for (final explicitSource in <String?>[null, 'v', 'v2']) {
+    test('scoped track memory with explicit source $explicitSource', () async {
+      await setup(trackChoices: true, preferredSource: explicitSource);
+      await runtime.history.savePreference(
+        SourcePreference(
+          owner: SourceReference(account: account, itemId: 'movie'),
+          target: SourceReference(
+            account: account,
+            itemId: 'movie',
+            mediaSourceId: 'v',
+          ),
+          libraryId: 'library',
+          lineId: 'line',
+          settings: const PlayerSeriesPreference(
+            audioLanguage: 'eng',
+            subtitleOff: true,
+          ),
+        ),
+      );
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(controller.resolved?.mediaSource.id, explicitSource ?? 'v');
+      expect(controller.audioStreamIndex, explicitSource == 'v2' ? 7 : 8);
+      expect(controller.subtitleStreamIndex, explicitSource == 'v2' ? 9 : null);
+    });
   }
 
   test(
@@ -656,89 +739,61 @@ void main() {
     }
   }
 
-  for (final failTarget in [false, true]) {
-    testWidgets(
-      'actual manual menu timeline confirmation ${failTarget ? 'failure and permitted recovery' : 'cancel keeps old then confirms target'}',
-      (tester) async {
-        await tester.runAsync(() async {
-          await setup(widgetTester: tester);
-          await controller.start();
-          backend.emitEvent(
-            VideoEventKind.position,
-            const Duration(seconds: 9),
-          );
-          await _eventually(() => controller.activeMediaSourceId == 'v');
-        });
-        await tester.pumpWidget(
-          MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(body: SourceSwitchButton(controller: controller)),
-          ),
-        );
-        await tester.tap(find.byKey(const Key('player-manual-switch')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(ListTile, 'v2'));
-        await tester.pumpAndSettle();
-        expect(
-          controller.switchConfirmation,
-          isNotNull,
-          reason: controller.trackFailure,
-        );
-        await tester.scrollUntilVisible(find.text('目标时间轴可能不同；请选择续播或从头播放'), 200);
-        expect(find.text('目标时间轴可能不同；请选择续播或从头播放'), findsOneWidget);
-        expect(controller.activeMediaSourceId, 'v');
-        await tester.ensureVisible(find.text('取消').first);
-        await tester.tap(find.text('取消').first);
-        await tester.pumpAndSettle();
-        expect(controller.switchConfirmation, isNull);
-        expect(controller.activeMediaSourceId, 'v');
-        await tester.scrollUntilVisible(
-          find.widgetWithText(ListTile, 'v2'),
-          -200,
-        );
-        await tester.tap(find.widgetWithText(ListTile, 'v2'));
-        await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('尝试当前位置'), 200);
-        backend.failNextOpen = failTarget;
-        await tester.tap(find.text('尝试当前位置'));
-        for (var i = 0; i < 20; i++) {
-          await tester.pump(const Duration(milliseconds: 50));
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 10)),
-          );
-        }
-        if (failTarget) {
-          expect(controller.trackFailure, isNotNull);
-          expect(find.text(controller.trackFailure!), findsOneWidget);
-          expect(controller.resolved!.mediaSource.id, 'v');
-          expect(controller.origin!.source.account, account);
-        }
-        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+  testWidgets(
+    'playback line menu lists only this server and keeps the saved line',
+    (tester) async {
+      await tester.runAsync(() async {
+        await setup(widgetTester: tester);
+        await controller.start();
+        backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
+        await _eventually(() => controller.activeMediaSourceId == 'v');
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(body: SourceSwitchButton(controller: controller)),
+        ),
+      );
+      expect(find.text('手动切换'), findsNothing);
+      expect(find.text('立即锁定'), findsNothing);
+      expect(find.byKey(const Key('player-playback-lines')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('player-playback-lines')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('playback-line-line')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('playback-line-mirror')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('playback-line-wrong')), findsOneWidget);
+      expect(find.text('正在使用'), findsOneWidget);
+      expect(find.text('v2'), findsNothing);
+      expect(find.text('连接线路（同一服务）'), findsNothing);
+      expect(find.text('跨服务来源（已确认作品）'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('playback-line-line')));
+      await tester.pumpAndSettle();
+      expect(controller.client.baseUrl?.host, 'a');
+      await tester.tap(find.byKey(const Key('player-playback-lines')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('playback-line-mirror')));
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
         await tester.runAsync(
-          () => _eventually(
-            () => controller.activeMediaSourceId == (failTarget ? 'v' : 'v2'),
-          ),
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
         );
-        await tester.pump();
-        expect(
-          runtime.history
-              .records(AccessRegion.ordinary)
-              .any(
-                (record) =>
-                    record.source.mediaSourceId == (failTarget ? 'v' : 'v2') &&
-                    record.positionTicks == 100000000,
-              ),
-          isTrue,
-        );
-        await tester.tap(find.text('取消').last);
-        await tester.pumpAndSettle();
-        controller.dispose();
-        await tester.pump(const Duration(seconds: 6));
-        await tester.pumpWidget(const SizedBox.shrink());
-      },
-    );
-  }
+        if (controller.client.baseUrl?.host == 'mirror') break;
+      }
+      expect(controller.client.baseUrl?.host, 'mirror');
+      expect(backend.openedStart, const Duration(seconds: 9));
+      expect(
+        auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+        'line',
+      );
+      controller.dispose();
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   test(
     'Playing and native open do not commit history; real advancement does, even if progress fails',
@@ -770,6 +825,33 @@ void main() {
   );
 
   test(
+    'aggregation item plays from the server session when its library is not checked',
+    () async {
+      await setup();
+      await runtime.registry.configureScope(
+        'a',
+        participates: true,
+        libraryIds: {},
+      );
+      final origin = await runtime.resolve(
+        PlayerOpenRequest(
+          itemId: 'movie',
+          libraryId: 'library',
+          source: SourceReference(account: account, itemId: 'movie'),
+        ),
+      );
+      expect(origin.permit.sessionOnly, isTrue);
+      expect(origin.libraryId, 'library');
+      expect(
+        (await origin.permit.dispatch((client) => client.getItem('movie'))).id,
+        'movie',
+      );
+      final session = await runtime.begin(origin, 'v');
+      expect(session.permit.sessionOnly, isTrue);
+    },
+  );
+
+  test(
     'foreign library and forged work cannot authorize an explicit source',
     () async {
       await setup();
@@ -796,6 +878,28 @@ void main() {
       );
     },
   );
+
+  for (final explicitSource in [false, true]) {
+    test(
+      'episode without ParentId resolves its library, explicit=$explicitSource',
+      () async {
+        await setup();
+        if (!explicitSource) await auth.restore();
+        final origin = await runtime.resolve(
+          PlayerOpenRequest(
+            itemId: 'episode-no-parent',
+            libraryId: explicitSource ? 'library' : null,
+            source: explicitSource
+                ? SourceReference(account: account, itemId: 'episode-no-parent')
+                : null,
+          ),
+        );
+        expect(origin.libraryId, 'library');
+        expect(origin.work.itemId, 'series');
+        expect(origin.source.account, account);
+      },
+    );
+  }
 
   test(
     'backup management checks never reopen or reassign source-owned playback',
@@ -872,8 +976,169 @@ void main() {
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
       await _eventually(() => controller.activeLineId == 'mirror');
       expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
+      expect(
+        auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+        'line',
+      );
+      final remembered = runtime.preference(
+        controller.origin!,
+        controller.item!,
+        controller.mediaSources,
+      );
+      expect(remembered.preference?.lineId, isNot('mirror'));
     },
   );
+
+  test('line open failure continues on the original line', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await controller.togglePlay();
+    final original = controller.client;
+    backend.failNextOpen = true;
+    await controller.switchLine('mirror');
+    expect(controller.playbackLineFailure, isNotNull);
+    expect(controller.state.phase, isNot(PlaybackPhase.failed));
+    expect(controller.client, same(original));
+    expect(controller.client.baseUrl?.host, 'a');
+    expect(backend.openedStart, const Duration(seconds: 12));
+    expect(
+      auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+      'line',
+    );
+  });
+
+  test(
+    'in-process line switch restores the shared address when stop or dispose fails',
+    () async {
+      for (final failure in ['stop', 'dispose']) {
+        final reports = <PlaybackReport>[];
+        final client = _Client(reports);
+        client.attachSession(
+          baseUrl: Uri.parse('https://a'),
+          accessToken: 'token',
+          userId: 'user',
+          userAgent: 'Rillight',
+        );
+        final video = _Backend();
+        final playing = PlayerController(
+          client: client,
+          itemId: 'movie',
+          backend: video,
+          window: PlayerWindow(),
+          settingsStore: MemoryPlayerSettingsStore(),
+          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+          progressInterval: const Duration(milliseconds: 30),
+          playbackLineSnapshot: const [
+            ServerLine(id: 'line', address: 'https://a'),
+            ServerLine(id: 'mirror', address: 'https://mirror'),
+          ],
+          verifiedPlaybackServerId: 'a',
+        );
+        try {
+          await playing.start();
+          await playing.switchLine('mirror');
+          expect(client.baseUrl?.host, 'mirror');
+          if (failure == 'stop') {
+            video.failStop = true;
+          } else {
+            video.failDispose = true;
+          }
+          await playing.close();
+          expect(client.baseUrl?.host, 'a');
+          expect(client.accessToken, 'token');
+          expect(client.userId, 'user');
+          expect(client.customUserAgent, 'Rillight');
+        } finally {
+          try {
+            await playing.disposeAsync();
+          } catch (_) {}
+          playing.dispose();
+        }
+      }
+    },
+  );
+
+  test(
+    'in-process line switch restores the shared address when close stop hangs',
+    () async {
+      final reports = <PlaybackReport>[];
+      final client = _Client(reports);
+      client.attachSession(
+        baseUrl: Uri.parse('https://a'),
+        accessToken: 'token',
+        userId: 'user',
+        userAgent: 'Rillight',
+      );
+      final video = _Backend();
+      final playing = PlayerController(
+        client: client,
+        itemId: 'movie',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        progressInterval: const Duration(milliseconds: 30),
+        disposeTimeout: const Duration(milliseconds: 50),
+        playbackLineSnapshot: const [
+          ServerLine(id: 'line', address: 'https://a'),
+          ServerLine(id: 'mirror', address: 'https://mirror'),
+        ],
+        verifiedPlaybackServerId: 'a',
+      );
+      try {
+        await playing.start();
+        await playing.switchLine('mirror');
+        expect(client.baseUrl?.host, 'mirror');
+        video.hangStop = const Duration(seconds: 5);
+        await playing.close();
+        expect(video.stopFinished, isFalse);
+        expect(client.baseUrl?.host, 'a');
+        expect(client.accessToken, 'token');
+        expect(client.userId, 'user');
+        expect(client.customUserAgent, 'Rillight');
+        await Future<void>.delayed(const Duration(seconds: 5));
+      } finally {
+        try {
+          await playing.disposeAsync();
+        } catch (_) {}
+        playing.dispose();
+      }
+    },
+  );
+
+  test('playback line label uses a nickname, otherwise host and port', () {
+    expect(
+      playbackLineLabel(
+        const ServerLine(
+          id: 'home',
+          address: 'https://play.example:443',
+          nickname: '家里',
+        ),
+      ),
+      '家里',
+    );
+    expect(
+      playbackLineLabel(
+        const ServerLine(id: 'plain', address: 'https://play.example:8443'),
+      ),
+      'play.example:8443',
+    );
+    expect(
+      playbackLineLabel(
+        const ServerLine(id: 'https', address: 'https://play.example:443'),
+      ),
+      const ServerLine(
+        id: 'https',
+        address: 'https://play.example:443',
+      ).hostLabel,
+    );
+    expect(
+      playbackLineLabel(const ServerLine(id: 'raw', address: 'not a uri')),
+      'not a uri',
+    );
+  });
 
   test(
     'lock freezes latest real position, clears presentation and rejects snapshots after unlock',

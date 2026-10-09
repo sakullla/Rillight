@@ -2,13 +2,13 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:rillight_player/cache_directory.dart';
 import 'package:win32/win32.dart';
 
-typedef CacheFileStat = ({int size, DateTime modified});
+typedef CacheFileStat = ({int size, DateTime modified, int? changedMicros});
 
-/// A fresh inventory for one quota-lock transaction. Windows directory entries
-/// already contain size and mtime; querying each file again costs thousands of
-/// synchronous filesystem calls as a session approaches its disk quota.
+/// A fresh inventory for one quota-lock transaction. Batch native metadata
+/// reads avoid thousands of Dart filesystem calls as a session fills up.
 ({List<FileSystemEntity> entries, Map<String, CacheFileStat> stats})
 readCacheDirectory(Directory directory, {required int maxEntries}) {
   if (Platform.isWindows) {
@@ -18,6 +18,35 @@ readCacheDirectory(Directory directory, {required int maxEntries}) {
       // Never use a partial native inventory for quota accounting. Retry via
       // Dart's complete enumeration if Windows enumeration cannot finish.
     }
+  }
+  if (Platform.isAndroid || Platform.isLinux || Platform.isMacOS) {
+    final entries = <FileSystemEntity>[];
+    final stats = <String, CacheFileStat>{};
+    final prefix = directory.path.endsWith(Platform.pathSeparator)
+        ? directory.path
+        : '${directory.path}${Platform.pathSeparator}';
+    for (final item in readNativeCacheDirectory(directory.path, maxEntries)) {
+      final path = '$prefix${item.name}';
+      switch (item.kind) {
+        case 1:
+          entries.add(File(path));
+          stats[path] = (
+            size: item.size,
+            modified: DateTime.fromMicrosecondsSinceEpoch(
+              item.modifiedMicros,
+              isUtc: true,
+            ),
+            changedMicros: item.changedMicros,
+          );
+        case 2:
+          entries.add(Directory(path));
+        default:
+          // Links and special entries count toward the file limit but cannot
+          // be used as regular cache blocks or traversed as directories.
+          entries.add(Link(path));
+      }
+    }
+    return (entries: entries, stats: stats);
   }
   return _readPortableDirectory(directory, maxEntries: maxEntries);
 }
@@ -33,7 +62,11 @@ _readPortableDirectory(Directory directory, {required int maxEntries}) {
     entries.add(entry);
     if (entry is File) {
       final stat = entry.statSync();
-      stats[entry.path] = (size: stat.size, modified: stat.modified);
+      stats[entry.path] = (
+        size: stat.size,
+        modified: stat.modified,
+        changedMicros: stat.changed.microsecondsSinceEpoch,
+      );
     }
   }
   return (entries: entries, stats: stats);
@@ -76,6 +109,9 @@ _readWindowsDirectory(Directory directory, {required int maxEntries}) {
             stats[entryPath] = (
               size: (item.nFileSizeHigh << 32) | item.nFileSizeLow,
               modified: item.ftLastWriteTime.toDateTime(),
+              // FindFirstFile has creation time, not metadata change time.
+              // Verification must still query FileStat on Windows.
+              changedMicros: null,
             );
           }
         }

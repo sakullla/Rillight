@@ -142,7 +142,7 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
                           IconButton(
                             tooltip: l.search,
                             onPressed: _submit,
-                            icon: const Icon(Icons.arrow_forward),
+                            icon: const Icon(Icons.arrow_forward_rounded),
                           ),
                         ],
                       ),

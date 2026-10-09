@@ -28,6 +28,7 @@ internal object CoreNative {
     external fun create(factory: CoreIoFactory): Long
     external fun destroy(handle: Long)
     external fun configureHardware(handle: Long, preferredHardware: Int, allowSoftwareFallback: Boolean): Int
+    external fun configureTunnel(handle: Long, factory: CoreTunnelFactory?, profiles: Int): Int
     external fun configureExternalAudioSpeed(handle: Long, enabled: Boolean): Int
     external fun configureAudioSink(handle: Long, channels: Int, accepted: Int, atmos: Boolean): Int
     external fun videoOutputSize(handle: Long, width: Int, height: Int): Int
@@ -51,7 +52,7 @@ internal object CoreNative {
     external fun track(handle: Long, ordinal: Int): IntArray?
     external fun trackLanguage(handle: Long, ordinal: Int): String?
     external fun takeAudio(handle: Long): CoreAudioFrame?
-    /** Returns PTS, geometry, SAR, rotation, session and timeline after Surface post. */
+    /** Returns PTS, geometry, SAR, rotation, session, timeline, transfer and primaries after post. */
     external fun renderVideo(handle: Long, surface: Surface, hdrDisplaySupported: Boolean): LongArray?
     external fun releaseColorRenderer()
     external fun videoFrameRate(handle: Long): Double

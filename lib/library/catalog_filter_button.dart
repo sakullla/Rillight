@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 
 /// 搜索、片库和「更多」共用的筛选入口。
 ///
@@ -129,7 +130,7 @@ class CatalogWatchChip extends StatelessWidget {
       ),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: InputChip(label: Text(label), onDeleted: onClear),
+        child: RemovablePill(label: label, onDeleted: onClear),
       ),
     );
   }
@@ -141,10 +142,10 @@ Widget _choice({
   required bool selected,
   required VoidCallback onSelected,
 }) {
-  return ChoiceChip(
+  return OptionPill(
     key: key,
-    label: Text(label),
+    label: label,
     selected: selected,
-    onSelected: (_) => onSelected(),
+    onPressed: onSelected,
   );
 }

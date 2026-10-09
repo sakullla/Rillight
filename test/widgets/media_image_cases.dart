@@ -120,6 +120,59 @@ void main() {
     primaryImageTag: 'tag-img',
   );
 
+  testWidgets('warm posters stop observing every scroll pixel', (tester) async {
+    const warmPoster = EmbyItem(
+      id: 'warm-scroll-poster',
+      name: '滚动海报',
+      type: 'Movie',
+      primaryImageTag: 'warm-scroll-tag',
+    );
+    final client = _ControlledImageClient();
+    final auth = AuthController(
+      client: client,
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    addTearDown(auth.dispose);
+    final scroll = _ListenerCountingController();
+    addTearDown(scroll.dispose);
+    final show = ValueNotifier(false);
+    addTearDown(show.dispose);
+    await tester.pumpWidget(
+      wrap(
+        auth,
+        ListView(
+          controller: scroll,
+          children: [
+            ValueListenableBuilder(
+              valueListenable: show,
+              builder: (context, value, _) => value
+                  ? const MediaImage(item: warmPoster, width: 120, height: 180)
+                  : const SizedBox(height: 180),
+            ),
+            const SizedBox(height: 2000),
+          ],
+        ),
+      ),
+    );
+    final position = scroll.position as _ListenerCountingPosition;
+    final baseline = position.listenerCount;
+    show.value = true;
+    await tester.pump();
+    await pumpUntilImage(tester);
+    expect(find.byType(Image), findsOneWidget);
+    expect(
+      position.listenerCount,
+      baseline,
+      reason: 'A loaded image has no viewport work on scroll',
+    );
+    final requests = client.requested.length;
+    scroll.jumpTo(50);
+    await tester.pump();
+    expect(client.requested, hasLength(requests));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'invalid200 artwork falls back on first visit, reentry and persisted cache hits',
     (tester) async {
@@ -1887,5 +1940,41 @@ class _CorruptBackdropClient extends EmbyClient {
   }) async {
     requests.add(type);
     return type == 'Backdrop' ? bad : good;
+  }
+}
+
+class _ListenerCountingController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) => _ListenerCountingPosition(
+    physics: physics,
+    context: context,
+    oldPosition: oldPosition,
+  );
+}
+
+class _ListenerCountingPosition extends ScrollPositionWithSingleContext {
+  _ListenerCountingPosition({
+    required super.physics,
+    required super.context,
+    super.oldPosition,
+  });
+  int listenerCount = 0;
+  final _listeners = <VoidCallback>[];
+  @override
+  void addListener(VoidCallback listener) {
+    _listeners.add(listener);
+    listenerCount = _listeners.length;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    _listeners.remove(listener);
+    listenerCount = _listeners.length;
+    super.removeListener(listener);
   }
 }

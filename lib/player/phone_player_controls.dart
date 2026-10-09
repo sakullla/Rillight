@@ -4,11 +4,13 @@ import 'dart:math' as math;
 import 'dart:ui' show DisplayFeature, DisplayFeatureType;
 
 import 'package:flutter/material.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
@@ -22,6 +24,23 @@ import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
+import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/track_picker.dart';
+
+/// 轨道选项的辅助行(内嵌/外挂、编码、默认),复用桌面同款描述。
+Widget? _phoneTrackMeta(BuildContext context, MediaStreamInfo track) {
+  final meta = trackMetaLabel(AppLocalizations.of(context), track);
+  if (meta.isEmpty) return null;
+  final theme = Theme.of(context);
+  return Text(
+    meta,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurface.withValues(alpha: .68),
+    ),
+  );
+}
 
 /// Phone controls with a title bar, central transport and a full-width timeline.
 /// Common options have direct bottom shortcuts; the full settings panel keeps
@@ -465,6 +484,12 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ],
               ),
+            if (c.playbackLineFailure != null)
+              Text(
+                l.playbackLineFailed(c.playbackLineFailure!),
+                key: const Key('playback-line-failure'),
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
             if (c.trackFailure != null)
               Row(
                 children: [
@@ -562,25 +587,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                alignment: WrapAlignment.spaceBetween,
-                spacing: 12,
-                runSpacing: 4,
-                children: [clock, cache],
-              ),
-            ),
-            const SizedBox(height: 8),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 12,
+              runSpacing: 2,
+              children: [clock, cache],
+            ),
+            const SizedBox(height: 4),
+            Row(
               children: [
                 _shortcut(
                   'mobile-player-speed',
                   Icons.speed,
-                  '${c.playbackRate}x',
+                  playerRateLabel(c.playbackRate),
                   () => _openMore(section: 'speed'),
                 ),
                 if (c.canSwitchAudioTrack || c.canConfigureSubtitles)
@@ -617,25 +637,29 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     String label,
     Future<void> Function() action,
   ) {
-    return Padding(
-      key: ValueKey('shortcut-shell-$key'),
-      padding: EdgeInsets.zero,
-      child: TextButton.icon(
+    return Expanded(
+      child: TextButton(
         key: Key(key),
         style: TextButton.styleFrom(
           foregroundColor: Colors.white,
-          minimumSize: const Size(48, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          backgroundColor: Colors.white.withValues(alpha: .14),
-          side: BorderSide(color: Colors.white.withValues(alpha: .22)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-          ),
+          minimumSize: const Size(48, 56),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: _controller.loading ? null : () => unawaited(action()),
-        icon: Icon(icon, size: 20),
-        label: Text(label, style: const TextStyle(fontSize: 14)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, height: 1.1),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -825,6 +849,26 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                         ),
                       ),
                     ),
+                    // 长列表分区显示条目数,让用户对规模有预期。
+                    if (switch (section) {
+                          'source' => c.mediaSources.length,
+                          'tracks' => c.selectableSubtitleTracks.length,
+                          _ => 0,
+                        } >
+                        1)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Text(
+                          l.trackPickerCount(
+                            section == 'source'
+                                ? c.mediaSources.length
+                                : c.selectableSubtitleTracks.length,
+                          ),
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
                     if (section == 'danmaku' && danmaku != null)
                       Switch(
                         key: DanmakuKeys.toggle,
@@ -849,7 +893,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (section == null) ...[
-                          SourceSwitchButton(controller: c),
+                          SourceSwitchButton(
+                            controller: c,
+                            surface: PlaybackLineSurface.sheet,
+                          ),
                           for (final entry in <String, (IconData, String)>{
                             'speed': (Icons.speed, l.playbackRate),
                             if (c.canSwitchAudioTrack ||
@@ -931,29 +978,48 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               ),
                             ),
                           ),
-                          for (final source in c.mediaSources)
-                            optionTile(
-                              key: ValueKey('mobile-source-${source.id}'),
-                              selected: source.id == c.activeMediaSourceId,
-                              leading: Icon(
-                                c.pendingMediaSourceId == source.id &&
-                                        c.isRecovering
-                                    ? Icons.hourglass_top
-                                    : source.id == c.activeMediaSourceId
-                                    ? Icons.check_circle
-                                    : Icons.radio_button_unchecked,
-                                key: ValueKey(
-                                  'mobile-source-icon-${source.id}',
+                          // 多版本(如 20 个片源)时自动带搜索;保留逐源状态图标。
+                          TrackPickerList(
+                            shrinkWrap: true,
+                            options: [
+                              for (final source in c.mediaSources)
+                                TrackPickerOption(
+                                  key: ValueKey('mobile-source-${source.id}'),
+                                  selected: source.id == c.activeMediaSourceId,
+                                  leading: Icon(
+                                    c.pendingMediaSourceId == source.id &&
+                                            c.isRecovering
+                                        ? Icons.hourglass_top
+                                        : source.id == c.activeMediaSourceId
+                                        ? Icons.check_circle
+                                        : Icons.radio_button_unchecked,
+                                    key: ValueKey(
+                                      'mobile-source-icon-${source.id}',
+                                    ),
+                                  ),
+                                  title: MediaSourceMenuTile(
+                                    view: source.presentation,
+                                  ),
+                                  searchText:
+                                      '${source.name ?? ''} ${source.id} '
+                                      '${source.presentation.headline} '
+                                      '${source.presentation.detail ?? ''}',
+                                  onTap: c.loading
+                                      ? null
+                                      : () async {
+                                          attemptedSourceId = source.id;
+                                          await c.switchMediaVersion(source.id);
+                                        },
                                 ),
-                              ),
-                              title: Text(source.name ?? source.id),
-                              onTap: c.loading
-                                  ? null
-                                  : () async {
-                                      attemptedSourceId = source.id;
-                                      await c.switchMediaVersion(source.id);
-                                    },
+                            ],
+                            tileBuilder: (context, option) => optionTile(
+                              key: option.key,
+                              selected: option.selected,
+                              leading: option.leading,
+                              title: option.title,
+                              onTap: option.onTap,
                             ),
+                          ),
                         ],
                         if (section == 'picture') ...[
                           _VideoScaleChoices(
@@ -1083,72 +1149,76 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 style: theme.textTheme.titleSmall,
                               ),
                             ),
-                            optionTile(
-                              reveal: !c.canSwitchAudioTrack,
-                              selected: c.subtitleStreamIndex == null,
-                              leading: Icon(
-                                c.subtitleStreamIndex == null
-                                    ? Icons.check_circle
-                                    : Icons.radio_button_unchecked,
-                              ),
-                              title: Text(l.subtitleOff),
-                              onTap: () => c.setSubtitle(null),
-                            ),
-                            for (final track in c.selectableSubtitleTracks)
-                              optionTile(
-                                selected: c.subtitleStreamIndex == track.index,
-                                leading: Icon(
-                                  c.subtitleStreamIndex == track.index
-                                      ? Icons.check_circle
-                                      : Icons.radio_button_unchecked,
+                            // 多语字幕(如 60 条)时搜索框紧跟分区标题,
+                            // 辅助行标出内嵌/外挂与编码。
+                            TrackPickerList(
+                              shrinkWrap: true,
+                              options: [
+                                TrackPickerOption(
+                                  selected: c.subtitleStreamIndex == null,
+                                  reveal: !c.canSwitchAudioTrack,
+                                  leading: Icon(
+                                    c.subtitleStreamIndex == null
+                                        ? Icons.check_circle
+                                        : Icons.radio_button_unchecked,
+                                  ),
+                                  title: Text(l.subtitleOff),
+                                  searchText: l.subtitleOff,
+                                  onTap: () => c.setSubtitle(null),
                                 ),
-                                title: Text(track.label),
-                                onTap: () => c.setSubtitle(track.index),
+                                for (final track in c.selectableSubtitleTracks)
+                                  TrackPickerOption(
+                                    selected:
+                                        c.subtitleStreamIndex == track.index,
+                                    reveal: false,
+                                    leading: Icon(
+                                      c.subtitleStreamIndex == track.index
+                                          ? Icons.check_circle
+                                          : Icons.radio_button_unchecked,
+                                    ),
+                                    title: Text(track.label),
+                                    subtitle: _phoneTrackMeta(context, track),
+                                    searchText:
+                                        '${track.label} ${track.language ?? ''} '
+                                        '${track.codec ?? ''} '
+                                        '${track.displayTitle ?? ''}',
+                                    onTap: () => c.setSubtitle(track.index),
+                                  ),
+                              ],
+                              tileBuilder: (context, option) => optionTile(
+                                key: option.key,
+                                selected: option.selected,
+                                reveal: option.reveal,
+                                leading: option.leading,
+                                title: option.title,
+                                subtitle: option.subtitle,
+                                onTap: option.onTap,
                               ),
+                            ),
                           ],
                           if (c.trackFailure != null)
                             Text(l.mobileTrackUnavailable),
                         ],
                         if (section == 'quality')
-                          ChipTheme(
-                            data: playerChoiceChipTheme(theme),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final bitrate in c.availableBitrates)
-                                  ChoiceChip(
-                                    key: ValueKey('mobile-quality-$bitrate'),
-                                    label: Text(playerQualityLabel(l, bitrate)),
-                                    selected: c.maxStreamingBitrate == bitrate,
-                                    showCheckmark: false,
-                                    onSelected: c.loading
-                                        ? null
-                                        : (_) => unawaited(
-                                            c.setMaxBitrate(bitrate),
-                                          ),
-                                  ),
-                              ],
-                            ),
+                          PlayerOptionGrid(
+                            options: [
+                              for (final bitrate in c.availableBitrates)
+                                PlayerOption(
+                                  key: ValueKey('mobile-quality-$bitrate'),
+                                  label: playerQualityLabel(l, bitrate),
+                                  selected: c.maxStreamingBitrate == bitrate,
+                                  onPressed: c.loading
+                                      ? null
+                                      : () =>
+                                            unawaited(c.setMaxBitrate(bitrate)),
+                                ),
+                            ],
                           ),
                         if (section == 'speed')
-                          ChipTheme(
-                            data: playerChoiceChipTheme(theme),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                for (final rate in kPlaybackRateLadder)
-                                  ChoiceChip(
-                                    label: Text('${rate}x'),
-                                    selected: c.playbackRate == rate,
-                                    showCheckmark: false,
-                                    onSelected: c.loading
-                                        ? null
-                                        : (_) => c.setRate(rate),
-                                  ),
-                              ],
-                            ),
+                          PlayerRateGrid(
+                            selected: c.playbackRate,
+                            enabled: !c.loading,
+                            onSelected: (rate) => unawaited(c.setRate(rate)),
                           ),
                         const SizedBox(height: 8),
                         Align(
@@ -1288,29 +1358,23 @@ class _VideoScaleChoicesState extends State<_VideoScaleChoices> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    return ChipTheme(
-      data: playerChoiceChipTheme(theme),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          ChoiceChip(
-            key: const Key('mobile-player-scale-fit'),
-            label: Text(l.playerFit),
-            selected: !_fill,
-            showCheckmark: false,
-            onSelected: (_) => _select(false),
-          ),
-          ChoiceChip(
-            key: const Key('mobile-player-scale-fill'),
-            label: Text(l.playerFill),
-            selected: _fill,
-            showCheckmark: false,
-            onSelected: (_) => _select(true),
-          ),
-        ],
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        OptionPill(
+          key: const Key('mobile-player-scale-fit'),
+          label: l.playerFit,
+          selected: !_fill,
+          onPressed: () => _select(false),
+        ),
+        OptionPill(
+          key: const Key('mobile-player-scale-fill'),
+          label: l.playerFill,
+          selected: _fill,
+          onPressed: () => _select(true),
+        ),
+      ],
     );
   }
 }

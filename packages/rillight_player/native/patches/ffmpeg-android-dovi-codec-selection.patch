@@ -1,0 +1,49 @@
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -795,6 +795,16 @@
+     return 0;
+ }
+ 
++static char *mediacodec_find_dolby_decoder(AVCodecContext *avctx, FFAMediaFormat *format)
++{
++    int32_t profile = 0;
++    /* Android profiles are single bits, not HEVC profile_idc values. */
++    if (!ff_AMediaFormat_getInt32(format, "profile", &profile) ||
++        profile <= 0 || (profile & (profile - 1)))
++        return NULL;
++    return ff_AMediaCodecList_getCodecNameByType("video/dolby-vision", profile, 0, avctx);
++}
++
+ static int mediacodec_dec_get_video_codec(AVCodecContext *avctx, MediaCodecDecContext *s,
+                                           const char *mime, FFAMediaFormat *format)
+ {
+@@ -827,15 +837,20 @@
+         }
+     }
+ 
+-    /* HEVC profile enums do not describe Dolby Vision decoder profiles.
+-     * Let the Dolby decoder select the profile from VPS/SPS/RPU instead. */
+-    profile = !strcmp(mime, "video/dolby-vision") ? -1 :
+-              ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
+-    if (profile < 0) {
+-        av_log(avctx, AV_LOG_WARNING, "Unsupported or unknown profile\n");
+-    }
+-
+-    s->codec_name = ff_AMediaCodecList_getCodecNameByType(mime, profile, 0, avctx);
++    if (!strcmp(mime, "video/dolby-vision")) {
++        s->codec_name = mediacodec_find_dolby_decoder(avctx, format);
++        if (!s->codec_name) {
++            /* Never fall through to MIME-only selection: that may instantiate
++             * an AVC/AV1 Dolby decoder for a HEVC Profile 5 stream. */
++            av_log(avctx, AV_LOG_ERROR, "No decoder advertises the requested Dolby Vision profile\n");
++            return AVERROR_DECODER_NOT_FOUND;
++        }
++    } else {
++        profile = ff_AMediaCodecProfile_getProfileFromAVCodecContext(avctx);
++        if (profile < 0)
++            av_log(avctx, AV_LOG_WARNING, "Unsupported or unknown profile\n");
++        s->codec_name = ff_AMediaCodecList_getCodecNameByType(mime, profile, 0, avctx);
++    }
+     if (!s->codec_name) {
+         // getCodecNameByType() can fail due to missing JVM, while NDK
+         // mediacodec can be used without JVM.

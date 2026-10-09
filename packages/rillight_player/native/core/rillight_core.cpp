@@ -1,5 +1,7 @@
 #include "rillight_core.h"
 #include "audio_contract.h"
+#include "bitmap_subtitle.h"
+#include "dts_packet_recovery.h"
 #include "video_buffer_pool.h"
 #include "video_frame_cost.h"
 #include "dovi_profile.h"
@@ -7,6 +9,8 @@
 #include "video_enhancer.h"
 #include "h264_access_unit.h"
 #include "portable_color_pipeline.h"
+#include "android_dovi_surface.h"
+#include "android_tunnel.h"
 #if defined(__ANDROID__)
 #include "android_color_pipeline.h"
 #endif
@@ -39,11 +43,11 @@
 #if defined(__ANDROID__)
 #include <unistd.h>
 #include <android/native_window.h>
-#include <android/log.h>
 #endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/bsf.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
@@ -85,24 +89,6 @@ constexpr size_t kMaxExternalSubtitleTracks = 16;
 constexpr int kExternalSubtitleStreamBase = 1000000;
 #endif
 using Clock = std::chrono::steady_clock;
-
-// Debug-only boundaries distinguish network probing from decoder/control stalls.
-struct TraceMediaPhase {
-#if defined(__ANDROID__) && !defined(NDEBUG)
-  const char *phase;
-  Clock::time_point started = Clock::now();
-  explicit TraceMediaPhase(const char *name) : phase(name) {
-    __android_log_print(ANDROID_LOG_INFO, "RillightPhase", "%s begin", phase);
-  }
-  ~TraceMediaPhase() {
-    __android_log_print(ANDROID_LOG_INFO, "RillightPhase", "%s end ms=%lld",
-        phase, static_cast<long long>(std::chrono::duration_cast<
-            std::chrono::milliseconds>(Clock::now() - started).count()));
-  }
-#else
-  explicit TraceMediaPhase(const char *) {}
-#endif
-};
 
 struct LoopbackIo {
   std::atomic<uint64_t> media_generation{0};
@@ -283,6 +269,21 @@ struct HardwareFormatSelection {
   bool allow_software_fallback = true;
 };
 
+struct TunnelDecoder {
+  std::shared_ptr<AndroidTunnelFactory> factory;
+  std::shared_ptr<AndroidTunnelSink> sink;
+  std::shared_ptr<void> window;
+  AVBSFContext* filter = nullptr;
+  std::mutex mutex;
+  std::vector<uint8_t> csd, config;
+  int width = 0, height = 0, profile = 0, level = 0, rate = 25;
+  AVRational time_base{1, 1000000};
+  int64_t discard_before = 0;
+  std::atomic<int64_t> submitted{-1};
+  int64_t emitted = -1;
+  ~TunnelDecoder() { av_bsf_free(&filter); }
+};
+
 struct Decoder {
   AVCodecContext *context = nullptr;
   int stream = -1;
@@ -291,7 +292,10 @@ struct Decoder {
   bool android_color_buffers = false;
   bool android_native_dolby = false;
   bool cpu_picture = false;
+  std::shared_ptr<TunnelDecoder> tunnel;
+  std::shared_ptr<AndroidDoviSurface> android_dovi_surface;
   int error = 0;
+  DtsPacketRecovery dts_recovery;
 };
 
 struct PendingPackets {
@@ -372,9 +376,17 @@ struct VideoOutputFrame : RillightCoreFrame {
   std::shared_ptr<void> gpu_texture;
   std::shared_ptr<AVFrame> codec_frame;
   int dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
+  int64_t presentation_time_ns = 0;
   bool subtitle_redraw = false;
-  std::vector<uint8_t> subtitle_pixels;
+  std::shared_ptr<std::vector<uint8_t>> subtitle_pixels;
   RillightCoreSubtitleOverlay subtitle_overlay{};
+};
+
+struct BitmapSubtitleOverlayCache {
+  bool valid = false;
+  BitmapSubtitleKey key{};
+  std::shared_ptr<std::vector<uint8_t>> pixels;
+  RillightCoreSubtitleOverlay overlay{};
 };
 
 struct AudioFilter {
@@ -392,21 +404,6 @@ struct AudioFilter {
   int output_layout = RILLIGHT_CORE_CH_LAYOUT_STEREO;
   int output_delivery = RILLIGHT_CORE_AUDIO_DELIVERY_PCM_STEREO;
   uint64_t sink_generation = 0;
-};
-
-struct SubtitleBitmap {
-  int x = 0;
-  int y = 0;
-  int width = 0;
-  int height = 0;
-  std::vector<uint8_t> indices;
-  std::vector<uint32_t> palette;
-};
-
-struct SubtitleCue {
-  int64_t start_us = 0;
-  int64_t end_us = 0;
-  std::vector<SubtitleBitmap> bitmaps;
 };
 
 #if RILLIGHT_HAVE_LIBASS
@@ -748,7 +745,28 @@ void blend_subtitles(RillightCoreFrame *frame,
 }
 
 void render_gpu_subtitles(VideoOutputFrame* frame,
-                          const std::vector<SubtitleCue>& cues, AssRenderer* ass) {
+                          const std::vector<SubtitleCue>& cues, AssRenderer* ass,
+                          BitmapSubtitleOverlayCache* cache) {
+  // Bitmap display sets remain unchanged across video frames. Share immutable
+  // composed pixels until a cue changes; animated ASS must still render at PTS.
+  bool cacheable = true;
+#if RILLIGHT_HAVE_LIBASS
+  cacheable = !ass->track;
+#endif
+  auto key = bitmap_subtitle_key(cues, frame->pts_us, frame->width, frame->height);
+  if (cacheable && cache->valid && cache->key == key) {
+    frame->subtitle_pixels = cache->pixels;
+    frame->subtitle_overlay = cache->overlay;
+    if (frame->subtitle_pixels)
+      frame->data_size += static_cast<int>(frame->subtitle_pixels->size());
+    return;
+  }
+  const auto remember = [&] {
+    cache->valid = cacheable;
+    cache->key = std::move(key);
+    cache->pixels = cacheable ? frame->subtitle_pixels : nullptr;
+    cache->overlay = cacheable ? frame->subtitle_overlay : RillightCoreSubtitleOverlay{};
+  };
   int left = frame->width, top = frame->height, right = 0, bottom = 0;
   const auto include = [&](int x, int y, int width, int height) {
     if (width <= 0 || height <= 0) return;
@@ -778,17 +796,17 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
 #else
   (void)ass;
 #endif
-  if (left >= right || top >= bottom) return;
+  if (left >= right || top >= bottom) { remember(); return; }
   const int width = right - left, height = bottom - top;
   const size_t bytes = static_cast<size_t>(width) * height * 4;
   if (bytes > kMaxVideoBytes) return;
-  frame->subtitle_pixels.assign(bytes, 0);
+  frame->subtitle_pixels = std::make_shared<std::vector<uint8_t>>(bytes, 0);
   frame->subtitle_overlay = {sizeof(RillightCoreSubtitleOverlay), left, top, width, height, width * 4,
-                             frame->subtitle_pixels.data()};
+                             frame->subtitle_pixels->data()};
   frame->data_size += static_cast<int>(bytes);
   const auto blend = [&](int64_t x, int64_t y, unsigned int color, unsigned int alpha) {
     if (x < left || x >= right || y < top || y >= bottom || !alpha) return;
-    auto* pixel = frame->subtitle_pixels.data() +
+    auto* pixel = frame->subtitle_pixels->data() +
         (static_cast<size_t>(y - top) * width + static_cast<size_t>(x - left)) * 4;
     for (int channel = 0; channel < 3; ++channel) {
       const unsigned int foreground = (color >> (16 - channel * 8)) & 255;
@@ -822,6 +840,7 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
     }
   }
 #endif
+  remember();
 }
 
 int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
@@ -841,6 +860,8 @@ int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
   cue.start_us = start + subtitle.start_display_time * 1000LL;
   cue.end_us = start + subtitle.end_display_time * 1000LL;
   if (cue.end_us <= cue.start_us) cue.end_us = cue.start_us + 5000000;
+  if (decoder.context->codec_id == AV_CODEC_ID_HDMV_PGS_SUBTITLE)
+    end_pgs_display(*cues, cue.start_us);
   size_t cue_bytes = 0;
   for (unsigned int index = 0; index < subtitle.num_rects; ++index) {
     const AVSubtitleRect *rect = subtitle.rects[index];
@@ -869,6 +890,8 @@ int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
   }
   avsubtitle_free(&subtitle);
   if (!cue.bitmaps.empty()) {
+    static std::atomic<uint64_t> next_identity{0};
+    cue.identity = next_identity.fetch_add(1, std::memory_order_relaxed) + 1;
     cues->push_back(std::move(cue));
     if (cues->size() > 8) cues->erase(cues->begin());
   }
@@ -896,6 +919,7 @@ struct RillightCoreImpl {
   std::mutex subtitle_mutex;
   AssRenderer ass;
   std::vector<SubtitleCue> subtitle_cues;
+  BitmapSubtitleOverlayCache bitmap_subtitle_cache;
   RillightCoreSubtitlePresentation subtitle_presentation{};
   RillightCoreFrame *displayed_clean = nullptr;
   bool subtitle_redraw = false;
@@ -921,14 +945,6 @@ struct RillightCoreImpl {
   // decide whether a full audio queue can wait for a picture.
   int video_packets_pending = 0;
   bool video_decode_busy = false;
-#if defined(__ANDROID__) && !defined(NDEBUG)
-  // Debug-only progress counters; no media URLs, credentials or public ABI changes.
-  Clock::time_point trace_last_log{};
-  std::atomic<int> trace_video_stage{0}; // 1 send, 2 receive, 3 retry send, 4 output
-  std::atomic<int64_t> trace_decoded{0}, trace_discarded{0}, trace_pts{-1};
-  int trace_audio_packets = 0;
-  uint64_t trace_video_packets = 0;
-#endif
   bool eof = false;
   bool input_exhausted = false;
   bool output_drained = false;
@@ -942,6 +958,9 @@ struct RillightCoreImpl {
   bool android_color_buffers = false;
   bool android_native_dolby = false;
   double video_frame_rate = 0;
+  bool software_video_required = false;
+  uint64_t presentation_failure_timeline = 0;
+  int presentation_failures = 0;
   int audio_index = -1;
   bool is_mp4_container = false;
   int video_track_id = -1;
@@ -1003,6 +1022,10 @@ struct RillightCoreImpl {
   RillightCoreHardware hardware_preference = RILLIGHT_CORE_HW_NONE;
   std::shared_ptr<void> android_window;
   std::atomic<uint32_t> android_dovi_profiles{0};
+  std::shared_ptr<AndroidTunnelFactory> tunnel_factory;
+  std::shared_ptr<TunnelDecoder> tunnel;
+  uint32_t tunnel_profiles = 0;
+  bool tunnel_disabled = false;
   bool allow_software_fallback = true;
   size_t video_bytes = 0;
   size_t audio_bytes = 0;
@@ -1650,21 +1673,64 @@ Decoder make_decoder(AVFormatContext *format, int index,
                      const std::shared_ptr<void>& android_window = {},
                      uint32_t android_dovi_profiles = 0,
                      int64_t discard_before_us = -1,
+                     bool dovi_8bit = false,
+                     const std::shared_ptr<AndroidTunnelFactory>& tunnel_factory = {},
+                     uint32_t tunnel_profiles = 0,
                      bool cpu_picture = false) {
-  // A MediaCodec surface has no pixels for enhancement. CPU mode keeps the
-  // window for presentation and leaves it off the decoder.
-  const std::shared_ptr<void> decoder_window =
+  std::shared_ptr<void> decoder_window =
       cpu_picture ? std::shared_ptr<void>{} : android_window;
   Decoder result;
   if (index < 0 || index >= static_cast<int>(format->nb_streams)) return result;
   const auto *parameters = format->streams[index]->codecpar;
+  if (!cpu_picture && tunnel_factory && android_window && preference == RILLIGHT_CORE_HW_MEDIACODEC &&
+      parameters->codec_id == AV_CODEC_ID_HEVC) {
+    const auto* side = av_packet_side_data_get(parameters->coded_side_data,
+        parameters->nb_coded_side_data, AV_PKT_DATA_DOVI_CONF);
+    const auto* record = side && side->size >= sizeof(AVDOVIDecoderConfigurationRecord)
+        ? reinterpret_cast<const AVDOVIDecoderConfigurationRecord*>(side->data) : nullptr;
+    if (record && android_dovi_profile_supported(record->dv_profile, tunnel_profiles) &&
+        !record->el_present_flag) {
+      auto tunnel = std::make_shared<TunnelDecoder>();
+      const auto* bsf = av_bsf_get_by_name("hevc_mp4toannexb");
+      if (bsf && av_bsf_alloc(bsf, &tunnel->filter) >= 0 &&
+          avcodec_parameters_copy(tunnel->filter->par_in, parameters) >= 0) {
+        tunnel->filter->time_base_in = format->streams[index]->time_base;
+        if (av_bsf_init(tunnel->filter) >= 0) {
+          tunnel->factory = tunnel_factory; tunnel->window = android_window;
+          tunnel->width = parameters->width; tunnel->height = parameters->height;
+          tunnel->profile = 1 << record->dv_profile;
+          tunnel->level = record->dv_level >= 1 && record->dv_level <= 13
+              ? 1 << (record->dv_level - 1) : 0;
+          tunnel->config.resize(24);
+          tunnel->config[0] = record->dv_version_major;
+          tunnel->config[1] = record->dv_version_minor;
+          tunnel->config[2] = (record->dv_profile << 1) | (record->dv_level >> 5);
+          tunnel->config[3] = (record->dv_level << 3) |
+              (record->rpu_present_flag << 2) | record->bl_present_flag;
+          tunnel->config[4] = record->dv_bl_signal_compatibility_id << 4;
+          tunnel->time_base = tunnel->filter->time_base_out;
+          tunnel->discard_before = std::max<int64_t>(0, discard_before_us);
+          const auto rate = av_guess_frame_rate(format, format->streams[index], nullptr);
+          if (rate.num > 0 && rate.den > 0)
+            tunnel->rate = std::clamp(static_cast<int>(std::ceil(av_q2d(rate))), 1, 240);
+          const auto* extra = tunnel->filter->par_out;
+          if (extra->extradata_size > 0 && extra->extradata_size < 1024 * 1024)
+            tunnel->csd.assign(extra->extradata, extra->extradata + extra->extradata_size);
+          result.context = avcodec_alloc_context3(nullptr);
+          if (result.context && avcodec_parameters_to_context(result.context, parameters) >= 0) {
+            result.context->pkt_timebase = format->streams[index]->time_base;
+            result.stream = index; result.hardware = RILLIGHT_CORE_HW_MEDIACODEC;
+            result.tunnel = std::move(tunnel);
+            result.android_native_dolby = true;
+            return result;
+          }
+          avcodec_free_context(&result.context);
+        }
+      }
+    }
+  }
   bool native_dovi = false;
   bool export_dovi = false;
-#if defined(__ANDROID__)
-  if (parameters->codec_type == AVMEDIA_TYPE_VIDEO)
-    __android_log_print(ANDROID_LOG_INFO, "RillightDecoder", "requested=%u surface=%d codec=%d tag=%u",
-        static_cast<unsigned>(preference), decoder_window ? 1 : 0, parameters->codec_id, parameters->codec_tag);
-#endif
   if (preference == RILLIGHT_CORE_HW_MEDIACODEC &&
       parameters->codec_id == AV_CODEC_ID_HEVC) {
     const auto* side = av_packet_side_data_get(parameters->coded_side_data,
@@ -1705,6 +1771,17 @@ Decoder make_decoder(AVFormatContext *format, int index,
       }
     }
   }
+#if defined(__ANDROID__)
+  if (export_dovi) {
+    const auto time_base = format->streams[index]->time_base;
+    if (!cpu_picture && AndroidColorPipeline::SupportsPrivateYuv())
+      result.android_dovi_surface = AndroidDoviSurface::Create(
+          parameters->width, parameters->height, time_base.num, time_base.den);
+    decoder_window = result.android_dovi_surface
+        ? std::shared_ptr<void>(result.android_dovi_surface, result.android_dovi_surface->Window())
+        : std::shared_ptr<void>{};
+  }
+#endif
   // FFmpeg's native AV1 decoder handles hardware surfaces only. A software
   // request must select the separately bundled dav1d decoder explicitly.
   const AVCodec *codec = preference == RILLIGHT_CORE_HW_NONE &&
@@ -1748,7 +1825,7 @@ Decoder make_decoder(AVFormatContext *format, int index,
     if (selected) {
       AVBufferRef *device = nullptr;
 #if defined(__ANDROID__)
-      if (preference == RILLIGHT_CORE_HW_MEDIACODEC && decoder_window && !export_dovi) {
+      if (preference == RILLIGHT_CORE_HW_MEDIACODEC && decoder_window) {
         device = av_hwdevice_ctx_alloc(device_type);
         if (device) {
           auto* device_context = reinterpret_cast<AVHWDeviceContext*>(device->data);
@@ -1776,13 +1853,10 @@ Decoder make_decoder(AVFormatContext *format, int index,
       }
     }
     if (device_error < 0) {
-#if defined(__ANDROID__)
-      __android_log_print(ANDROID_LOG_WARN, "RillightDecoder", "device rejected=%d", device_error);
-#endif
       avcodec_free_context(&context);
       if (allow_software_fallback)
         return make_decoder(format, index, RILLIGHT_CORE_HW_NONE, true, {}, 0,
-                            -1, cpu_picture);
+                            -1, false, {}, 0, cpu_picture);
       result.error = device_error;
       return result;
     }
@@ -1791,12 +1865,37 @@ Decoder make_decoder(AVFormatContext *format, int index,
     // Stay in native buffers even on hosts which installed a Java VM.
     av_opt_set_int(context->priv_data, "ndk_codec", 1, 0);
     av_opt_set_int(context->priv_data, "delay_flush", 1, 0);
+    // MediaCodec uses operating-rate to budget decoder resources. In
+    // particular, a 60 fps stream must not inherit a device's default rate.
+    const AVRational frame_rate = av_guess_frame_rate(
+        format, format->streams[index], nullptr);
+    if (frame_rate.num > 0 && frame_rate.den > 0) {
+      context->framerate = frame_rate;
+      av_opt_set_int(context->priv_data, "operating_rate",
+          std::clamp<int64_t>((static_cast<int64_t>(frame_rate.num) +
+              frame_rate.den - 1) / frame_rate.den, 1, 240), 0);
+    }
     if (export_dovi) {
       const int configured = av_opt_set_int(context->priv_data, "export_dovi", 1, 0);
       if (configured < 0) {
         avcodec_free_context(&context);
         result.error = configured;
         return result;
+      }
+      if (result.android_dovi_surface &&
+          av_opt_set_int(context->priv_data, "dovi_surface", 1, 0) < 0) {
+        avcodec_free_context(&context);
+        if (allow_software_fallback) return make_decoder(format, index);
+        result.error = AVERROR(ENOSYS);
+        return result;
+      }
+      if (dovi_8bit) {
+        const int configured_depth = av_opt_set_int(context->priv_data, "dovi_8bit", 1, 0);
+        if (configured_depth < 0) {
+          avcodec_free_context(&context);
+          result.error = configured_depth;
+          return result;
+        }
       }
       if (discard_before_us >= 0)
         av_opt_set_int(context->priv_data, "discard_before", discard_before_us, 0);
@@ -1815,22 +1914,21 @@ Decoder make_decoder(AVFormatContext *format, int index,
         if (profile >= 0 && profile <= 9)
           av_opt_set_int(context->priv_data, "dolby_profile", 1 << profile, 0);
       }
-#if defined(__ANDROID__)
-      __android_log_print(ANDROID_LOG_INFO, "RillightDecoder", "dolby mime configured=%d", configured);
-#endif
     }
   }
   const int open_result = avcodec_open2(context, codec, nullptr);
-#if defined(__ANDROID__)
-  if (parameters->codec_type == AVMEDIA_TYPE_VIDEO)
-    __android_log_print(ANDROID_LOG_INFO, "RillightDecoder", "decoder=%s opened=%d hardware=%u",
-        codec->name, open_result, result.hardware);
-#endif
   if (open_result < 0) {
     avcodec_free_context(&context);
+    // Lack of P010 byte output is not lack of HEVC hardware decoding. Keep
+    // timestamp-matched RPU conversion and retry NV12 before software decode.
+    if (export_dovi && !result.android_dovi_surface && !dovi_8bit) {
+      return make_decoder(format, index, preference, allow_software_fallback,
+                          android_window, android_dovi_profiles, discard_before_us, true,
+                          {}, 0, cpu_picture);
+    }
     if (preference != RILLIGHT_CORE_HW_NONE && allow_software_fallback)
       return make_decoder(format, index, RILLIGHT_CORE_HW_NONE, true, {}, 0,
-                          -1, cpu_picture);
+                          -1, false, {}, 0, cpu_picture);
     result.error = open_result;
     return result;
   }
@@ -2702,7 +2800,7 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
         core->android_native_dolby && !core->leave_native_dolby ? 1 : 0);
   }
   if ((video_index >= 0 && core->first_video) ||
-      (video_index < 0 && core->first_audio)) {
+      ((video_index < 0 || core->tunnel) && core->first_audio)) {
     if (core->state == RILLIGHT_CORE_OPENING ||
         core->state == RILLIGHT_CORE_BUFFERING ||
         core->state == RILLIGHT_CORE_RECOVERING) {
@@ -2724,7 +2822,15 @@ int drain_audio_filter(RillightCoreImpl *core, AudioFilter *filter,
   if (!filtered) return AVERROR(ENOMEM);
   int result = 0;
   while (!core->stop) {
+#if defined(__ANDROID__)
+    // A TrueHD access unit can contain only 40 samples. Coalesce into 10 ms
+    // PCM blocks so the bounded queue and JNI/AudioTrack feeder do not need
+    // 1,200 handoffs per second. get_samples preserves a short final block at
+    // EOF; seek/track changes discard the filter with the old timeline.
+    result = av_buffersink_get_samples(filter->sink, filtered, 480);
+#else
     result = av_buffersink_get_frame(filter->sink, filtered);
+#endif
     if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
       result = 0;
       break;
@@ -2781,7 +2887,7 @@ void apply_video_quality(RillightCoreImpl *core, RillightCoreFrame *output,
   if (!mid) return;
   mid->data = nullptr;
   mid->data_size = 0;
-  mid->subtitle_pixels.clear();
+  mid->subtitle_pixels.reset();
   mid->subtitle_overlay = {};
   mid->subtitle_redraw = false;
   mid->gpu_texture.reset();
@@ -2837,9 +2943,6 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   if (scale->enhancement.enabled)
     enhancement_frame.frame = scale->enhancement.Take(pts);
   if (discard) {
-#if defined(__ANDROID__) && !defined(NDEBUG)
-    core->trace_discarded++;
-#endif
     // Decode reference frames, but skip GPU readback, RGBA conversion and
     // subtitle composition for output that is already late. Doing all that
     // work before the renderer drops it delays subsequent useful pictures.
@@ -2852,7 +2955,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   const bool reconstruct = core->quality.NeedsReconstructedPicture();
 #if defined(__ANDROID__)
   bool android_color = hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
-      decoded->format == AV_PIX_FMT_P010LE &&
+      (decoded->format == AV_PIX_FMT_P010LE || decoded->format == AV_PIX_FMT_NV12 ||
+       (decoded->format == AV_PIX_FMT_MEDIACODEC && AndroidDoviSurface::From(decoded))) &&
       av_frame_get_side_data(decoded, AV_FRAME_DATA_DOVI_METADATA);
   if (android_color) {
     rillight_color::Constants scratch{};
@@ -3127,6 +3231,79 @@ RillightCoreFrame *passthrough_frame(const AVPacket *packet,
   return output;
 }
 
+int decode_tunnel_packet(RillightCoreImpl* core, Decoder& decoder,
+                         const AVPacket* packet, uint64_t timeline) {
+  auto tunnel = decoder.tunnel;
+  auto submit = [&](const uint8_t* data, int size, int64_t pts) {
+    const auto started = Clock::now();
+    for (;;) {
+      {
+        std::unique_lock lock(core->mutex);
+        if (core->stop || core->decode_abort || core->timeline != timeline) return 0;
+        if ((!core->play_intent && core->first_video) ||
+            (pts > playback_position(core) + 750000 && core->first_audio)) {
+          core->wake.wait_for(lock, std::chrono::milliseconds(4));
+          continue;
+        }
+      }
+      std::shared_ptr<AndroidTunnelSink> sink;
+      { std::lock_guard lock(tunnel->mutex); sink = tunnel->sink; }
+      if (!sink) return AVERROR(EIO);
+      const int accepted = sink->Queue(data, size, pts);
+      if (accepted < 0) return AVERROR(EIO);
+      if (accepted > 0) {
+        if (data) tunnel->submitted = std::max(tunnel->submitted.load(), pts);
+        return 0;
+      }
+      // Never leave stop/seek waiting inside a blocking MediaCodec queue call.
+      // A paused audio clock is intentional backpressure, not a decoder error.
+      { std::lock_guard lock(core->mutex);
+        if (core->play_intent && Clock::now() - started > std::chrono::seconds(8))
+          return AVERROR(ETIMEDOUT); }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  };
+  if (!packet) return submit(nullptr, 0, std::max<int64_t>(0, tunnel->submitted));
+  AVPacket* filtered = av_packet_clone(packet);
+  if (!filtered) return AVERROR(ENOMEM);
+  int result = av_bsf_send_packet(tunnel->filter, filtered);
+  if (result < 0) { av_packet_free(&filtered); return result; }
+  while ((result = av_bsf_receive_packet(tunnel->filter, filtered)) >= 0) {
+    if (tunnel->csd.empty()) {
+      // Some remuxes carry parameter sets only in the first Annex-B access unit.
+      // Preserve complete start-code-prefixed VPS/SPS/PPS, never an RPU as CSD.
+      std::vector<int> starts;
+      for (int i = 0; i + 4 < filtered->size; ++i) {
+        if (!filtered->data[i] && !filtered->data[i+1] &&
+            filtered->data[i+2] == 1) starts.push_back(i);
+      }
+      for (size_t i = 0; i < starts.size(); ++i) {
+        const int start = starts[i];
+        const int end = i + 1 < starts.size() ? starts[i+1] : filtered->size;
+        const int type = (filtered->data[start+3] >> 1) & 63;
+        if (type >= 32 && type <= 34)
+          tunnel->csd.insert(tunnel->csd.end(), filtered->data + start, filtered->data + end);
+      }
+    }
+    {
+      std::lock_guard lock(tunnel->mutex);
+      if (!tunnel->sink && !tunnel->csd.empty())
+        tunnel->sink = tunnel->factory->Open(tunnel->window.get(), tunnel->width,
+            tunnel->height, tunnel->profile, tunnel->level, tunnel->csd,
+            tunnel->config, tunnel->rate);
+      if (!tunnel->sink) { result = AVERROR(EIO); break; }
+    }
+    const int64_t pts = filtered->pts != AV_NOPTS_VALUE ? filtered->pts : filtered->dts;
+    if (pts == AV_NOPTS_VALUE) { result = AVERROR_INVALIDDATA; break; }
+    result = submit(filtered->data, filtered->size,
+        av_rescale_q(pts, tunnel->time_base, AVRational{1, 1000000}));
+    av_packet_unref(filtered);
+    if (result < 0 || core->timeline_signal != timeline) break;
+  }
+  av_packet_free(&filtered);
+  return result == AVERROR(EAGAIN) || result == AVERROR_EOF ? 0 : result;
+}
+
 int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
                   Decoder &decoder, const AVPacket *packet, int video_index,
                   VideoScale *scale, AudioFilter *audio_filter,
@@ -3134,7 +3311,13 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
                   double speed,
                   uint64_t session, uint64_t timeline, std::mutex *subtitle_mutex = nullptr,
                   const VideoSink *video_sink = nullptr) {
+  if (decoder.tunnel) return decode_tunnel_packet(core, decoder, packet, timeline);
   if (!decoder.context) return 0;
+  const auto recover_dts_packet = [&](int error) {
+    return error == AVERROR_INVALIDDATA && packet && packet->size > 0 &&
+        decoder.context->codec_id == AV_CODEC_ID_DTS &&
+        decoder.dts_recovery.skipInvalidPacket();
+  };
   const auto non_picture_error = [&](int error) {
     const auto* context = decoder.context;
     if (error != AVERROR_INVALIDDATA || !packet || packet->size <= 0 ||
@@ -3144,14 +3327,7 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
     return rillight_h264_non_picture(packet->data,
                                     static_cast<size_t>(packet->size), nal_length);
   };
-#if defined(__ANDROID__) && !defined(NDEBUG)
-  const bool trace_video = decoder.stream == video_index;
-  struct TraceReset {
-    std::atomic<int>* stage;
-    ~TraceReset() { if (stage) stage->store(0); }
-  } trace_reset{trace_video ? &core->trace_video_stage : nullptr};
-  if (trace_video) core->trace_video_stage = 1;
-#endif
+
   if (scale && decoder.stream == video_index && scale->enhancement.enabled &&
       !scale->enhancement.dual) {
     if (!packet) {
@@ -3186,24 +3362,20 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
     }
   }
   int result = avcodec_send_packet(decoder.context, packet);
+  if (recover_dts_packet(result)) return 0;
   if (non_picture_error(result)) return 0;
   bool submitted = result != AVERROR(EAGAIN);
   if (result < 0 && submitted) return result;
   AVFrame *decoded = av_frame_alloc();
   if (!decoded) return AVERROR(ENOMEM);
   while (!core->stop && !core->decode_abort) {
-#if defined(__ANDROID__) && !defined(NDEBUG)
-    if (trace_video) core->trace_video_stage = 2;
-#endif
     result = avcodec_receive_frame(decoder.context, decoded);
     if (result == AVERROR(EAGAIN) && !submitted) {
       // Backpressure is not a failed hardware decoder. Retain the packet,
       // drain output, and retry rather than replacing MediaCodec in software.
       { std::lock_guard lock(core->mutex); if (core->timeline != timeline) break; }
-#if defined(__ANDROID__) && !defined(NDEBUG)
-      if (trace_video) core->trace_video_stage = 3;
-#endif
       result = avcodec_send_packet(decoder.context, packet);
+      if (recover_dts_packet(result)) { result = 0; break; }
       if (non_picture_error(result)) { result = 0; break; }
       submitted = result != AVERROR(EAGAIN);
       if (result < 0 && submitted) break;
@@ -3211,13 +3383,17 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
       continue;
     }
     if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) break;
+    if (recover_dts_packet(result)) { result = 0; break; }
     if (result < 0) break;
+    decoder.dts_recovery.reset();
     const int64_t pts = frame_time(decoded, format->streams[decoder.stream]);
     if (decoder.stream == video_index) {
-#if defined(__ANDROID__) && !defined(NDEBUG)
-      core->trace_decoded++;
-      core->trace_pts = pts;
-      core->trace_video_stage = 4;
+#if defined(__ANDROID__)
+      if (decoder.android_dovi_surface &&
+          !decoder.android_dovi_surface->Attach(decoded, decoder.android_dovi_surface)) {
+        result = AVERROR(ENOMEM);
+        break;
+      }
 #endif
       result = video_sink
           ? (*video_sink)(decoded, decoder.stream, decoder.hardware, timeline)
@@ -3329,10 +3505,6 @@ class DecodeLane {
     if (type_ == RILLIGHT_CORE_VIDEO_RGBA && packet)
       core_->video_packets_pending++;
     queue_.push_back({copy, timeline, cost});
-#if defined(__ANDROID__) && !defined(NDEBUG)
-    if (type_ == RILLIGHT_CORE_VIDEO_RGBA && packet) core_->trace_video_packets++;
-    if (type_ == RILLIGHT_CORE_AUDIO_S16) core_->trace_audio_packets = static_cast<int>(queue_.size());
-#endif
     bytes_ += cost;
     core_->wake.notify_all();
     return 0;
@@ -3370,9 +3542,6 @@ class DecodeLane {
   void Clear() {
     for (auto &packet : queue_) av_packet_free(&packet.value);
     queue_.clear();
-#if defined(__ANDROID__) && !defined(NDEBUG)
-    if (type_ == RILLIGHT_CORE_AUDIO_S16) core_->trace_audio_packets = 0;
-#endif
     bytes_ = 0;
     if (type_ == RILLIGHT_CORE_VIDEO_RGBA) core_->video_packets_pending = 0;
   }
@@ -3393,9 +3562,6 @@ class DecodeLane {
         if (stopped_ || core_->stop || core_->decode_abort) break;
         packet = queue_.front();
         queue_.pop_front();
-#if defined(__ANDROID__) && !defined(NDEBUG)
-        if (type_ == RILLIGHT_CORE_AUDIO_S16) core_->trace_audio_packets = static_cast<int>(queue_.size());
-#endif
         bytes_ -= packet.cost;
         if (type_ == RILLIGHT_CORE_VIDEO_RGBA && packet.value &&
             core_->video_packets_pending > 0)
@@ -3604,6 +3770,8 @@ Decoder open_video_decoder(RillightCoreImpl *core, AVFormatContext *format,
   RillightCoreHardware preference = RILLIGHT_CORE_HW_NONE;
   bool allow_software = true;
   uint32_t profiles = 0;
+  uint32_t tunnel_profiles = 0;
+  std::shared_ptr<AndroidTunnelFactory> tunnel_factory;
   {
     std::lock_guard lock(core->mutex);
 #if defined(__ANDROID__)
@@ -3613,9 +3781,15 @@ Decoder open_video_decoder(RillightCoreImpl *core, AVFormatContext *format,
     allow_software = core->allow_software_fallback;
     profiles = core->android_dovi_profiles.load();
     if (!cpu_picture) window = core->android_window;
+    if (!cpu_picture && !core->tunnel_disabled && core->play_intent &&
+        core->audio_index >= 0) {
+      tunnel_factory = core->tunnel_factory;
+      tunnel_profiles = core->tunnel_profiles;
+    }
   }
   return make_decoder(format, index, preference, allow_software, window,
-                      profiles, discard_before_us, cpu_picture);
+                      profiles, discard_before_us, false, tunnel_factory,
+                      tunnel_profiles, cpu_picture);
 }
 
 void run(RillightCoreImpl *core, uint64_t session) {
@@ -3671,17 +3845,13 @@ void run(RillightCoreImpl *core, uint64_t session) {
   format->pb = main_source->avio;
   format->flags |= AVFMT_FLAG_CUSTOM_IO;
 
-  {
-    TraceMediaPhase trace("open-input");
-    result = avformat_open_input(&format, core->url.c_str(), nullptr, nullptr);
-  }
+  result = avformat_open_input(&format, core->url.c_str(), nullptr, nullptr);
   if (result < 0) goto finish;
   // MP4 sample tables and codec configuration already describe complete VOD
   // streams. Probing every optional track can otherwise force distant network
   // reads before playback, even though the selected decoders can open now.
   // Fragmented/live/incomplete headers retain FFmpeg's full discovery path.
   if (!complete_mp4_header(format)) {
-    TraceMediaPhase trace("stream-info");
     result = avformat_find_stream_info(format, nullptr);
     if (result < 0) goto finish;
   }
@@ -3692,10 +3862,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
     const AVCodec *audio_codec = nullptr;
     const int ai = av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1,
                                        &audio_codec, 0);
-    {
-      TraceMediaPhase trace("dovi-config");
-      result = restore_dovi_configuration(format, vi, &pending_packets);
-    }
+    result = restore_dovi_configuration(format, vi, &pending_packets);
     if (result < 0) goto finish;
     int opened_dovi_profile = RILLIGHT_CORE_DOVI_PROFILE_NONE;
     int opened_dovi_compatibility = -1;
@@ -3728,17 +3895,11 @@ void run(RillightCoreImpl *core, uint64_t session) {
     }
     {
       std::shared_ptr<void> window;
-      RillightCoreHardware preference = RILLIGHT_CORE_HW_NONE;
-      bool allow_software = true;
-      uint32_t profiles = 0;
-      {
-        std::lock_guard lock(core->mutex);
-        window = core->android_window;
-        preference = core->hardware_preference;
-        allow_software = core->allow_software_fallback;
-        profiles = core->android_dovi_profiles.load();
-      }
-      video = make_decoder(format, vi, preference, allow_software, window, profiles);
+      { std::lock_guard lock(core->mutex); window = core->android_window; }
+      video = make_decoder(format, vi, core->hardware_preference,
+                           core->allow_software_fallback, window, core->android_dovi_profiles,
+                           -1, false, ai >= 0 && core->play_intent ? core->tunnel_factory : nullptr,
+                           core->tunnel_profiles);
     }
 #if defined(__ANDROID__)
     if (video.context && video.hardware == RILLIGHT_CORE_HW_MEDIACODEC) {
@@ -3756,6 +3917,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       // surface only when enhancement is actually allowed to read pixels.
       if (core->quality.RequestsPicture() && !video.cpu_picture) {
         const int stream = video.stream;
+        video.tunnel.reset();
         avcodec_free_context(&video.context);
         video = open_video_decoder(core, format, stream);
       }
@@ -3815,6 +3977,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
     core->dolby_vision_profile = opened_dovi_profile;
     core->dolby_vision_compatibility = opened_dovi_compatibility;
     core->video_index = video.stream;
+    core->tunnel = video.tunnel;
     core->android_color_buffers = video.android_color_buffers;
     core->android_native_dolby = video.android_native_dolby;
     const AVRational rate = video.stream >= 0
@@ -3879,16 +4042,21 @@ void run(RillightCoreImpl *core, uint64_t session) {
                              &scale, &audio_filter, &subtitle_cues, &ass,
                              core->external_audio_speed ? 1.0 : core->speed, session,
                              timeline, &subtitle_mutex, &video_sink);
-      if (packet && result < 0 && video.hardware != RILLIGHT_CORE_HW_NONE &&
+      if (result < 0 && video.hardware != RILLIGHT_CORE_HW_NONE &&
           core->allow_software_fallback) {
-#if defined(__ANDROID__)
-        __android_log_print(ANDROID_LOG_WARN, "RillightDecoder", "hardware receive rejected=%d", result);
-#endif
         // A configured device can still reject the stream profile when the
-        // first packet is decoded. Retry that retained packet in software;
+        // first packets are decoded. Restart from a keyframe in software;
         // the replacement decoder has no device preference, so this is
         // bounded to one fallback for this stream.
-        Decoder replacement = make_decoder(format, video.stream);
+        const bool was_tunneled = !!video.tunnel;
+        std::shared_ptr<void> window;
+        { std::lock_guard lock(core->mutex); window = core->android_window;
+          if (was_tunneled) { core->tunnel.reset(); core->tunnel_disabled = true; } }
+        video.tunnel.reset();
+        Decoder replacement = was_tunneled
+            ? make_decoder(format, video.stream, core->hardware_preference,
+                           core->allow_software_fallback, window, core->android_dovi_profiles)
+            : make_decoder(format, video.stream);
         if (replacement.context) {
           avcodec_free_context(&video.context);
           video = replacement;
@@ -3912,9 +4080,24 @@ void run(RillightCoreImpl *core, uint64_t session) {
             scale.enhancement.Configure(true, enhancement_index >= 0,
                                         fel_nal_length, fel_time_base);
           }
-          result = decode_packet(core, format, video, packet, video.stream,
-                                 &scale, &audio_filter, &subtitle_cues, &ass,
-                                 core->external_audio_speed ? 1.0 : core->speed, session, timeline, &subtitle_mutex, &video_sink);
+          // The hardware may have accepted an entire GOP before rejecting its
+          // output format. The failing packet is not a decodable software
+          // starting point: retire this timeline and let the demux owner seek
+          // back to a keyframe after all lanes have quiesced.
+          std::lock_guard lock(core->mutex);
+          if (core->timeline == timeline && !core->stop) {
+            const int64_t position = playback_position(core);
+            ++core->timeline;
+            core->timeline_signal = core->timeline;
+            reset_frames(core);
+            core->seek_target = position;
+            core->base_position = position;
+            core->base_time = Clock::now();
+            core->state = RILLIGHT_CORE_RECOVERING;
+            core->wake.notify_all();
+            core->io.cancel_media_io(core->io.opaque);
+          }
+          result = 0;
         }
       }
 
@@ -4063,10 +4246,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         format->pb->eof_reached = 0;
       }
       pending_packets.Clear();
-      {
-        TraceMediaPhase trace("demux-seek");
-        result = av_seek_frame(format, -1, seek, AVSEEK_FLAG_BACKWARD);
-      }
+      result = av_seek_frame(format, -1, seek, AVSEEK_FLAG_BACKWARD);
       {
         std::lock_guard lock(core->mutex);
         core->media_io_active = false;
@@ -4079,14 +4259,36 @@ void run(RillightCoreImpl *core, uint64_t session) {
         }
       }
       if (result < 0) break;
-      if (video.context && video.hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
-          (!video.android_color_buffers || change_pixels)) {
+      bool software_required = false;
+      { std::lock_guard lock(core->mutex); software_required = core->software_video_required; }
+      if (video.context && software_required &&
+          (video.hardware != RILLIGHT_CORE_HW_NONE || change_pixels)) {
+        Decoder replacement = make_decoder(format, video.stream);
+        if (!replacement.context) {
+          result = replacement.error < 0 ? replacement.error : AVERROR_DECODER_NOT_FOUND;
+          break;
+        }
+        replacement.cpu_picture = core->quality.RequestsPicture();
+        avcodec_free_context(&video.context);
+        video = replacement;
+        conversion_ready = false;
+        std::lock_guard lock(core->mutex);
+        core->android_color_buffers = false;
+        core->android_native_dolby = false;
+        core->tunnel.reset();
+        for (auto& track : core->tracks)
+          if (track.stream_index == video.stream) track.actual_hardware = RILLIGHT_CORE_HW_NONE;
+      } else if (video.context && (change_pixels ||
+          (video.hardware == RILLIGHT_CORE_HW_MEDIACODEC &&
+           (!video.android_color_buffers || video.android_dovi_surface)))) {
         // Some Android Codec2 implementations stop producing pictures after
         // flush during an audio/subtitle/rate seek. All decode/conversion lanes
         // are quiescent here, so retire the codec and create a fresh instance.
         // Pixel enhancement also retires a surface or P010 decoder here: those
         // frames cannot be reconstructed.
         const int stream = video.stream;
+        { std::lock_guard lock(core->mutex); core->tunnel.reset(); }
+        video.tunnel.reset();
         avcodec_free_context(&video.context);
         video = open_video_decoder(core, format, stream,
                                    std::max<int64_t>(0, seek - 5000));
@@ -4098,6 +4300,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         std::lock_guard lock(core->mutex);
         core->android_color_buffers = video.android_color_buffers;
         core->android_native_dolby = video.android_native_dolby;
+        core->tunnel = video.tunnel;
         for (auto& track : core->tracks) {
           if (track.stream_index == stream)
             track.actual_hardware = RILLIGHT_CORE_HW_NONE;
@@ -4115,6 +4318,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       }
       scale.enhancement.Flush();
       if (audio.context) avcodec_flush_buffers(audio.context);
+      audio.dts_recovery.reset();
       if (subtitle.context) avcodec_flush_buffers(subtitle.context);
       close_audio_filter(&audio_filter);
       std::lock_guard subtitle_lock(subtitle_mutex);
@@ -4352,6 +4556,8 @@ finish:
   // subtitle events/fonts until the session is replaced or destroyed so a
   // paused viewport/PiP redraw cannot erase still-active glyphs.
   close_audio_filter(&audio_filter);
+  { std::lock_guard lock(core->mutex); core->tunnel.reset(); }
+  video.tunnel.reset();
   avcodec_free_context(&video.context);
   avcodec_free_context(&audio.context);
   avcodec_free_context(&subtitle.context);
@@ -4417,6 +4623,17 @@ double display_linear(double nits) {
   return std::clamp(nits * (1.0 + white / peak) / (white + nits), 0.0, 1.0);
 }
 }  // namespace
+
+int rillight_core_android_tunnel_factory(RillightCore* pointer,
+    std::shared_ptr<AndroidTunnelFactory> factory, uint32_t profiles) {
+  if (!pointer) return -1;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->state != RILLIGHT_CORE_IDLE) return -1;
+  core->tunnel_factory = std::move(factory);
+  core->tunnel_profiles = profiles;
+  return 0;
+}
 
 RILLIGHT_DOVI_TEST_API int rillight_dovi_base_rejected(int profile,
                                                        int compatibility) {
@@ -4628,14 +4845,57 @@ int rillight_core_set_android_window(RillightCore* pointer, void* window,
 #endif
 }
 
+int rillight_core_report_android_presentation(RillightCore* pointer,
+                                             const RillightCoreFrame* frame,
+                                             int succeeded) {
+  if (!pointer || !frame) return -1;
+  auto* core = impl(pointer);
+  std::lock_guard lock(core->mutex);
+  if (core->stop || core->session != frame->session_id ||
+      core->timeline != frame->timeline_version ||
+      core->software_video_required || !core->allow_software_fallback ||
+      core->hardware_preference != RILLIGHT_CORE_HW_MEDIACODEC ||
+      (frame->type != RILLIGHT_CORE_VIDEO_MEDIACODEC &&
+       frame->type != RILLIGHT_CORE_VIDEO_ANDROID_P010)) return 0;
+  if (core->presentation_failure_timeline != core->timeline) {
+    core->presentation_failure_timeline = core->timeline;
+    core->presentation_failures = 0;
+  }
+  if (succeeded) { core->presentation_failures = 0; return 0; }
+  if (++core->presentation_failures < 3) return 0;
+  // A decoder can succeed while image import, acquisition or GPU presentation
+  // fails. Recover on the demux owner after all lanes have quiesced, just as for
+  // decode failures; never feed an arbitrary inter frame to the new decoder.
+  core->software_video_required = true;
+  const int64_t position = playback_position(core);
+  ++core->timeline;
+  core->timeline_signal = core->timeline;
+  reset_frames(core);
+  core->seek_target = position;
+  core->base_position = position;
+  core->base_time = Clock::now();
+  core->state = RILLIGHT_CORE_RECOVERING;
+  core->wake.notify_all();
+  core->io.cancel_media_io(core->io.opaque);
+  return 1;
+}
+
 int rillight_core_render_mediacodec_frame(const RillightCoreFrame* frame) {
 #if defined(__ANDROID__)
   if (!frame || frame->type != RILLIGHT_CORE_VIDEO_MEDIACODEC) return -1;
   if (static_cast<const VideoOutputFrame*>(frame)->subtitle_redraw) return 0;
   const auto& decoded = static_cast<const VideoOutputFrame*>(frame)->codec_frame;
   if (!decoded || !decoded->data[3]) return -1;
-  return av_mediacodec_release_buffer(
-      reinterpret_cast<AVMediaCodecBuffer*>(decoded->data[3]), 1);
+  // take_frame already schedules against the audio/media clock. SurfaceFlinger
+  // expects an absolute CLOCK_MONOTONIC timestamp, not the stream's PTS (which
+  // may start hours from zero after a resume). The boolean release API passes
+  // that media timestamp through on some codecs and breaks display pacing.
+  const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      Clock::now().time_since_epoch()).count();
+  const auto present_ns = std::max<int64_t>(now_ns,
+      static_cast<const VideoOutputFrame*>(frame)->presentation_time_ns);
+  return av_mediacodec_render_buffer_at_time(
+      reinterpret_cast<AVMediaCodecBuffer*>(decoded->data[3]), present_ns);
 #else
   (void)frame;
   return -1;
@@ -4899,6 +5159,9 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
     core->video_output_kind = RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;
     core->is_mp4_container = false;
+    core->software_video_required = false;
+    core->presentation_failure_timeline = 0;
+    core->presentation_failures = 0;
     core->video_track_id = core->audio_track_id = -1;
     core->duration = -1;
     core->base_position = position_us;
@@ -4948,7 +5211,7 @@ int rillight_core_set_playing(RillightCore *pointer, int playing,
 int rillight_core_seek(RillightCore *pointer, int64_t position_us,
                        uint64_t operation_id) {
   if (!pointer || position_us < 0) return -1;
-  TraceMediaPhase trace("seek-command");
+
   auto *core = impl(pointer);
   std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
@@ -4958,10 +5221,7 @@ int rillight_core_seek(RillightCore *pointer, int64_t position_us,
       !accept_operation(core, operation_id)) return -1;
   ++core->timeline;
   core->timeline_signal = core->timeline;
-  {
-    TraceMediaPhase trace("seek-reset-frames");
-    reset_frames(core);
-  }
+  reset_frames(core);
   core->seek_target = position_us;
   core->base_position = position_us;
   core->base_time = Clock::now();
@@ -4972,10 +5232,7 @@ int rillight_core_seek(RillightCore *pointer, int64_t position_us,
   // generation on every seek so its next AVIO seek reopens the sealed route
   // rather than waiting on that stale connection.
   // The worker cannot start a new-timeline read until this callback returns.
-  {
-    TraceMediaPhase trace("seek-cancel-io");
-    core->io.cancel_media_io(core->io.opaque);
-  }
+  core->io.cancel_media_io(core->io.opaque);
   return 0;
 }
 
@@ -5259,6 +5516,8 @@ int rillight_core_snapshot(RillightCore *pointer,
   snapshot->first_audio_frame_ready = core->first_audio;
   snapshot->source_eof = core->eof;
   snapshot->queued_video_frames = static_cast<int>(core->video.size());
+  if (core->tunnel && core->tunnel->submitted > core->tunnel->emitted)
+    ++snapshot->queued_video_frames;
   snapshot->queued_audio_frames = static_cast<int>(core->audio.size());
   snapshot->playback_speed = core->speed;
   snapshot->preferred_hardware = core->hardware_preference;
@@ -5283,26 +5542,7 @@ int rillight_core_snapshot(RillightCore *pointer,
   snapshot->effective_denoise = core->effective_denoise;
   snapshot->requested_sharpen = core->requested_sharpen;
   snapshot->effective_sharpen = core->effective_sharpen;
-#if defined(__ANDROID__) && !defined(NDEBUG)
-  const auto trace_now = Clock::now();
-  if (trace_now - core->trace_last_log >= std::chrono::seconds(2)) {
-    core->trace_last_log = trace_now;
-    __android_log_print(ANDROID_LOG_INFO, "RillightDecode",
-        "session=%llu timeline=%llu state=%d pos_ms=%lld io=%d vwork=%d busy=%d stage=%d "
-        "apackets=%d vpackets=%llu decoded=%lld dropped=%lld pts_ms=%lld "
-        "vq=%zu aq=%zu first=%d/%d color=%d error=%d",
-        static_cast<unsigned long long>(core->session),
-        static_cast<unsigned long long>(core->timeline), static_cast<int>(core->state),
-        static_cast<long long>(snapshot->position_us / 1000), core->media_io_active,
-        core->video_packets_pending, core->video_decode_busy, core->trace_video_stage.load(),
-        core->trace_audio_packets, static_cast<unsigned long long>(core->trace_video_packets),
-        static_cast<long long>(core->trace_decoded.load()),
-        static_cast<long long>(core->trace_discarded.load()),
-        static_cast<long long>(core->trace_pts.load() / 1000),
-        core->video.size(), core->audio.size(), core->first_video, core->first_audio,
-        core->android_color_buffers, core->error);
-  }
-#endif
+
   return 0;
 }
 
@@ -5362,7 +5602,7 @@ static VideoOutputFrame *subtitle_frame_copy(const RillightCoreFrame *source) {
     if (!copy->data) { delete copy; return nullptr; }
     memcpy(copy->data, source->data, source->data_size);
   }
-  copy->subtitle_pixels.clear();
+  copy->subtitle_pixels.reset();
   copy->subtitle_overlay = {};
   return copy;
 }
@@ -5387,7 +5627,8 @@ static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core,
       blend_ass(frame, &core->ass);
     } else {
       const int bytes = frame->data_size;
-      render_gpu_subtitles(frame, core->subtitle_cues, &core->ass);
+      render_gpu_subtitles(frame, core->subtitle_cues, &core->ass,
+                           &core->bitmap_subtitle_cache);
       if (frame->data) frame->data_size = bytes;
     }
     return frame;
@@ -5405,10 +5646,38 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   if (!audio && type != RILLIGHT_CORE_VIDEO_RGBA && type != RILLIGHT_CORE_VIDEO_D3D11 &&
       type != RILLIGHT_CORE_VIDEO_MEDIACODEC && type != RILLIGHT_CORE_VIDEO_ANDROID_P010)
     return nullptr;
-  if (audio &&
+  if (audio && !core->tunnel &&
       core->state == RILLIGHT_CORE_RECOVERING && core->video_index >= 0 &&
       !core->first_video)
     return nullptr;
+  if (!audio && core->tunnel) {
+    auto tunnel = core->tunnel;
+    std::shared_ptr<AndroidTunnelSink> sink;
+    { std::lock_guard lock(tunnel->mutex); sink = tunnel->sink; }
+    const int64_t pts = sink ? sink->Rendered() : -1;
+    if (pts >= tunnel->discard_before && pts > tunnel->emitted) {
+      auto* receipt = new (std::nothrow) VideoOutputFrame{};
+      if (!receipt) return nullptr;
+      receipt->struct_size = sizeof(RillightCoreFrame);
+      receipt->type = RILLIGHT_CORE_VIDEO_ANDROID_TUNNEL;
+      receipt->session_id = core->session; receipt->timeline_version = core->timeline;
+      receipt->pts_us = pts; receipt->width = tunnel->width; receipt->height = tunnel->height;
+      receipt->sar_num = receipt->sar_den = 1;
+      receipt->source_color_transfer = AVCOL_TRC_SMPTE2084;
+      receipt->source_color_primaries = AVCOL_PRI_BT2020;
+      tunnel->emitted = pts;
+      core->first_video = true;
+      core->video_output_kind = RILLIGHT_CORE_VIDEO_OUT_DOLBY_VISION;
+      core->dovi_reconstruction = RILLIGHT_CORE_DOVI_RECON_NONE;
+      for (auto& track : core->tracks)
+        if (track.stream_index == core->video_index) track.actual_hardware = RILLIGHT_CORE_HW_MEDIACODEC;
+      rillight_core_release_frame(core->displayed_clean);
+      core->displayed_clean = receipt;
+      core->wake.notify_all();
+      return compose_displayed_frame(core, false);
+    }
+    if (!core->subtitle_redraw) return nullptr;
+  }
   if (!audio && core->subtitle_redraw && core->displayed_clean) {
     auto *redraw = core->subtitle_preview;
     if (type == RILLIGHT_CORE_VIDEO_RGBA && redraw &&
@@ -5446,7 +5715,12 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
       bytes -= late->data_size;
       rillight_core_release_frame(late);
     }
-    if (queue.front()->pts_us > clock_us + 10000 &&
+    // MediaCodec can queue a monotonic presentation deadline. Give the
+    // compositor a few vsyncs of lead time instead of racing the next vsync
+    // with an immediate release on every 60 fps frame.
+    const bool scheduled_surface = queue.front()->type == RILLIGHT_CORE_VIDEO_MEDIACODEC;
+    const int64_t lead_us = scheduled_surface ? 50000 : 10000;
+    if (queue.front()->pts_us > clock_us + lead_us &&
         !(core->state == RILLIGHT_CORE_PAUSED &&
           !core->paused_video_frame_emitted)) return nullptr;
   }
@@ -5465,6 +5739,14 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
     }
   }
   if (!audio) {
+    if (frame->type == RILLIGHT_CORE_VIDEO_MEDIACODEC) {
+      const auto now = Clock::now();
+      const auto remaining_us = core->state == RILLIGHT_CORE_PLAYING && frame->pts_us >= 0
+          ? std::max<int64_t>(0, frame->pts_us - playback_position(core, now)) : 0;
+      static_cast<VideoOutputFrame*>(frame)->presentation_time_ns =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count() +
+          static_cast<int64_t>(remaining_us * 1000 / core->speed);
+    }
     core->paused_video_frame_emitted = true;
     rillight_core_release_frame(core->displayed_clean);
     core->displayed_clean = nullptr;

@@ -201,7 +201,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(CatalogKeys.librariesMenu),
-          matching: find.text('片库'),
+          matching: find.text('媒体库'),
         ),
         findsOneWidget,
       );
@@ -288,7 +288,7 @@ void main() {
         tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
         'A thief who steals corporate secrets through dream-sharing.',
       );
-      expect(find.text('已看 40%'), findsOneWidget);
+      expect(find.textContaining('已看 40%'), findsOneWidget);
       expect(find.text('继续播放'), findsOneWidget);
       expect(find.text('章节'), findsOneWidget);
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
@@ -399,13 +399,15 @@ void main() {
         find.byKey(const Key('aggregation-keyword')),
         'no-synthetic-match',
       );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await settle(tester);
       expect(find.text('输入片名后搜索'), findsNothing);
-      expect(find.text('所选范围没有匹配作品'), findsOneWidget);
+      expect(find.text('没有结果'), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('aggregation-keyword')),
         'Inception',
       );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await settle(tester);
       final overlayHit = find.descendant(
         of: find.byType(AggregationPage),
@@ -430,18 +432,18 @@ void main() {
         find.byKey(const Key('aggregation-keyword')),
         'Inception',
       );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
       await settle(tester);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
-      // Source-safe UI categorizes the failure without exposing raw transport
-      // URLs. Every allowed library remains identifiable and retryable.
-      expect(find.textContaining('view-movies · 查询失败'), findsOneWidget);
+      // Search retries the failed server as one shelf.
+      expect(find.textContaining('HTTP 500'), findsOneWidget);
       expect(find.text('所选范围没有匹配作品'), findsNothing);
-      expect(find.text('重试此来源'), findsWidgets);
+      expect(find.text('重试'), findsWidgets);
       server.searchStatus = 200;
-      await tester.tap(find.text('重试此来源').first);
+      await tester.tap(find.text('重试').first);
       await settle(tester);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
-      expect(find.text('部分来源失败，已保留成功结果'), findsOneWidget);
+      expect(find.text('部分来源失败，已保留成功结果'), findsNothing);
       expect(
         find.byWidgetPredicate((w) => w is Text && w.data == 'Inception'),
         findsOneWidget,

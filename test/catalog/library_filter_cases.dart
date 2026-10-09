@@ -11,6 +11,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
+import 'package:rillight/app/widgets/option_pill.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/synthetic_source_fixture.dart';
@@ -312,6 +313,8 @@ void main() {
     expect(find.byType(ShelfGridPage), findsOneWidget);
     final before = posterNames(tester);
     await openFilters(tester);
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(OptionPill), findsWidgets);
     await tester.tap(
       find.byKey(const Key('catalog-grid-filter-section-watch')),
     );
@@ -323,8 +326,10 @@ void main() {
     await applyFilters(tester);
     expect(posterNames(tester), isNot(before));
     expect(server.requests.last, contains('Filters=IsPlayed'));
-    await tester.tap(find.byKey(gridFilterClearKey));
+    expect(find.byType(RemovablePill), findsOneWidget);
+    await tester.tap(find.byType(RemovablePill));
     await settle(tester);
+    expect(find.byType(RemovablePill), findsNothing);
     expect(posterNames(tester), before);
 
     await openLibrary(tester, 'view-untyped');

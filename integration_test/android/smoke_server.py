@@ -11,10 +11,12 @@ import json
 import pathlib
 import re
 import threading
+import time
 import urllib.parse
 
 TOKEN = "synthetic-android-smoke"
-counts = {"authorized": 0, "cross_origin": 0, "leaks": 0, "ranges": 0}
+counts = {"authorized": 0, "cross_origin": 0, "leaks": 0, "ranges": 0,
+          "max_range_start": 0}
 lock = threading.Lock()
 
 
@@ -76,6 +78,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return
             with lock:
                 counts["ranges"] += 1
+                counts["max_range_start"] = max(counts["max_range_start"], start)
         self.send_response(206 if match else 200)
         self.send_header("Content-Type", self.guess_type(str(path)))
         self.send_header("Content-Length", str(end - start + 1))
@@ -92,6 +95,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         break
                     self.wfile.write(data)
                     remaining -= len(data)
+                    if self.server.chunk_delay_ms:
+                        time.sleep(self.server.chunk_delay_ms / 1000)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -108,13 +113,16 @@ def main():
     parser.add_argument("media_dir", type=pathlib.Path)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--remote-port", type=int, default=8766)
+    parser.add_argument("--chunk-delay-ms", type=int, default=0)
     args = parser.parse_args()
     handler = functools.partial(Handler, directory=str(args.media_dir.resolve()))
     remote = http.server.ThreadingHTTPServer(("127.0.0.1", args.remote_port), handler)
     remote.remote_port = args.remote_port
+    remote.chunk_delay_ms = args.chunk_delay_ms
     threading.Thread(target=remote.serve_forever, daemon=True).start()
     origin = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     origin.remote_port = args.remote_port
+    origin.chunk_delay_ms = args.chunk_delay_ms
     print(f"Synthetic media origins ready on {args.port}/{args.remote_port}", flush=True)
     try:
         origin.serve_forever()

@@ -10,7 +10,11 @@
     "platform_patches": {
       "android": {
         "patches/ffmpeg-android-dolby-surface.patch": "5cad4150a0ea1818716c96d11429bf15f0043b144056e98b08858c1278986e7b",
-        "patches/ffmpeg-android-dovi-rpu.patch": "e189a0d753213e400d523e6bc309c472db6922d0143c29bb9f10ec8f7aed733a"
+        "patches/ffmpeg-android-dovi-rpu.patch": "e189a0d753213e400d523e6bc309c472db6922d0143c29bb9f10ec8f7aed733a",
+        "patches/ffmpeg-android-dovi-nv12.patch": "5ca382b350d5d2ffebddc73e8c102ffbe9559a161cca7299bf9dc03a0af2eed8",
+        "patches/ffmpeg-android-dovi-surface.patch": "3ae87438f951d83396192eebb65f0d972acd1bfabdd81404c87a8dbce159dd3f",
+        "patches/ffmpeg-android-dovi-codec-selection.patch": "e2048d465e1d94ceb3ed09fd3bf62bb1a95f04c798b71096a29a5ea9582e09c1",
+        "patches/ffmpeg-android-custom-io-buffering.patch": "5a723b6f98a4e557ba624859e616762ed687d14937c2e3e8813f4a6f1421e81b"
       }
     },
     "libraries": ["avformat", "avcodec", "avutil", "swresample", "swscale", "avfilter"]

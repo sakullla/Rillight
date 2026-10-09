@@ -40,6 +40,20 @@ String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
   origin.client.baseUrl.toString(),
 ]);
 
+// Keep the nullable source guard outside the async image loop. The pinned
+// Dart AOT compiler hoists origin.permit loads ahead of that loop's null guard
+// when this check is a captured, inlined local closure (ARM profile SIGSEGV).
+// Retain the live permit check after every asynchronous boundary.
+@pragma('vm:never-inline')
+bool _imageSourceIsValid(
+  PlaybackOrigin? origin,
+  AuthController auth,
+  String? accountScope,
+) {
+  if (origin == null) return mediaImageAccountScope(auth) == accountScope;
+  return origin.permit.isValid;
+}
+
 /// Cache policy is a consumer of the existing source permit, not an authority.
 /// Private bytes never enter the disk store (including probes and lazy writes).
 class MediaImageSourcePolicy extends ChangeNotifier {
@@ -88,6 +102,19 @@ const int kMediaBackdropMaxRequestWidth = 1280;
 /// 轮播单独放宽一档。
 const int kMediaBackdropHeroMaxRequestWidth = 1920;
 
+/// 电视 4K 面板(物理 3840 宽)的出血主图与详情背景上限。2560 在 4K 上
+/// 已足够细腻,单张解码约 15 MB,比原生 4K 省一半内存。
+const int kMediaBackdropTvMaxRequestWidth = 2560;
+
+/// 电视解码缓存:4K 面板上海报与背景按物理像素解码,单张约为 1080p 的四倍。
+const int kTvPaintingImageCacheMaxBytes = 160 * 1024 * 1024;
+
+/// 环境确认为电视后放宽解码缓存,避免 4K 下来回滚动反复解码。
+void configureTvPaintingImageCache() {
+  PaintingBinding.instance.imageCache.maximumSizeBytes =
+      kTvPaintingImageCacheMaxBytes;
+}
+
 /// 把 Flutter 解码缓存收到低配可承受的上限。启动时调用一次。
 void configurePaintingImageCache({bool playerProcess = false}) {
   final cache = PaintingBinding.instance.imageCache;
@@ -124,13 +151,14 @@ int mediaBackdropRequestWidth({
 int mediaHeroBackdropRequestWidth({
   required double layoutWidth,
   required double devicePixelRatio,
+  int max = kMediaBackdropHeroMaxRequestWidth,
 }) {
   final px = (layoutWidth * devicePixelRatio).round();
   if (px < kMediaBackdropMinRequestWidth) {
     return kMediaBackdropMinRequestWidth;
   }
-  if (px > kMediaBackdropHeroMaxRequestWidth) {
-    return kMediaBackdropHeroMaxRequestWidth;
+  if (px > max) {
+    return max;
   }
   return px;
 }
@@ -346,6 +374,7 @@ class _MediaImageState extends State<MediaImage> {
   int? _lastRequestWidth;
   int _loadGeneration = 0;
   List<ScrollPosition> _observedScrolls = const [];
+  bool _observingScrolls = false;
   bool _frameWakeQueued = false;
   Completer<void>? _layoutWake;
   Timer? _retryTimer;
@@ -395,6 +424,7 @@ class _MediaImageState extends State<MediaImage> {
       _lastRequestWidth = requestWidth;
       _loadGeneration++;
       _cancelRetryWait();
+      _observeScrolls(false);
       _future = null;
     }
     if (_hasImageSource && scope != null) {
@@ -447,6 +477,7 @@ class _MediaImageState extends State<MediaImage> {
         widthChanged) {
       _loadGeneration++;
       _cancelRetryWait();
+      _observeScrolls(false);
       _future = _hasImageSource && _accountScope != null ? _load() : null;
     }
   }
@@ -508,8 +539,24 @@ class _MediaImageState extends State<MediaImage> {
       position.removeListener(_onObservedScroll);
     }
     _observedScrolls = ancestorScrollPositions(context);
+    if (!_observingScrolls) return;
     for (final position in _observedScrolls) {
       position.addListener(_onObservedScroll);
+    }
+  }
+
+  // Loaded posters have no queue priority or viewport wait to update. Detach
+  // their per-pixel callbacks while retaining positions for a later image/tag
+  // change, keeping warm shelves and library grids out of scroll work.
+  void _observeScrolls(bool value) {
+    if (_observingScrolls == value) return;
+    _observingScrolls = value;
+    for (final position in _observedScrolls) {
+      if (value) {
+        position.addListener(_onObservedScroll);
+      } else {
+        position.removeListener(_onObservedScroll);
+      }
     }
   }
 
@@ -572,6 +619,7 @@ class _MediaImageState extends State<MediaImage> {
 
   Future<_LoadedImage?> _load() async {
     _cancelRetryWait();
+    _observeScrolls(false);
     final generation = ++_loadGeneration;
     bool current() => mounted && generation == _loadGeneration;
     // 内存命中立刻返回,回滑已看过的海报不闪骨架、也不等停稳。
@@ -580,6 +628,7 @@ class _MediaImageState extends State<MediaImage> {
       return peeked;
     }
     final cache = MediaImageCache.instance;
+    _observeScrolls(true);
     try {
       for (var attempt = 0; current(); attempt++) {
         if (!current()) {
@@ -669,6 +718,7 @@ class _MediaImageState extends State<MediaImage> {
       return null;
     } finally {
       if (generation == _loadGeneration) {
+        _observeScrolls(false);
         final wake = _layoutWake;
         _layoutWake = null;
         if (wake != null && !wake.isCompleted) {
@@ -753,9 +803,7 @@ class _MediaImageState extends State<MediaImage> {
     final origin = DetailSourceScope.maybeOf(context);
     final client = DetailSourceScope.clientOf(context);
     final serverId = _accountScope;
-    bool sourceValid() => origin != null
-        ? origin.permit.isValid
-        : mediaImageAccountScope(auth) == serverId;
+    bool sourceValid() => _imageSourceIsValid(origin, auth, serverId);
     if (serverId == null) return null;
     // This callback can be inspected while another image is unmounting. Do
     // not look up inherited widgets on a deactivated element.

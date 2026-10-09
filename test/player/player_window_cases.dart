@@ -199,34 +199,8 @@ void main() {
   }
 
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
-    final homeTitle = find.descendant(
-      of: find.byType(AppBar),
-      matching: find.text('灯川 Rillight'),
-    );
-    if (homeTitle.evaluate().isNotEmpty) {
-      await tester.tap(homeTitle);
-      await settle(tester);
-    }
-    await tester.tap(find.byKey(const Key('app-shell-aggregation')));
-    await settle(tester);
-    final title = server.items.firstWhere((item) => item.id == itemId).name;
-    final gridScroll = find
-        .descendant(
-          of: find.byType(CustomScrollView),
-          matching: find.byWidgetPredicate(
-            (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
-          ),
-        )
-        .first;
-    await tester.scrollUntilVisible(
-      find.text(title),
-      240,
-      scrollable: gridScroll,
-    );
-    final item = find.text(title).first;
-    await tester.ensureVisible(item);
-    await settle(tester);
-    await tester.tap(item);
+    final app = tester.widget<RillightApp>(find.byType(RillightApp));
+    app.router.push('/item/$itemId');
     await settle(tester);
     await tester.tap(find.byKey(PlayerKeys.open));
     await tester.pump();

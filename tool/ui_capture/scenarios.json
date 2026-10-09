@@ -1,13 +1,15 @@
 [
   {"id":"aggregation-ready","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-management","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-pin-setup","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-pin-error","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-single-source","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-empty-scope","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-comparison","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-segment-favorites","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-segment-libraries","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-management","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-pin-setup","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-pin-error","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-single-source","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-empty-scope","feature":"aggregation","platforms":["desktop","phone"]},
+  {"id":"aggregation-comparison","feature":"aggregation","platforms":["desktop","phone"]},
   {"id":"aggregation-search-single","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-partial-failure","feature":"aggregation","platforms":["desktop","phone","tv"]},
+  {"id":"aggregation-partial-failure","feature":"aggregation","platforms":["desktop","phone"]},
   {
     "id": "account",
     "feature": "servers",
@@ -516,6 +518,70 @@
       "desktop",
       "phone",
       "tv"
+    ]
+  },
+  {
+    "id": "player-dense-controls",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "player-dense-subtitles",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-dense-subtitles-search",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-dense-sources",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-dense-sources-search",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-dense-tracks",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-dense-tracks-search",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-dense-source",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "player-dense-source-search",
+    "feature": "player",
+    "platforms": [
+      "phone"
     ]
   },
   {

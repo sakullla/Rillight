@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/media_image/blurred_artwork.dart';
@@ -103,6 +104,9 @@ class HeroArtwork extends StatefulWidget {
     required this.requestWidth,
     this.compact = false,
     this.spotlightBackground = false,
+    this.posterFirst = false,
+    this.ambient = false,
+    this.prefetch = false,
     this.onResolved,
   });
 
@@ -113,6 +117,21 @@ class HeroArtwork extends StatefulWidget {
   /// Poster-spotlight mode: a poster result renders only the blurred, darkened
   /// full-bleed background; the parent draws the crisp poster card itself.
   final bool spotlightBackground;
+
+  /// Poster-forward mode (phone card): try posters before backdrops and request
+  /// the poster at [requestWidth]. A backdrop fallback renders contained over
+  /// its own blur so a 2:3 card never crops a wide still.
+  final bool posterFirst;
+
+  /// Ambient mode: whatever resolves is drawn only as a soft blurred fill; the
+  /// parent tints and fades it into the page. Never reports a theme colour.
+  final bool ambient;
+
+  /// Prefetch mode: resolve and decode the artwork the carousel will show next,
+  /// paint nothing, and never report colours or layouts. When that slide
+  /// arrives, the same sources hit the byte cache synchronously and the decoded
+  /// frame is already in the image cache, so it does not flash the placeholder.
+  final bool prefetch;
 
   /// Fires once per resolved image (post-frame, deduped by identity) so parents
   /// can switch between full-bleed and poster-spotlight layouts.
@@ -150,6 +169,8 @@ class _HeroArtworkState extends State<HeroArtwork> {
   // across carousel remounts without keeping another image cache alive.
   static final _dimensions = Expando<(int, int)>();
   Future<HeroArtworkData?>? _future;
+  HeroArtworkData? _initial;
+  String? _precached;
   String? _token;
   String? _reportedIdentity;
   int _generation = 0;
@@ -166,24 +187,85 @@ class _HeroArtworkState extends State<HeroArtwork> {
     _schedule();
   }
 
+  List<ItemImageRef> get _orderedRefs => widget.posterFirst
+      ? [...widget.sources.posters, ...widget.sources.backdrops]
+      : [...widget.sources.backdrops, ...widget.sources.posters];
+
   void _schedule() {
     final auth = AuthScope.maybeOf(context);
     final scope = mediaImageAccountScope(auth);
-    final refs = [...widget.sources.backdrops, ...widget.sources.posters];
+    final refs = _orderedRefs;
     final token =
-        '$scope/${widget.requestWidth}/${widget.compact}/${refs.map((ref) => '${ref.itemId}:${ref.type}:${ref.tag}').join('|')}';
+        '$scope/${widget.requestWidth}/${widget.compact}/${widget.posterFirst}/${refs.map((ref) => '${ref.itemId}:${ref.type}:${ref.tag}').join('|')}';
     if (_token == token) return;
     _token = token;
     final generation = ++_generation;
-    _future = scope == null || auth == null ? null : _load(scope, generation);
+    _initial = scope == null || auth == null ? null : _peek(scope);
+    _future = scope == null || auth == null || _initial != null
+        ? null
+        : _load(scope, generation);
+  }
+
+  /// Pixel width each source is requested (and the cache keyed) at.
+  int _sourceWidth(ItemImageRef ref) =>
+      ref.type == 'Primary' && !widget.posterFirst
+      ? math.min(widget.requestWidth, 480)
+      : widget.requestWidth;
+
+  bool _suitable(ItemImageRef ref, (int, int) dimensions) {
+    if (ref.type == 'Primary') {
+      return dimensions.$1 >= 240 && dimensions.$2 >= 320;
+    }
+    return HeroArtwork.suitableBackdrop(
+      dimensions.$1,
+      dimensions.$2,
+      minimumWidth: math.min(widget.compact ? 640 : 960, widget.requestWidth),
+    );
+  }
+
+  HeroArtworkData _data(String scope, ItemImageRef ref, Uint8List bytes) =>
+      HeroArtworkData(
+        bytes,
+        poster: ref.type == 'Primary',
+        identity: '$scope/${ref.itemId}/${ref.type}/${ref.tag}',
+      );
+
+  /// Synchronous replay of [_load] against the in-memory byte cache. Returns
+  /// null as soon as any earlier source is still unknown, so the result always
+  /// matches what the async walk would pick.
+  HeroArtworkData? _peek(String scope) {
+    final cache = MediaImageCache.instance;
+    for (final ref in _orderedRefs) {
+      final width = _sourceWidth(ref);
+      final bytes = cache.peek(
+        serverId: scope,
+        itemId: ref.itemId,
+        type: ref.type,
+        tag: ref.tag,
+        maxWidth: width,
+      );
+      if (bytes == null || bytes.isEmpty) {
+        final missed = cache.isNegativeCached(
+          serverId: scope,
+          itemId: ref.itemId,
+          type: ref.type,
+          tag: ref.tag,
+          maxWidth: width,
+        );
+        if (missed) continue;
+        return null;
+      }
+      final dimensions = _dimensions[bytes];
+      if (dimensions == null) return null;
+      if (_suitable(ref, dimensions)) return _data(scope, ref, bytes);
+    }
+    return null;
   }
 
   Future<HeroArtworkData?> _load(String scope, int generation) async {
     final auth = AuthScope.of(context);
     final client = auth.client;
-    final width = widget.requestWidth;
-    final minimum = math.min(widget.compact ? 640 : 960, width);
-    final refs = [...widget.sources.backdrops, ...widget.sources.posters];
+    final refs = _orderedRefs;
     bool current() =>
         mounted &&
         generation == _generation &&
@@ -191,9 +273,9 @@ class _HeroArtworkState extends State<HeroArtwork> {
     for (final ref in refs) {
       if (!current()) return null;
       try {
-        final poster = ref.type == 'Primary';
         // The sharp poster decodes at 480px; its blurred fill only needs 160px.
-        final sourceWidth = poster ? math.min(width, 480) : width;
+        // A poster-forward card asks for the poster at its own request width.
+        final sourceWidth = _sourceWidth(ref);
         CancelToken? cancel;
         final bytes = await MediaImageCache.instance.load(
           serverId: scope,
@@ -233,19 +315,8 @@ class _HeroArtworkState extends State<HeroArtwork> {
             buffer.dispose();
           }
         }
-        final suitable = poster
-            ? dimensions.$1 >= 240 && dimensions.$2 >= 320
-            : HeroArtwork.suitableBackdrop(
-                dimensions.$1,
-                dimensions.$2,
-                minimumWidth: minimum,
-              );
-        if (suitable && current()) {
-          return HeroArtworkData(
-            bytes,
-            poster: poster,
-            identity: '$scope/${ref.itemId}/${ref.type}/${ref.tag}',
-          );
+        if (_suitable(ref, dimensions) && current()) {
+          return _data(scope, ref, bytes);
         }
       } catch (_) {
         // Try another official artwork source without a broken-image banner.
@@ -271,8 +342,35 @@ class _HeroArtworkState extends State<HeroArtwork> {
     });
   }
 
+  /// Same provider [Image.memory] builds for these bytes and cache width, so
+  /// the decoded frame lands under the key the visible slide will look up.
+  int _cacheWidth(HeroArtworkData image) =>
+      image.poster && !widget.posterFirst ? 480 : widget.requestWidth;
+
+  Widget _buildPrefetch() {
+    return FutureBuilder<HeroArtworkData?>(
+      key: ValueKey(_token),
+      future: _future,
+      initialData: _initial,
+      builder: (context, snapshot) {
+        final image = snapshot.data;
+        if (image != null && _precached != image.identity) {
+          _precached = image.identity;
+          final provider = ResizeImage.resizeIfNeeded(
+            _cacheWidth(image),
+            null,
+            MemoryImage(image.bytes),
+          );
+          precacheImage(provider, context, onError: (_, _) {});
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (widget.prefetch) return _buildPrefetch();
     final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -285,17 +383,24 @@ class _HeroArtworkState extends State<HeroArtwork> {
       child: FutureBuilder<HeroArtworkData?>(
         key: ValueKey(_token),
         future: _future,
+        initialData: _initial,
         builder: (context, snapshot) {
           final image = snapshot.data;
           if (image == null) return const SizedBox.expand();
           _notifyResolved(image);
+          if (widget.ambient) {
+            return _blurredFill(image.bytes, opacity: 1, sigma: 40);
+          }
           if (widget.spotlightBackground && image.poster) {
             return _spotlightBackdrop(image.bytes);
           }
+          // The art whose shape matches the surface covers it; the other shape
+          // sits contained over its own blur.
+          final contain = widget.posterFirst ? !image.poster : image.poster;
           final art = Image.memory(
             image.bytes,
-            fit: image.poster ? BoxFit.contain : BoxFit.cover,
-            cacheWidth: image.poster ? 480 : widget.requestWidth,
+            fit: contain ? BoxFit.contain : BoxFit.cover,
+            cacheWidth: _cacheWidth(image),
             filterQuality: FilterQuality.medium,
             frameBuilder: (context, child, frame, synchronous) {
               if (frame != null || synchronous) {
@@ -305,17 +410,32 @@ class _HeroArtworkState extends State<HeroArtwork> {
                   image.bytes,
                 );
               }
-              return child;
+              // An already-decoded frame shows at once; a fresh decode fades
+              // in over the placeholder instead of popping.
+              if (synchronous) return child;
+              return AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: AppMotion.durationOf(context, AppMotion.slow),
+                curve: AppMotion.standard,
+                child: child,
+              );
             },
             errorBuilder: (_, _, _) => const SizedBox.expand(),
           );
-          if (!image.poster) return SizedBox.expand(child: art);
+          if (!contain) return SizedBox.expand(child: art);
           return ClipRect(
             child: Stack(
               fit: StackFit.expand,
               children: [
-                _blurredFill(image.bytes, opacity: .25, sigma: 24),
-                Padding(padding: const EdgeInsets.all(20), child: art),
+                _blurredFill(
+                  image.bytes,
+                  opacity: widget.posterFirst ? .45 : .25,
+                  sigma: 24,
+                ),
+                Padding(
+                  padding: EdgeInsets.all(widget.posterFirst ? 0 : 20),
+                  child: art,
+                ),
               ],
             ),
           );

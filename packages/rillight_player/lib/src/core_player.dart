@@ -53,17 +53,20 @@ class CorePlayerTrack {
     required this.type,
     required this.language,
     required this.isExternal,
+    this.videoRange,
   });
   final int index;
   final String type;
   final String? language;
   final bool isExternal;
+  final String? videoRange;
 
   Map<String, Object?> toChannel() => {
     'index': index,
     'type': type,
     'language': language,
     'external': isExternal,
+    'videoRange': videoRange,
   };
 }
 
@@ -413,7 +416,7 @@ abstract class CorePlayer {
 }
 
 /// One Android owner keeps its native SurfaceView mounted while media opens.
-class AndroidCorePlayer implements CorePlayer {
+class AndroidCorePlayer implements CorePlayer, CoreNativeSeekCancellation {
   AndroidCorePlayer()
     : owner = 'core-${++_nextOwner}-${DateTime.now().microsecondsSinceEpoch}' {
     _subscription = _nativeEvents.listen((dynamic raw) {

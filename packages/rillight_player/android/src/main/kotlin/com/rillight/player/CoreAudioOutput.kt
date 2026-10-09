@@ -8,6 +8,7 @@ import android.media.AudioRouting
 import android.media.AudioTrack
 import android.media.PlaybackParams
 import android.os.Build
+import java.nio.ByteBuffer
 
 internal const val AUDIO_WRITE_REJECT = -2
 internal const val AUDIO_WRITE_DROP = -3
@@ -106,17 +107,27 @@ private fun directPlayback(encoding: Int): Boolean {
 }
 
 /** AudioTrack is the only audio consumer; every queued sample belongs to one core timeline. */
-internal class CoreAudioOutput {
+internal class CoreAudioOutput(val tunneled: Boolean = false) {
     private var track: AudioTrack? = null
     private val clock = CoreQueueClock()
     private var endOfInput = false
     private var playbackSpeed = 1f
+    private var volume = 1f
     private var wantPlay = false
     private var channels = 0
     private var encoding = AudioFormat.ENCODING_PCM_16BIT
     private var passthrough = false
     private var bytesPerFrame = 4
     private var onRoute: (() -> Unit)? = null
+
+    private var tunnelBuffer: ByteBuffer? = null
+    private var tunnelFrame: CoreAudioFrame? = null
+    val sessionId: Int get() = requireNotNull(track).audioSessionId
+
+    init {
+        // The tunnel binds its video decoder to this stable stereo PCM session.
+        if (tunneled) open(CoreAudioFrame(0, 0, 0, ByteArray(0)))
+    }
 
     fun setRouteListener(listener: (() -> Unit)?) { onRoute = listener }
 
@@ -136,6 +147,8 @@ internal class CoreAudioOutput {
 
     fun ensure(frame: CoreAudioFrame): Boolean {
         if (matches(frame)) return true
+        // Replacing the AudioTrack would invalidate the tunnel's session ID.
+        if (tunneled) return false
         return try {
             open(frame)
             true
@@ -158,7 +171,11 @@ internal class CoreAudioOutput {
         if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause()
     }
 
-    fun setVolume(value: Float) { track?.setVolume(value.coerceIn(0f, 1f)) }
+    fun setVolume(value: Float) {
+        if (!value.isFinite()) return
+        volume = value.coerceIn(0f, 1f)
+        track?.setVolume(volume)
+    }
 
     fun setSpeed(value: Float) {
         require(value.isFinite() && value in .5f..3f)
@@ -192,6 +209,7 @@ internal class CoreAudioOutput {
             track.setStartThresholdInFrames(track.bufferCapacityInFrames)
         resetClock()
         endOfInput = false
+        tunnelBuffer = null; tunnelFrame = null
         if (wantPlay) track.play()
     }
 
@@ -205,7 +223,18 @@ internal class CoreAudioOutput {
         val track = track ?: return 0
         if (offset >= frame.bytes.size) return 0
         endOfInput = false
-        val written = track.write(frame.bytes, offset, frame.bytes.size - offset,
+        val written = if (tunneled) {
+            if (tunnelFrame !== frame) {
+                tunnelFrame = frame
+                tunnelBuffer = ByteBuffer.allocateDirect(frame.bytes.size).apply {
+                    put(frame.bytes); flip()
+                }
+            }
+            val buffer = requireNotNull(tunnelBuffer)
+            buffer.position(offset)
+            track.write(buffer, buffer.remaining(), AudioTrack.WRITE_NON_BLOCKING,
+                (frame.ptsUs.coerceAtLeast(0) + offset / 4L * 1_000_000L / 48_000L) * 1000L)
+        } else track.write(frame.bytes, offset, frame.bytes.size - offset,
             AudioTrack.WRITE_NON_BLOCKING)
         if (written < 0) throw IllegalStateException("AudioTrack write failed: $written")
         if (written > 0 && frame.passthrough && offset + written >= frame.bytes.size) {
@@ -231,8 +260,15 @@ internal class CoreAudioOutput {
         if (Build.VERSION.SDK_INT >= 31) {
             if (track.startThresholdInFrames > 1) track.setStartThresholdInFrames(1)
         } else if (!passthrough) {
-            val silence = ByteArray(track.bufferCapacityInFrames * bytesPerFrame)
-            val written = track.write(silence, 0, silence.size, AudioTrack.WRITE_NON_BLOCKING)
+            // Before API 31 the gate is fixed at buffer capacity. Silent PCM
+            // starts the device without extending the core's audible timeline.
+            val eofSilence = ByteArray(track.bufferCapacityInFrames * bytesPerFrame)
+            val tail = checkedSnapshot()?.first ?: return
+            val written = if (tunneled) {
+                val buffer = ByteBuffer.allocateDirect(eofSilence.size)
+                track.write(buffer, buffer.remaining(), AudioTrack.WRITE_NON_BLOCKING, tail * 1000)
+            } else track.write(eofSilence, 0, eofSilence.size,
+                AudioTrack.WRITE_NON_BLOCKING)
             if (written < 0) throw IllegalStateException("AudioTrack EOF padding failed: $written")
         }
         endOfInput = true
@@ -271,7 +307,8 @@ internal class CoreAudioOutput {
         val created = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
+                .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                .setFlags(if (tunneled) AudioAttributes.FLAG_HW_AV_SYNC else 0).build())
             .setAudioFormat(format)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(capacity)
@@ -280,6 +317,9 @@ internal class CoreAudioOutput {
             created.release()
             throw IllegalStateException("AudioTrack initialization failed")
         }
+        // The first track opens lazily, and route/layout changes replace it.
+        // Keep a previously selected volume (including mute) on every track.
+        created.setVolume(volume)
         track?.release()
         track = created
         channels = nextChannels

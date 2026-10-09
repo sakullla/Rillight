@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import zlib
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'packages/rillight_player/native'))
@@ -91,7 +92,7 @@ if sys.platform == 'win32':
     pinned_dlls = {Path(relative).name.lower()
                    for relative in marker['libraries']
                    if relative.startswith('bin/') and relative.lower().endswith('.dll')}
-    expected_dlls = pinned_dlls | {'flutter_windows.dll'} | {
+    expected_dlls = pinned_dlls | {'flutter_windows.dll', 'rillight_crc32.dll'} | {
         f'{name}_plugin.dll'.lower() for name in plugins
     }
     bundled_dlls = {path.name.lower() for path in bundle.glob('*.dll')}
@@ -106,11 +107,21 @@ if sys.platform == 'win32':
         library.rillight_core_ffmpeg_versions.restype = ctypes.c_char_p
         abi = library.rillight_core_abi_version()
         versions = library.rillight_core_ffmpeg_versions().decode('ascii')
+        checksum = ctypes.CDLL(str(bundle / 'rillight_crc32.dll'))
+        checksum.rillight_crc32.restype = ctypes.c_uint32
+        checksum.rillight_crc32.argtypes = [ctypes.c_uint32, ctypes.c_void_p,
+                                           ctypes.c_size_t]
+        vector = b'123456789' * 64  # Exercises the PCLMUL bulk path when supported.
+        if checksum.rillight_crc32(0, ctypes.c_char_p(vector), len(vector)) != zlib.crc32(vector):
+            raise RuntimeError('Bundled native IEEE CRC32 self-test failed')
+        checksum.rillight_crc32_backend.restype = ctypes.c_int
+        crc_backend = checksum.rillight_crc32_backend()
     header = (ROOT / 'packages/rillight_player/native/core/rillight_core.h').read_text()
     expected_abi = int(re.search(r'#define RILLIGHT_CORE_ABI_VERSION (\d+)', header).group(1))
     if abi != expected_abi or not matches_ffmpeg_version(versions):
         raise RuntimeError(f'Loaded Windows core/version mismatch: ABI {abi}, {versions}')
-    print(json.dumps({'coreAbi': abi, 'versions': versions}, sort_keys=True))
+    print(json.dumps({'coreAbi': abi, 'versions': versions,
+                      'crc32Backend': crc_backend}, sort_keys=True))
 else:
     print('Non-Windows host: static dependency scan only')
 print('Retired player dependencies and available core bundle verified.')

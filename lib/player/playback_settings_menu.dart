@@ -11,12 +11,16 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/player/playback_output_panel.dart';
 import 'package:rillight/player/playback_output_status.dart';
+import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/phone_subtitle_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
+import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/track_picker.dart';
 
-enum _SettingsSection { speed, skip, audio, quality, source, output }
+enum _SettingsSection { speed, skip, subtitles, audio, quality, source, output }
 
 /// 分类始终留在面板里，改值时不收起。窄窗口改成顶部分类条，控件相同。
 class PlaybackSettingsMenu extends StatefulWidget {
@@ -115,7 +119,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       builder: (context, menu, _) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SourceSwitchButton(controller: widget.controller),
+          PlaybackLineButton(controller: widget.controller),
           IconButton(
             key: PlayerKeys.more,
             focusNode: _buttonFocus,
@@ -166,6 +170,13 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           if (c.skipOutroEnabled) l10n.settingsSkipOutro,
         ];
         return enabled.isEmpty ? l10n.playerSettingOff : enabled.join(' · ');
+      case _SettingsSection.subtitles:
+        return switch (c.phoneSubtitleSettings.size) {
+          PhoneSubtitleSize.small => l10n.phoneSubtitleSmall,
+          PhoneSubtitleSize.standard => l10n.phoneSubtitleStandard,
+          PhoneSubtitleSize.large => l10n.phoneSubtitleLarge,
+          PhoneSubtitleSize.extraLarge => l10n.phoneSubtitleExtraLarge,
+        };
       case _SettingsSection.audio:
         for (final track in c.selectableAudioTracks) {
           if (track.index == c.audioStreamIndex) return track.label;
@@ -200,6 +211,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         l10n.playerSkipSettings,
         Icons.skip_next_rounded,
         const Key('player-skip-settings-section'),
+      ),
+      _SettingsSection.subtitles: (
+        l10n.phoneSubtitleSize,
+        Icons.subtitles_rounded,
+        const Key('player-subtitle-size-section'),
       ),
       if (c.canSwitchAudioTrack)
         _SettingsSection.audio: (
@@ -309,6 +325,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               enabled: !_pending && !c.loading,
               onSelected: (rate) => unawaited(_apply(() => c.setRate(rate))),
             )
+          else if (_isListSection(section))
+            Expanded(child: _listPicker(context, section))
           else
             ..._controls(context, section),
         ],
@@ -353,6 +371,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             child: ScrollConfiguration(
               behavior: const _CategoryScrollBehavior(),
               child: ListView(
+                key: const Key('player-settings-categories'),
                 scrollDirection: Axis.horizontal,
                 primary: false,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -364,13 +383,88 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             ),
           ),
           Expanded(
-            child: SingleChildScrollView(
-              key: ValueKey('player-settings-content-${section.name}'),
-              primary: false,
-              child: content,
-            ),
+            // 音轨/片源等列表分区自带滚动与搜索,不再套外层滚轴。
+            child: _isListSection(section)
+                ? KeyedSubtree(
+                    key: ValueKey('player-settings-content-${section.name}'),
+                    child: content,
+                  )
+                : SingleChildScrollView(
+                    key: ValueKey('player-settings-content-${section.name}'),
+                    primary: false,
+                    child: content,
+                  ),
           ),
         ],
+      ),
+    );
+  }
+
+  bool _isListSection(_SettingsSection section) =>
+      section == _SettingsSection.audio || section == _SettingsSection.source;
+
+  /// 长列表分区:超阈值自动出现搜索框,选项懒构建。
+  Widget _listPicker(BuildContext context, _SettingsSection section) {
+    final c = widget.controller;
+    final enabled = !_pending && !c.loading;
+    switch (section) {
+      case _SettingsSection.audio:
+        return TrackPickerList(
+          options: [
+            for (final track in c.selectableAudioTracks)
+              TrackPickerOption(
+                title: Text(
+                  track.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: _trackMeta(context, track),
+                searchText:
+                    '${track.label} ${track.language ?? ''} '
+                    '${track.codec ?? ''} ${track.displayTitle ?? ''}',
+                selected: track.index == c.audioStreamIndex,
+                onTap: enabled
+                    ? () => unawaited(_apply(() => c.setAudio(track.index)))
+                    : null,
+              ),
+          ],
+        );
+      case _SettingsSection.source:
+        return TrackPickerList(
+          options: [
+            for (final source in c.mediaSources)
+              TrackPickerOption(
+                title: MediaSourceMenuTile(view: source.presentation),
+                searchText:
+                    '${source.name ?? ''} ${source.id} '
+                    '${source.presentation.headline} '
+                    '${source.presentation.detail ?? ''}',
+                selected: source.id == c.resolved?.mediaSource.id,
+                onTap: enabled
+                    ? () => unawaited(
+                        _apply(() async {
+                          await c.switchMediaVersion(source.id);
+                        }),
+                      )
+                    : null,
+              ),
+          ],
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget? _trackMeta(BuildContext context, MediaStreamInfo track) {
+    final meta = trackMetaLabel(AppLocalizations.of(context), track);
+    if (meta.isEmpty) return null;
+    final theme = Theme.of(context);
+    return Text(
+      meta,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurface.withValues(alpha: .68),
       ),
     );
   }
@@ -378,88 +472,46 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   List<Widget> _controls(BuildContext context, _SettingsSection section) {
     final c = widget.controller;
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
     final enabled = !_pending && !c.loading;
     switch (section) {
       case _SettingsSection.speed:
         return const [];
-      case _SettingsSection.skip:
+      case _SettingsSection.subtitles:
+        if (!c.canAdjustSubtitleSize) {
+          return [Text(l10n.phoneSubtitleUnavailable)];
+        }
         return [
-          PlaybackSkipSettings(controller: c, compact: true),
-          const SizedBox(height: 12),
-          Text(
-            l10n.playerSkipSettingsSaved,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+          PhoneSubtitleSettingsControls(
+            value: c.phoneSubtitleSettings,
+            showHeading: false,
+            error: c.subtitlePresentationError,
+            onChanged: (value) =>
+                unawaited(_apply(() => c.setPhoneSubtitleSettings(value))),
           ),
         ];
-      case _SettingsSection.audio:
-        return [
-          for (final track in c.selectableAudioTracks)
-            _choice(
-              Text(track.label, maxLines: 2, overflow: TextOverflow.ellipsis),
-              track.index == c.audioStreamIndex,
-              enabled
-                  ? () => unawaited(_apply(() => c.setAudio(track.index)))
-                  : null,
-            ),
-        ];
+      case _SettingsSection.skip:
+        return [PlaybackSkipSettings(controller: c, compact: true)];
       case _SettingsSection.quality:
         return [
-          for (final bitrate in c.availableBitrates)
-            _choice(
-              Text(playerQualityLabel(l10n, bitrate)),
-              bitrate == c.maxStreamingBitrate,
-              enabled
-                  ? () => unawaited(_apply(() => c.setMaxBitrate(bitrate)))
-                  : null,
-            ),
-        ];
-      case _SettingsSection.source:
-        return [
-          for (final source in c.mediaSources)
-            _choice(
-              MediaSourceMenuTile(view: source.presentation),
-              source.id == c.resolved?.mediaSource.id,
-              enabled
-                  ? () => unawaited(
-                      _apply(() async {
-                        await c.switchMediaVersion(source.id);
-                      }),
-                    )
-                  : null,
-            ),
+          PlayerOptionGrid(
+            options: [
+              for (final bitrate in c.availableBitrates)
+                PlayerOption(
+                  key: ValueKey('player-quality-$bitrate'),
+                  label: playerQualityLabel(l10n, bitrate),
+                  selected: bitrate == c.maxStreamingBitrate,
+                  onPressed: enabled
+                      ? () => unawaited(_apply(() => c.setMaxBitrate(bitrate)))
+                      : null,
+                ),
+            ],
+          ),
         ];
       case _SettingsSection.output:
         return [PlaybackOutputPanelView(controller: c)];
+      default:
+        return const [];
     }
-  }
-
-  Widget _choice(Widget label, bool selected, VoidCallback? onPressed) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: RevealSelected(
-        selected: selected,
-        child: ListTile(
-          selected: selected,
-          selectedTileColor: scheme.surfaceBright,
-          selectedColor: scheme.onSurface,
-          iconColor: scheme.onSurfaceVariant,
-          textColor: scheme.onSurface,
-          shape: const StadiumBorder(),
-          minTileHeight: 44,
-          visualDensity: VisualDensity.compact,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-          title: label,
-          trailing: selected
-              ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurface)
-              : const SizedBox(width: 18),
-          onTap: onPressed,
-        ),
-      ),
-    );
   }
 }
 

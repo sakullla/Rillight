@@ -82,8 +82,87 @@ abstract final class AppTheme {
     scrim: Colors.black,
   );
 
+  /// 电视深色调:中性石墨底,影像为主角,大屏长时间观看不偏紫不刺眼。
+  /// 焦点用反相实底(近白底 + 深字),不依赖品牌色。
+  @visibleForTesting
+  static const Tones tvDarkTones = Tones._(
+    base: Color(0xFF0E1014),
+    surfaceLowest: Color(0xFF121419),
+    surfaceLow: Color(0xFF171A20),
+    surface: Color(0xFF1D2027),
+    surfaceHigh: Color(0xFF24282F),
+    surfaceHighest: Color(0xFF2D3139),
+    surfaceBright: Color(0xFF383D46),
+    onSurface: Color(0xFFF2F3F5),
+    onSurfaceVariant: Color(0xFFA9AFBA),
+    outline: Color(0xFF6E7480),
+    outlineVariant: Color(0xFF2E323A),
+    accent: Color(0xFFB8B8FF),
+    onAccent: Color(0xFF242052),
+    accentContainer: Color(0xFF37355F),
+    onAccentContainer: Color(0xFFE4DFFF),
+    secondary: Color(0xFFEDB7CD),
+    onSecondary: Color(0xFF462437),
+    secondaryContainer: Color(0xFF4E3447),
+    onSecondaryContainer: Color(0xFFFFDBEA),
+    tertiary: Color(0xFF9EDBD5),
+    onTertiary: Color(0xFF143C3B),
+    tertiaryContainer: Color(0xFF284C4C),
+    onTertiaryContainer: Color(0xFFC1F2EC),
+    error: Color(0xFFF08A80),
+    onError: Color(0xFF2A0A08),
+    errorContainer: Color(0xFF5C2320),
+    onErrorContainer: Color(0xFFFFD2CD),
+    inverseSurface: Color(0xFFF2F3F5),
+    onInverseSurface: Color(0xFF15171C),
+    inversePrimary: Color(0xFF5757A8),
+    scrim: Colors.black,
+  );
+
+  /// 电视浅色调:暖灰白底,与深色调同一分层与反相焦点。
+  @visibleForTesting
+  static const Tones tvLightTones = Tones._(
+    base: Color(0xFFF3F4F6),
+    surfaceLowest: Color(0xFFFFFFFF),
+    surfaceLow: Color(0xFFFFFFFF),
+    surface: Color(0xFFEBEDF0),
+    surfaceHigh: Color(0xFFE3E5E9),
+    surfaceHighest: Color(0xFFD9DCE1),
+    surfaceBright: Color(0xFFD0D4DA),
+    onSurface: Color(0xFF1A1C20),
+    onSurfaceVariant: Color(0xFF555B66),
+    outline: Color(0xFF7A808B),
+    outlineVariant: Color(0xFFD5D8DE),
+    accent: Color(0xFF5757A8),
+    onAccent: Color(0xFFFFFFFF),
+    accentContainer: Color(0xFFE3E1FF),
+    onAccentContainer: Color(0xFF343264),
+    secondary: Color(0xFF8E4E6D),
+    onSecondary: Color(0xFFFFFFFF),
+    secondaryContainer: Color(0xFFF9DEEA),
+    onSecondaryContainer: Color(0xFF63334B),
+    tertiary: Color(0xFF306D69),
+    onTertiary: Color(0xFFFFFFFF),
+    tertiaryContainer: Color(0xFFD2EFEA),
+    onTertiaryContainer: Color(0xFF214D49),
+    error: Color(0xFFB03A32),
+    onError: Color(0xFFFFFFFF),
+    errorContainer: Color(0xFFF5D4D0),
+    onErrorContainer: Color(0xFF4A120E),
+    inverseSurface: Color(0xFF1A1C20),
+    onInverseSurface: Color(0xFFF7F8FA),
+    inversePrimary: Color(0xFFB8B8FF),
+    scrim: Colors.black,
+  );
+
   /// 冷蓝灰深色主题(默认)。
   static final ThemeData _dark = _theme(darkTones);
+  static final ThemeData _tvDark = _theme(tvDarkTones);
+  static final ThemeData _tvLight = _theme(tvLightTones);
+
+  /// Android TV 深色/浅色。字号由 TvStageTheme 按 960×540 画布再换算。
+  static ThemeData tvDark() => _tvDark;
+  static ThemeData tvLight() => _tvLight;
   static final ThemeData _light = _theme(lightTones);
   static final ThemeData _phoneLight = _phone(_light);
   static final ThemeData _phoneDark = _phone(_dark);

@@ -107,53 +107,100 @@ class _HomeLoading extends StatelessWidget {
         LayoutBuilder(
           builder: (context, constraints) {
             final width = constraints.maxWidth;
-            final top = MediaQuery.viewPaddingOf(context).top;
+            final viewport = MediaQuery.sizeOf(context).height;
+            final top = MediaQuery.viewPaddingOf(context).top + 56;
             final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+            final posterHeight = PhoneHero.posterHeightFor(
+              width,
+              viewportHeight: viewport,
+            );
+            final posterWidth = posterHeight * 2 / 3;
+            // 与成品同形:居中 2:3 海报、两侧露出邻卡、下方标题/元信息/按钮。
             return SizedBox(
               height:
                   top +
-                  56 +
-                  PhoneHero.contentHeightFor(width, textScale: scale),
+                  PhoneHero.contentHeightFor(
+                    width,
+                    textScale: scale,
+                    viewportHeight: viewport,
+                  ),
               child: Padding(
-                padding: EdgeInsets.fromLTRB(16, top + 56, 16, 44),
-                child: Stack(
+                padding: EdgeInsets.only(top: top + PhoneHero.topGap),
+                child: Column(
                   children: [
-                    Positioned.fill(
-                      child: SkeletonBlock(
-                        width: width - 32,
-                        height:
-                            PhoneHero.contentHeightFor(
-                              width,
-                              textScale: scale,
-                            ) -
-                            44,
-                        borderRadius: BorderRadius.circular(24),
-                        animated: animate,
+                    SizedBox(
+                      height: posterHeight,
+                      child: ClipRect(
+                        child: OverflowBox(
+                          maxWidth: double.infinity,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              for (var i = 0; i < 3; i++) ...[
+                                if (i > 0)
+                                  const SizedBox(
+                                    width: PhoneHero.posterSpacing,
+                                  ),
+                                SkeletonBlock(
+                                  width: i == 1
+                                      ? posterWidth
+                                      : posterWidth * .88,
+                                  height: i == 1
+                                      ? posterHeight
+                                      : posterHeight * .88,
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadii.lg,
+                                  ),
+                                  animated: animate,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                    Positioned(
-                      left: 20,
-                      right: 20,
-                      bottom: 16,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(height: PhoneHero.posterGap),
+                    SkeletonBlock(
+                      width: 72,
+                      height: 12 * scale,
+                      animated: animate,
+                    ),
+                    const SizedBox(height: 10),
+                    SkeletonBlock(
+                      width: (width - 48) * .62,
+                      height: 24 * scale,
+                      animated: animate,
+                    ),
+                    const SizedBox(height: 10),
+                    SkeletonBlock(
+                      width: (width - 48) * .42,
+                      height: 14 * scale,
+                      animated: animate,
+                    ),
+                    const SizedBox(height: PhoneHero.actionsGap),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: PhoneHero.sidePadding,
+                      ),
+                      child: Row(
                         children: [
-                          SkeletonBlock(
-                            width: (width - 72) * .68,
-                            height: 28 * scale,
-                            animated: animate,
+                          Expanded(
+                            flex: 3,
+                            child: SkeletonBlock(
+                              height: PhoneHero.actionsHeight,
+                              borderRadius: BorderRadius.circular(24),
+                              animated: animate,
+                            ),
                           ),
-                          const SizedBox(height: 8),
-                          SkeletonBlock(
-                            width: 120,
-                            height: 14 * scale,
-                            animated: animate,
-                          ),
-                          const SizedBox(height: 16),
-                          SkeletonBlock(
-                            width: 180,
-                            height: 48,
-                            animated: animate,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: SkeletonBlock(
+                              height: PhoneHero.actionsHeight,
+                              borderRadius: BorderRadius.circular(24),
+                              animated: animate,
+                            ),
                           ),
                         ],
                       ),
@@ -340,16 +387,27 @@ class MobileEmptyState extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: Column(
             children: [
-              Icon(
-                Icons.movie_outlined,
-                size: AppSpacing.huge,
-                color: scheme.onSurfaceVariant,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHigh,
+                  shape: BoxShape.circle,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Icon(
+                    Icons.movie_outlined,
+                    size: 28,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.md),
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
               ),
               if (action != null) ...[
                 const SizedBox(height: AppSpacing.md),
@@ -391,12 +449,21 @@ class MobileFailureState extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: Column(
             children: [
-              Icon(
-                Icons.error_outline,
-                size: AppSpacing.huge,
-                color: scheme.error,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.errorContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Icon(
+                    Icons.error_outline_rounded,
+                    size: 28,
+                    color: scheme.onErrorContainer,
+                  ),
+                ),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.md),
               Text(
                 message,
                 textAlign: TextAlign.center,

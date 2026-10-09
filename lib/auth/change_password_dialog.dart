@@ -95,11 +95,13 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
         return AlertDialog(
           title: Text(l10n.changePassword),
           content: SizedBox(
-            width: AppViewport.fit(
-              360,
-              MediaQuery.sizeOf(context).width - 80,
-              MediaQuery.sizeOf(context),
-            ),
+            width: tv
+                ? context.tvdp(420)
+                : AppViewport.fit(
+                    360,
+                    MediaQuery.sizeOf(context).width - 80,
+                    MediaQuery.sizeOf(context),
+                  ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -153,24 +155,34 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                       ),
                     ),
                   if (tv) ...[
-                    const SizedBox(height: 12),
-                    TvAction(
-                      key: ChangePasswordDialog.cancelKey,
-                      onPressed: auth.isBusy
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      child: Text(l10n.cancelAction),
-                    ),
-                    TvAction(
-                      key: ChangePasswordDialog.submitKey,
-                      onPressed: canSubmit ? _submit : null,
-                      child: auth.isBusy
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Text(l10n.changePasswordSubmit),
+                    SizedBox(height: context.tvdp(16)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TvAction(
+                          key: ChangePasswordDialog.cancelKey,
+                          pill: true,
+                          onPressed: auth.isBusy
+                              ? null
+                              : () => Navigator.of(context).pop(),
+                          child: Text(l10n.cancelAction),
+                        ),
+                        SizedBox(width: context.tvdp(10)),
+                        TvAction(
+                          key: ChangePasswordDialog.submitKey,
+                          pill: true,
+                          emphasized: true,
+                          onPressed: canSubmit ? _submit : null,
+                          child: auth.isBusy
+                              ? SizedBox.square(
+                                  dimension: context.tvdp(16),
+                                  child: const CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(l10n.changePasswordSubmit),
+                        ),
+                      ],
                     ),
                   ],
                 ],
@@ -214,8 +226,16 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
         autofocus: true,
       ),
       Padding(
-        padding: const EdgeInsets.only(left: 8, bottom: 8),
-        child: Text(l10n.changePasswordCurrentHint),
+        padding: EdgeInsets.fromLTRB(
+          context.tvdp(4),
+          context.tvdp(6),
+          0,
+          context.tvdp(12),
+        ),
+        child: Text(
+          l10n.changePasswordCurrentHint,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       ),
       TvInput(
         key: ChangePasswordDialog.newPasswordField,
@@ -223,6 +243,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
         controller: _newPassword,
         secret: true,
       ),
+      SizedBox(height: context.tvdp(8)),
       TvInput(
         key: ChangePasswordDialog.confirmField,
         label: l10n.changePasswordConfirm,

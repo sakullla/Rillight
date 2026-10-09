@@ -6,11 +6,46 @@ import shutil
 import struct
 import tempfile
 import os
+import re
 import subprocess
 import unittest
+import sys
 from unittest.mock import patch
 
 import linux_release_checks as checks
+CORE_ABI = int(re.search(
+    r'#define RILLIGHT_CORE_ABI_VERSION (\d+)',
+    (checks.ROOT / 'packages/rillight_player/native/core/rillight_core.h').read_text(),
+).group(1))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'linux/packaging'))
+import wait_for_window
+
+
+class WindowDiscoveryTests(unittest.TestCase):
+    def test_retries_search_and_pid_races_and_rejects_other_process(self):
+        responses = [
+            (1, '9'),  # BadWindow during search: partial output is not usable.
+            (0, '10 11 12'),
+            (1, ''),  # Window 10 disappeared before PID lookup.
+            (0, '111'), (0, '112'),
+        ]
+        def run(args, **kwargs):
+            code, stdout = responses.pop(0)
+            return subprocess.CompletedProcess(args, code, stdout, '')
+        with patch.object(wait_for_window.subprocess, 'run', side_effect=run), \
+                patch.object(wait_for_window.os, 'readlink', side_effect=[
+                    '/usr/bin/unrelated', '/opt/rillight/rillight']), \
+                patch.object(wait_for_window.time, 'sleep'):
+            self.assertEqual(wait_for_window.find_window(
+                'class', '.*rillight.*', '/opt/rillight/rillight'), ('12', '112'))
+        self.assertEqual(responses, [])
+
+    def test_missing_window_fails_instead_of_passing(self):
+        with patch.object(wait_for_window.time, 'monotonic', side_effect=[0, 2]), \
+                patch.object(wait_for_window.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'No live'):
+                wait_for_window.find_window('name', 'diagnostic', '/usr/bin/zenity', 1)
+            run.assert_not_called()
 
 
 def write_elf(path, needed=(), soname=None, runpath='$ORIGIN', rpath=None):
@@ -68,7 +103,7 @@ class LinuxReleaseTests(unittest.TestCase):
     def write_report(self):
         notices = self.bundle / 'data/rillight_player'
         (notices / 'loaded-versions.json').write_text(json.dumps({
-            'coreAbi': 9, 'versions': 'ffmpeg=9.0.2;avformat=1',
+            'coreAbi': CORE_ABI, 'versions': 'ffmpeg=9.0.2;avformat=1',
             'bundledLibraries': {
                 str(path.relative_to(self.bundle)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in (self.bundle / 'lib').glob('*.so*') if path.is_file() and not path.is_symlink()
@@ -90,13 +125,17 @@ class LinuxReleaseTests(unittest.TestCase):
                 return self.value
 
         class Core:
-            rillight_core_abi_version = Function(9)
+            rillight_core_abi_version = Function(CORE_ABI)
             rillight_core_ffmpeg_versions = Function(b'ffmpeg=n9.0.2;avformat=1')
 
         with patch.object(checks.ctypes, 'CDLL', return_value=Core()):
-            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 9)
+            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], CORE_ABI)
             Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=9.0.2;avformat=1'
-            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], 9)
+            self.assertEqual(checks.loaded_core_versions(self.bundle)['coreAbi'], CORE_ABI)
+            Core.rillight_core_abi_version.value = CORE_ABI - 1
+            with self.assertRaisesRegex(ValueError, 'version mismatch'):
+                checks.loaded_core_versions(self.bundle)
+            Core.rillight_core_abi_version.value = CORE_ABI
             Core.rillight_core_ffmpeg_versions.value = b'ffmpeg=n9.0.1;avformat=1'
             with self.assertRaisesRegex(ValueError, 'version mismatch'):
                 checks.loaded_core_versions(self.bundle)

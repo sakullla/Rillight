@@ -44,7 +44,7 @@ node tool/capture-ui.mjs --only 'poster-hover*,player-settings-*' --platform des
 node tool/capture-ui.mjs --only server-delete-confirm --theme light
 ```
 
-Features are `home`, `library`, `detail`, `search`, `servers`, `settings`, `login`, `player` and `danmaku`; comma-separated values are supported. `--only` accepts exact state IDs or quoted `*`/`?` patterns. Combine filters with `--list` before a focused run. `--size` selects the profile width: desktop 1024/1440, phone 360/412 (including landscape playback), TV 1920. Filters combine with AND; values within one filter combine with OR. No matching state is an error, not a successful empty run.
+Features are `home`, `library`, `detail`, `search`, `servers`, `settings`, `login`, `player` and `danmaku`; comma-separated values are supported. `--only` accepts exact state IDs or quoted `*`/`?` patterns. Combine filters with `--list` before a focused run. `--size` selects the profile width: desktop 1024/1440, phone 360/412 (including landscape playback), TV 1920 (1080p panel, DPR 2) and 3840 (4K panel, DPR 4); both TV profiles use the real 960×540 logical canvas. Filters combine with AND; values within one filter combine with OR. No matching state is an error, not a successful empty run.
 
 Requires Node 18+, the project Flutter version and a Chinese font. Set `RILLIGHT_CAPTURE_FONT` to an absolute TTF/OTF/TTC path if automatic font discovery fails. Each run writes PNGs, `index.html`, `capture.log` and `manifest.json` to a unique directory under ignored `build/ui-capture/`; `--out` changes the output root. The report records the font hash, Flutter/host version, dimensions, application/rendered themes and missing states. Use the same environment and font for visual comparisons.
 

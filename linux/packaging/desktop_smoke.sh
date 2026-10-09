@@ -22,8 +22,8 @@ close_window() {
   xdotool windowclose "$1" >/dev/null 2>&1 || true
 }
 gtk-launch rillight
-window=$(timeout 30s xdotool search --sync --onlyvisible --class '.*rillight.*' | head -1)
-main_pid=$(xdotool getwindowpid "$window")
+read -r window main_pid < <(python3 "$(dirname "$0")/wait_for_window.py" \
+  --match class --pattern '.*rillight.*' --executable /opt/rillight/rillight)
 test "$(readlink "/proc/$main_pid/exe")" = /opt/rillight/rillight
 kill -0 "$main_pid"
 close_window "$window"
@@ -38,9 +38,9 @@ main_pid=''
 # a visible diagnostic, rather than silently using another player.
 mv "$media" "$media.disabled"
 gtk-launch rillight
-dialog=$(timeout 15s xdotool search --sync --onlyvisible --name '^Rillight 启动失败$' | head -1)
+read -r dialog dialog_pid < <(python3 "$(dirname "$0")/wait_for_window.py" \
+  --match name --pattern '^Rillight 启动失败$' --executable /usr/bin/zenity --timeout 15)
 test -n "$dialog"
-dialog_pid=$(xdotool getwindowpid "$dialog")
 test "$(readlink "/proc/$dialog_pid/exe")" = /usr/bin/zenity
 python3 "$(dirname "$0")/assert_diagnostic.py" "$dialog_pid" "$XDG_STATE_HOME/diagnostic-accessibility.json"
 grep -q '缺少 librillight_core.so' "$XDG_STATE_HOME/rillight/launch.log"

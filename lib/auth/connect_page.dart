@@ -326,14 +326,6 @@ class _ConnectPageState extends State<ConnectPage> {
                       children: [
                         _BrandHeader(l10n: l10n),
                         const SizedBox(height: AppSpacing.xl),
-                        // 登录前也能切外观;偏好持久化,设置页同源。
-                        const Align(
-                          alignment: Alignment.centerRight,
-                          child: AppearanceMenuButton(
-                            buttonKey: ConnectFormKeys.connectAppearanceKey,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
                         _buildFormCard(context, l10n, auth),
                         const SizedBox(height: AppSpacing.xxl),
                         _buildSavedServers(context, l10n, auth),
@@ -684,7 +676,7 @@ class _ConnectPageState extends State<ConnectPage> {
                   ),
                   if (selected)
                     Icon(
-                      Icons.check_circle,
+                      Icons.check_circle_rounded,
                       color: colorScheme.primary,
                       size: 20,
                     ),
@@ -794,34 +786,44 @@ class _BrandHeader extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: colorScheme.primaryContainer,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-          ),
-          child: Icon(
-            Icons.play_circle_fill,
-            color: colorScheme.onPrimaryContainer,
-            size: 26,
+        const SizedBox(width: 48),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: Icon(
+                  Icons.play_circle_rounded,
+                  color: colorScheme.onPrimaryContainer,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(l10n.appName, style: theme.textTheme.headlineSmall),
+                  Text(
+                    l10n.connectTitle,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: AppSpacing.md),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(l10n.appName, style: theme.textTheme.headlineSmall),
-            Text(
-              l10n.connectTitle,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+        const AppearanceMenuButton(
+          buttonKey: ConnectFormKeys.connectAppearanceKey,
         ),
       ],
     );

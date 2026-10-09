@@ -38,4 +38,17 @@ Future<void> ensureVisibleBelowTopBar(
     duration: Duration.zero,
   );
   await settle(tester);
+  // Nested/header layouts can clamp ensureVisible above the overlaid chrome.
+  // Reveal the entire hit target below it before the test sends a pointer.
+  final rect = tester.getRect(finder);
+  if (rect.top < barBottom + 8) {
+    final position = scrollable.position;
+    position.jumpTo(
+      (position.pixels - (barBottom + 8 - rect.top)).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
+    await settle(tester);
+  }
 }

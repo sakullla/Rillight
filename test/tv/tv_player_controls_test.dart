@@ -21,8 +21,8 @@ import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
-import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/source_switch_menu.dart';
+import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -34,8 +34,15 @@ void main() {
     bool reducedMotion = false,
     Size size = const Size(960, 540),
     String itemId = 'movie-inception',
+    String? extraLine,
+    bool multipleSources = false,
   }) async {
     final server = FakeEmbyServer();
+    if (multipleSources) {
+      server.items.firstWhere((i) => i.id == itemId).extraSources = const [
+        FakeMediaSource(id: 'alternate', name: 'HDR60 alternate'),
+      ];
+    }
     final auth = AuthController.memory(
       client: EmbyClient(
         device: const EmbyDeviceInfo(
@@ -54,6 +61,10 @@ void main() {
         password: 'correct-horse',
       ),
     );
+    if (extraLine != null) {
+      final line = extraLine;
+      await tester.runAsync(() => auth.addLine(auth.session!.server.id, line));
+    }
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -107,6 +118,32 @@ void main() {
         .state<TvPlayerPageState>(find.byType(TvPlayerPage))
         .controller!;
   }
+
+  testWidgets('TV idle controls hide while playback is rebuffering', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend();
+    final current = await start(tester, backend);
+    current.onUserActivity();
+    backend.emitBuffering(true);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect(current.controlsVisible, isFalse);
+    expect(
+      find.byKey(const Key('tv-player-gradient'), skipOffstage: false),
+      findsNothing,
+    );
+    backend.emitBuffering(false);
+    await tester.pump();
+    expect(current.controlsVisible, isFalse);
+    await current.togglePlay();
+    await tester.pump();
+    expect(current.controlsVisible, isTrue);
+    expect(find.byKey(const Key('tv-player-gradient')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+  }, tags: ['integration']);
 
   testWidgets('TV completion focuses replay and remote can replay or close', (
     tester,
@@ -193,6 +230,50 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('TV tracks panel applies subtitle size on the shared surface', (
+    tester,
+  ) async {
+    final video = FakeVideoBackend();
+    final c = await start(tester, video);
+    c.subtitleStreamIndex = 1;
+    c.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/media'),
+      playSessionId: 'session',
+      mediaSource: const PlaybackMediaSource(
+        id: 'only',
+        mediaStreams: [
+          MediaStreamInfo(
+            index: 1,
+            type: 'Subtitle',
+            isTextSubtitleStream: true,
+            displayTitle: 'Chinese',
+          ),
+        ],
+      ),
+      itemId: c.itemId,
+    );
+    c.onUserActivity();
+    await tester.pumpAndSettle();
+    expect(c.canAdjustSubtitleSize, isTrue);
+    await tester.tap(find.byKey(const Key('tv-player-tracks')));
+    await tester.pumpAndSettle();
+    final extraLarge = find.byKey(
+      const ValueKey('tv-subtitle-size-extraLarge'),
+    );
+    await tester.ensureVisible(extraLarge);
+    await tester.pumpAndSettle();
+    await tester.tap(extraLarge);
+    await tester.pumpAndSettle();
+    expect(c.phoneSubtitleSettings.size, PhoneSubtitleSize.extraLarge);
+    expect(video.subtitlePresentation, isNotNull);
+    expect(video.subtitlePresentation!.userScale, 1.5);
+    expect(video.subtitlePresentation!.displayWidth, 960);
+    expect(video.subtitlePresentation!.displayHeight, 540);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
+
   testWidgets(
     'surface remote seek and scan preserve playing and paused intent',
     (tester) async {
@@ -226,6 +307,47 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets(
+    'TV source target retains focus while opening and ignores repeated selection',
+    (tester) async {
+      final video = _SourceSwitchBackend();
+      final c = await start(
+        tester,
+        video,
+        reducedMotion: true,
+        multipleSources: true,
+      );
+      await tester.pumpAndSettle();
+      c.onUserActivity();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tv-player-source')));
+      await tester.pumpAndSettle();
+      final target = find.byKey(const ValueKey('source-alternate'));
+      await tester.ensureVisible(target);
+      video.gate = Completer<void>();
+      await tester.tap(target);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final node = FocusManager.instance.primaryFocus;
+      expect(c.loading, isTrue);
+      expect(node?.canRequestFocus, isTrue);
+      expect(
+        node?.context?.findAncestorWidgetOfExactType<TvAction>()?.key,
+        target.evaluate().single.widget.key,
+      );
+      final opens = video.attempts;
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pump();
+      expect(video.attempts, opens);
+      video.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(c.loading, isFalse);
+      expect(FocusManager.instance.primaryFocus, same(node));
+      await finish(tester);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('D-pad reaches every panel and back restores its entry focus', (
     tester,
   ) async {
@@ -238,23 +360,10 @@ void main() {
     await tester.pumpAndSettle();
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focused(tester, 'tv-player-toggle'), isTrue);
+    expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+    expect(find.text('手动切换'), findsNothing);
     for (final entry in ['tracks', 'quality', 'source', 'skip', 'speed']) {
       await key(tester, LogicalKeyboardKey.arrowRight);
-      if (entry == 'source') {
-        // Manual cross-source switching now has its own action between quality
-        // and the local media-version panel. Exercise rather than skip it.
-        expect(find.byKey(const Key('player-manual-switch')), findsOneWidget);
-        final manualFocus = FocusManager.instance.primaryFocus;
-        await key(tester, LogicalKeyboardKey.select);
-        expect(find.byType(SourceSwitchMenu), findsOneWidget);
-        expect(c.controlsPinned, isTrue);
-        await tester.binding.handlePopRoute();
-        await tester.pumpAndSettle();
-        expect(find.byType(SourceSwitchMenu), findsNothing);
-        expect(FocusManager.instance.primaryFocus, same(manualFocus));
-        expect(c.controlsPinned, isFalse);
-        await key(tester, LogicalKeyboardKey.arrowRight);
-      }
       expect(focused(tester, 'tv-player-$entry'), isTrue);
       final origin = FocusManager.instance.primaryFocus;
       await key(tester, LogicalKeyboardKey.select);
@@ -313,6 +422,40 @@ void main() {
     await finish(tester);
   }, tags: ['integration']);
 
+  testWidgets('TV line list shows only this server and the line in use', (
+    tester,
+  ) async {
+    final c = await start(
+      tester,
+      FakeVideoBackend(),
+      reducedMotion: true,
+      extraLine: 'https://mirror.example:8443',
+    );
+    expect(c.playbackLines, hasLength(2));
+    c.onUserActivity();
+    await tester.pumpAndSettle();
+    expect(find.text('手动切换'), findsNothing);
+    expect(find.text('立即锁定'), findsNothing);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    var found = false;
+    for (var step = 0; step < 6; step++) {
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      if (focused(tester, 'player-playback-lines')) {
+        found = true;
+        break;
+      }
+    }
+    expect(found, isTrue);
+    await key(tester, LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(PlaybackLineMenu), findsOneWidget);
+    expect(find.text('正在使用'), findsOneWidget);
+    expect(find.text('mirror.example:8443'), findsOneWidget);
+    expect(find.text('手动切换'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
+
   testWidgets(
     'timeline confirms preview, hide returns surface focus and zero speed remains visible',
     (tester) async {
@@ -337,7 +480,9 @@ void main() {
         find.byKey(const Key('tv-player-network-speed')),
       );
       expect(speed.bytesPerSecond, 0);
-      expect(speed.textStyle!.fontSize, greaterThanOrEqualTo(20));
+      // 960 画布下不低于 12(1080p 上 24 像素、4K 上 48 像素),
+      // 3 米外仍可读,又不和标题抢视线。
+      expect(speed.textStyle!.fontSize, greaterThanOrEqualTo(12));
       expect(find.textContaining('缓存'), findsNothing);
       expect(
         tester
@@ -639,4 +784,15 @@ class _DelayedBackend extends FakeVideoBackend {
   @override
   Widget buildView({Key? key}) =>
       const ColoredBox(key: Key('native-view'), color: Colors.blue);
+}
+
+class _SourceSwitchBackend extends FakeVideoBackend {
+  Completer<void>? gate;
+  int attempts = 0;
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    attempts++;
+    await gate?.future;
+    await super.open(request);
+  }
 }

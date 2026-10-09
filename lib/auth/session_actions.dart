@@ -20,6 +20,16 @@ class SessionActions extends StatelessWidget {
   const SessionActions({super.key});
 
   static const serverMenuKey = Key('session-current-server');
+
+  /// 未解锁时打开现有 PIN 对话框。已经允许，或对话框解锁成功时返回 true。
+  static Future<bool> ensurePrivateAccess(BuildContext context) async {
+    final auth = AuthScope.of(context);
+    if (!auth.regionAccess.allows(AccessRegion.private)) {
+      await showPrivateAccess(context, auth);
+    }
+    return context.mounted && auth.regionAccess.allows(AccessRegion.private);
+  }
+
   static const addServerKey = Key('session-add-server');
   static const lineSwitchFailureKey = Key('session-line-switch-failure');
 
@@ -42,14 +52,6 @@ class SessionActions extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SettingsAction(),
-            IconButton(
-              key: const Key('session-source-management'),
-              tooltip: l10n.sourceManagement,
-              constraints: kTitleBarIconConstraints,
-              iconSize: 18,
-              icon: const Icon(Icons.tune),
-              onPressed: () => showSourceManagement(context),
-            ),
             IconButton(
               key: serverMenuKey,
               tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',

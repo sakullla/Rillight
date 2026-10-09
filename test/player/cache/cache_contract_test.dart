@@ -328,6 +328,55 @@ void main() {
 
   group('session_byte_cache_test.dart', () {
     test(
+      'dense LRU coverage merges overlapping ranges without hiding a gap',
+      () async {
+        final cache = await SessionByteCache.open(memoryLimitBytes: 16 * 1024);
+        addTearDown(cache.close);
+        for (var i = 1023; i >= 0; i--) {
+          if (i == 512) continue;
+          await cache.put(
+            resource: 'media',
+            generation: 0,
+            offset: i * 4,
+            bytes: Uint8List(6),
+          );
+        }
+        await cache.put(
+          resource: 'other',
+          generation: 0,
+          offset: 2050,
+          bytes: Uint8List(2),
+        );
+        await cache.put(
+          resource: 'media',
+          generation: 1,
+          offset: 2050,
+          bytes: Uint8List(2),
+        );
+        await cache.read(resource: 'media', generation: 0, offset: 0);
+        int? missing(int offset, int length) => cache.firstMissingOffset(
+          resource: 'media',
+          generation: 0,
+          offset: offset,
+          length: length,
+        );
+        expect(missing(0, 4096), 2050);
+        expect(missing(2049, 4), 2050);
+        expect(missing(2052, 2044), isNull);
+        expect(missing(0, 0), isNull);
+        await cache.put(
+          resource: 'media',
+          generation: 0,
+          offset: 2050,
+          bytes: Uint8List(2),
+        );
+        expect(missing(0, 4096), isNull);
+        cache.invalidate('media');
+        expect(missing(0, 4096), 0);
+      },
+    );
+
+    test(
       'coverage survives append but detects eviction and replacement',
       () async {
         final cache = await SessionByteCache.open(memoryLimitBytes: 16);
@@ -516,6 +565,35 @@ void main() {
       },
     );
 
+    test(
+      'verified ranges reject same-size mutations with restored modification time',
+      () async {
+        final cache = await open(memory: 0);
+        await put(cache, 0, [1, 2, 3, 4]);
+        Future<List<CachedByteRange>?> ranges() => cache.availableRanges(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          verifyChecksum: true,
+        );
+        expect(await ranges(), isNotEmpty);
+        final block = root
+            .listSync(recursive: true)
+            .whereType<File>()
+            .singleWhere((file) => file.path.endsWith('.block'));
+        final original = block.statSync();
+        // Mutate in a later filesystem timestamp tick so only ctime can
+        // reveal a same-size, restored-mtime rewrite.
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        block.writeAsBytesSync([4, 3, 2, 1]);
+        block.setLastModifiedSync(original.modified);
+        expect(block.lengthSync(), original.size);
+        expect(block.lastModifiedSync(), original.modified);
+        expect(block.statSync().changed, isNot(original.changed));
+        expect(await ranges(), isEmpty);
+      },
+      skip: Platform.isWindows,
+    );
+
     test('CRC32 remains compatible with the standard known vector', () async {
       final cache = await open(memory: 0);
       await put(cache, 0, utf8.encode('123456789'));
@@ -643,6 +721,9 @@ void main() {
         await put(cache, 0, [1, 2, 3, 4]);
         expect((await read(cache, 1, length: 2))?.bytes, [2, 3]);
         await put(cache, 4, [5, 6, 7, 8]);
+        // Move foreground demand to the second block before checking a disk
+        // read: background publication keeps the current read block in RAM.
+        expect((await read(cache, 4))?.bytes, [5, 6, 7, 8]);
         final disk = await read(cache, 0);
         expect(disk?.source, CacheReadSource.disk);
         expect(disk?.bytes, [1, 2, 3, 4]);
@@ -778,6 +859,61 @@ void main() {
         );
         expect((await read(cache, 76))?.bytes, [1, 2, 3, 4]);
         expect(obstruction.readAsStringSync(), 'keep');
+      },
+    );
+
+    test(
+      'disk prefetch keeps the current foreground block within the RAM budget',
+      () async {
+        final cache = await open(memory: 8);
+        await put(cache, 0, [1, 2, 3, 4]);
+        expect((await read(cache, 0))?.source, CacheReadSource.memory);
+        await put(cache, 4, [5, 6, 7, 8]);
+        await put(cache, 8, [9, 10, 11, 12]);
+        expect((await read(cache, 1))?.source, CacheReadSource.memory);
+        expect((await read(cache, 4))?.bytes, [5, 6, 7, 8]);
+        await put(cache, 12, [13, 14, 15, 16]);
+        expect((await read(cache, 5))?.source, CacheReadSource.memory);
+        expect(cache.diagnostics['memoryPeakBytes'], lessThanOrEqualTo(8));
+      },
+    );
+
+    test(
+      'prefetch preserves alternating foreground blocks without pinning stale reads',
+      () async {
+        final cache = await open(memory: 8);
+        await put(cache, 0, [1, 2, 3, 4]);
+        await put(cache, 4, [5, 6, 7, 8]);
+        await read(cache, 0);
+        await read(cache, 4);
+        for (var offset = 8; offset < 24; offset += 4) {
+          await put(cache, offset, [9, 10, 11, 12]);
+          expect((await read(cache, 1))?.source, CacheReadSource.memory);
+          expect((await read(cache, 5))?.source, CacheReadSource.memory);
+        }
+        // New foreground demand still displaces the older read through LRU.
+        expect((await read(cache, 8))?.source, CacheReadSource.disk);
+        await put(cache, 24, [13, 14, 15, 16]);
+        expect((await read(cache, 9))?.source, CacheReadSource.memory);
+        expect((await read(cache, 5))?.source, CacheReadSource.memory);
+        expect(cache.diagnostics['memoryPeakBytes'], lessThanOrEqualTo(8));
+      },
+    );
+
+    test(
+      'published usage includes fresh foreign mutations and trailing paths',
+      () async {
+        final cache = await open(
+          memory: 0,
+          directory: Directory.fromUri(root.uri),
+        );
+        final foreign = Directory('${root.path}/${'e' * 32}')..createSync();
+        final occupied = File('${foreign.path}/unknown.bin');
+        for (var i = 0; i < 4; i++) {
+          occupied.writeAsBytesSync(List.filled(23 + i * 7, 9));
+          await put(cache, i * 3, [1, 2, 3]);
+          expect(cache.diagnostics['diskBytes'], _actualBytes(root));
+        }
       },
     );
 

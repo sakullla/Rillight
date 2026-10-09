@@ -458,7 +458,8 @@ void main() {
       await _editFocused(tester, 'new-horse');
       await _key(tester, LogicalKeyboardKey.arrowDown);
       expect(_focusedPasswordKey(), ChangePasswordDialog.cancelKey);
-      await _key(tester, LogicalKeyboardKey.arrowDown);
+      // 取消与提交并排在弹窗底部,右移到提交。
+      await _key(tester, LogicalKeyboardKey.arrowRight);
       expect(_focusedPasswordKey(), ChangePasswordDialog.submitKey);
       expect(
         tester

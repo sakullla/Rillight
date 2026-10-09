@@ -19,6 +19,16 @@
   "sourceOperationFailed": "操作失败或访问已撤销；未自动切换来源，请重新检查",
   "sourceRenameLine": "线路昵称",
   "switchManual": "手动切换",
+  "playbackLine": "线路",
+  "playbackLineInUse": "正在使用",
+  "playbackLineFailed": "线路切换失败，已继续使用原来的线路：{reason}",
+  "@playbackLineFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "switchLine": "连接线路（同一服务）",
   "switchVersion": "来源版本（当前条目）",
   "switchCrossSource": "跨服务来源（已确认作品）",
@@ -89,6 +99,10 @@
   "retry": "重试",
   "@retry": {
     "description": "Retry action after a visible failure."
+  },
+  "refresh": "刷新",
+  "@refresh": {
+    "description": "Reload the current list or home rows. This is a manual refresh, not a failure retry."
   },
   "posterPlaceholder": "封面不可用",
   "@posterPlaceholder": {
@@ -382,7 +396,7 @@
   "@home": {
     "description": "Navigation label for the signed-in home catalog."
   },
-  "libraries": "片库",
+  "libraries": "媒体库",
   "@libraries": {
     "description": "Home section of movie and TV library tiles."
   },
@@ -390,7 +404,7 @@
   "@customizeNav": {
     "description": "Action to choose which libraries appear in the top bar and their order."
   },
-  "customizeNavHint": "最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页片库。",
+  "customizeNavHint": "最多勾选 {count} 个。顶栏放不下的会进「更多」。未勾选的不出现在导航、更多和首页媒体库。",
   "@customizeNavHint": {
     "description": "Explains the pin limit in the customize-nav dialog.",
     "placeholders": {
@@ -431,6 +445,10 @@
   "searchEmptyQuery": "输入片名后搜索",
   "@searchEmptyQuery": {
     "description": "Hint shown when search has not been submitted."
+  },
+  "searchServerFilter": "服务器",
+  "@searchServerFilter": {
+    "description": "Opens the server list used to limit a search. Hidden until chosen."
   },
   "searchNoResults": "没有结果",
   "@searchNoResults": {
@@ -685,7 +703,27 @@
   "@details": {
     "description": "Opens the detail page for the featured home hero item."
   },
-  "browseEmpty": "暂无可浏览的内容，请刷新或从片库开始浏览。",
+  "heroNewMovie": "最新电影",
+  "@heroNewMovie": {
+    "description": "Home hero kicker above a recently added movie title."
+  },
+  "heroNewSeries": "最新剧集",
+  "@heroNewSeries": {
+    "description": "Home hero kicker above a recently updated series title."
+  },
+  "heroItemOf": "第 {index} 项，共 {count} 项",
+  "@heroItemOf": {
+    "description": "Accessibility label for the current home hero slide.",
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "browseEmpty": "暂无可浏览的内容，请刷新或从媒体库开始浏览。",
   "browseLoaded": "已载入 {count} 项",
   "@browseLoaded": {
     "placeholders": {
@@ -824,6 +862,27 @@
   "subtitleOff": "关闭字幕",
   "@subtitleOff": {
     "description": "Disable subtitles."
+  },
+  "subtitleMetaExternal": "外挂",
+  "@subtitleMetaExternal": {
+    "description": "Badge marking an external sidecar subtitle file."
+  },
+  "subtitleMetaEmbedded": "内嵌",
+  "@subtitleMetaEmbedded": {
+    "description": "Badge marking an in-container subtitle stream."
+  },
+  "trackMetaDefault": "默认",
+  "@trackMetaDefault": {
+    "description": "Badge marking the server-default track."
+  },
+  "trackPickerCount": "共 {count} 条",
+  "@trackPickerCount": {
+    "description": "Option count above a dense track or media source picker.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "subtitleBitmapBurnIn": "该字幕为位图，将请求服务器烧录",
   "@subtitleBitmapBurnIn": {
@@ -1460,6 +1519,26 @@
   "@tvSettingsOther": {
     "description": "TV settings pane group header for misc actions (add server, change password, logout)."
   },
+  "tvSettingsCurrent": "当前",
+  "@tvSettingsCurrent": {
+    "description": "电视设置里标记当前登录的服务器"
+  },
+  "tvViewAll": "查看全部",
+  "@tvViewAll": {
+    "description": "电视首页行尾进入完整列表的卡片"
+  },
+  "tvConnectHint": "输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。",
+  "@tvConnectHint": {
+    "description": "电视登录页左侧的一句说明"
+  },
+  "tvConnectOr": "或",
+  "@tvConnectOr": {
+    "description": "电视登录表单与手机辅助连接之间的分隔"
+  },
+  "tvUserAgentOptional": "User-Agent(可选)",
+  "@tvUserAgentOptional": {
+    "description": "电视登录表单里的可选 UA 字段"
+  },
   "mobileAddServer": "连接其他服务器",
   "mobileAccountServerGroup": "账户与服务器",
   "@mobileAccountServerGroup": {
@@ -1565,7 +1644,7 @@
   "@phoneHomeEdit": {
     "description": "Home-screen entry and title for reordering or hiding phone home rows."
   },
-  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。片库页仍会列出全部片库。",
+  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。",
   "@phoneHomeEditHint": {
     "description": "Explains that the home editor does not change the libraries tab."
   },
@@ -1585,7 +1664,7 @@
   "@phoneHomeSectionLatestSeries": {
     "description": "Phone home section label for the latest series row."
   },
-  "phoneHomeSectionLibraries": "片库入口",
+  "phoneHomeSectionLibraries": "媒体库",
   "@phoneHomeSectionLibraries": {
     "description": "Phone home section label for the library shortcut row."
   },
@@ -1636,9 +1715,9 @@
   "settingsPlaybackSummary": "倍速、片头片尾、缓冲与硬件解码",
   "settingsDanmakuDisplaySummary": "字号、不透明度、显示区域与屏蔽词",
   "settingsSkipIntro": "片头提示",
-  "settingsSkipIntroHint": "显示跳过片头按钮，需手动点击；关闭后完整播放片头",
+  "settingsSkipIntroHint": "手动跳过片头",
   "settingsSkipOutro": "片尾提示",
-  "settingsSkipOutroHint": "显示跳过或下一集提示；关闭后等播放结束再提示下一集",
+  "settingsSkipOutroHint": "片尾可跳过或进入下一集",
   "playerSkipSettings": "片头与片尾",
   "playerSettingOn": "开启",
   "playerSettingOff": "关闭",
@@ -1761,7 +1840,7 @@
   "filterSortAscending": "升序",
   "filterSortDescending": "降序",
   "phoneDiscover": "发现好故事",
-  "phoneLibraryBrowse": "浏览片库",
+  "phoneLibraryBrowse": "浏览媒体库",
   "phoneSearchHint": "搜索电影、剧集和演员",
   "phoneSelectedSeason": "本季 {count} 集",
   "@phoneSelectedSeason": {
@@ -1771,13 +1850,13 @@
       }
     }
   },
-  "phoneSubtitleSize": "手机字幕大小",
+  "phoneSubtitleSize": "字幕大小",
   "phoneSubtitleSmall": "小",
   "phoneSubtitleStandard": "标准",
   "phoneSubtitleLarge": "大",
   "phoneSubtitleExtraLarge": "特大",
-  "phoneSubtitleOriginal": "使用原始 ASS 样式",
-  "phoneSubtitleOriginalHint": "保留字幕作者的字号与特效排版",
+  "phoneSubtitleOriginal": "原始 ASS 样式",
+  "phoneSubtitleOriginalHint": "保留作者的字号与特效",
   "phoneSubtitleUnavailable": "当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整",
   "phonePictureInPicture": "画中画",
   "phonePipUnavailable": "当前设备或系统设置不支持画中画",
