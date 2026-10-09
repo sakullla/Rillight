@@ -1515,18 +1515,22 @@ void main() {
 
   testWidgets('visible uncached posters fetch while scrolling', (tester) async {
     final auth = await connect(tester);
-    await tester.runAsync(() async {
-      MediaImageCache.instance.markScrollActivity();
-      await tester.pumpWidget(buildSubject(auth, withTag));
-      MediaImageCache.instance.markScrollActivity();
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    });
+    // Keep the scroll-idle timer on the fake clock while engine I/O runs.
+    // A fixed wall-clock delay races request startup on busy CI workers.
+    MediaImageCache.instance.markScrollActivity();
+    await tester.runAsync(() => tester.pumpWidget(buildSubject(auth, withTag)));
+    final waiting = Stopwatch()..start();
+    while (imageRequests().isEmpty &&
+        waiting.elapsed < const Duration(seconds: 5)) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump();
+    }
     await tester.pump();
+    expect(MediaImageCache.instance.isScrollBusy, isTrue);
     expect(imageRequests(), isNotEmpty);
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-    });
-    await tester.pump();
+    await tester.pump(MediaImageCache.defaultScrollIdle);
     await tester.pump();
     expect(imageRequests(), isNotEmpty);
     await tester.pumpWidget(const SizedBox.shrink());

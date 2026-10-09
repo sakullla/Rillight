@@ -2411,7 +2411,7 @@ void main() {
         );
         expect(fixture.proxy.diagnostics['admissionRejected'], 0);
         expect(fixture.proxy.diagnostics['readAheadReaders'], 8);
-      expect(fixture.ranges, ['bytes=0-65535']);
+        expect(fixture.ranges, ['bytes=0-65535']);
         expect(fixture.hold!.isCompleted, isFalse);
       } finally {
         for (final client in clients) {
