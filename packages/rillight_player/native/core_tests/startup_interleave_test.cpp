@@ -24,7 +24,7 @@ struct Bytes {
 // Platform audio sinks do not consume PCM while the core is still OPENING.
 Bytes make_media(int audio_packets = 40, int audio_start_samples = 0,
                  bool video_before_audio = false, bool regular_video = false,
-                 bool resume_colors = false) {
+                 bool resume_colors = false, bool video_run_before_audio = false) {
   AVFormatContext *format = nullptr;
   assert(avformat_alloc_output_context2(&format, nullptr, "matroska", nullptr) == 0);
   format->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
@@ -79,8 +79,13 @@ Bytes make_media(int audio_packets = 40, int audio_start_samples = 0,
     av_packet_unref(packet);
   };
   if (video_before_audio) write_video(0);
+  if (video_run_before_audio) {
+    for (int index = 0; index < audio_packets; index += 5)
+      write_video(index / 5);
+  }
   for (int index = 0; index < audio_packets; ++index) {
-    if (regular_video && index % 5 == 0) write_video(index / 5);
+    if (regular_video && !video_run_before_audio && index % 5 == 0)
+      write_video(index / 5);
     assert(av_new_packet(packet, 960 * 4) == 0);
     std::memset(packet->data, 1, packet->size);
     packet->stream_index = audio->index;
@@ -200,6 +205,46 @@ void cancel(void *) {}
 }  // namespace
 
 int main() {
+  // A valid file can place its video chunk ahead of the matching audio chunk.
+  // The first resumed picture must not allow earlier audio onto the new timeline.
+  auto resume_audio = make_media(120, 0, false, true, true, true);
+  {
+    RillightCoreIo io{&resume_audio, open, read, seek, close, cancel, cancel};
+    auto* core = rillight_core_create(&io);
+    assert(core);
+    uint64_t operation = 0;
+    for (const int64_t start : {int64_t{700000}, int64_t{200000}, int64_t{0}}) {
+      if (start == 200000)
+        assert(rillight_core_seek(core, start, ++operation) == 0);
+      else
+        assert(rillight_core_open_at(core, "resume-audio.mkv", start,
+                                     ++operation) == 0);
+      int64_t first_audio = -1;
+      int64_t last_audio = -1;
+      bool old_audio = false;
+      const auto deadline = std::chrono::steady_clock::now() +
+                            std::chrono::seconds(3);
+      while (std::chrono::steady_clock::now() < deadline && last_audio < 1200000) {
+        while (auto* frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA))
+          rillight_core_release_frame(frame);
+        while (auto* frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16)) {
+          if (first_audio < 0) first_audio = frame->pts_us;
+          old_audio |= frame->pts_us < start - 20000;
+          last_audio = frame->pts_us;
+          rillight_core_release_frame(frame);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      std::printf("resume audio: start=%lld first=%lld last=%lld old=%d\n",
+                  static_cast<long long>(start), static_cast<long long>(first_audio),
+                  static_cast<long long>(last_audio), old_audio);
+      if (old_audio || first_audio < 0 || first_audio > start || last_audio < 1200000) {
+        rillight_core_destroy(core);
+        return 7;
+      }
+    }
+    rillight_core_destroy(core);
+  }
   auto resume_media = make_media(120, 0, false, true, true);
   for (const int64_t start : {int64_t{0}, int64_t{700000}}) {
     RillightCoreIo io{&resume_media, open, read, seek, close, cancel, cancel};

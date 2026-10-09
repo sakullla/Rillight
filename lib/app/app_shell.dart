@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -259,6 +260,7 @@ class _AppShellState extends State<AppShell> {
                         opaque:
                             !_immersiveTopBar(location) ||
                             _barScrolled(location),
+                        scrolled: _barScrolled(location),
                         searchFocus: _searchButtonFocus,
                         onBack: _navigateBack,
                       ),
@@ -307,12 +309,16 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.location,
     required this.opaque,
+    required this.scrolled,
     required this.searchFocus,
     required this.onBack,
   });
 
   final String location;
   final bool opaque;
+
+  /// 当前页内容已滚到顶栏下方:显示细分隔线,片库页把页内大标题收进顶栏。
+  final bool scrolled;
   final FocusNode searchFocus;
   final VoidCallback onBack;
 
@@ -361,12 +367,37 @@ class _TopBar extends StatelessWidget {
     final light = scheme.brightness == Brightness.light;
     final scrim = light ? scheme.surface : scheme.scrim;
     final overlayHeight = height + AppShell.topFadeHeight;
+    final item = AppRoutes.isItem(location);
+    // 片库与货架页自带大标题:未滚动时顶栏不重复,滚过标题后再收进顶栏。
+    final pageHasHeading = _pageHasHeading(location);
+    final showTitle = !item && (!pageHasHeading || scrolled);
+    final highContrast = MediaQuery.highContrastOf(context);
     return SizedBox(
       height: height,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (opaque)
+          if (opaque && item)
+            // 详情页底色随作品取色,实心的应用底色会切出一条色差。
+            // 改为磨砂:模糊下方画面再压一层中性薄色,随页面色调变化。
+            Positioned.fill(
+              child: ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(
+                    sigmaX: AppGlass.barBlur,
+                    sigmaY: AppGlass.barBlur,
+                  ),
+                  child: ColoredBox(
+                    color: (light ? Colors.white : Colors.black).withValues(
+                      alpha: highContrast
+                          ? AppGlass.reducedTint
+                          : (light ? 0.62 : 0.42),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else if (opaque)
             Positioned.fill(
               child: ColoredBox(
                 color: Theme.of(context).scaffoldBackgroundColor,
@@ -406,6 +437,24 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ),
+          if (opaque)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 1,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: scrolled ? 1 : 0,
+                  duration: AppMotion.durationOf(context, AppMotion.fast),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.outlineVariant.withValues(alpha: 0.35),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Material(
             key: AppShell.topBarKey,
             type: MaterialType.transparency,
@@ -423,8 +472,8 @@ class _TopBar extends StatelessWidget {
                           !AppRoutes.showsBrowseNav(location)))
                     Padding(
                       padding: const EdgeInsets.only(right: AppSpacing.xs),
-                      child: ScrimIconButton(
-                        key: CatalogKeys.back,
+                      child: _BackButton(
+                        overArtwork: !opaque,
                         tooltip: !canPop
                             ? l10n.home
                             : MaterialLocalizations.of(
@@ -454,17 +503,25 @@ class _TopBar extends StatelessWidget {
                       onPressed: () {
                         unawaited(showHomeDisplayDialog(context));
                       },
-                      icon: const Icon(Icons.more_horiz),
+                      icon: const Icon(Icons.tune_rounded),
                     ),
                   ] else ...[
                     Expanded(
-                      child: AppRoutes.isItem(location)
+                      child: item
                           ? const SizedBox.shrink()
-                          : Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium,
+                          : AnimatedOpacity(
+                              opacity: showTitle ? 1 : 0,
+                              duration: AppMotion.durationOf(
+                                context,
+                                AppMotion.fast,
+                              ),
+                              child: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
                             ),
                     ),
                   ],
@@ -488,6 +545,48 @@ class _TopBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+bool _pageHasHeading(String location) =>
+    location.startsWith('/library/') ||
+    location.startsWith('/shelf/') ||
+    location.startsWith('/server/');
+
+/// 顶栏返回钮:叠在作品画面上时用带底衬的圆钮保证对比度;
+/// 实心顶栏上改用安静的普通图标钮,不在浅色条上压一块深色圆片。
+class _BackButton extends StatelessWidget {
+  const _BackButton({
+    required this.overArtwork,
+    required this.tooltip,
+    required this.onPressed,
+    required this.icon,
+  });
+
+  final bool overArtwork;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final Widget icon;
+
+  @override
+  Widget build(BuildContext context) {
+    if (overArtwork) {
+      return ScrimIconButton(
+        key: CatalogKeys.back,
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: icon,
+      );
+    }
+    return IconButton(
+      key: CatalogKeys.back,
+      tooltip: tooltip,
+      onPressed: onPressed,
+      iconSize: 20,
+      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+      padding: EdgeInsets.zero,
+      icon: icon,
     );
   }
 }

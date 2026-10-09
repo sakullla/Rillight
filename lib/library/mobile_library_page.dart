@@ -235,13 +235,30 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       appBar: AppBar(
         title: Text(_libraryTitle(l10n), key: const Key('phone-library-title')),
         actions: [
+          // 没有筛选条件时用安静的中性底;有条件时转为强调色,一眼看出列表已被筛过。
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: FilledButton.tonalIcon(
-              key: const Key('phone-library-filter'),
-              onPressed: _openFilters,
-              icon: const Icon(Icons.tune_rounded, size: 20),
-              label: Text(l10n.libraryFilter),
+            child: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) {
+                final scheme = Theme.of(context).colorScheme;
+                final active = _hasCriteria(controller);
+                return FilledButton.tonalIcon(
+                  key: const Key('phone-library-filter'),
+                  onPressed: _openFilters,
+                  style: active
+                      ? null
+                      : FilledButton.styleFrom(
+                          backgroundColor: scheme.surfaceContainerHigh,
+                          foregroundColor: scheme.onSurface,
+                        ),
+                  icon: Icon(
+                    active ? Icons.filter_alt_rounded : Icons.tune_rounded,
+                    size: 20,
+                  ),
+                  label: Text(l10n.libraryFilter),
+                );
+              },
             ),
           ),
         ],

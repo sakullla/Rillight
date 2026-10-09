@@ -3489,7 +3489,8 @@ class PlaybackHttpProxy {
     if (route == null || route.role != PlaybackResourceRole.media.index) return;
     read.resourceKey = route.identity;
     read.localInputId = inputId;
-    // The native input closes its old AVIO before replacing the range. A
+    // A native ownership slot closes its old response before replacement;
+    // Android uses separate slots for retained interleaved track responses. A
     // stalled downstream body may not observe that TCP close until more bytes
     // arrive. Retire it before checking capacity, including bounded ranges.
     for (final previous in _reads) {

@@ -2432,13 +2432,19 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   Widget _results(BuildContext context, List<_SearchHit> visible) {
     final l = AppLocalizations.of(context);
     if (_term.isEmpty) {
-      return AppEmptyView(message: l.searchEmptyQuery);
+      return AppEmptyView(
+        icon: Icons.search_rounded,
+        message: l.searchEmptyQuery,
+      );
     }
     if (_searching && visible.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (visible.isEmpty) {
-      return AppEmptyView(message: l.searchNoResults);
+      return AppEmptyView(
+        icon: Icons.search_off_rounded,
+        message: l.searchNoResults,
+      );
     }
     final failed = visible.where((row) => row.error != null).length;
     return ListView(

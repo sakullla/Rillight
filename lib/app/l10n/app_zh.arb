@@ -486,7 +486,7 @@
   "@similarRow": {
     "description": "Detail shelf title for similar titles when the server returns items."
   },
-  "episodesRow": "集",
+  "episodesRow": "剧集",
   "@episodesRow": {
     "description": "Detail shelf title for episodes in the selected season."
   },
@@ -724,7 +724,7 @@
     }
   },
   "browseEmpty": "暂无可浏览的内容，请刷新或从媒体库开始浏览。",
-  "browseLoaded": "已载入 {count} 项",
+  "browseLoaded": "共 {count} 项",
   "@browseLoaded": {
     "placeholders": {
       "count": {
@@ -1143,6 +1143,10 @@
   "playbackOutputRequested": "请求",
   "playbackOutputEffective": "生效",
   "playbackOutputIdle": "未在播放，实际输出未知",
+  "settingsOutputSummary": "播放时显示实际的视频解码与音频输出",
+  "@settingsOutputSummary": {
+    "description": "Settings section summary for the read-only playback output status."
+  },
   "playbackOutputSpeedPcm": "倍速播放时压缩透传不可用，当前输出为 PCM。",
   "playbackOutputBaseFallback": "残差合成失败，当前是基础层回退，不是 FEL 完成。",
   "playbackOutputProfile5MissingRpu": "Profile 5 没有可用 RPU，不能按普通 HDR10 或 YUV 输出。",
@@ -1487,7 +1491,7 @@
   "mobileEmpty": "暂无内容",
   "mobileLoadMore": "加载更多",
   "mobileAllLoaded": "已显示全部内容",
-  "mobileConnectionHint": "连接你的 Emby 服务器。重启后会恢复已保存的会话；未提交的密码需要重新输入。",
+  "mobileConnectionHint": "登录你的 Emby 服务器，开始观看。",
   "mobileBackgroundPaused": "已暂停，点击播放继续",
   "mobilePreviousSession": "上次播放已中断，可从详情页继续观看。",
   "mobileRecoveryFailed": "上次播放进度同步失败，请重试。",

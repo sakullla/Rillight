@@ -5,6 +5,7 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 
@@ -31,6 +32,17 @@ void main() {
               path: AppRoutes.aggregation,
               builder: (context, state) =>
                   const ColoredBox(color: Colors.black),
+            ),
+            GoRoute(
+              path: '/library/:id',
+              builder: (context, state) => Builder(
+                builder: (context) => TextButton(
+                  key: const Key('scroll-under-bar'),
+                  onPressed: () =>
+                      const HomeScrollNotification(true).dispatch(context),
+                  child: const Text('scroll'),
+                ),
+              ),
             ),
           ],
         ),
@@ -122,5 +134,26 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('library pages hand their heading to the bar after scrolling', (
+    tester,
+  ) async {
+    await pump(tester, AppRoutes.library('movies'));
+    double titleOpacity() => tester
+        .widget<AnimatedOpacity>(
+          find.descendant(
+            of: find.byKey(AppShell.topBarKey),
+            matching: find.byType(AnimatedOpacity),
+          ),
+        )
+        .opacity;
+    // 页内已有大标题,未滚动时顶栏不重复显示。
+    expect(titleOpacity(), 0);
+    // 实心顶栏上的返回钮不再压深色圆底。
+    expect(find.byType(ScrimIconButton), findsNothing);
+    await tester.tap(find.byKey(const Key('scroll-under-bar')));
+    await tester.pumpAndSettle();
+    expect(titleOpacity(), 1);
   });
 }

@@ -1153,7 +1153,7 @@ abstract class AppLocalizations {
   /// Detail shelf title for episodes in the selected season.
   ///
   /// In zh, this message translates to:
-  /// **'集'**
+  /// **'剧集'**
   String get episodesRow;
 
   /// Episode detail shelf title for the season's episode strip used to switch episodes.
@@ -1453,7 +1453,7 @@ abstract class AppLocalizations {
   /// No description provided for @browseLoaded.
   ///
   /// In zh, this message translates to:
-  /// **'已载入 {count} 项'**
+  /// **'共 {count} 项'**
   String browseLoaded(int count);
 
   /// No description provided for @pauseCarousel.
@@ -2158,6 +2158,12 @@ abstract class AppLocalizations {
   /// **'未在播放，实际输出未知'**
   String get playbackOutputIdle;
 
+  /// Settings section summary for the read-only playback output status.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放时显示实际的视频解码与音频输出'**
+  String get settingsOutputSummary;
+
   /// No description provided for @playbackOutputSpeedPcm.
   ///
   /// In zh, this message translates to:
@@ -2665,7 +2671,7 @@ abstract class AppLocalizations {
   /// No description provided for @mobileConnectionHint.
   ///
   /// In zh, this message translates to:
-  /// **'连接你的 Emby 服务器。重启后会恢复已保存的会话；未提交的密码需要重新输入。'**
+  /// **'登录你的 Emby 服务器，开始观看。'**
   String get mobileConnectionHint;
 
   /// No description provided for @mobileBackgroundPaused.

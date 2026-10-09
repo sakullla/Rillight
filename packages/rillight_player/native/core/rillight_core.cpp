@@ -984,6 +984,7 @@ struct RillightCoreImpl {
   bool external_subtitle_pending = false;
   std::string requested_external_subtitle;
   int64_t seek_target = -1;
+  int64_t presentation_floor_us = 0;
   int64_t duration = -1;
   int64_t base_position = 0;
   Clock::time_point base_time = Clock::now();
@@ -1349,6 +1350,7 @@ bool passthrough_still_wanted(const RillightCoreImpl *core,
 }
 
 void reset_frames(RillightCoreImpl *core) {
+  core->presentation_floor_us = 0;
   rillight_core_release_frame(core->displayed_clean);
   core->displayed_clean = nullptr;
   core->subtitle_redraw = false;
@@ -2707,10 +2709,12 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
   const bool audio = rillight_core_frame_is_audio(frame->type);
   auto &queue = audio ? core->audio : core->video;
   auto &bytes = audio ? core->audio_bytes : core->video_bytes;
-  if ((core->state == RILLIGHT_CORE_RECOVERING ||
-       core->state == RILLIGHT_CORE_OPENING) && frame->pts_us != -1 &&
-      frame->pts_us + (audio ? 20000 : 5000) <
-          core->base_position) {
+  // Video and audio decode independently. The first resumed picture can make
+  // the timeline PLAYING while its audio lane is still decoding preroll.
+  // Keep the seek floor fixed for the timeline, independent of readiness and
+  // the advancing playback clock, including PCM and compressed passthrough.
+  if (frame->pts_us != -1 && frame->pts_us + (audio ? 20000 : 5000) <
+          core->presentation_floor_us) {
     lock.unlock();
     rillight_core_release_frame(frame);
     return 0;
@@ -4057,6 +4061,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       {
         std::lock_guard lock(core->mutex);
         if (core->timeline != timeline) continue;
+        core->presentation_floor_us = seek;
         core->media_io_active = true;
       }
       if (format->pb) {

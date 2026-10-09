@@ -13,6 +13,57 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CoreInputTest {
+    @Test fun retainedResponsesSurviveProxyOwnershipRetirement() {
+        val owners = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val nextChunk = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        // Model the actual proxy contract: a new range with the same ownership
+        // ID cancels its predecessor, even when its body is still streaming.
+        val server = LocalHttpServer(retireOwnedResponses = true) { headers, output ->
+            owners.add(headers.getValue("x-rillight-input-id"))
+            val start = headers.getValue("range").removePrefix("bytes=").substringBefore('-').toInt()
+            replyHeader(output, 206, 256 * 1024, "bytes $start-${start + 256 * 1024 - 1}/${8 * 1024 * 1024}")
+            output.write(ByteArray(8192) { ((start + it) % 251).toByte() })
+            output.flush()
+            nextChunk.await(5, TimeUnit.SECONDS)
+            output.write(ByteArray(8192) { ((start + 8192 + it) % 251).toByte() })
+            output.flush()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null)
+        try {
+            fun checkAt(position: Int) {
+                assertEquals(position.toLong(), input.seek(position.toLong(), 0))
+                val bytes = ByteArray(1024)
+                val count = input.read(bytes, bytes.size)
+                org.junit.Assert.assertTrue("Read at $position returned $count", count in 1..bytes.size)
+                org.junit.Assert.assertArrayEquals(
+                    ByteArray(count) { ((position + it) % 251).toByte() }, bytes.copyOf(count))
+            }
+            val tracks = listOf(1024 * 1024, 2 * 1024 * 1024, 3 * 1024 * 1024)
+            for (track in tracks) checkAt(track)
+            nextChunk.countDown()
+            for (track in tracks) checkAt(track + 8192 + 1024)
+            assertEquals(3, owners.size)
+            assertEquals(3, owners.toSet().size)
+            // Eviction must recycle only a closed response's ownership slot;
+            // it must not accumulate abandoned proxy readers on distant seeks.
+            checkAt(4 * 1024 * 1024)
+            checkAt(tracks.first() + 32 * 1024)
+            assertEquals(5, owners.size)
+            assertEquals(3, owners.toSet().size)
+            input.interrupt()
+            checkAt(5 * 1024 * 1024)
+            assertEquals(6, owners.size)
+            assertEquals(3, owners.toSet().size)
+        } finally {
+            nextChunk.countDown()
+            release.countDown()
+            input.close()
+            server.close()
+        }
+    }
+
     @Test fun interleavedTracksReuseResponsesAcrossSmallForwardGaps() {
         val requests = java.util.concurrent.atomic.AtomicInteger()
         val nextChunk = CountDownLatch(1)
@@ -380,9 +431,11 @@ private fun reply(output: OutputStream, status: Int, bytes: ByteArray,
     output.flush()
 }
 
-private class LocalHttpServer(private val response: (Map<String, String>, OutputStream) -> Unit) {
+private class LocalHttpServer(private val retireOwnedResponses: Boolean = false,
+    private val response: (Map<String, String>, OutputStream) -> Unit) {
     private val server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val workers = Executors.newCachedThreadPool()
+    private val owned = java.util.concurrent.ConcurrentHashMap<String, Socket>()
     val port: Int get() = server.localPort
 
     init {
@@ -406,7 +459,10 @@ private class LocalHttpServer(private val response: (Map<String, String>, Output
                     if (separator > 0)
                         headers[line.substring(0, separator).lowercase()] = line.substring(separator + 1).trim()
                 }
-                response(headers, it.getOutputStream())
+                val owner = headers["x-rillight-input-id"].takeIf { retireOwnedResponses }
+                if (owner != null) owned.put(owner, socket)?.close()
+                try { response(headers, it.getOutputStream()) }
+                finally { if (owner != null) owned.remove(owner, socket) }
             } catch (_: java.io.IOException) { /* The client may cancel the request. */ }
         }
     }

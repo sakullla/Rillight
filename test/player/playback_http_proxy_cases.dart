@@ -2425,6 +2425,61 @@ void main() {
     },
   );
 
+  test('retained native response slots finish their delayed bodies', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 8 * mib,
+      continuousTransfers: true,
+    );
+    fixture.binaryBody = Uint8List(8 * mib)..fillRange(0, 8 * mib, 9);
+    fixture.holdAfterBytes = 1024;
+    fixture.hold = Completer<void>();
+    final clients = <HttpClient>[];
+    final readers = <StreamIterator<List<int>>>[];
+    final lengths = <int>[];
+    try {
+      for (var slot = 0; slot < 3; slot++) {
+        final client = HttpClient();
+        clients.add(client);
+        final request = await client.getUrl(fixture.url);
+        request.headers.set('range', 'bytes=0-65535');
+        request.headers.set('x-rillight-input-id', '${slot + 1}');
+        final response = await request.close();
+        expect(response.statusCode, HttpStatus.partialContent);
+        final reader = StreamIterator(response);
+        readers.add(reader);
+        expect(
+          await reader.moveNext().timeout(const Duration(seconds: 3)),
+          true,
+        );
+        expect(reader.current, everyElement(9));
+        lengths.add(reader.current.length);
+      }
+      expect(fixture.proxy.diagnostics['activeRequests'], 3);
+      fixture.hold!.complete();
+      for (var slot = 0; slot < readers.length; slot++) {
+        final reader = readers[slot];
+        while (await reader.moveNext().timeout(const Duration(seconds: 3))) {
+          expect(reader.current, everyElement(9));
+          lengths[slot] += reader.current.length;
+        }
+        expect(lengths[slot], 65536);
+      }
+      expect(fixture.proxy.diagnostics['admissionRejected'], 0);
+    } finally {
+      for (final client in clients) {
+        client.close(force: true);
+      }
+      if (!fixture.hold!.isCompleted) fixture.hold!.complete();
+      for (final reader in readers) {
+        await reader.cancel();
+      }
+    }
+  });
+
   test('small sequential media reads share one live download', () async {
     const kib = 1024;
     const mib = 1024 * kib;

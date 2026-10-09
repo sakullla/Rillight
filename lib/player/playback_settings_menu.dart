@@ -83,8 +83,10 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
+    // 宽窗口用左侧分类栏，七个分类一眼看全；窄窗口退回顶部横向分类条。
+    final rail = screen.width >= 720;
     final width = math.min(
-      AppViewport.dp(420, screen),
+      AppViewport.dp(rail ? 560 : 420, screen),
       math.max(280.0, screen.width - 48),
     );
     final height = math.min(
@@ -150,7 +152,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               type: MaterialType.transparency,
               child: ListenableBuilder(
                 listenable: widget.controller,
-                builder: (context, _) => _panel(context),
+                builder: (context, _) => _panel(context, rail: rail),
               ),
             ),
           ),
@@ -196,7 +198,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     }
   }
 
-  Widget _panel(BuildContext context) {
+  Widget _panel(BuildContext context, {required bool rail}) {
     final c = widget.controller;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -247,7 +249,9 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     Widget category(_SettingsSection key, (String, IconData, Key) info) {
       final selected = section == key;
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        padding: rail
+            ? const EdgeInsets.symmetric(vertical: 2)
+            : const EdgeInsets.symmetric(horizontal: 4),
         child: RevealSelected(
           selected: selected,
           child: Semantics(
@@ -258,7 +262,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               icon: Icon(info.$2, size: 16),
               label: Text(info.$1),
               style: TextButton.styleFrom(
-                minimumSize: const Size(0, 36),
+                minimumSize: Size(rail ? double.infinity : 0, rail ? 40 : 36),
+                alignment: rail ? AlignmentDirectional.centerStart : null,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: VisualDensity.compact,
                 foregroundColor: selected
@@ -267,8 +272,12 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                 backgroundColor: selected
                     ? scheme.surfaceBright
                     : Colors.transparent,
-                shape: const StadiumBorder(),
-                side: selected
+                shape: rail
+                    ? RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                      )
+                    : const StadiumBorder(),
+                side: selected && !rail
                     ? BorderSide(color: scheme.onSurface.withValues(alpha: .7))
                     : BorderSide.none,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -332,6 +341,32 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         ],
       ),
     );
+    Widget categories(Axis axis) => ScrollConfiguration(
+      behavior: const _CategoryScrollBehavior(),
+      child: ListView(
+        key: const Key('player-settings-categories'),
+        scrollDirection: axis,
+        primary: false,
+        padding: axis == Axis.vertical
+            ? const EdgeInsets.all(8)
+            : const EdgeInsets.symmetric(horizontal: 8),
+        children: [
+          for (final entry in sections.entries)
+            category(entry.key, entry.value),
+        ],
+      ),
+    );
+    // 音轨/片源等列表分区自带滚动与搜索,不再套外层滚轴。
+    final body = _isListSection(section)
+        ? KeyedSubtree(
+            key: ValueKey('player-settings-content-${section.name}'),
+            child: content,
+          )
+        : SingleChildScrollView(
+            key: ValueKey('player-settings-content-${section.name}'),
+            primary: false,
+            child: content,
+          );
     return FocusTraversalGroup(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -366,35 +401,24 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                     color: scheme.outlineVariant.withValues(alpha: .7),
                   ),
           ),
-          SizedBox(
-            height: 48,
-            child: ScrollConfiguration(
-              behavior: const _CategoryScrollBehavior(),
-              child: ListView(
-                key: const Key('player-settings-categories'),
-                scrollDirection: Axis.horizontal,
-                primary: false,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+          if (rail)
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final entry in sections.entries)
-                    category(entry.key, entry.value),
+                  SizedBox(width: 148, child: categories(Axis.vertical)),
+                  VerticalDivider(
+                    width: 1,
+                    color: scheme.outlineVariant.withValues(alpha: .7),
+                  ),
+                  Expanded(child: body),
                 ],
               ),
-            ),
-          ),
-          Expanded(
-            // 音轨/片源等列表分区自带滚动与搜索,不再套外层滚轴。
-            child: _isListSection(section)
-                ? KeyedSubtree(
-                    key: ValueKey('player-settings-content-${section.name}'),
-                    child: content,
-                  )
-                : SingleChildScrollView(
-                    key: ValueKey('player-settings-content-${section.name}'),
-                    primary: false,
-                    child: content,
-                  ),
-          ),
+            )
+          else ...[
+            SizedBox(height: 48, child: categories(Axis.horizontal)),
+            Expanded(child: body),
+          ],
         ],
       ),
     );

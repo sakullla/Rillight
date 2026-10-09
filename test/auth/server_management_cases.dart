@@ -237,16 +237,56 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('家庭影院'), findsOneWidget);
       expect(find.text('第二台'), findsNothing);
-      await tester.enterText(
-        find.byKey(ServerSwitcherDialog.searchField),
-        '第二台',
-      );
-      await tester.pump();
-      expect(find.text('家庭影院'), findsNothing);
-      expect(find.text('暂无已保存的服务器'), findsOneWidget);
+      // 服务器很少时一眼可见,不再提供空搜索框。
+      expect(find.byKey(ServerSwitcherDialog.searchField), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('switcher offers search only once the list grows long', (
+    tester,
+  ) async {
+    final servers = [
+      for (var i = 1; i <= 6; i++)
+        _saved('server-id-$i', '服务器 $i', ['http://emby-$i.test:8096']),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: Scaffold(
+          body: ServerSwitcherDialog(
+            servers: servers,
+            activeServerId: 'server-id-1',
+            activeLineId: 'line-1',
+            onSelect: (_, _) {},
+            onAddServer: () {},
+            onLogout: () {},
+            onDelete: (_) {},
+            onChangePassword: () {},
+            onAddLine: (_) {},
+            onEditLine: (_, _) {},
+            onDeleteLine: (_, _) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(ServerSwitcherDialog.searchField),
+      'emby-6',
+    );
+    await tester.pump();
+    expect(find.text('服务器 1'), findsNothing);
+    expect(find.text('服务器 6'), findsOneWidget);
+    await tester.enterText(find.byKey(ServerSwitcherDialog.searchField), '无');
+    await tester.pump();
+    expect(find.text('暂无已保存的服务器'), findsOneWidget);
+    // 筛选为空时搜索框仍保留,便于改词。
+    expect(find.byKey(ServerSwitcherDialog.searchField), findsOneWidget);
+  });
 
   testWidgets(
     'switcher panel paints an opaque surface above background content in both themes',

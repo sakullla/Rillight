@@ -32,7 +32,11 @@ internal class CoreIoFactory(context: Context) {
 /** AVIO-compatible input. interrupt() never waits for read/seek and is reusable. */
 internal class CoreInput(private val url: String?, private val file: File?) {
     companion object { private val nextInputId = AtomicLong() }
-    private val inputId = nextInputId.incrementAndGet().toString()
+    // A proxy ownership ID replaces one response, not every range belonging
+    // to this AVIO. Keep one slot per live response (active plus two parked).
+    // Reusing a closed slot also retires any stale proxy reader before admission.
+    private val inputIds = List(3) { nextInputId.incrementAndGet().toString() }
+    private var responseId: String? = null
     private val epoch = AtomicLong()
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var input: InputStream? = null
@@ -45,7 +49,7 @@ internal class CoreInput(private val url: String?, private val file: File?) {
     private var wholeResponse = false
     private data class ParkedResponse(val connection: HttpURLConnection,
         val input: InputStream, val position: Long, val remaining: Long,
-        val whole: Boolean, val epoch: Long)
+        val whole: Boolean, val epoch: Long, val id: String)
     private val parked = ArrayList<ParkedResponse>(2)
     private val connections = java.util.concurrent.ConcurrentHashMap.newKeySet<HttpURLConnection>()
     // MP4 audio/video chunks can be far apart. Retain a few bounded windows
@@ -140,8 +144,8 @@ internal class CoreInput(private val url: String?, private val file: File?) {
             // Never retain the initial unbounded bootstrap response here.
             if (responseRemaining in 1..(1024 * 1024).toLong() && connection != null) {
                 parked.add(ParkedResponse(connection!!, input!!, httpPosition,
-                    responseRemaining, wholeResponse, connectionEpoch))
-                input = null; connection = null; connectionEpoch = -1
+                    responseRemaining, wholeResponse, connectionEpoch, responseId!!))
+                input = null; connection = null; connectionEpoch = -1; responseId = null
                 while (parked.size > 2) closeResponse(parked.removeAt(0))
             } else closeHttp()
         } else if (connection != null) closeHttp()
@@ -149,6 +153,7 @@ internal class CoreInput(private val url: String?, private val file: File?) {
             connection = retained.connection; input = retained.input
             httpPosition = retained.position; responseRemaining = retained.remaining
             wholeResponse = retained.whole; connectionEpoch = retained.epoch
+            responseId = retained.id
             advanceHttp(observed)
             return
         }
@@ -165,7 +170,9 @@ internal class CoreInput(private val url: String?, private val file: File?) {
         request.setRequestProperty("Accept-Encoding", "identity")
         // Private loopback ownership lets the proxy retire an abandoned
         // bootstrap reader even when HTTP disconnect waits for another write.
-        request.setRequestProperty("X-Rillight-Input-Id", inputId)
+        val id = inputIds.first { candidate -> parked.none { it.id == candidate } }
+        responseId = id
+        request.setRequestProperty("X-Rillight-Input-Id", id)
         val requestEnd = position + minOf(blockBytes.toLong() - 1, Long.MAX_VALUE - position)
         // Let the owned proxy adopt the first response as its continuous
         // download. Subsequent distant reads stay bounded and reusable. An
@@ -319,6 +326,7 @@ internal class CoreInput(private val url: String?, private val file: File?) {
         val oldConnection = connection
         connection = null
         connectionEpoch = -1
+        responseId = null
         try { oldInput?.close() } finally {
             oldConnection?.disconnect()
             if (oldConnection != null) connections.remove(oldConnection)

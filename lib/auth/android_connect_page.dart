@@ -32,6 +32,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
   final List<TextEditingController> _extraLines = [];
   ConnectDraft? _draft;
   bool _moreExpanded = false;
+  bool _passwordVisible = false;
 
   @override
   void didChangeDependencies() {
@@ -270,8 +271,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
     return Scaffold(
+      // 品牌头已经说明了页面用途,顶栏只留外观入口,不再重复一行标题。
       appBar: AppBar(
-        title: Text(l10n.connectTitle),
         // 登录前也能切外观;偏好持久化,设置页同源。
         actions: const [
           AppearanceMenuButton(buttonKey: Key('android-connect-appearance')),
@@ -291,24 +292,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      Icons.movie_filter_outlined,
-                      size: 36,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      l10n.appName,
-                      style: Theme.of(context).textTheme.headlineLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      l10n.mobileConnectionHint,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
+                    _PhoneBrandHeader(l10n: l10n),
+                    const SizedBox(height: 32),
                     if (auth.savedServers.isNotEmpty) ...[
                       Row(
                         children: [
@@ -369,18 +354,33 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                       key: const Key('android-connect-password'),
                       controller: _password,
                       enabled: !auth.isBusy,
-                      obscureText: true,
+                      obscureText: !_passwordVisible,
                       autocorrect: false,
                       enableSuggestions: false,
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(labelText: l10n.password),
+                      decoration: InputDecoration(
+                        labelText: l10n.password,
+                        suffixIcon: IconButton(
+                          key: const Key('android-connect-password-visibility'),
+                          tooltip: _passwordVisible
+                              ? l10n.hidePassword
+                              : l10n.showPassword,
+                          onPressed: () => setState(
+                            () => _passwordVisible = !_passwordVisible,
+                          ),
+                          icon: Icon(
+                            _passwordVisible
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                          ),
+                        ),
+                      ),
                     ),
                     if (auth.failure != null) ...[
                       const SizedBox(height: 16),
-                      Text(
-                        embyFailureMessage(l10n, auth.failure!),
-                        semanticsLabel: embyFailureMessage(l10n, auth.failure!),
+                      _PhoneConnectError(
+                        message: embyFailureMessage(l10n, auth.failure!),
                       ),
                     ],
                     const SizedBox(height: 24),
@@ -495,6 +495,101 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// 手机登录页品牌头:与桌面登录同一枚品牌方块,一句话说明用途。
+class _PhoneBrandHeader extends StatelessWidget {
+  const _PhoneBrandHeader({required this.l10n});
+
+  final AppLocalizations l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          child: SizedBox.square(
+            dimension: 56,
+            child: Icon(
+              Icons.play_circle_rounded,
+              size: 32,
+              color: scheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          l10n.appName,
+          style: theme.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          l10n.mobileConnectionHint,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+            height: 1.45,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 连接失败提示:浅错误底色 + 图标,和普通说明文字区分开。
+class _PhoneConnectError extends StatelessWidget {
+  const _PhoneConnectError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.errorContainer.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.error_outline_rounded,
+                size: 20,
+                color: scheme.onErrorContainer,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  message,
+                  semanticsLabel: message,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onErrorContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

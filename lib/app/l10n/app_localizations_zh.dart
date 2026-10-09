@@ -553,7 +553,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get similarRow => '更多类似';
 
   @override
-  String get episodesRow => '集';
+  String get episodesRow => '剧集';
 
   @override
   String get seasonEpisodes => '本季分集';
@@ -718,7 +718,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String browseLoaded(int count) {
-    return '已载入 $count 项';
+    return '共 $count 项';
   }
 
   @override
@@ -1092,6 +1092,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playbackOutputIdle => '未在播放，实际输出未知';
 
   @override
+  String get settingsOutputSummary => '播放时显示实际的视频解码与音频输出';
+
+  @override
   String get playbackOutputSpeedPcm => '倍速播放时压缩透传不可用，当前输出为 PCM。';
 
   @override
@@ -1358,7 +1361,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileAllLoaded => '已显示全部内容';
 
   @override
-  String get mobileConnectionHint => '连接你的 Emby 服务器。重启后会恢复已保存的会话；未提交的密码需要重新输入。';
+  String get mobileConnectionHint => '登录你的 Emby 服务器，开始观看。';
 
   @override
   String get mobileBackgroundPaused => '已暂停，点击播放继续';

@@ -257,6 +257,16 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   bool _loadingMore = false;
   bool _refreshing = false;
   bool _hasMore = false;
+
+  /// 服务器报告的条目总数;客户端二次过滤时不可信,置空。
+  int? _total;
+
+  /// 页头显示的数量:优先服务器总数,否则只在已全部载入时给出。
+  int? get _knownCount {
+    if (_items.isEmpty) return null;
+    return _total ?? (_hasMore ? null : _items.length);
+  }
+
   EmbyException? _error;
   EmbyException? _pageError;
   late CatalogSort _sort = _defaultSort;
@@ -448,6 +458,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         _error = null;
         _items = const [];
         _hasMore = false;
+        _total = null;
         _fetched = 0;
         _autoFills = 0;
       }
@@ -489,6 +500,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         _hasMore =
             _paged &&
             page.hasMore(fetched: _fetched, pageSize: ShelfGridPage.pageSize);
+        _total = widget.moviesOrSeriesOnly ? null : page.totalRecordCount;
         _loading = false;
         _refreshing = false;
         _autoFills = 0;
@@ -541,6 +553,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         _hasMore =
             _paged &&
             page.hasMore(fetched: _fetched, pageSize: ShelfGridPage.pageSize);
+        _total = widget.moviesOrSeriesOnly ? null : page.totalRecordCount;
         _loadingMore = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -776,102 +789,114 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                     )
                   : MediaShelf.posterLabelExtentFor(context),
             );
-            return MediaImageScrollListener(
-              child: CustomScrollView(
-                controller: _scrollController,
-                // 预构建半屏即可,快滑时少把屏幕外海报提前打进磁盘/解码。
-                scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _Header(
-                      title: _title(l10n),
-                      titleOverride: widget.titleOverride,
-                      showTitle: widget.showTitle,
-                      sort: _sort,
-                      options: options,
-                      onSort: _selectSort,
-                      showSort: _items.isNotEmpty,
-                      onRefresh: _manualRefresh,
-                      refreshing: _refreshing,
-                      loadedCount: _items.length,
-                      filters: _filterable ? _filters : null,
-                      typeFilterable: _typeFilterable,
-                      yearOptions: _yearOptions,
-                      genreOptions: _genreOptions,
-                      onFiltersChanged: _filterable ? _selectFilters : null,
-                    ),
-                  ),
-                  if (_error != null)
+            return NotificationListener<ScrollNotification>(
+              // 页内大标题滚出后,外壳顶栏接过标题并显示分隔线。
+              onNotification: (notification) {
+                if (notification.depth == 0 &&
+                    notification.metrics.axis == Axis.vertical) {
+                  HomeScrollNotification(
+                    notification.metrics.pixels > 40,
+                  ).dispatch(context);
+                }
+                return false;
+              },
+              child: MediaImageScrollListener(
+                child: CustomScrollView(
+                  controller: _scrollController,
+                  // 预构建半屏即可,快滑时少把屏幕外海报提前打进磁盘/解码。
+                  scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                  slivers: [
                     SliverToBoxAdapter(
-                      child: _failureNotice(_error!, _manualRefresh),
-                    ),
-                  if (_pageError != null)
-                    SliverToBoxAdapter(
-                      child: _failureNotice(_pageError!, _loadMore),
-                    ),
-                  if (_items.isEmpty)
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: AppEmptyView(message: l10n.browseEmpty),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.page,
-                        AppSpacing.xs,
-                        AppSpacing.page,
-                        AppSpacing.xxl,
+                      child: _Header(
+                        title: _title(l10n),
+                        titleOverride: widget.titleOverride,
+                        showTitle: widget.showTitle,
+                        sort: _sort,
+                        options: options,
+                        onSort: _selectSort,
+                        showSort: _items.isNotEmpty,
+                        onRefresh: _manualRefresh,
+                        refreshing: _refreshing,
+                        loadedCount: _knownCount,
+                        filters: _filterable ? _filters : null,
+                        typeFilterable: _typeFilterable,
+                        yearOptions: _yearOptions,
+                        genreOptions: _genreOptions,
+                        onFiltersChanged: _filterable ? _selectFilters : null,
                       ),
-                      sliver: SliverGrid(
-                        gridDelegate: gridDelegate,
-                        delegate: _ShelfChildDelegate(
-                          items: _items,
-                          wide: _wideGrid,
-                          builder: (context, index) {
-                            final item = _items[index];
-                            return CatalogEnsureVisibleOnFocus(
-                              child: ShelfGridPage.gridCard(
-                                context,
-                                item,
-                                wide: _wideGrid,
-                                onTap: () {
-                                  final open = ShelfItemOpen.maybeOf(context);
-                                  if (open != null) {
-                                    open(item);
-                                    return;
-                                  }
-                                  context.push(AppRoutes.item(item.id));
-                                },
-                                onRemoveFromResume: widget.source == 'resume'
-                                    ? (entry) {
-                                        unawaited(
-                                          CatalogScope.of(
-                                            context,
-                                          ).hideFromResume(entry),
-                                        );
-                                        setState(() {
-                                          _items = [
-                                            for (final current in _items)
-                                              if (current.id != entry.id)
-                                                current,
-                                          ];
-                                        });
-                                      }
-                                    : null,
-                              ),
-                            );
-                          },
+                    ),
+                    if (_error != null)
+                      SliverToBoxAdapter(
+                        child: _failureNotice(_error!, _manualRefresh),
+                      ),
+                    if (_pageError != null)
+                      SliverToBoxAdapter(
+                        child: _failureNotice(_pageError!, _loadMore),
+                      ),
+                    if (_items.isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: AppEmptyView(message: l10n.browseEmpty),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.page,
+                          AppSpacing.xs,
+                          AppSpacing.page,
+                          AppSpacing.xxl,
+                        ),
+                        sliver: SliverGrid(
+                          gridDelegate: gridDelegate,
+                          delegate: _ShelfChildDelegate(
+                            items: _items,
+                            wide: _wideGrid,
+                            builder: (context, index) {
+                              final item = _items[index];
+                              return CatalogEnsureVisibleOnFocus(
+                                child: ShelfGridPage.gridCard(
+                                  context,
+                                  item,
+                                  wide: _wideGrid,
+                                  onTap: () {
+                                    final open = ShelfItemOpen.maybeOf(context);
+                                    if (open != null) {
+                                      open(item);
+                                      return;
+                                    }
+                                    context.push(AppRoutes.item(item.id));
+                                  },
+                                  onRemoveFromResume: widget.source == 'resume'
+                                      ? (entry) {
+                                          unawaited(
+                                            CatalogScope.of(
+                                              context,
+                                            ).hideFromResume(entry),
+                                          );
+                                          setState(() {
+                                            _items = [
+                                              for (final current in _items)
+                                                if (current.id != entry.id)
+                                                  current,
+                                            ];
+                                          });
+                                        }
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       ),
-                    ),
-                  if (_loadingMore)
-                    const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                        child: Center(child: CircularProgressIndicator()),
+                    if (_loadingMore)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.only(bottom: AppSpacing.xxl),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             );
           },

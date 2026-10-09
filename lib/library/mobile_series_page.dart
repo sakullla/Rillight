@@ -407,7 +407,9 @@ class MobileSeriesPage extends StatelessWidget {
     return [
       if (plainOverview(item.overview) != null)
         EpisodeOverviewSection(overview: item.overview, compact: true),
-      if (showSeasons || onPickEpisode != null)
+      // 简介与季切换之间留出呼吸,季胶囊不再贴着上一段文字。
+      if (showSeasons || onPickEpisode != null) ...[
+        const SizedBox(height: AppSpacing.sm),
         SizedBox(
           height:
               48 *
@@ -433,6 +435,7 @@ class MobileSeriesPage extends StatelessWidget {
             ),
           ),
         ),
+      ],
       if (episodes.isNotEmpty || episodesLoading)
         Padding(
           padding: const EdgeInsets.fromLTRB(

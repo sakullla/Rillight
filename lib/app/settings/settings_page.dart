@@ -492,7 +492,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsSection(
                   icon: Icons.tune_rounded,
                   title: l10n.playbackOutputSection,
-                  subtitle: l10n.playbackOutputIdle,
+                  subtitle: l10n.settingsOutputSummary,
                   children: [
                     const PlaybackOutputPanel(
                       status: PlaybackOutputStatus.unknown,

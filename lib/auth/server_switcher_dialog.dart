@@ -78,6 +78,9 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
     super.dispose();
   }
 
+  bool get _searchable =>
+      widget.servers.length > 5 || _query.text.trim().isNotEmpty;
+
   List<SavedServer> get _filtered {
     final needle = _query.text.trim().toLowerCase();
     if (needle.isEmpty) {
@@ -143,29 +146,45 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
               AppSpacing.sm,
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  l10n.switchServer,
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                TextField(
-                  key: ServerSwitcherDialog.searchField,
-                  controller: _query,
-                  autofocus: widget.servers.length > 8,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: l10n.searchServers,
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    isDense: true,
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xs,
+                  ),
+                  child: Text(
+                    l10n.switchServer,
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                Expanded(
+                // 少量服务器一眼可见,不再摆一个空搜索框;多了才提供筛选。
+                if (_searchable) ...[
+                  TextField(
+                    key: ServerSwitcherDialog.searchField,
+                    controller: _query,
+                    autofocus: widget.servers.length > 8,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: l10n.searchServers,
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
+                // 列表按内容收缩,服务器少时面板不留大片空白。
+                Flexible(
                   child: filtered.isEmpty
-                      ? Center(child: Text(l10n.noSavedServers))
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: AppSpacing.xl,
+                          ),
+                          child: Center(child: Text(l10n.noSavedServers)),
+                        )
                       : ListView.builder(
+                          shrinkWrap: true,
                           itemCount: filtered.length,
                           itemBuilder: (context, index) {
                             return _ServerTile(
@@ -181,22 +200,25 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                           },
                         ),
                 ),
+                const SizedBox(height: AppSpacing.xs),
                 const Divider(height: 1),
-                ListTile(
+                const SizedBox(height: AppSpacing.xs),
+                _ActionTile(
                   key: SessionActions.addServerKey,
-                  leading: const Icon(Icons.add),
-                  title: Text(l10n.addServer),
+                  icon: Icons.add_rounded,
+                  label: l10n.addServer,
                   onTap: widget.onAddServer,
                 ),
-                ListTile(
+                _ActionTile(
                   key: ServerSwitcherDialog.changePasswordKey,
-                  leading: const Icon(Icons.password_outlined),
-                  title: Text(l10n.changePassword),
+                  icon: Icons.password_outlined,
+                  label: l10n.changePassword,
                   onTap: widget.onChangePassword,
                 ),
-                ListTile(
-                  leading: const Icon(Icons.logout),
-                  title: Text(l10n.logout),
+                _ActionTile(
+                  icon: Icons.logout_rounded,
+                  label: l10n.logout,
+                  color: scheme.error,
                   onTap: widget.onLogout,
                 ),
               ],
@@ -204,6 +226,120 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 面板底部的账户动作行:紧凑、圆角悬停,退出登录用警示色。
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      iconColor: color,
+      textColor: color,
+      leading: Icon(icon, size: 20),
+      minLeadingWidth: 24,
+      title: Text(label),
+      onTap: onTap,
+    );
+  }
+}
+
+/// 行尾次要操作:悬停或键盘聚焦到该行时才浮现。
+/// 隐去时仍保留占位与命中区域,行布局不跳动。
+class _RevealActions extends StatefulWidget {
+  const _RevealActions({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_RevealActions> createState() => _RevealActionsState();
+}
+
+class _RevealActionsState extends State<_RevealActions> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _hovered || _focused;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onFocusChange: (value) => setState(() => _focused = value),
+        child: _RevealScope(visible: visible, child: widget.child),
+      ),
+    );
+  }
+}
+
+class _RevealScope extends InheritedWidget {
+  const _RevealScope({required this.visible, required super.child});
+
+  final bool visible;
+
+  static bool of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_RevealScope>()?.visible ??
+      true;
+
+  @override
+  bool updateShouldNotify(_RevealScope oldWidget) =>
+      oldWidget.visible != visible;
+}
+
+class _Revealed extends StatelessWidget {
+  const _Revealed({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: _RevealScope.of(context) ? 1 : 0,
+      duration: AppMotion.durationOf(context, AppMotion.fast),
+      child: child,
+    );
+  }
+}
+
+/// 当前项的勾:固定占位,有无勾选的行尾图标都对齐同一条竖线。
+class _CheckSlot extends StatelessWidget {
+  const _CheckSlot({required this.checked});
+
+  final bool checked;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 28,
+      child: checked
+          ? Icon(
+              Icons.check_rounded,
+              size: 20,
+              color: Theme.of(context).colorScheme.primary,
+            )
+          : null,
     );
   }
 }
@@ -237,76 +373,130 @@ class _ServerTile extends StatelessWidget {
     final deleteServerButton = IconButton(
       key: ServerSwitcherDialog.deleteKey(server.id),
       tooltip: l10n.deleteServer,
+      visualDensity: VisualDensity.compact,
       icon: const Icon(Icons.delete_outline, size: 20),
       onPressed: () => _confirmDelete(context, l10n),
     );
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadii.md),
+    );
+    final selectedFill = scheme.primary.withValues(alpha: 0.10);
     final active = server.activeLine;
     if (active != null && server.lines.length <= 1) {
       // 单线路服务器:点击条目直接切换;行内提供添加与改址入口。
       // 删除线路在只剩一条时不提供。
-      return ListTile(
-        leading: const EmbyMark(size: 28),
-        title: Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          active.hostLabel,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              key: ServerSwitcherDialog.addLineKey(server.id),
-              tooltip: l10n.addLine,
-              icon: const Icon(Icons.add, size: 20),
-              onPressed: () => onAddLine(server.id),
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
+        child: _RevealActions(
+          child: ListTile(
+            shape: shape,
+            selected: selectedServer,
+            selectedTileColor: selectedFill,
+            selectedColor: scheme.onSurface,
+            contentPadding: const EdgeInsets.only(
+              left: AppSpacing.sm,
+              right: AppSpacing.xs,
             ),
-            IconButton(
-              key: ServerSwitcherDialog.editLineKey(server.id, active.id),
-              tooltip: l10n.editLine,
-              icon: const Icon(Icons.edit_outlined, size: 20),
-              onPressed: () => onEditLine(server.id, active),
+            leading: const EmbyMark(size: 28),
+            title: Text(
+              server.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: selectedServer
+                  ? const TextStyle(fontWeight: FontWeight.w600)
+                  : null,
             ),
-            deleteServerButton,
-            if (selectedServer) Icon(Icons.check, color: scheme.primary),
-          ],
-        ),
-        onTap: () => onSelect(server.id, active.id),
-      );
-    }
-    return ExpansionTile(
-      leading: const EmbyMark(size: 28),
-      initiallyExpanded: selectedServer,
-      title: Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: server.lines.length > 1 || active == null
-          ? Text(l10n.lineCount(server.lines.length))
-          : Text(
+            subtitle: Text(
               active.hostLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _Revealed(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: ServerSwitcherDialog.addLineKey(server.id),
+                        tooltip: l10n.addLine,
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.add_link_rounded, size: 20),
+                        onPressed: () => onAddLine(server.id),
+                      ),
+                      IconButton(
+                        key: ServerSwitcherDialog.editLineKey(
+                          server.id,
+                          active.id,
+                        ),
+                        tooltip: l10n.editLine,
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.edit_outlined, size: 20),
+                        onPressed: () => onEditLine(server.id, active),
+                      ),
+                      deleteServerButton,
+                    ],
+                  ),
+                ),
+                _CheckSlot(checked: selectedServer),
+              ],
+            ),
+            onTap: () => onSelect(server.id, active.id),
+          ),
+        ),
+      );
+    }
+    return _RevealActions(
+      child: ExpansionTile(
+        shape: shape,
+        collapsedShape: shape,
+        backgroundColor: selectedServer ? selectedFill : null,
+        collapsedBackgroundColor: selectedServer ? selectedFill : null,
+        tilePadding: const EdgeInsets.only(
+          left: AppSpacing.sm,
+          right: AppSpacing.xs,
+        ),
+        leading: const EmbyMark(size: 28),
+        initiallyExpanded: selectedServer,
+        title: Text(
+          server.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: selectedServer
+              ? const TextStyle(fontWeight: FontWeight.w600)
+              : null,
+        ),
+        subtitle: server.lines.length > 1 || active == null
+            ? Text(l10n.lineCount(server.lines.length))
+            : Text(
+                active.hostLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _Revealed(child: deleteServerButton),
+            _CheckSlot(checked: selectedServer),
+          ],
+        ),
         children: [
-          deleteServerButton,
-          if (selectedServer)
-            Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
+          for (final line in server.lines)
+            _lineTile(context, line, selectedServer: selectedServer),
+          ListTile(
+            key: ServerSwitcherDialog.addLineKey(server.id),
+            contentPadding: const EdgeInsets.only(
+              left: AppSpacing.xxxl,
+              right: AppSpacing.md,
+            ),
+            leading: const Icon(Icons.add, size: 20),
+            title: Text(l10n.addLine),
+            onTap: () => onAddLine(server.id),
+          ),
         ],
       ),
-      children: [
-        for (final line in server.lines)
-          _lineTile(context, line, selectedServer: selectedServer),
-        ListTile(
-          key: ServerSwitcherDialog.addLineKey(server.id),
-          contentPadding: const EdgeInsets.only(
-            left: AppSpacing.xxxl,
-            right: AppSpacing.md,
-          ),
-          leading: const Icon(Icons.add, size: 20),
-          title: Text(l10n.addLine),
-          onTap: () => onAddLine(server.id),
-        ),
-      ],
     );
   }
 
@@ -317,35 +507,49 @@ class _ServerTile extends StatelessWidget {
     required bool selectedServer,
   }) {
     final l10n = AppLocalizations.of(context);
-    return ListTile(
-      key: ServerSwitcherDialog.lineOptionKey(server.id, line.id),
-      contentPadding: const EdgeInsets.only(
-        left: AppSpacing.xxxl,
-        right: AppSpacing.md,
+    return _RevealActions(
+      child: ListTile(
+        key: ServerSwitcherDialog.lineOptionKey(server.id, line.id),
+        contentPadding: const EdgeInsets.only(
+          left: AppSpacing.xxxl,
+          right: AppSpacing.md,
+        ),
+        title: Text(
+          line.hostLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _Revealed(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    key: ServerSwitcherDialog.editLineKey(server.id, line.id),
+                    tooltip: l10n.editLine,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    onPressed: () => onEditLine(server.id, line),
+                  ),
+                  IconButton(
+                    key: ServerSwitcherDialog.deleteLineKey(server.id, line.id),
+                    tooltip: l10n.deleteLine,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.link_off, size: 20),
+                    onPressed: server.lines.length > 1
+                        ? () => onDeleteLine(server.id, line)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+            _CheckSlot(checked: selectedServer && line.id == activeLineId),
+          ],
+        ),
+        onTap: () => onSelect(server.id, line.id),
       ),
-      title: Text(line.hostLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            key: ServerSwitcherDialog.editLineKey(server.id, line.id),
-            tooltip: l10n.editLine,
-            icon: const Icon(Icons.edit_outlined, size: 20),
-            onPressed: () => onEditLine(server.id, line),
-          ),
-          IconButton(
-            key: ServerSwitcherDialog.deleteLineKey(server.id, line.id),
-            tooltip: l10n.deleteLine,
-            icon: const Icon(Icons.link_off, size: 20),
-            onPressed: server.lines.length > 1
-                ? () => onDeleteLine(server.id, line)
-                : null,
-          ),
-          if (selectedServer && line.id == activeLineId)
-            Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
-        ],
-      ),
-      onTap: () => onSelect(server.id, line.id),
     );
   }
 

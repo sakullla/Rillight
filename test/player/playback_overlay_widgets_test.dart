@@ -355,9 +355,76 @@ void main() {
     },
   );
 
+  testWidgets('wide settings list every category in a side rail', (
+    tester,
+  ) async {
+    final source = PlaybackMediaSource(
+      id: 'one',
+      supportsTranscoding: true,
+      mediaStreams: [
+        for (var i = 0; i < 2; i++)
+          MediaStreamInfo(index: i, type: 'Audio', displayTitle: 'Audio $i'),
+      ],
+    );
+    controller.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/movie'),
+      playSessionId: 'session',
+      mediaSource: source,
+      itemId: 'current',
+    );
+    controller.mediaSources = [
+      for (var i = 0; i < 2; i++) PlaybackMediaSource(id: '$i'),
+    ];
+    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(app(PlaybackSettingsMenu(controller: controller)));
+    await tester.tap(find.byKey(PlayerKeys.more));
+    await tester.pumpAndSettle();
+    final rail = find.byWidgetPredicate(
+      (widget) => widget is ListView && widget.scrollDirection == Axis.vertical,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('player-settings-categories')),
+        matching: find.byType(Scrollable),
+      ),
+      findsOneWidget,
+    );
+    final panel = tester.getRect(
+      find.byKey(const Key('player-settings-panel')),
+    );
+    for (final key in [
+      PlayerKeys.speed,
+      PlayerKeys.audio,
+      PlayerKeys.quality,
+      PlayerKeys.mediaSource,
+      const Key('player-output-section'),
+    ]) {
+      expect(find.descendant(of: rail, matching: find.byKey(key)), findsOne);
+      final rect = tester.getRect(find.byKey(key));
+      expect(
+        panel.contains(rect.topLeft) && panel.contains(rect.bottomRight),
+        isTrue,
+      );
+    }
+    await tester.tap(find.byKey(PlayerKeys.quality));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('player-quality-8000000')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('settings categories drag with the left mouse button', (
     tester,
   ) async {
+    // 窄窗口才使用顶部横向分类条。
+    tester.view.physicalSize = const Size(640, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final source = PlaybackMediaSource(
       id: 'one',
       supportsTranscoding: true,
