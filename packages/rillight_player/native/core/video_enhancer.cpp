@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstring>
 #include <mutex>
+#include <utility>
 
 namespace rillight {
 namespace {
@@ -29,7 +30,7 @@ float HalfToFloat(uint16_t value) {
         ++shift;
       }
       fraction &= 0x3ffu;
-      const uint32_t exp = static_cast<uint32_t>(127 - 15 - shift);
+      const uint32_t exp = static_cast<uint32_t>(127 - 14 - shift);
       bits = sign | (exp << 23) | (fraction << 13);
     }
   } else if (exponent == 31) {
@@ -97,7 +98,7 @@ void Denoise(VideoQualityEnhancer::Image* image, int strength) {
   const int height = image->height;
   const float sigma = 0.03f + (static_cast<float>(strength) / 100.0f) * 0.22f;
   const float inv = 1.0f / (2.0f * sigma * sigma);
-  std::vector<float> out = image->rgb;
+  std::vector<float> out(image->rgb.size());
   static const int kDx[9] = {-1, 0, 1, -1, 0, 1, -1, 0, 1};
   static const int kDy[9] = {-1, -1, -1, 0, 0, 0, 1, 1, 1};
   static const float kSpatial[9] = {1, 2, 1, 2, 4, 2, 1, 2, 1};
@@ -134,33 +135,35 @@ void Sharpen(VideoQualityEnhancer::Image* image, int strength, float ceiling) {
   const int width = image->width;
   const int height = image->height;
   const float amount = (static_cast<float>(strength) / 100.0f) * 1.2f;
-  std::vector<float> blur(image->rgb.size());
-  for (int y = 0; y < height; ++y) {
+  // A separable 3x3 box needs three scanlines, rather than nine RGB reads
+  // per pixel and a second full-frame pass to apply the unsharp mask.
+  const size_t row_size = static_cast<size_t>(width) * 3;
+  std::vector<float> rows(row_size * 3);
+  std::vector<float> out(image->rgb.size());
+  auto horizontal = [&](int y) {
+    const float* source = image->rgb.data() + static_cast<size_t>(y) * row_size;
+    float* dest = rows.data() + static_cast<size_t>(y % 3) * row_size;
     for (int x = 0; x < width; ++x) {
-      float sum_r = 0, sum_g = 0, sum_b = 0;
-      int count = 0;
-      for (int dy = -1; dy <= 1; ++dy) {
-        const int ny = std::clamp(y + dy, 0, height - 1);
-        for (int dx = -1; dx <= 1; ++dx) {
-          const int nx = std::clamp(x + dx, 0, width - 1);
-          const size_t index = static_cast<size_t>((ny * width + nx) * 3);
-          sum_r += image->rgb[index];
-          sum_g += image->rgb[index + 1];
-          sum_b += image->rgb[index + 2];
-          ++count;
-        }
-      }
-      const size_t center = static_cast<size_t>((y * width + x) * 3);
-      blur[center] = sum_r / static_cast<float>(count);
-      blur[center + 1] = sum_g / static_cast<float>(count);
-      blur[center + 2] = sum_b / static_cast<float>(count);
+      const int left = std::max(0, x - 1) * 3;
+      const int right = std::min(width - 1, x + 1) * 3;
+      for (int c = 0; c < 3; ++c)
+        dest[x * 3 + c] = source[left + c] + source[x * 3 + c] + source[right + c];
+    }
+  };
+  horizontal(0);
+  for (int y = 0; y < height; ++y) {
+    if (y + 1 < height) horizontal(y + 1);
+    const float* above = rows.data() + static_cast<size_t>(std::max(0, y - 1) % 3) * row_size;
+    const float* center = rows.data() + static_cast<size_t>(y % 3) * row_size;
+    const float* below = rows.data() + static_cast<size_t>(std::min(height - 1, y + 1) % 3) * row_size;
+    const size_t offset = static_cast<size_t>(y) * row_size;
+    for (size_t x = 0; x < row_size; ++x) {
+      const float blur = (above[x] + center[x] + below[x]) / 9.0f;
+      const float value = image->rgb[offset + x];
+      out[offset + x] = std::clamp(value + amount * (value - blur), 0.0f, ceiling);
     }
   }
-  for (size_t index = 0; index < image->rgb.size(); ++index) {
-    const float value =
-        image->rgb[index] + amount * (image->rgb[index] - blur[index]);
-    image->rgb[index] = std::clamp(value, 0.0f, ceiling);
-  }
+  image->rgb.swap(out);
 }
 
 void Encode(const VideoQualityEnhancer::Image& image, int bytes_per_pixel,
@@ -464,21 +467,22 @@ bool VideoQualityEnhancer::Process(
   }
   const float ceiling = bytes_per_pixel == 4 ? 1.0f : 8.0f;
   Image current = Decode(src, width, height, stride, bytes_per_pixel);
-  current = Filter(current, scale_capacity_ == 0, ceiling);
+  current = Filter(std::move(current), scale_capacity_ == 0, ceiling);
   current.pts_us = pts_us;
   current.timeline = timeline;
-  Image prior;
-  bool have_prior = false;
+  Image decoded_prior;
+  const Image* previous_image = nullptr;
   if (interp && previous && previous_stride >= width * bytes_per_pixel) {
-    prior = Decode(previous, width, height, previous_stride, bytes_per_pixel);
-    prior = Filter(prior, scale_capacity_ == 0, ceiling);
-    prior.timeline = timeline;
-    have_prior = prior.width == current.width && prior.height == current.height;
+    decoded_prior = Decode(previous, width, height, previous_stride, bytes_per_pixel);
+    decoded_prior = Filter(std::move(decoded_prior), scale_capacity_ == 0, ceiling);
+    decoded_prior.timeline = timeline;
+    if (decoded_prior.width == current.width && decoded_prior.height == current.height)
+      previous_image = &decoded_prior;
   } else if (interp && retained_.valid && retained_.timeline == timeline &&
              retained_.width == current.width &&
-             retained_.height == current.height) {
-    prior = retained_;
-    have_prior = true;
+             retained_.height == current.height &&
+             (retained_.pts_us < 0 || pts_us < 0 || pts_us > retained_.pts_us)) {
+    previous_image = &retained_;
   }
   if (spatial) {
     Encode(current, bytes_per_pixel, ceiling, &result->current, &result->stride);
@@ -490,10 +494,14 @@ bool VideoQualityEnhancer::Process(
     result->height = height;
     result->stride = width * bytes_per_pixel;
   }
-  if (interp && have_prior && !HardCut(prior, current)) {
-    Image mid = current;
+  if (interp && previous_image && !HardCut(*previous_image, current)) {
+    const Image& prior = *previous_image;
+    Image mid;
+    mid.width = current.width;
+    mid.height = current.height;
     if (ApplyRife(prior.rgb, current.rgb, current.width, current.height, ceiling,
                   &mid.rgb)) {
+      mid.alpha.resize(current.alpha.size());
       for (size_t index = 0; index < mid.alpha.size(); ++index)
         mid.alpha[index] = 0.5f * (prior.alpha[index] + current.alpha[index]);
       Encode(mid, bytes_per_pixel, ceiling, &result->midpoint, &result->mid_stride);
@@ -505,8 +513,8 @@ bool VideoQualityEnhancer::Process(
       result->has_midpoint = true;
     }
   }
-  retained_ = current;
-  retained_.valid = interp;
+  if (interp) retained_ = std::move(current);
+  else retained_ = {};
   return true;
 }
 
@@ -554,9 +562,10 @@ RillightCoreEnhancementStatus ResolveEnhancement(
     return active ? RILLIGHT_CORE_ENHANCE_REASON_ACTIVE
                   : RILLIGHT_CORE_ENHANCE_REASON_OFF;
   };
-  const bool rife_ready = RifeReady();
-  const bool anime_ready = Anime4kShadersReady();
-  const bool sr_ready = SuperResolutionReady();
+  // Ordinary playback must not initialize and hash unused model assets.
+  const bool rife_ready = request.interpolation == 2 && RifeReady();
+  const bool anime_ready = request.anime4k != 0 && Anime4kShadersReady();
+  const bool sr_ready = request.super_resolution == 2 && SuperResolutionReady();
   const bool interp_on = request.interpolation == 2 && rife_ready && !dolby &&
                          !refresh_blocks && drop_interpolation == 0 && !no_picture;
   const bool anime_on = request.anime4k != 0 && anime_ready && !dolby &&
@@ -768,20 +777,8 @@ int rillight_enhancement_resolve(const RillightCoreEnhancementRequest* request,
   if (!request || !facts || !load || !status ||
       status->struct_size < sizeof(*status))
     return -1;
-  if (request->struct_size != sizeof(*request) || !ValidFacts(*facts) ||
+  if (!rillight::ValidRequest(*request) || !ValidFacts(*facts) ||
       !ValidLoad(*load))
-    return -1;
-  if (request->interpolation != 0 && request->interpolation != 2) return -1;
-  if (request->anime4k < 0 || request->anime4k > 2) return -1;
-  if (request->super_resolution != 0 && request->super_resolution != 2)
-    return -1;
-  if (request->anime4k != 0 && request->super_resolution != 0) return -1;
-  if (request->denoise < 0 || request->denoise > 100 ||
-      request->sharpen < 0 || request->sharpen > 100)
-    return -1;
-  if ((request->accept_leave_native_dolby != 0 &&
-       request->accept_leave_native_dolby != 1) ||
-      request->display_refresh_hz < 0 || request->display_refresh_hz > 1000)
     return -1;
   *status = rillight::ResolveEnhancement(
       *request, *facts, load->drop_interpolation, load->drop_scale,
@@ -801,7 +798,7 @@ int rillight_enhancement_process_rgba(
   RillightCoreEnhancementLoad none{};
   none.struct_size = sizeof(none);
   const RillightCoreEnhancementLoad* applied = load ? load : &none;
-  if (applied->struct_size != sizeof(*applied)) return -1;
+  if (!ValidFacts(*facts) || !ValidLoad(*applied)) return -1;
   rillight::VideoQualityEnhancer enhancer;
   if (enhancer.Configure(*request) != 0) return -1;
   enhancer.UpdatePlaybackFacts(facts->native_dolby, facts->source_frame_rate);

@@ -1,3 +1,4 @@
+#include "enhancement_assets.h"
 #include "anime4k_glsl.h"
 
 #include <algorithm>
@@ -152,34 +153,15 @@ std::string Sha256(const std::string& bytes) {
   return hex;
 }
 
-std::filesystem::path ModuleDirectory() {
-#if defined(_WIN32)
-  HMODULE module = nullptr;
-  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCSTR>(&ModuleDirectory), &module))
-    return {};
-  char buffer[MAX_PATH * 4] = {};
-  const DWORD length = GetModuleFileNameA(module, buffer, sizeof(buffer));
-  if (length == 0 || length >= sizeof(buffer)) return {};
-  return std::filesystem::path(buffer).parent_path();
-#else
-  Dl_info info{};
-  if (dladdr(reinterpret_cast<const void*>(&ModuleDirectory), &info) == 0 ||
-      !info.dli_fname)
-    return {};
-  return std::filesystem::path(info.dli_fname).parent_path();
-#endif
-}
 
 std::vector<std::filesystem::path> ShaderRoots() {
   std::vector<std::filesystem::path> roots;
-  if (const char* env = std::getenv("RILLIGHT_ENHANCEMENT_DIR"))
-    roots.emplace_back(env);
+  const auto override_dir = EnhancementOverrideDirectory();
+  if (!override_dir.empty()) roots.push_back(override_dir);
 #ifdef RILLIGHT_ANIME4K_DIR
   roots.emplace_back(RILLIGHT_ANIME4K_DIR);
 #endif
-  const std::filesystem::path module = ModuleDirectory();
+  const std::filesystem::path module = EnhancementModuleDirectory();
   if (!module.empty()) {
     roots.push_back(module / "shaders" / "anime4k");
     roots.push_back(module);

@@ -104,8 +104,24 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(scroll.position.pixels, 0);
+      // The additional output category makes the category strip scrollable;
+      // reveal the lazily built speed button before switching back and forth.
+      final categories = find.descendant(
+        of: find.byKey(const Key('player-settings-categories')),
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(PlayerKeys.speed),
+        -180,
+        scrollable: categories,
+      );
       await tester.tap(find.byKey(PlayerKeys.speed));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(PlayerKeys.mediaSource),
+        180,
+        scrollable: categories,
+      );
       await tester.tap(find.byKey(PlayerKeys.mediaSource));
       await tester.pumpAndSettle();
       expect(

@@ -5,6 +5,16 @@ if(UNIX)
   add_test(NAME rillight_cache_directory COMMAND rillight_cache_directory_test)
 endif()
 
+add_executable(rillight_video_enhancer_test video_enhancer_test.cpp ../core/video_enhancer.cpp)
+target_compile_definitions(rillight_video_enhancer_test PRIVATE RILLIGHT_CORE_BUILD)
+target_link_libraries(rillight_video_enhancer_test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+if(MSVC)
+  target_compile_options(rillight_video_enhancer_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_video_enhancer_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_video_enhancer COMMAND rillight_video_enhancer_test)
+
 add_executable(rillight_dts_packet_recovery_test dts_packet_recovery_test.cpp)
 if(MSVC)
   target_compile_options(rillight_dts_packet_recovery_test PRIVATE /W4 /WX /UNDEBUG)
@@ -88,13 +98,16 @@ if(ANDROID AND RILLIGHT_CORE_GPU_TESTS)
   add_test(NAME rillight_android_color_pipeline COMMAND rillight_android_color_pipeline_test)
   add_executable(rillight_android_runtime_fallback_test
     android_runtime_fallback_test.cpp ../core/portable_color_pipeline.cpp
-    ../core/android_color_pipeline.cpp ../core/android_dovi_surface.cpp ../core/decoder_probe.cpp)
+    ../core/android_color_pipeline.cpp ../core/android_dovi_surface.cpp ../core/decoder_probe.cpp
+    ../core/video_enhancer.cpp ../core/enhancement_models.cpp ../core/anime4k_glsl.cpp)
   target_include_directories(rillight_android_runtime_fallback_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
-  target_compile_definitions(rillight_android_runtime_fallback_test PRIVATE RILLIGHT_HAVE_LIBASS=0)
+  target_compile_definitions(rillight_android_runtime_fallback_test PRIVATE
+    RILLIGHT_HAVE_LIBASS=0 RILLIGHT_HAVE_NCNN=1
+    "RILLIGHT_ANIME4K_DIR=\"${rillight_anime4k_dir}\"")
   target_compile_options(rillight_android_runtime_fallback_test PRIVATE -UNDEBUG)
   target_link_libraries(rillight_android_runtime_fallback_test PRIVATE
     ${avformat_library} ${avcodec_library} ${avfilter_library} ${avutil_library}
-    ${swscale_library} ${swresample_library} EGL GLESv3 android log mediandk dl Threads::Threads)
+    ${swscale_library} ${swresample_library} EGL GLESv3 android log mediandk dl Threads::Threads ncnn)
   # Run manually with the generated fixture; do not require a private clip in CI.
 endif()
 if(APPLE AND RILLIGHT_CORE_GPU_TESTS)

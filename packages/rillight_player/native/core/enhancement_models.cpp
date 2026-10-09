@@ -1,3 +1,4 @@
+#include "enhancement_assets.h"
 #include "enhancement_models.h"
 
 #include <algorithm>
@@ -112,31 +113,12 @@ std::string Sha256File(const std::filesystem::path& path) {
   return hex;
 }
 
-std::filesystem::path ModuleDirectory() {
-#if defined(_WIN32)
-  HMODULE module = nullptr;
-  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                          reinterpret_cast<LPCSTR>(&ModuleDirectory), &module))
-    return {};
-  char buffer[MAX_PATH * 4] = {};
-  const DWORD length = GetModuleFileNameA(module, buffer, sizeof(buffer));
-  if (length == 0 || length >= sizeof(buffer)) return {};
-  return std::filesystem::path(buffer).parent_path();
-#else
-  Dl_info info{};
-  if (dladdr(reinterpret_cast<const void*>(&ModuleDirectory), &info) == 0 ||
-      !info.dli_fname)
-    return {};
-  return std::filesystem::path(info.dli_fname).parent_path();
-#endif
-}
 
 std::filesystem::path FindAsset(const std::filesystem::path& relative) {
   std::vector<std::filesystem::path> roots;
-  if (const char* env = std::getenv("RILLIGHT_ENHANCEMENT_DIR"))
-    roots.emplace_back(env);
-  const std::filesystem::path module = ModuleDirectory();
+  const auto override_dir = EnhancementOverrideDirectory();
+  if (!override_dir.empty()) roots.push_back(override_dir);
+  const std::filesystem::path module = EnhancementModuleDirectory();
   if (!module.empty()) roots.push_back(module);
   for (const auto& root : roots) {
     const std::filesystem::path candidate = root / relative;
@@ -213,8 +195,8 @@ bool LoadParam(ncnn::Net* net, const std::filesystem::path& param,
   net->opt.use_vulkan_compute = false;
   net->opt.num_threads = 2;
   net->opt.lightmode = true;
-  return net->load_param(param.string().c_str()) == 0 &&
-         net->load_model(bin.string().c_str()) == 0;
+  return net->load_param(param.c_str()) == 0 &&
+         net->load_model(bin.c_str()) == 0;
 }
 
 void EnsureLoaded() {
