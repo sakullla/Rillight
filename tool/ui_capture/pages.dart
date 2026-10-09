@@ -614,7 +614,9 @@ extension PageCaptures on CaptureSession {
       (SettingsPage.hardwareDecodingKey, 'decoding'),
       (SettingsPage.decoderBackendKey, 'decoder'),
     ]) {
-      await tester.ensureVisible(find.byKey(entry.$1));
+      final target = find.byKey(entry.$1);
+      if (target.evaluate().isEmpty) continue;
+      await tester.ensureVisible(target);
       await advance(200);
       await save('settings-${entry.$2}');
     }

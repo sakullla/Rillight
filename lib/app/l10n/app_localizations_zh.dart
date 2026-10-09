@@ -1645,10 +1645,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneSubtitleExtraLarge => '特大';
 
   @override
-  String get phoneSubtitleOriginal => '使用原始 ASS 样式';
+  String get phoneSubtitleOriginal => '原始 ASS 样式';
 
   @override
-  String get phoneSubtitleOriginalHint => '保留字幕作者的字号与特效排版';
+  String get phoneSubtitleOriginalHint => '保留作者的字号与特效';
 
   @override
   String get phoneSubtitleUnavailable => '当前没有独立可调的文字字幕；图片字幕和画面内文字不支持字号调整';

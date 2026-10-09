@@ -62,15 +62,16 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
             PhoneSubtitleSettings(size: value.size, originalAss: original),
           ),
         ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            key: const Key('phone-subtitle-reset'),
-            icon: const Icon(Icons.restore),
-            onPressed: () => onChanged(const PhoneSubtitleSettings()),
-            label: Text(l.settingsRestoreDefaults),
+        if (value.size != PhoneSubtitleSize.standard || value.originalAss)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('phone-subtitle-reset'),
+              icon: const Icon(Icons.restore_rounded),
+              onPressed: () => onChanged(const PhoneSubtitleSettings()),
+              label: Text(l.settingsRestoreDefaults),
+            ),
           ),
-        ),
         if (error != null)
           Text(
             error!,

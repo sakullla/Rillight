@@ -129,6 +129,7 @@ void main() {
       );
       await pumpPage(tester, store: store);
       await expandSection(tester, '播放');
+      expect(find.byKey(const Key('phone-subtitle-reset')), findsNothing);
       await tester.tap(find.byKey(const Key('phone-subtitle-extraLarge')));
       await tester.pumpAndSettle();
       expect(
@@ -258,4 +259,23 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('decoder backend is hidden when the platform has one choice', (
+    tester,
+  ) async {
+    final store = MemoryPlayerSettingsStore();
+    await pumpPage(tester, store: store, platform: TargetPlatform.android);
+    await expandSection(tester, '播放');
+    expect(find.byKey(SettingsPage.decoderBackendKey), findsNothing);
+    expect(find.text('解码后端'), findsNothing);
+    expect(find.byKey(SettingsPage.hardwareDecodingKey), findsOneWidget);
+    expect(
+      tester
+          .widget<PlayerRateCell>(
+            find.byKey(const ValueKey('settings-decoding-auto')),
+          )
+          .selected,
+      isTrue,
+    );
+  }, tags: ['integration']);
 }

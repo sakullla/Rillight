@@ -460,29 +460,30 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                       ],
                     ),
-                    _SettingsOptionBlock(
-                      key: SettingsPage.decoderBackendKey,
-                      label: l10n.settingsDecoderBackend,
-                      options: [
-                        for (final value in backends)
-                          PlayerOption(
-                            key: ValueKey('settings-backend-${value.name}'),
-                            label: _backendLabel(l10n, value),
-                            selected:
-                                value ==
-                                (backends.contains(backend)
-                                    ? backend
-                                    : HardwareDecoderBackend.auto),
-                            onPressed: _loaded && backends.length > 1
-                                ? () => unawaited(
-                                    _save(
-                                      PlayerSettings(hardwareDecoder: value),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                      ],
-                    ),
+                    if (backends.length > 1)
+                      _SettingsOptionBlock(
+                        key: SettingsPage.decoderBackendKey,
+                        label: l10n.settingsDecoderBackend,
+                        options: [
+                          for (final value in backends)
+                            PlayerOption(
+                              key: ValueKey('settings-backend-${value.name}'),
+                              label: _backendLabel(l10n, value),
+                              selected:
+                                  value ==
+                                  (backends.contains(backend)
+                                      ? backend
+                                      : HardwareDecoderBackend.auto),
+                              onPressed: _loaded
+                                  ? () => unawaited(
+                                      _save(
+                                        PlayerSettings(hardwareDecoder: value),
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                        ],
+                      ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -637,6 +638,7 @@ PlayerSettings _mergeSettings(PlayerSettings current, PlayerSettings patch) {
     playbackRate: patch.playbackRate ?? current.playbackRate,
     skipIntroEnabled: patch.skipIntroEnabled ?? current.skipIntroEnabled,
     skipOutroEnabled: patch.skipOutroEnabled ?? current.skipOutroEnabled,
+    phoneSubtitles: patch.phoneSubtitles ?? current.phoneSubtitles,
     seriesPreferences: patch.seriesPreferences.isNotEmpty
         ? patch.seriesPreferences
         : current.seriesPreferences,
