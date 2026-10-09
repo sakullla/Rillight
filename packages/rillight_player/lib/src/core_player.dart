@@ -160,7 +160,7 @@ abstract class CorePlayer {
 }
 
 /// One Android owner keeps its native SurfaceView mounted while media opens.
-class AndroidCorePlayer implements CorePlayer {
+class AndroidCorePlayer implements CorePlayer, CoreNativeSeekCancellation {
   AndroidCorePlayer()
     : owner = 'core-${++_nextOwner}-${DateTime.now().microsecondsSinceEpoch}' {
     _subscription = _nativeEvents.listen((dynamic raw) {

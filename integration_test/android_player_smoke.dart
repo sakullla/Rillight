@@ -96,6 +96,10 @@ class _SmokeState extends State<_Smoke> {
 
   Future<void> run() async {
     try {
+      if (const bool.fromEnvironment('ANDROID_SMOKE_UNCACHED_SEEK_ONLY')) {
+        await runUncachedSeeks();
+        return;
+      }
       if (const bool.fromEnvironment('ANDROID_SMOKE_HLS_SUBTITLES_ONLY')) {
         await runHlsSubtitles();
         return;
@@ -259,6 +263,72 @@ class _SmokeState extends State<_Smoke> {
       debugPrintStack(stackTrace: stack);
       await backend.dispose();
     }
+  }
+
+  Future<void> runUncachedSeeks() async {
+    VideoOpenRequest media(int session, {int start = 0}) => VideoOpenRequest(
+      sessionId: session,
+      url: base.resolve('seek.mp4'),
+      credentialOrigin: base,
+      credentialHeaders: const {'X-Emby-Token': 'synthetic-android-smoke'},
+      start: Duration(seconds: start),
+      mediaStreams: const [
+        MediaStreamInfo(index: 0, type: 'Video', codec: 'h264'),
+        MediaStreamInfo(index: 1, type: 'Audio', codec: 'aac'),
+      ],
+    );
+    Future<void> advancing(int target) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 25));
+      while (backend.position.inMilliseconds < target * 1000 + 500 ||
+          backend.position.inMilliseconds >= target * 1000 + 8000 ||
+          !backend.isPlaying) {
+        check(errors.isEmpty, 'Seek failed: $errors');
+        check(
+          DateTime.now().isBefore(deadline),
+          'Seek to $target did not resume',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+      check(errors.isEmpty, 'Seek poisoned playback: $errors');
+      final status = await backend.diagnostics();
+      debugPrint(
+        'RILLIGHT_UNCACHED_SEEK ${jsonEncode({'target': target, 'positionMs': backend.position.inMilliseconds, 'hardware': status['coreActualHardwareName'], 'error': status['coreErrorCode'], 'cancelledReads': status['cancelledReads']})}',
+      );
+      record('seek-$target-playing');
+      await Future<void>.delayed(
+        const Duration(
+          seconds: int.fromEnvironment(
+            'ANDROID_SMOKE_HOLD_SECONDS',
+            defaultValue: 2,
+          ),
+        ),
+      );
+      check(errors.isEmpty, 'Seek failed after first frame: $errors');
+    }
+
+    await backend.open(media(101));
+    await advancing(0);
+    debugPrint(
+      'RILLIGHT_UNCACHED_SEEK_PREFIX ${jsonEncode({
+        'bytes': backend.bufferSnapshot.byteCoverage?.ranges.map((range) => [range.start, range.end]).toList(),
+        'totalBytes': backend.bufferSnapshot.byteCoverage?.totalBytes,
+      })}',
+    );
+    // Serve a >= 60 s MP4 with throttled reads so the first forward jump is
+    // outside the downloaded prefix. Keep the normal 2 GiB cache budget.
+    for (final target in [40, 10, 50, 5, 35]) {
+      await backend.seek(Duration(seconds: target));
+      await advancing(target);
+    }
+    await backend.pause();
+    await backend.seek(const Duration(seconds: 45));
+    await backend.play();
+    await advancing(45);
+    await backend.stop();
+    await backend.open(media(102, start: 25));
+    await advancing(25);
+    record('RILLIGHT_ANDROID_SMOKE_PASS');
+    await backend.pause();
   }
 
   Future<void> runHlsSubtitles() async {

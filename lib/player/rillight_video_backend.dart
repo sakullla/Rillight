@@ -1072,7 +1072,7 @@ class RillightVideoBackend extends VideoBackend
       position = value;
       return;
     }
-    // Desktop FFmpeg commits its new timeline and interrupts the old socket
+    // The owned core commits its new timeline and interrupts the old socket
     // atomically. Cancelling the proxy first can turn that old read into a
     // fatal EIO before the seek is accepted. Its closed downstream socket
     // already retires the corresponding proxy request.

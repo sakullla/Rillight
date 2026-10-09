@@ -320,3 +320,57 @@ and CoreInput tests passed (13). After removing temporary Java/native timing
 logs, all Android plugin unit tests passed (46); the profile APK was rebuilt
 and installed in the validation package. Other Android ABIs and physical HDR frame output
 were not validated in these runs; physical fan noise remains unverified.
+
+## Android uncached seek and lifecycle investigation (2026-10-09)
+
+The production 0.1.47 ARM64 app on a physical PKM110 phone reproduced the
+reported network-error overlay when seeking beyond downloaded bytes. The
+Android driver omitted `CoreNativeSeekCancellation`, so the shared backend
+cancelled proxy readers before the native core could advance its timeline.
+An interrupted old read could therefore fail the still-current playback.
+Android now declares the same cancellation ownership as the desktop driver;
+the native core already advances its timeline before interrupting owned IO.
+
+`flutter test test/player/android_seek_cancellation_test.dart` uses the real
+Android Dart driver, mocked platform calls and a real pending loopback HTTP
+request. Before the fix, one read was cancelled before the native seek call;
+after the fix, zero were cancelled. The backend suite plus this regression
+passed 20 tests.
+
+The disposable ARM64 profile app exercised a 60 s H.264/AAC MP4 through the
+owned HTTP proxy, with the default 2 GiB cache budget and an origin delayed
+80 ms per 64 KiB. Forward/backward targets 40, 10, 50, 5 and 35 seconds,
+paused seek to 45 seconds and reopen at 25 seconds resumed with MediaCodec
+and no playback error. The initial 8 s test deadline was insufficient for
+this throttled, high-bitrate fixture; the final test allows 25 s and still
+fails immediately on a playback error. This is functional seek evidence,
+not a startup-speed benchmark.
+
+Reproduce the focused device case with a >=60 s fast-start H.264/AAC
+`seek.mp4` in an ignored fixture directory:
+
+```sh
+python integration_test/android/smoke_server.py build/seek-fixtures --chunk-delay-ms 80
+adb reverse tcp:8765 tcp:8765
+flutter build apk --profile --android-project-arg=rillightValidation=true \
+  --dart-define=ANDROID_SMOKE_UNCACHED_SEEK_ONLY=true \
+  -t integration_test/android_player_smoke.dart
+```
+
+Supply the verified SDK and ABI options for the device, then install and
+launch the validation package. The smoke records its downloaded byte prefix
+before the first forward jump and emits PASS only after all targets recover.
+The server reports `max_range_start` so remote range reads can be distinguished
+from cached playback. Screenshots remain separate output evidence.
+
+The same phone also completed 15 fresh-backend open/play/dispose cycles.
+After disposal, process RSS ranged from 370.9 to 378.3 MiB, threads from 62
+to 67 and file descriptors from 289 to 307; disposal plus a fixed 1 s
+observation interval took 1039–1134 ms. Twelve alternating SDR H.264 / Dolby
+Vision HEVC source opens on one mounted player all used MediaCodec and
+completed without a core error or hang. These short phone samples did not
+show unbounded per-session growth; they do not exclude driver/GPU leaks or
+teardown hangs on the ARM32 TV, prolonged 4K HDR playback, or different Dolby
+profiles. The TV was absent from USB and its previous network ADB endpoint
+was unreachable. Its reported post-Dolby/source-switch hang remains
+unreproduced and is not claimed fixed by this release.
