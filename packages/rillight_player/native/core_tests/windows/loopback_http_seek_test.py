@@ -62,6 +62,7 @@ def main():
     drop_armed = threading.Event()
     dropped = threading.Event()
     requests = []
+    input_ids = []
     size = media_path.stat().st_size
 
     class Handler(BaseHTTPRequestHandler):
@@ -86,6 +87,7 @@ def main():
             start = int(match[1]) if match else 0
             end = min(int(match[2]), size - 1) if match and match[2] else size - 1
             requests.append((start, end))
+            input_ids.append(self.headers.get("X-Rillight-Input-Id"))
             self.send_response(206 if match else 200)
             self.send_header("Content-Type", "video/mp4")
             self.send_header("Accept-Ranges", "bytes")
@@ -275,8 +277,15 @@ def main():
                         lambda value: value.timeline_version > old_timeline
                         and value.first_video_frame_ready,
                         f"video after interrupted seek {operation}")
+                if not input_ids or any(
+                    identity is None or re.fullmatch(r"[0-9]{1,20}", identity) is None
+                    for identity in input_ids
+                ):
+                    raise AssertionError("Native media request lacks stable input identity")
+                if len(set(input_ids)) == len(input_ids):
+                    raise AssertionError("Input identity did not survive HTTP range replacement")
                 print(f"loopback HTTP seeks survived: requests={len(requests)}, "
-                      f"timeline={current.timeline_version}")
+                      f"timeline={current.timeline_version}, inputs={len(set(input_ids))}")
             finally:
                 gate_release.set()
                 library.rillight_core_destroy_loopback(core)

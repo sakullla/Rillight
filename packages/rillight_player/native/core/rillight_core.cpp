@@ -91,6 +91,7 @@ using Clock = std::chrono::steady_clock;
 
 struct LoopbackIo {
   std::atomic<uint64_t> media_generation{0};
+  std::atomic<uint64_t> next_input_id{1};
   std::atomic<int> media_open_error{0};
   std::atomic<bool> closing{false};
   std::mutex thread_mutex;
@@ -99,6 +100,7 @@ struct LoopbackIo {
 
 struct LoopbackHandle {
   LoopbackIo *owner;
+  uint64_t input_id = 0;
   AVIOContext *io = nullptr;
   std::string url;
   int64_t position = 0;
@@ -141,6 +143,12 @@ int loopback_open_at(LoopbackHandle *handle, int64_t position) {
   av_dict_set(&options, "rw_timeout", "45000000", 0);
   // Every reconnect must retain the same sealed route and redirect policy.
   av_dict_set(&options, "max_redirects", "0", 0);
+  // Each AVIO input performs sequential range reads. Preserve its identity
+  // across HTTP seeks so the proxy can retire its previous response before
+  // admitting the replacement, without cancelling other track readers.
+  const std::string headers = "X-Rillight-Input-Id: " +
+      std::to_string(handle->input_id) + "\r\n";
+  av_dict_set(&options, "headers", headers.c_str(), 0);
   // Reopening after cancellation must request the target directly. Opening at
   // byte zero first creates an obsolete header request beside the media read.
   if (position > 0) av_dict_set_int(&options, "offset", position, 0);
@@ -175,6 +183,7 @@ void *loopback_open(void *opaque, const char *url, int flags) {
       !(flags & AVIO_FLAG_READ) || (flags & AVIO_FLAG_WRITE)) return nullptr;
   auto handle = std::make_unique<LoopbackHandle>();
   handle->owner = owner;
+  handle->input_id = owner->next_input_id.fetch_add(1);
   handle->url = url;
   {
     std::lock_guard lock(owner->thread_mutex);

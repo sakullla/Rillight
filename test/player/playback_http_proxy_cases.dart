@@ -2363,6 +2363,68 @@ void main() {
     );
   }
 
+  test(
+    'native range replacement retires its reader before admission',
+    () async {
+      const mib = 1024 * 1024;
+      final fixture = await _CacheFixture.open(
+        memoryBytes: 8 * mib,
+        disk: true,
+        sessionBuffering: true,
+        readAheadBytes: 8 * mib,
+        continuousTransfers: true,
+      );
+      fixture.binaryBody = Uint8List(8 * mib);
+      fixture.holdAfterBytes = 1024;
+      fixture.hold = Completer<void>();
+      final clients = <HttpClient>[];
+      final readers = <StreamIterator<List<int>>>[];
+      try {
+        for (var index = 0; index < 8; index++) {
+          final client = HttpClient();
+          clients.add(client);
+          final request = await client.getUrl(fixture.url);
+          request.headers.set('range', 'bytes=0-65535');
+          request.headers.set('x-rillight-input-id', '${index + 1}');
+          final chunks = StreamIterator(await request.close());
+          readers.add(chunks);
+          expect(
+            await chunks.moveNext().timeout(const Duration(seconds: 3)),
+            isTrue,
+          );
+        }
+        expect(fixture.proxy.diagnostics['activeRequests'], 8);
+        final client = HttpClient();
+        clients.add(client);
+        final request = await client.getUrl(fixture.url);
+        request.headers.set('range', 'bytes=0-65535');
+        request.headers.set('x-rillight-input-id', '1');
+        final response = await request.close().timeout(
+          const Duration(seconds: 4),
+        );
+        expect(response.statusCode, HttpStatus.partialContent);
+        final replacement = StreamIterator(response);
+        readers.add(replacement);
+        expect(
+          await replacement.moveNext().timeout(const Duration(seconds: 3)),
+          isTrue,
+        );
+        expect(fixture.proxy.diagnostics['admissionRejected'], 0);
+        expect(fixture.proxy.diagnostics['readAheadReaders'], 8);
+      expect(fixture.ranges, ['bytes=0-65535']);
+        expect(fixture.hold!.isCompleted, isFalse);
+      } finally {
+        for (final client in clients) {
+          client.close(force: true);
+        }
+        if (!fixture.hold!.isCompleted) fixture.hold!.complete();
+        for (final reader in readers) {
+          await reader.cancel();
+        }
+      }
+    },
+  );
+
   test('small sequential media reads share one live download', () async {
     const kib = 1024;
     const mib = 1024 * kib;

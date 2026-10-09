@@ -3478,6 +3478,29 @@ class PlaybackHttpProxy {
     }
   }
 
+  void _retireSupersededNativeRead(HttpRequest incoming, _ProxyRead read) {
+    if (incoming.method != 'GET') return;
+    final inputId = incoming.headers.value('x-rillight-input-id');
+    if (inputId == null || !RegExp(r'^\d{1,20}$').hasMatch(inputId)) return;
+    final prefix = '/$_secret/';
+    if (!incoming.uri.path.startsWith(prefix)) return;
+    final token = incoming.uri.path.substring(prefix.length).split('/').first;
+    final route = _closed ? null : _routes.open(token);
+    if (route == null || route.role != PlaybackResourceRole.media.index) return;
+    read.resourceKey = route.identity;
+    read.localInputId = inputId;
+    // The native input closes its old AVIO before replacing the range. A
+    // stalled downstream body may not observe that TCP close until more bytes
+    // arrive. Retire it before checking capacity, including bounded ranges.
+    for (final previous in _reads) {
+      if (!identical(previous, read) &&
+          previous.resourceKey == route.identity &&
+          previous.localInputId == inputId) {
+        previous.cancel();
+      }
+    }
+  }
+
   Future<void> _serve(HttpRequest incoming) async {
     final read = _ProxyRead(seekGeneration: _seekGeneration);
     _reads.add(read);
@@ -3492,6 +3515,7 @@ class PlaybackHttpProxy {
     var acquired = false;
     var served = false;
     try {
+      _retireSupersededNativeRead(incoming, read);
       final prefetch = incoming.headers.value('x-rillight-prefetch') == '1';
       if (!prefetch) {
         _SegmentPrefetchJob? matching;
@@ -3713,29 +3737,6 @@ class PlaybackHttpProxy {
           }
         }
         _roles[key] = PlaybackResourceRole.values[route.role];
-      }
-      final localInput = incoming.headers.value('x-rillight-input-id');
-      if (incoming.method == 'GET' &&
-          _roles[key] == PlaybackResourceRole.media &&
-          localInput != null &&
-          RegExp(r'^\d{1,20}$').hasMatch(localInput)) {
-        read.localInputId = localInput;
-        final range = incoming.headers.value('range') ?? '';
-        read.bootstrapRead = range == 'bytes=0-';
-        if (RegExp(r'^bytes=\d+-\d+$').hasMatch(range)) {
-          // Native AVIO left its unbounded bootstrap response for a bounded
-          // track/index read. A disconnected HTTP consumer can otherwise wait
-          // for bytes indefinitely and pull prefetch back to the file header.
-          // Keep other inputs and the bounded retained track readers alive.
-          for (final previous in _reads) {
-            if (!identical(previous, read) &&
-                previous.resourceKey == key &&
-                previous.localInputId == localInput &&
-                previous.bootstrapRead) {
-              previous.cancel();
-            }
-          }
-        }
       }
       if (allowRange && await _tryBufferedResponse(incoming, key, read)) return;
       if (await _serveWarmPrefix(incoming, key, url, read)) return;
@@ -5052,7 +5053,6 @@ class _ProxyRead {
 
   String? resourceKey;
   String? localInputId;
-  bool bootstrapRead = false;
   bool readAheadProducer = false;
   HttpClientResponse? response;
   bool cancelled = false;
