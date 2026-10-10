@@ -141,6 +141,13 @@ class _Client extends EmbyClient {
               if (trackChoices) ...[
                 {'Index': 8, 'Type': 'Audio', 'Language': 'eng'},
                 {
+                  'Index': 10,
+                  'Type': 'Audio',
+                  'Language': 'jpn',
+                  'Codec': 'eac3',
+                  'Channels': 6,
+                },
+                {
                   'Index': 9,
                   'Type': 'Subtitle',
                   'Language': 'eng',
@@ -485,6 +492,37 @@ void main() {
       expect(controller.subtitleStreamIndex, explicitSource == 'v2' ? 9 : null);
     });
   }
+
+  test(
+    'scoped manual audio selection survives reopening identical source',
+    () async {
+      await setup(trackChoices: true);
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 1));
+      await _eventually(() => controller.activeMediaSourceId != null);
+      await controller.setAudio(10);
+      expect(controller.audioStreamIndex, 10);
+      await controller.disposeAsync();
+      controller.dispose();
+      controller = PlayerController(
+        client: auth.client,
+        itemId: 'movie',
+        backend: _Backend(),
+        window: PlayerWindow(),
+        runtime: runtime,
+        settingsStore: MemoryPlayerSettingsStore(),
+        openRequest: PlayerOpenRequest(
+          itemId: 'movie',
+          libraryId: 'library',
+          regionGeneration: runtime.registry.permit(account).regionGeneration,
+          source: SourceReference(account: account, itemId: 'movie'),
+        ),
+      );
+      await controller.start();
+      expect(controller.error, isNull);
+      expect(controller.audioStreamIndex, 10);
+    },
+  );
 
   test(
     'current private snapshot recovers Stopped and failed report retries',

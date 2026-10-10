@@ -52,6 +52,11 @@ void main() {
             final pointer = data + offset;
             expect(nativeCrc32(0, pointer, length), expected);
             expect(nativeCrc32Software(0, pointer, length), expected);
+            expect(nativeCrc32Chunk(0, pointer, length, 0), expected);
+            expect(
+              nativeCrc32Chunk(0, pointer, length, cacheCrc32Backend.index),
+              expected,
+            );
             expect(cacheCrc32(view), expected);
             final split = length ~/ 2;
             final first = nativeCrc32(0, pointer, split);
@@ -69,9 +74,13 @@ void main() {
     },
   );
 
-  test('bounded native copies preserve CRC across 4 MiB chunk boundaries', () {
+  test('borrowed chunks preserve CRC across block and call boundaries', () {
     // Independent Python zlib vectors: (i * 17 + (i >> 8)) & 255.
     const vectors = {
+      65535: 0xa03537d2,
+      65536: 0xfdcda63d,
+      65537: 0x8a976e3a,
+      131085: 0x21602ed6,
       4194303: 0x91286091,
       4194304: 0x1229ab40,
       4194305: 0xa4cc87b6,
@@ -88,6 +97,22 @@ void main() {
       );
     }
   });
+
+  test(
+    'borrowed heap and read-only nested views preserve offsets and bytes',
+    () {
+      final bytes = Uint8List(131085 + 19)..fillRange(0, 131085 + 19, 0xee);
+      for (var i = 0; i < 131085; i++) {
+        bytes[i + 7] = (i * 17 + (i >> 8)) & 255;
+      }
+      final original = Uint8List.fromList(bytes);
+      final outer = Uint8List.sublistView(bytes, 3, bytes.length - 2);
+      final view = Uint8List.sublistView(outer, 4, 131085 + 4);
+      expect(cacheCrc32(view), 0x21602ed6);
+      expect(cacheCrc32(view.asUnmodifiableView()), 0x21602ed6);
+      expect(bytes, original);
+    },
+  );
 
   test('cache CRC32 preserves standard IEEE tokens and view boundaries', () {
     expect(cacheCrc32(Uint8List(0)), 0);

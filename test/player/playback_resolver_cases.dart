@@ -599,6 +599,35 @@ void main() {
     );
   });
 
+  test(
+    'exact source restores audio index with duplicate language and title',
+    () {
+      const streams = [
+        MediaStreamInfo(index: 1, type: 'Audio', language: 'jpn'),
+        MediaStreamInfo(index: 10, type: 'Audio', language: 'jpn'),
+      ];
+      expect(
+        matchPreferredStreamIndex(
+          streams: streams,
+          preferredIndex: 10,
+          language: 'jpn',
+          title: 'jpn',
+          exactIndex: true,
+        ),
+        10,
+      );
+      expect(
+        matchPreferredStreamIndex(
+          streams: streams,
+          preferredIndex: 99,
+          language: 'jpn',
+          exactIndex: true,
+        ),
+        1,
+      );
+    },
+  );
+
   test('falls back to default then first text subtitle', () {
     final source = PlaybackMediaSource.fromJson({
       'Id': 'src',

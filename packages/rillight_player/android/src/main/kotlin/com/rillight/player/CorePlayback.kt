@@ -599,7 +599,7 @@ internal class CorePlayback(
                                         sinkAccept = if (bit == 0) 0 else sinkAccept and bit.inv()
                                         if (sinkAccept and 1 == 0) sinkAtmos = false
                                         val channels = try {
-                                            probeAudioSink(context, audio.routedDeviceIds()).channels
+                                            probeAudioSink(context, audio.routedDeviceIds(refresh = true)).channels
                                         } catch (_: RuntimeException) {
                                             2
                                         }
@@ -970,7 +970,7 @@ internal class CorePlayback(
     }
 
     private fun refreshAudioRoute() {
-        val routed = synchronized(outputLock) { audioOutput?.routedDeviceIds().orEmpty() }
+        val routed = synchronized(outputLock) { audioOutput?.routedDeviceIds(refresh = true).orEmpty() }
         val probed = try {
             probeAudioSink(context, routed)
         } catch (_: RuntimeException) {

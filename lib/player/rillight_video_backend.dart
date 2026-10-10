@@ -126,6 +126,7 @@ class RillightVideoBackend extends VideoBackend
   bool _diagnosticsBusy = false;
   bool _timelineRefreshing = false;
   int _timelineRefreshGeneration = -1;
+  DateTime? _lastTimelineRefreshAt;
   bool _disposed = false;
   int _generation = 0;
   int _sessionId = 0;
@@ -485,6 +486,7 @@ class RillightVideoBackend extends VideoBackend
     _coreSession = 'app-${request.sessionId}-$generation';
     position = request.start;
     duration = buffer = Duration.zero;
+    _lastTimelineRefreshAt = null;
     isPlaying = false;
     selectedAudioIndex = selectedSubtitleIndex = null;
     if (sameSession) {
@@ -553,12 +555,11 @@ class RillightVideoBackend extends VideoBackend
         diskLimitBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
           settings,
         ),
-        readAheadBytes:
-            const bool.hasEnvironment('RILLIGHT_VALIDATION_READ_AHEAD_MIB')
-            ? const int.fromEnvironment('RILLIGHT_VALIDATION_READ_AHEAD_MIB') *
-                  1024 *
-                  1024
-            : PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(settings),
+        // Forward prefetch follows the user's disk budget on every platform.
+        // RAM retention and pending transfers have independent bounds above.
+        readAheadBytes: PlayerRuntimeOptions.effectiveDiskCacheLimitBytes(
+          settings,
+        ),
         dynamicSource: request.dynamicSource,
         sessionBuffering: true,
         continuousTransfers: Platform.isAndroid,
@@ -884,9 +885,16 @@ class RillightVideoBackend extends VideoBackend
     final trackVersion = _trackVersion;
     try {
       if (duration > Duration.zero &&
+          (_lastTimelineRefreshAt == null ||
+              DateTime.now().difference(_lastTimelineRefreshAt!) >=
+                  const Duration(seconds: 1)) &&
           (!_timelineRefreshing || _timelineRefreshGeneration != generation)) {
         _timelineRefreshing = true;
         _timelineRefreshGeneration = generation;
+        // Disk inventories and media indexing are optional UI work. A growing
+        // multi-GiB download must not run them on every 250 ms speed tick.
+        // Existing coverage still retracts on eviction during diagnostics.
+        _lastTimelineRefreshAt = DateTime.now();
         // Indexing can scan disk for seconds. The transport keeps diagnostics
         // serviceable during that work; do not stall speed sampling behind it.
         unawaited(
@@ -1122,6 +1130,7 @@ class RillightVideoBackend extends VideoBackend
   }
 
   void _invalidateTrack() {
+    _lastTimelineRefreshAt = null;
     bufferSnapshot = BufferSnapshot.empty(
       sessionId: _sessionId,
       trackVersion: ++_trackVersion,

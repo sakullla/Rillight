@@ -69,7 +69,9 @@ class DiskCacheSession {
   _BlockReader? _reader;
   final Map<String, _VerifiedBlock> _verifiedFingerprints = {};
   Future<Map<String, Object?>>? _timedOutOperation;
-  Map<String, Object?> get diagnostics => Map.unmodifiable(_stats);
+  int _integrityScans = 0;
+  Map<String, Object?> get diagnostics =>
+      Map.unmodifiable({..._stats, 'diskIntegrityScans': _integrityScans});
 
   /// Finishes only when timed-out work has actually released its buffers.
   bool get hasPendingReads => _readOperations.isNotEmpty;
@@ -108,6 +110,7 @@ class DiskCacheSession {
 
   Future<Uint8List?> read(String token, {void Function()? onMissing}) async {
     if (_closed) return null;
+    _stats['diskBlockReads'] = (_stats['diskBlockReads'] as int? ?? 0) + 1;
     final reader = _reader;
     Map<String, Object?>? result;
     if (reader == null) {
@@ -148,7 +151,10 @@ class DiskCacheSession {
     if (result != null && result['error'] == null && result['bytes'] == null) {
       onMissing?.call();
     }
-    return result?['bytes'] as Uint8List?;
+    final bytes = result?['bytes'] as Uint8List?;
+    _stats['diskBlockReadBytes'] =
+        (_stats['diskBlockReadBytes'] as int? ?? 0) + (bytes?.length ?? 0);
+    return bytes;
   }
 
   void _rememberVerified(Map<String, Object?> result) {
@@ -161,6 +167,13 @@ class DiskCacheSession {
       stamp[1] as int,
       stamp[2] as int,
     );
+    _trimVerifiedFingerprints();
+  }
+
+  void _trimVerifiedFingerprints() {
+    while (_verifiedFingerprints.length > _maxCacheFiles) {
+      _verifiedFingerprints.remove(_verifiedFingerprints.keys.first);
+    }
   }
 
   Future<void> setSessionLimit(int bytes) async {
@@ -202,8 +215,16 @@ class DiskCacheSession {
     final verifier = _verifier;
     if (verifier == null) return null;
     final directory = _directory.path;
-    final known = Map<String, _VerifiedBlock>.from(_verifiedFingerprints);
+    // A snapshot verifies just one resource's tokens. Do not retire fingerprints
+    // belonging to another response/track when merging this snapshot's result.
+    final known = <String, _VerifiedBlock>{};
+    for (final token in tokens) {
+      final path = _join(directory, token);
+      final fingerprint = _verifiedFingerprints[path];
+      if (fingerprint != null) known[path] = fingerprint;
+    }
     final requested = List<String>.from(tokens);
+    _integrityScans++;
     final operation = verifier.verify(directory, requested, known);
     var timedOut = false;
     _verification = operation;
@@ -231,6 +252,7 @@ class DiskCacheSession {
             for (final entry in verified.entries) {
               _verifiedFingerprints.putIfAbsent(entry.key, () => entry.value);
             }
+            _trimVerifiedFingerprints();
           }
           _operations.remove(operation);
           if (identical(_verification, operation)) _verification = null;
@@ -1261,7 +1283,11 @@ class _DiskStore {
     final token = '$nonce-${bytes.length}-$checksum.block';
     final temporary = File(_join(lease.directory.path, '$nonce.partial'));
     try {
-      temporary.writeAsBytesSync(bytes, flush: true);
+      // These session blocks are disposable, not durable user data. Forcing
+      // fsync for every prefetch block stalls flash I/O used by playback.
+      // Close then rename still publishes a complete immutable file; CRC and
+      // length checks reject any block damaged by a crash or power loss.
+      temporary.writeAsBytesSync(bytes);
       temporary.renameSync(_join(lease.directory.path, token));
       _changed(temporary);
     } catch (_) {

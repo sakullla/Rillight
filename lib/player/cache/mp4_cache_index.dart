@@ -75,16 +75,21 @@ class Mp4CacheIndex {
       final movieScale = movieHeader == null
           ? null
           : _movieScale(data, movieHeader);
+      // Resolve identities before expanding sample tables. A multi-audio movie
+      // can contain hundreds of thousands of samples per unused track; those
+      // allocations cannot contribute to the selected playback timeline.
       final tracks = <_Track>[];
+      final trackBoxes = <int, _Box>{};
       for (final box in children.where((box) => box.type == 'trak')) {
         if (checkpoint != null) await checkpoint();
-        final track = await _track(data, box, mdats, movieScale, checkpoint);
+        final track = _trackIdentity(data, box);
         if (track == null) return null;
-        if (tracks.any((existing) => existing.id == track.id)) return null;
+        if (trackBoxes.containsKey(track.id)) return null;
+        trackBoxes[track.id] = box;
         if (track.kind == 'vide' || track.kind == 'soun') tracks.add(track);
       }
-      final video = _selected(tracks, 'vide', selectedVideoTrackId);
-      final audio = _selected(tracks, 'soun', selectedAudioTrackId);
+      var video = _selected(tracks, 'vide', selectedVideoTrackId);
+      var audio = _selected(tracks, 'soun', selectedAudioTrackId);
       if (video == null && audio == null) return null;
       if (tracks.where((track) => track.kind == 'vide').length > 1 &&
           selectedVideoTrackId == null) {
@@ -96,6 +101,26 @@ class Mp4CacheIndex {
       }
       if (selectedVideoTrackId != null && video == null) return null;
       if (selectedAudioTrackId != null && audio == null) return null;
+      if (video != null) {
+        video = await _track(
+          data,
+          trackBoxes[video.id]!,
+          mdats,
+          movieScale,
+          checkpoint,
+        );
+        if (video == null) return null;
+      }
+      if (audio != null) {
+        audio = await _track(
+          data,
+          trackBoxes[audio.id]!,
+          mdats,
+          movieScale,
+          checkpoint,
+        );
+        if (audio == null) return null;
+      }
       if (audio != null) {
         for (var i = 1; i < audio.samples.length; i++) {
           if (audio.samples[i].startUs < audio.samples[i - 1].startUs) {
@@ -860,17 +885,10 @@ _Box? _child(Uint8List bytes, _Box parent, String type) {
   return null;
 }
 
-Future<_Track?> _track(
-  Uint8List bytes,
-  _Box box,
-  List<_Box> mdats,
-  int? movieScale,
-  Future<void> Function()? checkpoint,
-) async {
-  final edts = _child(bytes, box, 'edts');
+_Track? _trackIdentity(Uint8List bytes, _Box box) {
   final tkhd = _child(bytes, box, 'tkhd');
   final mdia = _child(bytes, box, 'mdia');
-  if (tkhd == null || mdia == null) return null;
+  if (tkhd == null || mdia == null || tkhd.data >= tkhd.end) return null;
   final version = bytes[tkhd.data];
   if (version != 0 && version != 1) return null;
   final idOffset = tkhd.data + (version == 1 ? 20 : 12);
@@ -878,12 +896,27 @@ Future<_Track?> _track(
   final id = _u32(bytes, idOffset);
   if (id == 0) return null;
   final hdlr = _child(bytes, mdia, 'hdlr');
+  if (hdlr == null || hdlr.data + 12 > hdlr.end) return null;
+  return _Track(id, _type(bytes, hdlr.data + 8), const []);
+}
+
+Future<_Track?> _track(
+  Uint8List bytes,
+  _Box box,
+  List<_Box> mdats,
+  int? movieScale,
+  Future<void> Function()? checkpoint,
+) async {
+  final identity = _trackIdentity(bytes, box);
+  if (identity == null) return null;
+  final id = identity.id;
+  final kind = identity.kind;
+  if (kind != 'vide' && kind != 'soun') return identity;
+  final edts = _child(bytes, box, 'edts');
+  final mdia = _child(bytes, box, 'mdia')!;
   final mdhd = _child(bytes, mdia, 'mdhd');
   final minf = _child(bytes, mdia, 'minf');
-  if (hdlr == null || mdhd == null || minf == null) return null;
-  if (hdlr.data + 12 > hdlr.end) return null;
-  final kind = _type(bytes, hdlr.data + 8);
-  if (kind != 'vide' && kind != 'soun') return _Track(id, kind, const []);
+  if (mdhd == null || minf == null || mdhd.data >= mdhd.end) return null;
   final mdhdVersion = bytes[mdhd.data];
   if (mdhdVersion != 0 && mdhdVersion != 1) return null;
   final scaleOffset = mdhd.data + (mdhdVersion == 1 ? 20 : 12);

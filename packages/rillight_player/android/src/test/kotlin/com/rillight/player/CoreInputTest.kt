@@ -13,6 +13,52 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CoreInputTest {
+    @Test fun rollingInputReusesEvictedStorageWithoutReturningOldBytes() {
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val server = LocalHttpServer { headers, output ->
+            requests.incrementAndGet()
+            val start = headers.getValue("range").removePrefix("bytes=").substringBefore('-').toInt()
+            val size = 256 * 1024
+            reply(output, 206, ByteArray(size) { ((start / size + it) % 251).toByte() },
+                "bytes $start-${start + size - 1}/${64 * 1024 * 1024}")
+        }
+        var allocations = 0
+        var allocatedBytes = 0
+        val input = CoreInput("http://127.0.0.1:${server.port}/media", null) { size ->
+            allocations++
+            allocatedBytes += size
+            ByteArray(size)
+        }
+        try {
+            fun checkWindow(index: Int) {
+                val offset = index * 1024 * 1024
+                input.seek(offset.toLong(), 0)
+                val bytes = ByteArray(1024)
+                var count = 0
+                while (count < bytes.size) {
+                    val chunk = ByteArray(bytes.size - count)
+                    val read = input.read(chunk, chunk.size)
+                    org.junit.Assert.assertTrue(read > 0)
+                    chunk.copyInto(bytes, count, 0, read)
+                    count += read
+                }
+                org.junit.Assert.assertArrayEquals(
+                    ByteArray(1024) { ((index * 4 + it) % 251).toByte() }, bytes)
+            }
+            for (index in 1..24) checkWindow(index)
+            assertEquals(8, allocations)
+            assertEquals(2 * 1024 * 1024, allocatedBytes)
+            val before = requests.get()
+            // The seven other retained identities must still contain their
+            // own bytes after repeated eviction/reuse of the eighth slot.
+            for (index in 17..24) checkWindow(index)
+            assertEquals(before, requests.get())
+            checkWindow(1) // Evicted data must be fetched again, never aliased.
+            assertEquals(before + 1, requests.get())
+            assertEquals(8, allocations)
+        } finally { input.close(); server.close() }
+    }
+
     @Test fun retainedResponsesSurviveProxyOwnershipRetirement() {
         val owners = java.util.Collections.synchronizedList(mutableListOf<String>())
         val nextChunk = CountDownLatch(1)

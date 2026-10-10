@@ -309,11 +309,19 @@ Map<String, String> playbackStreamHeaders({
 int? matchPreferredStreamIndex({
   required List<MediaStreamInfo> streams,
   int? preferredIndex,
+  bool exactIndex = false,
   String? language,
   String? title,
 }) {
   if (streams.isEmpty) {
     return null;
+  }
+  // Only an identical source can treat a persisted index as authoritative.
+  // Language/title alone cannot distinguish two tracks with identical labels.
+  if (exactIndex && preferredIndex != null) {
+    for (final stream in streams) {
+      if (stream.index == preferredIndex) return stream.index;
+    }
   }
   final lang = language?.trim() ?? '';
   final name = title?.trim() ?? '';

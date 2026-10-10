@@ -13,6 +13,25 @@ import 'mp4_fixture.dart';
 void main() {
   group('progressive MP4 cache index', () {
     test(
+      'ambiguous long audio tracks stop before expanding sample tables',
+      () async {
+        final bytes = longProgressiveMp4Fixture(secondAudio: true);
+        var checkpoints = 0;
+        final index = await Mp4CacheIndex.load(
+          total: bytes.length,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+          checkpoint: () async {
+            if (++checkpoints > 4) {
+              throw StateError('Expanded an unselected track');
+            }
+          },
+        );
+        expect(index, isNull);
+      },
+    );
+
+    test(
       'long timeline matches audio linearly and yields during compute',
       () async {
         final bytes = longProgressiveMp4Fixture();
@@ -127,6 +146,45 @@ void main() {
         ];
         expect(first!.ranges(present, const Duration(seconds: 4)), isNotEmpty);
         expect(second!.ranges(present, const Duration(seconds: 4)), isEmpty);
+      },
+    );
+
+    test(
+      'unselected sample tables do not block selected track coverage',
+      () async {
+        final bytes = progressiveMp4Fixture(secondAudio: true);
+        // The last track has an unsupported sample table. Its identity remains
+        // valid, so it should matter only when that audio track is selected.
+        final marker = 'stsz'.codeUnits;
+        var lastTable = -1;
+        for (var i = 0; i <= bytes.length - marker.length; i++) {
+          if (bytes[i] == marker[0] &&
+              bytes[i + 1] == marker[1] &&
+              bytes[i + 2] == marker[2] &&
+              bytes[i + 3] == marker[3]) {
+            lastTable = i;
+          }
+        }
+        expect(lastTable, greaterThan(0));
+        bytes.setRange(lastTable, lastTable + 4, 'xxxx'.codeUnits);
+        Future<Mp4CacheIndex?> load(int? audio) => Mp4CacheIndex.load(
+          total: bytes.length,
+          selectedVideoTrackId: 1,
+          selectedAudioTrackId: audio,
+          read: (offset, length) async =>
+              Uint8List.sublistView(bytes, offset, offset + length),
+        );
+        final selected = await load(2);
+        expect(selected, isNotNull);
+        expect(
+          selected!.ranges([
+            CachedByteRange(0, bytes.length),
+          ], const Duration(seconds: 4)),
+          hasLength(1),
+        );
+        expect(await load(3), isNull);
+        expect(await load(null), isNull);
+        expect(await load(99), isNull);
       },
     );
 

@@ -154,6 +154,9 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     private val clock = CoreQueueClock()
     private val presentationClock = CorePresentationClock()
     private val timestamp = AudioTimestamp()
+    private val headPoll = CoreAudioHeadPoll()
+    private val routePoll = CoreAudioRoutePoll()
+    private var startThreshold = 1
     private var timestampAvailable = false
     private var lastTimestampPollNs = 0L
     private var hardwareClockActive = false
@@ -185,12 +188,18 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
         "sinkEncoding" to encoding,
         "sinkHardwareClock" to hardwareClockActive,
         "sinkHardwareDelayUs" to hardwareDelayUs,
+        "sinkBufferFrames" to (track?.bufferCapacityInFrames ?: 0),
+        "sinkStartThresholdFrames" to (if (Build.VERSION.SDK_INT >= 31)
+            track?.startThresholdInFrames ?: 0 else 0),
         "sinkUnderruns" to (track?.underrunCount ?: 0))
 
-    fun routedDeviceIds(): Set<Int> {
+    fun routedDeviceIds(refresh: Boolean = false): Set<Int> {
         if (Build.VERSION.SDK_INT < 24) return emptySet()
-        val id = track?.routedDevice?.id ?: return emptySet()
-        return setOf(id)
+        val active = track ?: return emptySet()
+        if (refresh) routePoll.reset()
+        return routePoll.read(System.nanoTime()) {
+            active.routedDevice?.id?.let { setOf(it) } ?: emptySet()
+        }
     }
 
     fun matches(frame: CoreAudioFrame): Boolean {
@@ -269,7 +278,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
         if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.pause()
         track.flush()
         if (Build.VERSION.SDK_INT >= 31 && endOfInput)
-            track.setStartThresholdInFrames(track.bufferCapacityInFrames)
+            track.setStartThresholdInFrames(startThreshold)
         resetClock()
         endOfInput = false
         tunnelBuffer = null; tunnelFrame = null
@@ -344,6 +353,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     }
 
     fun release() {
+        routePoll.reset()
         track?.let {
             it.pause()
             it.flush()
@@ -381,11 +391,25 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
             created.release()
             throw IllegalStateException("AudioTrack initialization failed")
         }
-        // The first track opens lazily, and route/layout changes replace it.
-        // Keep a previously selected volume (including mute) on every track.
-        created.setVolume(volume)
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                startThreshold = if (nextPassthrough)
+                    compressedStartThreshold(frame.bytes.size, frame.sampleCount,
+                        nextRate, created.bufferCapacityInFrames)
+                    else created.startThresholdInFrames
+                if (nextPassthrough) created.setStartThresholdInFrames(startThreshold)
+            }
+            // The first track opens lazily, and route/layout changes replace it.
+            // Keep a previously selected volume (including mute) on every track.
+            created.setVolume(volume)
+        } catch (error: RuntimeException) {
+            // ensure() can fall back to PCM without leaking an unowned track.
+            created.release()
+            throw error
+        }
         track?.release()
         track = created
+        routePoll.reset()
         channels = nextChannels
         sampleRate = nextRate
         encoding = nextEncoding
@@ -405,6 +429,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     private fun watchRoute(created: AudioTrack) {
         if (Build.VERSION.SDK_INT < 24) return
         created.addOnRoutingChangedListener(AudioRouting.OnRoutingChangedListener {
+            routePoll.reset()
             onRoute?.invoke()
         }, null)
     }
@@ -436,6 +461,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     }
 
     private fun resetPresentationClock() {
+        headPoll.reset()
         presentationClock.reset(System.nanoTime())
         timestampAvailable = false
         lastTimestampPollNs = 0
@@ -451,7 +477,11 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
             timestampAvailable = track.getTimestamp(timestamp)
             lastTimestampPollNs = nowNs
         }
-        val head = track.playbackHeadPosition.toLong()
+        // Multiple queue/drain queries in one feeder iteration share a hardware
+        // read; submitted sample accounting is still recomputed for every call.
+        val head = if (passthrough)
+            headPoll.read(nowNs) { track.playbackHeadPosition.toLong() }
+            else track.playbackHeadPosition.toLong()
         nowNs = System.nanoTime()
         val presented = if (track.playState == AudioTrack.PLAYSTATE_PLAYING)
             presentationClock.position(head,

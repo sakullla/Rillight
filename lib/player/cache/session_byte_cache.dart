@@ -24,9 +24,25 @@ class CacheRangeLease {
   final List<_ProtectedBlock> _blocks;
   final String? _protection;
   bool _closed = false;
+  Future<void> _reads = Future<void>.value();
+  Future<void>? _closing;
+  _ProtectedBlock? _readBlock;
+  Uint8List? _readBytes;
 
-  Future<CacheRead?> read(int offset, {int maxLength = 64 * 1024}) async {
-    if (_closed || _cache._closed) return null;
+  Future<CacheRead?> read(
+    int offset, {
+    int maxLength = 64 * 1024,
+    bool countHit = true,
+  }) {
+    // Serialize reads on this snapshot, including concurrent requests for the
+    // same block. Never allocate a second scratch buffer before releasing one.
+    final result = _reads.then((_) => _read(offset, maxLength, countHit));
+    _reads = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+
+  Future<CacheRead?> _read(int offset, int maxLength, bool countHit) async {
+    if (_closed || _cache._closed || maxLength <= 0) return null;
     // Acquisition advances to each selected block's end, so ends are strictly
     // increasing even when blocks overlap. Find the same first covering block.
     var low = 0, high = _blocks.length;
@@ -42,39 +58,68 @@ class CacheRangeLease {
     if (low == _blocks.length) return null;
     final block = _blocks[low];
     if (block.key.offset > offset) return null;
+    if (!identical(_readBlock, block)) _discardReadBuffer();
     var bytes = block.memory;
     var source = CacheReadSource.memory;
     if (bytes == null) {
-      final cost = block.length * 2;
-      if (_cache._pendingBytes + cost > _cache.pendingLimitBytes) return null;
-      _cache._pendingBytes += cost;
-      if (_cache._pendingBytes > _cache._pendingPeak) {
-        _cache._pendingPeak = _cache._pendingBytes;
-      }
-      try {
-        bytes = await _cache._disk?.read(block.token!);
-      } finally {
-        _cache._releasePending(cost, foregroundRead: true);
-      }
       source = CacheReadSource.disk;
+      bytes = _readBytes;
+      if (bytes == null) {
+        final cost = block.length * 2;
+        if (_cache._pendingBytes + cost > _cache.pendingLimitBytes) return null;
+        _cache._pendingBytes += cost;
+        if (_cache._pendingBytes > _cache._pendingPeak) {
+          _cache._pendingPeak = _cache._pendingBytes;
+        }
+        var retained = 0;
+        try {
+          bytes = await _cache._disk?.read(block.token!);
+          if (!_closed &&
+              !_cache._closed &&
+              bytes != null &&
+              _cache._pendingBytes <= _cache.pendingLimitBytes) {
+            // Keep one verified immutable block, charged to the existing
+            // transfer budget. A 64 KiB response must not read/checksum/copy
+            // the same 4 MiB disk block for every slice. Use snapshot identity,
+            // not the mutable cache key: invalidation can replace that key.
+            _readBlock = block;
+            _readBytes = bytes;
+            retained = bytes.length;
+          }
+        } finally {
+          _cache._releasePending(cost - retained, foregroundRead: true);
+        }
+      }
     }
-    if (_closed || bytes == null) return null;
+    if (_closed || _cache._closed || bytes == null) return null;
     final start = offset - block.key.offset;
     if (start >= bytes.length) return null;
     final end = (start + maxLength).clamp(start, bytes.length);
     if (end <= start) return null;
     final result = Uint8List.fromList(Uint8List.sublistView(bytes, start, end));
-    if (source == CacheReadSource.memory) {
+    if (countHit && source == CacheReadSource.memory) {
       _cache._memoryHits += result.length;
-    } else {
+    } else if (countHit) {
       _cache._diskHits += result.length;
     }
     return CacheRead(offset, result, source);
   }
 
-  Future<void> close() async {
-    if (_closed) return;
+  void _discardReadBuffer() {
+    final bytes = _readBytes;
+    _readBytes = null;
+    _readBlock = null;
+    if (bytes != null) {
+      _cache._releasePending(bytes.length, foregroundRead: true);
+    }
+  }
+
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
     _closed = true;
+    await _reads;
+    _discardReadBuffer();
     _cache._rangeLeases.remove(this);
     for (final block in _blocks.where((b) => b.memory != null)) {
       final count = _cache._memoryPins[block.key]! - 1;
@@ -87,6 +132,7 @@ class CacheRangeLease {
         _cache._memoryPins[block.key] = count;
       }
     }
+    _blocks.clear();
     if (_protection != null) await _cache._disk?.releaseProtection(_protection);
     _cache._trimMemory();
   }
@@ -155,8 +201,16 @@ class SessionByteCache {
   int _appliedPendingLimitBytes;
   int _appliedDiskSessionLimitBytes;
   final _entries = <_BlockKey, _Entry>{};
+  _BlockKey? _readCursor;
+  int _readCursorRevision = -1;
   int _revision = 0;
   int get revision => _revision;
+  int _contentRevision = 0;
+
+  /// Changes to indexed bytes or their published backing. Promoting an
+  /// immutable disk block into RAM (or dropping its RAM copy) does not require
+  /// rebuilding a content snapshot. Disk integrity still expires separately.
+  int get contentRevision => _contentRevision;
   int _coverageRevision = 0;
 
   /// Changes that can retract already available bytes. Appending new blocks
@@ -170,6 +224,11 @@ class SessionByteCache {
   DiskCacheSession? _disk;
   String? _degradation;
   String? _diskOpenFailure;
+  // A writer timeout does not invalidate immutable blocks. The independent
+  // foreground reader can still verify/read them while publication settles.
+  bool get _diskBlocksReadable =>
+      _disk != null &&
+      (_disk!.degradation == null || _disk!.degradation == 'disk-timeout');
   bool _closed = false;
   int _memoryBytes = 0;
   int _indexBytes = 0;
@@ -256,6 +315,10 @@ class SessionByteCache {
     }
     memoryLimitBytes = memoryBytes;
     pendingLimitBytes = pendingBytes;
+    for (final lease in _rangeLeases) {
+      if (_pendingBytes <= pendingLimitBytes) break;
+      lease._discardReadBuffer();
+    }
     _notifyPendingChanged();
     diskSessionLimitBytes = diskBytes;
     _trimMemory();
@@ -307,6 +370,7 @@ class SessionByteCache {
     _forget(key);
     _entries[key] = entry;
     _revision++;
+    _contentRevision++;
     _indexBytes += _indexCost(key);
     if (disk == null || disk.degradation != null) {
       _retainSameResource(key, bytes);
@@ -327,6 +391,7 @@ class SessionByteCache {
       if (token != null && !_closed && identical(_entries[key], entry)) {
         entry.diskToken = token;
         _revision++;
+        _contentRevision++;
       }
     } finally {
       _pendingPublications--;
@@ -419,6 +484,7 @@ class SessionByteCache {
     _forget(key);
     _entries[key] = entry;
     _revision++;
+    _contentRevision++;
     _indexBytes += _indexCost(key);
     _retain(key, bytes);
     while (_entries.length > maxEntries || _indexBytes > 4 * 1024 * 1024) {
@@ -453,6 +519,7 @@ class SessionByteCache {
             if (entry.diskToken != token) {
               entry.diskToken = token;
               _revision++;
+              _contentRevision++;
             }
           }
         },
@@ -461,6 +528,7 @@ class SessionByteCache {
         if (entry.diskToken != token) {
           entry.diskToken = token;
           _revision++;
+          _contentRevision++;
         }
       }
     } finally {
@@ -484,16 +552,33 @@ class SessionByteCache {
     if (_closed || maxLength <= 0) return null;
     _BlockKey? key;
     _Entry? entry;
-    // Bounded index; favor the latest overlapping block.
-    for (final candidate in _entries.keys.toList().reversed) {
-      final value = _entries[candidate]!;
-      if (candidate.resource == resource &&
-          candidate.generation == generation &&
-          candidate.offset <= offset &&
-          offset < candidate.offset + value.length) {
-        key = candidate;
+    final cursor = _readCursor;
+    if (cursor != null && _readCursorRevision == _revision) {
+      final value = _entries[cursor];
+      if (value != null &&
+          cursor.resource == resource &&
+          cursor.generation == generation &&
+          cursor.offset <= offset &&
+          offset < cursor.offset + value.length) {
+        key = cursor;
         entry = value;
-        break;
+      }
+    }
+    // Bounded index; favor the latest overlapping block.
+    // Sequential 64 KiB reads usually remain in the most recently used block.
+    // Do not copy the whole index for each slice. Any storage/index mutation
+    // invalidates the cursor, preserving newer overlapping publications.
+    if (key == null) {
+      for (final candidate in _entries.keys.toList().reversed) {
+        final value = _entries[candidate]!;
+        if (candidate.resource == resource &&
+            candidate.generation == generation &&
+            candidate.offset <= offset &&
+            offset < candidate.offset + value.length) {
+          key = candidate;
+          entry = value;
+          break;
+        }
       }
     }
     if (key == null || entry == null) return null;
@@ -523,7 +608,11 @@ class SessionByteCache {
       }
       source = CacheReadSource.disk;
       if (_closed || !identical(_entries[key], entry)) return null;
-      if (bytes != null) _retain(key, bytes, foreground: true);
+      if (bytes != null) {
+        // Disk messages already deliver owned bytes. Only external put callers
+        // require a defensive whole-block copy; response slices remain owned.
+        _retain(key, bytes, foreground: true, takeOwnership: true);
+      }
     }
     if (bytes == null) {
       if (confirmedMissing && _disk?.degradation != 'disk-timeout') {
@@ -534,6 +623,8 @@ class SessionByteCache {
     if (_memory.containsKey(key)) _foregroundMemory.add(key);
     _entries.remove(key);
     _entries[key] = entry;
+    _readCursor = key;
+    _readCursorRevision = _revision;
     final start = offset - key.offset;
     if (start >= bytes.length) return null;
     final end = (start + maxLength).clamp(start, bytes.length);
@@ -597,15 +688,10 @@ class SessionByteCache {
     }
     if (_closed) return const [];
     if (present == null) return null;
-    if (entries.any(
-      (entry) =>
-          identical(_entries[entry.key], entry.value) &&
-          !_memory.containsKey(entry.key) &&
-          entry.value.diskToken != null &&
-          !tokens.contains(entry.value.diskToken),
-    )) {
-      return null;
-    }
+    // Publication may finish while the verifier inspects older blocks. A new
+    // token was not part of this scan: omit just that block unless it is still
+    // in RAM. Do not discard the verified prefix on every concurrent append,
+    // which can starve coverage updates for the entire read-ahead download.
     final ranges = [
       for (final entry in entries)
         if (identical(_entries[entry.key], entry.value) &&
@@ -632,6 +718,58 @@ class SessionByteCache {
       }
     }
     return merged;
+  }
+
+  /// Retract only missing parts of an already verified snapshot. This never
+  /// adds newly cached bytes or replaces disk integrity verification.
+  List<CachedByteRange> retainAvailableRanges({
+    required String resource,
+    required int generation,
+    required List<CachedByteRange> verified,
+  }) {
+    if (_closed || verified.isEmpty) return const [];
+    final available = <CachedByteRange>[
+      for (final entry in _entries.entries)
+        if (entry.key.resource == resource &&
+            entry.key.generation == generation &&
+            (_memory.containsKey(entry.key) ||
+                (entry.value.diskToken != null && _diskBlocksReadable) ||
+                entry.value.publication != null))
+          CachedByteRange(
+            entry.key.offset,
+            entry.key.offset + entry.value.length,
+          ),
+    ]..sort((a, b) => a.start.compareTo(b.start));
+    final result = <CachedByteRange>[];
+    var cursor = 0;
+    for (final range in verified) {
+      while (cursor < available.length &&
+          available[cursor].end <= range.start) {
+        cursor++;
+      }
+      for (
+        var i = cursor;
+        i < available.length && available[i].start < range.end;
+        i++
+      ) {
+        final block = available[i];
+        final start = block.start > range.start ? block.start : range.start;
+        final end = block.end < range.end ? block.end : range.end;
+        if (end <= start) continue;
+        if (result.isNotEmpty && start <= result.last.end) {
+          final previous = result.removeLast();
+          result.add(
+            CachedByteRange(
+              previous.start,
+              end > previous.end ? end : previous.end,
+            ),
+          );
+        } else {
+          result.add(CachedByteRange(start, end));
+        }
+      }
+    }
+    return result;
   }
 
   /// The next possible hit lets the proxy limit an upstream gap request.
@@ -674,7 +812,7 @@ class SessionByteCache {
           entry.key.offset < end &&
           entry.key.offset + entry.value.length > offset &&
           (_memory.containsKey(entry.key) ||
-              (entry.value.diskToken != null && _disk?.degradation == null) ||
+              (entry.value.diskToken != null && _diskBlocksReadable) ||
               entry.value.publication != null)) {
         ranges.add((entry.key.offset, entry.key.offset + entry.value.length));
       }
@@ -873,9 +1011,11 @@ class SessionByteCache {
 
   Future<void> _close() async {
     _closed = true;
+    _contentRevision++;
     _coverageRevision++;
     await Future.wait(_rangeLeases.toList().map((lease) => lease.close()));
     _entries.clear();
+    _readCursor = null;
     _foregroundMemory.clear();
     _indexBytes = 0;
     _memory.clear();
@@ -883,7 +1023,12 @@ class SessionByteCache {
     await _disk?.close();
   }
 
-  void _retain(_BlockKey key, Uint8List bytes, {bool foreground = false}) {
+  void _retain(
+    _BlockKey key,
+    Uint8List bytes, {
+    bool foreground = false,
+    bool takeOwnership = false,
+  }) {
     if (_memoryPins.containsKey(key)) return;
     _removeMemory(key);
     if (bytes.length > memoryLimitBytes) return;
@@ -908,7 +1053,7 @@ class SessionByteCache {
       _removeMemory(oldest);
       _evictions++;
     }
-    _memory[key] = Uint8List.fromList(bytes);
+    _memory[key] = takeOwnership ? bytes : Uint8List.fromList(bytes);
     _revision++;
     _memoryBytes += bytes.length;
     if (_memoryBytes > _memoryPeak) _memoryPeak = _memoryBytes;
@@ -921,7 +1066,10 @@ class SessionByteCache {
     if (bytes != null) {
       _memoryBytes -= bytes.length;
       _revision++;
-      if (_entries[key]?.diskToken == null) _coverageRevision++;
+      if (_entries[key]?.diskToken == null) {
+        _contentRevision++;
+        _coverageRevision++;
+      }
     }
   }
 
@@ -956,6 +1104,7 @@ class SessionByteCache {
     if (_entries.remove(key) != null) {
       _indexBytes -= _indexCost(key);
       _revision++;
+      _contentRevision++;
       _coverageRevision++;
     }
   }

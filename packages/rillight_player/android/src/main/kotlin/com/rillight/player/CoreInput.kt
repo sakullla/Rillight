@@ -30,7 +30,8 @@ internal class CoreIoFactory(context: Context) {
 }
 
 /** AVIO-compatible input. interrupt() never waits for read/seek and is reusable. */
-internal class CoreInput(private val url: String?, private val file: File?) {
+internal class CoreInput(private val url: String?, private val file: File?,
+    private val allocateWindow: (Int) -> ByteArray = { ByteArray(it) }) {
     companion object { private val nextInputId = AtomicLong() }
     // A proxy ownership ID replaces one response, not every range belonging
     // to this AVIO. Keep one slot per live response (active plus two parked).
@@ -272,7 +273,14 @@ internal class CoreInput(private val url: String?, private val file: File?) {
                 val windowBytes = if (firstProbe) minOf(size, blockBytes) else blockBytes
                 val capacity = if (responseRemaining >= 0)
                     minOf(windowBytes.toLong(), responseRemaining).toInt() else windowBytes
-                window = ReadWindow(ByteArray(capacity))
+                // Retire the LRU identity before overwriting its bytes. The
+                // demuxer has already received copies of prior reads, so the
+                // evicted storage can be reused without retaining a ninth
+                // window or allocating another large array on every advance.
+                val retired = if (blocks.size >= 8)
+                    blocks.remove(blocks.keys.first()) else null
+                window = if (retired != null && retired.bytes.size == capacity)
+                    retired.apply { length = 0 } else ReadWindow(allocateWindow(capacity))
             }
             val pending = window.bytes
             val previousLength = window.length

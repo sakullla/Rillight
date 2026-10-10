@@ -140,6 +140,7 @@ Uint8List longProgressiveMp4Fixture({
   int videoGops = 1000,
   int audioSamplesPerGop = 100,
   bool manyAudioChunks = false,
+  bool secondAudio = false,
 }) {
   if (videoGops <= 0 ||
       audioSamplesPerGop <= 0 ||
@@ -227,6 +228,15 @@ Uint8List longProgressiveMp4Fixture({
       2000 ~/ audioSamplesPerGop,
       1,
     ),
+    if (secondAudio)
+      ...track(
+        3,
+        'soun',
+        audioOffset,
+        audioSamples,
+        2000 ~/ audioSamplesPerGop,
+        1,
+      ),
   ]);
   return Uint8List.fromList([...ftyp, ...mdat, ...moov]);
 }

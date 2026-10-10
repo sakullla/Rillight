@@ -104,6 +104,7 @@ class PlaybackHttpProxy {
   Duration? _timelineAttemptDuration;
   DateTime? _lastIntegrityCheck;
   DateTime? _lastSuccessfulTimelineAt;
+  DateTime? _timelineRetryAfter;
   String? _mappingUnknownReason;
   int? _selectedVideoTrackId;
   int? _selectedAudioTrackId;
@@ -194,6 +195,7 @@ class PlaybackHttpProxy {
   bool _refreshingResponseBytes = false;
   DateTime? _responseIntegrityAt;
   int _responseIntegrityRevision = -1;
+  int _responseCoverageRevision = -1;
   int _responseReadAheadSequence = 0;
 
   int get upstreamBytes => _upstreamBytes;
@@ -250,6 +252,7 @@ class PlaybackHttpProxy {
     _timelineIdentity = null;
     _timelineAttemptRevision = -1;
     _lastIntegrityCheck = null;
+    _timelineRetryAfter = null;
     _mappingUnknownReason = null;
     _cachedTimeline = const [];
     _clearByteCoverage();
@@ -283,6 +286,7 @@ class PlaybackHttpProxy {
     _mp4TimelineIndex = null;
     _timelineAttemptRevision = -1;
     _lastIntegrityCheck = null;
+    _timelineRetryAfter = null;
     _mappingUnknownReason = null;
     _cachedTimeline = const [];
     _timelineSequence++;
@@ -307,8 +311,9 @@ class PlaybackHttpProxy {
   void _publishByteCoverage(
     String resource,
     _Representation representation,
-    List<CachedByteRange> ranges,
-  ) {
+    List<CachedByteRange> ranges, {
+    required int scannedRevision,
+  }) {
     _cachedBytes = [
       for (final range in ranges)
         if (range.start >= 0 &&
@@ -317,7 +322,9 @@ class PlaybackHttpProxy {
           CachedByteRange(range.start, min(range.end, representation.total)),
     ];
     _byteIdentity = '$resource:${representation.generation}';
-    _byteRevision = cache!.revision;
+    // Writes completed during the asynchronous scan were not necessarily
+    // included. Do not mark them verified until the following snapshot.
+    _byteRevision = scannedRevision;
     _byteCoverageRevision = cache!.coverageRevision;
     _lastByteIntegrityCheck = DateTime.now();
     _timelineSequence++;
@@ -329,7 +336,7 @@ class PlaybackHttpProxy {
         !sessionBuffering ||
         _hlsNext.isNotEmpty ||
         _hlsPlaylists.isNotEmpty ||
-        cache!.diagnostics['degradation'] != null ||
+        _cacheReadsUncertain ||
         cache!.diagnostics['closed'] == true) {
       return null;
     }
@@ -346,20 +353,29 @@ class PlaybackHttpProxy {
   bool get _byteCoverageCurrent {
     final representation = _byteRepresentation;
     final resource = _timelineResource ?? _readAhead?.resource;
-    return representation != null &&
-        resource != null &&
-        _byteIdentity == '$resource:${representation.generation}' &&
-        (_byteCoverageRevision == cache!.coverageRevision ||
-            _cachedBytes.every(
-              (range) =>
-                  cache!.firstMissingOffset(
-                    resource: resource,
-                    generation: representation.generation,
-                    offset: range.start,
-                    length: range.end - range.start,
-                  ) ==
-                  null,
-            ));
+    if (representation == null ||
+        resource == null ||
+        _byteIdentity != '$resource:${representation.generation}') {
+      return false;
+    }
+    if (cache!.diagnostics['degradation'] == 'disk-timeout' &&
+        (_lastByteIntegrityCheck == null ||
+            DateTime.now().difference(_lastByteIntegrityCheck!) >=
+                verifiedSnapshotTtl)) {
+      return false;
+    }
+    if (_byteCoverageRevision != cache!.coverageRevision) {
+      // Sliding-window reclamation must remove the consumed part immediately,
+      // without blanking all remaining verified download progress between scans.
+      _cachedBytes = cache!.retainAvailableRanges(
+        resource: resource,
+        generation: representation.generation,
+        verified: _cachedBytes,
+      );
+      _byteCoverageRevision = cache!.coverageRevision;
+      _timelineSequence++;
+    }
+    return true;
   }
 
   void _retainByteCoverageWhileBusy() {
@@ -435,6 +451,7 @@ class PlaybackHttpProxy {
       'registryBudgetBytes': _roles.length * 4096,
       'streamPolicy': _stream.name,
       'sessionBuffering': sessionBuffering,
+      'configuredReadAheadBytes': readAheadBytes,
       'activeRequests': _active,
       'admissionWaits': _admissionWaits,
       'admissionRejected': _admissionRejected,
@@ -614,41 +631,51 @@ class PlaybackHttpProxy {
     }
     _mappingUnknownReason = reason;
     _timelineAttemptRevision = -1;
+    // Optional indexing must not restart its entire allocation/read workload
+    // on every 250 ms diagnostics tick while playback or publication is busy.
+    // Byte coverage is refreshed independently during this cooldown.
+    _timelineRetryAfter = reason == 'indexBudgetOrReadUnavailable'
+        ? DateTime.now().add(integrityRecheck)
+        : null;
     _timelineSequence++;
   }
 
   bool get _responseCoverageCurrent {
     final buffered = _bufferedResponse;
-    return !_closed &&
-        buffered != null &&
-        cache?.diagnostics['degradation'] == null &&
-        _responseByteIdentity == buffered.buffer.resource &&
-        _responseIntegrityAt != null &&
-        DateTime.now().difference(_responseIntegrityAt!) <
-            verifiedSnapshotTtl &&
-        _responseByteRanges.every(
-          (range) =>
-              cache!.firstMissingOffset(
-                resource: buffered.buffer.resource,
-                generation: 0,
-                offset: range.start,
-                length: range.end - range.start,
-              ) ==
-              null,
-        );
+    if (_closed ||
+        buffered == null ||
+        _cacheReadsUncertain ||
+        _responseByteIdentity != buffered.buffer.resource ||
+        _responseIntegrityAt == null ||
+        DateTime.now().difference(_responseIntegrityAt!) >=
+            verifiedSnapshotTtl) {
+      return false;
+    }
+    if (_responseCoverageRevision != cache!.coverageRevision) {
+      // Reclaiming one consumed block retracts only that part. Keep the other
+      // verified islands visible while the next asynchronous scan is pending.
+      _responseByteRanges = cache!.retainAvailableRanges(
+        resource: buffered.buffer.resource,
+        generation: 0,
+        verified: _responseByteRanges,
+      );
+      _responseCoverageRevision = cache!.coverageRevision;
+      _timelineSequence++;
+    }
+    return true;
   }
 
   Future<void> _refreshResponseCoverage() async {
     final buffered = _bufferedResponse;
     if (buffered == null || _refreshingResponseBytes || _closed) return;
     if (_responseByteIdentity == buffered.buffer.resource &&
-        _responseIntegrityRevision == cache!.revision &&
+        _responseIntegrityRevision == cache!.contentRevision &&
         _responseIntegrityAt != null &&
         DateTime.now().difference(_responseIntegrityAt!) < integrityRecheck) {
       return;
     }
     _refreshingResponseBytes = true;
-    final revision = cache!.revision;
+    final revision = cache!.contentRevision;
     try {
       final ranges = await cache!.availableRanges(
         resource: buffered.buffer.resource,
@@ -661,10 +688,19 @@ class PlaybackHttpProxy {
       _responseByteIdentity = buffered.buffer.resource;
       _responseIntegrityAt = DateTime.now();
       _responseIntegrityRevision = revision;
+      _responseCoverageRevision = cache!.coverageRevision;
       _timelineSequence++;
     } finally {
       _refreshingResponseBytes = false;
     }
+  }
+
+  bool get _cacheReadsUncertain {
+    final degradation = cache?.diagnostics['degradation'];
+    // Slow publication is independent of the read/verification workers. Keep
+    // recent verified coverage; actual loss, expiry and identity changes still
+    // retract it. Otherwise one busy write also appears as a playback hole.
+    return degradation != null && degradation != 'disk-timeout';
   }
 
   Future<void> _refreshByteCoverage() async {
@@ -676,7 +712,7 @@ class PlaybackHttpProxy {
     }
     if (_refreshingBytes) return;
     final identity = '$resource:${representation.generation}';
-    final revision = cache!.revision;
+    final revision = cache!.contentRevision;
     if (_byteIdentity == identity &&
         _byteRevision == revision &&
         _lastByteIntegrityCheck != null &&
@@ -694,7 +730,7 @@ class PlaybackHttpProxy {
       if (_closed ||
           _representations[resource]?.generation != representation.generation ||
           resource != (_timelineResource ?? _readAhead?.resource) ||
-          cache!.diagnostics['degradation'] != null) {
+          _cacheReadsUncertain) {
         if (_byteIdentity == identity) _clearByteCoverage();
         return;
       }
@@ -704,7 +740,12 @@ class PlaybackHttpProxy {
       }
       // availableRanges filters entries against the live cache after its
       // asynchronous disk check. Concurrent new writes are scanned next.
-      _publishByteCoverage(resource, representation, ranges);
+      _publishByteCoverage(
+        resource,
+        representation,
+        ranges,
+        scannedRevision: revision,
+      );
     } catch (_) {
       _retainByteCoverageWhileBusy();
     } finally {
@@ -740,13 +781,20 @@ class PlaybackHttpProxy {
     }
     final identity = '$resource:${representation.generation}';
     final trackSelectionVersion = _trackSelectionVersion;
+    final retryAfter = _timelineRetryAfter;
+    if (_timelineIdentity == identity &&
+        _timelineAttemptDuration == duration &&
+        retryAfter != null &&
+        DateTime.now().isBefore(retryAfter)) {
+      return;
+    }
     bool stillCurrent() =>
         !_closed &&
         _timelineIdentity == identity &&
         trackSelectionVersion == _trackSelectionVersion &&
         resource == (_timelineResource ?? _readAhead?.resource) &&
         _representations[resource]?.generation == representation.generation;
-    final snapshotRevision = cache!.revision;
+    final snapshotRevision = cache!.contentRevision;
     final coverageRevision = cache!.coverageRevision;
     bool revisionCurrent() {
       if (cache!.coverageRevision == coverageRevision) return true;
@@ -770,6 +818,7 @@ class PlaybackHttpProxy {
     if (!_reserveCacheWorkspace(1024 * 1024)) return;
     _refreshingTimeline = true;
     _charge(1024 * 1024);
+    CacheRangeLease? indexLease;
     try {
       if (_timelineIdentity != identity) {
         _timelineIdentity = identity;
@@ -800,7 +849,12 @@ class PlaybackHttpProxy {
         // but these verified byte islands remain conservative for this exact
         // representation and can be shown without another disk scan.
         if (verifyChecksum && _byteRepresentation != null) {
-          _publishByteCoverage(resource, representation, bytes);
+          _publishByteCoverage(
+            resource,
+            representation,
+            bytes,
+            scannedRevision: snapshotRevision,
+          );
         }
         return;
       }
@@ -808,21 +862,33 @@ class PlaybackHttpProxy {
       // Running a second disk checksum pass would consume the same pending
       // budget and delay both playback diagnostics and the foreground reads.
       if (verifyChecksum) {
-        _publishByteCoverage(resource, representation, bytes);
+        _publishByteCoverage(
+          resource,
+          representation,
+          bytes,
+          scannedRevision: snapshotRevision,
+        );
       }
       // Indexing a partially cached Matroska file can issue many immediate
       // memory reads. Yield to the isolate event queue so seek/cancel and HTTP
       // reads remain responsive, and bound this optional snapshot's work.
       final indexWatch = Stopwatch()..start();
+      // Building a long movie's immutable sample index is one-time work. A
+      // 250 ms total deadline on a TV can discard it on every attempt, causing
+      // repeated allocation/GC and preventing any temporal cache coverage.
+      // Keep short cooperative slices, but allow the initial build to finish.
+      var indexBudget = _timelineIndex == null && _mp4TimelineIndex == null
+          ? const Duration(seconds: 3)
+          : const Duration(milliseconds: 250);
       var lastYield = Duration.zero;
       Future<void> checkpoint() async {
-        if (indexWatch.elapsed > const Duration(milliseconds: 250)) {
+        if (!stillCurrent() || indexWatch.elapsed > indexBudget) {
           throw TimeoutException('Cache timeline indexing budget exceeded');
         }
         if (indexWatch.elapsed - lastYield >= const Duration(milliseconds: 4)) {
           await Future<void>.delayed(Duration.zero);
           lastYield = indexWatch.elapsed;
-          if (indexWatch.elapsed > const Duration(milliseconds: 250)) {
+          if (!stillCurrent() || indexWatch.elapsed > indexBudget) {
             throw TimeoutException('Cache timeline indexing budget exceeded');
           }
         }
@@ -836,13 +902,31 @@ class PlaybackHttpProxy {
         await checkpoint();
         final output = BytesBuilder(copy: false);
         while (output.length < length) {
-          final hit = await cache!.read(
-            resource: resource,
-            generation: representation.generation,
-            offset: offset + output.length,
-            maxLength: length - output.length,
+          final position = offset + output.length;
+          final remaining = length - output.length;
+          // Optional metadata must not become foreground demand and evict the
+          // audio/video working set. Reuse one protected snapshot's scratch
+          // block (charged to the existing transfer budget) across nearby
+          // header reads without promoting it into the playback RAM cache.
+          var hit = await indexLease?.read(
+            position,
+            maxLength: remaining,
             countHit: false,
           );
+          if (hit == null) {
+            await indexLease?.close();
+            indexLease = await cache!.protectRange(
+              resource: resource,
+              generation: representation.generation,
+              offset: position,
+              length: remaining,
+            );
+            hit = await indexLease?.read(
+              position,
+              maxLength: remaining,
+              countHit: false,
+            );
+          }
           if (hit == null || hit.bytes.isEmpty) return null;
           output.add(hit.bytes);
         }
@@ -874,6 +958,11 @@ class PlaybackHttpProxy {
             );
         if (!stillCurrent() || !revisionCurrent()) return;
         _mp4TimelineIndex = mp4;
+        // Mapping changing cache ranges remains a short bounded operation,
+        // even when this refresh also had to build the immutable index.
+        indexWatch.reset();
+        lastYield = Duration.zero;
+        indexBudget = const Duration(milliseconds: 250);
         final ranges = mp4 == null
             ? const <CachedTimeRange>[]
             : await mp4.rangesWithBudget(
@@ -888,12 +977,16 @@ class PlaybackHttpProxy {
             : null;
       }
       _lastSuccessfulTimelineAt = DateTime.now();
+      _timelineRetryAfter = _mappingUnknownReason == null
+          ? null
+          : DateTime.now().add(integrityRecheck);
       _timelineSequence++;
     } catch (_) {
       if (stillCurrent()) {
         _timelineRetry('indexBudgetOrReadUnavailable');
       }
     } finally {
+      await indexLease?.close();
       _charge(-1024 * 1024);
       _releaseCacheWorkspace(1024 * 1024);
       _refreshingTimeline = false;
@@ -3052,7 +3145,7 @@ class PlaybackHttpProxy {
         buffered.key != key ||
         !_cacheableRequest(incoming, key) ||
         dynamicSource ||
-        cache!.diagnostics['degradation'] != null) {
+        _cacheReadsUncertain) {
       return false;
     }
     final representation = buffered.representation;
@@ -4453,10 +4546,9 @@ class PlaybackHttpProxy {
                 cache: cache!,
                 resource: 'response-${++_responseReadAheadSequence}',
                 length: bodyLength,
-                aheadBytes: min(
-                  readAheadBytes,
-                  cache!.diskSessionLimitBytes ~/ 4,
-                ),
+                // The same disk-budget window applies to untagged responses.
+                // SessionReadAhead reserves workspace within that budget.
+                aheadBytes: min(readAheadBytes, cache!.diskSessionLimitBytes),
                 source: body(),
                 cancelSource: bodyRead.cancel,
                 releaseWorkspace: () {

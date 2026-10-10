@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/cache/http_cache_policy.dart';
@@ -10,6 +11,97 @@ import 'package:rillight/player/playback_http_proxy.dart';
 const _mib = 1024 * 1024;
 
 void main() {
+  test(
+    'busy writer serves cached playback without a second origin request',
+    () async {
+      final fixture = await _Direct.open(
+        holdAfter: 8 * _mib,
+        refuseSecond: true,
+        diskTimeout: const Duration(milliseconds: 80),
+      );
+      RandomAccessFile? lock;
+      try {
+        final old = await fixture.read();
+        expect(await old.moveNext(), isTrue);
+        await fixture.waitFor(
+          () =>
+              (fixture.proxy.diagnostics['responseReadAheadPublishedBytes']
+                      as int) >=
+                  5 * _mib &&
+              fixture.proxy.cache!.diagnostics['pendingPublications'] == 0,
+        );
+        fixture.proxy.cancelPendingReads();
+        await old.cancel();
+        lock = File(
+          '${fixture.root.path}/quota.lock',
+        ).openSync(mode: FileMode.append);
+        lock.lockSync(FileLock.exclusive);
+        await fixture.proxy.cache!.put(
+          resource: 'unrelated',
+          generation: 1,
+          offset: 0,
+          bytes: Uint8List(4),
+        );
+        expect(fixture.proxy.cache!.diagnostics['degradation'], 'disk-timeout');
+        final reader = await fixture.read(end: 65535);
+        var position = 0;
+        while (await reader.moveNext()) {
+          position = _verify(reader.current, position);
+        }
+        await reader.cancel();
+        expect(position, 65536);
+        expect(fixture.requests, 1);
+      } finally {
+        lock?.unlockSync();
+        lock?.closeSync();
+        await fixture.close();
+      }
+    },
+    skip: !Platform.isWindows,
+  );
+  test(
+    'untagged response uses the full configured budget and slides safely',
+    () async {
+      final fixture = await _Direct.open(
+        length: 96 * _mib + 37,
+        readAheadBytes: 64 * _mib,
+      );
+      try {
+        final reader = await fixture.read();
+        expect(await reader.moveNext(), isTrue);
+        var position = _verify(reader.current, 0);
+        expect(
+          fixture.proxy.diagnostics['configuredReadAheadBytes'],
+          64 * _mib,
+        );
+        // Keep the reader stationary while the producer fills beyond the old
+        // quarter-quota cap, then consume a file larger than the disk budget.
+        await fixture.waitFor(
+          () =>
+              (fixture.proxy.diagnostics['responseReadAheadPublishedBytes']
+                  as int) >=
+              48 * _mib,
+        );
+        while (await reader.moveNext()) {
+          position = _verify(reader.current, position);
+        }
+        expect(position, fixture.length);
+        expect(fixture.requests, 1);
+        expect(
+          fixture.proxy.cache!.diagnostics['memoryPeakBytes'],
+          lessThanOrEqualTo(2 * _mib),
+        );
+        expect(
+          fixture.proxy.cache!.diagnostics['diskBytes'],
+          lessThanOrEqualTo(64 * _mib),
+        );
+        await reader.cancel();
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
   test(
     'cached seek continues downloading beyond the old window on the same socket',
     () async {
@@ -106,6 +198,21 @@ void main() {
         expect(ranges, isNotEmpty);
         expect((ranges.first as Map)['start'], start);
         final identity = diagnostics['cachedByteIdentity'] as String;
+        await fixture.proxy.cache!.discardBefore(
+          resource: identity,
+          generation: 0,
+          offset: 2 * _mib,
+          keepPrefixBytes: 0,
+        );
+        // No refresh in between: dropping consumed blocks must retract just
+        // that prefix, not blink all retained coverage until the next scan.
+        final retained = fixture.proxy.diagnostics['cachedByteRanges'] as List;
+        expect(retained, isNotEmpty);
+        expect(
+          (retained.first as Map)['start'],
+          allOf(greaterThan(start), lessThanOrEqualTo(start + 2 * _mib)),
+        );
+        expect((retained.last as Map)['end'], (ranges.last as Map)['end']);
         await fixture.proxy.cache!.discardResource(identity);
         expect(fixture.proxy.diagnostics['cachedByteRanges'], isEmpty);
       } finally {
@@ -291,8 +398,10 @@ class _Direct {
 
   static Future<_Direct> open({
     int length = 20 * _mib,
+    int readAheadBytes = 8 * _mib,
     int? holdAfter,
     bool refuseSecond = false,
+    Duration diskTimeout = const Duration(milliseconds: 750),
   }) async {
     final root = await Directory.systemTemp.createTemp('rillight-response-');
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -300,11 +409,12 @@ class _Direct {
       root: root,
       memoryLimitBytes: 2 * _mib,
       diskLimitBytes: 64 * _mib,
+      diskTimeout: diskTimeout,
     );
     final proxy = await PlaybackHttpProxy.create(
       cache: cache,
       sessionBuffering: true,
-      readAheadBytes: 8 * _mib,
+      readAheadBytes: readAheadBytes,
     );
     final fixture = _Direct(
       root,

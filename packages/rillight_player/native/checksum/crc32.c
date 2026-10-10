@@ -124,10 +124,14 @@ CRC_API uint32_t rillight_crc32_software(uint32_t previous,
   return crc32_software(previous ^ UINT32_MAX, bytes, length) ^ UINT32_MAX;
 }
 
-CRC_API uint32_t rillight_crc32(uint32_t previous,
-                              const uint8_t *bytes, size_t length) {
+// Leaf FFI entry: the caller has already selected a supported CPU backend.
+// No system queries, allocation, retained pointers or Dart callbacks here.
+// Dart limits each borrowed-typed-data call to 64 KiB so GC can run between
+// chunks, including on CPUs that use the baseline software implementation.
+CRC_API uint32_t rillight_crc32_chunk(uint32_t previous,
+                                    const uint8_t *bytes, size_t length,
+                                    int backend) {
   uint32_t crc = previous ^ UINT32_MAX;
-  const int backend = rillight_crc32_backend();
 #if defined(CRC_ARM)
   if (backend == 1) return crc32_arm(crc, bytes, length) ^ UINT32_MAX;
 #elif defined(CRC_X86)
@@ -141,4 +145,9 @@ CRC_API uint32_t rillight_crc32(uint32_t previous,
   (void)backend;
 #endif
   return crc32_software(crc, bytes, length) ^ UINT32_MAX;
+}
+
+CRC_API uint32_t rillight_crc32(uint32_t previous,
+                              const uint8_t *bytes, size_t length) {
+  return rillight_crc32_chunk(previous, bytes, length, rillight_crc32_backend());
 }

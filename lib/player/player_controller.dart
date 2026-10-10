@@ -3953,6 +3953,9 @@ class PlayerController extends ChangeNotifier {
       final selectedAudio =
           matchPreferredStreamIndex(
             streams: next.mediaSource.audioStreams,
+            exactIndex:
+                memory?.mediaSourceId != null &&
+                memory!.mediaSourceId == next.mediaSource.id,
             preferredIndex:
                 audio ??
                 (strictTracks ? null : preferredAudioStreamIndex) ??
@@ -5486,8 +5489,10 @@ class PlayerController extends ChangeNotifier {
           libraryId: actual.libraryId,
           lineId: _ephemeralPlaybackLine ? _preferenceLineId : activeLineId,
           settings: PlayerSeriesPreference(
+            mediaSourceId: source.id,
+            audioStreamIndex: audioStreamIndex,
             audioLanguage: audio?.language,
-            audioTitle: audio?.displayTitle,
+            audioTitle: audio?.label,
             subtitleLanguage: subtitle?.language,
             subtitleTitle: subtitle?.displayTitle,
             subtitleOff: subtitleStreamIndex == null,

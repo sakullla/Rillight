@@ -95,6 +95,203 @@ Future<void> until(bool Function() condition) async {
 }
 
 void main() {
+  test(
+    'publishing new disk blocks does not invalidate verified older ranges',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-publish-scan-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 0,
+      );
+      try {
+        for (var i = 0; i < 64; i++) {
+          await cache.put(
+            resource: 'movie',
+            generation: 1,
+            offset: i * 1024,
+            bytes: Uint8List(1024),
+          );
+        }
+        for (var i = 64; i < 84; i++) {
+          final publication = cache.put(
+            resource: 'movie',
+            generation: 1,
+            offset: i * 1024,
+            bytes: Uint8List(1024),
+          );
+          final ranges = await cache.availableRanges(
+            resource: 'movie',
+            generation: 1,
+            verifyChecksum: true,
+          );
+          await publication;
+          expect(
+            ranges,
+            isNotNull,
+            reason: 'An appended block cannot invalidate the verified prefix',
+          );
+          expect(ranges!.first.start, 0);
+          expect(ranges.first.end, greaterThanOrEqualTo(64 * 1024));
+        }
+      } finally {
+        await cache.close();
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
+    'verifying one resource retains verified coverage of other resources',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-integrity-scope-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 0,
+      );
+      const block = SessionByteCache.maxBlockBytes;
+      try {
+        for (final resource in ['video', 'other-response']) {
+          for (var i = 0; i < 3; i++) {
+            await cache.put(
+              resource: resource,
+              generation: 1,
+              offset: i * block,
+              bytes: Uint8List(block)..fillRange(0, block, i + 1),
+            );
+          }
+        }
+        for (var pass = 0; pass < 2; pass++) {
+          for (final resource in ['video', 'other-response']) {
+            final ranges = await cache.availableRanges(
+              resource: resource,
+              generation: 1,
+              verifyChecksum: true,
+            );
+            expect(ranges, hasLength(1));
+            expect(ranges!.single.start, 0);
+            expect(
+              ranges.single.end,
+              3 * block,
+              reason:
+                  'Verifying another resource must not discard immutable fingerprints',
+            );
+          }
+        }
+      } finally {
+        await cache.close();
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
+    'content snapshots change when RAM-only bytes become unavailable',
+    () async {
+      final cache = await SessionByteCache.open(memoryLimitBytes: 1024);
+      try {
+        await cache.put(
+          resource: 'movie',
+          generation: 1,
+          offset: 0,
+          bytes: Uint8List(1024),
+        );
+        final revision = cache.contentRevision;
+        await cache.resize(
+          memoryBytes: 0,
+          pendingBytes: 8 * 1024 * 1024,
+          diskBytes: 0,
+        );
+        expect(cache.contentRevision, greaterThan(revision));
+        expect(
+          await cache.availableRanges(resource: 'movie', generation: 1),
+          isEmpty,
+        );
+        final emptyRevision = cache.contentRevision;
+        await cache.resize(
+          memoryBytes: 1024,
+          pendingBytes: 8 * 1024 * 1024,
+          diskBytes: 0,
+        );
+        await cache.putPreservingReadable(
+          resource: 'movie',
+          generation: 1,
+          offset: 0,
+          bytes: Uint8List(100),
+        );
+        expect(cache.contentRevision, greaterThan(emptyRevision));
+        expect(
+          (await cache.availableRanges(
+            resource: 'movie',
+            generation: 1,
+          ))!.single.end,
+          100,
+        );
+        final replacedRevision = cache.contentRevision;
+        cache.invalidate('movie');
+        expect(cache.contentRevision, greaterThan(replacedRevision));
+        expect(
+          await cache.availableRanges(resource: 'movie', generation: 1),
+          isEmpty,
+        );
+      } finally {
+        await cache.close();
+      }
+    },
+  );
+
+  test(
+    'retained coverage clips holes without adding unverified bytes',
+    () async {
+      final cache = await SessionByteCache.open(memoryLimitBytes: 1024);
+      try {
+        for (final offset in [0, 50, 200, 400]) {
+          await cache.put(
+            resource: 'movie',
+            generation: 1,
+            offset: offset,
+            bytes: Uint8List(100),
+          );
+        }
+        final ranges = cache.retainAvailableRanges(
+          resource: 'movie',
+          generation: 1,
+          verified: [
+            const CachedByteRange(25, 275),
+            const CachedByteRange(410, 450),
+          ],
+        );
+        expect(ranges.map((r) => (r.start, r.end)), [
+          (25, 150),
+          (200, 275),
+          (410, 450),
+        ]);
+        expect(
+          cache.retainAvailableRanges(
+            resource: 'movie',
+            generation: 2,
+            verified: ranges,
+          ),
+          isEmpty,
+        );
+        cache.invalidate('movie');
+        expect(
+          cache.retainAvailableRanges(
+            resource: 'movie',
+            generation: 1,
+            verified: ranges,
+          ),
+          isEmpty,
+        );
+      } finally {
+        await cache.close();
+      }
+    },
+  );
+
   group('matroska_cache_index_test.dart', () {
     test('follows an EOF SeekHead to locate cues outside the prefix', () async {
       List<int> head(int target, int offset) => element(
@@ -606,6 +803,202 @@ void main() {
     });
 
     test(
+      'sequential read cursor honors newer overlaps and invalidation',
+      () async {
+        final cache = await open(memory: 1024, disk: 0);
+        await put(cache, 0, List.filled(600, 7));
+        expect((await read(cache, 100, length: 1))!.bytes, [7]);
+        expect((await read(cache, 200, length: 1))!.bytes, [7]);
+        await put(cache, 100, List.filled(200, 8));
+        expect((await read(cache, 200, length: 1))!.bytes, [8]);
+        expect((await read(cache, 400, length: 1))!.bytes, [7]);
+        // The last successful read promotes that block over older overlaps.
+        expect((await read(cache, 200, length: 1))!.bytes, [7]);
+        cache.invalidate('secret-url-not-on-disk');
+        expect(await read(cache, 200, length: 1), isNull);
+        await put(cache, 0, List.filled(600, 9), generation: 2);
+        expect(await read(cache, 200, length: 1), isNull);
+        expect((await read(cache, 200, length: 1, generation: 2))!.bytes, [9]);
+      },
+    );
+
+    test(
+      'retained disk blocks never expose mutable response storage',
+      () async {
+        final cache = await open(memory: 0);
+        await put(cache, 0, List.filled(600, 7));
+        await cache.resize(
+          memoryBytes: 1024,
+          pendingBytes: 2048,
+          diskBytes: 4096,
+        );
+        final diskRead = (await read(cache, 0, length: 600))!;
+        expect(diskRead.source, CacheReadSource.disk);
+        diskRead.bytes.fillRange(0, 600, 99);
+        final memoryRead = (await read(cache, 0, length: 600))!;
+        expect(memoryRead.source, CacheReadSource.memory);
+        expect(memoryRead.bytes, List.filled(600, 7));
+        expect(cache.diagnostics['diskBlockReads'], 1);
+      },
+    );
+
+    test('protected sequential playback reads each disk block once', () async {
+      const blockSize = SessionByteCache.maxBlockBytes;
+      final cache = await open(
+        memory: 0,
+        disk: blockSize * 4,
+        pending: blockSize * 6,
+      );
+      await put(cache, 0, Uint8List(blockSize)..fillRange(0, blockSize, 7));
+      final lease = (await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: blockSize,
+      ))!;
+      final watch = Stopwatch()..start();
+      for (var offset = 0; offset < blockSize; offset += 64 * 1024) {
+        final result = (await lease.read(offset))!;
+        expect(result.bytes.length, 64 * 1024);
+        expect(result.bytes.first, 7);
+        expect(result.bytes.last, 7);
+        result.bytes[0] = 99; // Response consumers own their slice.
+      }
+      watch.stop();
+      // Work counters, rather than timing assertions, are stable across hosts.
+      // ignore: avoid_print
+      print(
+        'lease stream: ${watch.elapsedMilliseconds} ms; '
+        '${cache.diagnostics["diskBlockReads"]} block reads; '
+        '${cache.diagnostics["diskBlockReadBytes"]} bytes',
+      );
+      expect(cache.diagnostics['diskBlockReads'], 1);
+      expect(cache.diagnostics['diskBlockReadBytes'], blockSize);
+      expect(
+        cache.diagnostics['pendingPeakBytes'],
+        lessThanOrEqualTo(blockSize * 6),
+      );
+      await lease.close();
+      expect(cache.diagnostics['pendingBytes'], 0);
+    });
+
+    test(
+      'lease reuses owned slices and releases scratch on block changes',
+      () async {
+        final cache = await open(memory: 0);
+        await put(cache, 0, List.filled(600, 7));
+        await put(cache, 600, List.filled(600, 8));
+        final lease = (await cache.protectRange(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          offset: 0,
+          length: 1200,
+        ))!;
+        final slices = await Future.wait([
+          lease.read(0, maxLength: 100),
+          lease.read(100, maxLength: 100),
+          lease.read(200, maxLength: 100),
+        ]);
+        slices.first!.bytes[0] = 99;
+        expect((await lease.read(0, maxLength: 1))!.bytes, [7]);
+        expect(cache.diagnostics['diskBlockReads'], 1);
+        expect(cache.diagnostics['pendingBytes'], 600);
+        expect(
+          (await lease.read(600, maxLength: 100))!.bytes,
+          List.filled(100, 8),
+        );
+        expect(cache.diagnostics['diskBlockReads'], 2);
+        expect(cache.diagnostics['pendingBytes'], 600);
+        expect(cache.diagnostics['pendingPeakBytes'], lessThanOrEqualTo(2048));
+        await lease.close();
+        await lease.close();
+        expect(cache.diagnostics['pendingBytes'], 0);
+      },
+    );
+
+    test('disk lease preserves its snapshot after replacement', () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, List.filled(600, 7));
+      final lease = (await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 600,
+      ))!;
+      expect((await lease.read(0, maxLength: 1))!.bytes, [7]);
+      cache.invalidate('secret-url-not-on-disk');
+      await put(cache, 0, List.filled(600, 8));
+      expect((await lease.read(100, maxLength: 1))!.bytes, [7]);
+      expect((await read(cache, 100, length: 1))!.bytes, [8]);
+      await lease.close();
+      expect(cache.diagnostics['pendingBytes'], 0);
+    });
+
+    test('lease scratch yields to a reduced transfer budget', () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, List.filled(600, 7));
+      final lease = (await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 600,
+      ))!;
+      await lease.read(0, maxLength: 1);
+      await cache.resize(memoryBytes: 0, pendingBytes: 512, diskBytes: 4096);
+      expect(cache.diagnostics['pendingBytes'], 0);
+      expect(await lease.read(1), isNull);
+      await cache.resize(memoryBytes: 0, pendingBytes: 2048, diskBytes: 4096);
+      expect((await lease.read(1, maxLength: 1))!.bytes, [7]);
+      await lease.close();
+      expect(cache.diagnostics['pendingBytes'], 0);
+    });
+
+    test(
+      'closing during a disk read drains reservations and queued reads',
+      () async {
+        final cache = await open(memory: 0);
+        await put(cache, 0, List.filled(600, 7));
+        final lease = (await cache.protectRange(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          offset: 0,
+          length: 600,
+        ))!;
+        final first = lease.read(0, maxLength: 1);
+        final second = lease.read(1, maxLength: 1);
+        await Future<
+          void
+        >.value(); // First read has entered the worker request.
+        expect(cache.diagnostics['pendingBytes'], 1200);
+        final closing = cache.close();
+        expect(await first, isNull);
+        expect(await second, isNull);
+        await closing;
+        expect(cache.diagnostics['pendingBytes'], 0);
+        expect(cache.diagnostics['protectedRanges'], 0);
+      },
+    );
+
+    test('lease rejects corrupt disk bytes before retaining a block', () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, List.filled(600, 7));
+      final lease = (await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: 600,
+      ))!;
+      final file = root
+          .listSync(recursive: true)
+          .whereType<File>()
+          .singleWhere((file) => file.path.endsWith('.block'));
+      await file.writeAsBytes(List.filled(600, 8));
+      expect(await lease.read(0), isNull);
+      expect(cache.diagnostics['pendingBytes'], 0);
+      await lease.close();
+    });
+
+    test(
       'budget downgrade preserves protected reads and converges on release',
       () async {
         final cache = await open(memory: 16, disk: 4096);
@@ -969,6 +1362,67 @@ void main() {
   });
 
   group('session_read_ahead_test.dart', () {
+    test(
+      'cached distant probe does not skip the continuous download frontier',
+      () async {
+        const mib = 1024 * 1024;
+        final root = await Directory.systemTemp.createTemp(
+          'rillight-frontier-',
+        );
+        final cache = await SessionByteCache.open(
+          root: root,
+          memoryLimitBytes: 8 * mib,
+          diskLimitBytes: 96 * mib,
+        );
+        await cache.put(
+          resource: 'frontier',
+          generation: 1,
+          offset: 48 * mib,
+          bytes: Uint8List(mib),
+        );
+        final release = Completer<void>();
+        final ahead = SessionReadAhead(
+          cache: cache,
+          resource: 'frontier',
+          generation: 1,
+          total: 80 * mib,
+          aheadBytes: 64 * mib,
+          continuousTransfers: true,
+          fetch: (start, end) async => ReadAheadTransfer(
+            (() async* {
+              for (var offset = start; offset <= end; offset += 64 * 1024) {
+                if (offset == mib) await release.future;
+                yield Uint8List((end - offset + 1).clamp(0, 64 * 1024));
+              }
+            })(),
+            () {},
+          ),
+        );
+        try {
+          await ahead.read(0, 31).drain<void>();
+          await ahead.read(48 * mib, 48 * mib + 31).drain<void>();
+          release.complete();
+          await until(
+            () => ahead.diagnostics['readAheadWorkerActive'] == false,
+          );
+          expect(
+            cache.firstMissingOffset(
+              resource: 'frontier',
+              generation: 1,
+              offset: 0,
+              length: 49 * mib,
+            ),
+            isNull,
+          );
+        } finally {
+          if (!release.isCompleted) release.complete();
+          await ahead.close();
+          await cache.close();
+          await root.delete(recursive: true);
+        }
+      },
+    );
+
     test('slow recovery can supply first bytes after 46 seconds', () async {
       final cache = await SessionByteCache.open(memoryLimitBytes: 1024 * 1024);
       var requests = 0;
@@ -1301,57 +1755,72 @@ void main() {
         }
       },
     );
-    test(
-      'bounded track reads keep an active transfer covering a distant track',
-      () async {
-        const mib = 1024 * 1024;
-        const block = 64 * 1024;
-        final cache = await SessionByteCache.open(memoryLimitBytes: 64 * mib);
-        final release = Completer<void>();
-        final starts = <int>[];
-        final ahead = SessionReadAhead(
-          cache: cache,
-          resource: 'distant-tracks',
-          generation: 1,
-          total: 32 * mib,
-          aheadBytes: 32 * mib,
-          fetch: (start, end) async {
-            starts.add(start);
-            return ReadAheadTransfer(
-              (() async* {
-                for (var offset = start; offset <= end; offset += block) {
+    for (final continuous in [false, true]) {
+      test(
+        'distant bounded demand bypasses an unfinished prefetch gap ($continuous)',
+        () async {
+          const mib = 1024 * 1024;
+          const block = 64 * 1024;
+          final cache = await SessionByteCache.open(memoryLimitBytes: 8 * mib);
+          final releases = <Completer<void>>[];
+          final starts = <int>[];
+          final ahead = SessionReadAhead(
+            cache: cache,
+            resource: 'distant-tracks',
+            generation: 1,
+            total: 64 * mib,
+            aheadBytes: 32 * mib,
+            continuousTransfers: continuous,
+            fetch: (start, end) async {
+              starts.add(start);
+              final release = Completer<void>();
+              releases.add(release);
+              return ReadAheadTransfer(
+                (() async* {
                   yield Uint8List(block)
-                    ..fillRange(0, block, (offset ~/ block) % 251);
-                  if (offset == 0) await release.future;
-                }
-              })(),
-              () {
-                if (!release.isCompleted) release.complete();
-              },
-            );
-          },
-        );
-        try {
-          await ahead.read(0, block - 1).drain<void>();
-          final audio = ahead
-              .read(24 * mib, 24 * mib + block - 1)
-              .fold<List<int>>([], (all, part) => all..addAll(part));
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-          if (!release.isCompleted) release.complete();
-          expect(
-            (await audio.timeout(
-              const Duration(seconds: 5),
-            )).every((byte) => byte == (24 * mib ~/ block) % 251),
-            isTrue,
+                    ..fillRange(0, block, start == 0 ? 1 : 7);
+                  await release.future;
+                })(),
+                () {
+                  if (!release.isCompleted) release.complete();
+                },
+              );
+            },
           );
-          expect(starts, [0]);
-        } finally {
-          if (!release.isCompleted) release.complete();
-          await ahead.close();
-          await cache.close();
-        }
-      },
-    );
+          try {
+            await ahead.read(0, block - 1).drain<void>();
+            // A completed bounded AVIO read must not make a distant track wait
+            // for 24 MiB of unrelated bytes to arrive over the old response.
+            final audio = await ahead
+                .read(24 * mib, 24 * mib + block - 1)
+                .fold<List<int>>([], (all, part) => all..addAll(part))
+                .timeout(const Duration(seconds: 2));
+            expect(audio, hasLength(block));
+            expect(audio.every((byte) => byte == 7), isTrue);
+            expect(starts.take(2), [0, 24 * mib]);
+            expect(
+              cache.firstMissingOffset(
+                resource: 'distant-tracks',
+                generation: 1,
+                offset: block,
+                length: mib,
+              ),
+              block,
+              reason:
+                  'Foreground playback must work before the real gap is filled',
+            );
+            expect(ahead.failed, isFalse);
+          } finally {
+            ahead.stop();
+            for (final release in releases) {
+              if (!release.isCompleted) release.complete();
+            }
+            await ahead.close();
+            await cache.close();
+          }
+        },
+      );
+    }
     test(
       'cancelled downstream wakes a waiting read without retiring prefetch',
       () async {

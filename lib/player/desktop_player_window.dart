@@ -384,6 +384,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                     ? null
                     : matchPreferredStreamIndex(
                         streams: media.audioStreams,
+                        preferredIndex: settings?.mediaSourceId == media.id
+                            ? settings?.audioStreamIndex
+                            : null,
+                        exactIndex: settings?.mediaSourceId == media.id,
                         language: settings?.audioLanguage,
                         title: settings?.audioTitle,
                       )),
@@ -1681,8 +1685,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
         : media?.streamByIndex(controller!.subtitleStreamIndex!);
     final settings = PlayerSeriesPreference(
       mediaSourceName: media?.name,
+      mediaSourceId: media?.id,
+      audioStreamIndex: controller?.audioStreamIndex,
       audioLanguage: audio?.language,
-      audioTitle: audio?.displayTitle,
+      audioTitle: audio?.label,
       subtitleLanguage: subtitle?.language,
       subtitleTitle: subtitle?.displayTitle,
       subtitleOff: controller?.subtitleStreamIndex == null,

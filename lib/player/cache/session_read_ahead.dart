@@ -270,7 +270,11 @@ class SessionReadAhead {
   }
 
   int? _missing() {
-    var position = _position;
+    // A cached audio/index probe can move demand ahead of the running stream.
+    // Finish its contiguous frontier before following that demand; otherwise
+    // each bounded window can abandon an uncached gap near startup. Explicit
+    // seek/stop cancels _continuous, so it still repositions immediately.
+    var position = min(_position, _continuous?.nextOffset ?? _position);
     int? missing;
     while (position < _windowEnd) {
       missing = cache.firstMissingOffset(
@@ -624,14 +628,11 @@ class SessionReadAhead {
                   job.epoch == _producerEpoch &&
                   start >= job.start &&
                   start <= job.end &&
-                  (start <= job.offset + job.length + blockBytes ||
-                      // A completed bounded AVIO read followed by another
-                      // track is not a user seek. Keep the one response that
-                      // already covers both tracks instead of aborting it
-                      // before its distant audio/video bytes can arrive.
-                      // Explicit seeks call stop(); overlapping long readers
-                      // retain the preemption rule above.
-                      _readers.isEmpty && end - start + 1 <= 1024 * 1024),
+                  // Keep nearby or cached track reads on the existing stream.
+                  // A small AVIO request can still be urgent foreground demand
+                  // far beyond its frontier. Making it wait for an entire
+                  // scheduling window stalls playback until that gap fills.
+                  start <= job.offset + job.length + blockBytes,
             ));
   }
 
@@ -825,13 +826,15 @@ class SessionReadAhead {
 /// belong to SessionReadAhead; reaching a window boundary pauses this iterator.
 class _ContinuousTransfer {
   _ContinuousTransfer(this.transfer, this.chunkStart, this.end)
-    : iterator = StreamIterator(transfer.bytes);
+    : nextOffset = chunkStart,
+      iterator = StreamIterator(transfer.bytes);
 
   final ReadAheadTransfer transfer;
   final StreamIterator<List<int>> iterator;
   final int end;
   List<int> chunk = const [];
   int chunkStart;
+  int nextOffset;
   bool cancelled = false;
 
   bool canRead(int start) =>
@@ -872,6 +875,7 @@ class _ContinuousTransfer {
           ? Uint8List.sublistView(current, begin, begin + count)
           : Uint8List.fromList(current.sublist(begin, begin + count));
       position += count;
+      nextOffset = position;
     }
     if (windowEnd == end) cancel();
   }

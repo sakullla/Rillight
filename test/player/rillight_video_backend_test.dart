@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
@@ -272,6 +273,32 @@ void main() {
     // A test's default 2 GiB budget can evict an active 8 GiB session.
     addTearDown(() => isolatedCache.delete(recursive: true));
   });
+  test('Android prefetch follows saved disk budget across opens', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final settings = MemoryPlayerSettingsStore();
+    final backend = RillightVideoBackend(
+      settingsStore: settings,
+      diskCacheDirectory: isolatedCache,
+      createPlayer: () async => _CoreDriver(),
+    );
+    addTearDown(backend.dispose);
+    for (final mib in [2048, 512, 4096]) {
+      await settings.write(PlayerSettings(diskCacheLimitMiB: mib));
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: mib,
+          url: Uri.parse('http://127.0.0.1:8765/movie'),
+        ),
+      );
+      final data = await backend.diagnostics();
+      expect(data['configuredReadAheadBytes'], mib * 1024 * 1024);
+      expect(data['diskSessionLimitBytes'], mib * 1024 * 1024);
+      expect(data['memoryLimitBytes'], 8 * 1024 * 1024);
+      expect(data['pendingLimitBytes'], defaultCachePendingBytes);
+    }
+  });
+
   test(
     'slow recovery headers do not trigger premature startup source renewal',
     () async {
@@ -584,6 +611,60 @@ void main() {
       }
     },
   );
+  test('growing cache scans less often than download speed updates', () async {
+    const block = 64 * 1024;
+    const total = 32 * 1024 * 1024;
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      final match = RegExp(
+        r'^bytes=(\d+)-(\d+)$',
+      ).firstMatch(request.headers.value('range')!)!;
+      final start = int.parse(match[1]!);
+      final end = int.parse(match[2]!);
+      request.response.statusCode = 206;
+      request.response.headers.set('content-range', 'bytes $start-$end/$total');
+      request.response.headers.set('etag', '"growing-cache"');
+      request.response.contentLength = end - start + 1;
+      request.response.add(Uint8List(end - start + 1));
+      await request.response.close();
+    });
+    final driver = _WarmHandoffCoreDriver();
+    final backend = RillightVideoBackend(
+      diskCacheDirectory: isolatedCache,
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => driver,
+    );
+    var speedUpdates = 0;
+    final subscription = backend.events.listen((event) {
+      if (event.kind == VideoEventKind.cacheSpeed) speedUpdates++;
+    });
+    try {
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 1,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/growing'),
+        ),
+      );
+      // Keep the read-ahead worker paused so each synthetic native read adds
+      // bytes rather than letting a fast localhost producer fill the fixture.
+      await backend.pause();
+      final before =
+          (await backend.diagnostics())['diskIntegrityScans'] as int? ?? 0;
+      for (var i = 1; i <= 10; i++) {
+        await driver._read('bytes=${i * block}-${(i + 1) * block - 1}');
+        await Future<void>.delayed(const Duration(milliseconds: 160));
+      }
+      final data = await backend.diagnostics();
+      final scans = (data['diskIntegrityScans'] as int? ?? 0) - before;
+      expect(scans, inInclusiveRange(1, 4));
+      expect(speedUpdates, greaterThan(scans));
+      expect(backend.bufferSnapshot.byteCoverage?.ranges, isNotEmpty);
+    } finally {
+      await subscription.cancel();
+      await backend.dispose();
+      await upstream.close(force: true);
+    }
+  });
   test(
     'rejected optional audio keeps the current track and playable session',
     () async {
