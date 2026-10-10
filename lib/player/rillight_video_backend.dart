@@ -153,6 +153,7 @@ class RillightVideoBackend extends VideoBackend
   bool _opened = false;
   final _openingDownloadProgress = Stopwatch();
   int _openingDownloadBytes = 0;
+  int _openingResponseHeaders = 0;
   int _observedMediaHeaderTimeouts = 0;
   bool _wantsPlayback = true;
   bool _recovering = false;
@@ -505,6 +506,7 @@ class RillightVideoBackend extends VideoBackend
       ..reset()
       ..start();
     _openingDownloadBytes = 0;
+    _openingResponseHeaders = 0;
     _observedMediaHeaderTimeouts = 0;
     _lastFailure = null;
     _lastCoreEvent = null;
@@ -914,8 +916,16 @@ class RillightVideoBackend extends VideoBackend
       if (generation != _generation || _disposed) return;
       _lastTransportDiagnostics = data;
       final downloaded = (data['upstreamBytes'] as num?)?.toInt() ?? 0;
-      if (!_opened && downloaded != _openingDownloadBytes) {
+      final responseHeaders =
+          (data['mediaResponseHeaders'] as num?)?.toInt() ?? 0;
+      // Headers can arrive long before the first body chunk. Once a valid
+      // response arrives, give its body a fresh progress window instead of
+      // carrying the entire header wait into the stalled-opening heuristic.
+      if (!_opened &&
+          (downloaded != _openingDownloadBytes ||
+              responseHeaders != _openingResponseHeaders)) {
         _openingDownloadBytes = downloaded;
+        _openingResponseHeaders = responseHeaders;
         _openingDownloadProgress.reset();
       }
       _reportAuthentication(data, generation);

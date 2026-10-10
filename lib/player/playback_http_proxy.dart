@@ -180,6 +180,7 @@ class PlaybackHttpProxy {
   String? _lastUpstreamFailureKind;
   int? _lastUpstreamPhaseElapsedMs;
   int _mediaHeaderTimeouts = 0;
+  int _mediaResponseHeaders = 0;
   int? _authenticationStatus;
   int? _prefetchAuthenticationStatus;
   int _inFlight = 0;
@@ -440,6 +441,7 @@ class PlaybackHttpProxy {
       'upstreamConnectingRequests': _upstreamPhases['connect'] ?? 0,
       'upstreamAwaitingHeadersRequests': _upstreamPhases['headers'] ?? 0,
       'mediaHeaderTimeouts': _mediaHeaderTimeouts,
+      'mediaResponseHeaders': _mediaResponseHeaders,
       'lastUpstreamPhase': _lastUpstreamPhase,
       'lastUpstreamFailureKind': _lastUpstreamFailureKind,
       'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
@@ -1781,6 +1783,9 @@ class PlaybackHttpProxy {
         read.response = response;
         if (read.cancelled) read.releaseUnconsumedResponse();
         read.check();
+        if (media && response.statusCode >= 200 && response.statusCode < 300) {
+          _mediaResponseHeaders++;
+        }
         // A demuxer/index request can be the connection rejected by the origin,
         // not just a speculative lane. Resolve that contention before exposing
         // 403 as authentication failure to the player. A serial retry's genuine

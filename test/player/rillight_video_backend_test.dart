@@ -310,7 +310,14 @@ void main() {
         } else {
           await Future<void>.delayed(const Duration(seconds: 31));
           request.response.contentLength = 8;
-          request.response.add(List.filled(8, 9));
+          // Keep headers and body in separate diagnostic ticks: receiving
+          // valid slow headers is progress even before the first body byte.
+          final socket = await request.response.detachSocket();
+          await socket.flush();
+          await Future<void>.delayed(const Duration(milliseconds: 750));
+          socket.add(List.filled(8, 9));
+          await socket.close();
+          return;
         }
         await request.response.close();
       });
@@ -336,7 +343,7 @@ void main() {
             )
             .timeout(const Duration(seconds: 36));
         expect(requests, 2);
-        expect(renewals, isEmpty);
+        expect(renewals, isEmpty, reason: 'Valid slow headers must not renew');
       } finally {
         await subscription.cancel();
         await backend.dispose();

@@ -714,4 +714,27 @@ its 30-second bound during eviction and produced no usable container evidence.
 It must not be represented as a successful metadata diagnosis. The normal
 release-mode validation APK above was restored successfully and its activity
 launched after this diagnostic attempt; no ADB forwards remain. No commit,
-push or tag was made. Physical stutter and split-cache acceptance remain open.
+push or tag was made at that point. Physical stutter and split-cache acceptance
+remain open.
+
+### v0.1.56 release preparation — 2026-10-11
+
+The accumulated playback changes were committed as `fcd1d42`, then remote main
+`5162030` was merged without conflicts. Version 0.1.56+57 retains the configured
+disk budget and the unresolved physical TV findings above. Release notes do not
+claim that playback stutter or split/flickering coverage is fixed.
+
+The first full Flutter run passed 1,632 tests with two platform skips but failed
+the slow recovery-header regression. Explicitly separating response headers
+from the body with a detached HTTP socket reproduced premature source renewal:
+the header wait was incorrectly included in the opening body-progress timeout.
+Successful media response headers now advance the opening progress timer;
+error responses do not. The regression preserves the 31-second header delay
+and exposes a 750 ms headers/body gap instead of relying on packet timing.
+
+Final release checks: `flutter pub get` succeeded; `dart format lib test`
+reported 393 files with no changes; `flutter analyze` reported no issues;
+all 23 backend regressions passed; the repeated full `flutter test` run passed
+1,633 tests with two platform skips. Logs are retained under ignored
+`build/release-v0.1.56-*`. These checks do not change the pending physical TV
+acceptance above. The version bump itself has not been installed on the TV.
