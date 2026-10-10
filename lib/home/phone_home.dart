@@ -506,7 +506,12 @@ class _WideCard extends StatelessWidget {
     final progress = item.playbackProgress;
     final title = _resumeTitle(item);
     final meta = _resumeMeta(item, title);
-    final badges = phoneCardBadgeLabels(l10n, item);
+    final badges = phoneCardBadgeLabels(
+      l10n,
+      item,
+      // 横卡底部已经有进度条，不再把同一进度写成「已看 n%」。
+      includeResumeText: false,
+    );
     final badgeHeight = _wideBadgeHeight(context);
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.xs),
@@ -570,16 +575,22 @@ class _WideCard extends StatelessWidget {
                             left: 0,
                             right: 0,
                             bottom: 0,
-                            child: SizedBox(
-                              key: CatalogKeys.resumeProgress,
-                              height: 4,
-                              child: ColoredBox(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                child: FractionallySizedBox(
-                                  alignment: Alignment.centerLeft,
-                                  widthFactor: progress.clamp(0.0, 1.0),
-                                  child: ColoredBox(
-                                    color: theme.colorScheme.primary,
+                            child: Semantics(
+                              container: true,
+                              label: l10n.playbackProgress(
+                                (progress * 100).round(),
+                              ),
+                              child: SizedBox(
+                                key: CatalogKeys.resumeProgress,
+                                height: 4,
+                                child: ColoredBox(
+                                  color: Colors.black.withValues(alpha: 0.45),
+                                  child: FractionallySizedBox(
+                                    alignment: Alignment.centerLeft,
+                                    widthFactor: progress.clamp(0.0, 1.0),
+                                    child: ColoredBox(
+                                      color: theme.colorScheme.primary,
+                                    ),
                                   ),
                                 ),
                               ),

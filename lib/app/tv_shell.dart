@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -121,8 +122,25 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
     }
     _paneScroll[pane] = notification.context;
     final hide = notification.metrics.pixels > 4 && !_navScope.hasFocus;
-    if (hide != _navHidden) setState(() => _navHidden = hide);
+    if (hide != _navHidden) _setNavHidden(hide);
     return false;
+  }
+
+  /// Viewport layout can emit a scroll-start notification while applying new
+  /// content dimensions. setState in that phase schedules a build mid-frame.
+  void _setNavHidden(bool hide) {
+    void apply() {
+      if (mounted && hide != _navHidden) {
+        setState(() => _navHidden = hide);
+      }
+    }
+
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => apply());
+      return;
+    }
+    apply();
   }
 
   Future<void> _recover() async {

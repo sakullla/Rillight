@@ -356,16 +356,12 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final item = widget.item;
     final selected = widget.selected;
     final title = numberedEpisodeTitle(item);
-    final progress = item.playbackProgress;
     final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
     final played = item.userData.played;
     final runtime = runtimeLabel(l10n, item);
     final premiere = item.premiereDate;
     final meta = <String>[
-      // 已看由缩略图角标和行尾实心勾表达,这里不再重复一行文字。
-      if (item.canResume)
-        remainingLabel(l10n, item) ??
-            l10n.playbackProgress((progress * 100).round()),
+      // 续播由缩略图进度条表达，已看由角标和行尾勾表达，这里不再写一遍。
       if (premiere != null) formatDateYmd(premiere),
     ];
     final overview = plainOverview(item.overview);
@@ -438,7 +434,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                               color: selected
                                   ? scheme.primary
                                   : played
-                                  ? scheme.onSurface.withValues(alpha: .72)
+                                  ? scheme.onSurfaceVariant
                                   : null,
                             ),
                           ),
@@ -449,12 +445,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: item.canResume
-                                    ? scheme.primary
-                                    : scheme.onSurfaceVariant,
-                                fontWeight: item.canResume
-                                    ? FontWeight.w600
-                                    : null,
+                                color: scheme.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -465,9 +456,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurface.withValues(
-                                  alpha: played ? 0.58 : 0.78,
-                                ),
+                                color: scheme.onSurfaceVariant,
                                 height: 1.35,
                               ),
                             ),
@@ -491,9 +480,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                           played
                               ? Icons.check_circle_rounded
                               : Icons.check_circle_outline_rounded,
-                          color: played
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -501,11 +488,9 @@ class _EpisodeRowState extends State<EpisodeRow> {
                       key: CatalogKeys.episodePlay(item.id),
                       tooltip: playLabel,
                       style: actionStyle.copyWith(
-                        backgroundColor: WidgetStatePropertyAll(
-                          revealed ? scheme.onSurface : Colors.transparent,
-                        ),
+                        backgroundColor: WidgetStatePropertyAll(scheme.primary),
                         foregroundColor: WidgetStatePropertyAll(
-                          revealed ? scheme.surface : scheme.onSurface,
+                          scheme.onPrimary,
                         ),
                       ),
                       onPressed: widget.onPlay,
@@ -629,7 +614,13 @@ class _EpisodeThumb extends StatelessWidget {
             if (resumable)
               Align(
                 alignment: Alignment.bottomCenter,
-                child: _EpisodeProgressBar(value: item.playbackProgress),
+                child: _EpisodeProgressBar(
+                  key: ValueKey('episode-progress-${item.id}'),
+                  value: item.playbackProgress,
+                  label: AppLocalizations.of(
+                    context,
+                  ).playbackProgress((item.playbackProgress * 100).round()),
+                ),
               ),
           ],
         ),
@@ -669,23 +660,29 @@ class EpisodeThumbBadge extends StatelessWidget {
 
 /// 已看角标:深色圆底上的勾,不依赖画面明暗。
 class EpisodeWatchedBadge extends StatelessWidget {
-  const EpisodeWatchedBadge({super.key, this.size = 16});
+  const EpisodeWatchedBadge({super.key, this.size = 16, this.iconKey});
 
   final double size;
+  final Key? iconKey;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .6),
-        shape: BoxShape.circle,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(2),
-        child: Icon(
-          Icons.check_rounded,
-          size: size,
-          color: Colors.white.withValues(alpha: .95),
+    return Semantics(
+      container: true,
+      label: AppLocalizations.of(context).mobileWatched,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: .6),
+          shape: BoxShape.circle,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(
+            Icons.check_rounded,
+            key: iconKey,
+            size: size,
+            color: Colors.white.withValues(alpha: .95),
+          ),
         ),
       ),
     );
@@ -748,21 +745,30 @@ class _EpisodeRowSkeleton extends StatelessWidget {
 }
 
 class _EpisodeProgressBar extends StatelessWidget {
-  const _EpisodeProgressBar({required this.value});
+  const _EpisodeProgressBar({
+    super.key,
+    required this.value,
+    required this.label,
+  });
 
   final double value;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 3,
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.45),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: FractionallySizedBox(
-            widthFactor: value.clamp(0.0, 1.0),
-            child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+    return Semantics(
+      container: true,
+      label: label,
+      child: SizedBox(
+        height: 3,
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: 0.45),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: value.clamp(0.0, 1.0),
+              child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+            ),
           ),
         ),
       ),

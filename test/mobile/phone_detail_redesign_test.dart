@@ -162,6 +162,13 @@ void main() {
       );
       expect(find.text('2026 · 2 集'), findsOneWidget);
       expect(find.text('已看 1/2'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: summary,
+          matching: find.byType(LinearProgressIndicator),
+        ),
+        findsNothing,
+      );
       expect(find.text('圣女隐瞒身份的第一年。'), findsOneWidget);
       // 已看只由剧照上的勾表达。
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);

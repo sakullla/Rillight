@@ -1114,8 +1114,7 @@
     "id": "settings-decoder",
     "feature": "settings",
     "platforms": [
-      "desktop",
-      "phone"
+      "desktop"
     ]
   },
   {

@@ -257,19 +257,33 @@ Future<ColorScheme> contentSchemeFromBytes(
   }
 }
 
-/// Tonal pairs from the selected artwork own the local content surface. Global
-/// navigation and semantic errors retain their application theme.
+/// Artwork may tint the local surface, but the page stays in the app neutrals.
+/// Global navigation and semantic errors retain their application theme.
 @visibleForTesting
 ColorScheme composeContentScheme(ColorScheme base, ColorScheme artwork) {
-  // 只给表面染一层画面色。过重时整页像一块彩色色板（粉红、正红），
-  // 文字与海报都被抢了戏。
-  Color tone(Color surface) =>
-      Color.lerp(surface, artwork.primaryContainer, .24)!;
+  // 表面以应用自己的冷灰/石墨为主，只混进一成半画面色。
+  // 再往海报原色靠，整页会变成一块饱和色板。
+  Color tone(Color neutral, Color tint) => Color.lerp(neutral, tint, .16)!;
   return artwork.copyWith(
-    surface: tone(artwork.surface),
-    surfaceContainerLow: tone(artwork.surfaceContainerLow),
-    surfaceContainer: tone(artwork.surfaceContainer),
-    surfaceContainerHigh: tone(artwork.surfaceContainerHigh),
+    surface: tone(base.surface, artwork.surface),
+    surfaceContainerLowest: tone(
+      base.surfaceContainerLowest,
+      artwork.surfaceContainerLowest,
+    ),
+    surfaceContainerLow: tone(
+      base.surfaceContainerLow,
+      artwork.surfaceContainerLow,
+    ),
+    surfaceContainer: tone(base.surfaceContainer, artwork.surfaceContainer),
+    surfaceContainerHigh: tone(
+      base.surfaceContainerHigh,
+      artwork.surfaceContainerHigh,
+    ),
+    surfaceContainerHighest: tone(
+      base.surfaceContainerHighest,
+      artwork.surfaceContainerHighest,
+    ),
+    surfaceBright: tone(base.surfaceBright, artwork.surfaceBright),
     error: base.error,
     onError: base.onError,
     errorContainer: base.errorContainer,

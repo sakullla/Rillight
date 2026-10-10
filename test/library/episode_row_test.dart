@@ -60,7 +60,7 @@ void main() {
   });
 
   testWidgets(
-    'thumbnail plays directly while the row opens details; watched and remaining time show',
+    'thumbnail plays directly while the row opens details; watched badge and progress bar show',
     (tester) async {
       var played = 0;
       var opened = 0;
@@ -94,9 +94,13 @@ void main() {
           ),
         ),
       );
+      final semantics = tester.ensureSemantics();
       await tester.pump();
       expect(find.text('24分钟'), findsOneWidget);
-      expect(find.text('剩余 14 分钟'), findsOneWidget);
+      expect(find.text('剩余 14 分钟'), findsNothing);
+      expect(find.textContaining('已看'), findsNothing);
+      expect(find.byKey(const ValueKey('episode-progress-e2')), findsOneWidget);
+      expect(find.bySemanticsLabel('已看 42%'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('episode-thumb-play-e2')));
       await tester.pump();
@@ -121,8 +125,54 @@ void main() {
       expect(find.byType(EpisodeWatchedBadge), findsOneWidget);
       expect(find.textContaining('剩余'), findsNothing);
       expect(tester.takeException(), isNull);
+      semantics.dispose();
     },
   );
+
+  testWidgets('a resumable episode keeps its premiere date in body color', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: SizedBox(
+            width: 1200,
+            child: EpisodeRow(
+              item: EmbyItem(
+                id: 'e4',
+                name: '续看',
+                type: 'Episode',
+                indexNumber: 4,
+                premiereDate: DateTime(2024, 5, 2),
+                runTimeTicks: 24 * 60 * 10000000,
+                userData: const EmbyUserData(
+                  playbackPositionTicks: 10 * 60 * 10000000,
+                ),
+              ),
+              selected: false,
+              busyPlayed: false,
+              onTap: () {},
+              onPlay: () {},
+              onTogglePlayed: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final date = tester.widget<Text>(find.text('2024-05-02'));
+    final scheme = Theme.of(
+      tester.element(find.text('2024-05-02')),
+    ).colorScheme;
+    expect(date.style?.color, scheme.onSurfaceVariant);
+    expect(date.style?.fontWeight, isNot(FontWeight.w600));
+    expect(find.byKey(const ValueKey('episode-progress-e4')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   test(
     'series reading scale stays flat through 1080p and trails the panel scale',

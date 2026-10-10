@@ -2,6 +2,7 @@
 const caseModules = <String>[
   'app/android_bootstrap_cases.dart',
   'app/appearance_cases.dart',
+  'app/browsing_polish_cases.dart',
   'app/window_geometry_cases.dart',
   'app_shell_cases.dart',
   'auth/auth_controller_cases.dart',

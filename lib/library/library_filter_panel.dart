@@ -138,7 +138,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 padding: const EdgeInsets.fromLTRB(24, 20, 12, 12),
                 child: Row(
                   children: [
-                    Icon(Icons.tune_rounded, color: scheme.primary),
+                    Icon(Icons.tune_rounded, color: scheme.onSurface),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(

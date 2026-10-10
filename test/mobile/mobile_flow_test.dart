@@ -21,6 +21,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_errors.dart';
 import 'package:rillight/home/catalog_controller.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
@@ -336,7 +337,14 @@ void main() {
 
       // 登录后首页可见续播进度,且手机环境不出现桌面/TV 壳。
       expect(find.byType(MobileShell), findsOneWidget);
-      expect(find.text('已看 40%'), findsWidgets);
+      expect(find.text('已看 40%'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.resumeRow),
+          matching: find.byKey(CatalogKeys.resumeProgress),
+        ),
+        findsWidgets,
+      );
       expectPhoneOnly(tester);
 
       // 搜索:横屏下结果可见,草稿跨 tab 保留。
@@ -540,7 +548,18 @@ void main() {
       final percent = (updated.playedPercentage ?? 0).round();
       expect(percent, isNot(40));
       expect(find.text('已看 40%'), findsNothing);
-      expect(find.text('已看 $percent%'), findsWidgets);
+      expect(find.text('已看 $percent%'), findsNothing);
+      expect(
+        tester
+            .widget<FractionallySizedBox>(
+              find.descendant(
+                of: find.byKey(CatalogKeys.item('movie-inception')),
+                matching: find.byType(FractionallySizedBox),
+              ),
+            )
+            .widthFactor,
+        closeTo(percent / 100, 0.011),
+      );
       expectPhoneOnly(tester);
       expect(app.auth.isLoggedIn, isTrue);
       expect(tester.takeException(), isNull);

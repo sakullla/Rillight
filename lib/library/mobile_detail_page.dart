@@ -726,9 +726,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 }
 
-/// 头部主操作：整宽播放钮（`mobile-detail-play`），续播时下方一条进度与剩余时长；
+/// 头部主操作：整宽播放钮（`mobile-detail-play`），续播时下方只留一条进度。
 /// 再下面是带文字的次级操作——从头播放（`phone-detail-play-start`）、上一集/下一集、
-/// 已看切换（[CatalogKeys.playedToggle]）。不再把它们压成一排无字圆钮或塞进顶栏。
+/// 已看切换（[CatalogKeys.playedToggle]）。状态本身由图标表示，文字写的是动作。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
     required this.label,
@@ -798,7 +798,7 @@ class _DetailPlayActions extends StatelessWidget {
           icon: played
               ? Icons.check_circle_rounded
               : Icons.check_circle_outline_rounded,
-          label: played ? l.watchedAction : l.markPlayed,
+          label: played ? l.markUnplayed : l.markPlayed,
           tooltip: played ? l.markUnplayed : l.markPlayed,
           active: played,
           onPressed: onTogglePlayed,
@@ -828,30 +828,19 @@ class _DetailPlayActions extends StatelessWidget {
         ),
         if (progress != null && progress > 0) ...[
           const SizedBox(height: AppSpacing.xs),
-          Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: LinearProgressIndicator(
-                    key: const Key('phone-detail-progress'),
-                    value: progress.clamp(0, 1),
-                    minHeight: 4,
-                    color: scheme.primary,
-                    backgroundColor: scheme.onSurface.withValues(alpha: .12),
-                  ),
-                ),
+          Semantics(
+            container: true,
+            label: progressLabel,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                key: const Key('phone-detail-progress'),
+                value: progress.clamp(0, 1),
+                minHeight: 4,
+                color: scheme.primary,
+                backgroundColor: scheme.onSurface.withValues(alpha: .12),
               ),
-              if (progressLabel != null) ...[
-                const SizedBox(width: AppSpacing.sm),
-                Text(
-                  progressLabel!,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ],
+            ),
           ),
         ],
         if (tiles.isNotEmpty) ...[

@@ -12,6 +12,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -752,7 +753,7 @@ class MobileSeriesPage extends StatelessWidget {
   }
 }
 
-/// 本季概况（季详情）：季海报、名称、年份与集数、已看进度和本季简介。
+/// 本季概况（季详情）：季海报、名称、年份与集数、已看计数和本季简介。
 class _SeasonSummary extends StatefulWidget {
   const _SeasonSummary({
     super.key,
@@ -797,9 +798,6 @@ class _SeasonSummaryState extends State<_SeasonSummary> {
     if (!widget.showName && facts.isEmpty && overview == null) {
       return const SizedBox.shrink();
     }
-    final progress = watched != null && total != null && total > 0
-        ? watched / total
-        : null;
     final muted = theme.textTheme.labelLarge?.copyWith(
       color: scheme.onSurfaceVariant,
       fontWeight: FontWeight.w500,
@@ -854,31 +852,12 @@ class _SeasonSummaryState extends State<_SeasonSummary> {
                         ),
                       if (facts.isNotEmpty)
                         Text(facts.join(' · '), style: muted),
-                      if (progress != null) ...[
-                        const SizedBox(height: AppSpacing.xs),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(2),
-                                child: LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 4,
-                                  color: scheme.primary,
-                                  backgroundColor: scheme.onSurface.withValues(
-                                    alpha: .12,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.xs),
-                            Text(
-                              l.seasonWatchedCount(watched!, total!),
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
+                      if (watched != null && total != null && total > 0) ...[
+                        if (facts.isNotEmpty)
+                          const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          l.seasonWatchedCount(watched, total),
+                          style: muted,
                         ),
                       ],
                       if (overview != null) ...[
@@ -1049,8 +1028,8 @@ class _RevealEpisodeState extends State<_RevealEpisode> {
 
 /// 分集行：左侧 16:9 剧照，右侧标题与「编号 · 时长 · 播出日期」，简介通栏排在下面。
 ///
-/// 同一状态只表达一次：已看只由剧照上的勾和压暗表示；续播由剧照底部进度条和
-/// 主色「剩余 N 分钟」表示；当前集只用浅底色、主色标题和剧照中央播放钮标示。
+/// 同一状态只表达一次：已看只由剧照上的勾和压暗表示；续播只由剧照底部进度条
+/// 表示；当前集只用浅底色、主色标题和剧照中央播放钮标示。
 class _EpisodeRow extends StatelessWidget {
   const _EpisodeRow({
     required this.episode,
@@ -1080,7 +1059,6 @@ class _EpisodeRow extends StatelessWidget {
       ?runtime,
       if (premiere != null) formatDateYmd(premiere),
     ];
-    final remaining = episode.canResume ? remainingLabel(l, episode) : null;
     final title = Text(
       episode.name,
       maxLines: 2,
@@ -1090,7 +1068,7 @@ class _EpisodeRow extends StatelessWidget {
         color: current
             ? scheme.primary
             : played
-            ? scheme.onSurface.withValues(alpha: .7)
+            ? scheme.onSurfaceVariant
             : scheme.onSurface,
       ),
     );
@@ -1146,18 +1124,6 @@ class _EpisodeRow extends StatelessWidget {
                               ),
                             ),
                           ],
-                          if (remaining != null) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              remaining,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: scheme.primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -1174,9 +1140,7 @@ class _EpisodeRow extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant.withValues(
-                          alpha: played ? .75 : 1,
-                        ),
+                        color: scheme.onSurfaceVariant,
                         height: 1.45,
                       ),
                     ),
@@ -1232,31 +1196,25 @@ class _EpisodeThumb extends StatelessWidget {
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 4,
-                    color: scheme.primary,
-                    backgroundColor: Colors.black.withValues(alpha: .45),
+                  child: Semantics(
+                    container: true,
+                    label: AppLocalizations.of(
+                      context,
+                    ).playbackProgress((progress * 100).round()),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 4,
+                      color: scheme.primary,
+                      backgroundColor: Colors.black.withValues(alpha: .45),
+                    ),
                   ),
                 ),
               if (played)
-                Positioned(
+                const Positioned(
                   right: 6,
                   top: 6,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.primary,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Icon(
-                        Icons.check_rounded,
-                        key: const Key('phone-episode-watched'),
-                        size: 14,
-                        color: scheme.onPrimary,
-                      ),
-                    ),
+                  child: EpisodeWatchedBadge(
+                    iconKey: Key('phone-episode-watched'),
                   ),
                 ),
               if (current)

@@ -202,7 +202,24 @@ abstract final class AppTheme {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     ),
     navigationBarTheme: base.navigationBarTheme.copyWith(height: 72),
+    filledButtonTheme: FilledButtonThemeData(
+      style: _phoneTouchTarget(base.filledButtonTheme.style),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: _phoneTouchTarget(base.elevatedButtonTheme.style),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: _phoneTouchTarget(base.outlinedButtonTheme.style),
+    ),
   );
+
+  /// Phone primary buttons stay a 48dp target even when the label is short.
+  static ButtonStyle _phoneTouchTarget(ButtonStyle? style) {
+    return (style ?? const ButtonStyle()).copyWith(
+      minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+      tapTargetSize: MaterialTapTargetSize.padded,
+    );
+  }
 
   static ThemeData _theme(Tones t) {
     final scheme = ColorScheme(

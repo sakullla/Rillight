@@ -291,7 +291,18 @@ void main() {
         tester.widget<Text>(find.byKey(EpisodeOverviewSection.textKey)).data,
         'A thief who steals corporate secrets through dream-sharing.',
       );
-      expect(find.textContaining('已看 40%'), findsOneWidget);
+      expect(find.textContaining('已看 40%'), findsNothing);
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.descendant(
+                of: find.byKey(CatalogKeys.resumeProgress),
+                matching: find.byType(LinearProgressIndicator),
+              ),
+            )
+            .value,
+        closeTo(0.4, 0.001),
+      );
       expect(find.text('继续播放'), findsOneWidget);
       expect(find.text('章节'), findsOneWidget);
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
