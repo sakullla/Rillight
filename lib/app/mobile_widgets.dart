@@ -94,6 +94,7 @@ List<String> phoneCardBadgeLabels(
   AppLocalizations l10n,
   EmbyItem item, {
   bool includePlayback = true,
+  bool includeResumeText = true,
 }) {
   final labels = <String>[];
   if (item.isEpisode) {
@@ -107,7 +108,7 @@ List<String> phoneCardBadgeLabels(
   if (includePlayback) {
     if (item.userData.played) {
       labels.add(l10n.mobileWatched);
-    } else if (item.canResume) {
+    } else if (includeResumeText && item.canResume) {
       labels.add(l10n.playbackProgress((item.playbackProgress * 100).round()));
     }
   }

@@ -9,6 +9,7 @@ import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/home/catalog_keys.dart';
 
 import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -145,6 +146,13 @@ void main() {
       .where((r) => r.startsWith('GET') && r.contains('/Items/$itemId'))
       .length;
 
+  bool overlapsRow(WidgetTester tester, Finder tile) {
+    final row = find
+        .ancestor(of: tile, matching: find.byType(Scrollable))
+        .first;
+    return tester.getRect(tile).overlaps(tester.getRect(row));
+  }
+
   testWidgets(
     'remote opens the current season through the episode title link',
     (tester) async {
@@ -168,6 +176,130 @@ void main() {
         app.router.state.uri.queryParameters['season'],
         'season-friends-1',
       );
+      expect(
+        app.router.state.uri.queryParameters['episode'],
+        'episode-friends-s1e1',
+      );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('series link from a later episode lands on that episode', (
+    tester,
+  ) async {
+    const minute = 10000000 * 60;
+    final server = FakeEmbyServer();
+    server.setEpisodes('series-friends', [
+      for (var index = 1; index <= 20; index++)
+        FakeEpisode(
+          id: 'episode-friends-s1e$index',
+          name: 'Episode $index',
+          seasonId: 'season-friends-1',
+          indexNumber: index,
+          parentIndexNumber: 1,
+          playbackPositionTicks: index == 12 ? minute * 5 : 0,
+          playedPercentage: index == 12 ? 20 : null,
+          runTimeTicks: minute * 22,
+        ),
+    ]);
+    final app = await start(tester, server);
+    await login(tester, server);
+    await openItem(tester, app, 'episode-friends-s1e12');
+    expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowUp);
+    await key(tester, LogicalKeyboardKey.select);
+    expect(
+      app.router.state.uri.queryParameters['episode'],
+      'episode-friends-s1e12',
+    );
+    expect(app.router.state.uri.queryParameters['season'], 'season-friends-1');
+    final target = find.byKey(const ValueKey('episode-friends-s1e12'));
+    expect(target, findsOneWidget);
+    expect(overlapsRow(tester, target), isTrue);
+    expect(find.byKey(const ValueKey('episode-friends-s1e1')), findsNothing);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets(
+    'season chip scrolls the episode row to that season resume episode',
+    (tester) async {
+      const minute = 10000000 * 60;
+      final server = FakeEmbyServer();
+      server.setSeasons('series-friends', const [
+        FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+        FakeSeason(id: 'season-friends-2', name: '第 2 季', indexNumber: 2),
+      ]);
+      server.setEpisodes('series-friends', [
+        const FakeEpisode(
+          id: 'episode-friends-s1e1',
+          name: 'The Pilot',
+          seasonId: 'season-friends-1',
+          indexNumber: 1,
+          parentIndexNumber: 1,
+          played: true,
+          runTimeTicks: minute * 22,
+        ),
+        const FakeEpisode(
+          id: 'episode-friends-s1e2',
+          name: 'The One with the Resume',
+          seasonId: 'season-friends-1',
+          indexNumber: 2,
+          parentIndexNumber: 1,
+          playbackPositionTicks: minute * 5,
+          playedPercentage: 20,
+          runTimeTicks: minute * 22,
+        ),
+        for (var index = 1; index <= 16; index++)
+          FakeEpisode(
+            id: 'episode-friends-s2e$index',
+            name: 'Season Two $index',
+            seasonId: 'season-friends-2',
+            indexNumber: index,
+            parentIndexNumber: 2,
+            playbackPositionTicks: index == 12 ? minute * 4 : 0,
+            playedPercentage: index == 12 ? 25 : null,
+            runTimeTicks: minute * 22,
+          ),
+      ]);
+      final app = await start(tester, server);
+      await login(tester, server);
+      await openItem(tester, app, 'series-friends');
+      expect(find.byKey(const ValueKey('season-friends-2')), findsOneWidget);
+
+      // 先把详情页纵向滚开。这条偏移曾被分集横条当成自己的位置。
+      final vertical = find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      );
+      expect(vertical, findsOneWidget);
+      final page = tester.state<ScrollableState>(vertical).position;
+      expect(page.maxScrollExtent, greaterThan(120));
+      page.jumpTo(160);
+      await tester.pump();
+      final chip = find.byKey(const ValueKey('season-friends-2'));
+      await tester.ensureVisible(chip);
+      await tester.pump();
+      expect(page.pixels, greaterThan(40));
+      await tester.tap(chip);
+      await _settle(tester);
+
+      final target = find.byKey(const ValueKey('episode-friends-s2e12'));
+      expect(target, findsOneWidget);
+      final row = find
+          .ancestor(of: target, matching: find.byType(Scrollable))
+          .first;
+      final rowPixels = tester.state<ScrollableState>(row).position.pixels;
+      expect(rowPixels, greaterThan(page.pixels + 400));
+      expect(overlapsRow(tester, target), isTrue);
+      expect(
+        find.descendant(
+          of: target,
+          matching: find.byKey(const Key('tv-episode-current')),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('episode-friends-s2e1')), findsNothing);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -272,14 +404,21 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('episode-friends-s1e1')),
-          matching: find.textContaining('已看'),
+          matching: find.byType(EpisodeWatchedBadge),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
+          of: find.byKey(const ValueKey('episode-friends-s1e1')),
+          matching: find.text('已看'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
           of: find.byKey(const ValueKey('episode-friends-s1e3')),
-          matching: find.textContaining('已看'),
+          matching: find.byType(EpisodeWatchedBadge),
         ),
         findsNothing,
       );

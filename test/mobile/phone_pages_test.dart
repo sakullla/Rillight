@@ -578,10 +578,20 @@ void main() {
         isNotNull,
       );
       final banner = find.byKey(PhoneHero.bannerKey);
-      // 续播记录只留在「继续观看」行,轮播里不显示进度。
-      expect(find.text('已看 40%'), findsWidgets);
+      // 续播只留在「继续观看」行的进度条上，轮播和卡片文字都不再写百分比。
+      expect(find.text('已看 40%'), findsNothing);
       expect(
-        find.descendant(of: banner, matching: find.text('已看 40%')),
+        find.descendant(
+          of: find.byKey(CatalogKeys.resumeRow),
+          matching: find.byKey(CatalogKeys.resumeProgress),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(
+          of: banner,
+          matching: find.byKey(CatalogKeys.resumeProgress),
+        ),
         findsNothing,
       );
       expect(
@@ -766,8 +776,14 @@ void main() {
           ),
           isTrue,
         );
-        expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
-        expect(_inside(tester.getRect(find.text('已看 10%').last), card), isTrue);
+        expect(
+          find.descendant(
+            of: find.byKey(CatalogKeys.item('movie-b')),
+            matching: find.byKey(CatalogKeys.resumeProgress),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('已看 10%'), findsNothing);
 
         final resumePlay = find.byKey(const Key('phone-resume-play-movie-b'));
         expect(tester.getSize(resumePlay), const Size(48, 48));
@@ -781,7 +797,14 @@ void main() {
         final (liveRouter, server) = await _openPhone(tester);
         expect(find.byType(HomeHero), findsNothing);
         expect(find.byType(PhoneHero), findsOneWidget);
-        expect(find.text('已看 40%'), findsWidgets);
+        expect(find.text('已看 40%'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byKey(CatalogKeys.resumeRow),
+            matching: find.byKey(CatalogKeys.resumeProgress),
+          ),
+          findsWidgets,
+        );
         expect(find.text('继续观看'), findsOneWidget);
 
         final resumeCard = find.byKey(CatalogKeys.item('movie-inception'));
@@ -902,7 +925,7 @@ void main() {
       await tester.pumpWidget(_scriptedApp(catalog, router: router));
       await tester.pump();
 
-      // 继续观看横卡:季集编号与进度角标都落在卡内,底部进度条保留。
+      // 继续观看横卡:季集编号留在角标，进度只由底部进度条表达。
       final wideBadges = find.byKey(phoneHomeBadgesKey('episode-resume'));
       expect(wideBadges, findsOneWidget);
       final wideCard = tester.getRect(
@@ -915,15 +938,28 @@ void main() {
       );
       expect(
         find.descendant(of: wideBadges, matching: find.text('已看 40%')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.item('episode-resume')),
+          matching: find.byKey(CatalogKeys.resumeProgress),
+        ),
         findsOneWidget,
       );
-      expect(find.byKey(CatalogKeys.resumeProgress), findsWidgets);
 
-      // 电影海报:可续播给进度角标,已看只给已看角标、不带百分比。
+      // 可续播电影同样只留进度条；已看且没有进度条时才写「已看」。
       expect(
         find.descendant(
           of: find.byKey(phoneHomeBadgesKey('movie-progress')),
           matching: find.text('已看 10%'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(CatalogKeys.item('movie-progress')),
+          matching: find.byKey(CatalogKeys.resumeProgress),
         ),
         findsOneWidget,
       );

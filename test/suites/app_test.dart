@@ -14,6 +14,10 @@ void main() {
     'app/appearance_test.dart',
     caseEntrypoints['app/appearance_cases.dart']!,
   );
+  group(
+    'app/browsing_polish_test.dart',
+    caseEntrypoints['app/browsing_polish_cases.dart']!,
+  );
   group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
     'auth/connect_page_test.dart',

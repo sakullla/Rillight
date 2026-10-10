@@ -323,6 +323,7 @@ GoRouter createAppRouter({
                   key: ValueKey(state.uri.toString()),
                   itemId: state.pathParameters['itemId']!,
                   initialSeasonId: state.uri.queryParameters['season'],
+                  initialEpisodeId: state.uri.queryParameters['episode'],
                 ),
               ),
             ),

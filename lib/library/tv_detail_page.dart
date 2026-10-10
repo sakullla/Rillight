@@ -23,9 +23,15 @@ import 'package:rillight/player/player_window_host.dart';
 /// 电视详情:整屏背景图固定在后面,信息与操作压在左下;向下是季与分集行、
 /// 剧照和详细信息。滚动时背景逐步压暗,下方内容始终读得清。
 class TvDetailPage extends StatefulWidget {
-  const TvDetailPage({super.key, required this.itemId, this.initialSeasonId});
+  const TvDetailPage({
+    super.key,
+    required this.itemId,
+    this.initialSeasonId,
+    this.initialEpisodeId,
+  });
   final String itemId;
   final String? initialSeasonId;
+  final String? initialEpisodeId;
   @override
   State<TvDetailPage> createState() => _TvDetailPageState();
 }
@@ -56,6 +62,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
       cache: DetailSourceScope.cacheOf(context),
       itemId: widget.itemId,
       seasonId: widget.initialSeasonId,
+      initialEpisodeId: widget.initialEpisodeId,
     )..load();
     _focus.noteRoute(
       ModalRoute.of(context)?.isCurrent ?? true,
@@ -408,7 +415,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         _TvEpisodeRow(
           key: ValueKey('tv-episodes-${c.seasonId}'),
           episodes: c.episodes,
-          currentId: target?.id,
+          currentId: _tvEpisodeAnchor(c, target),
           metrics: metrics,
           nodeFor: (episode) => _focus.nodeFor('episode:${episode.id}'),
           more: c.hasMore
@@ -426,7 +433,23 @@ class _TvDetailPageState extends State<TvDetailPage> {
   }
 }
 
-/// 分集横向行:初次出现时把当前集滚进视口,长剧不用从第一集一路按过去。
+/// 分集行要露出的那一集:从分集详情进来时是该集,否则是这一季的续播或下一集。
+String? _tvEpisodeAnchor(DetailController controller, EmbyItem? playTarget) {
+  final requested = controller.initialEpisodeId?.trim();
+  if (requested != null &&
+      requested.isNotEmpty &&
+      controller.episodes.any((episode) => episode.id == requested)) {
+    return requested;
+  }
+  final target = playTarget?.id;
+  if (target != null &&
+      controller.episodes.any((episode) => episode.id == target)) {
+    return target;
+  }
+  return null;
+}
+
+/// 分集横向行:把当前集滚进视口,长剧不用从第一集一路按过去。
 class _TvEpisodeRow extends StatefulWidget {
   const _TvEpisodeRow({
     super.key,
@@ -448,23 +471,101 @@ class _TvEpisodeRow extends StatefulWidget {
 }
 
 class _TvEpisodeRowState extends State<_TvEpisodeRow> {
+  // 详情页纵向列表已经占用了这条路由的 PageStorage。分集行若再恢复它,
+  // 点季后会停在纵向偏移上,而不是这一季对应的集。
   ScrollController? _scroll;
+  int _alignGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleAlign();
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_scroll != null) return;
-    final s = TvDesign.scaleOf(context);
-    final index = widget.episodes.indexWhere((e) => e.id == widget.currentId);
-    final step = widget.metrics.width + TvDesign.cardGap * s;
-    // 当前集前面留一张,看得出前后都还有内容。
-    _scroll = ScrollController(
-      initialScrollOffset: index > 1 ? (index - 1) * step : 0,
+    // 首帧就用目标偏移。keepScrollOffset 为 false 时,这个值不会被
+    // 详情页已经滚过的纵向位置盖掉。
+    _scroll ??= ScrollController(
+      keepScrollOffset: false,
+      initialScrollOffset: _desiredOffset(),
     );
   }
 
   @override
+  void didUpdateWidget(_TvEpisodeRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldIndex = oldWidget.episodes.indexWhere(
+      (episode) => episode.id == oldWidget.currentId,
+    );
+    final index = widget.episodes.indexWhere(
+      (episode) => episode.id == widget.currentId,
+    );
+    if (oldWidget.currentId != widget.currentId ||
+        oldIndex != index ||
+        oldWidget.episodes.length != widget.episodes.length) {
+      _scheduleAlign();
+    }
+  }
+
+  void _scheduleAlign() {
+    final generation = ++_alignGeneration;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _align(generation, 0));
+  }
+
+  double _slot() =>
+      widget.metrics.width + TvDesign.cardGap * TvDesign.scaleOf(context);
+
+  /// 当前集前面留一张,看得出前后都还有内容。
+  double _offsetFor(int index) => index > 1 ? (index - 1) * _slot() : 0;
+
+  double _desiredOffset() {
+    final index = widget.episodes.indexWhere(
+      (episode) => episode.id == widget.currentId,
+    );
+    return _offsetFor(index);
+  }
+
+  void _align(int generation, int attempt) {
+    if (!mounted ||
+        generation != _alignGeneration ||
+        _scroll?.hasClients != true) {
+      return;
+    }
+    final position = _scroll!.position;
+    if (attempt >= 24) return;
+    if (!position.hasContentDimensions) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _align(generation, attempt + 1),
+      );
+      return;
+    }
+    final index = widget.episodes.indexWhere(
+      (episode) => episode.id == widget.currentId,
+    );
+    final raw = _offsetFor(index);
+    final max = position.maxScrollExtent;
+    // 懒加载列表首帧还不知道全程。先推到已知末端,下一帧再对准。
+    if (raw > max + 1) {
+      if (position.pixels != max) position.jumpTo(max);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _align(generation, attempt + 1),
+      );
+      return;
+    }
+    final target = raw.clamp(0.0, max);
+    if ((position.pixels - target).abs() > 1) position.jumpTo(target);
+  }
+
+  /// 槽宽包含间距。卡片保持原宽度并靠左，间距留在右侧。
+  Widget _slotChild(Widget child) {
+    return Align(alignment: Alignment.topLeft, child: child);
+  }
+
+  @override
   void dispose() {
+    _alignGeneration++;
     _scroll?.dispose();
     super.dispose();
   }
@@ -472,46 +573,45 @@ class _TvEpisodeRowState extends State<_TvEpisodeRow> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final s = TvDesign.scaleOf(context);
     final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
     final metrics = widget.metrics;
     final episodes = widget.episodes;
     final count = episodes.length + (widget.more == null ? 0 : 1);
     return SizedBox(
       height: metrics.height + metrics.focusRoom * 2,
-      child: ListView.separated(
-        controller: _scroll,
+      child: ListView.builder(
+        controller: _scroll!,
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
+        // 固定槽宽后首帧就知道滚动范围,切季能直接落到对应集。
+        itemExtent: _slot(),
         padding: EdgeInsets.symmetric(
           horizontal: gutter,
           vertical: metrics.focusRoom,
         ),
         itemCount: count,
-        separatorBuilder: (context, index) =>
-            SizedBox(width: TvDesign.cardGap * s),
         itemBuilder: (context, index) {
           if (index == episodes.length) {
-            return SizedBox(
-              width: metrics.width,
-              child: Align(alignment: Alignment.topCenter, child: widget.more),
+            return _slotChild(
+              SizedBox(
+                width: metrics.width,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: widget.more,
+                ),
+              ),
             );
           }
           final episode = episodes[index];
           final current = episode.id == widget.currentId;
+          // 当前集由图标标出，续播由进度条标出，已看由角标标出。
           final meta = <String>[
-            if (current) l.nowPlayingEpisode,
-            if (episode.canResume)
-              ?remainingLabel(l, episode)
-            else if (episode.userData.played)
-              l.mobileWatched,
             if (episode.premiereDate != null)
               formatDateYmd(episode.premiereDate!),
           ];
-          return SizedBox(
-            width: metrics.width,
-            child: Align(
-              alignment: Alignment.topCenter,
+          return _slotChild(
+            SizedBox(
+              width: metrics.width,
               child: TvCard(
                 key: ValueKey(episode.id),
                 item: episode,
@@ -653,6 +753,7 @@ class _TvDetailHeader extends StatelessWidget {
                       context,
                       item.seriesId!,
                       seasonId: item.seasonId ?? item.parentId,
+                      episodeId: item.id,
                     ),
                     extra: DetailSourceScope.command(context, item.seriesId!),
                   ),

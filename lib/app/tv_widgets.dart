@@ -1118,15 +1118,6 @@ class _TvCardState extends State<TvCard> {
             decoration: BoxDecoration(
               color: scheme.surfaceContainerHigh,
               borderRadius: radius,
-              boxShadow: focused
-                  ? [
-                      BoxShadow(
-                        blurRadius: 18 * s,
-                        offset: Offset(0, 6 * s),
-                        color: Colors.black.withValues(alpha: .45),
-                      ),
-                    ]
-                  : const [],
             ),
             foregroundDecoration: BoxDecoration(
               borderRadius: radius,
@@ -1159,11 +1150,17 @@ class _TvCardState extends State<TvCard> {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      child: LinearProgressIndicator(
-                        value: progress,
-                        minHeight: 3 * s,
-                        color: scheme.primary,
-                        backgroundColor: Colors.black.withValues(alpha: .5),
+                      child: Semantics(
+                        container: true,
+                        label: AppLocalizations.of(
+                          context,
+                        ).playbackProgress((progress * 100).round()),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 3 * s,
+                          color: scheme.primary,
+                          backgroundColor: Colors.black.withValues(alpha: .5),
+                        ),
                       ),
                     ),
                   if (widget.badge case final badge?)

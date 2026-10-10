@@ -38,6 +38,7 @@ class PosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final height = wide ? width * 9 / 16 : width * 1.5;
     final progress = item.playbackProgress;
     final title = item.isEpisode && (item.seriesName?.isNotEmpty ?? false)
@@ -89,6 +90,9 @@ class PosterCard extends StatelessWidget {
                           child: _ResumeProgressBar(
                             key: CatalogKeys.resumeProgress,
                             value: progress,
+                            label: l10n.playbackProgress(
+                              (progress * 100).round(),
+                            ),
                           ),
                         ),
                     ],
@@ -135,6 +139,7 @@ class EpisodeThumbCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final height = width * 9 / 16;
     final progress = item.playbackProgress;
     final title = numberedEpisodeTitle(item);
@@ -192,7 +197,12 @@ class EpisodeThumbCard extends StatelessWidget {
                       if (item.canResume)
                         Align(
                           alignment: Alignment.bottomCenter,
-                          child: _ResumeProgressBar(value: progress),
+                          child: _ResumeProgressBar(
+                            value: progress,
+                            label: l10n.playbackProgress(
+                              (progress * 100).round(),
+                            ),
+                          ),
                         ),
                       if (item.userData.played)
                         Positioned(
@@ -562,21 +572,30 @@ class _PosterRevealOverlay extends StatelessWidget {
 }
 
 class _ResumeProgressBar extends StatelessWidget {
-  const _ResumeProgressBar({super.key, required this.value});
+  const _ResumeProgressBar({
+    super.key,
+    required this.value,
+    required this.label,
+  });
 
   final double value;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 3,
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.45),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: FractionallySizedBox(
-            widthFactor: value.clamp(0.0, 1.0),
-            child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+    return Semantics(
+      container: true,
+      label: label,
+      child: SizedBox(
+        height: 3,
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: 0.45),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: value.clamp(0.0, 1.0),
+              child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+            ),
           ),
         ),
       ),

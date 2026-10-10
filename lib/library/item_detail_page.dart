@@ -2728,8 +2728,6 @@ class _MetaRow extends StatelessWidget {
       if (item.isSeries && seasonCount > 0) l10n.seasonCount(seasonCount),
       if (item.childCount != null && item.isSeries)
         l10n.episodeCount(item.childCount!),
-      if (item.canResume)
-        l10n.playbackProgress((item.playbackProgress * 100).round()),
     ];
     final rating = item.isEpisode ? null : item.communityRating;
     final actions = <Widget>[
@@ -2766,15 +2764,30 @@ class _MetaRow extends StatelessWidget {
             runSpacing: AppSpacing.xxs,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              if (facts.isNotEmpty)
-                Text(
-                  facts.join(' · '),
-                  key: item.canResume ? CatalogKeys.resumeProgress : null,
-                  style: factStyle,
-                ),
+              if (facts.isNotEmpty) Text(facts.join(' · '), style: factStyle),
               if (rating != null)
                 HeroRatingBadge(rating: rating, onScrim: false),
             ],
+          ),
+        ],
+        if (item.canResume) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Semantics(
+            container: true,
+            label: l10n.playbackProgress((item.playbackProgress * 100).round()),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+              child: SizedBox(
+                key: CatalogKeys.resumeProgress,
+                width: 168,
+                child: LinearProgressIndicator(
+                  value: item.playbackProgress.clamp(0, 1),
+                  minHeight: 4,
+                  color: scheme.primary,
+                  backgroundColor: scheme.onSurface.withValues(alpha: .16),
+                ),
+              ),
+            ),
           ),
         ],
       ],

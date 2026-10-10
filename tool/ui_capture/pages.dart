@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -624,6 +625,21 @@ extension PageCaptures on CaptureSession {
   }
 
   Future<void> settingsPages(RillightApp app) async {
+    // Widget tests default to Android, which has a single decoder backend.
+    // Desktop capture should show the Windows choice the settings page hides
+    // until more than one backend exists.
+    final restorePlatform = debugDefaultTargetPlatformOverride;
+    if (platform == 'desktop') {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    }
+    try {
+      await _settingsPages(app);
+    } finally {
+      debugDefaultTargetPlatformOverride = restorePlatform;
+    }
+  }
+
+  Future<void> _settingsPages(RillightApp app) async {
     if (platform == 'desktop') {
       await route(app, '/settings', 'settings');
     } else {
