@@ -181,6 +181,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
         rillight_core_configure_audio_sink(core, &sink);
       };
       auto reject_passthrough = [&](int kind) {
+        if (audio) audio->RejectFormat(kind);
         const uint32_t bit = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
                                  ? RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD
                                  : RILLIGHT_CORE_AUDIO_ACCEPT_EAC3;
@@ -337,7 +338,13 @@ struct Surface : std::enable_shared_from_this<Surface> {
               continue;
             }
             if (compressed) {
-              if (!audio->EnsurePassthrough(frame->audio_codec_id) &&
+              if (frame->sample_count <= 0 || frame->sample_rate <= 0) {
+                reject_passthrough(frame->audio_codec_id);
+                rillight_core_release_frame(frame);
+                pending_audio = nullptr;
+                continue;
+              }
+              if (!audio->EnsurePassthrough(frame->audio_codec_id, frame->sample_rate) &&
                   audio->passthrough_rejected()) {
                 reject_passthrough(frame->audio_codec_id);
                 rillight_core_release_frame(frame);
@@ -372,7 +379,7 @@ struct Surface : std::enable_shared_from_this<Surface> {
             if (compressed) {
               const size_t written = audio->WriteCompressed(
                   frame->audio_codec_id, frame->data,
-                  static_cast<size_t>(frame->data_size));
+                  static_cast<size_t>(frame->data_size), frame->sample_rate);
               if (audio->passthrough_rejected()) {
                 reject_passthrough(frame->audio_codec_id);
                 rillight_core_release_frame(frame);
@@ -382,10 +389,9 @@ struct Surface : std::enable_shared_from_this<Surface> {
               if (!written) break;
               pending_offset = frame->data_size;
               if (frame->pts_us >= 0) {
-                const int samples = frame->sample_count > 0
-                                        ? frame->sample_count : 1536;
+                const int samples = frame->sample_count;
                 const int64_t end_pts = frame->pts_us + static_cast<int64_t>(
-                    samples * 1000000.0 / 48000.0 * snapshot.playback_speed);
+                    samples * 1000000.0 / frame->sample_rate * snapshot.playback_speed);
                 audio_end_pts = end_pts;
                 audio_speed = snapshot.playback_speed;
                 if (first_audio_write == std::chrono::steady_clock::time_point{})

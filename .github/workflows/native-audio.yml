@@ -1,0 +1,44 @@
+name: Native audio contracts
+
+on:
+  push:
+    paths:
+      - 'packages/rillight_player/macos/**'
+      - 'packages/rillight_player/linux/**'
+      - 'packages/rillight_player/native/**'
+      - '.github/workflows/native-audio.yml'
+  pull_request:
+    paths:
+      - 'packages/rillight_player/macos/**'
+      - 'packages/rillight_player/linux/**'
+      - 'packages/rillight_player/native/**'
+      - '.github/workflows/native-audio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile Core Audio output and test transport contracts
+        run: |
+          cmake -S packages/rillight_player/native/core_tests/macos -B build/audio-contracts
+          cmake --build build/audio-contracts --parallel 3
+          ctest --test-dir build/audio-contracts --output-on-failure
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install PulseAudio development dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libpulse-dev pulseaudio
+      - name: Test route fallback and virtual PulseAudio output
+        run: |
+          pulseaudio --start --exit-idle-time=-1 --load='module-null-sink sink_name=rillight_validation'
+          cmake -S packages/rillight_player/native/core_tests/linux -B build/audio-contracts -DRILLIGHT_PULSE_TEST=ON
+          cmake --build build/audio-contracts --parallel 3
+          ctest --test-dir build/audio-contracts --output-on-failure

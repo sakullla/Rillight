@@ -1,5 +1,39 @@
 # macOS aggregation/private-region handoff
 
+## v0.1.55 digital audio output
+
+The candidate adds exclusive Core Audio HAL output for IEC 61937 AC-3,
+E-AC-3/JOC, DTS, DTS-HD and TrueHD. Only explicitly advertised digital physical
+formats with matching carrier rate/layout are eligible. Ordinary speakers,
+Bluetooth, float-only paths and unavailable digital formats remain decoded PCM.
+JOC/TrueHD data is preserved but Atmos is not inferred from generic device
+formats. A downstream receiver can still reject a codec after the driver
+accepts the carrier; software queue progress cannot prove physical sound.
+
+The audio worker owns device/format changes and a bounded single-producer,
+single-consumer buffer; the HAL callback only copies queued bytes and publishes
+timing. Failures retire the compressed output, restore device state and revoke
+that codec's acceptance for the route before reopening PCM. A real default
+device change permits a fresh probe. No forced PCM-as-bitstream workaround is
+used. Pause, seek, stream changes and shutdown reset queued compressed bursts.
+
+Local Windows/WSL checks exercise packet sample counts, byte preservation,
+queue wrap/backpressure/concurrency, Linux route rejection and a virtual
+PulseAudio sink. The dedicated `Native audio contracts` workflow compiles the
+actual macOS header against Apple frameworks and tests format rejection without
+claiming speaker output. Hosted package/control CI remains a separate check.
+
+On a physical Mac (both Intel and Apple Silicon where available), record the
+candidate/package hash, HDMI/USB receiver, advertised physical/virtual formats,
+actual receiver codec indicator and audible output for each supported format.
+Check stereo PCM fallback, busy device/hog failure, unplug/replug and switching
+between two devices with the same channel count, pause/resume, seek, track
+changes, and close/reopen. Verify another application can use the device after
+close and that its original physical format and mixing state were restored.
+Measure lip-sync separately. Current physical passthrough result: **unverified**.
+Also verify application mute and non-unity volume switch to PCM, and restoring
+100% permits passthrough again. Receiver volume remains independent.
+
 The T7 working-tree developer checks use synthetic Emby clients, Flutter widgets and a `FakeVideoBackend`. The desktop cumulative case launches a genuinely separate Flutter test helper process, uses production per-process file IPC and the main-process `HistoryWriter`; it is **not** a native macOS playback/window, decoder, GPU or physical-audio pass. No macOS native build or SDK/package verification was executed for T7. Earlier platform observations, if any, do not accept this candidate.
 
 ## Target-machine procedure (not yet executed)

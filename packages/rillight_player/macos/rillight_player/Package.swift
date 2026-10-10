@@ -26,6 +26,7 @@ let package = Package(
                 .linkedFramework("Accelerate"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("AudioToolbox"),
+                .linkedFramework("CoreAudio"),
                 .linkedFramework("CoreVideo"),
                 .linkedFramework("IOSurface"),
                 .linkedFramework("Metal"),

@@ -14,6 +14,8 @@
 
 #include "../native/core/iec61937_pack.h"
 #include "../native/core/rillight_core.h"
+#include "../native/core/audio_passthrough.h"
+#include "audio_route.h"
 
 namespace rillight_linux {
 
@@ -21,6 +23,21 @@ inline int PcmChannelTarget(int channels) {
   if (channels >= 8) return 8;
   if (channels >= 6) return 6;
   return 2;
+}
+
+inline pa_format_info* PassthroughFormat(int kind, int rate) {
+  if (kind != RILLIGHT_CORE_PASSTHROUGH_EAC3 &&
+      kind != RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
+      kind != RILLIGHT_CORE_PASSTHROUGH_TRUEHD) return nullptr;
+  const auto carrier = rillight_audio_carrier(kind, rate);
+  if (!carrier.rate) return nullptr;
+  auto* info = pa_format_info_new();
+  info->encoding = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
+      ? PA_ENCODING_TRUEHD_IEC61937 : PA_ENCODING_EAC3_IEC61937;
+  // Pulse multiplies E-AC-3's rate by four. TrueHD already uses carrier units.
+  pa_format_info_set_rate(info, kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD ? carrier.rate : rate);
+  pa_format_info_set_channels(info, carrier.channels);
+  return info;
 }
 
 // Failure leaves stereo PCM and no passthrough bits. Surface creation must
@@ -205,6 +222,10 @@ class PulseOutput {
       if (now - last_timing_request_ > std::chrono::milliseconds(250))
         RequestTiming();
       if (now - timing_missing_since_ > std::chrono::seconds(2)) {
+        if (passthrough_kind_ != 0) {
+          RejectPassthrough(passthrough_kind_);
+          return true;
+        }
         error_ = "PulseAudio timing unavailable";
         return false;
       }
@@ -218,24 +239,27 @@ class PulseOutput {
     if (channels > 8) channels = 8;
     return Ensure(channels, 0);
   }
-  bool EnsurePassthrough(int kind) {
+  bool EnsurePassthrough(int kind, int rate = 48000) {
     if (passthrough_rejected_) return false;
     if (kind != RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
         kind != RILLIGHT_CORE_PASSTHROUGH_EAC3 &&
         kind != RILLIGHT_CORE_PASSTHROUGH_TRUEHD) {
-      passthrough_rejected_ = true;
+      RejectPassthrough(kind);
       return false;
     }
-    return Ensure(2, kind);
+    const auto carrier = rillight_audio_carrier(kind, rate);
+    if (!carrier.rate) { RejectPassthrough(kind); return false; }
+    return Ensure(carrier.channels, kind, rate);
   }
   bool passthrough_rejected() const { return passthrough_rejected_; }
   int rejected_passthrough_kind() const { return rejected_kind_; }
   int current_passthrough_kind() const { return passthrough_kind_; }
   int route_generation() const { return route_generation_; }
   void copy_route(int *channels, uint32_t *accept) const {
-    if (channels) *channels = route_channels_;
-    if (accept) *accept = route_accept_;
+    if (channels) *channels = route_.channels;
+    if (accept) *accept = route_.accepted();
   }
+  void RejectFormat(int kind) { route_.Reject(kind); }
   void AbandonPassthrough() {
     passthrough_rejected_ = false;
     rejected_kind_ = 0;
@@ -270,8 +294,8 @@ class PulseOutput {
   }
   // Returns the consumed compressed size, 0 when the device needs another
   // iteration, or static_cast<size_t>(-1) when the burst cannot be packed.
-  size_t WriteCompressed(int kind, const uint8_t *data, size_t size) {
-    if (!EnsurePassthrough(kind)) return passthrough_rejected_ ? size_t(-1) : 0;
+  size_t WriteCompressed(int kind, const uint8_t *data, size_t size, int rate = 48000) {
+    if (!EnsurePassthrough(kind, rate)) return passthrough_rejected_ ? size_t(-1) : 0;
     if (!stream_ || pa_stream_get_state(stream_) != PA_STREAM_READY ||
         Latency() < 0) return 0;
     if (held_packet_ != data) {
@@ -323,17 +347,18 @@ class PulseOutput {
   }
   const std::string& error() const { return error_; }
  private:
-  bool Ensure(int channels, int kind) {
+  bool Ensure(int channels, int kind, int rate = 48000) {
     if (!error_.empty() && !passthrough_rejected_) return false;
     if (!context_ || pa_context_get_state(context_) != PA_CONTEXT_READY)
       return false;
-    if (stream_ && channels_ == channels && passthrough_kind_ == kind &&
+    if (stream_ && channels_ == channels && passthrough_kind_ == kind && source_rate_ == rate &&
         pa_stream_get_state(stream_) != PA_STREAM_FAILED &&
         pa_stream_get_state(stream_) != PA_STREAM_TERMINATED)
       return true;
     CloseStream();
     channels_ = channels;
     passthrough_kind_ = kind;
+    source_rate_ = rate;
     stride_ = kind == 0 ? std::max(1, channels) * 2 : 1;
     started_ = std::chrono::steady_clock::now();
     if (kind == 0) {
@@ -344,12 +369,8 @@ class PulseOutput {
                                PA_CHANNEL_MAP_WAVEEX);
       stream_ = pa_stream_new(context_, "Media", &spec, &map);
     } else {
-      pa_format_info *info = pa_format_info_new();
-      info->encoding = kind == RILLIGHT_CORE_PASSTHROUGH_TRUEHD
-                           ? PA_ENCODING_TRUEHD_IEC61937
-                           : PA_ENCODING_EAC3_IEC61937;
-      pa_format_info_set_rate(info, 48000);
-      pa_format_info_set_channels(info, channels);
+      pa_format_info *info = PassthroughFormat(kind, rate);
+      if (!info) { RejectPassthrough(kind); return false; }
       pa_format_info *formats[] = {info};
       stream_ = pa_stream_new_extended(context_, "Media", formats, 1, nullptr);
       pa_format_info_free(info);
@@ -379,6 +400,7 @@ class PulseOutput {
     return true;
   }
   void RejectPassthrough(int kind) {
+    route_.Reject(kind);
     if (kind != RILLIGHT_CORE_PASSTHROUGH_EAC3_JOC &&
         kind != RILLIGHT_CORE_PASSTHROUGH_EAC3 &&
         kind != RILLIGHT_CORE_PASSTHROUGH_TRUEHD)
@@ -448,8 +470,8 @@ class PulseOutput {
                       accept |= RILLIGHT_CORE_AUDIO_ACCEPT_TRUEHD;
                   }
                 }
-                self->route_channels_ = PcmChannelTarget(info->channel_map.channels);
-                self->route_accept_ = accept;
+                self->route_.Observe(info->name ? info->name : "",
+                    PcmChannelTarget(info->channel_map.channels), accept);
                 self->route_generation_ += 1;
               },
               self);
@@ -519,8 +541,8 @@ class PulseOutput {
   bool route_dirty_ = false;
   bool route_querying_ = false;
   int route_generation_ = 0;
-  int route_channels_ = 2;
-  uint32_t route_accept_ = 0;
+  int source_rate_ = 48000;
+  AudioRoutePolicy route_;
   RillightIec61937Mux mux_;
   std::vector<uint8_t> burst_;
   size_t burst_offset_ = 0;

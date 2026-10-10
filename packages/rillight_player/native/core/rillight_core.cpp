@@ -1,5 +1,6 @@
 #include "rillight_core.h"
 #include "audio_contract.h"
+#include "audio_passthrough.h"
 #include "bitmap_subtitle.h"
 #include "dts_packet_recovery.h"
 #include "video_buffer_pool.h"
@@ -1345,7 +1346,7 @@ bool unity_speed(double speed) { return speed > 0.999 && speed < 1.001; }
 bool passthrough_still_wanted(const RillightCoreImpl *core,
                               const RillightCoreFrame *frame) {
   if (!unity_speed(core->speed)) return false;
-  return (core->sink_accept &
+  return (rillight_audio_accept_for_gain(core->sink_accept, core->volume) &
           rillight_passthrough_accept_bit(frame->audio_codec_id)) != 0;
 }
 
@@ -3012,7 +3013,8 @@ struct AudioSinkView {
 
 AudioSinkView audio_sink_view(RillightCoreImpl *core) {
   std::lock_guard lock(core->mutex);
-  return {core->sink_max_channels, core->sink_accept, core->sink_atmos,
+  return {core->sink_max_channels,
+          rillight_audio_accept_for_gain(core->sink_accept, core->volume), core->sink_atmos,
           core->speed, core->sink_generation};
 }
 
@@ -3069,8 +3071,9 @@ RillightCoreFrame *passthrough_frame(const AVPacket *packet,
     pts = av_rescale_q(packet->pts, stream->time_base, AVRational{1, 1000000});
   const int sample_rate = stream->codecpar->sample_rate > 0
                               ? stream->codecpar->sample_rate : 48000;
-  int sample_count = 0;
-  if (packet->duration > 0 && sample_rate > 0) {
+  int sample_count = rillight_passthrough_samples(
+      kind, packet->data, packet->size, sample_rate);
+  if (sample_count == 0 && packet->duration > 0 && sample_rate > 0) {
     const int64_t scaled = av_rescale_q(packet->duration, stream->time_base,
                                         AVRational{1, sample_rate});
     if (scaled > 0 && scaled <= 480000) sample_count = static_cast<int>(scaled);
@@ -5197,7 +5200,26 @@ int rillight_core_set_volume(RillightCore *pointer, double gain,
   if (core->state == RILLIGHT_CORE_IDLE ||
       core->state == RILLIGHT_CORE_CLOSING ||
       !accept_operation(core, operation_id)) return -1;
+  const bool retire_encoded = core->volume == 1.0 && gain != 1.0 &&
+      core->audio_delivery == RILLIGHT_CORE_AUDIO_DELIVERY_PASSTHROUGH &&
+      core->state != RILLIGHT_CORE_ENDED && core->state != RILLIGHT_CORE_FAILED;
   core->volume = gain;
+  if (retire_encoded) {
+    // Retire device buffers too, including when paused or at demux EOF. Merely
+    // dropping decoded-ahead access units would skip audio or leave no PCM.
+    const int64_t position = playback_position(core);
+    ++core->timeline;
+    core->timeline_signal = core->timeline;
+    reset_frames(core);
+    core->seek_target = position;
+    core->base_position = position;
+    core->base_time = Clock::now();
+    core->state = RILLIGHT_CORE_RECOVERING;
+    core->io.cancel_media_io(core->io.opaque);
+  } else if (gain != 1.0) {
+    drop_passthrough_frames(core);
+  }
+  core->wake.notify_all();
   return 0;
 }
 

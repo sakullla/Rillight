@@ -98,6 +98,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
   int _hardwareStream;
   int _hardwareTicks;
   int _pcmChannels;
+  AudioDeviceID _audioDevice;
+  uint32_t _audioAccept, _rejectedAudioFormats;
   bool _routeListener;
   std::atomic<bool> _routeChanged;
 }
@@ -161,7 +163,9 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
     RillightCoreAudioSink sink{};
     sink.struct_size = sizeof(sink);
     sink.max_pcm_channels = rillight_macos::DefaultOutputChannelTarget();
-    sink.accepted_passthrough = 0;
+    _audioDevice = rillight_macos::DigitalDefaultDevice();
+    _audioAccept = rillight_macos::DigitalAcceptedFormats(_audioDevice);
+    sink.accepted_passthrough = _audioAccept;
     sink.reports_atmos = 0;
     _pcmChannels = sink.max_pcm_channels;
     rillight_core_configure_audio_sink(self->core, &sink);
@@ -364,12 +368,16 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
   }
   if (_routeChanged.exchange(false)) {
     const int channels = rillight_macos::DefaultOutputChannelTarget();
-    if (channels != _pcmChannels) {
+    const auto device = rillight_macos::DigitalDefaultDevice();
+    if (channels != _pcmChannels || device != _audioDevice) {
+      if (device != _audioDevice) _rejectedAudioFormats = 0;
+      _audioDevice = device;
+      _audioAccept = rillight_macos::DigitalAcceptedFormats(device) & ~_rejectedAudioFormats;
       _pcmChannels = channels;
       RillightCoreAudioSink sink{};
       sink.struct_size = sizeof(sink);
       sink.max_pcm_channels = channels;
-      sink.accepted_passthrough = 0;
+      sink.accepted_passthrough = _audioAccept;
       sink.reports_atmos = 0;
       rillight_core_configure_audio_sink(core, &sink);
       if (_audio) _audio->Reset();
@@ -388,6 +396,25 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
     _audioClockStarted = _audioHandedOff = _audioPaused = false;
     _audioGapSince = _audioStartupSince = _firstAudioWriteSince = {};
   }
+  auto rejectCompressed = [&](int kind) {
+    const auto bit = rillight_passthrough_accept_bit(kind);
+    _rejectedAudioFormats |= bit ? bit : _audioAccept;
+    _audioAccept &= ~_rejectedAudioFormats;
+    // Destroy the HAL output first, restoring format/mixing/hog ownership
+    // before a new PCM AudioQueue can open the same device.
+    _audio.reset();
+    [self releaseAudio];
+    RillightCoreAudioSink sink{};
+    sink.struct_size = sizeof(sink);
+    sink.max_pcm_channels = _pcmChannels;
+    sink.accepted_passthrough = _audioAccept;
+    sink.reports_atmos = 0;
+    rillight_core_configure_audio_sink(core, &sink);
+    _audioEndPts = -1;
+    _audioClockStarted = _audioHandedOff = _audioPaused = false;
+    _audioGapSince = _audioStartupSince = _firstAudioWriteSince = {};
+  };
+  if (_audio && _audio->rejected()) rejectCompressed(_audio->kind());
   if (_audio && !_audio->error().empty()) {
     [self setFailure:[NSString stringWithUTF8String:_audio->error().c_str()]];
     return;
@@ -414,21 +441,31 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
       }
       if (!_pendingAudio) break;
       auto* frame = _pendingAudio;
+      const bool compressed = frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH;
       const int stride = rillight_core_pcm_bytes_per_frame(frame);
-      if (frame->type != RILLIGHT_CORE_AUDIO_S16 ||
+      if ((!compressed && frame->type != RILLIGHT_CORE_AUDIO_S16) ||
           frame->session_id != snapshot.session_id ||
           frame->timeline_version != snapshot.timeline_version ||
-          frame->sample_rate != 48000 || frame->channels < 1 ||
-          frame->sample_count <= 0 ||
-          static_cast<int64_t>(frame->sample_count) * stride != frame->data_size ||
+          (!compressed && (frame->sample_rate != 48000 || frame->channels < 1 ||
+           frame->sample_count <= 0 ||
+           static_cast<int64_t>(frame->sample_count) * stride != frame->data_size)) ||
+          frame->data_size <= 0 ||
           !frame->data) {
         rillight_core_release_frame(frame);
         _pendingAudio = nullptr;
         continue;
       }
-      if (!_audio || _audio->channels() != frame->channels) {
-        if (_audio) _audio->Reset();
-        _audio = std::make_unique<rillight_macos::CoreAudioOutput>(frame->channels);
+      const int kind = compressed ? frame->audio_codec_id : 0;
+      if (compressed && (frame->sample_rate <= 0 || frame->sample_count <= 0 ||
+          !(_audioAccept & rillight_passthrough_accept_bit(kind)))) {
+        rejectCompressed(kind);
+        continue;
+      }
+      if (!_audio || _audio->channels() != frame->channels || _audio->kind() != kind ||
+          _audio->sample_rate() != frame->sample_rate) {
+        _audio.reset();
+        _audio = std::make_unique<rillight_macos::CoreAudioOutput>(frame->channels, kind, frame->sample_rate);
+        if (_audio->rejected()) { rejectCompressed(kind); continue; }
         if (!_audio->error().empty()) break;
       }
       if (frame->pts_us >= 0 &&
@@ -437,7 +474,7 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
         waitingFutureAudio = true;
         break;
       }
-      if (!_audioClockStarted && frame->pts_us >= 0) {
+      if (!compressed && !_audioClockStarted && frame->pts_us >= 0) {
         if (snapshot.position_us > frame->pts_us && snapshot.playback_speed > 0) {
           const double late = (snapshot.position_us - frame->pts_us) * 48000.0 /
                               (1000000.0 * snapshot.playback_speed);
@@ -451,8 +488,10 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
         _pendingAudio = nullptr;
         continue;
       }
-      const size_t written = _audio->Write(frame->data + _audioOffset,
-                                            frame->data_size - _audioOffset);
+      const size_t written = compressed
+          ? _audio->WriteCompressed(frame->data, frame->data_size, frame->sample_count)
+          : _audio->Write(frame->data + _audioOffset, frame->data_size - _audioOffset);
+      if (_audio->rejected()) { rejectCompressed(kind); continue; }
       if (!written) break;
       if (_audioHandedOff) {
         _audioHandedOff = false;
@@ -464,7 +503,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
         if (_firstAudioWriteSince == Clock::time_point{})
           _firstAudioWriteSince = Clock::now();
         _audioEndPts = frame->pts_us + static_cast<int64_t>(
-            (_audioOffset / static_cast<double>(stride)) * 1000000.0 / 48000.0 *
+            (compressed ? frame->sample_count : (_audioOffset / static_cast<double>(stride))) *
+            1000000.0 / frame->sample_rate *
             snapshot.playback_speed);
         _audioSpeed = snapshot.playback_speed;
         [self reportAudio:snapshot delay:_audio->DelayUs()];

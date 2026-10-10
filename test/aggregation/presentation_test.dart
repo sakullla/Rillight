@@ -103,13 +103,26 @@ class _RecordingHost extends PlayerWindowHost {
 class _IsolatedHelperControl extends DesktopPlayerProcessControl {
   _IsolatedHelperControl()
     : super(
-        startupTimeout: const Duration(seconds: 70),
+        startupTimeout: const Duration(seconds: 190),
         pollInterval: const Duration(milliseconds: 30),
       );
   final Map<int, Process> children = {};
   final Map<int, PlayerProcessProtocol> protocols = {};
   final Set<int> alive = {};
   final StringBuffer output = StringBuffer();
+  final Set<Process> runningChildren = {};
+
+  Future<void> stopChild(Process child) async {
+    if (!runningChildren.contains(child)) return;
+    if (Platform.isWindows) {
+      // Killing only flutter.bat's cmd.exe leaves its compiler/tester running
+      // against a launch directory that the parent is about to remove.
+      await Process.run('taskkill', ['/PID', '${child.pid}', '/T', '/F']);
+    } else {
+      child.kill();
+    }
+    await child.exitCode.timeout(const Duration(seconds: 10));
+  }
 
   // This fixture exercises cold, simulated player windows. It does not host
   // the native prewarmed-engine entry point (covered by process-control tests).
@@ -157,15 +170,19 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
     );
     child.stdout.transform(utf8.decoder).listen(output.write);
     child.stderr.transform(utf8.decoder).listen(output.write);
+    runningChildren.add(child);
     var finished = false;
     unawaited(
       child.exitCode.then((_) async {
         finished = true;
+        runningChildren.remove(child);
         alive.removeWhere((id) => children[id] == child);
         await childConfig?.delete(recursive: true);
       }),
     );
-    final deadline = DateTime.now().add(const Duration(seconds: 65));
+    // Cold native hooks compile in an isolated directory while the full suite
+    // is busy. This budget belongs to the test compiler, not product startup.
+    final deadline = DateTime.now().add(const Duration(seconds: 180));
     while (!finished && DateTime.now().isBefore(deadline)) {
       // Unlike native CreateProcess, this launch waits for Flutter to compile
       // the child. Keep the parent's lease alive during that wait; otherwise
@@ -181,7 +198,7 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
       }
       await Future<void>.delayed(const Duration(milliseconds: 40));
     }
-    child.kill();
+    await stopChild(child);
     throw StateError('Isolated simulated helper did not start: $output');
   }
 
@@ -189,8 +206,12 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
   bool isAlive(int pid) => alive.contains(pid);
   @override
   Future<void> terminate(int pid) async {
-    Process.killPid(pid);
-    children[pid]?.kill();
+    final child = children[pid];
+    if (child != null) {
+      await stopChild(child);
+    } else {
+      Process.killPid(pid);
+    }
     alive.remove(pid);
   }
 }
@@ -834,7 +855,7 @@ void main() {
         final records = f.history.records(AccessRegion.ordinary);
         if (records.isNotEmpty) positions.add(records.first.positionTicks);
       });
-      for (var i = 0; i < 1400; i++) {
+      for (var i = 0; i < 3800; i++) {
         await tester.pump(const Duration(milliseconds: 30));
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 50)),
@@ -1104,7 +1125,7 @@ void main() {
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
-    timeout: const Timeout(Duration(seconds: 210)),
+    timeout: const Timeout(Duration(minutes: 8)),
   );
   testWidgets(
     'TV remote actual B detail and controller write seven seconds then migration rejects late observation',

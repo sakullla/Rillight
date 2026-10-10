@@ -97,6 +97,20 @@ emulator evidence, distinct from a physical phone or TV.
 
 ### macOS
 
+The audio sink probes the default Core Audio device's advertised digital
+physical formats. AC-3, E-AC-3 (including JOC), DTS, DTS-HD and TrueHD can use
+IEC 61937 output when the device exposes a matching integer carrier format.
+The output acquires exclusive device ownership, disables mixing where exposed,
+and restores the original format/mixing/ownership on close. It never routes
+compressed data through the PCM AudioQueue or a float-PCM workaround. Unsupported
+carrier formats, device/open/write failures and stalled callbacks fall back to
+decoded PCM. Generic digital-format support does not prove that the downstream
+receiver decodes every codec; physical HDMI/receiver acceptance is separate.
+See the current audio checklist in `macos/TESTING_HANDOFF.md`.
+Application volume must be 100% for bitstream output. Muting, attenuation or
+amplification switches to decoded PCM so software gain is honored; use the
+receiver's volume control to keep passthrough active.
+
 `native/build_macos.sh` builds the pinned universal x86_64+arm64 SDK with
 libass, dav1d and VideoToolbox. The plugin supports Swift Package Manager
 through `macos/rillight_player/Package.swift` and retains its CocoaPods

@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -202,9 +203,77 @@ int64_t seek(void *, void *handle, int64_t offset, int whence) {
 }
 void close(void *, void *handle) { delete static_cast<Bytes *>(handle); }
 void cancel(void *) {}
+
+Bytes make_ac3() {
+  const auto* codec = avcodec_find_encoder(AV_CODEC_ID_AC3);
+  assert(codec);
+  auto* encoder = avcodec_alloc_context3(codec);
+  encoder->sample_fmt = AV_SAMPLE_FMT_FLTP;
+  encoder->sample_rate = 48000;
+  encoder->time_base = {1, 48000};
+  encoder->bit_rate = 448000;
+  av_channel_layout_default(&encoder->ch_layout, 6);
+  assert(avcodec_open2(encoder, codec, nullptr) == 0);
+  auto* frame = av_frame_alloc();
+  frame->format = encoder->sample_fmt;
+  frame->sample_rate = encoder->sample_rate;
+  frame->nb_samples = encoder->frame_size;
+  assert(av_channel_layout_copy(&frame->ch_layout, &encoder->ch_layout) == 0);
+  assert(av_frame_get_buffer(frame, 0) == 0);
+  auto* packet = av_packet_alloc();
+  Bytes bytes;
+  for (int index = 0; index < 160; ++index) {
+    assert(av_frame_make_writable(frame) == 0);
+    for (int channel = 0; channel < 6; ++channel)
+      for (int sample = 0; sample < frame->nb_samples; ++sample)
+        reinterpret_cast<float*>(frame->data[channel])[sample] =
+            0.2f * std::sin((index * frame->nb_samples + sample) * 0.05f);
+    frame->pts = index * frame->nb_samples;
+    assert(avcodec_send_frame(encoder, frame) == 0);
+    assert(avcodec_receive_packet(encoder, packet) == 0);
+    bytes.data.insert(bytes.data.end(), packet->data, packet->data + packet->size);
+    av_packet_unref(packet);
+  }
+  av_packet_free(&packet);
+  av_frame_free(&frame);
+  avcodec_free_context(&encoder);
+  return bytes;
+}
+
+void test_passthrough_volume() {
+  auto bytes = make_ac3();
+  RillightCoreIo io{&bytes, open, read, seek, close, cancel, cancel};
+  auto* core = rillight_core_create(&io);
+  assert(core);
+  RillightCoreAudioSink sink{};
+  sink.struct_size = sizeof(sink);
+  sink.max_pcm_channels = 6;
+  sink.accepted_passthrough = RILLIGHT_CORE_AUDIO_ACCEPT_AC3;
+  assert(rillight_core_configure_audio_sink(core, &sink) == 0);
+  assert(rillight_core_open(core, "gain.ac3", 1) == 0);
+  uint64_t operation = 1;
+  for (double gain : {1.0, 0.0, 0.5, 1.0}) {
+    assert(rillight_core_set_volume(core, gain, ++operation) == 0);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    bool observed = false;
+    while (!observed && std::chrono::steady_clock::now() < deadline) {
+      auto* frame = rillight_core_take_frame(core, RILLIGHT_CORE_AUDIO_S16);
+      if (!frame) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+      const bool encoded = frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH;
+      if (gain != 1.0) assert(!encoded);
+      if (gain == 0.0)
+        for (int i = 0; i < frame->data_size; ++i) assert(frame->data[i] == 0);
+      observed = gain == 1.0 ? encoded : true;
+      rillight_core_release_frame(frame);
+    }
+    assert(observed);
+  }
+  rillight_core_destroy(core);
+}
 }  // namespace
 
 int main() {
+  test_passthrough_volume();
   // A valid file can place its video chunk ahead of the matching audio chunk.
   // The first resumed picture must not allow earlier audio onto the new timeline.
   auto resume_audio = make_media(120, 0, false, true, true, true);

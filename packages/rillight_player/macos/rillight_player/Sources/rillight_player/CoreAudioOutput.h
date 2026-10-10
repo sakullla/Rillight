@@ -9,6 +9,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <memory>
+#include "CoreAudioDigital.h"
 
 namespace rillight_macos {
 
@@ -49,13 +51,18 @@ inline int DefaultOutputChannelTarget() {
 
 // Audio Queue Services is Core Audio's buffered PCM output. The callback only
 // retires a buffer; all core calls and frame copies remain on the surface queue.
-// macOS playback in this round is PCM. Passthrough stays off at the sink.
+// Encoded output owns a separate HAL device; compressed bytes never enter
+// AudioQueue's PCM conversion path.
 class CoreAudioOutput {
  public:
-  explicit CoreAudioOutput(int channels = 2)
+  explicit CoreAudioOutput(int channels = 2, int kind = 0, int rate = 48000)
       : channels_(std::clamp(channels, 1, 8)),
         bytes_per_frame_(channels_ * 2),
         buffer_bytes_(48000 / 50 * bytes_per_frame_) {
+    if (kind != 0) {
+      digital_ = std::make_unique<CoreAudioDigital>(kind, rate);
+      return;
+    }
     AudioStreamBasicDescription format{};
     format.mSampleRate = 48000;
     format.mFormatID = kAudioFormatLinearPCM;
@@ -83,6 +90,12 @@ class CoreAudioOutput {
   CoreAudioOutput& operator=(const CoreAudioOutput&) = delete;
 
   int channels() const { return channels_; }
+  int kind() const { return digital_ ? digital_->kind() : 0; }
+  int sample_rate() const { return digital_ ? digital_->sample_rate() : 48000; }
+  bool rejected() const { return digital_ && digital_->failed(); }
+  size_t WriteCompressed(const uint8_t* data, size_t bytes, int samples) {
+    return digital_ ? digital_->Write(data, bytes, samples) : 0;
+  }
 
   size_t Write(const uint8_t* data, size_t bytes) {
     if (!queue_ || !error_.empty() || paused_) return 0;
@@ -112,6 +125,7 @@ class CoreAudioOutput {
   }
 
   int64_t DelayUs() const {
+    if (digital_) return digital_->DelayUs();
     if (!queue_ || !started_) return 0;
     AudioTimeStamp stamp{};
     if (AudioQueueGetCurrentTime(queue_, nullptr, &stamp, nullptr) != noErr ||
@@ -122,6 +136,7 @@ class CoreAudioOutput {
   }
 
   void Pause(bool pause) {
+    if (digital_) { digital_->Pause(pause); return; }
     if (!queue_ || !started_ || paused_ == pause) return;
     const OSStatus status = pause ? AudioQueuePause(queue_)
                                   : AudioQueueStart(queue_, nullptr);
@@ -130,6 +145,7 @@ class CoreAudioOutput {
   }
 
   void Reset() {
+    if (digital_) { digital_->Reset(); return; }
     if (!queue_) return;
     // A seek may arrive before the first PCM buffer starts the queue. Stop is
     // also valid for an already started queue that is currently paused.
@@ -143,6 +159,7 @@ class CoreAudioOutput {
   }
 
   bool HasQueuedAudio() const {
+    if (digital_) return digital_->DelayUs() != 0;
     if (!started_) return false;
     const int64_t delay = DelayUs();
     return delay < 0 || delay > 1000;
@@ -164,6 +181,7 @@ class CoreAudioOutput {
   }
 
   AudioQueueRef queue_ = nullptr;
+  std::unique_ptr<CoreAudioDigital> digital_;
   int channels_ = 2;
   int bytes_per_frame_ = 4;
   int buffer_bytes_ = 3840;

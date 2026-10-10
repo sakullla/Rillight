@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   s.dependency 'FlutterMacOS'
   s.platform = :osx, '12.0'
   s.vendored_libraries = 'Libraries/*.dylib'
-  s.frameworks = 'Accelerate', 'AudioToolbox', 'CoreGraphics', 'CoreVideo', 'IOSurface', 'Metal', 'QuartzCore'
+  s.frameworks = 'Accelerate', 'AudioToolbox', 'CoreAudio', 'CoreGraphics', 'CoreVideo', 'IOSurface', 'Metal', 'QuartzCore'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',

@@ -493,7 +493,9 @@ void main() {
       await controller.start();
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 17));
       await _eventually(() => controller.activeMediaSourceId != null);
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+      await _eventually(
+        () => snapshots.snapshot?.positionTicks == 17 * kEmbyTicksPerSecond,
+      );
       final snapshot = (await snapshots.read())!;
       expect(runtime.canRecoverSnapshot(snapshot), isTrue);
       final client = controller.client as _Client;
