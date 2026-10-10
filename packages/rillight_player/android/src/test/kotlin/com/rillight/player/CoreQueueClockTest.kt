@@ -7,6 +7,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreQueueClockTest {
+    @Test fun compressedSampleCountsUseTheSourceSampleRate() {
+        for (rate in listOf(44_100, 48_000, 96_000, 192_000)) {
+            val clock = CoreQueueClock()
+            clock.reset(0, rate)
+            clock.submittedAccessUnit(1_000_000, rate / 10, 1.0)
+            assertEquals(1_100_000L to 50_000L, clock.snapshot(rate / 20L))
+        }
+    }
+
     @Test fun deviceTempoKeepsSourceSampleDurationAcrossRateChanges() {
         val clock = CoreQueueClock()
         clock.reset(0)

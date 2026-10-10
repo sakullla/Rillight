@@ -485,6 +485,20 @@
     ]
   },
   {
+    "id": "movie-detail-chapters",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "movie-detail-media",
+    "feature": "detail",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
     "id": "player-buffering",
     "feature": "player",
     "platforms": [

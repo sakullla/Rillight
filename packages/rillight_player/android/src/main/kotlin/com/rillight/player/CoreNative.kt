@@ -12,6 +12,7 @@ internal class CoreAudioFrame(
     val delivery: Int = 0,
     val passthrough: Boolean = false,
     val codec: Int = 0,
+    val sampleRate: Int = 48_000,
 )
 
 internal class CoreVideoOverlay(

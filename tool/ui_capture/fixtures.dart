@@ -255,6 +255,13 @@ FakeEmbyServer captureServer() {
   ];
   movie.overview =
       '一段关于约定、勇气与重新出发的旅程。老人卡尔带着满屋气球飞向远方，却意外遇见了热心的小伙伴。穿过云海与群山，他们发现最珍贵的冒险就在彼此身边。';
+  // 没有服务器剪影的章节：详情页画序号底板，不是一排灰块。
+  movie.chapters = const [
+    FakeChapter(name: '启程', startPositionTicks: 0),
+    FakeChapter(name: '飞越云海', startPositionTicks: 8 * 60 * 10000000),
+    FakeChapter(name: '天堂瀑布', startPositionTicks: 31 * 60 * 10000000),
+    FakeChapter(name: '归途', startPositionTicks: 72 * 60 * 10000000),
+  ];
   server.setSeasons('series-friends', const [
     FakeSeason(
       id: 'season-friends-1',
@@ -417,6 +424,17 @@ class CaptureAdapter extends FakeEmbyAdapter {
           }
           if (value['Id'] == 'movie-up') {
             value['BackdropImageTags'] = ['capture-still-1', 'capture-still-2'];
+            value['PremiereDate'] = '2009-05-29T00:00:00.0000000Z';
+            // 手机「详细信息」表展示片源容器、大小与码率。
+            final sources = value['MediaSources'];
+            if (sources is List) {
+              for (final source in sources) {
+                if (source is! Map) continue;
+                source['Container'] ??= 'mkv';
+                source['Size'] ??= 2684354560;
+                source['Bitrate'] ??= 12400000;
+              }
+            }
             // The carousel draws transparent title art when a logo exists.
             final tags = value['ImageTags'];
             if (tags is Map) tags['Logo'] = 'capture-logo';

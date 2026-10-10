@@ -10,8 +10,11 @@ internal class CoreQueueClock {
     private var speed = 1.0
     private var playbackProgressed = false
     private var counterReset = false
+    private var sampleRate = 48_000
 
-    fun reset(headPosition: Long) {
+    fun reset(headPosition: Long, rate: Int = 48_000) {
+        require(rate > 0)
+        sampleRate = rate
         val head = headPosition and 0xffffffffL
         submitted = 0
         headBase = head
@@ -30,7 +33,7 @@ internal class CoreQueueClock {
         submitted += newBytes / bytesPerFrame
         speed = playbackSpeed
         endPtsUs = framePtsUs +
-            (frameBytesWritten.toDouble() / bytesPerFrame / 48_000 * 1_000_000 * speed).toLong()
+            (frameBytesWritten.toDouble() / bytesPerFrame / sampleRate * 1_000_000 * speed).toLong()
     }
 
     /** One compressed access unit is timed from its sample count, not its byte size. */
@@ -39,10 +42,10 @@ internal class CoreQueueClock {
         submitted += sampleCount
         speed = playbackSpeed
         endPtsUs = framePtsUs +
-            (sampleCount.toDouble() / 48_000 * 1_000_000 * speed).toLong()
+            (sampleCount.toDouble() / sampleRate * 1_000_000 * speed).toLong()
     }
 
-    fun snapshot(headPosition: Long): Pair<Long, Long>? {
+    fun snapshot(headPosition: Long, presentedPosition: Long? = null): Pair<Long, Long>? {
         if (endPtsUs < 0) return null
         val head = headPosition and 0xffffffffL
         if (head < lastHead) {
@@ -50,16 +53,18 @@ internal class CoreQueueClock {
             else {
                 // The old device queue is no longer measurable. The caller must
                 // flush it before using a new timeline or reporting a drain.
-                reset(head)
+                reset(head, sampleRate)
                 counterReset = true
                 return null
             }
         }
         lastHead = head
-        val consumed = (wraps + head - headBase).coerceAtLeast(0)
+        val hardwarePending = if (presentedPosition == null) 0L
+            else (head - presentedPosition) and 0xffffffffL
+        val consumed = (wraps + head - headBase - hardwarePending).coerceAtLeast(0)
         if (consumed > 0) playbackProgressed = true
         val waiting = (submitted - consumed).coerceAtLeast(0)
-        val mediaDelay = (waiting.toDouble() * 1_000_000 / 48_000 * speed).toLong()
+        val mediaDelay = (waiting.toDouble() * 1_000_000 / sampleRate * speed).toLong()
         return endPtsUs to mediaDelay
     }
 

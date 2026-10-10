@@ -1822,4 +1822,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String tvLanValidUntil(String time) {
     return '本次配对有效至 $time';
   }
+
+  @override
+  String get detailEpisodesHeader => '剧集';
+
+  @override
+  String get detailInfo => '详细信息';
+
+  @override
+  String get premiereDateLabel => '首播日期';
+
+  @override
+  String get runtimeRowLabel => '时长';
+
+  @override
+  String get fileContainerLabel => '容器';
+
+  @override
+  String get fileSizeLabel => '文件大小';
+
+  @override
+  String get fileBitrateLabel => '码率';
+
+  @override
+  String seasonWatchedCount(int watched, int total) {
+    return '已看 $watched/$total';
+  }
+
+  @override
+  String get watchedAction => '已看';
 }

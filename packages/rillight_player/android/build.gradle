@@ -59,17 +59,19 @@ dependencies {
 
 // The pinned per-ABI SDK contains FFmpeg/libass runtime libraries. Keep them
 // under build/ so a missing SDK never silently falls back to system codecs.
-def stageCoreJni = tasks.register('stageCoreJniLibs') {
-    doLast {
+def stageCoreJni = tasks.register('stageCoreJniLibs', Sync) {
+    into layout.buildDirectory.dir('generated/coreJni')
+    coreAbis.each { abi ->
+        from("${coreSdkRoot}/${abi}/lib") {
+            include '*.so'
+            into abi
+        }
+    }
+    doFirst {
         if (!coreSdkRoot) throw new GradleException('Set rillightCoreSdkRoot or RILLIGHT_CORE_SDK_ROOT')
         coreAbis.each { abi ->
             def source = file("${coreSdkRoot}/${abi}/lib")
             if (!source.isDirectory()) throw new GradleException("Missing verified core SDK: ${source}")
-            copy {
-                from source
-                include '*.so'
-                into layout.buildDirectory.dir("generated/coreJni/${abi}").get().asFile
-            }
         }
     }
 }

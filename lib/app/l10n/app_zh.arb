@@ -1878,5 +1878,49 @@
         "type": "String"
       }
     }
+  },
+  "detailEpisodesHeader": "剧集",
+  "@detailEpisodesHeader": {
+    "description": "Phone series detail: heading of the season and episode section."
+  },
+  "detailInfo": "详细信息",
+  "@detailInfo": {
+    "description": "Phone detail: heading of dates and file facts."
+  },
+  "premiereDateLabel": "首播日期",
+  "@premiereDateLabel": {
+    "description": "Phone detail info row label for the premiere date."
+  },
+  "runtimeRowLabel": "时长",
+  "@runtimeRowLabel": {
+    "description": "Phone detail info row label for runtime."
+  },
+  "fileContainerLabel": "容器",
+  "@fileContainerLabel": {
+    "description": "Phone detail info row label for the media container format."
+  },
+  "fileSizeLabel": "文件大小",
+  "@fileSizeLabel": {
+    "description": "Phone detail info row label for the media file size."
+  },
+  "fileBitrateLabel": "码率",
+  "@fileBitrateLabel": {
+    "description": "Phone detail info row label for the overall media bitrate."
+  },
+  "seasonWatchedCount": "已看 {watched}/{total}",
+  "@seasonWatchedCount": {
+    "description": "Phone season summary: watched episodes among the season's episodes.",
+    "placeholders": {
+      "watched": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "watchedAction": "已看",
+  "@watchedAction": {
+    "description": "Phone detail labelled action showing the item is watched; tap to mark unwatched."
   }
 }

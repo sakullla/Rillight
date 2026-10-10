@@ -16,6 +16,8 @@ import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
+import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
@@ -259,11 +261,20 @@ extension PageCaptures on CaptureSession {
       );
       final episodeArea = switch (platform) {
         'desktop' => find.byKey(CatalogKeys.episodesRow),
-        'phone' => find.byKey(const Key('phone-season-list')),
+        // 手机的分区标题行（剧集 + 选集）在季标签和本季概况上方。
+        'phone' => find.byKey(CatalogKeys.locateEpisode),
         _ => find.byKey(const Key('tv-detail-episodes')),
       };
       if (episodeArea.evaluate().isNotEmpty) {
-        await tester.ensureVisible(episodeArea.first);
+        if (platform == 'phone') {
+          // 顶栏会盖住贴顶的标题行，留出顶栏高度再对齐。
+          await Scrollable.ensureVisible(
+            tester.element(episodeArea.first),
+            alignment: 0.15,
+          );
+        } else {
+          await tester.ensureVisible(episodeArea.first);
+        }
         await advance(300);
         await save('season-episodes');
       }
@@ -281,6 +292,33 @@ extension PageCaptures on CaptureSession {
       }
       await route(app, '/item/episode-friends-s1e2', 'episode-detail');
       await route(app, '/item/movie-up', 'movie-detail');
+      if (platform == 'phone') {
+        // 首屏以下：章节、演职员、媒体信息与详细信息。
+        final page = find
+            .descendant(
+              of: find.byType(MobileDetailPage),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        for (final (key, name) in const [
+          (Key('phone-chapter-strip'), 'movie-detail-chapters'),
+          (EpisodeMediaStreamsSection.sectionKey, 'movie-detail-media'),
+        ]) {
+          await tester.scrollUntilVisible(
+            find.byKey(key),
+            300,
+            scrollable: page,
+          );
+          await Scrollable.ensureVisible(
+            tester.element(find.byKey(key)),
+            alignment: 0.15,
+          );
+          await advance(300);
+          await save(name);
+        }
+        tester.state<ScrollableState>(page).position.jumpTo(0);
+        await advance(300);
+      }
       if (platform == 'phone') {
         tester.platformDispatcher.textScaleFactorTestValue = 2;
         await advance(350);

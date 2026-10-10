@@ -520,6 +520,7 @@ internal class CorePlayback(
         var timeline = -1L
         var audioClockActive = false
         var sampledRoute = emptySet<Int>()
+        var rejectedFormats = 0
         try {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
             audio?.setVolume(volume)
@@ -545,6 +546,7 @@ internal class CorePlayback(
                 synchronized(outputLock) {
                     val routed = audio?.routedDeviceIds().orEmpty()
                     if (routed.isNotEmpty() && routed != sampledRoute) {
+                        if (sampledRoute.isNotEmpty()) rejectedFormats = 0
                         sampledRoute = routed
                         pendingRoute = try {
                             probeAudioSink(context, routed)
@@ -553,7 +555,7 @@ internal class CorePlayback(
                         }
                     }
                     val requested = if (audio?.tunneled == true)
-                        AudioSinkCapability(2, 0, false) else pendingRoute
+                        AudioSinkCapability(2, 0, false) else pendingRoute?.withoutFormats(rejectedFormats)
                     if (requested != null &&
                         (requested.channels != sinkChannels || requested.accept != sinkAccept ||
                             requested.atmos != sinkAtmos)) {
@@ -592,8 +594,9 @@ internal class CorePlayback(
                                         pendingOffset = 0
                                         audio.flush()
                                     } else if (written == AUDIO_WRITE_REJECT) {
-                                        val bit = if (frame.codec == 2) 2 else 1
-                                        sinkAccept = sinkAccept and bit.inv()
+                                        val bit = coreAudioAcceptBit(frame.codec)
+                                        rejectedFormats = rejectedFormats or if (bit == 0) 31 else bit
+                                        sinkAccept = if (bit == 0) 0 else sinkAccept and bit.inv()
                                         if (sinkAccept and 1 == 0) sinkAtmos = false
                                         val channels = try {
                                             probeAudioSink(context, audio.routedDeviceIds()).channels
@@ -962,7 +965,8 @@ internal class CorePlayback(
             "doviReconstruction" to (snap?.getOrNull(34)?.toInt() ?: 0),
             "dolbyVisionCompatibility" to (snap?.getOrNull(35)?.toInt() ?: -1),
             "outputEpoch" to epoch) +
-            mapOf("outputFrameRate" to (handle?.let(CoreNative::outputFrameRate) ?: 0.0))
+            mapOf("outputFrameRate" to (handle?.let(CoreNative::outputFrameRate) ?: 0.0)) +
+            synchronized(outputLock) { audioOutput?.timingStatus().orEmpty() }
     }
 
     private fun refreshAudioRoute() {

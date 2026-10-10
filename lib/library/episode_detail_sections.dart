@@ -7,6 +7,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -29,18 +30,26 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final phone = PresentationScope.isPhoneOf(context);
     final gutter = PresentationScope.pageGutterOf(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         gutter,
-        AppSpacing.md,
+        phone ? AppSpacing.xl : AppSpacing.md,
         gutter,
         AppSpacing.sm,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: theme.textTheme.titleMedium),
+          Text(
+            title,
+            style: phone
+                ? theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  )
+                : theme.textTheme.titleMedium,
+          ),
           const SizedBox(height: AppSpacing.sm),
           child,
         ],
@@ -588,6 +597,16 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     if (groups.isEmpty) {
       return const SizedBox.shrink();
     }
+    if (PresentationScope.isPhoneOf(context)) {
+      return _Section(
+        title: l10n.detailMediaInfo,
+        child: _PhoneStreamCard(
+          key: sectionKey,
+          groups: groups,
+          source: source,
+        ),
+      );
+    }
     final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
@@ -750,6 +769,208 @@ class _StreamGroup {
   final List<_StreamChoice> choices;
   final int? selectedIndex;
   final ValueChanged<int>? onSelected;
+}
+
+/// 手机媒体信息：一张卡分三行（视频/音轨/字幕），每行图标 + 标题，下面是可横滑的
+/// 单选轨道。没选过时高亮片源的默认轨，说明「不改就放这一条」。
+class _PhoneStreamCard extends StatelessWidget {
+  const _PhoneStreamCard({
+    super.key,
+    required this.groups,
+    required this.source,
+  });
+
+  final List<_StreamGroup> groups;
+  final ItemMediaSource source;
+
+  ItemMediaStream? _stream(int index) =>
+      source.streams.where((s) => s.index == index).firstOrNull;
+
+  IconData _icon(_StreamGroup group) {
+    final first = group.choices.firstOrNull;
+    final stream = first == null ? null : _stream(first.index);
+    if (stream?.isSubtitle == true) return Icons.subtitles_outlined;
+    if (stream?.isAudio == true) return Icons.graphic_eq_rounded;
+    return Icons.videocam_outlined;
+  }
+
+  int? _defaultIndex(_StreamGroup group) {
+    for (final choice in group.choices) {
+      if (_stream(choice.index)?.isDefault == true) return choice.index;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh.withValues(alpha: .55),
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < groups.length; i++) ...[
+            if (i > 0)
+              Divider(
+                height: 1,
+                indent: AppSpacing.md,
+                endIndent: AppSpacing.md,
+                color: scheme.outlineVariant.withValues(alpha: .5),
+              ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _icon(groups[i]),
+                          size: 18,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        Text(
+                          groups[i].title,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (groups[i].choices.length > 1) ...[
+                          const SizedBox(width: AppSpacing.xxs),
+                          Text(
+                            '${groups[i].choices.length}',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: scheme.onSurfaceVariant.withValues(
+                                alpha: .7,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  if (groups[i].onSelected == null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final choice in groups[i].choices)
+                            Text(
+                              choice.line,
+                              key: ValueKey('media-stream-${choice.index}'),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                        ],
+                      ),
+                    )
+                  else
+                    _PhoneTrackRow(
+                      group: groups[i],
+                      highlighted:
+                          groups[i].selectedIndex ?? _defaultIndex(groups[i]),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PhoneTrackRow extends StatelessWidget {
+  const _PhoneTrackRow({required this.group, required this.highlighted});
+
+  final _StreamGroup group;
+  final int? highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final height =
+        40 * (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
+    return SizedBox(
+      height: height,
+      child: DetachedHorizontalScroll(
+        builder: (controller) => ListView.separated(
+          controller: controller,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          itemCount: group.choices.length,
+          separatorBuilder: (context, index) =>
+              const SizedBox(width: AppSpacing.xs),
+          itemBuilder: (context, index) {
+            final choice = group.choices[index];
+            final selected = choice.index == highlighted;
+            return Material(
+              key: ValueKey('media-stream-${choice.index}'),
+              color: selected
+                  ? scheme.primary.withValues(alpha: .16)
+                  : scheme.surface.withValues(alpha: .6),
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: selected
+                      ? scheme.primary
+                      : scheme.outlineVariant.withValues(alpha: .7),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => group.onSelected!(choice.index),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (selected) ...[
+                        Icon(
+                          Icons.check_rounded,
+                          size: 16,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 240),
+                        child: Text(
+                          choice.line,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: selected ? scheme.primary : scheme.onSurface,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 /// 轨道少时按文字宽度排列。轨道一多，长短标题会把换行挤成参差的一行一个，
@@ -925,17 +1146,121 @@ class NextEpisodeCard extends StatelessWidget {
 }
 
 /// 元数据分区:入库日期等次级日期。全部缺失时整段隐藏。
+///
+/// 手机上扩成「详细信息」：首播、时长、入库日期和当前片源的容器、大小、码率，
+/// 左标签右数值的表格。
 class EpisodeMetadataSection extends StatelessWidget {
-  const EpisodeMetadataSection({super.key, required this.item});
+  const EpisodeMetadataSection({super.key, required this.item, this.source});
 
   static const sectionKey = Key('episode-metadata');
 
   final EmbyItem item;
 
+  /// 当前片源；手机信息表据此给出容器、文件大小与码率。
+  final ItemMediaSource? source;
+
+  static String _bytes(int size) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = size.toDouble();
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    final digits = unit >= 3 ? 2 : (unit == 0 ? 0 : 1);
+    return '${value.toStringAsFixed(digits)} ${units[unit]}';
+  }
+
+  static String _bitrate(int bps) {
+    if (bps >= 1000000) {
+      return '${(bps / 1000000).toStringAsFixed(1)} Mbps';
+    }
+    return '${(bps / 1000).round()} kbps';
+  }
+
+  Widget _phone(BuildContext context, AppLocalizations l10n) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final source = this.source;
+    final runtime = item.isSeries ? null : runtimeLabel(l10n, item);
+    final container = source?.container?.trim();
+    final size = source?.size;
+    final bitrate = source?.bitrate;
+    final rows = <(String, String)>[
+      if (item.premiereDate != null)
+        (l10n.premiereDateLabel, formatDateYmd(item.premiereDate!)),
+      if (runtime != null) (l10n.runtimeRowLabel, runtime),
+      if (item.dateCreated != null)
+        (l10n.dateAdded, formatDateYmd(item.dateCreated!)),
+      if (container != null && container.isNotEmpty)
+        (l10n.fileContainerLabel, container.toUpperCase()),
+      if (size != null && size > 0) (l10n.fileSizeLabel, _bytes(size)),
+      if (bitrate != null && bitrate > 0)
+        (l10n.fileBitrateLabel, _bitrate(bitrate)),
+    ];
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final labelStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    final valueStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w600,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return _Section(
+      title: l10n.detailInfo,
+      child: DecoratedBox(
+        key: sectionKey,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh.withValues(alpha: .55),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        child: Column(
+          children: [
+            for (var i = 0; i < rows.length; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  indent: AppSpacing.md,
+                  endIndent: AppSpacing.md,
+                  color: scheme.outlineVariant.withValues(alpha: .5),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: Text(rows[i].$1, style: labelStyle)),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        rows[i].$2,
+                        textAlign: TextAlign.end,
+                        style: valueStyle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    if (PresentationScope.isPhoneOf(context)) {
+      return _phone(context, l10n);
+    }
     final rows = <(String, String)>[
       if (item.dateCreated != null)
         (l10n.dateAdded, formatDateYmd(item.dateCreated!)),

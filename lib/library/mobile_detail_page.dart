@@ -431,8 +431,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     return extra;
   }
 
-  /// 标题下只留辨认这部片子的一行:年份、时长、评分、类型。
-  /// 首播和入库日期在下方的媒体信息里。
+  /// 标题下只留辨认这部片子的一行:年份、时长、评分和画质/声道标签。
+  /// 流派在简介下方单独一行，首播和入库日期在下方的详细信息里。
   List<PhoneMetaEntry> _bannerMeta(AppLocalizations l, EmbyItem item) {
     if (item.isSeries) {
       final seasons = _controller?.seasons ?? const <EmbyItem>[];
@@ -448,8 +448,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             item.communityRating!.toStringAsFixed(1),
             highlight: true,
           ),
-        for (final genre in item.genres)
-          PhoneMetaEntry(genre, onTap: () => _openGenre(item, genre)),
       ];
     }
     final code = item.isEpisode ? seasonEpisodeCode(item) : null;
@@ -463,8 +461,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
           item.communityRating!.toStringAsFixed(1),
           highlight: true,
         ),
-      for (final genre in item.genres)
-        PhoneMetaEntry(genre, onTap: () => _openGenre(item, genre)),
+      for (final badge in phoneTechBadges(_source(item)))
+        PhoneMetaEntry(badge, badge: true),
     ];
   }
 
@@ -527,24 +525,6 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                       overflow: TextOverflow.ellipsis,
                     )
                   : null,
-              actions: [
-                if (item != null && !item.isSeries)
-                  IconButton(
-                    key: CatalogKeys.playedToggle,
-                    tooltip: item.userData.played
-                        ? l.markUnplayed
-                        : l.markPlayed,
-                    onPressed: controller.playedBusy ? null : _togglePlayed,
-                    icon: Icon(
-                      item.userData.played
-                          ? Icons.check_circle
-                          : Icons.check_circle_outline,
-                      color: item.userData.played
-                          ? Theme.of(context).colorScheme.primary
-                          : null,
-                    ),
-                  ),
-              ],
             ),
             body: RefreshIndicator(
               onRefresh: _refresh,
@@ -601,6 +581,18 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                         : _playLabel(l, item, target),
                                     enabled:
                                         target != null && target.isPlayable,
+                                    progress: target?.canResume == true
+                                        ? target!.playbackProgress
+                                        : null,
+                                    progressLabel: target == null
+                                        ? null
+                                        : remainingLabel(l, target),
+                                    played: item.isSeries
+                                        ? null
+                                        : item.userData.played,
+                                    onTogglePlayed: controller.playedBusy
+                                        ? null
+                                        : _togglePlayed,
                                     showRestart:
                                         !item.isSeries &&
                                         target?.canResume == true,
@@ -654,11 +646,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                       episodesLoading: controller.episodesLoading,
                       episodeError: controller.episodeError,
                       hasMore: controller.hasMore,
+                      episodeTotal: controller.episodeTotal,
                       playTargetId: target?.id,
                       focusEpisodeId: widget.initialEpisodeId,
                       scrollCoordinator: _episodeScrollCoordinator,
                       similar: _similar,
                       onPickEpisode: _pickEpisode,
+                      onOpenGenre: DetailSourceScope.maybeOf(context) == null
+                          ? (genre) => _openGenre(item, genre)
+                          : null,
                       onSelectSeason: _changeSeason,
                       onOpenEpisode: _openItem,
                       onRetryEpisodes: controller.seasonId == null
@@ -692,6 +688,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           onSubtitle: (index) =>
                               setState(() => _subtitleStreamIndex = index),
                           onOpenItem: _openItem,
+                          onOpenGenre:
+                              DetailSourceScope.maybeOf(context) == null
+                              ? (genre) => _openGenre(item, genre)
+                              : null,
                           onChapter: item.isPlayable
                               ? (chapter) => _openPlayer(
                                   item.id,
@@ -726,8 +726,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 }
 
-/// 头部主操作:主播放按钮融入沉浸头部(`mobile-detail-play`),可续播的非剧集
-/// 条目附"从头播放"次级按钮(`phone-detail-play-start`),key 与行为保持不变。
+/// 头部主操作：整宽播放钮（`mobile-detail-play`），续播时下方一条进度与剩余时长；
+/// 再下面是带文字的次级操作——从头播放（`phone-detail-play-start`）、上一集/下一集、
+/// 已看切换（[CatalogKeys.playedToggle]）。不再把它们压成一排无字圆钮或塞进顶栏。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
     required this.label,
@@ -735,6 +736,10 @@ class _DetailPlayActions extends StatelessWidget {
     required this.showRestart,
     required this.onPlay,
     required this.onRestart,
+    this.progress,
+    this.progressLabel,
+    this.played,
+    this.onTogglePlayed,
     this.onPrevious,
     this.onNext,
   });
@@ -744,78 +749,240 @@ class _DetailPlayActions extends StatelessWidget {
   final bool showRestart;
   final VoidCallback? onPlay;
   final VoidCallback? onRestart;
+
+  /// 续播进度 0–1；为 null 时不画进度行。
+  final double? progress;
+  final String? progressLabel;
+
+  /// 已看状态；为 null（剧集）时不提供已看切换。
+  final bool? played;
+  final VoidCallback? onTogglePlayed;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final toolStyle = IconButton.styleFrom(
-      minimumSize: const Size(48, 48),
-      fixedSize: const Size(48, 48),
-      padding: EdgeInsets.zero,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      backgroundColor: scheme.surfaceContainerHigh,
-      foregroundColor: scheme.onSurface,
-      shape: const CircleBorder(),
-    );
-    final extras = <Widget>[
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final played = this.played;
+    final progress = this.progress;
+    final tiles = <Widget>[
       if (showRestart)
-        IconButton(
+        _ActionTile(
           key: const Key('phone-detail-play-start'),
+          icon: Icons.replay_rounded,
+          label: l.playFromStart,
           tooltip: l.playFromStart,
-          style: toolStyle,
           onPressed: onRestart,
-          icon: const Icon(Icons.replay_rounded),
         ),
       if (onPrevious != null)
-        IconButton(
+        _ActionTile(
           key: CatalogKeys.previousEpisode,
+          icon: Icons.skip_previous_rounded,
+          label: l.previousEpisode,
           tooltip: l.previousEpisode,
-          style: toolStyle,
           onPressed: onPrevious,
-          icon: const Icon(Icons.skip_previous_rounded),
         ),
       if (onNext != null)
-        IconButton(
+        _ActionTile(
           key: CatalogKeys.nextEpisode,
+          icon: Icons.skip_next_rounded,
+          label: l.nextEpisode,
           tooltip: l.nextEpisode,
-          style: toolStyle,
           onPressed: onNext,
-          icon: const Icon(Icons.skip_next_rounded),
+        ),
+      if (played != null)
+        _ActionTile(
+          key: CatalogKeys.playedToggle,
+          icon: played
+              ? Icons.check_circle_rounded
+              : Icons.check_circle_outline_rounded,
+          label: played ? l.watchedAction : l.markPlayed,
+          tooltip: played ? l.markUnplayed : l.markPlayed,
+          active: played,
+          onPressed: onTogglePlayed,
         ),
     ];
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: Tooltip(
-            message: label,
-            child: FilledButton.icon(
-              key: const Key('mobile-detail-play'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size(48, 48),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
+        Tooltip(
+          message: label,
+          child: FilledButton.icon(
+            key: const Key('mobile-detail-play'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(48, 52),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
               ),
-              onPressed: enabled ? onPlay : null,
-              icon: const Icon(Icons.play_arrow_rounded, size: 24),
-              label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+              textStyle: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
+            onPressed: enabled ? onPlay : null,
+            icon: const Icon(Icons.play_arrow_rounded, size: 26),
+            label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
           ),
         ),
-        if (extras.isNotEmpty) ...[
-          const SizedBox(width: AppSpacing.xs),
-          ...extras,
+        if (progress != null && progress > 0) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    key: const Key('phone-detail-progress'),
+                    value: progress.clamp(0, 1),
+                    minHeight: 4,
+                    color: scheme.primary,
+                    backgroundColor: scheme.onSurface.withValues(alpha: .12),
+                  ),
+                ),
+              ),
+              if (progressLabel != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  progressLabel!,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+        if (tiles.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              for (var i = 0; i < tiles.length; i++) ...[
+                if (i > 0) const SizedBox(width: AppSpacing.xs),
+                tiles[i],
+              ],
+            ],
+          ),
         ],
       ],
     );
   }
+}
+
+/// 图标在上、文字在下的次级操作。触控区不小于 72×56。
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.onPressed,
+    this.active = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final enabled = onPressed != null;
+    final color = !enabled
+        ? scheme.onSurface.withValues(alpha: .38)
+        : active
+        ? scheme.primary
+        : scheme.onSurface;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xs,
+                vertical: 6,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 24, color: color),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: color,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 头部画质/声道/字幕标签：4K、HDR/杜比视界、5.1/7.1、全景声、字幕。
+List<String> phoneTechBadges(ItemMediaSource? source) {
+  if (source == null) return const [];
+  final video = source.streams.where((s) => s.isVideo).firstOrNull;
+  final audios = source.streams.where((s) => s.isAudio).toList();
+  final audio =
+      audios.where((s) => s.isDefault == true).firstOrNull ??
+      audios.firstOrNull;
+  final badges = <String>[];
+  final height = video?.height ?? source.height;
+  if (height != null && height > 0) {
+    badges.add(
+      height >= 2000
+          ? '4K'
+          : height >= 1000
+          ? '1080P'
+          : height >= 700
+          ? '720P'
+          : 'SD',
+    );
+  }
+  final rangeType = (video?.videoRangeType ?? '').toUpperCase();
+  final range = (video?.videoRange ?? '').toUpperCase();
+  if (rangeType.contains('DOVI') || rangeType.contains('DOLBY')) {
+    badges.add('DOLBY VISION');
+  } else if (rangeType.contains('HDR10+') || rangeType.contains('HDR10PLUS')) {
+    badges.add('HDR10+');
+  } else if (range == 'HDR' ||
+      rangeType.contains('HDR') ||
+      rangeType == 'HLG') {
+    badges.add(rangeType == 'HLG' ? 'HLG' : 'HDR');
+  }
+  final audioText = [
+    audio?.profile,
+    audio?.label,
+    audio?.codec,
+  ].whereType<String>().join(' ').toUpperCase();
+  if (audioText.contains('ATMOS')) {
+    badges.add('ATMOS');
+  }
+  final channels = audio?.channels;
+  if (channels != null && channels >= 6) {
+    badges.add(channels >= 8 ? '7.1' : '5.1');
+  }
+  if (source.streams.any((s) => s.isSubtitle)) {
+    badges.add('CC');
+  }
+  return badges;
 }
 
 class _PhoneItemDetail extends StatelessWidget {
@@ -828,6 +995,7 @@ class _PhoneItemDetail extends StatelessWidget {
     required this.onAudio,
     required this.onSubtitle,
     required this.onOpenItem,
+    required this.onOpenGenre,
     required this.onChapter,
     required this.onOpenSimilar,
   });
@@ -840,6 +1008,7 @@ class _PhoneItemDetail extends StatelessWidget {
   final ValueChanged<int> onAudio;
   final ValueChanged<int> onSubtitle;
   final ValueChanged<String> onOpenItem;
+  final ValueChanged<String>? onOpenGenre;
   final ValueChanged<ItemChapter>? onChapter;
   final VoidCallback? onOpenSimilar;
 
@@ -850,7 +1019,7 @@ class _PhoneItemDetail extends StatelessWidget {
       children: [
         if (plainOverview(item.overview) != null)
           EpisodeOverviewSection(overview: item.overview, compact: true),
-        DetailAlbumStrip(item: item),
+        PhoneGenreChips(genres: item.genres, onTap: onOpenGenre),
         if (item.chapters.isNotEmpty)
           _ChapterStrip(
             itemId: item.id,
@@ -858,6 +1027,7 @@ class _PhoneItemDetail extends StatelessWidget {
             onChapter: onChapter,
           ),
         EpisodePeopleSection(people: item.people),
+        DetailAlbumStrip(item: item),
         EpisodeMediaStreamsSection(
           source: mediaSource,
           selectedAudioIndex: selectedAudioIndex,
@@ -865,7 +1035,7 @@ class _PhoneItemDetail extends StatelessWidget {
           onAudio: onAudio,
           onSubtitle: onSubtitle,
         ),
-        EpisodeMetadataSection(item: item),
+        EpisodeMetadataSection(item: item, source: mediaSource),
         DetailExternalLinks(links: item.externalUrls, title: item.name),
         if (similar.isNotEmpty)
           _DetailSimilar(
@@ -956,7 +1126,6 @@ class _ChapterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
     final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
     return SizedBox(
@@ -982,13 +1151,7 @@ class _ChapterCard extends StatelessWidget {
                         tag: chapter.imageTag,
                       )
                     else
-                      ColoredBox(
-                        color: scheme.surfaceContainerHigh,
-                        child: Icon(
-                          Icons.play_arrow_rounded,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
+                      _ChapterFallback(index: index),
                     Positioned(
                       left: AppSpacing.xs,
                       bottom: AppSpacing.xs,
@@ -1032,6 +1195,53 @@ class _ChapterCard extends StatelessWidget {
   }
 }
 
+/// 章节没有服务器剪影时：主色渐变底 + 章节序号，一排章节读起来是一段顺序，
+/// 而不是一排灰块。
+class _ChapterFallback extends StatelessWidget {
+  const _ChapterFallback({required this.index});
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [scheme.primaryContainer, scheme.surfaceContainerHigh],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            right: AppSpacing.xs,
+            top: 2,
+            child: Text(
+              (index + 1).toString().padLeft(2, '0'),
+              style: theme.textTheme.headlineLarge?.copyWith(
+                color: scheme.onPrimaryContainer.withValues(alpha: .28),
+                fontWeight: FontWeight.w800,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Center(
+            child: Icon(
+              Icons.play_circle_outline_rounded,
+              size: 30,
+              color: scheme.onPrimaryContainer.withValues(alpha: .8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChapterThumb extends StatefulWidget {
   const _ChapterThumb({required this.itemId, required this.index, this.tag});
 
@@ -1062,14 +1272,7 @@ class _ChapterThumbState extends State<_ChapterThumb> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final fallback = ColoredBox(
-      color: scheme.surfaceContainerHigh,
-      child: Icon(
-        Icons.bookmark_outline_rounded,
-        color: scheme.onSurfaceVariant,
-      ),
-    );
+    final fallback = _ChapterFallback(index: widget.index);
     return FutureBuilder<Uint8List?>(
       future: _future,
       builder: (context, snapshot) {
@@ -1208,8 +1411,6 @@ class _PhoneDetailPending extends StatelessWidget {
           item!.communityRating!.toStringAsFixed(1),
           highlight: true,
         ),
-      for (final genre in item?.genres ?? const <String>[])
-        PhoneMetaEntry(genre),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

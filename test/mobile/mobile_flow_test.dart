@@ -29,6 +29,7 @@ import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
+import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
@@ -368,10 +369,12 @@ void main() {
       await tester.tap(find.text('老友记'));
       await tester.pumpAndSettle();
       expect(find.byType(MobileDetailPage), findsOneWidget);
-      expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
+      // 只有一季：不画单独一颗季标签，改由本季概况卡写出季名。
+      expect(find.byKey(const Key('phone-season-list')), findsNothing);
+      expect(find.byKey(MobileSeriesPage.seasonSummaryKey), findsOneWidget);
       expect(find.text('The Pilot'), findsWidgets);
-      // 已看集在分集列表有"已看"文字与缩略图角标。
-      expect(find.text('已看'), findsOneWidget);
+      // 已看只由缩略图角标表达一次，不再另写「已看」文字。
+      expect(find.text('已看'), findsNothing);
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
       expectPhoneOnly(tester);
 

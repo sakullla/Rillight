@@ -51,7 +51,7 @@ JNI_CALLBACKS = {
     'CoreIoFactory': {('open', '(Ljava/lang/String;)Lcom/rillight/player/CoreInput;')},
     'CoreInput': {('read', '([BI)I'), ('seek', '(JI)J'),
                   ('close', '()V'), ('interrupt', '()V')},
-    'CoreAudioFrame': {('<init>', '(JJJ[BIIIZI)V')},
+    'CoreAudioFrame': {('<init>', '(JJJ[BIIIZII)V')},
     'CoreVideoOverlay': {('<init>', '(IIIIII[B)V')},
     'CoreNative': {('create', '(Lcom/rillight/player/CoreIoFactory;)J')},
 }

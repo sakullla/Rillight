@@ -567,14 +567,14 @@ Java_com_rillight_player_CoreNative_takeAudio(JNIEnv *env, jobject,
   if (bytes) env->SetByteArrayRegion(bytes, 0, frame->data_size,
                                     reinterpret_cast<const jbyte *>(frame->data));
   jclass cls = env->FindClass("com/rillight/player/CoreAudioFrame");
-  jmethodID ctor = cls ? env->GetMethodID(cls, "<init>", "(JJJ[BIIIZI)V") : nullptr;
+  jmethodID ctor = cls ? env->GetMethodID(cls, "<init>", "(JJJ[BIIIZII)V") : nullptr;
   jobject result = bytes && ctor ? env->NewObject(cls, ctor,
       static_cast<jlong>(frame->session_id),
       static_cast<jlong>(frame->timeline_version),
       static_cast<jlong>(frame->pts_us), bytes,
       frame->channels, frame->sample_count, frame->audio_delivery,
       frame->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH ? JNI_TRUE : JNI_FALSE,
-      frame->audio_codec_id) : nullptr;
+      frame->audio_codec_id, frame->sample_rate) : nullptr;
   if (cls) env->DeleteLocalRef(cls);
   if (bytes) env->DeleteLocalRef(bytes);
   rillight_core_release_frame(frame);

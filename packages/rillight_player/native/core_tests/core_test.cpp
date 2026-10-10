@@ -1122,6 +1122,20 @@ int main() {
   assert(interpolated >= 170000 && interpolated <= 200000);
   std::this_thread::sleep_for(std::chrono::milliseconds(40));
   assert(snapshot(core).position_us == 200000);
+  // Hardware presentation can trail the consumed-frame counter by 100 ms.
+  // Applying that correction must let audio catch up without moving backwards
+  // or retaining the old 100 ms video lead forever.
+  assert(rillight_core_report_audio_played(
+             core, clock_identity.session_id, clock_identity.timeline_version,
+             1000000, 900000) == 0);
+  const auto correcting = snapshot(core).position_us;
+  assert(correcting == 200000);
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  assert(snapshot(core).position_us == correcting);
+  assert(rillight_core_report_audio_played(
+             core, clock_identity.session_id, clock_identity.timeline_version,
+             1000000, 750000) == 0);
+  assert(snapshot(core).position_us >= 250000);
   assert(rillight_core_set_playing(core, 0, 4) == 0);
   const auto paused_position = snapshot(core).position_us;
   std::this_thread::sleep_for(std::chrono::milliseconds(20));

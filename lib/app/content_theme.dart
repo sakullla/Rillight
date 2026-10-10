@@ -261,8 +261,10 @@ Future<ColorScheme> contentSchemeFromBytes(
 /// navigation and semantic errors retain their application theme.
 @visibleForTesting
 ColorScheme composeContentScheme(ColorScheme base, ColorScheme artwork) {
+  // 只给表面染一层画面色。过重时整页像一块彩色色板（粉红、正红），
+  // 文字与海报都被抢了戏。
   Color tone(Color surface) =>
-      Color.lerp(surface, artwork.primaryContainer, .38)!;
+      Color.lerp(surface, artwork.primaryContainer, .24)!;
   return artwork.copyWith(
     surface: tone(artwork.surface),
     surfaceContainerLow: tone(artwork.surfaceContainerLow),

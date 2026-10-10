@@ -5233,13 +5233,19 @@ int rillight_core_report_audio_played(RillightCore *pointer,
   const int64_t current_position = playback_position(core, now);
   const int64_t reported_position =
       std::max<int64_t>(0, queued_end_pts_us - remaining_media_delay_us);
-  if (core->audio_clock_handed_off && reported_position < current_position)
+  if (core->audio_clock_handed_off && queued_end_pts_us <= current_position)
     return -1;
   core->audio_clock_active = true;
   core->audio_clock_limit = queued_end_pts_us;
   core->audio_clock_handed_off = false;
   core->base_position = std::max(current_position, reported_position);
-  core->base_time = now;
+  // A device presentation clock can lag the initial wall clock or report a
+  // newly measured hardware latency. Hold video until audio catches up rather
+  // than preserving that lead forever with max(current, reported) on every tick.
+  // The public position stays monotonic while the clock corrects its phase.
+  const auto catchup_us = static_cast<int64_t>(
+      std::max<int64_t>(0, current_position - reported_position) / core->speed);
+  core->base_time = now + std::chrono::microseconds(catchup_us);
   return 0;
 }
 

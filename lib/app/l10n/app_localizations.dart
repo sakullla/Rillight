@@ -3555,6 +3555,60 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'本次配对有效至 {time}'**
   String tvLanValidUntil(String time);
+
+  /// Phone series detail: heading of the season and episode section.
+  ///
+  /// In zh, this message translates to:
+  /// **'剧集'**
+  String get detailEpisodesHeader;
+
+  /// Phone detail: heading of dates and file facts.
+  ///
+  /// In zh, this message translates to:
+  /// **'详细信息'**
+  String get detailInfo;
+
+  /// Phone detail info row label for the premiere date.
+  ///
+  /// In zh, this message translates to:
+  /// **'首播日期'**
+  String get premiereDateLabel;
+
+  /// Phone detail info row label for runtime.
+  ///
+  /// In zh, this message translates to:
+  /// **'时长'**
+  String get runtimeRowLabel;
+
+  /// Phone detail info row label for the media container format.
+  ///
+  /// In zh, this message translates to:
+  /// **'容器'**
+  String get fileContainerLabel;
+
+  /// Phone detail info row label for the media file size.
+  ///
+  /// In zh, this message translates to:
+  /// **'文件大小'**
+  String get fileSizeLabel;
+
+  /// Phone detail info row label for the overall media bitrate.
+  ///
+  /// In zh, this message translates to:
+  /// **'码率'**
+  String get fileBitrateLabel;
+
+  /// Phone season summary: watched episodes among the season's episodes.
+  ///
+  /// In zh, this message translates to:
+  /// **'已看 {watched}/{total}'**
+  String seasonWatchedCount(int watched, int total);
+
+  /// Phone detail labelled action showing the item is watched; tap to mark unwatched.
+  ///
+  /// In zh, this message translates to:
+  /// **'已看'**
+  String get watchedAction;
 }
 
 class _AppLocalizationsDelegate

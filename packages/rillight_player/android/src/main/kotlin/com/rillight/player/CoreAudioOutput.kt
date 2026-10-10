@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRouting
 import android.media.AudioTrack
+import android.media.AudioTimestamp
 import android.media.PlaybackParams
 import android.os.Build
 import java.nio.ByteBuffer
@@ -25,6 +26,11 @@ internal data class RouteDevice(
     val encodings: Set<Int>,
 )
 
+internal fun AudioSinkCapability.withoutFormats(rejected: Int): AudioSinkCapability {
+    val remaining = accept and rejected.inv()
+    return copy(accept = remaining, atmos = atmos && remaining and 1 != 0)
+}
+
 /**
  * Only devices on the current media route count. An unknown route stays stereo
  * so a disconnected HDMI receiver cannot keep a downmix from happening.
@@ -35,12 +41,14 @@ internal fun routeCapability(
     routedIds: Set<Int>,
     eac3Encoding: Int,
     trueHdEncoding: Int,
+    plainEac3Encoding: Int = -1,
+    otherEncodings: Map<Int, Int> = emptyMap(),
     direct: (Int) -> Boolean,
 ): AudioSinkCapability {
     val selected = outputs.filter { it.id in routedIds }
     if (routedIds.isEmpty() || selected.isEmpty()) return AudioSinkCapability(2, 0, false)
     var channels = 8
-    var accept = 3
+    var accept = 3 or otherEncodings.keys.fold(0) { mask, bit -> mask or bit }
     var atmos = true
     for (device in selected) {
         val target = when {
@@ -51,12 +59,17 @@ internal fun routeCapability(
         channels = minOf(channels, target)
         var deviceAccept = 0
         var deviceAtmos = false
+        if (plainEac3Encoding in device.encodings && direct(plainEac3Encoding))
+            deviceAccept = deviceAccept or 1
         if (eac3Encoding in device.encodings && direct(eac3Encoding)) {
             deviceAccept = deviceAccept or 1
             deviceAtmos = true
         }
         if (trueHdEncoding in device.encodings && direct(trueHdEncoding))
             deviceAccept = deviceAccept or 2
+        for ((bit, encoding) in otherEncodings) {
+            if (encoding in device.encodings && direct(encoding)) deviceAccept = deviceAccept or bit
+        }
         accept = accept and deviceAccept
         atmos = atmos && deviceAtmos
     }
@@ -82,7 +95,36 @@ internal fun probeAudioSink(context: Context, routedDeviceIds: Set<Int> = emptyS
     }
     val eac3 = if (Build.VERSION.SDK_INT >= 28) AudioFormat.ENCODING_E_AC3_JOC else -1
     val trueHd = if (Build.VERSION.SDK_INT >= 25) AudioFormat.ENCODING_DOLBY_TRUEHD else -1
-    return routeCapability(outputs, routed, eac3, trueHd, ::directPlayback)
+    // Retain DTS/DTS-HD's existing decoded PCM path. On the tested HDMI route,
+    // direct support and successful writes still produced no physical sound.
+    // Do not enable that experimental route as part of the E-AC-3 fix.
+    return routeCapability(outputs, routed, eac3, trueHd,
+        AudioFormat.ENCODING_E_AC3, mapOf(4 to AudioFormat.ENCODING_AC3), ::directPlayback)
+}
+
+// Keep native RillightCorePassthroughKind values explicit. Compressed bytes
+// must never silently use PCM when a new/unsupported kind crosses the ABI.
+internal fun coreAudioEncoding(passthrough: Boolean, codec: Int, api: Int): Int? {
+    if (!passthrough) return AudioFormat.ENCODING_PCM_16BIT
+    if (api < 29) return null
+    return when (codec) {
+        1 -> AudioFormat.ENCODING_E_AC3_JOC
+        2 -> AudioFormat.ENCODING_DOLBY_TRUEHD
+        3 -> AudioFormat.ENCODING_E_AC3
+        4 -> AudioFormat.ENCODING_AC3
+        5 -> AudioFormat.ENCODING_DTS
+        6 -> AudioFormat.ENCODING_DTS_HD
+        else -> null
+    }
+}
+
+internal fun coreAudioAcceptBit(codec: Int): Int = when (codec) {
+    1, 3 -> 1
+    2 -> 2
+    4 -> 4
+    5 -> 8
+    6 -> 16
+    else -> 0
 }
 
 private fun directPlayback(encoding: Int): Boolean {
@@ -110,11 +152,18 @@ private fun directPlayback(encoding: Int): Boolean {
 internal class CoreAudioOutput(val tunneled: Boolean = false) {
     private var track: AudioTrack? = null
     private val clock = CoreQueueClock()
+    private val presentationClock = CorePresentationClock()
+    private val timestamp = AudioTimestamp()
+    private var timestampAvailable = false
+    private var lastTimestampPollNs = 0L
+    private var hardwareClockActive = false
+    private var hardwareDelayUs = 0L
     private var endOfInput = false
     private var playbackSpeed = 1f
     private var volume = 1f
     private var wantPlay = false
     private var channels = 0
+    private var sampleRate = 48_000
     private var encoding = AudioFormat.ENCODING_PCM_16BIT
     private var passthrough = false
     private var bytesPerFrame = 4
@@ -131,6 +180,13 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
 
     fun setRouteListener(listener: (() -> Unit)?) { onRoute = listener }
 
+    fun timingStatus(): Map<String, Any> = mapOf(
+        "sinkSampleRate" to sampleRate,
+        "sinkEncoding" to encoding,
+        "sinkHardwareClock" to hardwareClockActive,
+        "sinkHardwareDelayUs" to hardwareDelayUs,
+        "sinkUnderruns" to (track?.underrunCount ?: 0))
+
     fun routedDeviceIds(): Set<Int> {
         if (Build.VERSION.SDK_INT < 24) return emptySet()
         val id = track?.routedDevice?.id ?: return emptySet()
@@ -141,11 +197,14 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
         val track = track ?: return false
         return track.state == AudioTrack.STATE_INITIALIZED &&
             channels == pcmChannels(frame) &&
+            sampleRate == frame.sampleRate &&
             encoding == encodingOf(frame) &&
             passthrough == frame.passthrough
     }
 
     fun ensure(frame: CoreAudioFrame): Boolean {
+        if (encodingOf(frame) == null || frame.sampleRate <= 0 ||
+            (frame.passthrough && frame.sampleCount <= 0)) return false
         if (matches(frame)) return true
         // Replacing the AudioTrack would invalidate the tunnel's session ID.
         if (tunneled) return false
@@ -162,7 +221,10 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
     fun play() {
         wantPlay = true
         val track = track ?: return
-        if (track.playState != AudioTrack.PLAYSTATE_PLAYING) track.play()
+        if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+            resetPresentationClock()
+            track.play()
+        }
     }
 
     fun pause() {
@@ -188,6 +250,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
             return
         }
         if (!changed) return
+        resetPresentationClock()
         val active = track ?: return
         val wasPlaying = active.playState == AudioTrack.PLAYSTATE_PLAYING
         try {
@@ -233,12 +296,12 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
             val buffer = requireNotNull(tunnelBuffer)
             buffer.position(offset)
             track.write(buffer, buffer.remaining(), AudioTrack.WRITE_NON_BLOCKING,
-                (frame.ptsUs.coerceAtLeast(0) + offset / 4L * 1_000_000L / 48_000L) * 1000L)
+                (frame.ptsUs.coerceAtLeast(0) + offset / bytesPerFrame.toLong() * 1_000_000L / sampleRate) * 1000L)
         } else track.write(frame.bytes, offset, frame.bytes.size - offset,
             AudioTrack.WRITE_NON_BLOCKING)
         if (written < 0) throw IllegalStateException("AudioTrack write failed: $written")
         if (written > 0 && frame.passthrough && offset + written >= frame.bytes.size) {
-            val samples = frame.sampleCount.coerceAtLeast(1)
+            val samples = frame.sampleCount
             clock.submittedAccessUnit(frame.ptsUs, samples, playbackSpeed)
         } else if (written > 0 && !frame.passthrough) {
             clock.submitted(frame.ptsUs, offset + written, written, playbackSpeed, bytesPerFrame)
@@ -291,19 +354,20 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
 
     private fun open(frame: CoreAudioFrame) {
         val nextChannels = pcmChannels(frame)
-        val nextEncoding = encodingOf(frame)
+        val nextEncoding = requireNotNull(encodingOf(frame))
         val nextPassthrough = frame.passthrough
+        val nextRate = frame.sampleRate
         val mask = channelMask(nextChannels)
         val format = AudioFormat.Builder()
             .setEncoding(nextEncoding)
-            .setSampleRate(48_000)
+            .setSampleRate(nextRate)
             .setChannelMask(mask)
             .build()
-        val minimum = AudioTrack.getMinBufferSize(48_000, mask, nextEncoding)
+        val minimum = AudioTrack.getMinBufferSize(nextRate, mask, nextEncoding)
         if (minimum <= 0) throw IllegalStateException("AudioTrack format is unavailable")
         val frameBytes = if (nextPassthrough) 1 else nextChannels * 2
         val capacity = if (nextPassthrough) maxOf(minimum, 24_576 * 2)
-        else maxOf(minimum * 2, 48_000 / 2 * frameBytes)
+        else maxOf(minimum * 2, nextRate / 2 * frameBytes)
         val created = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -323,6 +387,7 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
         track?.release()
         track = created
         channels = nextChannels
+        sampleRate = nextRate
         encoding = nextEncoding
         passthrough = nextPassthrough
         bytesPerFrame = frameBytes
@@ -355,14 +420,8 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
         }
     }
 
-    private fun encodingOf(frame: CoreAudioFrame): Int {
-        if (!frame.passthrough || Build.VERSION.SDK_INT < 29) return AudioFormat.ENCODING_PCM_16BIT
-        return when (frame.codec) {
-            1 -> AudioFormat.ENCODING_E_AC3_JOC
-            2 -> AudioFormat.ENCODING_DOLBY_TRUEHD
-            else -> AudioFormat.ENCODING_PCM_16BIT
-        }
-    }
+    private fun encodingOf(frame: CoreAudioFrame): Int? =
+        coreAudioEncoding(frame.passthrough, frame.codec, Build.VERSION.SDK_INT)
 
     private fun channelMask(count: Int): Int = when {
         count >= 8 -> AudioFormat.CHANNEL_OUT_7POINT1_SURROUND
@@ -372,12 +431,37 @@ internal class CoreAudioOutput(val tunneled: Boolean = false) {
 
     private fun resetClock() {
         val track = track ?: return
-        clock.reset(track.playbackHeadPosition.toLong())
+        clock.reset(track.playbackHeadPosition.toLong(), sampleRate)
+        resetPresentationClock()
+    }
+
+    private fun resetPresentationClock() {
+        presentationClock.reset(System.nanoTime())
+        timestampAvailable = false
+        lastTimestampPollNs = 0
+        hardwareClockActive = false
+        hardwareDelayUs = 0
     }
 
     private fun checkedSnapshot(): Pair<Long, Long>? {
         val track = track ?: return null
-        val snapshot = clock.snapshot(track.playbackHeadPosition.toLong())
+        var nowNs = System.nanoTime()
+        if (track.playState == AudioTrack.PLAYSTATE_PLAYING &&
+            nowNs - lastTimestampPollNs >= 100_000_000L) {
+            timestampAvailable = track.getTimestamp(timestamp)
+            lastTimestampPollNs = nowNs
+        }
+        val head = track.playbackHeadPosition.toLong()
+        nowNs = System.nanoTime()
+        val presented = if (track.playState == AudioTrack.PLAYSTATE_PLAYING)
+            presentationClock.position(head,
+                timestamp.framePosition.takeIf { timestampAvailable },
+                timestamp.nanoTime.takeIf { timestampAvailable }, nowNs, playbackSpeed.toDouble(), sampleRate)
+            else null
+        hardwareClockActive = presented != null
+        hardwareDelayUs = if (presented == null) 0 else
+            (((head - presented) and 0xffffffffL) * 1_000_000L / sampleRate)
+        val snapshot = clock.snapshot(head, presented)
         if (!clock.takeCounterReset()) return snapshot
         val wasPlaying = track.playState == AudioTrack.PLAYSTATE_PLAYING
         flush()

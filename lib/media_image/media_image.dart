@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'artwork_crop.dart';
+import 'blurred_artwork.dart';
 
 import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
@@ -177,6 +178,7 @@ class MediaImage extends StatefulWidget {
     this.smartCrop = false,
     this.fit = BoxFit.contain,
     this.contributesToTheme = false,
+    this.blurFill = false,
   });
 
   final EmbyItem item;
@@ -196,6 +198,10 @@ class MediaImage extends StatefulWidget {
   /// Cards crop to a consistent frame; large artwork can retain its full image.
   final BoxFit fit;
   final bool contributesToTheme;
+
+  /// 画面形状与外框不符时（竖版海报放进横幅），用同一张图的模糊放大
+  /// 铺满留白，原图仍按 [fit] 完整显示，不再露出两侧色块。
+  final bool blurFill;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
   @visibleForTesting
@@ -924,7 +930,7 @@ class _MediaImageState extends State<MediaImage> {
   ) {
     // 按请求宽度解码,避免服务端返回原图时在片库滚动里整屏解码。
     // ImageCache 用字符串 key,避免每帧对整段 JPEG 做 ==/hashCode。
-    return Image(
+    final image = Image(
       image: _MediaMemoryImage(
         cacheKey: loaded.cacheKey,
         bytes: loaded.bytes,
@@ -952,6 +958,23 @@ class _MediaImageState extends State<MediaImage> {
       errorBuilder: (context, error, stackTrace) {
         return PosterPlaceholder(width: width, height: height);
       },
+    );
+    if (!widget.blurFill) return image;
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            RepaintBoundary(
+              child: BlurredArtwork(bytes: loaded.bytes, sigma: 28),
+            ),
+            ColoredBox(color: Colors.black.withValues(alpha: .18)),
+            image,
+          ],
+        ),
+      ),
     );
   }
 
