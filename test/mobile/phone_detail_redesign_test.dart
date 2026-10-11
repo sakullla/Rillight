@@ -7,6 +7,7 @@ import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
+import 'package:rillight/media_image/media_image.dart';
 
 const _minute = 60 * 10000000;
 
@@ -151,25 +152,22 @@ void main() {
       );
       await tester.pump();
 
-      // 一季时不画单独一颗季标签，季名写在概况卡里。
+      // 一季时不画单独一颗季标签，也不再有季海报概况卡；
+      // 集数与已看进度只是分区标题下的一行小字。
       expect(find.byKey(const Key('phone-season-list')), findsNothing);
       expect(find.byType(PhoneSeasonTab), findsNothing);
       final summary = find.byKey(MobileSeriesPage.seasonSummaryKey);
       expect(summary, findsOneWidget);
       expect(
-        find.descendant(of: summary, matching: find.text('第 1 季')),
+        find.descendant(of: summary, matching: find.text('2 集 · 已看 1/2')),
         findsOneWidget,
       );
-      expect(find.text('2026 · 2 集'), findsOneWidget);
-      expect(find.text('已看 1/2'), findsOneWidget);
       expect(
-        find.descendant(
-          of: summary,
-          matching: find.byType(LinearProgressIndicator),
-        ),
+        find.descendant(of: summary, matching: find.byType(MediaImage)),
         findsNothing,
       );
-      expect(find.text('圣女隐瞒身份的第一年。'), findsOneWidget);
+      expect(find.text('第 1 季'), findsNothing);
+      expect(find.text('圣女隐瞒身份的第一年。'), findsNothing);
       // 已看只由剧照上的勾表达。
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
       expect(find.text('已看'), findsNothing);
@@ -214,7 +212,7 @@ void main() {
         isTrue,
       );
       expect(find.text('第 1 季'), findsOneWidget);
-      expect(find.text('2024 · 40 集'), findsOneWidget);
+      expect(find.text('40 集'), findsOneWidget);
       // 分页没载完时不猜已看比例。
       expect(find.textContaining('已看 '), findsNothing);
       expect(tester.takeException(), isNull);

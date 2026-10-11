@@ -61,7 +61,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(EpisodeRow).evaluate().length, lessThan(16));
+    // 网格一行四五张卡，视口附近只构建几行。
+    expect(find.byType(EpisodeRow).evaluate().length, lessThan(40));
     expect(find.byKey(const ValueKey('episode-row-episode-199')), findsNothing);
 
     selected.value = 180;
@@ -72,7 +73,7 @@ void main() {
       tester.getRect(target).overlaps(const Rect.fromLTWH(0, 0, 1440, 900)),
       isTrue,
     );
-    expect(find.byType(EpisodeRow).evaluate().length, lessThan(16));
+    expect(find.byType(EpisodeRow).evaluate().length, lessThan(40));
 
     // Revisiting the selected row through normal scrolling must not trigger
     // another automatic seek merely because its element was recreated.

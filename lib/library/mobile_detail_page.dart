@@ -466,10 +466,18 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     ];
   }
 
-  String _playLabel(AppLocalizations l, EmbyItem item, EmbyItem? target) {
+  String _playLabel(
+    AppLocalizations l,
+    EmbyItem item,
+    EmbyItem? target, {
+    bool full = false,
+  }) {
     if (target == null || !target.isPlayable) return l.noPlayableStream;
     if (item.isSeries) {
-      final code = episodeLabel(target);
+      // 按钮只写集号：集名放进按钮在窄屏会折成两行；悬停/读屏说明带集名。
+      final code = full
+          ? episodeLabel(target)
+          : seasonEpisodeCode(target) ?? episodeLabel(target);
       return target.canResume ? l.resumePlayEpisode(code) : l.playEpisode(code);
     }
     return target.canResume ? l.resumePlay : l.play;
@@ -560,6 +568,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           child: PhoneItemBanner(
                             item: imageSource,
                             title: (item ?? imageSource).name,
+                            titleWidget: pending
+                                ? _PhoneDetailPending.title(context, handoff)
+                                : null,
+                            pendingMeta: pending
+                                ? _PhoneDetailPending.metaPlaceholder(
+                                    context,
+                                    handoff,
+                                  )
+                                : null,
                             titleHint: item != null && item.isEpisode
                                 ? item.seriesName
                                 : null,
@@ -571,14 +588,27 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                 ? () => _openSeries(item)
                                 : null,
                             meta: item == null
-                                ? const []
+                                ? _PhoneDetailPending.metaEntries(
+                                    context,
+                                    handoff,
+                                  )
                                 : _bannerMeta(l, item),
                             actions: item == null
-                                ? null
+                                ? (pending
+                                      ? _PhoneDetailPending.action(context)
+                                      : null)
                                 : _DetailPlayActions(
                                     label: target == null
                                         ? l.noPlayableStream
                                         : _playLabel(l, item, target),
+                                    tooltip: target == null
+                                        ? null
+                                        : _playLabel(
+                                            l,
+                                            item,
+                                            target,
+                                            full: true,
+                                          ),
                                     enabled:
                                         target != null && target.isPlayable,
                                     progress: target?.canResume == true
@@ -617,10 +647,14 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                   ),
                             preferBackdrop: preferBackdrop,
                             maxWidth: imageWidth,
-                            showCaption: !pending,
+                            posterItem: handoff?.item ?? item,
                           ),
                         ),
-                      if (pending) _PhoneDetailPending(handoff: handoff),
+                      if (pending)
+                        _PhoneDetailPending(
+                          handoff: handoff,
+                          withCaption: imageSource == null,
+                        ),
                       if (item != null && controller.error != null)
                         MobileFailureState(
                           message: embyFailureMessage(l, controller.error!),
@@ -726,12 +760,14 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 }
 
-/// 头部主操作：整宽播放钮（`mobile-detail-play`），续播时下方只留一条进度。
-/// 再下面是带文字的次级操作——从头播放（`phone-detail-play-start`）、上一集/下一集、
-/// 已看切换（[CatalogKeys.playedToggle]）。状态本身由图标表示，文字写的是动作。
+/// 头部主操作：播放钮（`mobile-detail-play`）占满一行，已看切换
+/// （[CatalogKeys.playedToggle]）作为同高的方形钮紧挨在右侧，状态由实心/空心勾表示。
+/// 续播时下面是一条进度和「剩余 N 分钟」。从头播放（`phone-detail-play-start`）、
+/// 上一集/下一集是等宽的次级按钮，只有可用时才出现。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
     required this.label,
+    this.tooltip,
     required this.enabled,
     required this.showRestart,
     required this.onPlay,
@@ -744,7 +780,12 @@ class _DetailPlayActions extends StatelessWidget {
     this.onNext,
   });
 
+  static const double _height = 52;
+
   final String label;
+
+  /// 悬停/读屏的完整说明（含集名）；缺省同 [label]。
+  final String? tooltip;
   final bool enabled;
   final bool showRestart;
   final VoidCallback? onPlay;
@@ -767,89 +808,142 @@ class _DetailPlayActions extends StatelessWidget {
     final scheme = theme.colorScheme;
     final played = this.played;
     final progress = this.progress;
-    final tiles = <Widget>[
+    final progressLabel = this.progressLabel;
+    final secondary = <Widget>[
       if (showRestart)
-        _ActionTile(
+        _SecondaryAction(
           key: const Key('phone-detail-play-start'),
           icon: Icons.replay_rounded,
           label: l.playFromStart,
-          tooltip: l.playFromStart,
           onPressed: onRestart,
         ),
       if (onPrevious != null)
-        _ActionTile(
+        _SecondaryAction(
           key: CatalogKeys.previousEpisode,
           icon: Icons.skip_previous_rounded,
           label: l.previousEpisode,
-          tooltip: l.previousEpisode,
           onPressed: onPrevious,
         ),
       if (onNext != null)
-        _ActionTile(
+        _SecondaryAction(
           key: CatalogKeys.nextEpisode,
           icon: Icons.skip_next_rounded,
           label: l.nextEpisode,
-          tooltip: l.nextEpisode,
           onPressed: onNext,
         ),
-      if (played != null)
-        _ActionTile(
-          key: CatalogKeys.playedToggle,
-          icon: played
-              ? Icons.check_circle_rounded
-              : Icons.check_circle_outline_rounded,
-          label: played ? l.markUnplayed : l.markPlayed,
-          tooltip: played ? l.markUnplayed : l.markPlayed,
-          active: played,
-          onPressed: onTogglePlayed,
-        ),
     ];
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Tooltip(
-          message: label,
-          child: FilledButton.icon(
-            key: const Key('mobile-detail-play'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(48, 52),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              textStyle: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
+        Row(
+          children: [
+            Expanded(
+              child: Tooltip(
+                message: tooltip ?? label,
+                child: FilledButton.icon(
+                  key: const Key('mobile-detail-play'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(48, _height),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: shape,
+                    textStyle: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  onPressed: enabled ? onPlay : null,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 26),
+                  label: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
             ),
-            onPressed: enabled ? onPlay : null,
-            icon: const Icon(Icons.play_arrow_rounded, size: 26),
-            label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
-          ),
+            if (played != null) ...[
+              const SizedBox(width: AppSpacing.xs),
+              Tooltip(
+                message: played ? l.markUnplayed : l.markPlayed,
+                child: Semantics(
+                  toggled: played,
+                  child: Material(
+                    key: CatalogKeys.playedToggle,
+                    color: played
+                        ? scheme.primaryContainer
+                        : scheme.surfaceContainerHigh,
+                    shape: shape,
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: onTogglePlayed,
+                      child: SizedBox.square(
+                        dimension: _height,
+                        child: Icon(
+                          played
+                              ? Icons.check_circle_rounded
+                              : Icons.check_circle_outline_rounded,
+                          size: 26,
+                          color: onTogglePlayed == null
+                              ? scheme.onSurface.withValues(alpha: .38)
+                              : played
+                              ? scheme.onPrimaryContainer
+                              : scheme.onSurface,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
         if (progress != null && progress > 0) ...[
-          const SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.sm),
           Semantics(
             container: true,
             label: progressLabel,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                key: const Key('phone-detail-progress'),
-                value: progress.clamp(0, 1),
-                minHeight: 4,
-                color: scheme.primary,
-                backgroundColor: scheme.onSurface.withValues(alpha: .12),
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      key: const Key('phone-detail-progress'),
+                      value: progress.clamp(0, 1),
+                      minHeight: 4,
+                      color: scheme.primary,
+                      backgroundColor: scheme.onSurface.withValues(alpha: .12),
+                    ),
+                  ),
+                ),
+                if (progressLabel != null && progressLabel.isNotEmpty) ...[
+                  const SizedBox(width: AppSpacing.sm),
+                  ExcludeSemantics(
+                    child: Text(
+                      progressLabel,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
-        if (tiles.isNotEmpty) ...[
+        if (secondary.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
-              for (var i = 0; i < tiles.length; i++) ...[
+              for (var i = 0; i < secondary.length; i++) ...[
                 if (i > 0) const SizedBox(width: AppSpacing.xs),
-                tiles[i],
+                Expanded(child: secondary[i]),
               ],
             ],
           ),
@@ -859,120 +953,49 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 图标在上、文字在下的次级操作。触控区不小于 72×56。
-class _ActionTile extends StatelessWidget {
-  const _ActionTile({
+/// 次级操作：浅底圆角钮，图标与文字同行，等宽排开，触控高度 48。
+class _SecondaryAction extends StatelessWidget {
+  const _SecondaryAction({
     super.key,
     required this.icon,
     required this.label,
-    required this.tooltip,
     required this.onPressed,
-    this.active = false,
   });
 
   final IconData icon;
   final String label;
-  final String tooltip;
   final VoidCallback? onPressed;
-  final bool active;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final enabled = onPressed != null;
-    final color = !enabled
-        ? scheme.onSurface.withValues(alpha: .38)
-        : active
-        ? scheme.primary
-        : scheme.onSurface;
     return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        enabled: enabled,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xs,
-                vertical: 6,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 24, color: color),
-                  const SizedBox(height: 4),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: color,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      message: label,
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          backgroundColor: scheme.surfaceContainerHigh,
+          foregroundColor: scheme.onSurface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          textStyle: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
           ),
         ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+        label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
 }
 
-/// 头部画质/声道/字幕标签：4K、HDR/杜比视界、5.1/7.1、全景声、字幕。
-List<String> phoneTechBadges(ItemMediaSource? source) {
-  if (source == null) return const [];
-  final video = source.streams.where((s) => s.isVideo).firstOrNull;
-  final audios = source.streams.where((s) => s.isAudio).toList();
-  final audio =
-      audios.where((s) => s.isDefault == true).firstOrNull ??
-      audios.firstOrNull;
-  final badges = <String>[];
-  final height = video?.height ?? source.height;
-  if (height != null && height > 0) {
-    badges.add(
-      height >= 2000
-          ? '4K'
-          : height >= 1000
-          ? '1080P'
-          : height >= 700
-          ? '720P'
-          : 'SD',
-    );
-  }
-  final rangeType = (video?.videoRangeType ?? '').toUpperCase();
-  final range = (video?.videoRange ?? '').toUpperCase();
-  if (rangeType.contains('DOVI') || rangeType.contains('DOLBY')) {
-    badges.add('DOLBY VISION');
-  } else if (rangeType.contains('HDR10+') || rangeType.contains('HDR10PLUS')) {
-    badges.add('HDR10+');
-  } else if (range == 'HDR' ||
-      rangeType.contains('HDR') ||
-      rangeType == 'HLG') {
-    badges.add(rangeType == 'HLG' ? 'HLG' : 'HDR');
-  }
-  final audioText = [
-    audio?.profile,
-    audio?.label,
-    audio?.codec,
-  ].whereType<String>().join(' ').toUpperCase();
-  if (audioText.contains('ATMOS')) {
-    badges.add('ATMOS');
-  }
-  final channels = audio?.channels;
-  if (channels != null && channels >= 6) {
-    badges.add(channels >= 8 ? '7.1' : '5.1');
-  }
-  if (source.streams.any((s) => s.isSubtitle)) {
-    badges.add('CC');
-  }
-  return badges;
-}
+/// 头部画质/声道/字幕标签，与桌面和电视共用 [mediaTechBadges]。
+List<String> phoneTechBadges(ItemMediaSource? source) =>
+    mediaTechBadges(source);
 
 class _PhoneItemDetail extends StatelessWidget {
   const _PhoneItemDetail({
@@ -1140,7 +1163,7 @@ class _ChapterCard extends StatelessWidget {
                         tag: chapter.imageTag,
                       )
                     else
-                      _ChapterFallback(index: index),
+                      ChapterFallbackArt(index: index),
                     Positioned(
                       left: AppSpacing.xs,
                       bottom: AppSpacing.xs,
@@ -1184,53 +1207,6 @@ class _ChapterCard extends StatelessWidget {
   }
 }
 
-/// 章节没有服务器剪影时：主色渐变底 + 章节序号，一排章节读起来是一段顺序，
-/// 而不是一排灰块。
-class _ChapterFallback extends StatelessWidget {
-  const _ChapterFallback({required this.index});
-
-  final int index;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [scheme.primaryContainer, scheme.surfaceContainerHigh],
-        ),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned(
-            right: AppSpacing.xs,
-            top: 2,
-            child: Text(
-              (index + 1).toString().padLeft(2, '0'),
-              style: theme.textTheme.headlineLarge?.copyWith(
-                color: scheme.onPrimaryContainer.withValues(alpha: .28),
-                fontWeight: FontWeight.w800,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-          Center(
-            child: Icon(
-              Icons.play_circle_outline_rounded,
-              size: 30,
-              color: scheme.onPrimaryContainer.withValues(alpha: .8),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ChapterThumb extends StatefulWidget {
   const _ChapterThumb({required this.itemId, required this.index, this.tag});
 
@@ -1261,7 +1237,7 @@ class _ChapterThumbState extends State<_ChapterThumb> {
 
   @override
   Widget build(BuildContext context) {
-    final fallback = _ChapterFallback(index: widget.index);
+    final fallback = ChapterFallbackArt(index: widget.index);
     return FutureBuilder<Uint8List?>(
       future: _future,
       builder: (context, snapshot) {
@@ -1348,45 +1324,49 @@ class _DetailSimilar extends StatelessWidget {
   }
 }
 
-/// 条目还没返回时：头图（交接图或占位）下面同时有标题、主操作和正文占位。
+/// 条目还没返回时：有交接图就画同一个头部（标题、元数据和主操作就位），
+/// 下面是正文占位；没有交接图时头部是骨架块，标题与主操作排在它下面。
 class _PhoneDetailPending extends StatelessWidget {
-  const _PhoneDetailPending({required this.handoff});
+  const _PhoneDetailPending({required this.handoff, required this.withCaption});
 
   final PhoneImageHandoff? handoff;
+
+  /// 头部没有画面（也就没有标题区）时，由这里补上标题、元数据和主操作。
+  final bool withCaption;
 
   static const headerKey = Key('phone-detail-pending-header');
   static const titleKey = Key('phone-detail-pending-title');
   static const actionKey = Key('phone-detail-pending-action');
   static const bodyKey = Key('phone-detail-pending-body');
 
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
+  static Widget title(BuildContext context, PhoneImageHandoff? handoff) {
     final theme = Theme.of(context);
-    final source = handoff;
-    final width = MediaQuery.sizeOf(context).width;
-    final contentWidth = width - AppSpacing.md * 2;
-    final animate = !MediaQuery.disableAnimationsOf(context);
-    final name = source?.item.name.trim() ?? '';
-    final title = name.isEmpty
-        ? SkeletonBlock(
-            key: titleKey,
-            width: contentWidth * 0.5,
-            height: 28,
-            animated: animate,
-          )
-        : Text(
-            name,
-            key: titleKey,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.headlineLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              height: 1.2,
-            ),
-          );
-    final item = source?.item;
-    final meta = <PhoneMetaEntry>[
+    final name = handoff?.item.name.trim() ?? '';
+    final compact = handoff != null && !handoff.item.isEpisode;
+    if (name.isEmpty) {
+      return SkeletonBlock(
+        key: titleKey,
+        width: 160,
+        height: 28,
+        animated: !MediaQuery.disableAnimationsOf(context),
+      );
+    }
+    return Text(
+      name,
+      key: titleKey,
+      maxLines: compact ? 3 : 2,
+      overflow: TextOverflow.ellipsis,
+      style: phoneDetailTitleStyle(theme, compact: compact),
+    );
+  }
+
+  static List<PhoneMetaEntry> metaEntries(
+    BuildContext context,
+    PhoneImageHandoff? handoff,
+  ) {
+    final l = AppLocalizations.of(context);
+    final item = handoff?.item;
+    return [
       if (item?.isEpisode == true && seasonEpisodeCode(item!) != null)
         PhoneMetaEntry(seasonEpisodeCode(item)!),
       if (item?.productionYear != null)
@@ -1401,26 +1381,76 @@ class _PhoneDetailPending extends StatelessWidget {
           highlight: true,
         ),
     ];
+  }
+
+  static Widget? metaPlaceholder(
+    BuildContext context,
+    PhoneImageHandoff? handoff,
+  ) {
+    if (metaEntries(context, handoff).isNotEmpty) return null;
+    return SkeletonBlock(
+      width: 144,
+      height: 18,
+      animated: !MediaQuery.disableAnimationsOf(context),
+    );
+  }
+
+  static Widget action(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return KeyedSubtree(
+      key: actionKey,
+      child: _DetailPlayActions(
+        label: l.play,
+        enabled: false,
+        showRestart: false,
+        onPlay: null,
+        onRestart: null,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final source = handoff;
+    final width = MediaQuery.sizeOf(context).width;
+    final contentWidth = width - AppSpacing.md * 2;
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    final item = source?.item;
+    final meta = metaEntries(context, source);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PhoneDetailCaption(
-          title: title,
-          meta: meta,
-          pendingMetadata: meta.isEmpty
-              ? SkeletonBlock(width: 144, height: 18, animated: animate)
-              : null,
-          actions: KeyedSubtree(
-            key: actionKey,
-            child: _DetailPlayActions(
-              label: l.play,
-              enabled: false,
-              showRestart: false,
-              onPlay: null,
-              onRestart: null,
+        if (withCaption)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              0,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: title(context, source),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: meta.isEmpty
+                      ? metaPlaceholder(context, source)!
+                      : Text(
+                          meta.map((entry) => entry.label).join(' · '),
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                action(context),
+              ],
             ),
           ),
-        ),
+        const SizedBox(height: AppSpacing.lg),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: Column(

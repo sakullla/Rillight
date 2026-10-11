@@ -2817,11 +2817,12 @@ Future<(GoRouter, FakeEmbyServer)> _openPhone(
 
 // ---- Hero/动效专用 harness(自 phone_motion_test 并入) ----
 
+/// 头部承接共享图的那一张（从海报进来是海报卡，从横版卡进来是背景）。
 MediaImage _bannerImage(WidgetTester tester) {
   return tester.widget<MediaImage>(
     find.descendant(
       of: find.byKey(PhoneItemBanner.bannerKey),
-      matching: find.byType(MediaImage),
+      matching: find.byKey(PhoneItemBanner.handoffImageKey),
       skipOffstage: false,
     ),
   );

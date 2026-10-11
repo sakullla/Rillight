@@ -14,12 +14,96 @@ import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
-/// 分集分区:纵向行列表(缩略图 + 标题 + 时长/进度 + 简介),头部为
-/// 「集」+ 季切换/选集 + 「更多」。行内容自适应伸展铺满可用宽度。
+/// 分集网格的几何：列数、卡宽与固定的卡高。
 ///
-/// 播放和已看一直留在行尾,方便扫视一季时直接开播或标已看。
+/// 卡高由剧照高度加标题、日期和两行简介的实际行高算出，同一季每张卡等高，
+/// 网格不必构建屏外的卡片就能定位到任意一集。
+class EpisodeGridMetrics {
+  const EpisodeGridMetrics({
+    required this.columns,
+    required this.cardWidth,
+    required this.thumbHeight,
+    required this.extent,
+  });
+
+  /// 卡片之间的横向/纵向间距。
+  static const double crossSpacing = AppSpacing.md;
+  static const double mainSpacing = AppSpacing.sm;
+
+  /// 卡片内边距：悬停/当前集底色比剧照外扩一圈。
+  static const double inset = AppSpacing.xs;
+
+  final int columns;
+  final double cardWidth;
+  final double thumbHeight;
+  final double extent;
+
+  /// 最窄卡宽（1080p 设计值），宽屏随阅读缩放一起变大。
+  static double minCardWidthFor(Size viewport) =>
+      272 * AppViewport.readingScaleOf(viewport);
+
+  static EpisodeGridMetrics of(BuildContext context, double available) {
+    final viewport = MediaQuery.sizeOf(context);
+    final min = minCardWidthFor(viewport);
+    var columns = ((available + crossSpacing) / (min + crossSpacing)).floor();
+    if (columns < 1) columns = 1;
+    if (columns > 6) columns = 6;
+    final cardWidth = (available - crossSpacing * (columns - 1)) / columns;
+    final thumbWidth = cardWidth - inset * 2;
+    final thumbHeight = thumbWidth * 9 / 16;
+    final theme = Theme.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    double lines(TextStyle? style, int count) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: List.filled(count, '国Ag').join('\n'),
+          style: style,
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: count,
+      )..layout();
+      final height = painter.height;
+      painter.dispose();
+      return height;
+    }
+
+    final text =
+        AppSpacing.xs +
+        lines(_EpisodeCardStyles.title(theme), 1) +
+        2 +
+        lines(_EpisodeCardStyles.meta(theme), 1) +
+        AppSpacing.xxs +
+        lines(_EpisodeCardStyles.overview(theme), 2);
+    return EpisodeGridMetrics(
+      columns: columns,
+      cardWidth: cardWidth,
+      thumbHeight: thumbHeight,
+      extent: (inset * 2 + thumbHeight + text).ceilToDouble() + 1,
+    );
+  }
+}
+
+abstract final class _EpisodeCardStyles {
+  static TextStyle? title(ThemeData theme) =>
+      theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600);
+
+  static TextStyle? meta(ThemeData theme) => theme.textTheme.bodySmall
+      ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+
+  static TextStyle? overview(ThemeData theme) => theme.textTheme.bodySmall
+      ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4);
+}
+
+/// 分集分区:响应式卡片网格(16:9 剧照 + 「N. 标题」+ 播出日期 + 两行简介),
+/// 头部为「剧集」+ 季切换/选集 + 「更多」。宽窗口一行四五集,一季一眼扫完,
+/// 不再是一条条横贯整屏、播放钮远在行尾的长行。
+///
+/// 剧照承载全部状态与快捷操作:悬停浮出中央播放钮,右上角是
+/// 已看切换(已看时常驻实心勾,未看时悬停/聚焦才出现),底部是时长与续播进度。
+/// 点卡片其余区域进入集详情,右键菜单同样可播放/标已看。
 /// [error] 非空且没有剧集时,分区换成说明与重试。已有剧集时 [loadMoreError]
-/// 留在列表上方,条目保持可见;[hasMore] 时列表末尾提供「加载更多」。
+/// 留在网格上方,条目保持可见;[hasMore] 时网格末尾提供「加载更多」。
 /// 作为 sliver 放入父级 [CustomScrollView]，分集只在视口附近构建。
 class EpisodeList extends StatefulWidget {
   const EpisodeList({
@@ -39,6 +123,7 @@ class EpisodeList extends StatefulWidget {
     required this.onTogglePlayed,
     required this.busyPlayedIds,
     required this.onMore,
+    this.summary,
     this.loadMoreError,
     this.onRetryLoadMore,
   });
@@ -61,6 +146,9 @@ class EpisodeList extends StatefulWidget {
   final Set<String> busyPlayedIds;
   final VoidCallback? onMore;
 
+  /// 标题下的一行小字(集数、已看进度);为空时不占行。
+  final String? summary;
+
   @override
   State<EpisodeList> createState() => _EpisodeListState();
 }
@@ -69,6 +157,7 @@ class _EpisodeListState extends State<EpisodeList> {
   final _header = GlobalKey();
   final _rows = <String, GlobalKey>{};
   int _seekGeneration = 0;
+  EpisodeGridMetrics? _metrics;
 
   @override
   void initState() {
@@ -104,10 +193,11 @@ class _EpisodeListState extends State<EpisodeList> {
     );
   }
 
-  // Estimate from an already laid-out row, then align the actual target once
-  // it is built. Seeking never materializes the entire season to measure it.
+  // 网格卡片等高:由目标所在行直接算出偏移,跳过去后再把已构建的目标卡对齐。
+  // 定位从不为了量高度而构建整季。
   void _seek(int target, int generation, int attempt) {
     if (!mounted || generation != _seekGeneration || attempt >= 24) return;
+    if (target >= widget.episodes.length) return;
     final id = widget.episodes[target].id;
     final targetContext = _rows[id]?.currentContext;
     if (targetContext != null) {
@@ -115,33 +205,24 @@ class _EpisodeListState extends State<EpisodeList> {
       return;
     }
     final header = _header.currentContext;
-    if (header == null) return;
-    final position = Scrollable.of(header).position;
-    var anchor = header.findRenderObject() as RenderBox;
-    var distance = target;
-    var height =
-        EpisodeRow.thumbWidthFor(MediaQuery.sizeOf(context)) * 9 / 16 +
-        AppSpacing.xs * 3;
-    var headerExtent = anchor.size.height;
-    for (var i = 0; i < widget.episodes.length; i++) {
-      final row = _rows[widget.episodes[i].id]?.currentContext;
-      final box = row?.findRenderObject();
-      if (box is RenderBox &&
-          box.hasSize &&
-          (headerExtent > 0 || (target - i).abs() < distance.abs())) {
-        anchor = box;
-        distance = target - i;
-        height = box.size.height;
-        headerExtent = 0;
-      }
+    final metrics = _metrics;
+    if (header == null || metrics == null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _seek(target, generation, attempt + 1),
+      );
+      return;
     }
+    final position = Scrollable.of(header).position;
+    final anchor = header.findRenderObject() as RenderBox;
     final start = RenderAbstractViewport.of(
       anchor,
     ).getOffsetToReveal(anchor, 0).offset;
-    final offset = (start + headerExtent + distance * height).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
+    final row = target ~/ metrics.columns;
+    final offset =
+        (start +
+                anchor.size.height +
+                row * (metrics.extent + EpisodeGridMetrics.mainSpacing))
+            .clamp(position.minScrollExtent, position.maxScrollExtent);
     position.jumpTo(offset);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _seek(target, generation, attempt + 1),
@@ -156,6 +237,7 @@ class _EpisodeListState extends State<EpisodeList> {
     final error = widget.error;
     final loadMoreError = widget.loadMoreError;
     final empty = widget.episodes.isEmpty;
+    final summary = widget.summary;
     return SliverMainAxisGroup(
       key: CatalogKeys.episodesRow,
       slivers: [
@@ -164,7 +246,7 @@ class _EpisodeListState extends State<EpisodeList> {
             key: _header,
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.page,
-              AppSpacing.md,
+              AppSpacing.lg,
               AppSpacing.page,
               AppSpacing.sm,
             ),
@@ -174,9 +256,31 @@ class _EpisodeListState extends State<EpisodeList> {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        l10n.episodesRow,
-                        style: theme.textTheme.titleMedium,
+                      child: Wrap(
+                        spacing: AppSpacing.sm,
+                        crossAxisAlignment: WrapCrossAlignment.end,
+                        children: [
+                          Text(
+                            l10n.episodesRow,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (summary != null && summary.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(
+                                summary,
+                                key: const Key('episode-list-summary'),
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     widget.headerAction,
@@ -198,7 +302,10 @@ class _EpisodeListState extends State<EpisodeList> {
                     onRetry: widget.onRetry,
                   )
                 else if (widget.loading && empty)
-                  const EpisodeListSkeleton(),
+                  const Padding(
+                    padding: EdgeInsets.only(top: AppSpacing.sm),
+                    child: EpisodeListSkeleton(),
+                  ),
                 if (loadMoreError != null && !empty)
                   Row(
                     children: [
@@ -223,22 +330,40 @@ class _EpisodeListState extends State<EpisodeList> {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-          sliver: SliverList.builder(
-            itemCount: widget.episodes.length,
-            itemBuilder: (context, index) {
-              final episode = widget.episodes[index];
-              return KeyedSubtree(
-                key: _rows.putIfAbsent(episode.id, () => GlobalKey()),
-                child: EpisodeRow(
-                  key: ValueKey('episode-row-${episode.id}'),
-                  item: episode,
-                  selected: episode.id == widget.currentId,
-                  busyPlayed: widget.busyPlayedIds.contains(episode.id),
-                  onTap: () => widget.onTap(episode),
-                  onPlay: () => widget.onPlay(episode),
-                  onTogglePlayed: () => widget.onTogglePlayed(episode),
+          // 卡片内边距让剧照与页面边距对齐，悬停底色外扩到边距里。
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.page - EpisodeGridMetrics.inset,
+          ),
+          sliver: SliverLayoutBuilder(
+            builder: (context, constraints) {
+              final metrics = EpisodeGridMetrics.of(
+                context,
+                constraints.crossAxisExtent,
+              );
+              _metrics = metrics;
+              return SliverGrid.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: metrics.columns,
+                  crossAxisSpacing: EpisodeGridMetrics.crossSpacing,
+                  mainAxisSpacing: EpisodeGridMetrics.mainSpacing,
+                  mainAxisExtent: metrics.extent,
                 ),
+                itemCount: widget.episodes.length,
+                itemBuilder: (context, index) {
+                  final episode = widget.episodes[index];
+                  return KeyedSubtree(
+                    key: _rows.putIfAbsent(episode.id, () => GlobalKey()),
+                    child: EpisodeRow(
+                      key: ValueKey('episode-row-${episode.id}'),
+                      item: episode,
+                      selected: episode.id == widget.currentId,
+                      busyPlayed: widget.busyPlayedIds.contains(episode.id),
+                      onTap: () => widget.onTap(episode),
+                      onPlay: () => widget.onPlay(episode),
+                      onTogglePlayed: () => widget.onTogglePlayed(episode),
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -246,7 +371,7 @@ class _EpisodeListState extends State<EpisodeList> {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.only(
-              top: AppSpacing.sm,
+              top: AppSpacing.md,
               bottom: AppSpacing.md,
             ),
             child: widget.hasMore
@@ -271,9 +396,12 @@ class _EpisodeListState extends State<EpisodeList> {
   }
 }
 
-/// 分集行:16:9 缩略图(进度条叠底) + 「N. 标题」+ 时长/进度 + 两行简介。
-/// 播放/已看紧贴行尾,不另占一列空白。点整行进入集详情,右键菜单同样可
-/// 播放/标已看。当前集以 surfaceContainerHigh 底色与 primary 左边条标示。
+/// 分集卡:16:9 剧照在上,「N. 标题」、播出日期与两行简介在下。
+///
+/// 当前集:剧照主色描边 + 主色标题;已看:标题转次要色,剧照右上角实心勾。
+/// 点卡片进集详情;剧照中央的圆钮直接开播([CatalogKeys.episodePlay]);右上角
+/// [CatalogKeys.episodePlayed] 切换已看。卡片在网格里等高,由
+/// [EpisodeGridMetrics] 给出;单独使用时按内容收缩。
 class EpisodeRow extends StatefulWidget {
   const EpisodeRow({
     super.key,
@@ -292,15 +420,10 @@ class EpisodeRow extends StatefulWidget {
   final VoidCallback onPlay;
   final VoidCallback onTogglePlayed;
 
-  static double thumbWidthFor(Size viewport) {
-    final width = viewport.width;
-    final base = width < AppBreakpoints.compact
-        ? 168.0
-        : width < AppBreakpoints.large
-        ? 184.0
-        : 200.0;
-    return base * AppViewport.readingScaleOf(viewport);
-  }
+  /// 网格最窄的剧照宽，骨架与旧调用方沿用。
+  static double thumbWidthFor(Size viewport) =>
+      EpisodeGridMetrics.minCardWidthFor(viewport) -
+      EpisodeGridMetrics.inset * 2;
 
   @override
   State<EpisodeRow> createState() => _EpisodeRowState();
@@ -360,145 +483,81 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final played = item.userData.played;
     final runtime = runtimeLabel(l10n, item);
     final premiere = item.premiereDate;
-    final meta = <String>[
-      // 续播由缩略图进度条表达，已看由角标和行尾勾表达，这里不再写一遍。
-      if (premiere != null) formatDateYmd(premiere),
-    ];
     final overview = plainOverview(item.overview);
-    final viewport = MediaQuery.sizeOf(context);
-    final thumbWidth = EpisodeRow.thumbWidthFor(viewport);
-    final thumbHeight = thumbWidth * 9 / 16;
-    final control = 36.0 * AppViewport.readingScaleOf(viewport);
     final revealed = _hovered || _focused;
-    final fill = selected
-        ? scheme.surfaceContainerHigh
-        : revealed
-        ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
+    final fill = revealed
+        ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
         : Colors.transparent;
-    final actionStyle = IconButton.styleFrom(
-      minimumSize: Size(control, control),
-      padding: EdgeInsets.all(6 * control / 36),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      visualDensity: VisualDensity.compact,
-      iconSize: 24 * control / 36,
-    );
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: Material(
-            color: fill,
-            child: InkWell(
-              key: CatalogKeys.episode(item.id),
-              onTap: widget.onTap,
-              onFocusChange: (value) => setState(() => _focused = value),
-              onSecondaryTapDown: (details) {
-                unawaited(_openMenu(context, details.globalPosition));
-              },
-              // 当前集只用底色与标题主色标示,不再叠左边条和缩略图描边。
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.xs,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Material(
+        color: fill,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: CatalogKeys.episode(item.id),
+          onTap: widget.onTap,
+          onFocusChange: (value) => setState(() => _focused = value),
+          onSecondaryTapDown: (details) {
+            unawaited(_openMenu(context, details.globalPosition));
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(EpisodeGridMetrics.inset),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: _EpisodeThumb(
+                    item: item,
+                    runtime: runtime,
+                    hovered: revealed,
+                    selected: selected,
+                    playLabel: playLabel,
+                    onPlay: widget.onPlay,
+                    played: played,
+                    busyPlayed: widget.busyPlayed,
+                    onTogglePlayed: widget.onTogglePlayed,
+                  ),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _EpisodeThumb(
-                      item: item,
-                      width: thumbWidth,
-                      height: thumbHeight,
-                      runtime: runtime,
-                      hovered: _hovered || _focused,
-                      selected: selected,
-                      playLabel: playLabel,
-                      onPlay: widget.onPlay,
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: selected
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                              color: selected
-                                  ? scheme.primary
-                                  : played
-                                  ? scheme.onSurfaceVariant
-                                  : null,
-                            ),
-                          ),
-                          if (meta.isNotEmpty) ...[
-                            const SizedBox(height: AppSpacing.xxs),
-                            Text(
-                              meta.join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                          if (overview != null && overview.isNotEmpty) ...[
-                            const SizedBox(height: AppSpacing.xxs),
-                            Text(
-                              overview,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    IconButton(
-                      key: CatalogKeys.episodePlayed(item.id),
-                      tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
-                      style: actionStyle,
-                      onPressed: widget.busyPlayed
-                          ? null
-                          : widget.onTogglePlayed,
-                      // 未看的勾平时隐去,悬停/聚焦再出现;已看的实心勾常驻。
-                      icon: AnimatedOpacity(
-                        opacity: played || revealed || selected ? 1 : 0,
-                        duration: AppMotion.durationOf(context, AppMotion.fast),
-                        child: Icon(
-                          played
-                              ? Icons.check_circle_rounded
-                              : Icons.check_circle_outline_rounded,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      key: CatalogKeys.episodePlay(item.id),
-                      tooltip: playLabel,
-                      style: actionStyle.copyWith(
-                        backgroundColor: WidgetStatePropertyAll(scheme.primary),
-                        foregroundColor: WidgetStatePropertyAll(
-                          scheme.onPrimary,
-                        ),
-                      ),
-                      onPressed: widget.onPlay,
-                      icon: const Icon(Icons.play_arrow_rounded),
-                    ),
-                  ],
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _EpisodeCardStyles.title(theme)?.copyWith(
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: selected
+                        ? scheme.primary
+                        : played
+                        ? scheme.onSurfaceVariant
+                        : scheme.onSurface,
+                  ),
                 ),
-              ),
+                // 续播由进度条表达，已看由角标表达，这里只写播出日期。
+                if (premiere != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    formatDateYmd(premiere),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _EpisodeCardStyles.meta(theme)?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+                if (overview != null && overview.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    overview,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: _EpisodeCardStyles.overview(theme),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
@@ -509,75 +568,92 @@ class _EpisodeRowState extends State<EpisodeRow> {
 
 enum _EpisodeRowMenuAction { play, togglePlayed }
 
-/// 分集缩略图:右下时长胶囊、已看角标并压暗;悬停浮出播放按钮,
-/// 点缩略图直接开播(点行其余区域仍进集详情)。
+/// 分集剧照:右下时长胶囊、底部续播进度、右上已看切换;悬停时压暗并浮出
+/// 中央播放钮,点它直接开播(点卡片其余区域,包括剧照,进集详情)。
 class _EpisodeThumb extends StatelessWidget {
   const _EpisodeThumb({
     required this.item,
-    required this.width,
-    required this.height,
     required this.runtime,
     required this.hovered,
     required this.selected,
     required this.playLabel,
     required this.onPlay,
+    required this.played,
+    required this.busyPlayed,
+    required this.onTogglePlayed,
   });
 
   final EmbyItem item;
-  final double width;
-  final double height;
   final String? runtime;
   final bool hovered;
   final bool selected;
   final String playLabel;
   final VoidCallback onPlay;
+  final bool played;
+  final bool busyPlayed;
+  final VoidCallback onTogglePlayed;
 
   @override
   Widget build(BuildContext context) {
-    final played = item.userData.played;
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final resumable = item.canResume;
     final fade = AppMotion.durationOf(context, AppMotion.normal);
     final runtime = this.runtime;
-    return SizedBox(
-      width: width,
-      height: height,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.sm),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            RepaintBoundary(
-              child: MediaImage(
-                key: ValueKey(item.id),
-                item: item,
-                width: width,
-                height: height,
-                preferThumb: true,
-                fit: BoxFit.cover,
-                maxWidth: 480,
-              ),
-            ),
-            IgnorePointer(
-              child: AnimatedContainer(
-                duration: fade,
-                color: Colors.black.withValues(alpha: hovered ? .32 : 0),
-              ),
-            ),
-            if (runtime != null)
-              Positioned(
-                right: 6,
-                bottom: resumable ? 9 : 6,
-                child: EpisodeThumbBadge(label: runtime),
-              ),
-            if (played)
-              const Positioned(top: 6, right: 6, child: EpisodeWatchedBadge()),
-            Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: ValueKey('episode-thumb-play-${item.id}'),
-                canRequestFocus: false,
-                onTap: onPlay,
-                child: Center(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final height = constraints.maxHeight;
+        final width = constraints.maxWidth;
+        return DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: selected
+                ? Border.all(color: scheme.primary, width: 2)
+                : Border.all(color: scheme.onSurface.withValues(alpha: .08)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(color: scheme.surfaceContainerHigh),
+                RepaintBoundary(
+                  child: AnimatedScale(
+                    scale: hovered ? 1.04 : 1,
+                    duration: fade,
+                    curve: AppMotion.standard,
+                    child: MediaImage(
+                      key: ValueKey(item.id),
+                      item: item,
+                      width: width,
+                      height: height,
+                      preferThumb: true,
+                      fit: BoxFit.cover,
+                      maxWidth: 640,
+                    ),
+                  ),
+                ),
+                IgnorePointer(
+                  child: AnimatedContainer(
+                    duration: fade,
+                    color: Colors.black.withValues(
+                      alpha: hovered
+                          ? .36
+                          : played && !selected
+                          ? .22
+                          : 0,
+                    ),
+                  ),
+                ),
+                if (runtime != null)
+                  Positioned(
+                    right: 6,
+                    bottom: resumable ? 9 : 6,
+                    child: EpisodeThumbBadge(label: runtime),
+                  ),
+                // 只有中央的圆钮开播；卡片其余位置（含剧照）进入集详情。
+                Center(
                   child: AnimatedOpacity(
                     opacity: hovered ? 1 : 0,
                     duration: fade,
@@ -587,21 +663,24 @@ class _EpisodeThumb extends StatelessWidget {
                       curve: AppMotion.standard,
                       child: Tooltip(
                         message: playLabel,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: .5),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: .85),
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Padding(
-                            padding: EdgeInsets.all(height * .08),
-                            child: Icon(
-                              Icons.play_arrow_rounded,
-                              color: Colors.white,
-                              size: height * .26,
+                        child: Material(
+                          key: CatalogKeys.episodePlay(item.id),
+                          color: scheme.primary,
+                          shape: const CircleBorder(),
+                          elevation: 4,
+                          shadowColor: Colors.black54,
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            key: ValueKey('episode-thumb-play-${item.id}'),
+                            canRequestFocus: false,
+                            onTap: onPlay,
+                            child: Padding(
+                              padding: EdgeInsets.all(height * .06),
+                              child: Icon(
+                                Icons.play_arrow_rounded,
+                                color: scheme.onPrimary,
+                                size: height * .22,
+                              ),
                             ),
                           ),
                         ),
@@ -609,22 +688,58 @@ class _EpisodeThumb extends StatelessWidget {
                     ),
                   ),
                 ),
-              ),
-            ),
-            if (resumable)
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: _EpisodeProgressBar(
-                  key: ValueKey('episode-progress-${item.id}'),
-                  value: item.playbackProgress,
-                  label: AppLocalizations.of(
-                    context,
-                  ).playbackProgress((item.playbackProgress * 100).round()),
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: AnimatedOpacity(
+                    // 未看的勾平时隐去,悬停/聚焦再出现;已看的实心勾常驻。
+                    opacity: played || hovered ? 1 : 0,
+                    duration: AppMotion.durationOf(context, AppMotion.fast),
+                    child: IconButton(
+                      key: CatalogKeys.episodePlayed(item.id),
+                      tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(32, 32),
+                        padding: const EdgeInsets.all(4),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: busyPlayed ? null : onTogglePlayed,
+                      icon: played
+                          ? const EpisodeWatchedBadge()
+                          : DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: .6),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Icon(
+                                  Icons.check_rounded,
+                                  size: 16,
+                                  color: Colors.white.withValues(alpha: .7),
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
                 ),
-              ),
-          ],
-        ),
-      ),
+                if (resumable)
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: _EpisodeProgressBar(
+                      key: ValueKey('episode-progress-${item.id}'),
+                      value: item.playbackProgress,
+                      label: l10n.playbackProgress(
+                        (item.playbackProgress * 100).round(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -689,57 +804,61 @@ class EpisodeWatchedBadge extends StatelessWidget {
   }
 }
 
-/// 分集列表加载骨架:与 [EpisodeRow] 同结构的全宽占位行。
+/// 分集网格加载骨架:与 [EpisodeRow] 同几何的一行卡片占位。
 class EpisodeListSkeleton extends StatelessWidget {
-  const EpisodeListSkeleton({super.key, this.rows = 3});
+  const EpisodeListSkeleton({super.key, this.rows = 1});
 
   /// 骨架行数。
   final int rows;
 
   @override
   Widget build(BuildContext context) {
-    final thumbWidth = EpisodeRow.thumbWidthFor(MediaQuery.sizeOf(context));
-    return Column(
-      children: [
-        for (var i = 0; i < rows; i++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: _EpisodeRowSkeleton(thumbWidth: thumbWidth),
-          ),
-      ],
-    );
-  }
-}
-
-class _EpisodeRowSkeleton extends StatelessWidget {
-  const _EpisodeRowSkeleton({required this.thumbWidth});
-
-  final double thumbWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SkeletonBlock(width: thumbWidth, height: thumbWidth * 9 / 16),
-          const SizedBox(width: AppSpacing.md),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SkeletonBlock(width: 220, height: AppSpacing.md),
-                SizedBox(height: AppSpacing.xs),
-                SkeletonBlock(width: 140, height: AppSpacing.sm),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final metrics = EpisodeGridMetrics.of(context, available);
+        return Column(
+          children: [
+            for (var row = 0; row < rows; row++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < metrics.columns; i++) ...[
+                      if (i > 0)
+                        const SizedBox(width: EpisodeGridMetrics.crossSpacing),
+                      SizedBox(
+                        width: metrics.cardWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SkeletonBlock(
+                              width: metrics.cardWidth,
+                              height: metrics.cardWidth * 9 / 16,
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            SkeletonBlock(
+                              width: metrics.cardWidth * .7,
+                              height: AppSpacing.md,
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            SkeletonBlock(
+                              width: metrics.cardWidth * .4,
+                              height: AppSpacing.sm,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

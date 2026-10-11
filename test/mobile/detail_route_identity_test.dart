@@ -68,10 +68,11 @@ void main() {
       await tester.pumpWidget(app);
       app.router.go('/item/series-friends?season=season-friends-1');
       await _artworkFrames(tester);
+      // 横幅背景（直接进入时它承接共享图）；海报卡始终是剧集本身。
       MediaImage header() => tester.widget<MediaImage>(
         find.descendant(
           of: find.byKey(PhoneItemBanner.bannerKey),
-          matching: find.byType(MediaImage),
+          matching: find.byKey(PhoneItemBanner.handoffImageKey),
         ),
       );
       // Entering a series keeps its artwork until the user selects a season.

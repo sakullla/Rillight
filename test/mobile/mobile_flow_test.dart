@@ -377,7 +377,7 @@ void main() {
       await tester.tap(find.text('老友记'));
       await tester.pumpAndSettle();
       expect(find.byType(MobileDetailPage), findsOneWidget);
-      // 只有一季：不画单独一颗季标签，改由本季概况卡写出季名。
+      // 只有一季：不画单独一颗季标签，也没有季概况卡，只剩标题下一行集数小字。
       expect(find.byKey(const Key('phone-season-list')), findsNothing);
       expect(find.byKey(MobileSeriesPage.seasonSummaryKey), findsOneWidget);
       expect(find.text('The Pilot'), findsWidgets);

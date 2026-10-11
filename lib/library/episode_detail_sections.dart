@@ -610,22 +610,79 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     final labelStyle = theme.textTheme.labelLarge?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
+    // 桌面/电视：一张卡，左侧是固定宽的分类名，右侧是该类各轨，行间细分隔线。
+    // 窄窗口放不下标签列时，分类名回到各组上方。
+    final scheme = theme.colorScheme;
     return _Section(
       title: l10n.detailMediaInfo,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 880),
-        child: Column(
-          key: sectionKey,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < groups.length; i++) ...[
-              if (i > 0) const SizedBox(height: AppSpacing.sm),
-              Text(groups[i].title, style: labelStyle),
-              const SizedBox(height: AppSpacing.xs),
-              _StreamChoiceWrap(group: groups[i]),
-            ],
-          ],
-        ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 720) {
+            return Column(
+              key: sectionKey,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < groups.length; i++) ...[
+                  if (i > 0) const SizedBox(height: AppSpacing.sm),
+                  Text(groups[i].title, style: labelStyle),
+                  const SizedBox(height: AppSpacing.xs),
+                  _StreamChoiceWrap(group: groups[i]),
+                ],
+              ],
+            );
+          }
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 960),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh.withValues(alpha: .55),
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                border: Border.all(
+                  color: scheme.onSurface.withValues(alpha: .06),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.xs,
+                ),
+                child: Column(
+                  key: sectionKey,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < groups.length; i++) ...[
+                      if (i > 0)
+                        Divider(
+                          height: 1,
+                          color: scheme.onSurface.withValues(alpha: .08),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: AppSpacing.sm,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 72,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(groups[i].title, style: labelStyle),
+                              ),
+                            ),
+                            Expanded(
+                              child: _StreamChoiceWrap(group: groups[i]),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1291,6 +1348,53 @@ class EpisodeMetadataSection extends StatelessWidget {
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 章节没有服务器剪影时：主色渐变底 + 章节序号，一排章节读起来是一段顺序，
+/// 而不是一排灰块。手机与桌面章节卡共用。
+class ChapterFallbackArt extends StatelessWidget {
+  const ChapterFallbackArt({super.key, required this.index});
+
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [scheme.primaryContainer, scheme.surfaceContainerHigh],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            right: AppSpacing.xs,
+            top: 2,
+            child: Text(
+              (index + 1).toString().padLeft(2, '0'),
+              style: theme.textTheme.headlineLarge?.copyWith(
+                color: scheme.onPrimaryContainer.withValues(alpha: .28),
+                fontWeight: FontWeight.w800,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Center(
+            child: Icon(
+              Icons.play_circle_outline_rounded,
+              size: 30,
+              color: scheme.onPrimaryContainer.withValues(alpha: .8),
+            ),
+          ),
         ],
       ),
     );

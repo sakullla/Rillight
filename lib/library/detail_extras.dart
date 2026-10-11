@@ -50,9 +50,17 @@ void openGenreShelf(BuildContext context, EmbyItem item, String genre) {
 }
 
 class DetailGenreRow extends StatelessWidget {
-  const DetailGenreRow({super.key, required this.item, this.genres});
+  const DetailGenreRow({
+    super.key,
+    required this.item,
+    this.genres,
+    this.dense = false,
+  });
 
   final EmbyItem item;
+
+  /// 嵌在桌面头部信息栏里：细描边小胶囊，压在背景图上不抢标题。
+  final bool dense;
 
   /// 切集的列表条目经常不带流派。传入后沿用已经显示的名称，避免芯片先消失。
   final List<String>? genres;
@@ -75,6 +83,43 @@ class DetailGenreRow extends StatelessWidget {
               pill: true,
               onPressed: () => openGenreShelf(context, item, genre),
               child: Text(genre),
+            ),
+        ],
+      );
+    }
+    if (dense) {
+      final theme = Theme.of(context);
+      final scheme = theme.colorScheme;
+      return Wrap(
+        key: const Key('detail-genre-pills'),
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          for (final genre in genres)
+            Material(
+              color: scheme.onSurface.withValues(alpha: .08),
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: scheme.onSurface.withValues(alpha: .16),
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => openGenreShelf(context, item, genre),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: 5,
+                  ),
+                  child: Text(
+                    genre,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: .9),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
             ),
         ],
       );

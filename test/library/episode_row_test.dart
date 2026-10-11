@@ -7,7 +7,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_list.dart';
 
 void main() {
-  testWidgets('episode rows stay short enough to scan a season', (
+  testWidgets('episode cards stay compact enough to scan a season', (
     tester,
   ) async {
     final item = EmbyItem(
@@ -27,7 +27,7 @@ void main() {
           body: Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
-              width: 1200,
+              width: 300,
               child: EpisodeRow(
                 item: item,
                 selected: false,
@@ -52,8 +52,17 @@ void main() {
       ),
     );
 
-    expect(row.height, lessThan(150));
-    expect(row.right - play.right, lessThan(28));
+    // 剧照在上，播放落在剧照上，标题与两行简介在下。
+    expect(row.height, lessThan(300));
+    // 播放圆钮居中压在剧照上，标题在剧照下面。
+    final thumbHeight = (row.width - 16) * 9 / 16;
+    expect(play.center.dx, closeTo(row.center.dx, 1));
+    expect(play.center.dy, closeTo(row.top + 8 + thumbHeight / 2, 1));
+    expect(play.width, lessThan(row.width / 2));
+    expect(
+      tester.getRect(find.text('1. 勇者的相遇')).top,
+      greaterThan(row.top + 8 + thumbHeight),
+    );
     expect(overview.maxLines, 2);
     expect(find.text('1. 勇者的相遇'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -69,15 +78,18 @@ void main() {
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
-          body: SizedBox(
-            width: 1200,
-            child: EpisodeRow(
-              item: item,
-              selected: false,
-              busyPlayed: false,
-              onTap: () => opened++,
-              onPlay: () => played++,
-              onTogglePlayed: () {},
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 320,
+              child: EpisodeRow(
+                item: item,
+                selected: false,
+                busyPlayed: false,
+                onTap: () => opened++,
+                onPlay: () => played++,
+                onTogglePlayed: () {},
+              ),
             ),
           ),
         ),
@@ -106,6 +118,13 @@ void main() {
       await tester.pump();
       expect(played, 1);
       expect(opened, 0);
+      // 剧照上圆钮以外的位置与卡片其余部分一样进入集详情。
+      final card = tester.getRect(find.byType(EpisodeRow));
+      await tester.tapAt(card.topLeft + const Offset(24, 24));
+      await tester.pump();
+      expect(played, 1);
+      expect(opened, 1);
+      opened = 0;
       await tester.tap(find.text('2. 半途'));
       await tester.pump();
       expect(opened, 1);
@@ -138,25 +157,28 @@ void main() {
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
-          body: SizedBox(
-            width: 1200,
-            child: EpisodeRow(
-              item: EmbyItem(
-                id: 'e4',
-                name: '续看',
-                type: 'Episode',
-                indexNumber: 4,
-                premiereDate: DateTime(2024, 5, 2),
-                runTimeTicks: 24 * 60 * 10000000,
-                userData: const EmbyUserData(
-                  playbackPositionTicks: 10 * 60 * 10000000,
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 320,
+              child: EpisodeRow(
+                item: EmbyItem(
+                  id: 'e4',
+                  name: '续看',
+                  type: 'Episode',
+                  indexNumber: 4,
+                  premiereDate: DateTime(2024, 5, 2),
+                  runTimeTicks: 24 * 60 * 10000000,
+                  userData: const EmbyUserData(
+                    playbackPositionTicks: 10 * 60 * 10000000,
+                  ),
                 ),
+                selected: false,
+                busyPlayed: false,
+                onTap: () {},
+                onPlay: () {},
+                onTogglePlayed: () {},
               ),
-              selected: false,
-              busyPlayed: false,
-              onTap: () {},
-              onPlay: () {},
-              onTogglePlayed: () {},
             ),
           ),
         ),
@@ -190,15 +212,16 @@ void main() {
         AppViewport.readingScaleOf(const Size(3840, 2160)),
         lessThan(AppViewport.scaleOf(const Size(3840, 2160))),
       );
-      expect(EpisodeRow.thumbWidthFor(const Size(1920, 1080)), 200);
+      // 网格最窄卡 272（剧照再减两侧 8 的内边距），随阅读缩放放大。
+      expect(EpisodeRow.thumbWidthFor(const Size(1920, 1080)), 256);
       expect(
         EpisodeRow.thumbWidthFor(const Size(3840, 2160)),
-        closeTo(330, 0.1),
+        closeTo(272 * 1.65 - 16, 0.1),
       );
     },
   );
 
-  testWidgets('episode title grows on a 4K window without doubling the row', (
+  testWidgets('episode title grows on a 4K window without doubling the card', (
     tester,
   ) async {
     addTearDown(tester.view.resetPhysicalSize);
@@ -224,13 +247,16 @@ void main() {
             alignment: Alignment.topCenter,
             child: AppViewport.readingScope(
               enabled: true,
-              child: EpisodeRow(
-                item: item,
-                selected: false,
-                busyPlayed: false,
-                onTap: () {},
-                onPlay: () {},
-                onTogglePlayed: () {},
+              child: SizedBox(
+                width: EpisodeGridMetrics.minCardWidthFor(view),
+                child: EpisodeRow(
+                  item: item,
+                  selected: false,
+                  busyPlayed: false,
+                  onTap: () {},
+                  onPlay: () {},
+                  onTogglePlayed: () {},
+                ),
               ),
             ),
           ),
@@ -244,8 +270,9 @@ void main() {
     final uhd = await titleHeight(const Size(3840, 2160));
     expect(uhd, greaterThan(hd * 1.4));
     expect(uhd, lessThan(hd * 2));
-    final row = tester.getSize(find.byType(EpisodeRow));
-    expect(row.height, lessThan(360));
+    // 4K 下卡宽与字号同比放大，卡片仍是一张剧照加三四行字的比例。
+    final card = tester.getSize(find.byType(EpisodeRow));
+    expect(card.height, lessThan(card.width * 1.1));
     expect(tester.takeException(), isNull);
   });
 }
