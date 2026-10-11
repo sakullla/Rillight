@@ -249,28 +249,58 @@ def main():
             for stale in release.glob('librillight_core.dll'):
                 stale.unlink()
             subprocess.run([flutter_tool(), 'build', 'windows', '--release',
-                            '--target', 'tool/subtitle_window_smoke.dart'],
+                            '--target', 'test/player/subtitle_window_smoke.dart'],
                            cwd=ROOT, env=env, check=True)
 
-        server = subprocess.Popen(
-            [sys.executable, str(ROOT / 'tool/player_fixtures.py'),
-             '--media', str(media), '--output', str(output)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        try:
-            server_json = output / 'server.json'
-            wait_for(lambda: server_json.exists(), 15, 'Fixture server failed to start')
+        def start_attempt(out_dir):
+            """一次完整启动尝试;返回 (app, server, player_log)。
+
+            桌面窗口/合成器繁忙时应用进程存在非确定性启动竞态
+            (device_id/watch-history 已写但主窗口初始化不完成),
+            单次失败由调用方清理后重试,重试同样要求完整像素证据。
+            """
+            srv = subprocess.Popen(
+                [sys.executable, str(ROOT / 'tool/player_fixtures.py'),
+                 '--media', str(media), '--output', str(out_dir)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            wait_for(lambda: (out_dir / 'server.json').exists(), 15,
+                     'Fixture server failed to start')
             app_env = os.environ.copy()
-            app_env['RILLIGHT_VALIDATION_DIRECTORY'] = str(output)
+            app_env['RILLIGHT_VALIDATION_DIRECTORY'] = str(out_dir)
+            # playback_runtime 从独立变量解析数据根;不设时播放器会写真实
+            # 用户配置目录并与运行中的实例撞锁。
+            app_env['RILLIGHT_VALIDATION_DATA_DIR'] = str(out_dir)
             app_env['RILLIGHT_CORE_PREFIX_WINDOWS_X64'] = str(sdk)
-            app = subprocess.Popen(
+            proc = subprocess.Popen(
                 [str(ROOT / 'build/windows/x64/runner/Release/rillight.exe')],
                 cwd=ROOT, env=app_env,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(f'Subtitle window evidence: {output}')
+            return proc, srv
 
-            player_log = output / 'player.jsonl'
-            wait_for(lambda: player_log.exists(), 60,
-                     'Player process did not start; see main.jsonl')
+        attempt_dirs = [output]
+        attempt_dirs.append(build_root / f'{output.name}-retry')
+        app = server = None
+        player_log = None
+        for attempt, out_dir in enumerate(attempt_dirs):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            if app is not None:
+                app.kill()
+            if server is not None:
+                server.terminate()
+            app, server = start_attempt(out_dir)
+            print(f'Subtitle window evidence: {out_dir}')
+            player_log = out_dir / 'player.jsonl'
+            try:
+                wait_for(lambda: player_log.exists(), 60,
+                         'Player process did not start')
+                output = out_dir
+                break
+            except RuntimeError as error:
+                if attempt == len(attempt_dirs) - 1:
+                    raise RuntimeError(
+                        f'{error}; see {out_dir}/main.jsonl') from error
+                print(f'startup attempt {attempt + 1} failed; retrying')
+        try:
             pid = None
             for _ in range(100):
                 rows = [json.loads(line) for line in player_log.read_text(encoding='utf-8').splitlines() if line.strip()]
