@@ -124,8 +124,8 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Default,Arial,40,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,20,1
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:00.500,0:00:05.000,Default,,0,0,0,,SECOND hard break one\\N次字幕硬换行第二行
-Dialogue: 0,0:00:05.500,0:00:10.500,Default,,0,0,0,,SECOND second cue\\N继续显示
+Dialogue: 0,0:00:00.50,0:00:05.00,Default,,0,0,0,,SECOND hard break one\\N次字幕硬换行第二行
+Dialogue: 0,0:00:05.50,0:00:10.50,Default,,0,0,0,,SECOND second cue\\N继续显示
 '''
         (directory / 'window-secondary.ass').write_text(ass, encoding='utf-8')
     if long_cache and not (directory / 'cache-long.mp4').exists():

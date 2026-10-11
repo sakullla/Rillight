@@ -222,7 +222,12 @@ void main() {
       for (final key in ['tv-player-quality', 'tv-player-source']) {
         expect(find.byKey(Key(key)), findsNothing);
       }
-      expect(find.byKey(const Key('tv-player-tracks')), findsNothing);
+      // 无自带字幕的媒体也保留轨道入口:本地导入在那里(R1/R2)。
+      expect(find.byKey(const Key('tv-player-tracks')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('tv-player-tracks')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('tv-subtitle-off')), findsOneWidget);
+      expect(find.byKey(const Key('tv-subtitle-import')), findsOneWidget);
       expect(find.byKey(const Key('tv-player-speed')), findsOneWidget);
       expect(tester.takeException(), isNull);
       await finish(tester);

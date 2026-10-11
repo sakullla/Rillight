@@ -1097,8 +1097,15 @@ void main() {
     ]) {
       expect(find.byKey(Key(key)), findsNothing);
     }
-    expect(find.byKey(const Key('mobile-player-section-tracks')), findsNothing);
-    expect(find.text('关闭字幕'), findsNothing);
+    // 无自带字幕的媒体也保留轨道入口:本地导入在那里(R1/R2)。
+    expect(
+      find.byKey(const Key('mobile-player-section-tracks')),
+      findsOneWidget,
+    );
+    await enterSection(tester, 'tracks');
+    // 双槽字幕面板:主/次字幕各有一个"关闭字幕"项。
+    expect(find.text('关闭字幕'), findsNWidgets(2));
+    expect(find.byKey(const Key('mobile-subtitle-import')), findsOneWidget);
     await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
     await tester.pumpAndSettle();
     await closePlayer(tester);

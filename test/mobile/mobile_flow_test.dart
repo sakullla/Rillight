@@ -143,14 +143,12 @@ void main() {
     expect(find.byType(MobileShell), findsOneWidget);
   }
 
-  Future<void> tapSheetText(WidgetTester tester, String text) async {
+  /// 在更多面板的滚动列表中找到目标并确保可见后点按。
+  /// 双槽字幕面板下同名轨道会出现两份,调用方需自行消歧(如 `.first`)。
+  Future<void> tapSheetFinder(WidgetTester tester, Finder target) async {
     final list = find.descendant(
       of: find.byKey(const Key('mobile-player-options')),
       matching: find.byType(Scrollable),
-    );
-    final target = find.descendant(
-      of: find.byKey(const Key('mobile-player-options')),
-      matching: find.text(text),
     );
     for (var i = 0; i < 12; i++) {
       if (target.evaluate().isNotEmpty) {
@@ -167,7 +165,7 @@ void main() {
       await tester.drag(list, const Offset(0, -120));
       await tester.pumpAndSettle();
     }
-    fail('could not tap $text in the tracks sheet');
+    fail('could not tap $target in the tracks sheet');
   }
 
   void expectPhoneOnly(WidgetTester tester) {
@@ -472,7 +470,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(tracks);
       await tester.pumpAndSettle();
-      await tapSheetText(tester, '英文字幕');
+      // 双槽字幕面板:主/次字幕列表各含同名轨道,取首个(主字幕槽)实例。
+      await tapSheetFinder(
+        tester,
+        find
+            .descendant(
+              of: find.byKey(const Key('mobile-player-options')),
+              matching: find.text('英文字幕'),
+            )
+            .first,
+      );
       expect(current.subtitleStreamIndex, 4);
       expect(current.trackFailure, isNull);
       expect(backend.subtitleIndex, 4);
