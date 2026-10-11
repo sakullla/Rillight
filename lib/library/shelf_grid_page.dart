@@ -1298,6 +1298,10 @@ class _FilterBar extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: LibraryFilterPanel(
         key: gridFilterPanelKey,
+        capabilities:
+            (ShelfClientOverride.maybeOf(context) ??
+                    AuthScope.of(context).client)
+                .capabilities,
         initial: filters,
         years: yearOptions,
         genres: genreOptions,

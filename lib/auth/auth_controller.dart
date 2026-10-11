@@ -77,8 +77,6 @@ class AuthController extends ChangeNotifier {
     this.servers = this.sources.ordinaryStore;
     this.sources.addMembershipCleanup(_clearSourceContribution);
     this.sources.addSourceRevocation(_sourceChanged);
-    client.onSessionExpired = _onSessionExpired;
-    client.onRefreshSession = _refreshSession;
   }
 
   factory AuthController.memory({MediaServerClient? client}) {
@@ -117,6 +115,13 @@ class AuthController extends ChangeNotifier {
       _providerClientFactory(type);
   void Function()? _selectionGuard;
   int _activationGeneration = 0;
+  Object? _sessionOwner;
+  bool _ownsActivation(int generation) =>
+      !_disposed && generation == _activationGeneration;
+  void _requireActivation(int generation) {
+    if (!_ownsActivation(generation)) throw StateError('Selection superseded');
+  }
+
   String? _revokedSelectionId;
   bool _refreshingSelection = false;
 
@@ -144,7 +149,6 @@ class AuthController extends ChangeNotifier {
     try {
       _selectionGuard?.call();
     } on StateError {
-      _activationGeneration++;
       _revokedSelectionId = id;
       _prefill = _session?.server;
       _session = null;
@@ -294,7 +298,9 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> restore() async {
+    final generation = ++_activationGeneration;
     final snapshot = await servers.load();
+    if (!_ownsActivation(generation)) return;
     _savedServers = snapshot.servers;
     final lastId = snapshot.lastServerId;
     _rememberedServerId = lastId;
@@ -308,14 +314,16 @@ class AuthController extends ChangeNotifier {
       return;
     }
     final stored = await credentials.read(last.id);
+    if (!_ownsActivation(generation)) return;
     if (stored == null || stored.accessToken.isEmpty) {
       _prefill = last;
       notifyListeners();
       return;
     }
     try {
-      await _activate(last, stored);
+      await _activate(last, stored, generation: generation);
     } catch (error) {
+      if (!_ownsActivation(generation)) return;
       _session = null;
       _prefill = last;
       _failure = error is MediaServerException
@@ -337,6 +345,7 @@ class AuthController extends ChangeNotifier {
     if (_busy) {
       return false;
     }
+    final generation = ++_activationGeneration;
     // 只有电视辅助确认会要求失败后留在原会话。手机和桌面的失败结果保持原样。
     final previous = preserveSessionOnFailure ? _session : null;
     _busy = true;
@@ -348,15 +357,15 @@ class AuthController extends ChangeNotifier {
       if (_client.serviceType != serviceType) {
         _client.clearSession();
         _client = createProviderClient(serviceType);
-        _client.onSessionExpired = _onSessionExpired;
-        _client.onRefreshSession = _refreshSession;
       }
       client.setUserAgent(userAgent);
       final baseUrl = normalizeServerAddress(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
+      _requireActivation(generation);
       // Preserve legacy configuration IDs. New entries have a local identity
       // independent from remote IDs and other service protocols.
       await sources.requireOrdinaryIdentity(client.serviceType, publicInfo.id);
+      _requireActivation(generation);
       final existing = _savedServers
           .where(
             (s) =>
@@ -368,12 +377,14 @@ class AuthController extends ChangeNotifier {
       final credentialCommit = await sources.beginOrdinaryCredentials(
         configuredId,
       );
+      _requireActivation(generation);
       final auth = await client.authenticateByName(
         baseUrl: baseUrl,
         username: username,
         password: password,
         serverId: publicInfo.id,
       );
+      _requireActivation(generation);
       final server = _serverWithLine(
         existing: existing,
         serverId: configuredId,
@@ -392,17 +403,22 @@ class AuthController extends ChangeNotifier {
         password: password.isEmpty ? null : password,
       );
       await sources.commitOrdinaryCredentials(credentialCommit, stored);
+      _requireActivation(generation);
       await _upsertServer(server);
+      _requireActivation(generation);
       await sources.requireOrdinaryServer(server.id);
-      await _activate(server, stored);
+      _requireActivation(generation);
+      await _activate(server, stored, generation: generation);
       _prefill = null;
       connectDraft = null;
       return true;
     } on MediaServerException catch (error) {
+      if (!_ownsActivation(generation)) return false;
       _failure = error;
       await _dropOrRestore(previous);
       return false;
     } catch (error) {
+      if (!_ownsActivation(generation)) return false;
       _failure = MediaServerException(
         MediaServerFailureKind.unknown,
         detail: error.toString(),
@@ -460,6 +476,8 @@ class AuthController extends ChangeNotifier {
     if (_busy) {
       return;
     }
+    final generation = ++_activationGeneration;
+    final selectedClient = client;
     _busy = true;
     notifyListeners();
     final currentId = _session?.server.id ?? _revokedSelectionId;
@@ -468,26 +486,31 @@ class AuthController extends ChangeNotifier {
       if (currentId != null) {
         credentialCommit = await sources.beginOrdinaryCredentials(currentId);
       }
-      await client.logout();
+      await selectedClient.logout();
     } on MediaServerException {
       // Local credentials are still cleared so the user can sign in again.
     } on StateError {
       // The member may have moved before logout could capture authority.
     } finally {
-      client.clearSession();
-      _session = null;
-      _failure = null;
-      connectDraft = null;
-      _resetLibraryCounts();
+      if (_ownsActivation(generation)) {
+        client.clearSession();
+        _session = null;
+        _sessionOwner = null;
+        _failure = null;
+        connectDraft = null;
+        _resetLibraryCounts();
+      }
       if (credentialCommit != null) {
         try {
           await sources.commitOrdinaryCredentials(credentialCommit, null);
         } on CredentialRevocationException catch (error) {
-          _failure = MediaServerException(
-            MediaServerFailureKind.unknown,
-            detail: error.toString(),
-            cause: error,
-          );
+          if (_ownsActivation(generation)) {
+            _failure = MediaServerException(
+              MediaServerFailureKind.unknown,
+              detail: error.toString(),
+              cause: error,
+            );
+          }
         } on StateError {
           // Membership/account changed while remote logout was pending.
         }
@@ -507,6 +530,7 @@ class AuthController extends ChangeNotifier {
     if (found == null) {
       return;
     }
+    final generation = ++_activationGeneration;
     final currentLineId = found.activeLine?.id;
     final requestedLineId = (lineId == null || lineId.isEmpty)
         ? currentLineId
@@ -528,6 +552,7 @@ class AuthController extends ChangeNotifier {
         ? found.copyWith(activeLineId: requestedLineId)
         : found;
     final stored = await credentials.read(serverId);
+    if (!_ownsActivation(generation)) return;
     guard?.call();
     final sameServer = _session?.server.id == serverId;
     final changingLine = sameServer && requestedLineId != currentLineId;
@@ -550,10 +575,12 @@ class AuthController extends ChangeNotifier {
         } catch (error) {
           detail = error.toString();
         }
+        if (!_ownsActivation(generation)) return;
         if (detail.isEmpty && server.serviceType == MediaServerType.plex) {
           detail = await _targetLineFailure(server, stored) ?? '';
         }
         guard?.call();
+        if (!_ownsActivation(generation)) return;
         if (detail.isNotEmpty) {
           _lineSwitchFailure = LineSwitchFailure(
             address: server.baseUrl,
@@ -568,9 +595,11 @@ class AuthController extends ChangeNotifier {
       guard?.call();
       try {
         await _upsertServer(server);
+        if (!_ownsActivation(generation)) return;
         guard?.call();
-        await _activate(server, stored, guard: guard);
+        await _activate(server, stored, guard: guard, generation: generation);
       } catch (error) {
+        if (!_ownsActivation(generation)) return;
         guard?.call();
         _session = null;
         _revokedSelectionId = null;
@@ -580,6 +609,7 @@ class AuthController extends ChangeNotifier {
             ? error
             : const MediaServerException(MediaServerFailureKind.sessionExpired);
       }
+      if (!_ownsActivation(generation)) return;
       connectDraft = null;
       notifyListeners();
       return;
@@ -1110,62 +1140,99 @@ class AuthController extends ChangeNotifier {
     SavedServer server,
     StoredCredentials stored, {
     void Function()? guard,
+    int? generation,
   }) async {
     guard?.call();
-    final generation = ++_activationGeneration;
+    final operation = generation ?? ++_activationGeneration;
+    _requireActivation(operation);
     if (stored.serviceType != server.serviceType ||
         server.homeUserId != stored.homeUserId ||
         server.cloudAccountId != stored.cloudAccountId) {
       throw StateError('Source credential identity mismatch');
     }
-    if (_client.serviceType != server.serviceType) {
-      _client.clearSession();
-      _client = createProviderClient(server.serviceType);
+    // Verification may await the network. A candidate must not share mutable
+    // session fields with the published client or another pending activation.
+    // Legacy Emby activation is synchronous and retains injected subclasses.
+    final attached =
+        server.serviceType == MediaServerType.emby &&
+            _client.serviceType == server.serviceType
+        ? _client
+        : createProviderClient(server.serviceType);
+    if (server.serviceType != MediaServerType.emby &&
+        identical(attached, _client)) {
+      throw StateError('Provider factory must return an independent client');
     }
-    _guardedClient?.clearSession();
-    _guardedClient = null;
-    final attached = _client;
-    attached.onSessionExpired = _onSessionExpired;
-    attached.onRefreshSession = _refreshSession;
-    attached.attachSession(
-      baseUrl: Uri.parse(server.baseUrl),
-      accessToken: stored.accessToken,
-      userId: stored.userId,
-      userAgent: server.normalizedUserAgent,
-    );
-    final sourceGuard = sources.selectedSessionGuard(server.id);
-    if (server.serviceType != MediaServerType.emby) {
-      _session = null;
-      try {
+    attached.onSessionExpired = null;
+    attached.onRefreshSession = null;
+    late final void Function() sourceGuard;
+    MediaServerClient? guarded;
+    try {
+      attached.attachSession(
+        baseUrl: Uri.parse(server.baseUrl),
+        accessToken: stored.accessToken,
+        userId: stored.userId,
+        userAgent: server.normalizedUserAgent,
+      );
+      sourceGuard = sources.selectedSessionGuard(server.id);
+      if (server.serviceType != MediaServerType.emby) {
         final info = await attached.getPublicInfo(Uri.parse(server.baseUrl));
+        _requireActivation(operation);
         sourceGuard();
         guard?.call();
         if (info.id != (server.verifiedServerId ?? server.id)) {
           throw const MediaServerException(MediaServerFailureKind.forbidden);
         }
         await sources.verifyAttachedSession(server.id, stored, attached);
+        _requireActivation(operation);
         sourceGuard();
         guard?.call();
-        if (_disposed || generation != _activationGeneration) {
-          throw StateError('Selection superseded');
-        }
-        _guardedClient = attached.withRequestGuard(sourceGuard);
-        _guardedClient!.onSessionExpired = _onSessionExpired;
-        _guardedClient!.onRefreshSession = _refreshSession;
-      } catch (_) {
-        attached.clearSession();
-        rethrow;
+        guarded = attached.withRequestGuard(sourceGuard);
       }
+      guard?.call();
+      _requireActivation(operation);
+      sourceGuard();
+    } catch (_) {
+      attached.clearSession();
+      guarded?.clearSession();
+      rethrow;
     }
-    guard?.call();
+    final retired = _client;
+    final retiredGuarded = _guardedClient;
+    if (!identical(retired, attached)) {
+      retired.onSessionExpired = null;
+      retired.onRefreshSession = null;
+      retired.clearSession();
+    }
+    retiredGuarded?.clearSession();
+    _client = attached;
+    _guardedClient = guarded;
     _selectionGuard = sourceGuard;
     _revokedSelectionId = null;
-    _session = AuthSession(
+    final session = AuthSession(
       server: server,
       userId: stored.userId,
       username: stored.username,
       accessToken: stored.accessToken,
     );
+    _session = session;
+    final owner = Object();
+    _sessionOwner = owner;
+    bool ownsSession() =>
+        !_disposed &&
+        identical(_sessionOwner, owner) &&
+        identical(_client, attached) &&
+        _isSameSession(session);
+    void expired() {
+      if (ownsSession()) _onSessionExpired();
+    }
+
+    Future<bool> refresh() => ownsSession()
+        ? _refreshSession(session, attached, ownsSession)
+        : Future.value(false);
+    attached.onSessionExpired = expired;
+    attached.onRefreshSession = refresh;
+    guarded?.onSessionExpired = expired;
+    guarded?.onRefreshSession = refresh;
     unawaited(loadLibraryCounts());
   }
 
@@ -1192,22 +1259,26 @@ class AuthController extends ChangeNotifier {
     _rememberedServerId = lastId;
   }
 
-  Future<bool> _refreshSession() async {
-    final session = _session;
-    if (session == null) {
-      return false;
-    }
+  Future<bool> _refreshSession(
+    AuthSession session,
+    MediaServerClient selectedClient,
+    bool Function() ownsSession,
+  ) async {
+    final generation = _activationGeneration;
+    bool current() => ownsSession() && _ownsActivation(generation);
+    if (!current()) return false;
     try {
       final credentialCommit = await sources.beginOrdinaryCredentials(
         session.server.id,
       );
       final stored = await credentials.read(session.server.id);
+      if (!current()) return false;
       final password = stored?.password;
       if (stored == null || password == null || password.isEmpty) {
         return false;
       }
-      client.setUserAgent(session.server.normalizedUserAgent);
-      final auth = await client.authenticateByName(
+      selectedClient.setUserAgent(session.server.normalizedUserAgent);
+      final auth = await selectedClient.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
         password: password,
@@ -1226,14 +1297,21 @@ class AuthController extends ChangeNotifier {
         username: stored.username,
         password: password,
       );
-      if (!_isSameSession(session)) {
+      if (!current()) {
         return false;
       }
       _refreshingSelection = true;
       try {
         await sources.commitOrdinaryCredentials(credentialCommit, next);
-        if (!_isSameSession(session)) return false;
-        await _activate(session.server, next);
+        if (!current()) return false;
+        await _activate(
+          session.server,
+          next,
+          generation: generation,
+          guard: () {
+            if (!current()) throw StateError('Refresh superseded');
+          },
+        );
       } finally {
         _refreshingSelection = false;
       }
@@ -1260,6 +1338,7 @@ class AuthController extends ChangeNotifier {
     _handlingExpiry = true;
     final current = _session!;
     _session = null;
+    _sessionOwner = null;
     client.clearSession();
     _prefill = current.server;
     _failure = const MediaServerException(

@@ -62,6 +62,7 @@ class PlexAuthentication
     this.guard,
     DateTime Function()? now,
     this.strongPin = true,
+    String? userAgent,
   }) : dio =
            dio ??
            Dio(
@@ -73,7 +74,8 @@ class PlexAuthentication
            ),
        accountUrl = accountUrl ?? Uri.parse('https://clients.plex.tv'),
        homeUrl = homeUrl ?? Uri.parse('https://plex.tv'),
-       now = now ?? DateTime.now;
+       now = now ?? DateTime.now,
+       userAgent = resolveUserAgent(userAgent, device);
   final ClientDeviceInfo device;
   final PlexCredentialReader readCredential;
   final PlexCredentialWriter writeCredential;
@@ -83,9 +85,26 @@ class PlexAuthentication
   final void Function()? guard;
   final DateTime Function() now;
   final bool strongPin;
+  final String userAgent;
+
+  /// Keep per-source headers on the request, never on the shared Dio client.
+  PlexAuthentication withUserAgent(String? value) => PlexAuthentication(
+    device: device,
+    readCredential: readCredential,
+    writeCredential: writeCredential,
+    deleteCredential: deleteCredential,
+    dio: dio,
+    accountUrl: accountUrl,
+    homeUrl: homeUrl,
+    guard: guard,
+    now: now,
+    strongPin: strongPin,
+    userAgent: value,
+  );
   final Map<String, Future<void>> _refreshes = {};
   final Map<String, int> _generations = {};
   Map<String, String> get headers => {
+    'User-Agent': userAgent,
     'X-Plex-Client-Identifier': device.deviceId,
     'X-Plex-Product': device.clientName,
     'X-Plex-Version': device.version,

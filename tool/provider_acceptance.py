@@ -40,6 +40,10 @@ COMMANDS = (
         "test/player/provider_process_boundary_test.dart",
     )),
     ("product", (
+        "test/auth/provider_session_ownership_test.dart",
+        "test/auth/provider_user_agent_test.dart",
+        "test/auth/provider_connect_entry_user_agent_test.dart",
+        "test/catalog/desktop_provider_filter_test.dart",
         "test/auth/provider_connect_controller_test.dart",
         "test/auth/provider_connect_dialog_test.dart",
         "test/auth/provider_connect_management_test.dart",

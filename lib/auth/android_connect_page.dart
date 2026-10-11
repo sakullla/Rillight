@@ -178,6 +178,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
       final connected = await showProviderConnect(
         context,
         auth,
+        userAgent: _userAgent.text,
         existing: selected,
       );
       if (connected == true && mounted) context.go(AppRoutes.home);
@@ -319,6 +320,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                               final connected = await showProviderConnect(
                                 context,
                                 auth,
+                                userAgent: _userAgent.text,
                               );
                               if (connected == true && context.mounted) {
                                 context.go(AppRoutes.home);

@@ -63,6 +63,7 @@ Future<bool?> showProviderConnect(
   SavedServer? existing,
   AccessRegion region = AccessRegion.ordinary,
   bool home = false,
+  String? userAgent,
 }) async {
   final release = auth.retainAuthorizationPresentation();
   try {
@@ -74,6 +75,7 @@ Future<bool?> showProviderConnect(
         existing: existing,
         region: region,
         home: home,
+        initialUserAgent: userAgent,
       ),
     );
   } finally {
@@ -88,11 +90,13 @@ class ProviderConnectDialog extends StatefulWidget {
     this.existing,
     this.region = AccessRegion.ordinary,
     this.home = false,
+    this.initialUserAgent,
   });
   final AuthController auth;
   final SavedServer? existing;
   final AccessRegion region;
   final bool home;
+  final String? initialUserAgent;
   @override
   State<ProviderConnectDialog> createState() => _ProviderConnectDialogState();
 }
@@ -112,10 +116,11 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       auth: widget.auth,
       existing: widget.existing,
       region: widget.region,
+      userAgent: widget.initialUserAgent,
     );
     address.text = widget.existing?.baseUrl ?? '';
     username.text = widget.existing?.username ?? '';
-    userAgent.text = widget.existing?.userAgent ?? '';
+    userAgent.text = controller.userAgent;
     userAgent.addListener(() => controller.userAgent = userAgent.text);
     widget.auth.regionAccess.addListener(_accessChanged);
     if (widget.home) {
@@ -291,8 +296,10 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                           l.password,
                           secret: true,
                         ),
-                        _input('provider-user-agent', userAgent, l.userAgent),
-                        const SizedBox(height: 12),
+                      ],
+                      _input('provider-user-agent', userAgent, l.userAgent),
+                      const SizedBox(height: 12),
+                      if (c.type != MediaServerType.plex)
                         FilledButton(
                           key: const Key('provider-password-submit'),
                           onPressed: c.busy
@@ -304,7 +311,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                                 ),
                           child: Text(l.connect),
                         ),
-                      ],
                       if (c.type != MediaServerType.emby)
                         OutlinedButton(
                           key: const Key('provider-authorize'),

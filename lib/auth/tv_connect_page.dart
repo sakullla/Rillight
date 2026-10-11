@@ -97,6 +97,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
       final connected = await showProviderConnect(
         context,
         auth,
+        userAgent: _userAgent.text,
         existing: selected,
       );
       if (connected == true && mounted) context.go(AppRoutes.home);
@@ -300,7 +301,11 @@ class _TvConnectPageState extends State<TvConnectPage> {
             onPressed: auth.isBusy
                 ? null
                 : () async {
-                    final connected = await showProviderConnect(context, auth);
+                    final connected = await showProviderConnect(
+                      context,
+                      auth,
+                      userAgent: _userAgent.text,
+                    );
                     if (connected == true && context.mounted) {
                       context.go(AppRoutes.home);
                     }

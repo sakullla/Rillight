@@ -231,12 +231,22 @@ class PlexClient extends MediaServerClient
           ? plexMap(root['MediaContainer'])
           : root;
     } on MediaServerException catch (error) {
+      // Errors are responses too: a retired request cannot refresh or expire
+      // a later session, even when the server returns an authentication error.
+      _guard?.call();
+      if (generation != _generation) {
+        throw const MediaServerException(MediaServerFailureKind.cancelled);
+      }
       if (error.kind == MediaServerFailureKind.authorizationExpired &&
           !refreshed &&
           onRefreshSession != null) {
         _guard?.call();
-        if (await onRefreshSession!()) {
-          _guard?.call();
+        final refreshedSession = await onRefreshSession!();
+        _guard?.call();
+        if (generation != _generation) {
+          throw const MediaServerException(MediaServerFailureKind.cancelled);
+        }
+        if (refreshedSession) {
           return _get(
             path,
             query: query,
@@ -260,7 +270,10 @@ class PlexClient extends MediaServerClient
     final response = await plexRequest(
       _dio,
       plexEndpoint(baseUrl, '/identity'),
-      headers: {'X-Plex-Client-Identifier': device.deviceId},
+      headers: {
+        'X-Plex-Client-Identifier': device.deviceId,
+        'User-Agent': userAgent,
+      },
     );
     _guard?.call();
     final root = plexMap(plexMap(response.data)['MediaContainer']);

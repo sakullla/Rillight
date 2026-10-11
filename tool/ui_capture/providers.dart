@@ -151,6 +151,7 @@ extension ProviderCaptures on CaptureSession {
           MediaServerType.plex => 'Plex',
         }).last,
       );
+      await _providerField('provider-user-agent', 'Rillight-Capture/1.0');
       await save('provider-$name-login');
       if (type == MediaServerType.plex) {
         CaptureProviders.plex.authorized = false;

@@ -848,14 +848,17 @@ void main() {
         ServerListSnapshot(servers: [saved], lastServerId: 'a'),
       );
       final credentials = MemoryCredentialStore({'a': credential(saved)});
+      var verifications = 0;
       final registry = SourceSessionRegistry(
         access: RegionAccessController(),
         store: store,
         credentials: credentials,
         createClient: () => IdentityClient(MediaServerType.emby),
         createProviderClient: IdentityClient.new,
-        sessionIdentityVerifier: (_, _, _) async =>
-            throw StateError('Synthetic invalid identity'),
+        sessionIdentityVerifier: (_, _, _) async {
+          verifications++;
+          throw StateError('Synthetic invalid identity');
+        },
       );
       final client = IdentityClient(MediaServerType.plex);
       final auth = AuthController(
@@ -863,9 +866,11 @@ void main() {
         credentials: credentials,
         servers: store,
         sources: registry,
+        providerClientFactory: IdentityClient.new,
       );
       addTearDown(auth.dispose);
       await auth.restore();
+      expect(verifications, 1);
       expect(auth.failure, isNotNull);
       expect(auth.isLoggedIn, isFalse);
       expect(client.hasSession, isFalse);

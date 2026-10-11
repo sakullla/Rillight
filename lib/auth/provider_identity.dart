@@ -23,15 +23,17 @@ Future<void> verifyProviderIdentity(
     throw StateError('Plex authorization required');
   }
   client.bindVerifiedIdentity(
-    await plex.verifyResourceIdentity(
-      cloudCredentialRef: server.cloudCredentialRef!,
-      resourceCredentialRef: server.resourceCredentialRef!,
-      cloudAccountId: server.cloudAccountId!,
-      serverId: server.verifiedServerId!,
-      userId: credentials.userId,
-      resourceToken: credentials.accessToken,
-      connection: client.baseUrl!,
-      homeUserId: server.homeUserId,
-    ),
+    await plex
+        .withUserAgent(server.userAgent)
+        .verifyResourceIdentity(
+          cloudCredentialRef: server.cloudCredentialRef!,
+          resourceCredentialRef: server.resourceCredentialRef!,
+          cloudAccountId: server.cloudAccountId!,
+          serverId: server.verifiedServerId!,
+          userId: credentials.userId,
+          resourceToken: credentials.accessToken,
+          connection: client.baseUrl!,
+          homeUserId: server.homeUserId,
+        ),
   );
 }

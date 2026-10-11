@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../media_server/authentication.dart';
 import '../media_server/capabilities.dart';
+import '../media_server/device.dart';
 import '../media_server/errors.dart';
 import '../media_server/media_server_client.dart';
 import '../media_server/server_address.dart';
@@ -29,13 +30,15 @@ class ProviderConnectController extends ChangeNotifier {
     required this.auth,
     this.existing,
     this.region = AccessRegion.ordinary,
-  }) : type = existing?.serviceType ?? MediaServerType.emby;
+    String? userAgent,
+  }) : type = existing?.serviceType ?? MediaServerType.emby,
+       userAgent = userAgent ?? existing?.userAgent ?? '';
 
   final AuthController auth;
   final SavedServer? existing;
   final AccessRegion region;
   MediaServerType type;
-  String userAgent = '';
+  String userAgent;
   String? _submittedPassword;
   ProviderConnectStage stage = ProviderConnectStage.credentials;
   bool busy = false;
@@ -104,7 +107,7 @@ class ProviderConnectController extends ChangeNotifier {
     _client = auth
         .createProviderClient(type)
         .withRequestGuard(authorization.requireValid);
-    _client!.setUserAgent(userAgent.isEmpty ? existing?.userAgent : userAgent);
+    _client!.setUserAgent(userAgent);
     if (type == MediaServerType.plex) {
       final base = auth.plexAuthentication;
       _plex = PlexAuthentication(
@@ -118,6 +121,7 @@ class ProviderConnectController extends ChangeNotifier {
         now: base.now,
         strongPin: base.strongPin,
         guard: authorization.requireValid,
+        userAgent: userAgent,
       );
     }
   }
@@ -278,7 +282,7 @@ class ProviderConnectController extends ChangeNotifier {
       id: id,
       name: resource.server.serverName,
       nickname: existing?.nickname,
-      userAgent: existing?.userAgent,
+      userAgent: normalizeUserAgent(userAgent),
       username: resource.user.name,
       region: region,
       serviceType: type,
@@ -331,7 +335,7 @@ class ProviderConnectController extends ChangeNotifier {
         authorizationMethod: method,
         verifiedServerId: info.id,
         nickname: existing?.nickname,
-        userAgent: userAgent.isEmpty ? existing?.userAgent : userAgent,
+        userAgent: normalizeUserAgent(userAgent),
         lines: existing == null
             ? [ServerLine(id: '$id-line', address: uri.toString())]
             : [

@@ -1362,6 +1362,8 @@ class EmbyClient implements MediaServerClient {
   }
 
   Future<T> _withAuthRetry<T>(Future<T> Function() send) async {
+    final expired = onSessionExpired;
+    final refresh = onRefreshSession;
     try {
       return await send();
     } on MediaServerException {
@@ -1374,10 +1376,17 @@ class EmbyClient implements MediaServerClient {
       if (mapped.kind != MediaServerFailureKind.sessionExpired) {
         throw mapped;
       }
+      // A selected Emby client can be reattached while this request is in
+      // flight. Never borrow the callbacks installed for its later session.
+      if (!identical(expired, onSessionExpired) ||
+          !identical(refresh, onRefreshSession)) {
+        throw const MediaServerException(MediaServerFailureKind.cancelled);
+      }
       if (!await _refreshIfExpired()) {
-        onSessionExpired?.call();
+        expired?.call();
         throw mapped;
       }
+      final retryExpired = onSessionExpired;
       try {
         return await send();
       } on MediaServerException {
@@ -1385,7 +1394,7 @@ class EmbyClient implements MediaServerClient {
       } on DioException catch (retryError) {
         final retryMapped = MediaServerException.fromDio(retryError);
         if (retryMapped.kind == MediaServerFailureKind.sessionExpired) {
-          onSessionExpired?.call();
+          if (identical(retryExpired, onSessionExpired)) retryExpired?.call();
         }
         throw retryMapped;
       }
