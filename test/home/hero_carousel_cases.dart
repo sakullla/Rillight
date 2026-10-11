@@ -252,7 +252,7 @@ void main() {
       (tester) async {
         await pumpDesktop(tester);
         await tester.pump();
-        Finder countdown() => find.byType(TweenAnimationBuilder<double>);
+        Finder countdown() => find.byType(HeroCountdownFill);
         expect(countdown(), findsNothing);
 
         final gesture = await tester.createGesture(
@@ -505,6 +505,34 @@ void main() {
       await tester.pump(HeroAutoRotate.rotateInterval);
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('Movie A'), findsOneWidget);
+      await unmount(tester);
+    });
+
+    testWidgets('countdown steps per device pixel instead of every vsync', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(wrap(PhoneHero(catalog: catalog)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+      final fill = find.byType(HeroCountdownFill);
+      expect(fill, findsOneWidget);
+      HeroCountdownFillState state() =>
+          tester.state<HeroCountdownFillState>(fill);
+      expect(state().progress, greaterThan(0));
+      expect(state().progress, lessThan(1));
+      // 1x DPR: one step per ~318ms (7s / 22px); no ticker between steps.
+      expect(tester.hasRunningAnimations, isFalse);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      final before = state().progress;
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(state().progress, greaterThan(before));
+      await tester.pump();
+      expect(tester.binding.hasScheduledFrame, isFalse);
       await unmount(tester);
     });
   });

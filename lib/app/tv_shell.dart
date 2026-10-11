@@ -36,6 +36,9 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
   int _paneSelectionRevision = 0;
   bool _initialized = false, _recovering = false, _failed = false;
 
+  /// 只有真正退到后台(hidden/paused)再回来才刷新;系统浮层只经过 inactive。
+  bool _backgrounded = false;
+
   /// 面板内容向下滚动后收起导航;焦点回到导航时重新展开。
   bool _navHidden = false;
 
@@ -234,7 +237,13 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _backgrounded = true;
+      return;
+    }
+    if (state == AppLifecycleState.resumed && _backgrounded && mounted) {
+      _backgrounded = false;
       final auth = AuthScope.of(context), catalog = CatalogScope.of(context);
       unawaited(() async {
         try {

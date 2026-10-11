@@ -187,6 +187,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   PhoneDisplayControl? _display;
   final PhonePlayerInteraction _interaction = PhonePlayerInteraction();
   Object? _visualSignature;
+
+  /// Last overlay built while hidden, reused until the controls are revealed.
+  (PlayerController, Widget)? _hiddenControls;
   bool _fillFrame = false;
   VideoBackendPhonePresentation? _presentation;
   bool _pip = false;
@@ -843,9 +846,21 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   ListenableBuilder(
                     listenable: Listenable.merge([c, _interaction]),
                     builder: (context, _) {
-                      return PhoneMotion.reveal(
+                      final visible = _interaction.controlsVisibleFor(c);
+                      // Hidden controls sit at opacity 0 behind IgnorePointer.
+                      // Reusing the same widget skips rebuilding and laying
+                      // out the whole overlay on every playback tick (5 Hz for
+                      // the entire session). The first hidden build is fresh,
+                      // and any reveal rebuilds before it is painted.
+                      final frozen = _hiddenControls;
+                      if (!visible &&
+                          frozen != null &&
+                          identical(frozen.$1, c)) {
+                        return frozen.$2;
+                      }
+                      final built = PhoneMotion.reveal(
                         context: context,
-                        visible: _interaction.controlsVisibleFor(c),
+                        visible: visible,
                         child: PhonePlayerControls(
                           controller: c,
                           danmaku: danmaku,
@@ -871,6 +886,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                           },
                         ),
                       );
+                      _hiddenControls = visible ? null : (c, built);
+                      return built;
                     },
                   ),
                 if (!_interaction.locked &&

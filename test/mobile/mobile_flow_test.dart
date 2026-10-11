@@ -181,6 +181,41 @@ void main() {
     expect(find.byType(TvPlayerPage, skipOffstage: false), findsNothing);
   }
 
+  testWidgets('only a real return from background reloads the home catalog', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    await start(tester, server, signedIn: true);
+    expect(find.byType(MobileShell), findsOneWidget);
+    bool resumeRow(String entry) => entry.contains('/Items/Resume');
+    final before = server.requests.where(resumeRow).length;
+    expect(before, greaterThan(0));
+
+    // Notification shade / system dialog: inactive only, no reload.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(server.requests.where(resumeRow).length, before);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(server.requests.where(resumeRow).length, greaterThan(before));
+    expect(tester.takeException(), isNull);
+    // Drain real cache IO and fake-time HTTP deadlines started by reloads.
+    for (var i = 0; i < 3; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(seconds: 13));
+    }
+  }, tags: ['integration']);
+
   testWidgets('home chrome ignores aggregation scroll and layout restoration', (
     tester,
   ) async {

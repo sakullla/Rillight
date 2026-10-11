@@ -29,14 +29,16 @@ Future<void> main(List<String> args) async {
     await runPlayerWindow(argumentFallback: args.length > 1 ? args[1] : '');
     return;
   }
+  // Appearance preference IO is independent of credentials: overlap them.
+  final appearance = AppearanceController();
+  final appearanceReady = appearance.ready;
   await configureMainWindow();
   final auth = await createProductionAuth();
   final router = createAppRouter(auth: auth);
   final playback = await PlaybackRuntime.production(auth);
   final playerHost = DesktopPlayerWindowHost(auth: auth, runtime: playback);
   // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
-  final appearance = AppearanceController();
-  await appearance.ready;
+  await appearanceReady;
   // 播放器进程请求打开条目详情(播放结束"查看剧集"):
   // 主窗口路由到详情页并前置主窗口。
   playerHost.onOpenItemRoute = (itemId, {seasonId, command}) {

@@ -525,24 +525,102 @@ class _ActivePill extends StatelessWidget {
         if (token == null) return pill(null);
         return RepaintBoundary(
           child: pill(
-            TweenAnimationBuilder<double>(
+            HeroCountdownFill(
               key: ValueKey(token),
-              tween: Tween(begin: 0, end: 1),
-              duration: interval,
-              builder: (context, value, _) => Align(
-                alignment: Alignment.centerLeft,
-                child: FractionallySizedBox(
-                  widthFactor: value,
-                  heightFactor: 1,
-                  child: ColoredBox(color: fill),
-                ),
-              ),
+              interval: interval,
+              width: HeroDots._activeWidth,
+              fill: fill,
             ),
           ),
         );
       },
     );
   }
+}
+
+/// 轮播倒计时填充:每前进一个物理像素才重建一次。
+///
+/// 22 逻辑像素宽的进度条在 7 秒里只有几十个可见状态。逐帧补间会让首页
+/// 在没有任何交互时仍按屏幕刷新率(手机常见 90/120Hz)持续出帧,
+/// CPU/GPU 与显示控制器都无法降频。这里改用按像素步进的计时器:
+/// 外观相同,空闲首页的出帧次数降到每秒约 10 次以内。
+@visibleForTesting
+class HeroCountdownFill extends StatefulWidget {
+  const HeroCountdownFill({
+    super.key,
+    required this.interval,
+    required this.width,
+    required this.fill,
+  });
+
+  final Duration interval;
+
+  /// 填充轨道的逻辑宽度,用于按物理像素划分步数。
+  final double width;
+  final Color fill;
+
+  @override
+  State<HeroCountdownFill> createState() => HeroCountdownFillState();
+}
+
+@visibleForTesting
+class HeroCountdownFillState extends State<HeroCountdownFill> {
+  /// 两次重建的最短间隔:高 DPR 屏上也不比 30Hz 更密。
+  static const minStep = Duration(milliseconds: 33);
+
+  Timer? _timer;
+  int _steps = 1;
+  int _step = 0;
+
+  /// 当前填充比例(0–1),已按步数量化。
+  double get progress => _step / _steps;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+    final byPixels = (widget.width * dpr).ceil();
+    final byRate = widget.interval.inMicroseconds ~/ minStep.inMicroseconds;
+    final steps = byPixels.clamp(1, byRate < 1 ? 1 : byRate);
+    if (steps == _steps && _timer != null) return;
+    // 步数变化(如窗口换到不同 DPR 的屏幕)时保持已走过的比例。
+    final ratio = _steps == 0 ? 0.0 : _step / _steps;
+    _steps = steps;
+    _step = (ratio * steps).floor();
+    _timer?.cancel();
+    _timer = null;
+    if (_step >= _steps) return;
+    final period = Duration(
+      microseconds: widget.interval.inMicroseconds ~/ _steps,
+    );
+    final start = _step;
+    _timer = Timer.periodic(period, (timer) {
+      // [Timer.tick] 计入被系统延后的周期,休眠唤醒后直接追到正确位置。
+      final next = (start + timer.tick).clamp(0, _steps);
+      if (next >= _steps) {
+        timer.cancel();
+        if (identical(_timer, timer)) _timer = null;
+      }
+      if (next != _step && mounted) setState(() => _step = next);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: FractionallySizedBox(
+      widthFactor: progress,
+      heightFactor: 1,
+      child: ColoredBox(color: widget.fill),
+    ),
+  );
 }
 
 /// 轮播换页:淡入叠加轻微缩放(进场由 1.04 收到 1),比纯淡入更有层次。

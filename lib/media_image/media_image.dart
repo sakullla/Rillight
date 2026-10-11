@@ -182,7 +182,8 @@ class MediaImage extends StatefulWidget {
     this.fit = BoxFit.contain,
     this.contributesToTheme = false,
     this.blurFill = false,
-  });
+    this.blurSigma,
+  }) : assert(blurSigma == null || !contributesToTheme);
 
   final MediaItem item;
   final double? width;
@@ -205,6 +206,11 @@ class MediaImage extends StatefulWidget {
   /// 画面形状与外框不符时（竖版海报放进横幅），用同一张图的模糊放大
   /// 铺满留白，原图仍按 [fit] 完整显示，不再露出两侧色块。
   final bool blurFill;
+
+  /// 非空时只画这张图的模糊版本(氛围底),不再解码清晰原图。
+  /// 模糊在不超过 160 像素的画布上做一次并缓存,滚动时不再逐帧对整幅
+  /// 横幅跑 [ImageFiltered];与 [contributesToTheme] 互斥。
+  final double? blurSigma;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
   @visibleForTesting
@@ -933,6 +939,18 @@ class _MediaImageState extends State<MediaImage> {
     double? height,
     Alignment alignment,
   ) {
+    final blurSigma = widget.blurSigma;
+    if (blurSigma != null) {
+      return SizedBox(
+        width: width,
+        height: height,
+        child: ClipRect(
+          child: RepaintBoundary(
+            child: BlurredArtwork(bytes: loaded.bytes, sigma: blurSigma),
+          ),
+        ),
+      );
+    }
     // 按请求宽度解码,避免服务端返回原图时在片库滚动里整屏解码。
     // ImageCache 用字符串 key,避免每帧对整段 JPEG 做 ==/hashCode。
     final image = Image(

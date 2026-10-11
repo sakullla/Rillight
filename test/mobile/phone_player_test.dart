@@ -24,6 +24,7 @@ import 'package:rillight/player/danmaku/dandanplay_client.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/source_switch_menu.dart';
+import 'package:rillight/player/phone_player_controls.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/phone_orientation.dart';
@@ -1520,6 +1521,43 @@ void main() {
     await tester.tap(find.byKey(const Key('mobile-player-toggle')));
     await tester.pump();
     expect(current.isPlaying, isFalse);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('hidden controls are not rebuilt on every playback tick', (
+    tester,
+  ) async {
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    final backend = current.backend as FakeVideoBackend;
+    PhonePlayerControls controls() =>
+        tester.widget<PhonePlayerControls>(find.byType(PhonePlayerControls));
+    current.toggleControls();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(current.controlsVisible, isFalse);
+    final hidden = controls();
+    var notified = 0;
+    void count() => notified++;
+    current.addListener(count);
+    // Each distinct throughput readout notifies the controller.
+    for (var i = 1; i <= 5; i++) {
+      backend.emitEvent(VideoEventKind.cacheSpeed, i * 3.0 * 1024 * 1024);
+      await tester.pump(kPlaybackUiMinInterval);
+    }
+    current.removeListener(count);
+    expect(notified, greaterThan(0));
+    expect(identical(controls(), hidden), isTrue);
+
+    // Revealing rebuilds immediately with the current playback state.
+    current.toggleControls();
+    await tester.pump();
+    expect(identical(controls(), hidden), isFalse);
+    expect(current.controlsVisible, isTrue);
     await closePlayer(tester);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);

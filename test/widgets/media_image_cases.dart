@@ -24,6 +24,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_image/blurred_artwork.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -514,6 +515,44 @@ void main() {
     client.pending['img-movie']!.complete(kTinyPng);
     await pumpUntilImage(tester);
     expect(find.byType(Image), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(MediaImageCache.defaultScrollIdle);
+  });
+
+  testWidgets('blurSigma paints cached blur instead of a sharp live filter', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient();
+    final auth = detachedAuth(client);
+    addTearDown(auth.dispose);
+    await tester.pumpWidget(
+      wrap(
+        auth,
+        const MediaImage(
+          item: withTag,
+          width: 360,
+          height: 220,
+          fit: BoxFit.cover,
+          blurSigma: 36,
+        ),
+      ),
+    );
+    await pumpUntilImage(tester);
+    expect(client.requested, ['img-movie']);
+    expect(find.byType(BlurredArtwork), findsOneWidget);
+    expect(find.byType(ImageFiltered), findsNothing);
+    // No full-resolution decode of the sharp artwork is requested.
+    expect(
+      find.descendant(
+        of: find.byType(MediaImage),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Image &&
+              widget.image.runtimeType.toString() == '_MediaMemoryImage',
+        ),
+      ),
+      findsNothing,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(MediaImageCache.defaultScrollIdle);
   });

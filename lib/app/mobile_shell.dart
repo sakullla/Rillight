@@ -29,6 +29,10 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   bool? _pendingHomeCovered;
   bool _homeCoverScheduled = false;
   bool _recovering = false, _recoveryFailed = false, _initialized = false;
+
+  /// 只有真正退到后台(hidden/paused)再回来才刷新。下拉通知栏、系统弹窗、
+  /// 分屏切换焦点只经过 inactive,不值得为此重新拉取用户与整个首页。
+  bool _backgrounded = false;
   @override
   void initState() {
     super.initState();
@@ -79,7 +83,13 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _backgrounded = true;
+      return;
+    }
+    if (state == AppLifecycleState.resumed && _backgrounded && mounted) {
+      _backgrounded = false;
       final auth = AuthScope.of(context), catalog = CatalogScope.of(context);
       if (auth.isLoggedIn) {
         unawaited(() async {

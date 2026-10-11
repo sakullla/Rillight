@@ -69,6 +69,8 @@ class PhoneItemBanner extends StatelessWidget {
   /// 承接共享图过渡的那一张（海报卡或背景），参数与来源卡片一致。
   static const handoffImageKey = Key('phone-detail-handoff-image');
 
+  static const double _posterBlurSigma = 36;
+
   final MediaItem item;
 
   /// 海报卡显示的条目。剧集切季时背景跟着季走，海报卡仍是剧集本身，
@@ -128,6 +130,9 @@ class PhoneItemBanner extends StatelessWidget {
     final rise = showPoster ? posterHeight * .68 : AppSpacing.xl;
     final landscape = hasLandscapeArt(item);
 
+    // 只有海报、又不承接共享图时，背景只是氛围底：直接取预先缩小模糊好的
+    // 版本，不解码清晰大图，也不在滚动时逐帧对整幅横幅做高斯模糊。
+    final cachedBlur = !landscape && !preferBackdrop;
     Widget backdrop = MediaImage(
       key: preferBackdrop ? handoffImageKey : backdropKey,
       item: item,
@@ -136,6 +141,7 @@ class PhoneItemBanner extends StatelessWidget {
       smartCrop: landscape,
       fit: BoxFit.cover,
       maxWidth: preferBackdrop ? maxWidth : PhoneMotion.pageRequestWidth,
+      blurSigma: cachedBlur ? _posterBlurSigma : null,
     );
     if (preferBackdrop) {
       backdrop = PhoneMotion.sharedImage(
@@ -149,14 +155,17 @@ class PhoneItemBanner extends StatelessWidget {
       backdrop = Stack(
         fit: StackFit.expand,
         children: [
-          ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(
-              sigmaX: 36,
-              sigmaY: 36,
-              tileMode: TileMode.clamp,
+          if (cachedBlur)
+            backdrop
+          else
+            ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: _posterBlurSigma,
+                sigmaY: _posterBlurSigma,
+                tileMode: TileMode.clamp,
+              ),
+              child: backdrop,
             ),
-            child: backdrop,
-          ),
           ColoredBox(color: Colors.black.withValues(alpha: .18)),
         ],
       );

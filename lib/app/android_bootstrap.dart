@@ -68,25 +68,26 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         return;
       }
       if (environment.isTv) configureTvPaintingImageCache();
-      final auth = await (widget.createAuth ?? createProductionAuth)();
+      // 凭据、外观偏好与应用目录互不依赖,并行读取以缩短冷启动白屏。
+      // Record.wait 会等全部完成后再报告失败,不留下悬空的平台调用。
+      // 外观仍在上屏前就绪,避免启动闪一下错误亮度。
+      final appearance = AppearanceController();
+      final (auth, _, supportDirectory) = await (
+        (widget.createAuth ?? createProductionAuth)(),
+        appearance.ready,
+        widget.createAuth != null
+            ? Future<Directory?>.value()
+            : getApplicationSupportDirectory(),
+      ).wait;
       if (!mounted) {
         auth.dispose();
         return;
       }
-      final snapshotStore = widget.createAuth != null
+      final snapshotStore = supportDirectory == null
           ? MemoryPlaybackSessionSnapshotStore()
           : FilePlaybackSessionSnapshotStore(
-              File(
-                '${(await getApplicationSupportDirectory()).path}/rillight/playback-session.json',
-              ),
+              File('${supportDirectory.path}/rillight/playback-session.json'),
             );
-      if (!mounted) {
-        auth.dispose();
-        return;
-      }
-      // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
-      final appearance = AppearanceController();
-      await appearance.ready;
       if (!mounted) {
         auth.dispose();
         return;
