@@ -986,9 +986,11 @@ void main() {
       rate: 1,
     );
     final after = controller.estimatePosition();
+    // Scheduling may advance the real clock between samples. Only backward
+    // snapping is a regression; forward elapsed time has no 20 ms ceiling.
     expect(
-      after.inMilliseconds,
-      closeTo(mid.inMilliseconds, 20),
+      after,
+      greaterThanOrEqualTo(mid),
       reason: '晚到的 time-pos 不得把已插值的时钟拽回去',
     );
   });

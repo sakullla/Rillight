@@ -102,9 +102,11 @@ class _RecordingHost extends PlayerWindowHost {
 }
 
 class _IsolatedHelperControl extends DesktopPlayerProcessControl {
+  static const launchTimeout = Duration(seconds: 180);
+
   _IsolatedHelperControl()
     : super(
-        startupTimeout: const Duration(seconds: 190),
+        startupTimeout: launchTimeout + const Duration(seconds: 10),
         pollInterval: const Duration(milliseconds: 30),
       );
   final Map<int, Process> children = {};
@@ -183,7 +185,7 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
     );
     // Cold native hooks compile in an isolated directory while the full suite
     // is busy. This budget belongs to the test compiler, not product startup.
-    final deadline = DateTime.now().add(const Duration(seconds: 180));
+    final deadline = DateTime.now().add(launchTimeout);
     while (!finished && DateTime.now().isBefore(deadline)) {
       // Unlike native CreateProcess, this launch waits for Flutter to compile
       // the child. Keep the parent's lease alive during that wait; otherwise
@@ -992,10 +994,10 @@ void main() {
       await _settle(tester);
       await tester.ensureVisible(find.widgetWithText(FilledButton, '播放').first);
       await tester.tap(find.widgetWithText(FilledButton, '播放').first);
-      // The real helper launch allows 70 seconds, including native asset and
-      // Flutter compilation. Its observation deadline must not expire first.
+      // Include the helper's native asset/Flutter compilation budget, then
+      // allow its first observation to reach the parent.
       final privateHelperDeadline = DateTime.now().add(
-        const Duration(seconds: 80),
+        _IsolatedHelperControl.launchTimeout + const Duration(seconds: 20),
       );
       while (DateTime.now().isBefore(privateHelperDeadline)) {
         await tester.pump(const Duration(milliseconds: 30));

@@ -81,6 +81,8 @@ void main() {
               (fixture.proxy.diagnostics['responseReadAheadPublishedBytes']
                   as int) >=
               48 * _mib,
+          // This checks capacity, not disk/CPU throughput under suite load.
+          timeout: const Duration(seconds: 30),
         );
         while (await reader.moveNext()) {
           position = _verify(reader.current, position);
@@ -483,8 +485,11 @@ class _Direct {
     return StreamIterator(response.timeout(const Duration(seconds: 10)));
   }
 
-  Future<void> waitFor(bool Function() condition) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
+  Future<void> waitFor(
+    bool Function() condition, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
     while (!condition() && DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }

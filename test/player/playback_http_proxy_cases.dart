@@ -3961,11 +3961,12 @@ class _CacheFixture {
   Future<void> settle() async {
     // Network completion precedes final publication by a microtask; disk tests
     // wait for the bounded storage writer rather than assuming synchronous IO.
-    for (var tries = 0; tries < 100; tries++) {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    do {
       await Future<void>.delayed(const Duration(milliseconds: 5));
       if (cache.diagnostics['pendingBytes'] == 0) return;
-    }
-    fail('Cache writer did not settle');
+    } while (DateTime.now().isBefore(deadline));
+    fail('Cache writer did not settle: ${cache.diagnostics}');
   }
 
   Future<(int, String)> read(String? range) async {
