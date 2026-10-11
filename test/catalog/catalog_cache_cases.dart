@@ -199,7 +199,12 @@ void main() {
       await cacheA.fetch(client, request);
       await cacheA.flushPendingWrites();
       expect(disk.files, hasLength(1));
-      expect(disk.files.keys.single, contains('server-a|user-alice|'));
+      expect(
+        disk.files.keys.single,
+        startsWith(
+          '["emby","ordinary","server-a",null,"user-alice",null,null]|',
+        ),
+      );
 
       // 同 serverId 不同用户:key 不同,读不到对方数据。
       final cacheB = CatalogCache()

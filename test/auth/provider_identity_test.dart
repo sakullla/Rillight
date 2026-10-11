@@ -1,3 +1,4 @@
+import 'package:rillight/auth/auth_controller.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -36,6 +37,8 @@ class IdentityClient extends MediaServerClient {
   @override
   void Function()? onSessionExpired;
   @override
+  Future<bool> Function()? onRefreshSession;
+  @override
   bool get hasSession => accessToken != null;
   @override
   void attachSession({
@@ -68,6 +71,9 @@ class IdentityClient extends MediaServerClient {
     return MediaUser(id: returnedUser ?? userId!, name: 'same-name');
   }
 
+  @override
+  Future<LibraryCounts> getItemCounts() async =>
+      const LibraryCounts(movie: 0, series: 0, episode: 0, others: []);
   @override
   Future<void> logout() async => clearSession();
   @override
@@ -551,6 +557,402 @@ void main() {
   );
 
   test(
+    'session notification removes current identity from memory and disk only',
+    () async {
+      final disk = IdentityCatalogDisk();
+      final a = CatalogCache()..debugSetDiskStore(disk);
+      final b = CatalogCache()..debugSetDiskStore(disk);
+      const request = CatalogRequest('views');
+      a.attachSession(
+        serverId: 'same',
+        userId: 'same',
+        serviceType: MediaServerType.emby,
+      );
+      b.attachSession(
+        serverId: 'same',
+        userId: 'same',
+        serviceType: MediaServerType.plex,
+        homeUserId: 'child',
+      );
+      await a.write(request, {'source': 'a'});
+      await b.write(request, {'source': 'b'});
+      await Future.wait([a.flushPendingWrites(), b.flushPendingWrites()]);
+      expect(disk.values, hasLength(2));
+      await a.invalidateSession();
+      expect(await a.lookup(request), isNull);
+      expect(disk.values, hasLength(1));
+      final restored = CatalogCache()..debugSetDiskStore(disk);
+      restored.attachSession(
+        serverId: 'same',
+        userId: 'same',
+        serviceType: MediaServerType.emby,
+      );
+      expect(await restored.lookup(request), isNull);
+      expect((await b.lookup(request))!.json, {'source': 'b'});
+      restored.attachSession(
+        serverId: 'same',
+        userId: 'same',
+        serviceType: MediaServerType.plex,
+        homeUserId: 'child',
+      );
+      expect((await restored.lookup(request))!.json, {'source': 'b'});
+    },
+  );
+
+  final invalidFields = <String, Object?>{
+    'region': 'privat',
+    'participates': 'true',
+    'scopeKnown': 1,
+    'libraryIds': ['library', 42],
+    'activeLineId': 'missing',
+    'lines': [
+      const ServerLine(id: 'line', address: 'https://server.test').toJson(),
+      {'id': 'broken'},
+    ],
+  };
+  for (final invalid in invalidFields.entries) {
+    test(
+      'explicit invalid ${invalid.key} cannot be normalized or overwrite the original',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('invalid-source');
+        addTearDown(() => dir.delete(recursive: true));
+        final record = source(
+          'private',
+          MediaServerType.emby,
+          region: AccessRegion.private,
+        ).toJson();
+        record[invalid.key] = invalid.value;
+        final raw = jsonEncode({
+          'version': 3,
+          'servers': [record],
+        });
+        final file = File('${dir.path}/servers.json');
+        await file.writeAsString(raw);
+        final store = FileServerListStore(file);
+        await expectLater(store.load(), throwsFormatException);
+        await expectLater(
+          store.save(const ServerListSnapshot(servers: [])),
+          throwsFormatException,
+        );
+        expect(await file.readAsString(), raw);
+      },
+    );
+  }
+  for (final region in [null, 42, true]) {
+    test(
+      'non-string region $region is rejected instead of becoming ordinary',
+      () {
+        final record = source('private', MediaServerType.emby).toJson()
+          ..['region'] = region;
+        expect(() => SavedServer.fromJson(record), throwsFormatException);
+      },
+    );
+  }
+  test(
+    'malformed and duplicate lines reject rather than silently retaining a subset',
+    () {
+      for (final lines in [
+        [null],
+        [],
+        'not-a-list',
+        [
+          {'id': 'line', 'address': 42},
+        ],
+        [
+          {'id': 'line', 'address': 'ftp://server.test'},
+        ],
+        [
+          const ServerLine(id: 'line', address: 'https://server.test').toJson(),
+          const ServerLine(id: 'line', address: 'https://other.test').toJson(),
+        ],
+      ]) {
+        final record = source('a', MediaServerType.emby).toJson()
+          ..['lines'] = lines;
+        expect(() => SavedServer.fromJson(record), throwsFormatException);
+      }
+    },
+  );
+
+  for (final failedKey in ['rillight.media.v2.a', 'rillight.emby.v1.a']) {
+    test(
+      'partial deletion of $failedKey remains revoked after credential store restart',
+      () async {
+        final dir = await Directory.systemTemp.createTemp('revocation-marker');
+        addTearDown(() => dir.delete(recursive: true));
+        final file = File('${dir.path}/credentials.json');
+        final a = source('a', MediaServerType.emby);
+        final b = source('b', MediaServerType.emby);
+        final values = {
+          'rillight.emby.v1.a': jsonEncode(credential(a).toJson()),
+          'rillight.media.v2.b': jsonEncode(credential(b).toJson()),
+        };
+        SecureCredentialStore open() => SecureCredentialStore(
+          fallback: FileCredentialStore(file),
+          readSecure: (key) async => values[key],
+          writeSecure: (key, value) async {
+            values[key] = value;
+          },
+          deleteSecure: (key) async {
+            if (key == failedKey) {
+              throw const OSError('synthetic keychain failure');
+            }
+            values.remove(key);
+          },
+        );
+        final store = open();
+        expect((await store.read('a'))!.userId, 'same-user');
+        await expectLater(
+          store.delete('a'),
+          throwsA(isA<CredentialRevocationException>()),
+        );
+        expect(await store.read('a'), isNull);
+        final restarted = open();
+        expect(await restarted.read('a'), isNull);
+        expect(
+          (await restarted.read('b'))!.accessToken,
+          credential(b).accessToken,
+        );
+        await restarted.write('a', credential(a, user: 'new-user'));
+        expect((await restarted.read('a'))!.userId, 'new-user');
+      },
+    );
+  }
+
+  test(
+    'ordinary logout does not roll back durable revocation when old-key deletion fails',
+    () async {
+      final saved = source('a', MediaServerType.emby);
+      final values = {
+        'rillight.emby.v1.a': jsonEncode(credential(saved).toJson()),
+      };
+      final fallback = MemoryCredentialStore();
+      SecureCredentialStore open() => SecureCredentialStore(
+        fallback: fallback,
+        readSecure: (key) async => values[key],
+        writeSecure: (key, value) async {
+          values[key] = value;
+        },
+        deleteSecure: (key) async {
+          if (key.contains('emby.v1')) throw const OSError('failed');
+          values.remove(key);
+        },
+      );
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
+        credentials: open(),
+        createClient: () => IdentityClient(MediaServerType.emby),
+      );
+      addTearDown(registry.dispose);
+      await registry.load();
+      final permit = registry.permit(
+        (await registry.authenticate('a')).account,
+      );
+      final commit = await registry.beginOrdinaryCredentials('a');
+      await expectLater(
+        registry.commitOrdinaryCredentials(commit, null),
+        throwsA(isA<CredentialRevocationException>()),
+      );
+      expect(permit.isValid, isFalse);
+      expect(await open().read('a'), isNull);
+      await expectLater(registry.ensureSession('a'), throwsStateError);
+    },
+  );
+
+  test(
+    'membership revocation during credential deletion restores only the still-owned source',
+    () async {
+      final access = RegionAccessController();
+      await access.setPin('1234', '1234', (_) async {});
+      await access.unlock('1234');
+      final saved = source('a', MediaServerType.emby);
+      final credentials = GatedDeletion({'a': credential(saved)});
+      final registry = SourceSessionRegistry(
+        access: access,
+        store: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
+        credentials: credentials,
+        createClient: () => IdentityClient(MediaServerType.emby),
+      );
+      addTearDown(registry.dispose);
+      await registry.load();
+      final pending = registry.commitOrdinaryCredentials(
+        await registry.beginOrdinaryCredentials('a'),
+        null,
+      );
+      final rejected = expectLater(pending, throwsStateError);
+      await credentials.started.future;
+      final moving = registry.move('a', AccessRegion.private);
+      credentials.release.complete();
+      await rejected;
+      await moving;
+      expect(
+        (await credentials.read('a'))!.accessToken,
+        credential(saved).accessToken,
+      );
+      expect(registry.project(AccessRegion.ordinary), isEmpty);
+      expect(registry.project(AccessRegion.private).single.id, 'a');
+    },
+  );
+
+  test(
+    'identity verification rejection and late response cannot establish or restore a Plex session',
+    () async {
+      final saved = source(
+        'a',
+        MediaServerType.plex,
+        cloud: 'cloud',
+        home: 'child',
+      );
+      final gate = Completer<void>();
+      final started = Completer<void>();
+      var reject = true;
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
+        credentials: MemoryCredentialStore({'a': credential(saved)}),
+        createClient: () => IdentityClient(MediaServerType.emby),
+        createProviderClient: IdentityClient.new,
+        sessionIdentityVerifier: (server, stored, client) async {
+          expect(server.homeUserId, 'child');
+          expect(client.accessToken, stored.accessToken);
+          if (reject) throw StateError('Synthetic remote identity mismatch');
+          if (!started.isCompleted) started.complete();
+          await gate.future;
+        },
+      );
+      addTearDown(registry.dispose);
+      await registry.load();
+      await expectLater(registry.ensureSession('a'), throwsStateError);
+      await expectLater(registry.authenticate('a'), throwsStateError);
+      reject = false;
+      final pending = registry.ensureSession('a');
+      final rejected = expectLater(pending, throwsStateError);
+      await started.future;
+      await registry.logoutSource('a');
+      gate.complete();
+      await rejected;
+      await expectLater(registry.ensureSession('a'), throwsStateError);
+    },
+  );
+
+  test(
+    'selected Plex restore requires verifier before exposing AuthSession',
+    () async {
+      final saved = source(
+        'a',
+        MediaServerType.plex,
+        cloud: 'cloud',
+        home: 'child',
+      );
+      final store = MemoryServerListStore(
+        ServerListSnapshot(servers: [saved], lastServerId: 'a'),
+      );
+      final credentials = MemoryCredentialStore({'a': credential(saved)});
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: credentials,
+        createClient: () => IdentityClient(MediaServerType.emby),
+        createProviderClient: IdentityClient.new,
+        sessionIdentityVerifier: (_, _, _) async =>
+            throw StateError('Synthetic invalid identity'),
+      );
+      final client = IdentityClient(MediaServerType.plex);
+      final auth = AuthController(
+        client: client,
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      addTearDown(auth.dispose);
+      await expectLater(auth.restore(), throwsStateError);
+      expect(auth.isLoggedIn, isFalse);
+      expect(client.hasSession, isFalse);
+    },
+  );
+
+  test(
+    'selected logout reports partial cleanup while remaining signed out and not busy',
+    () async {
+      final saved = source('a', MediaServerType.emby);
+      final values = {
+        'rillight.emby.v1.a': jsonEncode(credential(saved).toJson()),
+      };
+      final credentials = SecureCredentialStore(
+        fallback: MemoryCredentialStore(),
+        readSecure: (key) async => values[key],
+        writeSecure: (key, value) async {
+          values[key] = value;
+        },
+        deleteSecure: (key) async {
+          if (key.contains('emby.v1')) throw const OSError('failed');
+          values.remove(key);
+        },
+      );
+      final store = MemoryServerListStore(
+        ServerListSnapshot(servers: [saved], lastServerId: 'a'),
+      );
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: credentials,
+        createClient: () => IdentityClient(MediaServerType.emby),
+      );
+      final auth = AuthController(
+        client: IdentityClient(MediaServerType.emby),
+        credentials: credentials,
+        servers: store,
+        sources: registry,
+      );
+      addTearDown(auth.dispose);
+      await auth.restore();
+      expect(auth.isLoggedIn, isTrue);
+      await auth.logout();
+      expect(auth.isLoggedIn, isFalse);
+      expect(auth.isBusy, isFalse);
+      expect(auth.failure, isNotNull);
+      expect(await credentials.read('a'), isNull);
+    },
+  );
+
+  test(
+    'cancelled authorization discards the verifier result before publishing a session',
+    () async {
+      final gate = Completer<void>();
+      final started = Completer<void>();
+      final store = MemoryServerListStore();
+      final registry = SourceSessionRegistry(
+        access: RegionAccessController(),
+        store: store,
+        credentials: MemoryCredentialStore(),
+        createClient: () => IdentityClient(MediaServerType.emby),
+        createProviderClient: IdentityClient.new,
+        sessionIdentityVerifier: (_, _, _) async {
+          started.complete();
+          await gate.future;
+        },
+      );
+      addTearDown(registry.dispose);
+      final attempt = await registry.beginAuthorization(
+        serviceType: MediaServerType.plex,
+        region: AccessRegion.ordinary,
+      );
+      final saved = source(attempt.id, MediaServerType.plex);
+      final pending = registry.commitAuthorization(
+        attempt,
+        server: saved,
+        value: credential(saved),
+      );
+      final rejected = expectLater(pending, throwsStateError);
+      await started.future;
+      attempt.cancel();
+      gate.complete();
+      await rejected;
+      expect((await store.load()).servers, isEmpty);
+    },
+  );
+
+  test(
     'catalog cache separates provider and Home identities; image keys cannot collide on delimiters',
     () async {
       final cache = CatalogCache()..debugSetDiskStore(null);
@@ -611,5 +1013,38 @@ class RejectingStore extends MemoryServerListStore {
   Future<void> save(ServerListSnapshot snapshot) async {
     if (reject) throw StateError('Synthetic disk failure');
     await super.save(snapshot);
+  }
+}
+
+class IdentityCatalogDisk implements PrefixCatalogDiskStore {
+  final values = <String, String>{};
+  @override
+  Future<String?> read(String key) async => values[key];
+  @override
+  Future<void> write(String key, String body) async {
+    values[key] = body;
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    values.remove(key);
+  }
+
+  @override
+  Future<void> clear() async => values.clear();
+  @override
+  Future<void> removePrefix(String prefix) async =>
+      values.removeWhere((key, _) => key.startsWith(prefix));
+}
+
+class GatedDeletion extends MemoryCredentialStore {
+  GatedDeletion(super.seed);
+  final started = Completer<void>();
+  final release = Completer<void>();
+  @override
+  Future<void> delete(String id) async {
+    if (!started.isCompleted) started.complete();
+    await release.future;
+    await super.delete(id);
   }
 }

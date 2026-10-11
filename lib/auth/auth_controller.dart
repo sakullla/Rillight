@@ -1,3 +1,4 @@
+import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
 import 'package:rillight/media_server/server_address.dart';
 import 'dart:async';
@@ -214,7 +215,7 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    _activate(last, stored);
+    await _activate(last, stored);
     notifyListeners();
   }
 
@@ -278,7 +279,7 @@ class AuthController extends ChangeNotifier {
       await sources.commitOrdinaryCredentials(credentialCommit, stored);
       await _upsertServer(server);
       await sources.requireOrdinaryServer(server.id);
-      _activate(server, stored);
+      await _activate(server, stored);
       _prefill = null;
       connectDraft = null;
       return true;
@@ -319,13 +320,25 @@ class AuthController extends ChangeNotifier {
       _resetLibraryCounts();
       return;
     }
-    _session = previous;
-    client.attachSession(
-      baseUrl: Uri.parse(previous.server.baseUrl),
-      accessToken: previous.accessToken,
-      userId: previous.userId,
-      userAgent: previous.server.normalizedUserAgent,
-    );
+    try {
+      await _activate(
+        previous.server,
+        StoredCredentials(
+          serviceType: previous.server.serviceType,
+          accessToken: previous.accessToken,
+          userId: previous.userId,
+          username: previous.username,
+          cloudCredentialRef: previous.server.cloudCredentialRef,
+          cloudAccountId: previous.server.cloudAccountId,
+          homeUserId: previous.server.homeUserId,
+          resourceCredentialRef: previous.server.resourceCredentialRef,
+        ),
+      );
+    } catch (_) {
+      _session = null;
+      client.clearSession();
+      _resetLibraryCounts();
+    }
   }
 
   Future<void> logout() async {
@@ -356,6 +369,12 @@ class AuthController extends ChangeNotifier {
       if (credentialCommit != null) {
         try {
           await sources.commitOrdinaryCredentials(credentialCommit, null);
+        } on CredentialRevocationException catch (error) {
+          _failure = MediaServerException(
+            MediaServerFailureKind.unknown,
+            detail: error.toString(),
+            cause: error,
+          );
         } on StateError {
           // Membership/account changed while remote logout was pending.
         }
@@ -424,7 +443,7 @@ class AuthController extends ChangeNotifier {
       _lineSwitchFailure = null;
       _failure = null;
       await _upsertServer(server);
-      _activate(server, stored);
+      await _activate(server, stored);
       connectDraft = null;
       notifyListeners();
       return;
@@ -586,7 +605,7 @@ class AuthController extends ChangeNotifier {
       if (remountSession) {
         final stored = await credentials.read(next.id);
         if (stored != null && stored.accessToken.isNotEmpty) {
-          _activate(next, stored);
+          await _activate(next, stored);
           notifyListeners();
           return;
         }
@@ -625,7 +644,7 @@ class AuthController extends ChangeNotifier {
       if (activeChanged) {
         final stored = await credentials.read(serverId);
         if (stored != null && stored.accessToken.isNotEmpty) {
-          _activate(next, stored);
+          await _activate(next, stored);
         } else {
           _session = AuthSession(
             server: next,
@@ -861,24 +880,33 @@ class AuthController extends ChangeNotifier {
     );
   }
 
-  void _activate(SavedServer server, StoredCredentials stored) {
+  Future<void> _activate(SavedServer server, StoredCredentials stored) async {
     if (server.serviceType != client.serviceType ||
         stored.serviceType != server.serviceType ||
         server.homeUserId != stored.homeUserId ||
         server.cloudAccountId != stored.cloudAccountId) {
       throw StateError('Source credential identity mismatch');
     }
-    _session = AuthSession(
-      server: server,
-      userId: stored.userId,
-      username: stored.username,
-      accessToken: stored.accessToken,
-    );
     client.attachSession(
       baseUrl: Uri.parse(server.baseUrl),
       accessToken: stored.accessToken,
       userId: stored.userId,
       userAgent: server.normalizedUserAgent,
+    );
+    if (server.serviceType == MediaServerType.plex) {
+      _session = null;
+      try {
+        await sources.verifyAttachedSession(server.id, stored, client);
+      } catch (_) {
+        client.clearSession();
+        rethrow;
+      }
+    }
+    _session = AuthSession(
+      server: server,
+      userId: stored.userId,
+      username: stored.username,
+      accessToken: stored.accessToken,
     );
     // 会话指向(或换到)一台服务器后刷新库规模;后台进行,不阻塞登录/切换。
     unawaited(loadLibraryCounts());
@@ -946,7 +974,7 @@ class AuthController extends ChangeNotifier {
       }
       await sources.commitOrdinaryCredentials(credentialCommit, next);
       if (!_isSameSession(session)) return false;
-      _activate(session.server, next);
+      await _activate(session.server, next);
       _failure = null;
       notifyListeners();
       return true;

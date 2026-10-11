@@ -7,6 +7,66 @@ import '../media_server/authentication.dart';
 
 enum AccessRegion { ordinary, private }
 
+// Missing legacy fields have documented defaults. Explicit invalid values do
+// not: accepting them could expose a private source or destroy a saved line.
+String? _storedString(
+  Map<String, dynamic> json,
+  String key, {
+  bool required = false,
+  bool nullable = true,
+}) {
+  if (!json.containsKey(key)) {
+    if (required) throw const FormatException('Missing source field');
+    return null;
+  }
+  final value = json[key];
+  if (value == null && nullable && !required) return null;
+  if (value is! String || (required && value.isEmpty)) {
+    throw const FormatException('Invalid source field');
+  }
+  return value;
+}
+
+bool _storedBool(Map<String, dynamic> json, String key, bool fallback) {
+  if (!json.containsKey(key)) return fallback;
+  if (json[key] is! bool) {
+    throw const FormatException('Invalid permission field');
+  }
+  return json[key] as bool;
+}
+
+T _storedEnum<T extends Enum>(
+  Map<String, dynamic> json,
+  String key,
+  List<T> values,
+  T fallback,
+) {
+  if (!json.containsKey(key)) return fallback;
+  final value = _storedString(json, key, required: true);
+  return values.firstWhere(
+    (entry) => entry.name == value,
+    orElse: () => throw const FormatException('Unknown source field'),
+  );
+}
+
+DateTime? _storedDate(Map<String, dynamic> json, String key) {
+  final value = _storedString(json, key);
+  if (value == null) return null;
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) throw const FormatException('Invalid source date');
+  return parsed;
+}
+
+String _storedAddress(String address) {
+  final uri = Uri.tryParse(address);
+  if (uri == null ||
+      !const ['http', 'https'].contains(uri.scheme) ||
+      uri.host.isEmpty) {
+    throw const FormatException('Invalid source address');
+  }
+  return address;
+}
+
 class ServerLine {
   const ServerLine({
     required this.id,
@@ -41,15 +101,21 @@ class ServerLine {
   };
 
   factory ServerLine.fromJson(Map<String, dynamic> json) {
-    final id = json['id']?.toString() ?? '';
-    final address =
-        json['address']?.toString() ?? json['baseUrl']?.toString() ?? '';
+    final id = _storedString(json, 'id', nullable: false);
+    if (id != null && id.isEmpty) {
+      throw const FormatException('Empty line identity');
+    }
+    final address = json.containsKey('address')
+        ? _storedString(json, 'address', required: true)!
+        : _storedString(json, 'baseUrl', required: true)!;
+    _storedString(json, 'userAgent'); // known legacy per-line field
     return ServerLine(
-      id: id.isNotEmpty ? id : 'line-$address',
-      address: address,
-      nickname: json['nickname']?.toString(),
-      checkStatus: json['checkStatus']?.toString() ?? 'unknown',
-      checkedAt: DateTime.tryParse(json['checkedAt']?.toString() ?? ''),
+      id: id ?? 'line-$address',
+      address: _storedAddress(address),
+      nickname: _storedString(json, 'nickname'),
+      checkStatus:
+          _storedString(json, 'checkStatus', nullable: false) ?? 'unknown',
+      checkedAt: _storedDate(json, 'checkedAt'),
     );
   }
 
@@ -177,57 +243,73 @@ class SavedServer {
 
   factory SavedServer.fromJson(Map<String, dynamic> json) {
     final lines = <ServerLine>[];
-    final rawLines = json['lines'];
-    if (rawLines is List) {
+    if (json.containsKey('lines')) {
+      final rawLines = json['lines'];
+      if (rawLines is! List || rawLines.isEmpty) {
+        throw const FormatException('Invalid source lines');
+      }
+      final ids = <String>{};
       for (final item in rawLines) {
-        if (item is Map) {
-          final line = ServerLine.fromJson(Map<String, dynamic>.from(item));
-          if (line.address.isNotEmpty) {
-            lines.add(line);
-          }
+        if (item is! Map) throw const FormatException('Invalid source line');
+        final line = ServerLine.fromJson(Map<String, dynamic>.from(item));
+        if (!ids.add(line.id)) {
+          throw const FormatException('Duplicate line identity');
         }
+        lines.add(line);
       }
+    } else {
+      final baseUrl = _storedString(json, 'baseUrl', required: true)!;
+      lines.add(ServerLine(id: 'default', address: _storedAddress(baseUrl)));
     }
-    if (lines.isEmpty) {
-      final baseUrl = json['baseUrl']?.toString() ?? '';
-      if (baseUrl.isNotEmpty) {
-        lines.add(ServerLine(id: 'default', address: baseUrl));
-      }
+    final activeLineId = _storedString(json, 'activeLineId');
+    if (activeLineId != null && !lines.any((line) => line.id == activeLineId)) {
+      throw const FormatException('Unknown active line');
     }
-    final activeLineId = json['activeLineId']?.toString();
-    final resolvedActiveLineId =
-        (activeLineId != null && activeLineId.isNotEmpty)
-        ? activeLineId
-        : (lines.isNotEmpty ? lines.first.id : null);
+    final resolvedActiveLineId = activeLineId ?? lines.first.id;
+    final rawLibraryIds = json.containsKey('libraryIds')
+        ? json['libraryIds']
+        : const [];
+    if (rawLibraryIds is! List ||
+        rawLibraryIds.any((id) => id is! String || id.isEmpty)) {
+      throw const FormatException('Invalid library selection');
+    }
     return SavedServer(
-      id: json['id']?.toString() ?? '',
-      name: json['name']?.toString() ?? '',
-      nickname: json['nickname']?.toString(),
-      username: json['username']?.toString() ?? '',
-      serviceType: MediaServerType.values.byName(
-        json['serviceType'] as String? ?? 'emby',
+      id: _storedString(json, 'id', required: true) ?? '',
+      name: _storedString(json, 'name') ?? '',
+      nickname: _storedString(json, 'nickname'),
+      username: _storedString(json, 'username') ?? '',
+      serviceType: _storedEnum(
+        json,
+        'serviceType',
+        MediaServerType.values,
+        MediaServerType.emby,
       ),
-      authorizationMethod: AuthorizationMethod.values.byName(
-        json['authorizationMethod'] as String? ?? 'password',
+      authorizationMethod: _storedEnum(
+        json,
+        'authorizationMethod',
+        AuthorizationMethod.values,
+        AuthorizationMethod.password,
       ),
-      cloudCredentialRef: json['cloudCredentialRef'] as String?,
-      cloudAccountId: json['cloudAccountId'] as String?,
-      homeUserId: json['homeUserId'] as String?,
-      resourceCredentialRef: json['resourceCredentialRef'] as String?,
+      cloudCredentialRef: _storedString(json, 'cloudCredentialRef'),
+      cloudAccountId: _storedString(json, 'cloudAccountId'),
+      homeUserId: _storedString(json, 'homeUserId'),
+      resourceCredentialRef: _storedString(json, 'resourceCredentialRef'),
       lines: List<ServerLine>.unmodifiable(lines),
       activeLineId: resolvedActiveLineId,
       userAgent: _resolveUserAgent(json, resolvedActiveLineId),
-      region: json['region'] == 'private'
-          ? AccessRegion.private
-          : AccessRegion.ordinary,
-      participates: json['participates'] != false,
-      libraryIds: List<String>.unmodifiable(
-        (json['libraryIds'] as List? ?? []).whereType<String>(),
+      region: _storedEnum(
+        json,
+        'region',
+        AccessRegion.values,
+        AccessRegion.ordinary,
       ),
-      scopeKnown: json['scopeKnown'] == true,
-      verifiedServerId: json['verifiedServerId']?.toString(),
-      checkedAt: DateTime.tryParse(json['checkedAt']?.toString() ?? ''),
-      checkStatus: json['checkStatus']?.toString() ?? 'unknown',
+      participates: _storedBool(json, 'participates', true),
+      libraryIds: List<String>.unmodifiable(rawLibraryIds.cast<String>()),
+      scopeKnown: _storedBool(json, 'scopeKnown', false),
+      verifiedServerId: _storedString(json, 'verifiedServerId'),
+      checkedAt: _storedDate(json, 'checkedAt'),
+      checkStatus:
+          _storedString(json, 'checkStatus', nullable: false) ?? 'unknown',
     );
   }
 
@@ -237,7 +319,7 @@ class SavedServer {
     Map<String, dynamic> json,
     String? activeLineId,
   ) {
-    final serverLevel = json['userAgent']?.toString().trim();
+    final serverLevel = _storedString(json, 'userAgent')?.trim();
     if (serverLevel != null && serverLevel.isNotEmpty) {
       return serverLevel;
     }

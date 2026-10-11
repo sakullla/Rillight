@@ -187,7 +187,12 @@ void main() {
       expect(rowRefreshes, 1);
       expect(fullRefreshes, 0);
       expect(await cache.lookup(request), isNull, reason: '会话前缀缓存已失效');
-      expect(store.removedPrefixes, contains('server-id-1|user-alice|'));
+      expect(
+        store.removedPrefixes,
+        contains(
+          '["emby","ordinary","server-id-1",null,"user-alice",null,null]|',
+        ),
+      );
       expect(store.data, isEmpty);
 
       // LibraryChanged:重建缓存后再触发,走全量刷新并再次失效。
@@ -197,7 +202,12 @@ void main() {
 
       expect(rowRefreshes, 1);
       expect(fullRefreshes, 1);
-      expect(store.removedPrefixes, contains('server-id-1|user-alice|'));
+      expect(
+        store.removedPrefixes,
+        contains(
+          '["emby","ordinary","server-id-1",null,"user-alice",null,null]|',
+        ),
+      );
       await socket.stop();
     }),
   );

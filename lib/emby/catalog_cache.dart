@@ -705,7 +705,7 @@ class CatalogCache {
     }
   }
 
-  /// 失效当前会话(key 前缀 `serverId|userId|`)的全部缓存。
+  /// 失效当前会话(完整来源身份前缀)的全部缓存。
   ///
   /// 供 WebSocket 通知等外部变更信号使用:通知不含变更细节,
   /// 失效后以重新拉取结果为准。未绑定会话时为无操作。
@@ -713,7 +713,7 @@ class CatalogCache {
     if (!hasSession) {
       return;
     }
-    await invalidatePrefix('$_serverId|$_userId|');
+    await invalidatePrefix('$_sourceIdentity|');
   }
 
   /// 失效 key 以 [prefix] 开头的条目:内存层同步移除,磁盘层尽力删除
