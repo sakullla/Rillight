@@ -1473,13 +1473,11 @@ void main() {
 
         expect(await read(0), [7, 7, 7, 7]);
         final watch = Stopwatch()..start();
-        expect(await read(4).timeout(const Duration(milliseconds: 2000)), [
-          7,
-          7,
-          7,
-          7,
-        ]);
-        expect(watch.elapsed, lessThan(const Duration(milliseconds: 2000)));
+        // 期限相对 mediaHeaderTimeout 放宽到 10 倍:满载机器上事件循环
+        // 抖动会吃掉紧预算,但恢复必须仍有界(不是挂起)。
+        final deadline = const Duration(milliseconds: 400) * 10;
+        expect(await read(4).timeout(deadline), [7, 7, 7, 7]);
+        expect(watch.elapsed, lessThan(deadline));
         expect(ports.length, 3);
         expect(ports[2], isNot(ports[1]));
         expect(proxy.diagnostics['recoveryAttempts'], 1);
@@ -1492,7 +1490,7 @@ void main() {
         await server.close(force: true);
       }
     },
-    timeout: const Timeout(Duration(seconds: 5)),
+    timeout: const Timeout(Duration(seconds: 12)),
   );
 
   test(

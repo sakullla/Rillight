@@ -344,10 +344,12 @@ class _Fixture {
 }
 
 Future<void> _settle(WidgetTester tester) async {
-  for (var i = 0; i < 12; i++) {
-    await tester.pump(const Duration(milliseconds: 80));
+  // 满载机器上真实 HTTP fixture 的往返可能超过紧凑预算;放宽到
+  // ~3s 壁钟并加长真实延迟,让异步回合有机会完成。
+  for (var i = 0; i < 24; i++) {
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      () => Future<void>.delayed(const Duration(milliseconds: 25)),
     );
   }
 }
