@@ -782,6 +782,11 @@ extension PageCaptures on CaptureSession {
     expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
     await save('server-import-private');
     await tap(BackupImportFlowKeys.close);
+    if (platform == 'phone') {
+      // 返回键关闭仍在的手机服务底表,避免遮挡后续页面捕获。
+      await tester.binding.handlePopRoute();
+      await advance(500);
+    }
     auth.backupImportKeys = const BackupImportKeys();
     auth.backupImportPicker = null;
   }

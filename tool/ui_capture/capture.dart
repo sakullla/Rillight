@@ -616,23 +616,29 @@ void main() {
                 await capture.tap(const Key('mobile-player-section-tracks'));
                 await capture.save('player-dense-tracks');
                 await tester.enterText(
-                  find.byKey(kTrackPickerSearchKey),
+                  find.byKey(kTrackPickerSearchKey).first,
                   'eng',
                 );
                 await capture.advance(300);
                 await capture.save('player-dense-tracks-search');
-                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey).first,
+                  '',
+                );
                 await capture.advance(200);
                 await capture.tap(const Key('mobile-player-panel-back'));
                 await capture.tap(const Key('mobile-player-source-entry'));
                 await capture.save('player-dense-source');
                 await tester.enterText(
-                  find.byKey(kTrackPickerSearchKey),
+                  find.byKey(kTrackPickerSearchKey).first,
                   '1080',
                 );
                 await capture.advance(300);
                 await capture.save('player-dense-source-search');
-                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey).first,
+                  '',
+                );
                 await capture.advance(200);
                 await capture.tap(const Key('mobile-player-panel-back'));
                 await capture.tap(const Key('mobile-player-panel-close'));
