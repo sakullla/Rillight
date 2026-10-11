@@ -14,6 +14,7 @@ class ServerImportDraft {
 
   final String name;
   final String username;
+
   /// First entry is the primary line. The registry owns new line IDs.
   final List<ServerImportLine> lines;
   final StoredCredentials? credentials;
