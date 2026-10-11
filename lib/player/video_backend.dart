@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../media_server/resources.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ class VideoOpenRequest {
     this.sessionId = 0,
     this.headers = const {},
     this.credentialOrigin,
+    this.authorization,
     this.credentialHeaders = const {},
     this.playMethod = PlayMethod.directStream,
     this.isInfiniteStream = false,
@@ -25,6 +27,7 @@ class VideoOpenRequest {
   final Duration start;
   final Map<String, String> headers;
   final Uri? credentialOrigin;
+  final ResourceAuthorization? authorization;
   final Map<String, String> credentialHeaders;
   final PlayMethod playMethod;
   final bool isInfiniteStream;

@@ -286,7 +286,12 @@ class PlaybackRuntime {
         .project(actual.source.account.region)
         .firstWhere((s) => s.id == actual.source.account.configuredServerId);
     final line = server.lines.firstWhere((l) => l.id == lineId);
-    final independent = registry.createClient();
+    final independent =
+        registry.createProviderClient?.call(server.serviceType) ??
+        registry.createClient();
+    if (independent.serviceType != server.serviceType) {
+      throw StateError('Line provider identity mismatch');
+    }
     final address = Uri.parse(line.address);
     final identity = await independent.getPublicInfo(address).timeout(timeout);
     actual.permit.requireValid();
@@ -300,6 +305,12 @@ class PlaybackRuntime {
       userAgent: actual.client.customUserAgent,
     );
     try {
+      if (registry.sessionIdentityVerifier != null) {
+        final stored = await registry.credentials.read(server.id);
+        actual.permit.requireValid();
+        if (stored == null) throw StateError('Line credential unavailable');
+        await registry.verifyAttachedSession(server.id, stored, independent);
+      }
       final user = await actual.permit
           .dispatch((_) => independent.getUser())
           .timeout(timeout);
@@ -312,11 +323,11 @@ class PlaybackRuntime {
       if (item.id != actual.source.itemId) {
         throw StateError('Line item mismatch');
       }
-      final info = await actual.permit
-          .dispatch((_) => independent.getPlaybackInfo(itemId: item.id))
-          .timeout(timeout);
-      if (info.mediaSources.isEmpty ||
-          (version != null && !info.mediaSources.any((s) => s.id == version))) {
+      // Validate advertised versions without opening a disposable remote
+      // playback. The actual controller owns negotiation and its cleanup lease.
+      if (version != null &&
+          item.mediaSources.isNotEmpty &&
+          !item.mediaSources.any((s) => s.id == version)) {
         throw StateError('Line actual version missing');
       }
       return PlaybackOrigin(
@@ -358,6 +369,7 @@ class PlaybackRuntime {
         source.itemId != snapshot.itemId ||
         source.mediaSourceId != snapshot.mediaSourceId ||
         snapshot.userId != source.account.userId ||
+        snapshot.serviceType != source.account.serviceType ||
         snapshot.position < Duration.zero) {
       return false;
     }
@@ -377,6 +389,10 @@ class PlaybackRuntime {
         .any(
           (s) =>
               s.id == source.account.configuredServerId &&
+              s.serviceType == source.account.serviceType &&
+              s.verifiedServerId == source.account.verifiedServerId &&
+              s.cloudAccountId == source.account.cloudAccountId &&
+              s.homeUserId == source.account.homeUserId &&
               s.participates &&
               s.scopeKnown &&
               s.libraryIds.contains(library) &&
@@ -387,6 +403,11 @@ class PlaybackRuntime {
   }
 
   Future<bool> recoverSnapshot(PlaybackSessionSnapshot snapshot) async {
+    for (final pending in snapshot.validatedPendingCleanups) {
+      if (!await recoverSnapshot(pending)) {
+        throw StateError('Pending playback cleanup is not authorized');
+      }
+    }
     final source = snapshot.source;
     final library = snapshot.libraryId;
     // Legacy/unknown snapshots cannot authorize a request after restart.
@@ -399,50 +420,15 @@ class PlaybackRuntime {
       return false;
     }
     // Reject permanent scope/generation removal without probing. A missing
-    // ordinary session after cold start is not revocation: acquire it below.
+    // ordinary session after cold start does not require cloud authentication.
     if (!canRecoverSnapshot(snapshot)) return false;
-    final account = await registry.acquireAccount(
-      source.account.configuredServerId,
-      region: source.account.region,
+    return registry.recoverPlayback(
+      account: source.account,
+      report: playbackReportFromSnapshot(snapshot),
+      baseUrl: Uri.parse(snapshot.baseUrl),
       libraryId: library,
+      regionGeneration: snapshot.regionGeneration,
+      cleanupOnly: snapshot.cleanupOnly,
     );
-    if (account != source.account) return false;
-    final lines = registry
-        .project(source.account.region)
-        .firstWhere((s) => s.id == source.account.configuredServerId)
-        .lines;
-    final savedLines = lines.where(
-      (l) => Uri.parse(l.address) == Uri.parse(snapshot.baseUrl),
-    );
-    if (savedLines.length != 1) return false;
-    var origin = await resolve(
-      PlayerOpenRequest(
-        itemId: snapshot.itemId,
-        source: source,
-        libraryId: library,
-        regionGeneration: snapshot.regionGeneration,
-      ),
-    );
-    if (origin.client.baseUrl != Uri.parse(snapshot.baseUrl)) {
-      origin = await resolveLine(
-        origin,
-        savedLines.single.id,
-        snapshot.mediaSourceId,
-      );
-    } else {
-      final info = await origin.permit.dispatch(
-        (_) => origin.client.getPlaybackInfo(itemId: snapshot.itemId),
-      );
-      if (!info.mediaSources.any((s) => s.id == snapshot.mediaSourceId)) {
-        return false;
-      }
-    }
-    await origin.permit
-        .dispatch(
-          (_) =>
-              origin.client.stopPlayback(playbackReportFromSnapshot(snapshot)),
-        )
-        .timeout(const Duration(seconds: 3));
-    return origin.permit.isValid;
   }
 }

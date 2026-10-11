@@ -890,6 +890,7 @@ class JellyfinClient extends MediaServerClient
       publicHeaders: {'User-Agent': userAgent},
     );
     return ResolvedPlayback(
+      canRenewUrlInPlace: false,
       playMethod: method,
       streamUrl: uri,
       playSessionId: info.playSessionId,
@@ -968,6 +969,7 @@ class JellyfinClient extends MediaServerClient
         for (var redirect = 0; redirect < 6; redirect++) {
           _check(gen);
           _validateBase(target);
+          target = auth.sanitizeUri(target);
           final r = await _dio.getUri<ResponseBody>(
             target,
             options: Options(

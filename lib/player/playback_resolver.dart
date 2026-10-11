@@ -1,5 +1,6 @@
 import 'package:rillight/media_server/media_source_format.dart';
 import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/resources.dart';
 
 /// 从 PlaybackInfo 的多个媒体源里选出要播的那一个。
 ///
@@ -118,12 +119,15 @@ int _sourceFingerprintScore({
   return score;
 }
 
-/// 自定义 UA 对所有媒体地址生效；会话凭据只发往 Emby 同源地址。
+/// Provider resource authorization takes precedence over the legacy session.
+/// Custom UA is public; session credentials stay on their authorized origins.
 Map<String, String> playbackStreamHeaders({
   required Uri streamUrl,
   required Uri baseUrl,
   required Map<String, String> sessionHeaders,
+  ResourceAuthorization? authorization,
 }) {
+  if (authorization != null) return authorization.headersFor(streamUrl);
   final sameOrigin =
       streamUrl.scheme == baseUrl.scheme &&
       streamUrl.host == baseUrl.host &&

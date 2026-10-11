@@ -11,7 +11,7 @@ import 'plex_authentication.dart';
 import 'plex_codec.dart';
 import 'plex_http.dart';
 
-class PlexClient extends MediaServerClient {
+class PlexClient extends MediaServerClient implements PartPlaybackProvider {
   PlexClient({
     required this.device,
     Dio? dio,
@@ -796,6 +796,7 @@ class PlexClient extends MediaServerClient {
     var target = uri;
     for (var hop = 0; hop < 6; hop++) {
       _guard?.call();
+      target = auth.sanitizeUri(target);
       final response = await plexRequest(
         _dio,
         target,
@@ -927,6 +928,99 @@ class PlexClient extends MediaServerClient {
     }
     final frames = item.chapters.where((v) => v.imageTag != null).toList();
     return frames.isEmpty ? null : _ChapterPreview(this, itemId, frames);
+  }
+
+  @override
+  Future<PlaybackInfo> preparePart({
+    required String itemId,
+    required PlaybackMediaSource previous,
+    required Duration position,
+    required int? audioIndex,
+    required int? subtitleIndex,
+    required int maxStreamingBitrate,
+    PlaybackCapabilities? capabilities,
+  }) async {
+    await getItem(itemId);
+    final media = plexList(
+      _metadata[itemId]?['Media'],
+    ).where((v) => plexString(v['id']) == previous.id).firstOrNull;
+    if (media == null) {
+      throw const MediaServerException(MediaServerFailureKind.invalidResponse);
+    }
+    final parts = plexList(media['Part']);
+    final timeline = MediaTimeline([
+      for (final part in parts)
+        MediaPart(
+          id: plexString(part['id']),
+          resource: AuthorizedMediaResource(
+            url: '',
+            authorization: _authorization,
+          ),
+          duration: plexDuration(part['duration']),
+        ),
+    ]);
+    final location = timeline.locate(position);
+    if (location == null) {
+      throw const MediaServerException(
+        MediaServerFailureKind.unsupported,
+        detail: '分段时长未知，无法定位',
+      );
+    }
+    final tracks = plexList(
+      parts[location.index]['Stream'],
+    ).map(plexPlaybackStream).toList();
+    final target = PlaybackMediaSource(
+      id: previous.id,
+      runtime: timeline.duration,
+      mediaStreams: tracks,
+      defaultAudioStreamIndex: tracks
+          .where((s) => s.isAudio && s.isDefault)
+          .firstOrNull
+          ?.index,
+      defaultSubtitleStreamIndex: tracks
+          .where((s) => s.isSubtitle && s.isDefault)
+          .firstOrNull
+          ?.index,
+    );
+    int? match(int? index, String type) {
+      if (index == null) return null;
+      final old = previous.streamByIndex(index);
+      if (old == null) {
+        throw StateError('Selected track identity is unavailable');
+      }
+      final candidates = tracks.where((s) => s.type == type).toList();
+      // Plex IDs are globally unique within this source: retain an exact ID
+      // only when it actually belongs to this Part, otherwise map language.
+      if (candidates.any((s) => s.index == index)) return index;
+      final language = old.language?.trim().toLowerCase();
+      if (language == null || language.isEmpty || language == 'und') {
+        throw PartTrackSelectionRequired(target);
+      }
+      final matching = candidates
+          .where((s) => s.language?.trim().toLowerCase() == language)
+          .toList();
+      if (matching.length == 1) return matching.single.index;
+      final titled = matching
+          .where(
+            (s) =>
+                old.displayTitle != null && s.displayTitle == old.displayTitle,
+          )
+          .toList();
+      if (titled.length == 1) return titled.single.index;
+      throw PartTrackSelectionRequired(target);
+    }
+
+    return getPlaybackInfo(
+      itemId: itemId,
+      mediaSourceId: previous.id,
+      startPosition: position,
+      audioStreamIndex: match(audioIndex, 'Audio'),
+      subtitleStreamIndex: subtitleIndex == null
+          ? -1
+          : match(subtitleIndex, 'Subtitle'),
+      maxStreamingBitrate: maxStreamingBitrate,
+      capabilities: capabilities,
+    );
   }
 
   @override
@@ -1198,7 +1292,23 @@ class PlexClient extends MediaServerClient {
     );
     return PlaybackInfo(
       playSessionId: session,
-      mediaSources: [source],
+      mediaSources: [
+        source,
+        for (final version in versions)
+          if (plexString(version['id']) != source.id)
+            PlaybackMediaSource(
+              id: plexString(version['id']),
+              name: plexString(version['videoResolution']),
+              container: version['container'] as String?,
+              runtime: plexDuration(version['duration']),
+              bitrate: plexInt(version['bitrate']) == null
+                  ? null
+                  : plexInt(version['bitrate'])! * 1000,
+              mediaStreams: plexList(
+                plexList(version['Part']).firstOrNull?['Stream'],
+              ).map(plexPlaybackStream).toList(),
+            ),
+      ],
       resources: effectiveLease,
     );
   }
@@ -1233,6 +1343,7 @@ class PlexClient extends MediaServerClient {
       filmTimeline: playback.timeline,
       partIndex: playback.position.index,
       partStartPosition: playback.position.local,
+      streamStartsAtRequestedPosition: playback.method != PlayMethod.directPlay,
       authorization: playback.auth,
       resources: playback.lease,
     );
@@ -1318,24 +1429,21 @@ class PlexResolvedPlayback extends ResolvedPlayback {
     super.timeline,
     super.authorization,
     super.resources,
-    required this.filmTimeline,
-    required this.partIndex,
-    required this.partStartPosition,
-  });
-  final MediaTimeline filmTimeline;
-  final int partIndex;
-  final Duration partStartPosition;
+    super.canRenewUrlInPlace = false,
+    required MediaTimeline filmTimeline,
+    required super.partIndex,
+    required super.partStartPosition,
+    super.streamStartsAtRequestedPosition,
+  }) : super(filmTimeline: filmTimeline);
+  @override
+  MediaTimeline get filmTimeline => super.filmTimeline!;
 }
 
 /// A failed preflight must not lose its cleanup handle when the server is
 /// temporarily unable to stop it. The owner can retry this original lease;
 /// retrying getPlaybackInfo would create a different session and is incorrect.
-class PlexPlaybackPreparationException extends MediaServerException {
-  const PlexPlaybackPreparationException(
-    this.resources,
-    MediaServerFailureKind kind,
-  ) : super(kind, detail: '播放预检失败，原会话资源清理尚未完成');
-  final PlaybackResourceLease resources;
+class PlexPlaybackPreparationException extends PlaybackPreparationException {
+  const PlexPlaybackPreparationException(super.resources, super.kind);
 }
 
 bool _subtitleRequiresTranscode(

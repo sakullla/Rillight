@@ -1,4 +1,4 @@
-import 'package:rillight/media_server/server_address.dart';
+import 'package:rillight/media_server/resources.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -26,13 +26,14 @@ enum PlaybackResourceRole {
 
 enum PlaybackCacheStream { conservative, stable }
 
-/// A per-session loopback transport. The native core never receives Emby credentials;
+/// A per-session loopback transport. The native core never receives service credentials;
 /// every redirect, HLS child resource and subtitle is authorized separately.
 class PlaybackHttpProxy {
   PlaybackHttpProxy._(
     this._server,
     this.origin,
     this.headers,
+    this.authorization,
     this._cache,
     this.dynamicSource,
     this.sessionBuffering,
@@ -65,6 +66,7 @@ class PlaybackHttpProxy {
   String? _warmIdentity;
   final Uri? origin;
   final Map<String, String> headers;
+  final ResourceAuthorization authorization;
   final String _secret;
   SessionByteCache? _cache;
   SessionByteCache? get cache => _cache;
@@ -546,6 +548,7 @@ class PlaybackHttpProxy {
   static Future<PlaybackHttpProxy> create({
     Uri? origin,
     Map<String, String> headers = const {},
+    ResourceAuthorization? authorization,
     FutureOr<SessionByteCache>? cache,
     bool dynamicSource = false,
     bool sessionBuffering = false,
@@ -562,6 +565,15 @@ class PlaybackHttpProxy {
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
     origin,
     Map.unmodifiable(headers),
+    authorization ??
+        ResourceAuthorization(
+          headersByOrigin: {origin?.origin ?? '': headers},
+          publicHeaders: {
+            for (final entry in headers.entries)
+              if (entry.key.toLowerCase() == 'user-agent')
+                entry.key: entry.value,
+          },
+        ),
     cache is SessionByteCache ? cache : null,
     dynamicSource,
     sessionBuffering,
@@ -1530,13 +1542,7 @@ class PlaybackHttpProxy {
   }
 
   Uri _withoutForeignCredentials(Uri url) {
-    if (origin != null && url.origin == origin!.origin) return url;
-    final tokens = headers.entries
-        .where((e) => e.key.toLowerCase() == 'x-emby-token')
-        .map((e) => e.value)
-        .where((e) => e.isNotEmpty)
-        .toSet();
-    return withoutCredentialValues(url, tokens);
+    return authorization.sanitizeUri(url);
   }
 
   Future<(HttpClientResponse, Uri)> _fetch(
@@ -1756,11 +1762,8 @@ class PlaybackHttpProxy {
               : incoming.headers.value(name);
           if (value != null) request.headers.set(name, value);
         }
-        for (final header in headers.entries) {
-          if (header.key.toLowerCase() == 'user-agent' ||
-              (origin != null && url.origin == origin!.origin)) {
-            request.headers.set(header.key, header.value);
-          }
+        for (final header in authorization.headersFor(url).entries) {
+          request.headers.set(header.key, header.value);
         }
         // A fast range says nothing about the next cold range or LB node.
         // Real media responses can take 30+ seconds to send headers and then

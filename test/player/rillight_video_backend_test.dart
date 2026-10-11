@@ -264,6 +264,46 @@ class _RejectedAudioCoreDriver extends _CoreDriver {
 }
 
 void main() {
+  test(
+    'remote Plex selection IDs map to negotiated output indices in both directions',
+    () async {
+      final temp = await Directory.systemTemp.createTemp(
+        'provider-output-indices-',
+      );
+      final driver = _CoreDriver();
+      final backend = RillightVideoBackend(
+        createPlayer: () async => driver,
+        diskCacheDirectory: temp,
+        settingsStore: MemoryPlayerSettingsStore(),
+      );
+      try {
+        await backend.open(
+          VideoOpenRequest(
+            url: Uri.parse('http://127.0.0.1/movie'),
+            sessionId: 1,
+            mediaStreams: const [
+              MediaStreamInfo(
+                index: 721,
+                playbackIndex: 2,
+                type: 'Audio',
+                language: 'eng',
+              ),
+            ],
+          ),
+        );
+        expect(driver.request!.streams.single.index, 2);
+        expect(backend.selectedAudioIndex, 721);
+        expect(backend.audioTrackSupported(721), true);
+        await backend.setAudioIndex(721);
+        expect(driver.lastArgs['index'], 2);
+        expect(backend.selectedAudioIndex, 721);
+      } finally {
+        await backend.dispose();
+        await temp.delete(recursive: true);
+      }
+    },
+  );
+
   late Directory isolatedCache;
   setUp(() async {
     isolatedCache = await Directory.systemTemp.createTemp(

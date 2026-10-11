@@ -6,8 +6,9 @@ import 'capabilities.dart';
 class ResourceAuthorization {
   ResourceAuthorization({
     required Map<String, Map<String, String>> headersByOrigin,
-    this.publicHeaders = const {},
-  }) : headersByOrigin = Map.unmodifiable({
+    Map<String, String> publicHeaders = const {},
+  }) : publicHeaders = Map.unmodifiable(publicHeaders),
+       headersByOrigin = Map.unmodifiable({
          for (final e in headersByOrigin.entries)
            e.key: Map<String, String>.unmodifiable(e.value),
        });
@@ -17,6 +18,55 @@ class ResourceAuthorization {
     ...publicHeaders,
     ...?headersByOrigin[target.origin],
   };
+
+  /// Remove copied service credentials on each hop without rebuilding signed
+  /// query parameters. A different authorized origin only receives its own
+  /// credentials, never another origin's token.
+  Uri sanitizeUri(Uri target) {
+    final permitted = _credentialValues(headersByOrigin[target.origin]);
+    final foreign = <String>{
+      for (final entry in headersByOrigin.entries)
+        if (entry.key != target.origin) ..._credentialValues(entry.value),
+    }..removeAll(permitted);
+    if (!target.hasQuery || foreign.isEmpty) return target;
+    final parts = target.query.split('&');
+    final kept = parts.where((part) {
+      final decoded = Uri.decodeQueryComponent(part);
+      return !foreign.any(decoded.contains);
+    }).toList();
+    if (kept.length == parts.length) return target;
+    return target.replace(query: kept.join('&'));
+  }
+
+  static Set<String> _credentialValues(Map<String, String>? headers) {
+    final values = <String>{};
+    for (final entry in (headers ?? const <String, String>{}).entries) {
+      final name = entry.key.toLowerCase();
+      if (entry.value.isEmpty ||
+          !(name.contains('token') ||
+              name.contains('authorization') ||
+              name == 'cookie' ||
+              name == 'api-key' ||
+              name == 'x-api-key')) {
+        continue;
+      }
+      values.add(entry.value);
+      if (name == 'authorization' || name == 'x-emby-authorization') {
+        final bearer = RegExp(
+          r'^Bearer\s+(.+)$',
+          caseSensitive: false,
+        ).firstMatch(entry.value);
+        if (bearer != null) values.add(bearer.group(1)!);
+        for (final match in RegExp(
+          r'(?:^|[,\s])Token\s*=\s*"([^"]+)"',
+          caseSensitive: false,
+        ).allMatches(entry.value)) {
+          values.add(match.group(1)!);
+        }
+      }
+    }
+    return values;
+  }
 }
 
 class AuthorizedMediaResource {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'resources.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -249,4 +250,13 @@ String? _bodyText(Object? data) {
     }
   }
   return null;
+}
+
+/// Preparation failed, and the original resource still needs release.
+class PlaybackPreparationException extends MediaServerException {
+  const PlaybackPreparationException(
+    this.resources,
+    MediaServerFailureKind kind,
+  ) : super(kind, detail: 'Playback preparation failed; cleanup is pending');
+  final PlaybackResourceLease resources;
 }

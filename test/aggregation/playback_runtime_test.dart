@@ -362,6 +362,7 @@ void main() {
   late SourceAccount account;
   late List<PlaybackReport> reports;
   late MemoryPlaybackSessionSnapshotStore snapshots;
+  var cleanupFails = false;
 
   Future<void> setup({
     bool private = false,
@@ -372,6 +373,7 @@ void main() {
     WidgetTester? widgetTester,
   }) async {
     reports = [];
+    cleanupFails = false;
     final access = RegionAccessController();
     if (private) {
       await access.setPin('1234', '1234', (_) async {});
@@ -422,7 +424,9 @@ void main() {
       access: access,
       store: store,
       credentials: credentials,
-      createClient: () => _Client(reports, trackChoices: trackChoices),
+      createClient: () =>
+          _Client(reports, trackChoices: trackChoices)
+            ..failStopped = cleanupFails,
     );
     await registry.load();
     account = (await registry.authenticate('a')).account;
@@ -543,11 +547,10 @@ void main() {
       );
       final snapshot = (await snapshots.read())!;
       expect(runtime.canRecoverSnapshot(snapshot), isTrue);
-      final client = controller.client as _Client;
-      client.failStopped = true;
+      cleanupFails = true;
       await expectLater(runtime.recoverSnapshot(snapshot), throwsStateError);
       expect(runtime.canRecoverSnapshot(snapshot), isTrue);
-      client.failStopped = false;
+      cleanupFails = false;
       expect(await runtime.recoverSnapshot(snapshot), isTrue);
       expect(
         reports.last.position.inMicroseconds * 10,
@@ -556,13 +559,13 @@ void main() {
       expect(reports.last.playSessionId, snapshot.playSessionId);
       final recoveryStore = MemoryPlaybackSessionSnapshotStore();
       await recoveryStore.write(snapshot);
-      client.failStopped = true;
+      cleanupFails = true;
       await expectLater(
         recoverAndroidSession(auth.client, recoveryStore, runtime: runtime),
         throwsStateError,
       );
       expect(await recoveryStore.read(), isNotNull);
-      client.failStopped = false;
+      cleanupFails = false;
       expect(
         await recoverAndroidSession(
           auth.client,
@@ -1371,7 +1374,7 @@ void main() {
   });
 
   test(
-    'fresh ordinary registry recovery acquires session and retries transient failure',
+    'fresh ordinary recovery only cleans original session and retries transient failure',
     () async {
       await setup();
       await controller.start();
@@ -1380,7 +1383,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 40));
       final saved = (await snapshots.read())!;
       final freshReports = <PlaybackReport>[];
-      var offline = true;
+      var failCleanup = true;
       final freshRegistry = SourceSessionRegistry(
         access: RegionAccessController(),
         store: MemoryServerListStore(
@@ -1396,8 +1399,8 @@ void main() {
           ),
         }),
         createClient: () => _Client(freshReports)
-          ..failPublic = offline
-          ..failStopped = true,
+          ..failPublic = true
+          ..failStopped = failCleanup,
       );
       await freshRegistry.load();
       final freshAuth = AuthController(
@@ -1432,21 +1435,25 @@ void main() {
         ),
         isNull,
       );
-      offline = false;
       await expectLater(
         recoverAndroidSession(freshAuth.client, store, runtime: fresh),
         throwsStateError,
       );
       expect(await store.read(), isNotNull);
-      final permit = freshRegistry.permit(account, libraryId: 'library');
-      await permit.dispatch((c) async {
-        (c as _Client).failStopped = false;
-      });
+      failCleanup = false;
       expect(
         await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
         isTrue,
       );
       expect(await store.read(), isNull);
+      expect(
+        freshRegistry.sessionAccount(
+          'a',
+          region: AccessRegion.ordinary,
+          libraryId: 'library',
+        ),
+        isNull,
+      );
       expect(
         freshReports.last.position.inMicroseconds * 10,
         saved.position.inMicroseconds * 10,
@@ -1742,6 +1749,8 @@ void main() {
       await _eventually(() => !backend.isPlaying);
       expect(controller.permissionRevoked, isTrue);
       expect(controller.activeOrigin, isNull);
+      // Native retirement and resource cleanup are independent futures.
+      await _eventually(() => snapshots.snapshot == null);
       expect(await snapshots.read(), isNull);
       await expectLater(controller.restoreOriginalSource(), throwsStateError);
     },

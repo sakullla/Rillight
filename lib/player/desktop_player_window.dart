@@ -112,12 +112,15 @@ class PlayerWindowLaunch {
   }
 
   factory PlayerWindowLaunch.fromJson(Map<String, dynamic> json) {
+    if (json['schema'] != null && json['schema'] != 2) {
+      throw const FormatException('Unknown player launch schema');
+    }
     final name = json['serviceType'] as String? ?? 'emby';
     final type = MediaServerType.values
         .where((type) => type.name == name)
         .firstOrNull;
     if (type == null) throw const FormatException('Unknown media service');
-    return PlayerWindowLaunch(
+    final launch = PlayerWindowLaunch(
       serviceType: type,
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
@@ -167,6 +170,12 @@ class PlayerWindowLaunch {
         version: json['version'] as String? ?? kAppVersion,
       ),
     );
+    final account = launch.request.source?.account;
+    if (account != null &&
+        (account.serviceType != type || account.userId != launch.userId)) {
+      throw const FormatException('Player source identity mismatch');
+    }
+    return launch;
   }
 
   Map<String, dynamic> toJson() {
@@ -301,7 +310,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   PlayerStartupPreparation? _startupPreparation;
   bool _opening = false;
   String get _currentAuthIdentity =>
-      '${auth.client.baseUrl}|${auth.client.userId}|${auth.client.accessToken}';
+      '${auth.client.serviceType.name}|${auth.client.baseUrl}|${auth.client.userId}|${auth.client.accessToken}';
 
   /// 串行化 open/close 与 watcher 代发,避免 close 清掉后开的 pid,
   /// 并让 close() 等到在途 reconcile 结束后再回到登出。
@@ -702,25 +711,51 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           snapshot.source == null ||
           snapshot.source!.account != _origin?.source.account ||
           snapshot.regionGeneration != _origin?.permit.regionGeneration) {
-        await store.delete();
+        if (snapshot.pendingCleanups.isEmpty) await store.delete();
         return;
       }
       if (await runtime!.recoverSnapshot(snapshot)) await store.delete();
       return;
     }
     final client = auth.client;
-    if (snapshot.baseUrl != client.baseUrl?.toString() ||
+    if (snapshot.serviceType != client.serviceType ||
+        snapshot.baseUrl != client.baseUrl?.toString() ||
         snapshot.userId != client.userId) {
       return;
     }
     final token = client.accessToken;
+    if (token == null || token.isEmpty) return;
+    final frozen = client.withRequestGuard(() {
+      if (client.serviceType != snapshot.serviceType ||
+          client.baseUrl?.toString() != snapshot.baseUrl ||
+          client.userId != snapshot.userId ||
+          client.accessToken != token) {
+        throw StateError('Playback compensation identity revoked');
+      }
+    });
     try {
-      await client
-          .stopPlayback(playbackReportFromSnapshot(snapshot))
+      for (final pending in snapshot.validatedPendingCleanups) {
+        if (pending.serviceType != snapshot.serviceType ||
+            pending.baseUrl != snapshot.baseUrl ||
+            pending.userId != snapshot.userId) {
+          throw StateError(
+            'Pending playback cleanup needs its source authority',
+          );
+        }
+        await frozen
+            .releasePlayback(playbackReportFromSnapshot(pending))
+            .timeout(reportTimeout);
+      }
+      final report = playbackReportFromSnapshot(snapshot);
+      await (snapshot.cleanupOnly
+              ? frozen.releasePlayback(report)
+              : frozen.stopPlayback(report))
           .timeout(reportTimeout);
     } catch (_) {
       _notify(PlayerHostNotice.progressSyncFailed);
       return;
+    } finally {
+      frozen.clearSession();
     }
     if (client.accessToken == token &&
         snapshot.baseUrl == client.baseUrl?.toString() &&
@@ -1508,7 +1543,7 @@ class PlayerWindowApp extends StatefulWidget {
 
 class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   late PlayerWindowLaunch _launch;
-  late final AuthController _auth;
+  late AuthController _auth;
   var _playerKey = GlobalKey<PlayerPageState>();
   Future<void>? _closing;
   Timer? _commands;
@@ -1613,16 +1648,14 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     await _playerKey.currentState?.controller?.disposeAsync();
     if (!mounted || _closing != null || revision != _launchRevision) return;
     _playerKey = GlobalKey<PlayerPageState>();
+    final previousAuth = _auth;
+    final nextAuth = _authFor(launch);
     setState(() {
       _launch = launch;
       _startup = null;
-      _auth.client.attachSession(
-        baseUrl: Uri.parse(launch.baseUrl),
-        accessToken: launch.accessToken,
-        userId: launch.userId,
-        userAgent: launch.userAgent,
-      );
+      _auth = nextAuth;
     });
+    previousAuth.dispose();
   }
 
   Future<void> _configureWindow() async {

@@ -1,6 +1,7 @@
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/playback.dart';
 import '../auth/source_sessions.dart';
+import '../media_server/resources.dart';
 import '../aggregation/history/history_writer.dart';
 
 /// Immutable ownership plus a per-session report queue. A later login cannot
@@ -12,11 +13,13 @@ class PlaybackSession {
     required this.report,
     this.permit,
     this.frozenStop,
+    this.resources,
   }) : baseUrl = client.baseUrl?.toString(),
        userId = client.userId,
        accessToken = client.accessToken;
 
   final int id;
+  final PlaybackResourceLease? resources;
   final MediaServerClient client;
   final String? baseUrl;
   final String? userId;

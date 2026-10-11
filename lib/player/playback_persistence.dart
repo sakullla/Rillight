@@ -54,6 +54,8 @@ class PlaybackSessionSnapshot {
     this.source,
     this.libraryId,
     this.regionGeneration,
+    this.cleanupOnly = false,
+    this.pendingCleanups = const [],
   });
 
   final String itemId;
@@ -69,7 +71,47 @@ class PlaybackSessionSnapshot {
   final String? libraryId;
   final int? regionGeneration;
 
+  /// A prepared resource existed, but playback had not started. Recovery must
+  /// release it without writing a watched/progress event.
+  final bool cleanupOnly;
+  static const maxPendingCleanups = 64;
+  final List<PlaybackSessionSnapshot> pendingCleanups;
+
+  List<PlaybackSessionSnapshot> get validatedPendingCleanups {
+    if (pendingCleanups.length > maxPendingCleanups ||
+        pendingCleanups.any(
+          (value) => !value.cleanupOnly || value.pendingCleanups.isNotEmpty,
+        )) {
+      throw const FormatException('Invalid pending playback cleanups');
+    }
+    return List.unmodifiable(pendingCleanups);
+  }
+
+  PlaybackSessionSnapshot withPendingCleanups(
+    List<PlaybackSessionSnapshot> pending,
+  ) {
+    final result = PlaybackSessionSnapshot(
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      playSessionId: playSessionId,
+      position: position,
+      baseUrl: baseUrl,
+      userId: userId,
+      timestamp: timestamp,
+      playMethod: playMethod,
+      serviceType: serviceType,
+      source: source,
+      libraryId: libraryId,
+      regionGeneration: regionGeneration,
+      cleanupOnly: cleanupOnly,
+      pendingCleanups: List.unmodifiable(pending),
+    );
+    result.validatedPendingCleanups;
+    return result;
+  }
+
   Map<String, dynamic> toJson() {
+    final pending = validatedPendingCleanups;
     return {
       'itemId': itemId,
       'mediaSourceId': mediaSourceId,
@@ -84,16 +126,37 @@ class PlaybackSessionSnapshot {
       if (source != null) 'source': encodeSource(source!),
       if (libraryId != null) 'libraryId': libraryId,
       if (regionGeneration != null) 'regionGeneration': regionGeneration,
+      if (cleanupOnly) 'cleanupOnly': true,
+      if (pending.isNotEmpty)
+        'pendingCleanups': [for (final value in pending) value.toJson()],
     };
   }
 
   /// 缺少任一会话标识字段时返回 null(视为无效快照)。
   static PlaybackSessionSnapshot? fromJson(Map<String, dynamic> json) {
-    final serviceName = json['serviceType'] as String? ?? 'emby';
+    final rawPending = json['pendingCleanups'];
+    if (rawPending != null &&
+        (rawPending is! List || rawPending.length > maxPendingCleanups)) {
+      return null;
+    }
+    final pending = <PlaybackSessionSnapshot>[];
+    for (final value in rawPending as List? ?? const []) {
+      // Reject recursion before decoding a child, including deeply nested input.
+      if (value is! Map ||
+          value['cleanupOnly'] != true ||
+          value.containsKey('pendingCleanups')) {
+        return null;
+      }
+      final child = fromJson(Map<String, dynamic>.from(value));
+      if (child == null) return null;
+      pending.add(child);
+    }
+    final serviceName = json['serviceType'] ?? 'emby';
     final serviceType = MediaServerType.values
         .where((type) => type.name == serviceName)
         .firstOrNull;
-    if (serviceType == null ||
+    if (serviceName is! String ||
+        serviceType == null ||
         (json['schema'] != null && json['schema'] != 2)) {
       return null;
     }
@@ -123,6 +186,12 @@ class PlaybackSessionSnapshot {
     final timestamp =
         DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+    final source = json['source'] is Map
+        ? decodeSource(Map<String, dynamic>.from(json['source'] as Map))
+        : null;
+    if (source != null && source.account.serviceType != serviceType) {
+      return null;
+    }
     return PlaybackSessionSnapshot(
       itemId: itemId,
       mediaSourceId: mediaSourceId,
@@ -135,11 +204,11 @@ class PlaybackSessionSnapshot {
       baseUrl: baseUrl,
       userId: userId,
       timestamp: timestamp,
-      source: json['source'] is Map
-          ? decodeSource(Map<String, dynamic>.from(json['source'] as Map))
-          : null,
+      source: source,
       libraryId: json['libraryId'] as String?,
       regionGeneration: json['regionGeneration'] as int?,
+      cleanupOnly: json['cleanupOnly'] == true,
+      pendingCleanups: List.unmodifiable(pending),
     );
   }
 }

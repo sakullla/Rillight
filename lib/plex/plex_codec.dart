@@ -165,6 +165,7 @@ MediaItem plexItem(Map<String, dynamic> row, {bool section = false}) {
 
 MediaStreamInfo plexPlaybackStream(Map<String, dynamic> row) => MediaStreamInfo(
   index: plexInt(row['id']) ?? 0,
+  playbackIndex: plexInt(row['index']),
   type: plexStreamType(row['streamType']),
   codec: row['codec'] as String?,
   language: row['languageCode'] as String?,
@@ -198,11 +199,10 @@ class PlexNegotiatedStream extends MediaStreamInfo {
     super.width,
     super.height,
     super.bitRate,
-    required this.playbackIndex,
+    required super.playbackIndex,
     required this.decision,
     required this.location,
   });
-  final int? playbackIndex;
   final String decision, location;
 }
 

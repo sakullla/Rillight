@@ -1,4 +1,5 @@
 import 'authentication.dart';
+import 'errors.dart';
 import 'resources.dart';
 export 'models.dart';
 import 'package:dio/dio.dart';
@@ -54,6 +55,30 @@ abstract class MediaServerClient
 }
 
 extension MediaServerPlaybackStop on MediaServerClient {
+  /// Inspect metadata without retaining a provider's preflight resources.
+  Future<PlaybackInfo> inspectPlaybackInfo({
+    required String itemId,
+    String? mediaSourceId,
+    int? maxStreamingBitrate,
+    Duration? startPosition,
+  }) async {
+    final info = await getPlaybackInfo(
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      maxStreamingBitrate: maxStreamingBitrate,
+      startPosition: startPosition,
+    );
+    try {
+      await info.resources?.release();
+    } catch (_) {
+      throw PlaybackPreparationException(
+        info.resources!,
+        MediaServerFailureKind.unknown,
+      );
+    }
+    return info;
+  }
+
   Future<void> stopPlayback(PlaybackReport report) async {
     try {
       await reportStopped(report);

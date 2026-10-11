@@ -263,6 +263,7 @@ class EmbyClient implements MediaServerClient {
   String? _accessToken;
   String? _userId;
   String? _customUserAgent;
+  int _resourceGeneration = 0;
 
   @override
   Uri? get baseUrl => _baseUrl;
@@ -293,6 +294,7 @@ class EmbyClient implements MediaServerClient {
     required String userId,
     String? userAgent,
   }) {
+    _resourceGeneration++;
     _baseUrl = baseUrl;
     _accessToken = accessToken;
     _userId = userId;
@@ -301,6 +303,7 @@ class EmbyClient implements MediaServerClient {
 
   @override
   void clearSession() {
+    _resourceGeneration++;
     _baseUrl = null;
     _accessToken = null;
     _userId = null;
@@ -935,6 +938,7 @@ class EmbyClient implements MediaServerClient {
     Duration receiveTimeout = const Duration(seconds: 60),
     int attempts = 3,
     int? maxBytes,
+    CancelToken? cancelToken,
   }) async {
     if (!hasSession) {
       throw const MediaServerException(MediaServerFailureKind.sessionExpired);
@@ -943,27 +947,25 @@ class EmbyClient implements MediaServerClient {
     for (var attempt = 0; attempt < attempts; attempt++) {
       try {
         return await _withAuthRetry(() async {
-          final origin = _baseUrl!;
-          final token = _accessToken!;
-          final authorizedHeaders = sessionHeaders;
-          var target = uri;
-          for (var redirects = 0; redirects <= 5; redirects++) {
-            final sameOrigin = target.origin == origin.origin;
-            if (!sameOrigin) {
-              target = target.replace(
-                queryParameters: {
-                  for (final entry in target.queryParameters.entries)
-                    if (!{
-                          'api_key',
-                          'apikey',
-                          'access_token',
-                          'x-emby-token',
-                        }.contains(entry.key.toLowerCase()) &&
-                        !entry.value.contains(token))
-                      entry.key: entry.value,
-                },
+          final generation = _resourceGeneration;
+          void checkCurrent() {
+            if (generation != _resourceGeneration || !hasSession) {
+              throw const MediaServerException(
+                MediaServerFailureKind.cancelled,
               );
             }
+          }
+
+          final origin = _baseUrl!;
+          final authorizedHeaders = sessionHeaders;
+          final authorization = ResourceAuthorization(
+            headersByOrigin: {origin.origin: authorizedHeaders},
+          );
+          var target = uri;
+          for (var redirects = 0; redirects <= 5; redirects++) {
+            checkCurrent();
+            final sameOrigin = target.origin == origin.origin;
+            target = authorization.sanitizeUri(target);
             if (!{'http', 'https'}.contains(target.scheme) ||
                 target.userInfo.isNotEmpty) {
               throw StateError('Unsupported subtitle URL');
@@ -990,7 +992,9 @@ class EmbyClient implements MediaServerClient {
               final response = await _dio.requestUri<List<int>>(
                 target,
                 options: options,
+                cancelToken: cancelToken,
               );
+              checkCurrent();
               if ({301, 302, 303, 307, 308}.contains(response.statusCode)) {
                 final location = response.headers.value('location');
                 if (location == null) {
@@ -1009,12 +1013,22 @@ class EmbyClient implements MediaServerClient {
               }
               return data;
             }
+            if (cancelToken?.isCancelled == true) {
+              throw cancelToken!.cancelError!;
+            }
             final transferCancel = CancelToken();
+            cancelToken?.whenCancel.then(transferCancel.cancel);
             final response = await _dio.requestUri<ResponseBody>(
               target,
               cancelToken: transferCancel,
               options: options,
             );
+            try {
+              checkCurrent();
+            } catch (_) {
+              transferCancel.cancel();
+              rethrow;
+            }
             if ({301, 302, 303, 307, 308}.contains(response.statusCode)) {
               transferCancel.cancel();
               final location = response.headers.value('location');
@@ -1030,11 +1044,13 @@ class EmbyClient implements MediaServerClient {
             }
             final body = response.data;
             if (body == null) {
+              transferCancel.cancel();
               throw StateError('Empty response');
             }
             final bytes = BytesBuilder(copy: false);
             try {
               await for (final chunk in body.stream) {
+                checkCurrent();
                 final room = maxBytes - bytes.length;
                 if (room <= 0) break;
                 if (chunk.length > room) {
@@ -1049,6 +1065,7 @@ class EmbyClient implements MediaServerClient {
               }
             }
             final data = bytes.takeBytes();
+            checkCurrent();
             if (data.isEmpty) {
               throw StateError('Empty response');
             }
@@ -1141,32 +1158,17 @@ class EmbyClient implements MediaServerClient {
       _baseUrl!,
       '/Videos/$itemId/index.bif',
     ).replace(queryParameters: {'Width': '160'});
-    return _withAuthRetry(() async {
-      final transferCancel = cancelToken ?? CancelToken();
-      final response = await _dio.requestUri<ResponseBody>(
-        uri,
-        cancelToken: transferCancel,
-        options: Options(
-          responseType: ResponseType.stream,
-          headers: {
-            ..._headers(token: _accessToken, userId: _userId),
-            'Accept': '*/*',
-          },
-        ),
-      );
-      final body = response.data;
-      if (body == null) throw const FormatException('Missing preview data');
-      const limit = 32 * 1024 * 1024;
-      final bytes = BytesBuilder(copy: false);
-      await for (final chunk in body.stream) {
-        if (bytes.length + chunk.length > limit) {
-          transferCancel.cancel('Preview data exceeds memory limit');
-          throw const FormatException('Preview data exceeds memory limit');
-        }
-        bytes.add(chunk);
-      }
-      return bytes.takeBytes();
-    });
+    const limit = 32 * 1024 * 1024;
+    final bytes = await readAuthorizedBytes(
+      uri,
+      cancelToken: cancelToken,
+      attempts: 1,
+      maxBytes: limit + 1,
+    );
+    if (bytes.length > limit) {
+      throw const FormatException('Preview data exceeds memory limit');
+    }
+    return Uint8List.fromList(bytes);
   }
 
   @override
@@ -1325,25 +1327,13 @@ class EmbyClient implements MediaServerClient {
       _baseUrl!,
       path,
     ).replace(queryParameters: _stringifyQuery(queryParameters));
-    return _withAuthRetry(() async {
-      final response = await _dio.requestUri<dynamic>(
-        uri,
-        cancelToken: cancelToken,
-        options: Options(
-          method: 'GET',
-          responseType: ResponseType.bytes,
-          headers: {
-            ..._headers(token: _accessToken, userId: _userId),
-            'Accept': '*/*',
-          },
-        ),
-      );
-      final data = response.data;
-      if (data is List<int>) {
-        return data;
-      }
-      throw const MediaServerException(MediaServerFailureKind.unknown);
-    });
+    return readAuthorizedBytes(
+      uri,
+      cancelToken: cancelToken,
+      attempts: 1,
+      receiveTimeout:
+          _dio.options.receiveTimeout ?? const Duration(seconds: 15),
+    );
   }
 
   Future<T> _withAuthRetry<T>(Future<T> Function() send) async {

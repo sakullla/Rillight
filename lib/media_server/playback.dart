@@ -23,6 +23,7 @@ class MediaStreamInfo {
     this.isTextSubtitleStream,
     this.deliveryMethod,
     this.deliveryUrl,
+    this.playbackIndex,
     this.channels,
     this.width,
     this.height,
@@ -45,6 +46,9 @@ class MediaStreamInfo {
   /// PlaybackInfo's selected subtitle delivery, independent of container origin.
   final String? deliveryMethod;
   final String? deliveryUrl;
+
+  /// Output-container index, distinct from the remote selection ID.
+  final int? playbackIndex;
   final int? channels;
   final int? width;
   final int? height;
@@ -309,11 +313,45 @@ class ResolvedPlayback {
     required this.itemId,
     this.requiresStrmExpansion = false,
     this.timeline,
+    this.filmTimeline,
+    this.partIndex = 0,
+    this.partStartPosition = Duration.zero,
+    this.streamStartsAtRequestedPosition,
     this.authorization,
     this.resources,
+    this.canRenewUrlInPlace = true,
   });
 
+  final bool canRenewUrlInPlace;
   final MediaTimeline? timeline;
+
+  /// Ordered film parts. A stream may cover only [partIndex].
+  final MediaTimeline? filmTimeline;
+  final int partIndex;
+  final Duration partStartPosition;
+
+  /// Null preserves the legacy transcode convention; false means a full Part.
+  final bool? streamStartsAtRequestedPosition;
+  bool get startsAtRequestedPosition =>
+      streamStartsAtRequestedPosition ?? isTranscode;
+  Duration? get partOffset {
+    final film = filmTimeline;
+    if (film == null) return Duration.zero;
+    if (partIndex < 0 || partIndex >= film.parts.length) return null;
+    var offset = Duration.zero;
+    for (var i = 0; i < partIndex; i++) {
+      final value = film.parts[i].duration;
+      if (value == null || value < Duration.zero) return null;
+      offset += value;
+    }
+    return offset;
+  }
+
+  Duration? get streamOrigin => partOffset == null
+      ? null
+      : partOffset! +
+            (startsAtRequestedPosition ? partStartPosition : Duration.zero);
+
   final ResourceAuthorization? authorization;
   final PlaybackResourceLease? resources;
   final PlayMethod playMethod;
@@ -357,3 +395,24 @@ const List<int> kTranscodeBitrates = [
   2000000,
   1000000,
 ];
+
+/// A provider whose selected stream addresses one film Part.
+abstract interface class PartPlaybackProvider {
+  Future<PlaybackInfo> preparePart({
+    required String itemId,
+    required PlaybackMediaSource previous,
+    required Duration position,
+    required int? audioIndex,
+    required int? subtitleIndex,
+    required int maxStreamingBitrate,
+    PlaybackCapabilities? capabilities,
+  });
+}
+
+/// Part languages differ or are ambiguous; expose real target choices.
+class PartTrackSelectionRequired implements Exception {
+  const PartTrackSelectionRequired(this.target);
+  final PlaybackMediaSource target;
+  @override
+  String toString() => 'Part language requires explicit selection';
+}

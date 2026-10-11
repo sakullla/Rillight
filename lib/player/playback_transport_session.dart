@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:rillight/media_server/resources.dart';
 
 import 'cache/cache_limits.dart';
 import 'cache/session_byte_cache.dart';
@@ -77,6 +78,7 @@ class PlaybackTransportSession {
   static Future<PlaybackTransportSession> start({
     Uri? origin,
     Map<String, String> headers = const {},
+    ResourceAuthorization? authorization,
     Directory? cacheRoot,
     int memoryLimitBytes = 32 * 1024 * 1024,
     int diskLimitBytes = 2048 * 1024 * 1024,
@@ -106,6 +108,8 @@ class PlaybackTransportSession {
           sessionBuffering,
           continuousTransfers,
           readAheadConcurrency,
+          authorization?.headersByOrigin,
+          authorization?.publicHeaders,
         ],
         onError: inbox.sendPort,
         onExit: inbox.sendPort,
@@ -277,6 +281,17 @@ Future<void> _serveTransport(List<Object?> arguments) async {
     proxy = await PlaybackHttpProxy.create(
       origin: arguments[2] == null ? null : Uri.parse(arguments[2]! as String),
       headers: Map<String, String>.from(arguments[3]! as Map),
+      authorization: arguments[13] == null
+          ? null
+          : ResourceAuthorization(
+              headersByOrigin: {
+                for (final entry in (arguments[13]! as Map).entries)
+                  entry.key as String: Map<String, String>.from(
+                    entry.value as Map,
+                  ),
+              },
+              publicHeaders: Map<String, String>.from(arguments[14]! as Map),
+            ),
       cache: cache,
       readAheadBytes: arguments[8]! as int,
       dynamicSource: arguments[9]! as bool,

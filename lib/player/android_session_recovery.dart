@@ -19,10 +19,11 @@ Future<bool> recoverAndroidSession(
         await store.delete();
         return true;
       }
-      await store.delete();
+      if (snapshot.pendingCleanups.isEmpty) await store.delete();
       return false;
     } catch (_) {
-      if (!runtime.canRecoverSnapshot(snapshot)) {
+      if (snapshot.pendingCleanups.isEmpty &&
+          !runtime.canRecoverSnapshot(snapshot)) {
         // A revoked compensation is discarded, never kept as a lock-screen
         // retry or resurrected when the same account is unlocked again.
         await store.delete();
@@ -38,7 +39,7 @@ Future<bool> recoverAndroidSession(
   if (snapshot.serviceType != client.serviceType ||
       snapshot.baseUrl != base.toString() ||
       snapshot.userId != user) {
-    await store.delete();
+    if (snapshot.pendingCleanups.isEmpty) await store.delete();
     return false;
   }
   if (client.baseUrl != base ||
@@ -54,14 +55,28 @@ Future<bool> recoverAndroidSession(
       userAgent: client.customUserAgent,
     );
   try {
-    await frozen.getUser().timeout(const Duration(seconds: 5));
+    // This is a stop-only compensation using an already attached resource
+    // credential. In particular, Plex cleanup must not require cloud/Home
+    // authorization, and no provider may negotiate a replacement playback.
     if (client.baseUrl != base ||
         client.userId != user ||
         client.accessToken != token) {
       return false;
     }
-    await frozen
-        .stopPlayback(playbackReportFromSnapshot(snapshot))
+    for (final pending in snapshot.validatedPendingCleanups) {
+      if (pending.serviceType != client.serviceType ||
+          pending.baseUrl != base.toString() ||
+          pending.userId != user) {
+        throw StateError('Pending playback cleanup needs its source authority');
+      }
+      await frozen
+          .releasePlayback(playbackReportFromSnapshot(pending))
+          .timeout(const Duration(seconds: 3));
+    }
+    final report = playbackReportFromSnapshot(snapshot);
+    await (snapshot.cleanupOnly
+            ? frozen.releasePlayback(report)
+            : frozen.stopPlayback(report))
         .timeout(const Duration(seconds: 3));
     await store.delete();
     return true;

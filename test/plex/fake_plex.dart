@@ -30,6 +30,7 @@ class FakePlex {
   bool failStops = false;
   bool expireHome = false;
   String secondAudioCodec = 'aac';
+  String secondAudioLanguage = 'eng';
   bool additionalUnsupportedAudio = false;
   String subtitleCodec = 'srt';
   String? subtitleDecision;
@@ -554,7 +555,7 @@ class FakePlex {
                 'id': 22,
                 'streamType': 2,
                 'codec': secondAudioCodec,
-                'languageCode': 'eng',
+                'languageCode': secondAudioLanguage,
                 'selected': true,
               },
             ],

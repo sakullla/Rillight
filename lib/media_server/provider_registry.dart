@@ -1,4 +1,6 @@
 import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/jellyfin/jellyfin_client.dart';
+import 'package:rillight/plex/plex_client.dart';
 import 'capabilities.dart';
 import 'device.dart';
 import 'media_server_client.dart';
@@ -10,6 +12,8 @@ typedef MediaServerBuilder =
 class MediaServerProviders {
   static final Map<MediaServerType, MediaServerBuilder> _builders = {
     MediaServerType.emby: (device) => EmbyClient(device: device),
+    MediaServerType.jellyfin: (device) => JellyfinClient(device: device),
+    MediaServerType.plex: (device) => PlexClient(device: device),
   };
 
   static void register(MediaServerType type, MediaServerBuilder builder) {

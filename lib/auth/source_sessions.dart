@@ -335,6 +335,70 @@ class SourceSessionRegistry {
     _frozenStops.clear();
   }
 
+  /// Compensate one persisted playback without reacquiring cloud authority or
+  /// negotiating media. This never publishes a session or grants catalog access.
+  Future<bool> recoverPlayback({
+    required SourceAccount account,
+    required PlaybackReport report,
+    required Uri baseUrl,
+    required String libraryId,
+    int? regionGeneration,
+    bool cleanupOnly = false,
+  }) async {
+    final server = _allowed(account.configuredServerId);
+    final scope = _scopes[server.id] ?? 0;
+    final generation = access.generation;
+    void requireOwner() {
+      _requireCurrent(server, scope, generation);
+      final current = _allowed(server.id);
+      if (current.region != account.region ||
+          current.serviceType != account.serviceType ||
+          current.verifiedServerId != account.verifiedServerId ||
+          current.cloudAccountId != account.cloudAccountId ||
+          current.homeUserId != account.homeUserId ||
+          !current.participates ||
+          !current.scopeKnown ||
+          !current.libraryIds.contains(libraryId) ||
+          !current.lines.any((line) => Uri.parse(line.address) == baseUrl) ||
+          (account.region == AccessRegion.private &&
+              (regionGeneration != generation ||
+                  _sessions[server.id]?.account != account))) {
+        throw StateError('Playback cleanup ownership revoked');
+      }
+    }
+
+    requireOwner();
+    final stored = await credentials.read(server.id);
+    requireOwner();
+    if (stored == null ||
+        !_credentialsMatch(server, stored) ||
+        stored.userId != account.userId ||
+        stored.accessToken.isEmpty) {
+      return false;
+    }
+    final client = _clientFor(account.serviceType);
+    if (_sessions.values.any((session) => identical(session.client, client))) {
+      throw StateError('Cleanup client must be independent');
+    }
+    client.attachSession(
+      baseUrl: baseUrl,
+      accessToken: stored.accessToken,
+      userId: stored.userId,
+      userAgent: server.userAgent,
+    );
+    try {
+      requireOwner();
+      await (cleanupOnly
+              ? client.releasePlayback(report)
+              : client.stopPlayback(report))
+          .timeout(const Duration(seconds: 3));
+      requireOwner();
+      return true;
+    } finally {
+      client.clearSession();
+    }
+  }
+
   int _revision = 0;
   final Map<String, int> _authAttempts = {};
   final Map<String, SourceAuthorization> _pendingAuthorizations = {};

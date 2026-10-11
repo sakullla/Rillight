@@ -549,6 +549,7 @@ class RillightVideoBackend extends VideoBackend
 
       final transport = await PlaybackTransportSession.start(
         origin: request.credentialOrigin,
+        authorization: request.authorization,
         headers: request.credentialHeaders.isNotEmpty
             ? request.credentialHeaders
             : request.headers,
@@ -623,7 +624,7 @@ class RillightVideoBackend extends VideoBackend
           streams: [
             for (final stream in request.mediaStreams)
               CorePlayerTrack(
-                index: stream.index,
+                index: stream.playbackIndex ?? stream.index,
                 type: stream.type,
                 language: stream.language,
                 videoRange: stream.videoRange,
@@ -643,8 +644,10 @@ class RillightVideoBackend extends VideoBackend
       await _syncContainerTracks(result, transport);
       await transport.setPlaybackActive(_wantsPlayback);
       if (_disposed || generation != _generation) return;
-      selectedAudioIndex = result['audioIndex'] as int?;
-      selectedSubtitleIndex = result['subtitleIndex'] as int?;
+      selectedAudioIndex = _remoteTrackIndex(result['audioIndex'] as int?);
+      selectedSubtitleIndex = _remoteTrackIndex(
+        result['subtitleIndex'] as int?,
+      );
       _noteOutput(result, generation);
 
       if (_disposed || generation != _generation) return;
@@ -838,6 +841,7 @@ class RillightVideoBackend extends VideoBackend
               start: position,
               headers: request.headers,
               credentialOrigin: request.credentialOrigin,
+              authorization: request.authorization,
               credentialHeaders: request.credentialHeaders,
               playMethod: request.playMethod,
               isInfiniteStream: request.isInfiniteStream,
@@ -1057,10 +1061,25 @@ class RillightVideoBackend extends VideoBackend
     }
   }
 
+  int _outputTrackIndex(int index) =>
+      _lastOpenRequest?.mediaStreams
+          .where((s) => s.index == index)
+          .firstOrNull
+          ?.playbackIndex ??
+      index;
+  int? _remoteTrackIndex(int? index) {
+    if (index == null) return null;
+    return _lastOpenRequest?.mediaStreams
+            .where((s) => (s.playbackIndex ?? s.index) == index)
+            .firstOrNull
+            ?.index ??
+        index;
+  }
+
   Set<int> _indices(Object? raw) => raw is List
       ? {
           for (final item in raw)
-            if (item is num) item.toInt(),
+            if (item is num) _remoteTrackIndex(item.toInt())!,
         }
       : const {};
   void _readTrackSupport(Map<String, dynamic> result) {
@@ -1135,8 +1154,8 @@ class RillightVideoBackend extends VideoBackend
     if (generation != _generation) {
       throw StateError('Superseded player command');
     }
-    selectedAudioIndex = result['audioIndex'] as int?;
-    selectedSubtitleIndex = result['subtitleIndex'] as int?;
+    selectedAudioIndex = _remoteTrackIndex(result['audioIndex'] as int?);
+    selectedSubtitleIndex = _remoteTrackIndex(result['subtitleIndex'] as int?);
     _noteOutput(result, generation);
   }
 
@@ -1179,6 +1198,7 @@ class RillightVideoBackend extends VideoBackend
       start: request.start,
       headers: request.headers,
       credentialOrigin: request.credentialOrigin,
+      authorization: request.authorization,
       credentialHeaders: request.credentialHeaders,
       playMethod: request.playMethod,
       isInfiniteStream: request.isInfiniteStream,
@@ -1249,7 +1269,7 @@ class RillightVideoBackend extends VideoBackend
     _cacheTrackPending++;
     _invalidateTrack();
     try {
-      await _command('audio', {'index': index});
+      await _command('audio', {'index': _outputTrackIndex(index)});
     } on CoreTrackSelectionException {
       if (generation == _generation) {
         _playableAudio = {..._playableAudio}..remove(index);
@@ -1271,7 +1291,7 @@ class RillightVideoBackend extends VideoBackend
     if (subtitleTrackSupported(index) == false) {
       throw const DeviceTrackRejected();
     }
-    await _command('subtitle', {'index': index});
+    await _command('subtitle', {'index': _outputTrackIndex(index)});
     _selectedSubtitleUri = null;
     _selectedSubtitleServerIndex = null;
     _selectedSubtitleTitle = null;
