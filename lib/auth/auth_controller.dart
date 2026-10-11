@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:rillight/app/file_import.dart';
+import 'package:rillight/auth/backup_import/backup_import_models.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -96,6 +98,14 @@ class AuthController extends ChangeNotifier {
   }
 
   ConnectDraft? connectDraft;
+
+  /// 备份导入的文件选择边界。生产使用系统选择器;测试与原型捕获注入
+  /// 假实现,不把用户路径或 Android content URI 直接交给解析器。
+  AppFilePicker? backupImportPicker;
+
+  /// 备份解密材料注入点。仓库不携带第三方客户端密钥常量;授权渠道
+  /// 注入前,加密容器按 decryptionKeyUnavailable 如实报告,不假装成功。
+  BackupImportKeys backupImportKeys = const BackupImportKeys();
 
   AuthSession? _session;
   List<SavedServer> _savedServers = const [];

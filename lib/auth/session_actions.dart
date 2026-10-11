@@ -9,6 +9,7 @@ import 'package:rillight/app/settings/settings_action.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -89,6 +90,10 @@ class SessionActions extends StatelessWidget {
               onAddServer: () {
                 Navigator.of(dialogContext).pop();
                 GoRouter.of(context).push('${AppRoutes.connect}?add=1');
+              },
+              onImportBackup: () {
+                Navigator.of(dialogContext).pop();
+                unawaited(showBackupImportFlow(context, auth: auth));
               },
               onLogout: () {
                 Navigator.of(dialogContext).pop();
