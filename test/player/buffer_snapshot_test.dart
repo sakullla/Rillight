@@ -271,7 +271,7 @@ void main() {
 
   for (final reason in <String?>[null, 'containerTrackOrTimingUnknown']) {
     testWidgets(
-      'empty time coverage falls back to real byte islands: $reason',
+      'time track never substitutes byte fractions for media time: $reason',
       (tester) async {
         final boundaryKey = GlobalKey();
         await tester.pumpWidget(
@@ -292,7 +292,13 @@ void main() {
                       unknownReason: reason,
                       byteCoverage: BufferedByteCoverage(
                         totalBytes: 100,
-                        ranges: const [BufferedByteRange(0, 60)],
+                        // A metadata probe, initial read and distant seek read
+                        // do not establish corresponding media-time ranges.
+                        ranges: const [
+                          BufferedByteRange(0, 1),
+                          BufferedByteRange(3, 11),
+                          BufferedByteRange(15, 60),
+                        ],
                       ),
                     ),
                     duration: const Duration(seconds: 100),
@@ -304,11 +310,73 @@ void main() {
           ),
         );
         final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
-        expect(pixels.at(120, 3), const Color(0xff75bed2));
+        expect(pixels.at(30, 3), Colors.white);
+        expect(pixels.at(120, 3), const Color(0xff363c44));
         expect(pixels.at(240, 3), const Color(0xff363c44));
       },
     );
   }
+
+  testWidgets('seek thumb and time track stay aligned before and after seek', (
+    tester,
+  ) async {
+    final boundaryKey = GlobalKey();
+    for (final seconds in [4, 91]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Material(
+            child: Center(
+              child: RepaintBoundary(
+                key: boundaryKey,
+                child: SizedBox(
+                  width: 740,
+                  height: 40,
+                  child: SliderTheme(
+                    data: const SliderThemeData(
+                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                    ),
+                    child: BufferedRangesTrack(
+                      snapshot: BufferSnapshot(
+                        sessionId: 1,
+                        resourceId: 'media',
+                        representationVersion: 'v1',
+                        trackVersion: 0,
+                        sequence: seconds,
+                        ranges: const [],
+                        unknownReason: 'containerTrackOrTimingUnknown',
+                        byteCoverage: BufferedByteCoverage(
+                          totalBytes: 100,
+                          ranges: [
+                            const BufferedByteRange(3, 11),
+                            if (seconds == 91) const BufferedByteRange(15, 32),
+                          ],
+                        ),
+                      ),
+                      duration: const Duration(minutes: 23, seconds: 40),
+                      child: Slider(
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
+                        value: seconds / 1420,
+                        onChanged: (_) {},
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
+      final thumbX = (15 + seconds / 2).round();
+      expect(pixels.at(thumbX, 16), Colors.white);
+      expect(pixels.at(thumbX, 20), Colors.white);
+      expect(pixels.at(thumbX + 10, 20), const Color(0xff363c44));
+      expect(pixels.at(80, 20), const Color(0xff363c44));
+      expect(pixels.at(150, 20), const Color(0xff363c44));
+      if (seconds == 91) expect(pixels.at(30, 20), Colors.white);
+    }
+  });
 }
 
 BufferSnapshot _pixelSnapshot({String? unknownReason}) => BufferSnapshot(

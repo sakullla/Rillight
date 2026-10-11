@@ -136,6 +136,9 @@ void _paintTrack(
   }
 
   final total = duration.inMicroseconds;
+  // Byte offsets cannot locate cache on a media timeline: variable bitrate,
+  // metadata and seek reads produce unrelated fractions and apparent gaps.
+  // Leave unknown time coverage empty until verified media ranges arrive.
   if (snapshot.isKnown && snapshot.ranges.isNotEmpty && total > 0) {
     for (final range in snapshot.ranges) {
       segment(
@@ -143,19 +146,6 @@ void _paintTrack(
         (range.end.inMicroseconds / total).clamp(0.0, 1.0),
         const Color(0xff697783),
       );
-    }
-  } else if (!snapshot.hidesByteCoverage) {
-    final bytes = snapshot.byteCoverage;
-    if (bytes != null) {
-      // A byte ratio is download progress, not a promise that the same media
-      // time can be sought. Use a distinct color on the one existing track.
-      for (final range in bytes.ranges) {
-        segment(
-          range.start / bytes.totalBytes,
-          range.end / bytes.totalBytes,
-          const Color(0xff75bed2),
-        );
-      }
     }
   }
   // Played coverage takes precedence; cache never paints over the thumb.
