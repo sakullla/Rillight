@@ -1438,5 +1438,10 @@
   },
 {"id": "player-settings-output", "feature": "player", "platforms": ["desktop", "phone", "tv"]},
 {"id": "player-settings-output-focus", "feature": "player", "platforms": ["tv"]},
-{"id": "player-landscape-settings-output", "feature": "player", "platforms": ["phone"]}
+{"id": "player-landscape-settings-output", "feature": "player", "platforms": ["phone"]},
+{"id": "server-import-entry", "feature": "servers", "platforms": ["desktop", "phone", "tv"]},
+{"id": "server-import-loading", "feature": "servers", "platforms": ["desktop", "phone", "tv"]},
+{"id": "server-import-partial", "feature": "servers", "platforms": ["desktop", "phone", "tv"]},
+{"id": "server-import-failed", "feature": "servers", "platforms": ["desktop", "phone", "tv"]},
+{"id": "server-import-private", "feature": "servers", "platforms": ["desktop", "phone", "tv"]}
 ]

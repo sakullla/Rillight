@@ -14,6 +14,7 @@ class ServerSwitcherDialog extends StatefulWidget {
     required this.activeLineId,
     required this.onSelect,
     required this.onAddServer,
+    this.onImportBackup,
     required this.onLogout,
     required this.onDelete,
     required this.onChangePassword,
@@ -27,6 +28,9 @@ class ServerSwitcherDialog extends StatefulWidget {
   final String? activeLineId;
   final void Function(String serverId, String lineId) onSelect;
   final VoidCallback onAddServer;
+
+  /// 从 Hills/小幻备份导入服务配置;为空时不显示该入口。
+  final VoidCallback? onImportBackup;
   final VoidCallback onLogout;
 
   /// 删除一台已保存服务器;先弹确认框,确认后才回调。
@@ -49,6 +53,7 @@ class ServerSwitcherDialog extends StatefulWidget {
   static const deleteConfirmKey = Key('server-delete-confirm');
   static const deleteCancelKey = Key('server-delete-cancel');
   static const changePasswordKey = Key('server-change-password');
+  static const importBackupKey = Key('server-import-backup');
 
   static const privateKey = Key('server-switcher-private');
 
@@ -209,6 +214,13 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                   label: l10n.addServer,
                   onTap: widget.onAddServer,
                 ),
+                if (widget.onImportBackup != null)
+                  _ActionTile(
+                    key: ServerSwitcherDialog.importBackupKey,
+                    icon: Icons.upload_file_outlined,
+                    label: l10n.backupImportEntry,
+                    onTap: widget.onImportBackup!,
+                  ),
                 _ActionTile(
                   key: ServerSwitcherDialog.changePasswordKey,
                   icon: Icons.password_outlined,

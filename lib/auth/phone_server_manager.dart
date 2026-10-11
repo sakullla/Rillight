@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 
@@ -41,6 +42,7 @@ class PhoneServerManager extends StatefulWidget {
   final Future<void> Function()? onCurrentLineChanged;
   static const searchKey = Key('phone-server-search');
   static const addKey = Key('phone-server-add');
+  static const importKey = Key('phone-server-import');
 
   @override
   State<PhoneServerManager> createState() => _PhoneServerManagerState();
@@ -461,6 +463,21 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                             itemCount: servers.length,
                             itemBuilder: (_, i) => _server(servers[i]),
                           ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 备份导入:结果面板盖在底表上方,导入后列表随 auth 刷新。
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      key: PhoneServerManager.importKey,
+                      onPressed: _busy || widget.auth.isBusy
+                          ? null
+                          : () => unawaited(
+                              showBackupImportFlow(context, auth: widget.auth),
+                            ),
+                      icon: const Icon(Icons.upload_file_outlined, size: 18),
+                      label: Text(l.backupImportEntry),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   SizedBox(

@@ -94,9 +94,11 @@ class BackupImportKeys {
   /// A self-carried `_key` entry in the file itself takes precedence.
   final Map<String, List<int>> rodelCommonKeysBySource;
 
-  /// Candidate AES-256 keys for the `.rpb` `config.json` payload. The native
-  /// key for that entry is not yet available, so this list stays empty until
-  /// an authorized source provides one.
+  /// Candidate 16-byte AES-128 keys for the `.rpb` `config.json` payload
+  /// (`base64(IV || AES-128-CBC(PKCS7))`). The real client key constant is
+  /// provisioned through an authorized runtime channel and never committed;
+  /// without a key the parse reports [BackupImportContainerStatus.decryptionKeyUnavailable]
+  /// rather than an empty success.
   final List<List<int>> rodelBackupConfigKeys;
 }
 

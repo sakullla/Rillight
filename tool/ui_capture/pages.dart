@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -5,11 +8,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
+import 'package:rillight/app/file_import.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
+import 'package:rillight/auth/backup_import/backup_import_models.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
@@ -23,6 +29,7 @@ import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 
+import '../../test/auth/backup_import/backup_import_cases.dart';
 import '../../test/emby/fake_emby_server.dart';
 import 'capture.dart';
 import 'fixtures.dart';
@@ -622,6 +629,161 @@ extension PageCaptures on CaptureSession {
       );
       await save('server-add-advanced');
     }
+    await _backupImportStates(app, auth);
+  }
+
+  /// 备份导入:合成凭据样本走真实的解析与提交。入口、加载、部分成功、
+  /// 整体失败与私密锁定跳过都是显式注册的原型状态。
+  Future<void> _backupImportStates(RillightApp app, AuthController auth) async {
+    const ids = [
+      'server-import-entry',
+      'server-import-loading',
+      'server-import-partial',
+      'server-import-failed',
+      'server-import-private',
+    ];
+    if (!ids.any(shouldCapture)) return;
+    final existing = auth.savedServers.first;
+    // 自携带密钥的 common-config:不需要任何客户端密钥常量。
+    final partialBytes = (await tester.runAsync(
+      () => buildCommonConfig([
+        commonEntry(
+          type: 'emby',
+          name: '导入的新服务器',
+          url: 'http://192.0.2.60:8096',
+          authorization: authorization(userName: 'carol'),
+        ),
+        commonEntry(
+          type: 'emby',
+          name: '已存在服务器',
+          url: existing.baseUrl,
+          // 缺少可对照的远端 userId 时,判重回落到账号名比对。
+          authorization: authorization(userName: existing.username, userId: ''),
+        ),
+        commonEntry(
+          type: 'jellyfin',
+          name: '非目标服务',
+          url: 'http://192.0.2.61:8920',
+        ),
+        commonEntry(type: 'emby', name: '缺线路', url: ''),
+      ], selfKey: selfCarriedTestKey),
+    ))!;
+    final privateBytes = (await tester.runAsync(
+      () => buildHillsBackup([
+        hillsServer(
+          displayName: '私密库',
+          serverUrl: 'http://192.0.2.62:8096',
+          isPrivate: true,
+        ),
+      ]),
+    ))!;
+    final brokenBytes = utf8.encode('not a backup');
+
+    Future<Key> openEntry() async {
+      switch (platform) {
+        case 'desktop':
+          app.router.go('/');
+          await advance(700);
+          await tap(SessionActions.serverMenuKey);
+          await advance(400);
+          return ServerSwitcherDialog.importBackupKey;
+        case 'phone':
+          app.router.go('/mine');
+          await advance(700);
+          await tap(PhoneMinePage.lineKey);
+          await advance(600);
+          return PhoneServerManager.importKey;
+        default:
+          app.router.go('/connect?add=1');
+          await advance(700);
+          return const ValueKey('tv-connect-import');
+      }
+    }
+
+    PickedAppFile fileOf(String name, List<int> bytes) => PickedAppFile(
+      fileName: name,
+      length: bytes.length,
+      read: (limit) async => Uint8List.fromList(bytes),
+    );
+
+    Future<void> runImport(Key entry, List<int> bytes) async {
+      auth.backupImportPicker = _InlinePicker(
+        () async => fileOf('backup', bytes),
+      );
+      await tap(entry);
+    }
+
+    final entry = await openEntry();
+    await save('server-import-entry');
+
+    // 加载态:读取被门闩挂起,面板出现后放行。
+    final gate = Completer<void>();
+    auth.backupImportPicker = _InlinePicker(
+      () async => PickedAppFile(
+        fileName: 'backup.json',
+        length: partialBytes.length,
+        read: (limit) async {
+          await gate.future;
+          return Uint8List.fromList(partialBytes);
+        },
+      ),
+    );
+    await tap(entry);
+    for (
+      var i = 0;
+      i < 40 && find.byKey(BackupImportFlowKeys.loading).evaluate().isEmpty;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+    }
+    expect(find.byKey(BackupImportFlowKeys.loading), findsOneWidget);
+    await save('server-import-loading');
+    gate.complete();
+    for (var i = 0;
+        i < 60 && find.byKey(BackupImportFlowKeys.result).evaluate().isEmpty;
+        i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+    }
+    // ignore: avoid_print
+    print(
+      'IMPORT DEBUG servers=${auth.savedServers.length} '
+      'loading=${find.byKey(BackupImportFlowKeys.loading).evaluate().isNotEmpty} '
+      'result=${find.byKey(BackupImportFlowKeys.result).evaluate().isNotEmpty}',
+    );
+    expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
+    await save('server-import-partial');
+    await tap(BackupImportFlowKeys.close);
+
+    // 整体失败:未知格式零写入,失败面板给出安全分类原因。
+    Key next = entry;
+    if (platform == 'desktop') {
+      // 切换面板在导入前已自行关闭;重新打开。手机底表与电视连接页仍在。
+      next = await openEntry();
+    }
+    await runImport(next, brokenBytes);
+    await advance(600);
+    expect(find.byKey(BackupImportFlowKeys.failure), findsOneWidget);
+    await save('server-import-failed');
+    await tap(BackupImportFlowKeys.close);
+
+    // 私密锁定:备份中的私密记录按条跳过并说明原因。
+    if (platform == 'desktop') {
+      next = await openEntry();
+    }
+    auth.backupImportKeys = hillsKeys();
+    await runImport(next, privateBytes);
+    await advance(600);
+    expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
+    await save('server-import-private');
+    await tap(BackupImportFlowKeys.close);
+    auth.backupImportKeys = const BackupImportKeys();
+    auth.backupImportPicker = null;
   }
 
   Future<void> settingsPages(RillightApp app) async {
@@ -736,4 +898,16 @@ extension PageCaptures on CaptureSession {
       );
     }
   }
+}
+
+/// 注入式文件选择边界:原型捕获直接交付合成备份字节。
+class _InlinePicker implements AppFilePicker {
+  const _InlinePicker(this._pick);
+  final Future<PickedAppFile?> Function() _pick;
+
+  @override
+  Future<PickedAppFile?> pickFile({
+    required String dialogTitle,
+    required List<String> allowedExtensions,
+  }) => _pick();
 }

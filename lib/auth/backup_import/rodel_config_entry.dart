@@ -4,12 +4,12 @@ import '../credential_store.dart';
 import '../server_import_models.dart';
 import 'backup_import_models.dart';
 
-/// Maps one decrypted Rodel configuration record onto the shared import
-/// draft. The schema is verified for common-config entries
-/// (`type`/`name`/`url`/`lines`/`authorization`); the same mapper is applied
-/// to decrypted `.rpb` `config.json` records, whose plaintext schema is not
-/// yet observable without the native key. Records are only reported after a
-/// working key materializes them, so an unverifiable assumption can never
+/// Maps one decrypted common-config record onto the shared import draft.
+/// The schema is verified for common-config entries
+/// (`type`/`name`/`url`/`lines`/`authorization`); the native `.rpb`
+/// `config.json` payload uses its own sqlite `Config` row schema and is
+/// mapped by `mapRodelPackageRow` instead. Records are only reported after
+/// a working key materializes them, so an unverifiable assumption can never
 /// silently produce drafts on its own.
 BackupRecordOutcome mapRodelConfigEntry(int index, Object? entry) {
   if (entry is! Map) {

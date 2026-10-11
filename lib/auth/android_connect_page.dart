@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -6,6 +8,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -397,6 +400,18 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             ? l10n.retry
                             : l10n.connect,
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    // 备份导入:空服务首次配置与已有服务补充都可用。
+                    OutlinedButton.icon(
+                      key: const Key('android-connect-import'),
+                      onPressed: auth.isBusy
+                          ? null
+                          : () => unawaited(
+                              showBackupImportFlow(context, auth: auth),
+                            ),
+                      icon: const Icon(Icons.upload_file_outlined, size: 18),
+                      label: Text(l10n.backupImportEntry),
                     ),
                     _buildMore(context, l10n, auth),
                   ],

@@ -20,6 +20,10 @@ void main() {
   );
   group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
+    'auth/backup_import/backup_import_flow_test.dart',
+    caseEntrypoints['auth/backup_import/backup_import_flow_cases.dart']!,
+  );
+  group(
     'auth/connect_page_test.dart',
     caseEntrypoints['auth/connect_page_cases.dart']!,
   );

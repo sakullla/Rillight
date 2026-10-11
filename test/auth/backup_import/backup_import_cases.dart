@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -6,6 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/backup_import/backup_crypto.dart';
 import 'package:rillight/auth/backup_import/backup_import.dart';
 import 'package:rillight/auth/backup_import/backup_import_models.dart';
+
+bool _probeMaterialsPresent() {
+  final base =
+      'docs/sakullla-workflow/2026-10-11-字幕完善与Emby配置导入'
+      '/evidence/import-materials';
+  return File('$base/rpb-probe-sample.rpb').existsSync() &&
+      File('$base/KEYS.md').existsSync();
+}
 
 // Fixtures are rebuilt synthetically from the verified source-format
 // contracts (docs evidence directory, not committed) with test keys and
@@ -24,8 +33,12 @@ final List<int> commonTestKey = List<int>.generate(
   (i) => (0x0b * i + 5) & 0xff,
 );
 final List<int> rpbTestKey = List<int>.generate(
-  32,
+  16,
   (i) => (0x1d * i + 3) & 0xff,
+);
+final List<int> rpbWrongKey = List<int>.generate(
+  16,
+  (i) => (0x05 * i + 17) & 0xff,
 );
 const selfCarriedTestKey = 'rillight-self-carried-test-key!!';
 
@@ -165,28 +178,78 @@ Map<String, Object?> authorization({
   'data': null,
 };
 
+/// One sqlite `Config` table row as serialized inside the `.rpb`
+/// `config.json` payload; `DetailJson` is a nested JSON string.
+Map<String, Object?> rpbRow({
+  required String name,
+  required String host,
+  int port = 8096,
+  String path = '',
+  String userName = '',
+  String userId = '',
+  String password = '',
+  String accessToken = '',
+  List<Map<String, Object?>> backupLines = const [],
+  int type = 3,
+  String rowId = '0123456789abcdef0123456789abcdef',
+}) => <String, Object?>{
+  'Id': rowId,
+  'Type': type,
+  'LastOpenTime': null,
+  'CreatedTime': '2026-10-11T00:00:00Z',
+  'LastUpdateTime': '2026-10-11T00:00:00Z',
+  'LastPlayTime': null,
+  'Order': 0,
+  'Icon': null,
+  'DetailJson': jsonEncode(<String, Object?>{
+    'Name': name,
+    'UserName': userName,
+    'UserId': userId,
+    'Host': host,
+    'Port': port,
+    'Path': path.isEmpty ? null : path,
+    'Password': password.isEmpty ? null : password,
+    'AccessToken': accessToken.isEmpty ? null : accessToken,
+    'BackupLinesJson': backupLines.isEmpty ? null : jsonEncode(backupLines),
+    'AutomaticLineSwitching': null,
+    'TsTranscode': null,
+    'StrmDirectlyPlay': null,
+    'StrmUseM3U8': null,
+    'ServerDanmaku': null,
+    'StripReverseProxyPrefix': null,
+    'AppendAuthQueryParameters': null,
+    'AutoAppendEmbyPath': null,
+    'IncludePlatformInUserAgent': null,
+    'TokenRecordTime': null,
+    'AuthWithoutPassword': false,
+    'CollectionOrder': null,
+    'HiddenCollections': null,
+    'HappyEyeballsMode': null,
+  }),
+  'ExcludeAggregateSearch': false,
+  'WatchCycle': null,
+  'ExtensionData': null,
+};
+
+/// Builds a `.rpb` fixture with the verified payload contract:
+/// `base64(IV || AES-128-CBC(key, PKCS7))` over the row array JSON with the
+/// first 16 serialized characters dropped.
 Future<List<int>> buildRpbBackup(
   List<Map<String, Object?>> entries, {
   List<int> key = const [],
-  bool fixedIvScheme = false,
   bool includeMarkers = true,
   bool includeConfig = true,
+  bool dropHeader = true,
   int extraEntries = 0,
 }) async {
   final effectiveKey = key.isEmpty ? rpbTestKey : key;
-  final iv = fixedIvScheme
-      ? effectiveKey.sublist(0, 16)
-      : List<int>.generate(16, (i) => 0x30 + i);
-  final ciphertext = await encryptAes256Cbc(
-    utf8.encode(jsonEncode(entries)),
-    effectiveKey,
-    iv,
+  final iv = List<int>.generate(16, (i) => 0x30 + i);
+  final serialized = jsonEncode(entries);
+  final plaintext = utf8.encode(
+    dropHeader ? serialized.substring(16) : serialized,
   );
-  final body = utf8.encode(
-    base64.encode(
-      fixedIvScheme ? ciphertext : Uint8List.fromList([...iv, ...ciphertext]),
-    ),
-  );
+  final blob = await encryptAes128CbcPrefixedIv(plaintext, effectiveKey, iv);
+  final body = utf8.encode(base64.encode(blob));
   final archive = Archive();
   if (includeMarkers) {
     archive.addFile(ArchiveFile('__v2__', 0, Uint8List(0)));
@@ -599,31 +662,28 @@ void main() {
   });
 
   group('rodel backup package', () {
-    test('decrypts config records and ignores plaintext members', () async {
+    test('decrypts config rows and ignores plaintext members', () async {
       final bytes = await buildRpbBackup([
-        commonEntry(
-          type: 'emby',
+        rpbRow(
           name: 'rpb-a',
-          url: 'http://192.0.2.30:8096',
-          lines: [
+          host: 'http://192.0.2.30',
+          port: 8096,
+          userName: 'synthetic-user',
+          userId: 'synthetic-user-id',
+          password: 'synthetic-pass',
+          accessToken: 'synthetic-token',
+          backupLines: [
             {
-              'url': 'https://rpb-line.test.example',
-              'name': 'l1',
-              'additional_data': null,
+              'Id': 'line-1',
+              'Name': 'l1',
+              'Host': 'https://rpb-line.test.example',
+              'Port': 443,
+              'Path': '',
             },
           ],
-          authorization: authorization(),
         ),
-        commonEntry(
-          type: 'emby',
-          name: 'rpb-b',
-          url: 'https://rpb-b.test.example',
-        ),
-        commonEntry(
-          type: 'plex',
-          name: 'rpb-c',
-          url: 'http://192.0.2.31:32400',
-        ),
+        rpbRow(name: 'rpb-b', host: 'https://rpb-b.test.example', port: 443),
+        rpbRow(name: 'rpb-c', host: 'http://192.0.2.31', port: 32400, type: 4),
       ]);
       final result = await parseBackupForImport(bytes, keys: rpbKeys());
       expect(result.format, BackupImportFormat.rodelBackupPackage);
@@ -632,65 +692,55 @@ void main() {
       expect(result.count(BackupRecordStatus.skippedNonTarget), 1);
       final drafts = result.drafts.toList();
       expect(drafts[0].name, 'rpb-a');
+      expect(drafts[0].username, 'synthetic-user');
       expect(drafts[0].credentials?.accessToken, 'synthetic-token');
+      expect(drafts[0].credentials?.userId, 'synthetic-user-id');
+      expect(drafts[0].credentials?.password, 'synthetic-pass');
       expect(drafts[0].lines.map((line) => line.address), [
         'http://192.0.2.30:8096',
         'https://rpb-line.test.example',
       ]);
+      expect(drafts[0].lines[1].name, 'l1');
       // history/settings/searchHistory members exist in the fixture but no
       // draft field can carry them.
-      expect(drafts.every((draft) => draft.lines.length <= 2), isTrue);
+      expect(drafts[1].credentials, isNull);
+      final skipped = result.records[2];
+      expect(skipped.status, BackupRecordStatus.skippedNonTarget);
+      expect(skipped.reason, BackupRecordReason.nonTargetServerType);
     });
 
-    test('supports the key-derived IV layout', () async {
+    test('composes host, port and path into normalized addresses', () async {
       final bytes = await buildRpbBackup([
-        commonEntry(
-          type: 'emby',
-          name: 'fixed-iv',
-          url: 'http://192.0.2.32:8096',
+        rpbRow(name: 'custom-port', host: 'http://192.0.2.31', port: 27367),
+        rpbRow(
+          name: 'default-port',
+          host: 'https://rpb-default.test.example',
+          port: 443,
+          path: '/',
         ),
-      ], fixedIvScheme: true);
+        rpbRow(name: 'no-scheme', host: '192.0.2.32', port: 8096),
+        rpbRow(
+          name: 'sub-path',
+          host: 'https://rpb-path.test.example',
+          port: 443,
+          path: '/emby',
+        ),
+      ]);
       final result = await parseBackupForImport(bytes, keys: rpbKeys());
       expect(result.status, BackupImportContainerStatus.ready);
-      expect(result.drafts.single.name, 'fixed-iv');
-    });
-
-    test('accepts a configs object wrapper around the record list', () async {
-      final iv = rpbTestKey.sublist(0, 16);
-      final ciphertext = await encryptAes256Cbc(
-        utf8.encode(
-          jsonEncode(<String, Object?>{
-            'configs': [
-              commonEntry(
-                type: 'emby',
-                name: 'wrapped',
-                url: 'http://192.0.2.33:8096',
-              ),
-            ],
-          }),
-        ),
-        rpbTestKey,
-        iv,
-      );
-      final body = utf8.encode(base64.encode(ciphertext));
-      final archive = Archive()
-        ..addFile(ArchiveFile('__v2__', 0, Uint8List(0)))
-        ..addFile(ArchiveFile('config.json', body.length, body));
-      final bytes = Uint8List.fromList(ZipEncoder().encode(archive));
-      final result = await parseBackupForImport(bytes, keys: rpbKeys());
-      expect(result.status, BackupImportContainerStatus.ready);
-      expect(result.drafts.single.name, 'wrapped');
+      expect(result.drafts.map((draft) => draft.lines.first.address).toList(), [
+        'http://192.0.2.31:27367',
+        'https://rpb-default.test.example',
+        'http://192.0.2.32:8096',
+        'https://rpb-path.test.example/emby',
+      ]);
     });
 
     test(
       'reports the missing native key as an honest gap, not empty success',
       () async {
         final bytes = await buildRpbBackup([
-          commonEntry(
-            type: 'emby',
-            name: 'rpb-a',
-            url: 'http://192.0.2.30:8096',
-          ),
+          rpbRow(name: 'rpb-a', host: 'http://192.0.2.30', port: 8096),
         ]);
         final result = await parseBackupForImport(bytes);
         expect(result.format, BackupImportFormat.rodelBackupPackage);
@@ -700,16 +750,26 @@ void main() {
         );
         expect(result.records, isEmpty);
         expect(result.hasDrafts, isFalse);
+        // The verified contract is AES-128; a 32-byte candidate is not a
+        // usable key and must not silently downgrade the report.
+        final wideKey = await parseBackupForImport(
+          bytes,
+          keys: BackupImportKeys(rodelBackupConfigKeys: [hillsTestKey]),
+        );
+        expect(
+          wideKey.status,
+          BackupImportContainerStatus.decryptionKeyUnavailable,
+        );
       },
     );
 
     test('treats a wrong key as an undecryptable payload', () async {
       final bytes = await buildRpbBackup([
-        commonEntry(type: 'emby', name: 'rpb-a', url: 'http://192.0.2.30:8096'),
+        rpbRow(name: 'rpb-a', host: 'http://192.0.2.30', port: 8096),
       ]);
       final result = await parseBackupForImport(
         bytes,
-        keys: rpbKeys(key: hillsWrongKey),
+        keys: rpbKeys(key: rpbWrongKey),
       );
       expect(result.status, BackupImportContainerStatus.undecryptablePayload);
       expect(result.hasDrafts, isFalse);
@@ -717,21 +777,21 @@ void main() {
 
     test('rejects markerless zips, corrupt zips and missing config', () async {
       final markerless = await buildRpbBackup([
-        commonEntry(type: 'emby', name: 'x', url: 'http://192.0.2.34:8096'),
+        rpbRow(name: 'x', host: 'http://192.0.2.34', port: 8096),
       ], includeMarkers: false);
       expect(
         (await parseBackupForImport(markerless, keys: rpbKeys())).status,
         BackupImportContainerStatus.unrecognizedFormat,
       );
       final noConfig = await buildRpbBackup([
-        commonEntry(type: 'emby', name: 'x', url: 'http://192.0.2.34:8096'),
+        rpbRow(name: 'x', host: 'http://192.0.2.34', port: 8096),
       ], includeConfig: false);
       expect(
         (await parseBackupForImport(noConfig, keys: rpbKeys())).status,
         BackupImportContainerStatus.corruptContainer,
       );
       final truncatedEocd = (await buildRpbBackup([
-        commonEntry(type: 'emby', name: 'x', url: 'http://192.0.2.34:8096'),
+        rpbRow(name: 'x', host: 'http://192.0.2.34', port: 8096),
       ])).sublist(0, 30);
       expect(
         (await parseBackupForImport(truncatedEocd, keys: rpbKeys())).status,
@@ -741,7 +801,7 @@ void main() {
 
     test('enforces archive entry bounds', () async {
       final bytes = await buildRpbBackup([
-        commonEntry(type: 'emby', name: 'rpb-a', url: 'http://192.0.2.30:8096'),
+        rpbRow(name: 'rpb-a', host: 'http://192.0.2.30', port: 8096),
       ], extraEntries: 8);
       final result = await parseBackupForImport(
         bytes,
@@ -751,6 +811,44 @@ void main() {
       expect(result.status, BackupImportContainerStatus.sizeLimitExceeded);
       expect(result.hasDrafts, isFalse);
     });
+
+    test(
+      'parses the authorized probe sample end to end',
+      () async {
+        // The probe sample and the real key live only in the local,
+        // git-ignored evidence directory (they must not be committed); the
+        // synthetic fixture tests above cover committed coverage.
+        final sample = File(
+          'docs/sakullla-workflow/2026-10-11-字幕完善与Emby配置导入'
+          '/evidence/import-materials/rpb-probe-sample.rpb',
+        );
+        final keysDoc = File(
+          'docs/sakullla-workflow/2026-10-11-字幕完善与Emby配置导入'
+          '/evidence/import-materials/KEYS.md',
+        );
+        final keyHex = RegExp(
+          r'\.rpb `config\.json`[^`]*`([0-9a-f]{32})`',
+        ).firstMatch(keysDoc.readAsStringSync())!.group(1)!;
+        final key = [
+          for (var i = 0; i < 32; i += 2)
+            int.parse(keyHex.substring(i, i + 2), radix: 16),
+        ];
+        final result = await parseBackupForImport(
+          sample.readAsBytesSync(),
+          keys: BackupImportKeys(rodelBackupConfigKeys: [key]),
+        );
+        expect(result.status, BackupImportContainerStatus.ready);
+        final draft = result.drafts.single;
+        expect(draft.name, 'KEYTEST-AAAA');
+        expect(draft.username, 'probe');
+        expect(draft.lines.single.address, 'http://198.51.100.1:8096');
+        expect(draft.credentials, isNull);
+      },
+      skip: _probeMaterialsPresent()
+          ? false
+          : '探针样本与密钥文档仅存在于本机 evidence 目录(不入仓)',
+      timeout: const Timeout(Duration(seconds: 30)),
+    );
   });
 
   group('container detection', () {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -10,6 +12,7 @@ import 'package:rillight/app/widgets/emby_mark.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -26,6 +29,7 @@ abstract final class ConnectFormKeys {
   static const submit = Key('connect-submit');
   static const passwordVisibility = Key('connect-password-visibility');
   static const addServer = Key('connect-add-server');
+  static const importBackup = Key('connect-import-backup');
   static const addLine = Key('connect-add-line');
   static const deleteLine = Key('connect-delete-line');
   static const serverSearch = Key('connect-server-search');
@@ -565,6 +569,14 @@ class _ConnectPageState extends State<ConnectPage> {
                 l10n.savedServers,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
+            ),
+            TextButton.icon(
+              key: ConnectFormKeys.importBackup,
+              onPressed: auth.isBusy
+                  ? null
+                  : () => unawaited(showBackupImportFlow(context, auth: auth)),
+              icon: const Icon(Icons.upload_file_outlined, size: 18),
+              label: Text(l10n.backupImportEntry),
             ),
             TextButton.icon(
               key: ConnectFormKeys.addServer,
