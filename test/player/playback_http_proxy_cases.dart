@@ -479,14 +479,19 @@ void main() {
     try {
       await first.future.timeout(const Duration(seconds: 5));
       final deadline = DateTime.now().add(const Duration(seconds: 5));
+      var observedDownloadSpeed = fixture.proxy.upstreamBytesPerSecond > 0;
       while (fixture.proxy.upstreamBytes < 8 * mib &&
           DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
+        observedDownloadSpeed =
+            observedDownloadSpeed || fixture.proxy.upstreamBytesPerSecond > 0;
       }
+      // Speed is a rolling one-second sample. Observe it during the transfer;
+      // disk publication/checksum work may finish after the sample expires.
+      expect(observedDownloadSpeed, isTrue);
       await fixture.settle();
       await fixture.proxy.refreshTimeline(const Duration(minutes: 1));
       expect(fixture.proxy.upstreamBytes, 8 * mib + 1);
-      expect(fixture.proxy.upstreamBytesPerSecond, greaterThan(0));
       expect(fixture.proxy.diagnostics['cachedByteRanges'], [
         {'start': 0, 'end': 16 * mib},
       ]);
