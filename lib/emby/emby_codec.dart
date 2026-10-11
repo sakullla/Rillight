@@ -470,6 +470,7 @@ PlaybackMediaSource decodeEmbyPlaybackMediaSource(Map<String, dynamic> json) {
     isInfiniteStream: json['IsInfiniteStream'] == true,
     directStreamUrl: json['DirectStreamUrl']?.toString(),
     transcodingUrl: json['TranscodingUrl']?.toString(),
+    transcodingOutputBitrate: _selectedOutputBitrate(json['TranscodingUrl']),
     runtime: _asInt(json['RunTimeTicks']) == null
         ? null
         : Duration(microseconds: _asInt(json['RunTimeTicks'])! ~/ 10),
@@ -530,4 +531,24 @@ ItemExternalUrl decodeEmbyItemExternalUrl(Map<String, dynamic> json) {
     name: json['Name']?.toString() ?? '',
     url: json['Url']?.toString() ?? '',
   );
+}
+
+// These are the selected encoder rates in the server's PlaybackInfo response.
+// MaxStreamingBitrate is a request ceiling and is deliberately never accepted.
+int? _selectedOutputBitrate(Object? serverUrl) {
+  if (serverUrl is! String) return null;
+  final uri = Uri.tryParse(serverUrl);
+  if (uri == null) return null;
+  int? value(String name) {
+    final fields = uri.queryParametersAll.entries
+        .where((e) => e.key.toLowerCase() == name)
+        .toList();
+    if (fields.length != 1 || fields.single.value.length != 1) return null;
+    return int.tryParse(fields.single.value.single);
+  }
+
+  final video = value('videobitrate'), audio = value('audiobitrate');
+  return video == null || audio == null || video <= 0 || audio < 0
+      ? null
+      : video + audio;
 }

@@ -714,7 +714,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         if (snapshot.pendingCleanups.isEmpty) await store.delete();
         return;
       }
-      if (await runtime!.recoverSnapshot(snapshot)) await store.delete();
+      await runtime!.recoverSnapshot(snapshot, persistRetry: store.write);
+      await store.delete();
       return;
     }
     final client = auth.client;

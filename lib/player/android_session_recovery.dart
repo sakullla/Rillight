@@ -15,11 +15,12 @@ Future<bool> recoverAndroidSession(
     final snapshot = await store.read();
     if (snapshot == null) return false;
     try {
-      if (await runtime.recoverSnapshot(snapshot)) {
+      if (await runtime.recoverSnapshot(snapshot, persistRetry: store.write)) {
         await store.delete();
         return true;
       }
-      if (snapshot.pendingCleanups.isEmpty) await store.delete();
+      // Every entry either completed or permanently lost its authority.
+      await store.delete();
       return false;
     } catch (_) {
       if (snapshot.pendingCleanups.isEmpty &&

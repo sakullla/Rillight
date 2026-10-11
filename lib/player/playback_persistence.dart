@@ -88,8 +88,9 @@ class PlaybackSessionSnapshot {
   }
 
   PlaybackSessionSnapshot withPendingCleanups(
-    List<PlaybackSessionSnapshot> pending,
-  ) {
+    List<PlaybackSessionSnapshot> pending, {
+    bool? cleanupOnly,
+  }) {
     final result = PlaybackSessionSnapshot(
       itemId: itemId,
       mediaSourceId: mediaSourceId,
@@ -103,7 +104,7 @@ class PlaybackSessionSnapshot {
       source: source,
       libraryId: libraryId,
       regionGeneration: regionGeneration,
-      cleanupOnly: cleanupOnly,
+      cleanupOnly: cleanupOnly ?? this.cleanupOnly,
       pendingCleanups: List.unmodifiable(pending),
     );
     result.validatedPendingCleanups;

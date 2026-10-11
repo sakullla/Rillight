@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -19,7 +20,10 @@ const device = ClientDeviceInfo(
   version: '1',
 );
 
-class _Backend extends FakeVideoBackend {
+class _Backend extends FakeVideoBackend implements VideoBackendCapabilities {
+  @override
+  Future<PlaybackCapabilities> playbackCapabilities(int bitrate) async =>
+      PlaybackCapabilities(h264: true, aac: true, maxStreamingBitrate: bitrate);
   _Backend() : super(duration: const Duration(seconds: 60));
   final requests = <VideoOpenRequest>[];
   Completer<void>? openGate;
@@ -84,6 +88,107 @@ void main() {
     return value;
   }
 
+  test(
+    'direct Plex playback offers and confirms actual negotiated qualities',
+    () async {
+      final value = await start(seconds: 75);
+      expect(value.resolved!.playMethod, PlayMethod.directPlay);
+      expect(value.availableBitrates, contains(8000000));
+      await value.togglePlay();
+      expect(value.isPlaying, false);
+      await value.setMaxBitrate(8000000);
+      expect(value.trackFailure, isNull);
+      expect(value.maxStreamingBitrate, 8000000);
+      expect(value.resolved!.outputBitrate, 8000000);
+      expect(value.position, const Duration(seconds: 75));
+      expect(value.isPlaying, false);
+      fake.decisionBitrateKbps = 4000;
+      await value.setMaxBitrate(4000000);
+      expect(value.trackFailure, isNull);
+      expect(value.maxStreamingBitrate, 4000000);
+      expect(value.resolved!.outputBitrate, 4000000);
+      expect(value.position, const Duration(seconds: 75));
+      expect(value.resolved!.partIndex, 1);
+    },
+  );
+  for (final returnedBitrate in <int?>[12000, 4000, null]) {
+    test(
+      'unconfirmed Plex quality $returnedBitrate cannot replace original',
+      () async {
+        final value = await start();
+        fake.decisionBitrateKbps = returnedBitrate;
+        await value.setMaxBitrate(8000000);
+        expect(value.trackFailure, isNotNull);
+        expect(value.maxStreamingBitrate, kCoreMaxStreamingBitrate);
+        expect(value.resolved!.playMethod, PlayMethod.directPlay);
+        expect(value.position, const Duration(seconds: 10));
+      },
+    );
+  }
+  test(
+    'default ASS stays off through reopen, version switch and suspend',
+    () async {
+      fake.defaultSubtitleSelected = true;
+      fake.subtitleCodec = 'ass';
+      final first = Map<String, dynamic>.from(
+        (fake.movie['Media'] as List).first as Map,
+      );
+      fake.mediaVersions = [
+        first,
+        {...first, 'id': 8},
+      ];
+      final value = await start(bitrate: 8000000);
+      expect(value.subtitleStreamIndex, isNull);
+      expect(
+        fake.requests
+            .lastWhere((r) => r.path.endsWith('/decision'))
+            .query['subtitles'],
+        'none',
+      );
+      await value.setSubtitle(13);
+      expect(value.subtitleStreamIndex, 13);
+      expect(
+        fake.requests
+            .lastWhere((r) => r.path.endsWith('/decision'))
+            .query['subtitles'],
+        'burn',
+      );
+      await value.setSubtitle(null);
+      expect(value.subtitleStreamIndex, isNull);
+      expect(
+        fake.requests
+            .lastWhere((r) => r.path.endsWith('/decision'))
+            .query['subtitles'],
+        'none',
+      );
+      await value.switchMediaSource('8');
+      if (value.switchConfirmation != null) {
+        await value.confirmMediaSourceSwitch(
+          SwitchResumeChoice.currentPosition,
+        );
+      }
+      expect(value.error, isNull, reason: value.disconnectDetail);
+      expect(value.trackFailure, isNull);
+      expect(value.resolved!.mediaSource.id, '8');
+      expect(value.subtitleStreamIndex, isNull);
+      expect(
+        fake.requests
+            .lastWhere((r) => r.path.endsWith('/decision'))
+            .query['subtitles'],
+        'none',
+      );
+      await value.suspendPlayback();
+      await value.restorePlayback();
+      expect(value.error, isNull, reason: value.disconnectDetail);
+      expect(value.subtitleStreamIndex, isNull);
+      expect(
+        fake.requests
+            .lastWhere((r) => r.path.endsWith('/decision'))
+            .query['subtitles'],
+        'none',
+      );
+    },
+  );
   test(
     'Part 2 mid-start uses local decoder time and reports global film time',
     () async {

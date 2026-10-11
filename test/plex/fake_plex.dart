@@ -35,6 +35,9 @@ class FakePlex {
   String subtitleCodec = 'srt';
   String? subtitleDecision;
   String? subtitleLocation;
+  bool defaultSubtitleSelected = false;
+  int? decisionBitrateKbps = 8000;
+  List<Map<String, dynamic>>? mediaVersions;
   List<Map<String, dynamic>>? catalog;
   final Map<String, Map<String, int>> selectedStreams = {};
   final sessions = <String>{};
@@ -328,20 +331,27 @@ class FakePlex {
     }
     if (path == '/video/:/transcode/universal/decision') {
       if (q['session'] == null ||
-          q['mediaIndex'] != '0' ||
+          int.tryParse(q['mediaIndex'] ?? '') == null ||
           q['partIndex'] == null) {
         return _json(r, {}, status: 400);
       }
       sessions.add(q['session']!);
       final partIndex = int.parse(q['partIndex']!);
-      final parts = ((movie['Media'] as List).first as Map)['Part'] as List;
+      final media =
+          (movie['Media'] as List)[int.parse(q['mediaIndex']!)] as Map;
+      final parts = media['Part'] as List;
       final part = parts[partIndex] as Map;
       final selection = selectedStreams['${part['id']}'] ?? {};
       final chosenAudio =
-          selection['audioStreamID'] ?? (partIndex == 0 ? 12 : 22);
+          selection['audioStreamID'] ??
+          ((part['Stream'] as List).cast<Map>().firstWhere(
+                (s) => s['streamType'] == 2,
+              )['id']
+              as int);
       final chosenSubtitle = q['subtitles'] == 'none'
           ? 0
-          : selection['subtitleStreamID'] ?? 0;
+          : selection['subtitleStreamID'] ??
+                (defaultSubtitleSelected && partIndex == 0 ? 13 : 0);
       final output = <Map<String, dynamic>>[];
       for (final source
           in (part['Stream'] as List).cast<Map<String, dynamic>>()) {
@@ -391,8 +401,9 @@ class FakePlex {
             {
               'Media': [
                 {
-                  'bitrate': 8000,
-                  'id': 7,
+                  if (decisionBitrateKbps != null)
+                    'bitrate': decisionBitrateKbps,
+                  'id': media['id'],
                   'selected': true,
                   'Part': [
                     {
@@ -411,8 +422,9 @@ class FakePlex {
     }
     if (path.startsWith('/library/parts/') && r.method == 'PUT') {
       final partId = path.split('/').last;
-      final part = (((movie['Media'] as List).first as Map)['Part'] as List)
+      final part = (movie['Media'] as List)
           .cast<Map>()
+          .expand((m) => (m['Part'] as List).cast<Map>())
           .firstWhere((part) => '${part['id']}' == partId);
       final streams = (part['Stream'] as List).cast<Map>();
       if (q['audioStreamID'] != null &&
@@ -508,61 +520,64 @@ class FakePlex {
       {'type': 'intro', 'startTimeOffset': 1000, 'endTimeOffset': 4000},
       {'type': 'intro', 'startTimeOffset': 5000},
     ],
-    'Media': [
-      {
-        'id': 7,
-        'container': 'mkv',
-        'duration': 120000,
-        'bitrate': 20000,
-        'Part': [
+    'Media':
+        mediaVersions ??
+        [
           {
-            'id': 101,
-            'key': '/library/parts/101/file.mkv',
-            'duration': missingPartDuration ? null : 60000,
-            'indexes': 'sd',
-            'Stream': [
-              {'id': 11, 'streamType': 1, 'codec': 'h264'},
+            'id': 7,
+            'container': 'mkv',
+            'duration': 120000,
+            'bitrate': 20000,
+            'Part': [
               {
-                'id': 12,
-                'streamType': 2,
-                'codec': 'aac',
-                'languageCode': 'eng',
-                'selected': true,
+                'id': 101,
+                'key': '/library/parts/101/file.mkv',
+                'duration': missingPartDuration ? null : 60000,
+                'indexes': 'sd',
+                'Stream': [
+                  {'id': 11, 'streamType': 1, 'codec': 'h264'},
+                  {
+                    'id': 12,
+                    'streamType': 2,
+                    'codec': 'aac',
+                    'languageCode': 'eng',
+                    'selected': true,
+                  },
+                  if (additionalUnsupportedAudio)
+                    {
+                      'id': 14,
+                      'streamType': 2,
+                      'codec': 'dts',
+                      'languageCode': 'jpn',
+                    },
+                  {
+                    'id': 13,
+                    'streamType': 3,
+                    'codec': subtitleCodec,
+                    'selected': defaultSubtitleSelected,
+                    'key': '/library/streams/13',
+                  },
+                ],
               },
-              if (additionalUnsupportedAudio)
-                {
-                  'id': 14,
-                  'streamType': 2,
-                  'codec': 'dts',
-                  'languageCode': 'jpn',
-                },
               {
-                'id': 13,
-                'streamType': 3,
-                'codec': subtitleCodec,
-                'key': '/library/streams/13',
-              },
-            ],
-          },
-          {
-            'id': 102,
-            'key': '/library/parts/102/file.mkv',
-            'duration': 60000,
-            'indexes': 'sd',
-            'Stream': [
-              {'id': 21, 'streamType': 1, 'codec': 'h264'},
-              {
-                'id': 22,
-                'streamType': 2,
-                'codec': secondAudioCodec,
-                'languageCode': secondAudioLanguage,
-                'selected': true,
+                'id': 102,
+                'key': '/library/parts/102/file.mkv',
+                'duration': 60000,
+                'indexes': 'sd',
+                'Stream': [
+                  {'id': 21, 'streamType': 1, 'codec': 'h264'},
+                  {
+                    'id': 22,
+                    'streamType': 2,
+                    'codec': secondAudioCodec,
+                    'languageCode': secondAudioLanguage,
+                    'selected': true,
+                  },
+                ],
               },
             ],
           },
         ],
-      },
-    ],
   };
 
   List<Map<String, dynamic>> get _catalog =>

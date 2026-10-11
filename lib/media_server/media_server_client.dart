@@ -61,12 +61,14 @@ extension MediaServerPlaybackStop on MediaServerClient {
     String? mediaSourceId,
     int? maxStreamingBitrate,
     Duration? startPosition,
+    int? subtitleStreamIndex,
   }) async {
     final info = await getPlaybackInfo(
       itemId: itemId,
       mediaSourceId: mediaSourceId,
       maxStreamingBitrate: maxStreamingBitrate,
       startPosition: startPosition,
+      subtitleStreamIndex: subtitleStreamIndex,
     );
     try {
       await info.resources?.release();

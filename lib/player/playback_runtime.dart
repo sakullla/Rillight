@@ -1,5 +1,6 @@
 import 'package:rillight/player/playback_persistence.dart';
 import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
@@ -402,12 +403,66 @@ class PlaybackRuntime {
         );
   }
 
-  Future<bool> recoverSnapshot(PlaybackSessionSnapshot snapshot) async {
+  Future<bool> recoverSnapshot(
+    PlaybackSessionSnapshot snapshot, {
+    Future<void> Function(PlaybackSessionSnapshot)? persistRetry,
+  }) async {
+    final retry = <PlaybackSessionSnapshot>[];
+    Object? firstFailure;
+    StackTrace? firstStack;
+    void rememberFailure(Object error, StackTrace stack) {
+      firstFailure ??= error;
+      firstStack ??= stack;
+    }
+
+    bool permanentlyRevoked(PlaybackSessionSnapshot value, Object error) =>
+        !canRecoverSnapshot(value) ||
+        error is PlaybackCleanupRevoked ||
+        (error is MediaServerException &&
+            const {
+              MediaServerFailureKind.forbidden,
+              MediaServerFailureKind.invalidCredentials,
+              MediaServerFailureKind.sessionExpired,
+              MediaServerFailureKind.authorizationExpired,
+            }.contains(error.kind));
+
     for (final pending in snapshot.validatedPendingCleanups) {
-      if (!await recoverSnapshot(pending)) {
-        throw StateError('Pending playback cleanup is not authorized');
+      try {
+        // False means this owner can no longer authorize compensation. Never
+        // reacquire the retired source, and do not block independent owners.
+        await _recoverSingleSnapshot(pending);
+      } catch (error, stack) {
+        if (!permanentlyRevoked(pending, error)) {
+          retry.add(pending);
+          rememberFailure(error, stack);
+        }
       }
     }
+    var recovered = false;
+    var retryPrimary = false;
+    try {
+      recovered = await _recoverSingleSnapshot(snapshot);
+    } catch (error, stack) {
+      if (!permanentlyRevoked(snapshot, error)) {
+        retryPrimary = true;
+        rememberFailure(error, stack);
+      }
+    }
+    if (firstFailure != null) {
+      // Persist only retryable children; a successfully reported main session
+      // must not produce another watched event while a different owner retries.
+      await persistRetry?.call(
+        snapshot.withPendingCleanups(
+          retry,
+          cleanupOnly: !retryPrimary || snapshot.cleanupOnly,
+        ),
+      );
+      Error.throwWithStackTrace(firstFailure!, firstStack!);
+    }
+    return recovered;
+  }
+
+  Future<bool> _recoverSingleSnapshot(PlaybackSessionSnapshot snapshot) async {
     final source = snapshot.source;
     final library = snapshot.libraryId;
     // Legacy/unknown snapshots cannot authorize a request after restart.

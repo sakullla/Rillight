@@ -89,7 +89,11 @@ class EmbyClient implements MediaServerClient {
   @override
   AccountResourceAuthentication? get accountAuthentication => null;
   final Map<String, PlaybackResourceLease> _resources = {};
-  PlaybackResourceLease _resourceLease(String sessionId) {
+  PlaybackResourceLease _resourceLease(
+    String sessionId, {
+    String? itemId,
+    String? mediaSourceId,
+  }) {
     final base = baseUrl!, user = userId!, token = accessToken!;
     return _resources.putIfAbsent('$base|$user|$sessionId', () {
       final frozen = EmbyClient(device: device, dio: _dio)
@@ -101,6 +105,8 @@ class EmbyClient implements MediaServerClient {
         );
       return PlaybackResourceLease(
         id: sessionId,
+        itemId: itemId,
+        mediaSourceId: mediaSourceId,
         release: () async {
           await frozen._requestJson(
             'DELETE',
@@ -173,6 +179,7 @@ class EmbyClient implements MediaServerClient {
     );
     return ResolvedPlayback(
       playMethod: result.playMethod,
+      outputBitrate: result.outputBitrate,
       streamUrl: result.streamUrl,
       playSessionId: result.playSessionId,
       mediaSource: result.mediaSource,
@@ -796,7 +803,11 @@ class EmbyClient implements MediaServerClient {
       mediaSources: info.mediaSources,
       resources: info.playSessionId.isEmpty
           ? null
-          : _resourceLease(info.playSessionId),
+          : _resourceLease(
+              info.playSessionId,
+              itemId: itemId,
+              mediaSourceId: mediaSourceId ?? info.primarySource?.id,
+            ),
     );
   }
 

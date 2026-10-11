@@ -27,6 +27,7 @@ class JellyfinFakeServer {
   };
   bool quickEnabled = true, quickAuthorized = false;
   String serverId = 'server-jellyfin';
+  String transcodeOutputQuery = '';
   int? nextStatus;
   Object? nextJson;
   Completer<void>? delay;
@@ -274,12 +275,13 @@ class JellyfinFakeServer {
             {
               'Id': 'version-1',
               'Container': 'mkv',
+              'Bitrate': 24000000,
               'RunTimeTicks': 1200000000,
               'SupportsDirectPlay': body!['EnableDirectPlay'],
               'SupportsDirectStream': true,
               'SupportsTranscoding': true,
               'TranscodingUrl':
-                  '/Videos/movie-1/master.m3u8?PlaySessionId=$id&DeviceId=$device&sig=a%2Fb+z',
+                  '/Videos/movie-1/master.m3u8?PlaySessionId=$id&DeviceId=$device&sig=a%2Fb+z$transcodeOutputQuery',
               'MediaStreams': [
                 {'Index': 1, 'Type': 'Audio', 'Codec': 'aac'},
                 {

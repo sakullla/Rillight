@@ -1157,6 +1157,8 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
     final cleanupHeaders = Map<String, String>.from(sessionHeaders);
     final lease = PlaybackResourceLease(
       id: session,
+      itemId: itemId,
+      mediaSourceId: plexString(media['id']),
       release: () async {
         final response = await plexRequest(
           _dio,
@@ -1171,6 +1173,9 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
         _released(session);
       },
     );
+    int? outputBitrate = plexInt(media['bitrate']) == null
+        ? null
+        : plexInt(media['bitrate'])! * 1000;
     PlayMethod method = PlayMethod.directPlay;
     Uri url = Uri.parse(timeline.parts[location.index].resource.url);
     var playbackStreams = streams.map(plexPlaybackStream).toList();
@@ -1201,6 +1206,7 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
           plexString(media['id']),
         );
         final bitrate = plexInt(selected['bitrate']);
+        outputBitrate = bitrate == null || bitrate <= 0 ? null : bitrate * 1000;
         if (maxStreamingBitrate != null &&
             bitrate != null &&
             bitrate * 1000 < maxStreamingBitrate &&
@@ -1261,7 +1267,9 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
       container: media['container'] as String?,
       supportsDirectPlay: method == PlayMethod.directPlay,
       supportsDirectStream: method == PlayMethod.directStream,
-      supportsTranscoding: method == PlayMethod.transcode,
+      // PMS permits requesting a decision; permission/codec rejection remains
+      // a real negotiation failure, independent of this session's direct mode.
+      supportsTranscoding: true,
       directStreamUrl: method != PlayMethod.transcode ? url.toString() : null,
       transcodingUrl: method == PlayMethod.transcode ? url.toString() : null,
       runtime: plexDuration(media['duration'] ?? row['duration']),
@@ -1276,6 +1284,8 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
         ? lease
         : PlaybackResourceLease(
             id: session,
+            itemId: itemId,
+            mediaSourceId: source.id,
             release: () async {
               _released(session);
             },
@@ -1289,7 +1299,25 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
       auth,
       effectiveLease,
       location,
+      outputBitrate,
     );
+    // Sibling version tracks must describe the same global film position.
+    // First-Part IDs are not valid inputs when a saved preference resumes Part 2.
+    List<MediaStreamInfo> versionStreams(Map<String, dynamic> version) {
+      final versionParts = plexList(version['Part']);
+      var remaining = position;
+      for (final part in versionParts) {
+        final duration = plexDuration(part['duration']);
+        if (remaining == Duration.zero ||
+            (duration != null && remaining < duration)) {
+          return plexList(part['Stream']).map(plexPlaybackStream).toList();
+        }
+        if (duration == null) return const [];
+        remaining -= duration;
+      }
+      return const [];
+    }
+
     return PlaybackInfo(
       playSessionId: session,
       mediaSources: [
@@ -1304,9 +1332,7 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
               bitrate: plexInt(version['bitrate']) == null
                   ? null
                   : plexInt(version['bitrate'])! * 1000,
-              mediaStreams: plexList(
-                plexList(version['Part']).firstOrNull?['Stream'],
-              ).map(plexPlaybackStream).toList(),
+              mediaStreams: versionStreams(version),
             ),
       ],
       resources: effectiveLease,
@@ -1332,6 +1358,7 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
     }
     return PlexResolvedPlayback(
       playMethod: playback.method,
+      outputBitrate: playback.outputBitrate,
       streamUrl: playback.url,
       playSessionId: info.playSessionId,
       mediaSource: playback.source,
@@ -1430,6 +1457,7 @@ class PlexResolvedPlayback extends ResolvedPlayback {
     super.authorization,
     super.resources,
     super.canRenewUrlInPlace = false,
+    super.outputBitrate,
     required MediaTimeline filmTimeline,
     required super.partIndex,
     required super.partStartPosition,
@@ -1580,6 +1608,7 @@ class _Playback {
     this.auth,
     this.lease,
     this.position,
+    this.outputBitrate,
   );
   final String itemId;
   final PlaybackMediaSource source;
@@ -1589,6 +1618,7 @@ class _Playback {
   final ResourceAuthorization auth;
   final PlaybackResourceLease lease;
   final PartPosition position;
+  final int? outputBitrate;
 }
 
 class _ChapterPreview implements MediaPreview {

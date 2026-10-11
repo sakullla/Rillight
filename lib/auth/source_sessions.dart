@@ -233,6 +233,12 @@ typedef SessionIdentityVerifier =
 typedef MembershipCleanup =
     Future<void> Function(SourceAccount? account, String serverId);
 
+/// The captured compensation authority was retired. Unlike transport failures,
+/// retrying this old operation must not reacquire authorization.
+class PlaybackCleanupRevoked extends StateError {
+  PlaybackCleanupRevoked() : super('Playback cleanup ownership revoked');
+}
+
 /// Sole configuration/session/permission authority for multi-source consumers.
 /// Factory MUST return a new client, never AuthController's active client.
 class SourceSessionRegistry {
@@ -349,21 +355,25 @@ class SourceSessionRegistry {
     final scope = _scopes[server.id] ?? 0;
     final generation = access.generation;
     void requireOwner() {
-      _requireCurrent(server, scope, generation);
-      final current = _allowed(server.id);
-      if (current.region != account.region ||
-          current.serviceType != account.serviceType ||
-          current.verifiedServerId != account.verifiedServerId ||
-          current.cloudAccountId != account.cloudAccountId ||
-          current.homeUserId != account.homeUserId ||
-          !current.participates ||
-          !current.scopeKnown ||
-          !current.libraryIds.contains(libraryId) ||
-          !current.lines.any((line) => Uri.parse(line.address) == baseUrl) ||
-          (account.region == AccessRegion.private &&
-              (regionGeneration != generation ||
-                  _sessions[server.id]?.account != account))) {
-        throw StateError('Playback cleanup ownership revoked');
+      try {
+        _requireCurrent(server, scope, generation);
+        final current = _allowed(server.id);
+        if (current.region != account.region ||
+            current.serviceType != account.serviceType ||
+            current.verifiedServerId != account.verifiedServerId ||
+            current.cloudAccountId != account.cloudAccountId ||
+            current.homeUserId != account.homeUserId ||
+            !current.participates ||
+            !current.scopeKnown ||
+            !current.libraryIds.contains(libraryId) ||
+            !current.lines.any((line) => Uri.parse(line.address) == baseUrl) ||
+            (account.region == AccessRegion.private &&
+                (regionGeneration != generation ||
+                    _sessions[server.id]?.account != account))) {
+          throw PlaybackCleanupRevoked();
+        }
+      } on StateError {
+        throw PlaybackCleanupRevoked();
       }
     }
 

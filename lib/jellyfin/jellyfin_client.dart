@@ -799,7 +799,11 @@ class JellyfinClient extends MediaServerClient
       parsed.playSessionId,
       playbackDevice,
     ).encode();
-    final lease = _lease(handle);
+    final lease = _lease(
+      handle,
+      itemId: itemId,
+      mediaSourceId: mediaSourceId ?? parsed.primarySource?.id,
+    );
     return PlaybackInfo(
       playSessionId: handle,
       mediaSources: parsed.mediaSources,
@@ -807,7 +811,11 @@ class JellyfinClient extends MediaServerClient
     );
   }
 
-  PlaybackResourceLease _lease(String id) {
+  PlaybackResourceLease _lease(
+    String id, {
+    String? itemId,
+    String? mediaSourceId,
+  }) {
     final handle = _PlaybackHandle.decode(id);
     return _leases.putIfAbsent(id, () {
       // Capture original authority; a later user switch must never send cleanup
@@ -815,6 +823,8 @@ class JellyfinClient extends MediaServerClient
       final bound = withRequestGuard(() {});
       return PlaybackResourceLease(
         id: id,
+        itemId: itemId,
+        mediaSourceId: mediaSourceId,
         release: () async {
           final report = _reports[id];
           await bound._request(
@@ -892,6 +902,10 @@ class JellyfinClient extends MediaServerClient
     return ResolvedPlayback(
       canRenewUrlInPlace: false,
       playMethod: method,
+      outputBitrate:
+          method == PlayMethod.transcode || resource == s.transcodingUrl
+          ? s.transcodingOutputBitrate
+          : s.bitrate,
       streamUrl: uri,
       playSessionId: info.playSessionId,
       mediaSource: s,

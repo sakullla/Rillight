@@ -129,9 +129,14 @@ class MediaTimeline {
 class PlaybackResourceLease {
   PlaybackResourceLease({
     required this.id,
+    this.itemId,
+    this.mediaSourceId,
     required Future<void> Function() release,
   }) : _release = release;
   final String id;
+
+  /// Concrete remote identity captured when this resource was allocated.
+  final String? itemId, mediaSourceId;
   final Future<void> Function() _release;
   Future<void>? _pending;
   bool _released = false;

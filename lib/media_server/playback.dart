@@ -133,6 +133,7 @@ class PlaybackMediaSource {
     this.isInfiniteStream = false,
     this.directStreamUrl,
     this.transcodingUrl,
+    this.transcodingOutputBitrate,
     this.runtime,
     this.defaultAudioStreamIndex,
     this.defaultSubtitleStreamIndex,
@@ -158,6 +159,9 @@ class PlaybackMediaSource {
   final bool isInfiniteStream;
   final String? directStreamUrl;
   final String? transcodingUrl;
+
+  /// Server-selected output bps decoded from PlaybackInfo, never a requested cap.
+  final int? transcodingOutputBitrate;
   final Duration? runtime;
   final int? defaultAudioStreamIndex;
   final int? defaultSubtitleStreamIndex;
@@ -320,8 +324,12 @@ class ResolvedPlayback {
     this.authorization,
     this.resources,
     this.canRenewUrlInPlace = true,
+    this.outputBitrate,
   });
 
+  /// Negotiated output bitrate in bits/s, from the server response (not request).
+  /// Null means unconfirmed; callers must not infer it from their requested cap.
+  final int? outputBitrate;
   final bool canRenewUrlInPlace;
   final MediaTimeline? timeline;
 

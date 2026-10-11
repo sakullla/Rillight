@@ -48,6 +48,35 @@ void main() {
   );
 
   test(
+    'transcode quality uses server encoder selection, never input or request ceiling',
+    () async {
+      attach();
+      for (final sample in <(String, int?)>[
+        ('&VideoBitrate=3808000&AudioBitrate=192000', 4000000),
+        ('&VideoBitrate=7808000&AudioBitrate=192000', 8000000),
+        ('&MaxStreamingBitrate=4000000', null),
+        ('&VideoBitrate=3808000', null),
+        ('&VideoBitrate=3808000&VideoBitrate=1&AudioBitrate=192000', null),
+      ]) {
+        fake.transcodeOutputQuery = sample.$1;
+        final info = await client.getPlaybackInfo(
+          itemId: 'movie-1',
+          maxStreamingBitrate: 4000000,
+          forceTranscode: true,
+        );
+        final playback = client.resolvePlayback(
+          info: info,
+          itemId: 'movie-1',
+          forceTranscode: true,
+        )!;
+        expect(playback.mediaSource.bitrate, 24000000);
+        expect(playback.outputBitrate, sample.$2, reason: sample.$1);
+        await info.resources!.release();
+      }
+      expect(fake.resources, isEmpty);
+    },
+  );
+  test(
     'password verifies server identity, restore and logout use official routes',
     () async {
       expect((await client.getPublicInfo(fake.url)).id, 'server-jellyfin');

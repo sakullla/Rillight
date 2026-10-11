@@ -619,18 +619,26 @@ class PlayerController extends ChangeNotifier {
     final user = owner.userId;
     final identity = target?.source ?? origin?.source ?? openRequest?.source;
     if (base == null || user == null) return;
+    final cleanupItem = lease.itemId ?? targetItemId ?? itemId;
+    final cleanupVersion = lease.mediaSourceId ?? sourceId ?? '';
     final snapshot = PlaybackSessionSnapshot(
       cleanupOnly: true,
       serviceType: owner.serviceType,
-      itemId: targetItemId ?? itemId,
-      mediaSourceId: sourceId ?? resolved?.mediaSource.id ?? '',
+      itemId: cleanupItem,
+      mediaSourceId: cleanupVersion,
       playSessionId: lease.id,
       playMethod: PlayMethod.transcode,
       position: Duration.zero,
       baseUrl: base.toString(),
       userId: user,
       timestamp: DateTime.now(),
-      source: identity,
+      source: identity == null
+          ? null
+          : SourceReference(
+              account: identity.account,
+              itemId: cleanupItem,
+              mediaSourceId: cleanupVersion,
+            ),
       libraryId:
           target?.libraryId ?? origin?.libraryId ?? openRequest?.libraryId,
       regionGeneration:
@@ -1949,31 +1957,8 @@ class PlayerController extends ChangeNotifier {
     if (requestedBitrate == kCoreMaxStreamingBitrate) return true;
     final playback = resolved;
     if (playback == null) return false;
-    final source = playback.mediaSource;
-    if (!playback.isTranscode) {
-      final bitrate = source.bitrate;
-      return bitrate != null && bitrate > 0 && bitrate <= requestedBitrate;
-    }
-
-    // A transcode URL can echo MaxStreamingBitrate without honoring it. Only
-    // the server's selected video and audio bitrates confirm the output cap.
-    final url = source.transcodingUrl;
-    final uri = url == null ? null : Uri.tryParse(url);
-    if (uri == null) return false;
-    int? bitrateParameter(String name) {
-      final matches = uri.queryParametersAll.entries
-          .where((entry) => entry.key.toLowerCase() == name.toLowerCase())
-          .toList();
-      if (matches.length != 1 || matches.single.value.length != 1) return null;
-      return int.tryParse(matches.single.value.single);
-    }
-
-    final video = bitrateParameter('VideoBitrate');
-    final audio = bitrateParameter('AudioBitrate');
-    if (video == null || audio == null || video <= 0 || audio < 0) {
-      return false;
-    }
-    return video <= requestedBitrate && audio <= requestedBitrate - video;
+    final confirmed = playback.outputBitrate;
+    return confirmed != null && confirmed > 0 && confirmed <= requestedBitrate;
   }
 
   List<int> get availableBitrates {
@@ -2780,6 +2765,7 @@ class PlayerController extends ChangeNotifier {
         itemId: playback.itemId,
         authorization: playback.authorization,
         canRenewUrlInPlace: playback.canRenewUrlInPlace,
+        outputBitrate: playback.outputBitrate,
         timeline: playback.timeline,
         filmTimeline: playback.filmTimeline,
         partIndex: playback.partIndex,
@@ -2817,6 +2803,7 @@ class PlayerController extends ChangeNotifier {
       itemId: playback.itemId,
       authorization: playback.authorization,
       canRenewUrlInPlace: playback.canRenewUrlInPlace,
+      outputBitrate: playback.outputBitrate,
       timeline: playback.timeline,
       filmTimeline: playback.filmTimeline,
       partIndex: playback.partIndex,
@@ -3035,6 +3022,7 @@ class PlayerController extends ChangeNotifier {
                 itemId: itemId,
                 mediaSourceId: sourceId,
                 maxStreamingBitrate: maxStreamingBitrate,
+                subtitleStreamIndex: -1,
               ),
             ).timeout(recoveryTimeout)
           : await target.permit
@@ -3043,6 +3031,7 @@ class PlayerController extends ChangeNotifier {
                     itemId: target.source.itemId,
                     mediaSourceId: sourceId,
                     maxStreamingBitrate: maxStreamingBitrate,
+                    subtitleStreamIndex: -1,
                   ),
                 )
                 .timeout(recoveryTimeout);
@@ -4193,6 +4182,7 @@ class PlayerController extends ChangeNotifier {
             )
           : null;
       if (!_accepts(operation)) return;
+      var renegotiateForPreference = false;
       var info =
           preparedInfo ??
           await _sourceRequest<PlaybackInfo>(
@@ -4201,7 +4191,8 @@ class PlayerController extends ChangeNotifier {
               mediaSourceId: requestClient is PartPlaybackProvider
                   ? requestedSourceId ??
                         activeMediaSourceId ??
-                        preferredMediaSourceId
+                        preferredMediaSourceId ??
+                        _rememberedPreference?.mediaSourceId
                   : null,
               maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
               startPosition: startTicks > 0
@@ -4210,7 +4201,7 @@ class PlayerController extends ChangeNotifier {
               audioStreamIndex:
                   audio ?? (strictTracks ? null : preferredAudioStreamIndex),
               subtitleStreamIndex: subtitleOff
-                  ? null
+                  ? -1
                   : (subtitle ??
                         (strictTracks ? null : preferredSubtitleStreamIndex)),
               capabilities: profile,
@@ -4260,19 +4251,11 @@ class PlayerController extends ChangeNotifier {
           return;
         }
         _rememberedPreference = settings;
-        if (settings.maxStreamingBitrate != null &&
+        if (requestedBitrate == null &&
+            settings.maxStreamingBitrate != null &&
             settings.maxStreamingBitrate != maxStreamingBitrate) {
           maxStreamingBitrate = settings.maxStreamingBitrate!;
-          await _releasePrepared(preparing);
-          info = await _sourceRequest<PlaybackInfo>(
-            () => client.getPlaybackInfo(
-              itemId: itemId,
-              maxStreamingBitrate: maxStreamingBitrate,
-              forceTranscode: forceTranscode,
-            ),
-          );
-          preparing = info.resources;
-          if (!_accepts(operation)) return;
+          renegotiateForPreference = true;
         }
       }
       final chosenId = preferredPlaybackSourceId(
@@ -4291,6 +4274,72 @@ class PlayerController extends ChangeNotifier {
           detail: 'Requested media source is no longer available',
         );
         return;
+      }
+      final preferredSettings = strictTracks ? null : _rememberedPreference;
+      final targetSource = info.sourceById(chosenId ?? '');
+      final effectiveAudio =
+          audio ??
+          (strictTracks ? null : preferredAudioStreamIndex) ??
+          (targetSource == null
+              ? null
+              : matchPreferredStreamIndex(
+                  streams: targetSource.audioStreams,
+                  preferredIndex: preferredSettings?.audioStreamIndex,
+                  language: preferredSettings?.audioLanguage,
+                  title: preferredSettings?.audioTitle,
+                ));
+      final effectiveSubtitle =
+          subtitleOff ||
+              (subtitle == null &&
+                  preferredSubtitleStreamIndex == null &&
+                  preferredSettings?.subtitleOff == true)
+          ? -1
+          : subtitle ??
+                (strictTracks ? null : preferredSubtitleStreamIndex) ??
+                (targetSource == null
+                    ? null
+                    : matchPreferredStreamIndex(
+                        streams: targetSource.subtitleStreams,
+                        preferredIndex: preferredSettings?.subtitleStreamIndex,
+                        language: preferredSettings?.subtitleLanguage,
+                        title: preferredSettings?.subtitleTitle,
+                      ));
+      if (renegotiateForPreference ||
+          (requestClient is PartPlaybackProvider &&
+              chosenId != info.primarySource?.id) ||
+          (preferredSettings != null &&
+              (preferredSettings.audioStreamIndex != null ||
+                  preferredSettings.audioLanguage != null ||
+                  preferredSettings.subtitleStreamIndex != null ||
+                  preferredSettings.subtitleLanguage != null ||
+                  preferredSettings.subtitleOff))) {
+        await _releasePrepared(preparing);
+        preparing = null;
+        final selectedProfile = backend is VideoBackendCapabilities
+            ? await (backend as VideoBackendCapabilities).playbackCapabilities(
+                requestedBitrate ?? maxStreamingBitrate,
+              )
+            : profile;
+        if (!_accepts(operation)) return;
+        info = await _sourceRequest<PlaybackInfo>(
+          () => requestClient.getPlaybackInfo(
+            itemId: itemId,
+            mediaSourceId: chosenId,
+            maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
+            startPosition: durationFromTicks(startTicks),
+            audioStreamIndex: effectiveAudio,
+            subtitleStreamIndex: effectiveSubtitle,
+            capabilities: selectedProfile,
+            forceTranscode: forceTranscode,
+          ),
+        );
+        preparing = info.resources;
+        if (!_accepts(operation)) return;
+        await _writePreparationSnapshot(
+          operation,
+          info,
+          startTicks: startTicks,
+        );
       }
       final resolvedNext = client.resolvePlayback(
         info: info,
@@ -5894,6 +5943,7 @@ class PlayerController extends ChangeNotifier {
       await prefix.start(
         itemId: next.id,
         url: playback.streamUrl,
+        authorization: playback.authorization,
         headers: playbackStreamHeaders(
           streamUrl: playback.streamUrl,
           baseUrl: base,

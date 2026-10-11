@@ -68,7 +68,146 @@ class DelayedCredentials extends MemoryCredentialStore {
   }
 }
 
+class RecoveryFixture {
+  RecoveryFixture(this.primary, this.target, this.registry, this.runtime);
+  final CleanupClient primary, target;
+  final SourceSessionRegistry registry;
+  final PlaybackRuntime runtime;
+
+  static Future<RecoveryFixture> create({
+    CredentialStore? credentialStore,
+  }) async {
+    final primary = CleanupClient(MediaServerType.emby);
+    final target = CleanupClient(MediaServerType.plex);
+    final servers = MemoryServerListStore(
+      ServerListSnapshot(
+        servers: [
+          for (final type in [MediaServerType.emby, MediaServerType.plex])
+            SavedServer(
+              id: type.name,
+              name: type.name,
+              username: type.name,
+              serviceType: type,
+              verifiedServerId: type.name,
+              scopeKnown: true,
+              libraryIds: const ['library'],
+              lines: [
+                ServerLine(id: 'line', address: 'https://${type.name}.test'),
+              ],
+            ),
+        ],
+      ),
+    );
+    final credentials =
+        credentialStore ??
+        MemoryCredentialStore({
+          for (final type in [MediaServerType.emby, MediaServerType.plex])
+            type.name: StoredCredentials(
+              serviceType: type,
+              accessToken: 'resource-${type.name}',
+              userId: type.name,
+              username: type.name,
+            ),
+        });
+    final registry = SourceSessionRegistry(
+      access: RegionAccessController(),
+      store: servers,
+      credentials: credentials,
+      createClient: () => primary,
+      createProviderClient: (type) =>
+          type == MediaServerType.plex ? target : primary,
+      sessionIdentityVerifier: (_, _, _) async =>
+          throw StateError('must never reauthorize cleanup'),
+    );
+    await registry.load();
+    final auth = AuthController(
+      client: primary,
+      credentials: credentials,
+      servers: servers,
+      sources: registry,
+    );
+    final history = await HistoryWriter.open(
+      registry: registry,
+      store: MemoryHistoryStore(),
+    );
+    return RecoveryFixture(
+      primary,
+      target,
+      registry,
+      PlaybackRuntime(auth: auth, history: history),
+    );
+  }
+
+  PlaybackSessionSnapshot snapshot(
+    MediaServerType type, {
+    bool cleanupOnly = false,
+  }) => PlaybackSessionSnapshot(
+    itemId: 'item',
+    mediaSourceId: 'version',
+    playSessionId: 'session-${type.name}',
+    position: Duration.zero,
+    baseUrl: 'https://${type.name}.test',
+    userId: type.name,
+    timestamp: DateTime.utc(2026),
+    serviceType: type,
+    cleanupOnly: cleanupOnly,
+    libraryId: 'library',
+    source: SourceReference(
+      account: SourceAccount(
+        serviceType: type,
+        region: AccessRegion.ordinary,
+        configuredServerId: type.name,
+        verifiedServerId: type.name,
+        userId: type.name,
+      ),
+      itemId: 'item',
+      mediaSourceId: 'version',
+    ),
+  );
+
+  Future<void> dispose() async {
+    await runtime.history.close();
+    runtime.auth.dispose();
+  }
+}
+
 void main() {
+  test(
+    'logout during pending credential read skips the retired authority and recovers main',
+    () async {
+      final credentials = DelayedCredentials({
+        for (final type in [MediaServerType.emby, MediaServerType.plex])
+          type.name: StoredCredentials(
+            serviceType: type,
+            accessToken: 'resource-${type.name}',
+            userId: type.name,
+            username: type.name,
+          ),
+      });
+      final fixture = await RecoveryFixture.create(
+        credentialStore: credentials,
+      );
+      addTearDown(fixture.dispose);
+      final store = MemoryPlaybackSessionSnapshotStore(
+        fixture.snapshot(MediaServerType.emby).withPendingCleanups([
+          fixture.snapshot(MediaServerType.plex, cleanupOnly: true),
+        ]),
+      );
+      credentials.gate = Completer<void>();
+      final recovery = recoverAndroidSession(
+        fixture.primary,
+        store,
+        runtime: fixture.runtime,
+      );
+      await Future<void>.delayed(Duration.zero);
+      await fixture.registry.logoutSource('plex');
+      credentials.gate!.complete();
+      expect(await recovery, isTrue);
+      expect(fixture.target.releases, isEmpty);
+      expect(fixture.primary.reports.single.playSessionId, 'session-emby');
+      expect(await store.read(), isNull);
+    },
+  );
   test(
     'cross-provider pending cleanup retains whole snapshot and its own token on retry',
     () async {
@@ -160,8 +299,9 @@ void main() {
         recoverAndroidSession(primary, store, runtime: runtime),
         throwsStateError,
       );
-      expect(await store.read(), same(original));
-      expect(primary.reports, isEmpty);
+      expect((await store.read())!.pendingCleanups, hasLength(1));
+      expect((await store.read())!.cleanupOnly, isTrue);
+      expect(primary.reports.single.playSessionId, 'session-emby');
       expect(target.reports, isEmpty);
       target.failRelease = false;
       expect(
@@ -175,7 +315,94 @@ void main() {
         'session-plex',
       ]);
       expect(primary.reports.single.playSessionId, 'session-emby');
-      expect(primary.releaseTokens, ['resource-emby']);
+      expect(primary.releaseTokens, ['resource-emby', 'resource-emby']);
+    },
+  );
+  for (final revocation in [
+    'scope',
+    'logout',
+    'delete',
+    'private-generation',
+  ]) {
+    test(
+      '$revocation pending owner cannot block the still authorized main session',
+      () async {
+        final fixture = await RecoveryFixture.create();
+        addTearDown(fixture.dispose);
+        var pending = fixture.snapshot(MediaServerType.plex, cleanupOnly: true);
+        switch (revocation) {
+          case 'scope':
+            await fixture.registry.configureScope(
+              'plex',
+              participates: false,
+              libraryIds: {},
+            );
+          case 'logout':
+            await fixture.registry.logoutSource('plex');
+          case 'delete':
+            await fixture.registry.logoutSource('plex', remove: true);
+          case 'private-generation':
+            pending = PlaybackSessionSnapshot.fromJson({
+              ...pending.toJson(),
+              'source': {
+                ...(pending.toJson()['source'] as Map),
+                'region': 'private',
+              },
+              'regionGeneration': -1,
+            })!;
+        }
+        final store = MemoryPlaybackSessionSnapshotStore(
+          fixture.snapshot(MediaServerType.emby).withPendingCleanups([pending]),
+        );
+        expect(
+          await recoverAndroidSession(
+            fixture.primary,
+            store,
+            runtime: fixture.runtime,
+          ),
+          isTrue,
+        );
+        expect(fixture.target.releases, isEmpty);
+        expect(fixture.target.reports, isEmpty);
+        expect(fixture.primary.reports.single.playSessionId, 'session-emby');
+        expect(await store.read(), isNull);
+      },
+    );
+  }
+
+  test(
+    'revoked pending is pruned while a different temporary failure stays retryable',
+    () async {
+      final fixture = await RecoveryFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.registry.configureScope(
+        'plex',
+        participates: false,
+        libraryIds: {},
+      );
+      fixture.primary.fail = true;
+      final store = MemoryPlaybackSessionSnapshotStore(
+        fixture.snapshot(MediaServerType.emby).withPendingCleanups([
+          fixture.snapshot(MediaServerType.plex, cleanupOnly: true),
+        ]),
+      );
+      await expectLater(
+        recoverAndroidSession(fixture.primary, store, runtime: fixture.runtime),
+        throwsStateError,
+      );
+      expect((await store.read())!.pendingCleanups, isEmpty);
+      expect((await store.read())!.cleanupOnly, isFalse);
+      fixture.primary.fail = false;
+      expect(
+        await recoverAndroidSession(
+          fixture.primary,
+          store,
+          runtime: fixture.runtime,
+        ),
+        isTrue,
+      );
+      expect(await store.read(), isNull);
+      expect(fixture.target.releases, isEmpty);
     },
   );
   for (final type in MediaServerType.values) {

@@ -108,6 +108,7 @@ ResolvedPlayback? resolveEmbyPlayback({
     }
     return ResolvedPlayback(
       playMethod: PlayMethod.transcode,
+      outputBitrate: source.transcodingOutputBitrate,
       streamUrl: embyResourceUri(baseUrl, transcoding, accessToken),
       playSessionId: info.playSessionId,
       mediaSource: source,
@@ -129,6 +130,7 @@ ResolvedPlayback _direct(
       : PlayMethod.directPlay;
   return ResolvedPlayback(
     playMethod: expandStrm ? PlayMethod.directPlay : method,
+    outputBitrate: source.bitrate,
     streamUrl: streamUrl,
     playSessionId: playSessionId,
     mediaSource: source,
