@@ -343,6 +343,8 @@ Future<void> main(List<String> args) async {
       }
       await record('server-resume', controller.position.inMilliseconds);
       await controller.setVolume(15);
+      // Pausing immediately after startup must publish the confirmed native
+      // state even when play and pause occur between two periodic polls.
       await controller.togglePlay();
       await _until(() => !controller.isPlaying);
       await checkDisplayRequest('paused', false);

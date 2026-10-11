@@ -767,7 +767,11 @@ class DesktopCorePlayer
 
   void _tick() {
     if (_disposed || _session.isEmpty) return;
-    final snapshot = _readSnapshot();
+    _publishSnapshot(_readSnapshot());
+  }
+
+  void _publishSnapshot(_CoreSnapshot snapshot) {
+    if (_disposed || _session.isEmpty) return;
     if (snapshot.timelineVersion != _previousTimeline) {
       _previousTimeline = snapshot.timelineVersion;
       _previousPosition = -1;
@@ -1276,6 +1280,12 @@ class DesktopCorePlayer
       );
     } else {
       snapshot = _readSnapshot();
+    }
+    if (method == 'play' || method == 'pause') {
+      // A play/pause pair can complete inside one polling interval. Publish
+      // each confirmed native state so the UI and texture scheduler cannot
+      // remain on an intermediate state that the next tick never observes.
+      _publishSnapshot(snapshot);
     }
     return _finishOutput(_trackResult(snapshot, _serverStreams), snapshot);
   }
