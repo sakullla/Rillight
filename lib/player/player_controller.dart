@@ -402,8 +402,14 @@ class PlayerController extends ChangeNotifier {
   Duration position = Duration.zero;
   Duration duration = Duration.zero;
 
-  /// 条目或媒体源上的片长。进度条可能被更短的探测时长盖掉,切集仍以它为准。
+  /// 条目或媒体源上的片长。直连时进度条可以采用更准确的探测时长;
+  /// 转码 HLS 的探测时长常常只是剩余窗口,不能把整条进度盖成剩余长度。
   Duration _catalogRuntime = Duration.zero;
+
+  /// Transcode HLS already starts at this media time. Core timestamps are
+  /// relative to that origin and must be added back for the seek bar.
+  Duration _streamOrigin = Duration.zero;
+  DateTime? _knownBufferHeldAt;
   Duration buffer = Duration.zero;
   BufferSnapshot bufferSnapshot = BufferSnapshot.empty(
     sessionId: 0,
@@ -1982,6 +1988,8 @@ class PlayerController extends ChangeNotifier {
     itemId = targetId;
     item = null;
     resolved = null;
+    _streamOrigin = Duration.zero;
+    _knownBufferHeldAt = null;
     position = duration = buffer = Duration.zero;
     bufferSnapshot = BufferSnapshot.empty(
       sessionId: operation.id,
@@ -2483,6 +2491,112 @@ class PlayerController extends ChangeNotifier {
     position = value;
     _updateActiveSkip();
     _maybeOfferNextUp();
+  }
+
+  Duration _displayedPosition(Duration reported) {
+    if (_streamOrigin <= Duration.zero) return reported;
+    final shifted = _streamOrigin + reported;
+    final limit = duration > _catalogRuntime ? duration : _catalogRuntime;
+    if (limit > Duration.zero && shifted > limit) return limit;
+    return shifted;
+  }
+
+  bool _shorterTranscodeWindow(Duration probed) {
+    return isTranscode &&
+        _catalogRuntime > Duration.zero &&
+        probed + const Duration(seconds: 1) < _catalogRuntime;
+  }
+
+  BufferSnapshot _stabilizeBufferSnapshot(BufferSnapshot next) {
+    final stripped = withoutPrematureByteCoverage(next);
+    final previous = bufferSnapshot;
+    final same =
+        previous.sessionId == stripped.sessionId &&
+        previous.resourceId.isNotEmpty &&
+        previous.resourceId == stripped.resourceId &&
+        previous.representationVersion == stripped.representationVersion &&
+        previous.trackVersion == stripped.trackVersion;
+    final transient = _transientBufferGap(stripped.unknownReason);
+    if (transient && same && previous.isKnown && previous.ranges.isNotEmpty) {
+      _knownBufferHeldAt ??= DateTime.now();
+      if (DateTime.now().difference(_knownBufferHeldAt!) <
+          const Duration(seconds: 2)) {
+        return BufferSnapshot(
+          sessionId: stripped.sessionId,
+          resourceId: stripped.resourceId,
+          representationVersion: stripped.representationVersion,
+          trackVersion: stripped.trackVersion,
+          sequence: stripped.sequence,
+          ranges: previous.ranges,
+        );
+      }
+    }
+    _knownBufferHeldAt = stripped.isKnown && stripped.ranges.isNotEmpty
+        ? null
+        : _knownBufferHeldAt;
+    if (!transient || !same) {
+      _knownBufferHeldAt = null;
+    }
+    return stripped;
+  }
+
+  bool _transientBufferGap(String? reason) {
+    return reason == 'indexUnavailable' ||
+        reason == 'mediaMappingUnavailable' ||
+        reason == 'hlsTimingUnavailable' ||
+        reason == 'hlsManifestTooLarge';
+  }
+
+  Future<ResolvedPlayback?> _expandStrm(
+    PlaybackOperation operation,
+    ResolvedPlayback playback,
+  ) async {
+    if (!playback.requiresStrmExpansion) return playback;
+    try {
+      final bytes = await client.readAuthorizedBytes(
+        playback.streamUrl,
+        receiveTimeout: const Duration(seconds: 15),
+        attempts: 1,
+        maxBytes: 64 * 1024,
+      );
+      if (!_accepts(operation)) return null;
+      final target = parseStrmTarget(utf8.decode(bytes, allowMalformed: true));
+      if (target == null) return _strmTranscodeFallback(playback);
+      return ResolvedPlayback(
+        playMethod: PlayMethod.directPlay,
+        streamUrl: target,
+        playSessionId: playback.playSessionId,
+        mediaSource: playback.mediaSource,
+        itemId: playback.itemId,
+      );
+    } catch (_) {
+      return _strmTranscodeFallback(playback);
+    }
+  }
+
+  ResolvedPlayback? _strmTranscodeFallback(ResolvedPlayback playback) {
+    final transcoding = playback.mediaSource.transcodingUrl;
+    final base = client.baseUrl;
+    final token = client.accessToken;
+    if (transcoding == null ||
+        transcoding.isEmpty ||
+        base == null ||
+        token == null ||
+        token.isEmpty) {
+      return null;
+    }
+    if (playback.mediaSource.audioStreams.any(
+      (stream) => isOriginalDolbyAudioCodec(stream.codec),
+    )) {
+      return null;
+    }
+    return ResolvedPlayback(
+      playMethod: PlayMethod.transcode,
+      streamUrl: embyResourceUri(base, transcoding, token),
+      playSessionId: playback.playSessionId,
+      mediaSource: playback.mediaSource,
+      itemId: playback.itemId,
+    );
   }
 
   /// 片尾标记处,或无标记时片长最后约 3 分钟,提前给出下一集(不倒计时)。
@@ -3526,7 +3640,7 @@ class PlayerController extends ChangeNotifier {
           final prompt = skipPromptVisible;
           final offered = nextEpisode;
           final previousPosition = position;
-          _setPosition(event.value as Duration);
+          _setPosition(_displayedPosition(event.value as Duration));
           final frozenSession = _session;
           if (frozenSession?.frozenStop != null &&
               origin?.permit.isValid == true) {
@@ -3560,7 +3674,7 @@ class PlayerController extends ChangeNotifier {
           }
         case VideoEventKind.duration:
           final value = event.value as Duration;
-          if (value > Duration.zero) {
+          if (value > Duration.zero && !_shorterTranscodeWindow(value)) {
             duration = value;
             _rebuildSkipSegments();
             _maybeOfferNextUp();
@@ -3576,7 +3690,7 @@ class PlayerController extends ChangeNotifier {
               next.trackVersion < bufferSnapshot.trackVersion) {
             return;
           }
-          bufferSnapshot = next;
+          bufferSnapshot = _stabilizeBufferSnapshot(next);
           _updateNetworkSlow();
         case VideoEventKind.cacheSpeed:
           final value = event.value;
@@ -3697,16 +3811,24 @@ class PlayerController extends ChangeNotifier {
             .timeout(const Duration(seconds: 15)),
       );
       if (!_accepts(operation) || !identical(resolved, current)) return;
-      final next = resolvePlayback(
+      final resolvedNext = resolvePlayback(
         info: info,
         baseUrl: client.baseUrl!,
         accessToken: client.accessToken!,
         itemId: itemId,
         mediaSourceId: current.mediaSource.id,
       );
+      if (resolvedNext == null ||
+          resolvedNext.isTranscode ||
+          resolvedNext.mediaSource.id != current.mediaSource.id) {
+        return;
+      }
+      final next = await _expandStrm(operation, resolvedNext);
       if (next == null ||
           next.isTranscode ||
-          next.mediaSource.id != current.mediaSource.id) {
+          next.requiresStrmExpansion ||
+          next.mediaSource.id != current.mediaSource.id ||
+          !_accepts(operation)) {
         return;
       }
       await (renewal as VideoBackendSourceRenewal).refreshSourceUrl(
@@ -3896,7 +4018,7 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      final next = resolvePlayback(
+      final resolvedNext = resolvePlayback(
         info: info,
         baseUrl: client.baseUrl!,
         accessToken: client.accessToken!,
@@ -3904,6 +4026,11 @@ class PlayerController extends ChangeNotifier {
         mediaSourceId: chosenId,
         forceTranscode: forceTranscode,
       );
+      if (!_accepts(operation)) return;
+      final next = resolvedNext == null
+          ? null
+          : await _expandStrm(operation, resolvedNext);
+      if (!_accepts(operation)) return;
       if (next == null) {
         if (compatibilityReason != null) {
           await _failOpen(operation, detail: compatibilityReason);
@@ -4009,6 +4136,11 @@ class PlayerController extends ChangeNotifier {
       _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
 
       onStage?.call('native open');
+      // The transcoding URL already includes StartTimeTicks. Seeking the core
+      // to the same absolute time lands inside a playlist that starts at 0.
+      _streamOrigin = next.isTranscode
+          ? durationFromTicks(boundedStartTicks)
+          : Duration.zero;
       await _operations.run(operation, () async {
         await backend.open(
           VideoOpenRequest(
@@ -4025,7 +4157,9 @@ class PlayerController extends ChangeNotifier {
                   ]
                 : next.mediaSource.mediaStreams,
             startPaused: startPaused,
-            start: durationFromTicks(boundedStartTicks),
+            start: next.isTranscode
+                ? Duration.zero
+                : durationFromTicks(boundedStartTicks),
             credentialOrigin: client.baseUrl,
             credentialHeaders: client.sessionHeaders,
             // 所有媒体地址保留 UA，会话凭据仅发往 Emby 同源地址。
@@ -4046,7 +4180,7 @@ class PlayerController extends ChangeNotifier {
         if (runtime > 0) {
           duration = _catalogRuntime;
         }
-        _setPosition(backend.position);
+        _setPosition(_displayedPosition(backend.position));
         _rebuildSkipSegments();
         isPlaying = backend.isPlaying;
         audioStreamIndex = next.isTranscode
@@ -5013,6 +5147,8 @@ class PlayerController extends ChangeNotifier {
     isPlaying = false;
     loading = false;
     sessionExpired = true;
+    _streamOrigin = Duration.zero;
+    _knownBufferHeldAt = null;
     position = duration = buffer = Duration.zero;
     bufferSnapshot = BufferSnapshot.empty(
       sessionId: 0,
@@ -5313,7 +5449,7 @@ class PlayerController extends ChangeNotifier {
           nextEpisode?.item.id != next.id) {
         return;
       }
-      final playback = resolvePlayback(
+      final resolvedPlayback = resolvePlayback(
         info: info,
         baseUrl: base,
         accessToken: token,
@@ -5323,7 +5459,9 @@ class PlayerController extends ChangeNotifier {
           requestedName: _preferredSourceName,
         ),
       );
-      if (playback == null) return;
+      if (resolvedPlayback == null || operation == null) return;
+      final playback = await _expandStrm(operation, resolvedPlayback);
+      if (playback == null || playback.requiresStrmExpansion) return;
       if (!_accepts(operation) || nextEpisode?.item.id != next.id) return;
       final prefix = _nextPrefix ??= NextEpisodePrefix(fetch: nextPrefixFetch);
       await prefix.start(

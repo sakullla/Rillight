@@ -541,7 +541,8 @@ bool open_text_ass(AssRenderer *ass, const AVCodecContext *decoder,
 }
 
 int decode_text_subtitle(Decoder &decoder, const AVPacket *packet,
-                         AVRational time_base, AssRenderer *ass) {
+                         AVRational time_base, AssRenderer *ass,
+                         int64_t origin_us = 0) {
   AVSubtitle subtitle{};
   int got = 0;
   const int result = avcodec_decode_subtitle2(decoder.context, &subtitle,
@@ -553,6 +554,8 @@ int decode_text_subtitle(Decoder &decoder, const AVPacket *packet,
        av_rescale_q(packet->pts, time_base, AVRational{1, 1000})) :
       subtitle.pts / 1000;
   start_ms += subtitle.start_display_time;
+  // Frame clocks are media-relative. Embedded cues must use the same origin.
+  if (origin_us > 0) start_ms -= origin_us / 1000;
   int64_t duration_ms = 0;
   if (subtitle.end_display_time > subtitle.start_display_time)
     duration_ms = subtitle.end_display_time - subtitle.start_display_time;
@@ -632,10 +635,11 @@ bool open_external_text(AssRenderer *ass, const std::vector<char> &header,
 }
 
 void process_ass(AssRenderer *ass, const AVPacket *packet,
-                 AVRational time_base) {
+                 AVRational time_base, int64_t origin_us = 0) {
   if (!ass->track || !packet->data || packet->size <= 0) return;
-  const int64_t start = packet->pts == AV_NOPTS_VALUE ? 0 :
+  int64_t start = packet->pts == AV_NOPTS_VALUE ? 0 :
       av_rescale_q(packet->pts, time_base, AVRational{1, 1000});
+  if (origin_us > 0) start -= origin_us / 1000;
   const int64_t duration = packet->duration > 0 ?
       av_rescale_q(packet->duration, time_base, AVRational{1, 1000}) : 5000;
   ass_process_chunk(ass->track,
@@ -857,7 +861,8 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
 
 int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
                            AVRational time_base,
-                           std::vector<SubtitleCue> *cues) {
+                           std::vector<SubtitleCue> *cues,
+                           int64_t origin_us = 0) {
   AVSubtitle subtitle{};
   int got = 0;
   const int result = avcodec_decode_subtitle2(decoder.context, &subtitle,
@@ -869,8 +874,8 @@ int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
     start = av_rescale_q(packet->pts, time_base, AVRational{1, 1000000});
   if (start == AV_NOPTS_VALUE) start = 0;
   SubtitleCue cue;
-  cue.start_us = start + subtitle.start_display_time * 1000LL;
-  cue.end_us = start + subtitle.end_display_time * 1000LL;
+  cue.start_us = start + subtitle.start_display_time * 1000LL - origin_us;
+  cue.end_us = start + subtitle.end_display_time * 1000LL - origin_us;
   if (cue.end_us <= cue.start_us) cue.end_us = cue.start_us + 5000000;
   if (decoder.context->codec_id == AV_CODEC_ID_HDMV_PGS_SUBTITLE)
     end_pgs_display(*cues, cue.start_us);
@@ -987,6 +992,10 @@ struct RillightCoreImpl {
   int64_t seek_target = -1;
   int64_t presentation_floor_us = 0;
   int64_t duration = -1;
+  // Absolute PTS of the first sample, in microseconds. Frame clocks and the
+  // seek bar are media time, so this origin is subtracted from PTS and added
+  // only when calling av_seek_frame. MPEG-TS and HLS often start far from 0.
+  int64_t media_origin_us = 0;
   int64_t base_position = 0;
   Clock::time_point base_time = Clock::now();
   bool audio_clock_active = false;
@@ -2237,6 +2246,11 @@ int64_t frame_time(const AVFrame *frame, const AVStream *stream) {
                       AVRational{1, 1000000});
 }
 
+int64_t media_pts_us(const RillightCoreImpl *core, int64_t pts_us) {
+  if (!core || pts_us < 0 || core->media_origin_us <= 0) return pts_us;
+  return pts_us - core->media_origin_us;
+}
+
 RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  uint64_t session, uint64_t timeline,
                                  const AVStream *stream,
@@ -2770,7 +2784,11 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
     if (core->state == RILLIGHT_CORE_OPENING ||
         core->state == RILLIGHT_CORE_BUFFERING ||
         core->state == RILLIGHT_CORE_RECOVERING) {
-      if (core->base_position == 0 && frame->pts_us > 0)
+      // A small lead-in keeps A/V aligned. An absolute TS/HLS PTS larger than
+      // the program is not the playback clock; adopting it jumps the seek bar
+      // to the end.
+      if (core->base_position == 0 && frame->pts_us > 0 &&
+          (core->duration <= 0 || frame->pts_us <= core->duration))
         core->base_position = frame->pts_us;
       core->base_time = Clock::now();
       core->state = core->play_intent ? RILLIGHT_CORE_PLAYING
@@ -2823,7 +2841,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
                         AssRenderer *ass, uint64_t session, uint64_t timeline,
                         std::mutex *subtitle_mutex) {
   int result = 0;
-  const int64_t pts = frame_time(decoded, format->streams[stream_index]);
+  const int64_t pts = media_pts_us(
+      core, frame_time(decoded, format->streams[stream_index]));
   bool discard = false;
   int output_width;
   int output_height;
@@ -3249,7 +3268,8 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
     if (recover_dts_packet(result)) { result = 0; break; }
     if (result < 0) break;
     decoder.dts_recovery.reset();
-    const int64_t pts = frame_time(decoded, format->streams[decoder.stream]);
+    const int64_t pts = media_pts_us(
+        core, frame_time(decoded, format->streams[decoder.stream]));
     if (decoder.stream == video_index) {
 #if defined(__ANDROID__)
       if (decoder.android_dovi_surface &&
@@ -3838,6 +3858,9 @@ void run(RillightCoreImpl *core, uint64_t session) {
         ? format->streams[audio.stream]->id : -1;
     core->subtitle_index = subtitle.stream;
     core->duration = format->duration == AV_NOPTS_VALUE ? -1 : format->duration;
+    core->media_origin_us =
+        format->start_time != AV_NOPTS_VALUE && format->start_time > 0
+            ? format->start_time : 0;
     core->tracks.clear();
 #if RILLIGHT_HAVE_LIBASS
     core->embedded_stream_count = format->nb_streams;
@@ -3989,17 +4012,20 @@ void run(RillightCoreImpl *core, uint64_t session) {
             format->streams[subtitle.stream]->codecpar->codec_id;
         if (bitmap_subtitle_codec(codec))
           result = decode_bitmap_subtitle(subtitle, packet,
-              format->streams[subtitle.stream]->time_base, &subtitle_cues);
+              format->streams[subtitle.stream]->time_base, &subtitle_cues,
+              core->media_origin_us);
 #if RILLIGHT_HAVE_LIBASS
         else if (text_subtitle_codec(codec) && ass.track)
           result = decode_text_subtitle(subtitle, packet,
-              format->streams[subtitle.stream]->time_base, &ass);
+              format->streams[subtitle.stream]->time_base, &ass,
+              core->media_origin_us);
 #endif
       }
 #if RILLIGHT_HAVE_LIBASS
       else if (ass.track)
         process_ass(&ass, packet,
-                    format->streams[subtitle.stream]->time_base);
+                    format->streams[subtitle.stream]->time_base,
+                    core->media_origin_us);
 #endif
 
       return result;
@@ -4072,7 +4098,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
         format->pb->eof_reached = 0;
       }
       pending_packets.Clear();
-      result = av_seek_frame(format, -1, seek, AVSEEK_FLAG_BACKWARD);
+      int64_t seek_ts = seek;
+      if (format->start_time != AV_NOPTS_VALUE && format->start_time > 0 &&
+          seek <= std::numeric_limits<int64_t>::max() - format->start_time) {
+        seek_ts = seek + format->start_time;
+      }
+      result = av_seek_frame(format, -1, seek_ts, AVSEEK_FLAG_BACKWARD);
       {
         std::lock_guard lock(core->mutex);
         core->media_io_active = false;
@@ -4945,6 +4976,7 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->presentation_failures = 0;
     core->video_track_id = core->audio_track_id = -1;
     core->duration = -1;
+    core->media_origin_us = 0;
     core->base_position = position_us;
     core->base_time = Clock::now();
     core->seek_target = position_us > 0 ? position_us : -1;
@@ -5460,7 +5492,7 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
     auto tunnel = core->tunnel;
     std::shared_ptr<AndroidTunnelSink> sink;
     { std::lock_guard lock(tunnel->mutex); sink = tunnel->sink; }
-    const int64_t pts = sink ? sink->Rendered() : -1;
+    const int64_t pts = media_pts_us(core, sink ? sink->Rendered() : -1);
     if (pts >= tunnel->discard_before && pts > tunnel->emitted) {
       auto* receipt = new (std::nothrow) VideoOutputFrame{};
       if (!receipt) return nullptr;

@@ -72,6 +72,23 @@ class BufferedByteCoverage {
   }
 }
 
+/// Drops byte coverage that would draw a second, non-time cache bar.
+BufferSnapshot withoutPrematureByteCoverage(BufferSnapshot snapshot) {
+  if (!snapshot.hidesByteCoverage || snapshot.byteCoverage == null) {
+    return snapshot;
+  }
+  return BufferSnapshot(
+    sessionId: snapshot.sessionId,
+    resourceId: snapshot.resourceId,
+    representationVersion: snapshot.representationVersion,
+    trackVersion: snapshot.trackVersion,
+    sequence: snapshot.sequence,
+    ranges: snapshot.ranges,
+    unknownReason: snapshot.unknownReason,
+    duration: null,
+  );
+}
+
 /// The one authoritative cache-timeline observation for a backend session.
 /// An empty [ranges] list with [unknownReason] means coverage cannot be
 /// established; it must not be replaced by a bitrate or byte-ratio estimate.
@@ -115,6 +132,18 @@ class BufferSnapshot {
   final BufferedByteCoverage? byteCoverage;
 
   bool get isKnown => unknownReason == null;
+
+  /// Byte islands are a file fraction. While a time index or an HLS playlist
+  /// is still being established, painting them on the seek bar makes a second
+  /// cache stripe that then jumps to the real time ranges.
+  bool get hidesByteCoverage {
+    final reason = unknownReason;
+    return reason == 'indexUnavailable' ||
+        reason == 'mediaMappingUnavailable' ||
+        reason == 'preparing' ||
+        reason == 'notOpened' ||
+        (reason != null && reason.startsWith('hls'));
+  }
 
   /// Reject late cache updates after a media, representation, or track switch.
   /// A changed identity is accepted only after the controller establishes its

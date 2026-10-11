@@ -49,6 +49,35 @@ void main() {
     expect(() => snapshot.ranges.clear(), throwsUnsupportedError);
   });
 
+  test('drops byte coverage while time or HLS timing is still unknown', () {
+    final snapshot = BufferSnapshot(
+      sessionId: 1,
+      resourceId: 'media',
+      representationVersion: 'v1',
+      trackVersion: 0,
+      sequence: 2,
+      ranges: const [],
+      unknownReason: 'hlsTimingUnavailable',
+      byteCoverage: BufferedByteCoverage(
+        totalBytes: 100,
+        ranges: const [BufferedByteRange(0, 40)],
+      ),
+    );
+    expect(withoutPrematureByteCoverage(snapshot).byteCoverage, isNull);
+    expect(snapshot.hidesByteCoverage, isTrue);
+    final settled = BufferSnapshot(
+      sessionId: 1,
+      resourceId: 'media',
+      representationVersion: 'v1',
+      trackVersion: 0,
+      sequence: 3,
+      ranges: const [],
+      unknownReason: 'containerTrackOrTimingUnknown',
+      byteCoverage: snapshot.byteCoverage,
+    );
+    expect(withoutPrematureByteCoverage(settled).byteCoverage, isNotNull);
+  });
+
   test('rejects late versions and keeps unknown coverage empty', () {
     BufferSnapshot value(int sequence, {int track = 1, String? reason}) =>
         BufferSnapshot(

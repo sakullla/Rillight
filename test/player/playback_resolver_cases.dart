@@ -381,6 +381,79 @@ void main() {
     expect(info.sourceById('src-missing'), isNull);
   });
 
+  test('strm pointer with a remote path ignores stream.strm', () {
+    final resolved = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-strm-both',
+        'MediaSources': [
+          {
+            'Id': 'src-strm',
+            'Protocol': 'Http',
+            'Path': 'HTTPS://cdn.example.com/episode-01.mkv',
+            'Container': 'strm',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': true,
+            'DirectStreamUrl':
+                '/Videos/episode-strm/stream.strm?static=true&MediaSourceId=src-strm',
+            'TranscodingUrl': '/videos/episode-strm/master.m3u8',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'episode-strm',
+    );
+    expect(resolved, isNotNull);
+    expect(resolved!.requiresStrmExpansion, isFalse);
+    expect(resolved.isTranscode, isFalse);
+    expect(
+      resolved.streamUrl.toString(),
+      'https://cdn.example.com/episode-01.mkv',
+    );
+    expect(resolved.streamUrl.queryParameters.containsKey('api_key'), isFalse);
+  });
+
+  test('local strm expands the pointer instead of playing stream.strm', () {
+    final resolved = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-strm-local',
+        'MediaSources': [
+          {
+            'Id': 'src-local',
+            'Protocol': 'File',
+            'Path': '/media/movies/feature.strm',
+            'Container': 'strm',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': true,
+            'DirectStreamUrl':
+                '/Videos/movie/stream.strm?static=true&MediaSourceId=src-local',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'movie',
+    );
+    expect(resolved, isNotNull);
+    expect(resolved!.requiresStrmExpansion, isTrue);
+    expect(resolved.streamUrl.path, '/emby/Videos/movie/stream.strm');
+    expect(resolved.streamUrl.queryParameters['api_key'], token);
+    expect(
+      parseStrmTarget('''
+#EXTM3U
+#EXTINF:-1,remote
+
+https://cdn.example.com/movie.mkv
+'''),
+      Uri.parse('https://cdn.example.com/movie.mkv'),
+    );
+    expect(parseStrmTarget('# comment only\n'), isNull);
+    expect(
+      parseStrmTarget('"https://cdn.example.com/quoted.mp4"'),
+      Uri.parse('https://cdn.example.com/quoted.mp4'),
+    );
+  });
+
   test('strm remote path direct plays the original URL without token', () {
     final resolved = resolvePlayback(
       info: PlaybackInfo.fromJson({

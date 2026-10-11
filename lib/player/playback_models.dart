@@ -217,7 +217,7 @@ class PlaybackMediaSource {
 
   /// 直连时可直接打开的远端地址(strm 等场景,服务端不提供 DirectStreamUrl)。
   bool get isRemoteHttpPath {
-    final value = path?.trim() ?? '';
+    final value = path?.trim().toLowerCase() ?? '';
     return value.startsWith('http://') || value.startsWith('https://');
   }
 

@@ -771,6 +771,7 @@ class EmbyClient {
     Uri uri, {
     Duration receiveTimeout = const Duration(seconds: 60),
     int attempts = 3,
+    int? maxBytes,
   }) async {
     if (!hasSession) {
       throw const EmbyException(EmbyFailureKind.sessionExpired);
@@ -804,25 +805,55 @@ class EmbyClient {
                 target.userInfo.isNotEmpty) {
               throw StateError('Unsupported subtitle URL');
             }
-            final response = await _dio.requestUri<List<int>>(
+            final headers = {
+              if (sameOrigin) ...authorizedHeaders,
+              'User-Agent': userAgent,
+              'Accept': '*/*',
+            };
+            final options = Options(
+              method: 'GET',
+              responseType: maxBytes == null
+                  ? ResponseType.bytes
+                  : ResponseType.stream,
+              receiveTimeout: receiveTimeout,
+              followRedirects: false,
+              validateStatus: (status) =>
+                  status != null &&
+                  ((status >= 200 && status < 300) ||
+                      {301, 302, 303, 307, 308}.contains(status)),
+              headers: headers,
+            );
+            if (maxBytes == null) {
+              final response = await _dio.requestUri<List<int>>(
+                target,
+                options: options,
+              );
+              if ({301, 302, 303, 307, 308}.contains(response.statusCode)) {
+                final location = response.headers.value('location');
+                if (location == null) {
+                  throw StateError('Subtitle redirect has no destination');
+                }
+                final next = target.resolve(location);
+                if (target.scheme == 'https' && next.scheme != 'https') {
+                  throw StateError('Insecure subtitle redirect');
+                }
+                target = next;
+                continue;
+              }
+              final data = response.data;
+              if (data == null || data.isEmpty) {
+                throw StateError('Empty response');
+              }
+              return data;
+            }
+            final transferCancel = CancelToken();
+            final response = await _dio.requestUri<ResponseBody>(
               target,
-              options: Options(
-                method: 'GET',
-                responseType: ResponseType.bytes,
-                receiveTimeout: receiveTimeout,
-                followRedirects: false,
-                validateStatus: (status) =>
-                    status != null &&
-                    ((status >= 200 && status < 300) ||
-                        {301, 302, 303, 307, 308}.contains(status)),
-                headers: {
-                  if (sameOrigin) ...authorizedHeaders,
-                  'User-Agent': userAgent,
-                  'Accept': '*/*',
-                },
-              ),
+              cancelToken: transferCancel,
+              options: options,
             );
             if ({301, 302, 303, 307, 308}.contains(response.statusCode)) {
+              transferCancel.cancel();
               final location = response.headers.value('location');
               if (location == null) {
                 throw StateError('Subtitle redirect has no destination');
@@ -834,8 +865,28 @@ class EmbyClient {
               target = next;
               continue;
             }
-            final data = response.data;
-            if (data == null || data.isEmpty) {
+            final body = response.data;
+            if (body == null) {
+              throw StateError('Empty response');
+            }
+            final bytes = BytesBuilder(copy: false);
+            try {
+              await for (final chunk in body.stream) {
+                final room = maxBytes - bytes.length;
+                if (room <= 0) break;
+                if (chunk.length > room) {
+                  bytes.add(chunk.sublist(0, room));
+                  break;
+                }
+                bytes.add(chunk);
+              }
+            } finally {
+              if (!transferCancel.isCancelled) {
+                transferCancel.cancel();
+              }
+            }
+            final data = bytes.takeBytes();
+            if (data.isEmpty) {
               throw StateError('Empty response');
             }
             return data;

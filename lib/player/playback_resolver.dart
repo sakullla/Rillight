@@ -9,6 +9,7 @@ class ResolvedPlayback {
     required this.playSessionId,
     required this.mediaSource,
     required this.itemId,
+    this.requiresStrmExpansion = false,
   });
 
   final PlayMethod playMethod;
@@ -16,6 +17,10 @@ class ResolvedPlayback {
   final String playSessionId;
   final PlaybackMediaSource mediaSource;
   final String itemId;
+
+  /// [streamUrl] is the strm pointer, not a media file. The caller reads it
+  /// and opens the first http(s) target inside.
+  final bool requiresStrmExpansion;
 
   bool get isTranscode => playMethod == PlayMethod.transcode;
 }
@@ -137,8 +142,14 @@ int _sourceFingerprintScore({
   return score;
 }
 
-/// 解析起播流:直连优先(服务端 DirectStreamUrl,否则 strm 远端 Path,
-/// 否则静态流地址),不可直连且有 TranscodingUrl 时转码。
+/// 解析起播流。
+///
+/// 远端媒体地址(含 strm 已解析出的 http(s) 路径)优先于
+/// DirectStreamUrl:后者对 strm 经常是 `stream.strm` 文本。容器或路径仍是
+/// strm、且没有可直接打开的媒体地址时,返回指针并标记
+/// [ResolvedPlayback.requiresStrmExpansion],由调用方读取正文里的第一行
+/// http(s)。其余直连仍用 DirectStreamUrl,否则静态流;不可直连且有
+/// TranscodingUrl 时转码。
 ///
 /// [mediaSourceId] 指定选择的媒体源(播放中换源);缺省取第一个。
 ResolvedPlayback? resolvePlayback({
@@ -161,9 +172,26 @@ ResolvedPlayback? resolvePlayback({
   }
 
   final canDirect = source.supportsDirectPlay || source.supportsDirectStream;
+  if (!forceTranscode) {
+    final remoteMedia = _remoteMediaUrl(source);
+    // The owned core can open the URL inside a strm even when the device
+    // profile has no strm container and the server therefore clears
+    // SupportsDirectPlay.
+    if (remoteMedia != null &&
+        (source.supportsDirectPlay || _isStrmSource(source))) {
+      return _direct(
+        source,
+        info.playSessionId,
+        itemId,
+        Uri.parse(remoteMedia),
+      );
+    }
+  }
   if (canDirect && !forceTranscode) {
-    final directStreamUrl = source.directStreamUrl;
-    if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
+    final directStreamUrl = source.directStreamUrl?.trim();
+    if (directStreamUrl != null &&
+        directStreamUrl.isNotEmpty &&
+        !_isStrmResource(directStreamUrl)) {
       return _direct(
         source,
         info.playSessionId,
@@ -171,14 +199,29 @@ ResolvedPlayback? resolvePlayback({
         embyResourceUri(baseUrl, directStreamUrl, accessToken),
       );
     }
-    if (source.isRemoteHttpPath) {
+    if (source.isRemoteHttpPath && !_isStrmResource(source.path)) {
       // strm 等场景:服务端已把条目解析为远端地址,直连打开原始 URL,
       // 不附带 api_key(避免向第三方地址泄漏令牌)。
       return _direct(
         source,
         info.playSessionId,
         itemId,
-        Uri.parse(source.path!),
+        Uri.parse(source.path!.trim()),
+      );
+    }
+    if (_isStrmSource(source)) {
+      return _direct(
+        source,
+        info.playSessionId,
+        itemId,
+        _strmPointerUri(
+          source,
+          baseUrl,
+          accessToken,
+          itemId,
+          info.playSessionId,
+        ),
+        expandStrm: true,
       );
     }
     return _direct(
@@ -217,17 +260,90 @@ ResolvedPlayback _direct(
   PlaybackMediaSource source,
   String playSessionId,
   String itemId,
-  Uri streamUrl,
-) {
+  Uri streamUrl, {
+  bool expandStrm = false,
+}) {
   final method = source.supportsDirectStream || !source.supportsDirectPlay
       ? PlayMethod.directStream
       : PlayMethod.directPlay;
   return ResolvedPlayback(
-    playMethod: method,
+    playMethod: expandStrm ? PlayMethod.directPlay : method,
     streamUrl: streamUrl,
     playSessionId: playSessionId,
     mediaSource: source,
     itemId: itemId,
+    requiresStrmExpansion: expandStrm,
+  );
+}
+
+/// First playable http(s) target in a strm body. Blank lines and `#` comments,
+/// including `#EXTM3U` / `#EXTINF`, are skipped.
+Uri? parseStrmTarget(String text) {
+  final body = text.length > 256 * 1024 ? text.substring(0, 256 * 1024) : text;
+  for (final raw in body.split(RegExp(r'\r?\n'))) {
+    var line = raw.trim();
+    if (line.startsWith('\uFEFF')) {
+      line = line.substring(1).trim();
+    }
+    if (line.isEmpty || line.startsWith('#')) continue;
+    if ((line.startsWith('"') && line.endsWith('"') && line.length >= 2) ||
+        (line.startsWith("'") && line.endsWith("'") && line.length >= 2)) {
+      line = line.substring(1, line.length - 1).trim();
+    }
+    final lower = line.toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+      continue;
+    }
+    return Uri.tryParse(line);
+  }
+  return null;
+}
+
+bool _isHttpUrl(String value) {
+  final lower = value.trim().toLowerCase();
+  return lower.startsWith('http://') || lower.startsWith('https://');
+}
+
+bool _isStrmResource(String? value) {
+  final text = value?.trim();
+  if (text == null || text.isEmpty) return false;
+  final path = (Uri.tryParse(text)?.path ?? text).toLowerCase();
+  return path.endsWith('.strm');
+}
+
+bool _isStrmSource(PlaybackMediaSource source) {
+  return source.container?.trim().toLowerCase() == 'strm' ||
+      _isStrmResource(source.path) ||
+      _isStrmResource(source.directStreamUrl);
+}
+
+/// Remote URL that is the media itself. A `.strm` URL still has to be read.
+String? _remoteMediaUrl(PlaybackMediaSource source) {
+  final path = source.path?.trim();
+  if (path == null || !_isHttpUrl(path) || _isStrmResource(path)) return null;
+  return path;
+}
+
+Uri _strmPointerUri(
+  PlaybackMediaSource source,
+  Uri baseUrl,
+  String accessToken,
+  String itemId,
+  String playSessionId,
+) {
+  final path = source.path?.trim();
+  if (path != null && _isHttpUrl(path) && _isStrmResource(path)) {
+    return Uri.parse(path);
+  }
+  final direct = source.directStreamUrl?.trim();
+  if (direct != null && direct.isNotEmpty) {
+    return embyResourceUri(baseUrl, direct, accessToken);
+  }
+  return embyResourceUri(
+    baseUrl,
+    '/Videos/$itemId/stream.strm?static=true'
+    '&MediaSourceId=${source.id}&PlaySessionId=$playSessionId',
+    accessToken,
   );
 }
 

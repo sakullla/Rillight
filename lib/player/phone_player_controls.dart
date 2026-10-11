@@ -522,27 +522,6 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ),
               ),
-            if (c.isBuffering && !c.loading)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox.square(
-                      dimension: 12,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      l.playerBuffering,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 showValueIndicator: ShowValueIndicator.onDrag,
@@ -592,7 +571,28 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               alignment: WrapAlignment.spaceBetween,
               spacing: 12,
               runSpacing: 2,
-              children: [clock, cache],
+              children: [
+                if (c.isBuffering && !c.loading)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox.square(
+                        dimension: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        l.playerBuffering,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                clock,
+                cache,
+              ],
             ),
             const SizedBox(height: 4),
             Row(
