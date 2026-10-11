@@ -15,6 +15,10 @@ void main() {
     caseEntrypoints['auth/auth_controller_cases.dart']!,
   );
   group(
+    'auth/backup_import/backup_import_test.dart',
+    caseEntrypoints['auth/backup_import/backup_import_cases.dart']!,
+  );
+  group(
     'auth/server_list_store_test.dart',
     caseEntrypoints['auth/server_list_store_cases.dart']!,
   );

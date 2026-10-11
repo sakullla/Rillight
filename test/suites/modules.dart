@@ -5,65 +5,66 @@ import '../app/browsing_polish_cases.dart' as case2;
 import '../app/window_geometry_cases.dart' as case3;
 import '../app_shell_cases.dart' as case4;
 import '../auth/auth_controller_cases.dart' as case5;
-import '../auth/change_password_cases.dart' as case6;
-import '../auth/connect_page_cases.dart' as case7;
-import '../auth/library_counts_cases.dart' as case8;
-import '../auth/line_management_cases.dart' as case9;
-import '../auth/server_list_store_cases.dart' as case10;
-import '../auth/server_management_cases.dart' as case11;
-import '../catalog/catalog_browse_cases.dart' as case12;
-import '../catalog/catalog_cache_cases.dart' as case13;
-import '../catalog/catalog_controller_cases.dart' as case14;
-import '../catalog/emby_catalog_client_cases.dart' as case15;
-import '../catalog/item_detail_cases.dart' as case16;
-import '../catalog/library_filter_cases.dart' as case17;
-import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case18;
-import '../emby/emby_client_cases.dart' as case19;
-import '../emby/emby_device_cases.dart' as case20;
-import '../emby/emby_item_image_cases.dart' as case21;
-import '../emby/emby_socket_cases.dart' as case22;
-import '../emby/emby_url_cases.dart' as case23;
-import '../emby/media_source_format_cases.dart' as case24;
-import '../home/hero_carousel_cases.dart' as case25;
-import '../home/home_page_cases.dart' as case26;
-import '../home/library_nav_prefs_cases.dart' as case27;
-import '../library/item_format_cases.dart' as case28;
-import '../player/capability_record_cases.dart' as case29;
-import '../player/danmaku/dandanplay_client_cases.dart' as case30;
-import '../player/danmaku/danmaku_controller_cases.dart' as case31;
-import '../player/danmaku/danmaku_hash_cases.dart' as case32;
-import '../player/danmaku/danmaku_layout_cases.dart' as case33;
-import '../player/danmaku/danmaku_renderer_cases.dart' as case34;
-import '../player/danmaku/danmaku_settings_cases.dart' as case35;
-import '../player/danmaku/danmaku_timeline_cases.dart' as case36;
-import '../player/desktop_player_window_host_cases.dart' as case37;
-import '../player/device_profile_cases.dart' as case38;
-import '../player/emby_playback_client_cases.dart' as case39;
-import '../player/playback_check_in_cases.dart' as case40;
-import '../player/playback_http_proxy_cases.dart' as case41;
-import '../player/playback_resolver_cases.dart' as case42;
-import '../player/playback_session_cases.dart' as case43;
-import '../player/playback_session_snapshot_cases.dart' as case44;
-import '../player/playback_wake_lock_cases.dart' as case45;
-import '../player/player_controls_cases.dart' as case46;
-import '../player/player_host_command_cases.dart' as case47;
-import '../player/player_process_control_cases.dart' as case48;
-import '../player/player_process_protocol_cases.dart' as case49;
-import '../player/player_runtime_options_cases.dart' as case50;
-import '../player/player_settings_cases.dart' as case51;
-import '../player/player_window_cases.dart' as case52;
-import '../player/player_window_launch_cases.dart' as case53;
-import '../player/subtitle_menu_cases.dart' as case54;
-import '../player/subtitle_slots_cases.dart' as case55;
-import '../settings_page_cases.dart' as case56;
-import '../widgets/app_empty_view_cases.dart' as case57;
-import '../widgets/app_hover_card_cases.dart' as case58;
-import '../widgets/backdrop_scrim_cases.dart' as case59;
-import '../widgets/liquid_glass_cases.dart' as case60;
-import '../widgets/media_image_cases.dart' as case61;
-import '../widgets/poster_card_cases.dart' as case62;
-import '../widgets/scrim_icon_button_cases.dart' as case63;
-import '../widgets/skeleton_cases.dart' as case64;
+import '../auth/backup_import/backup_import_cases.dart' as case6;
+import '../auth/change_password_cases.dart' as case7;
+import '../auth/connect_page_cases.dart' as case8;
+import '../auth/library_counts_cases.dart' as case9;
+import '../auth/line_management_cases.dart' as case10;
+import '../auth/server_list_store_cases.dart' as case11;
+import '../auth/server_management_cases.dart' as case12;
+import '../catalog/catalog_browse_cases.dart' as case13;
+import '../catalog/catalog_cache_cases.dart' as case14;
+import '../catalog/catalog_controller_cases.dart' as case15;
+import '../catalog/emby_catalog_client_cases.dart' as case16;
+import '../catalog/item_detail_cases.dart' as case17;
+import '../catalog/library_filter_cases.dart' as case18;
+import '../catalog/shelf_grid_scroll_rebuild_cases.dart' as case19;
+import '../emby/emby_client_cases.dart' as case20;
+import '../emby/emby_device_cases.dart' as case21;
+import '../emby/emby_item_image_cases.dart' as case22;
+import '../emby/emby_socket_cases.dart' as case23;
+import '../emby/emby_url_cases.dart' as case24;
+import '../emby/media_source_format_cases.dart' as case25;
+import '../home/hero_carousel_cases.dart' as case26;
+import '../home/home_page_cases.dart' as case27;
+import '../home/library_nav_prefs_cases.dart' as case28;
+import '../library/item_format_cases.dart' as case29;
+import '../player/capability_record_cases.dart' as case30;
+import '../player/danmaku/dandanplay_client_cases.dart' as case31;
+import '../player/danmaku/danmaku_controller_cases.dart' as case32;
+import '../player/danmaku/danmaku_hash_cases.dart' as case33;
+import '../player/danmaku/danmaku_layout_cases.dart' as case34;
+import '../player/danmaku/danmaku_renderer_cases.dart' as case35;
+import '../player/danmaku/danmaku_settings_cases.dart' as case36;
+import '../player/danmaku/danmaku_timeline_cases.dart' as case37;
+import '../player/desktop_player_window_host_cases.dart' as case38;
+import '../player/device_profile_cases.dart' as case39;
+import '../player/emby_playback_client_cases.dart' as case40;
+import '../player/playback_check_in_cases.dart' as case41;
+import '../player/playback_http_proxy_cases.dart' as case42;
+import '../player/playback_resolver_cases.dart' as case43;
+import '../player/playback_session_cases.dart' as case44;
+import '../player/playback_session_snapshot_cases.dart' as case45;
+import '../player/playback_wake_lock_cases.dart' as case46;
+import '../player/player_controls_cases.dart' as case47;
+import '../player/player_host_command_cases.dart' as case48;
+import '../player/player_process_control_cases.dart' as case49;
+import '../player/player_process_protocol_cases.dart' as case50;
+import '../player/player_runtime_options_cases.dart' as case51;
+import '../player/player_settings_cases.dart' as case52;
+import '../player/player_window_cases.dart' as case53;
+import '../player/player_window_launch_cases.dart' as case54;
+import '../player/subtitle_menu_cases.dart' as case55;
+import '../player/subtitle_slots_cases.dart' as case56;
+import '../settings_page_cases.dart' as case57;
+import '../widgets/app_empty_view_cases.dart' as case58;
+import '../widgets/app_hover_card_cases.dart' as case59;
+import '../widgets/backdrop_scrim_cases.dart' as case60;
+import '../widgets/liquid_glass_cases.dart' as case61;
+import '../widgets/media_image_cases.dart' as case62;
+import '../widgets/poster_card_cases.dart' as case63;
+import '../widgets/scrim_icon_button_cases.dart' as case64;
+import '../widgets/skeleton_cases.dart' as case65;
 
 // Import every module once; registering one group calls only its main().
 // Importing widget modules alone does not install Flutter's HTTP mock.
@@ -74,63 +75,64 @@ const caseEntrypoints = <String, void Function()>{
   'app/window_geometry_cases.dart': case3.main,
   'app_shell_cases.dart': case4.main,
   'auth/auth_controller_cases.dart': case5.main,
-  'auth/change_password_cases.dart': case6.main,
-  'auth/connect_page_cases.dart': case7.main,
-  'auth/library_counts_cases.dart': case8.main,
-  'auth/line_management_cases.dart': case9.main,
-  'auth/server_list_store_cases.dart': case10.main,
-  'auth/server_management_cases.dart': case11.main,
-  'catalog/catalog_browse_cases.dart': case12.main,
-  'catalog/catalog_cache_cases.dart': case13.main,
-  'catalog/catalog_controller_cases.dart': case14.main,
-  'catalog/emby_catalog_client_cases.dart': case15.main,
-  'catalog/item_detail_cases.dart': case16.main,
-  'catalog/library_filter_cases.dart': case17.main,
-  'catalog/shelf_grid_scroll_rebuild_cases.dart': case18.main,
-  'emby/emby_client_cases.dart': case19.main,
-  'emby/emby_device_cases.dart': case20.main,
-  'emby/emby_item_image_cases.dart': case21.main,
-  'emby/emby_socket_cases.dart': case22.main,
-  'emby/emby_url_cases.dart': case23.main,
-  'emby/media_source_format_cases.dart': case24.main,
-  'home/hero_carousel_cases.dart': case25.main,
-  'home/home_page_cases.dart': case26.main,
-  'home/library_nav_prefs_cases.dart': case27.main,
-  'library/item_format_cases.dart': case28.main,
-  'player/capability_record_cases.dart': case29.main,
-  'player/danmaku/dandanplay_client_cases.dart': case30.main,
-  'player/danmaku/danmaku_controller_cases.dart': case31.main,
-  'player/danmaku/danmaku_hash_cases.dart': case32.main,
-  'player/danmaku/danmaku_layout_cases.dart': case33.main,
-  'player/danmaku/danmaku_renderer_cases.dart': case34.main,
-  'player/danmaku/danmaku_settings_cases.dart': case35.main,
-  'player/danmaku/danmaku_timeline_cases.dart': case36.main,
-  'player/desktop_player_window_host_cases.dart': case37.main,
-  'player/device_profile_cases.dart': case38.main,
-  'player/emby_playback_client_cases.dart': case39.main,
-  'player/playback_check_in_cases.dart': case40.main,
-  'player/playback_http_proxy_cases.dart': case41.main,
-  'player/playback_resolver_cases.dart': case42.main,
-  'player/playback_session_cases.dart': case43.main,
-  'player/playback_session_snapshot_cases.dart': case44.main,
-  'player/playback_wake_lock_cases.dart': case45.main,
-  'player/player_controls_cases.dart': case46.main,
-  'player/player_host_command_cases.dart': case47.main,
-  'player/player_process_control_cases.dart': case48.main,
-  'player/player_process_protocol_cases.dart': case49.main,
-  'player/player_runtime_options_cases.dart': case50.main,
-  'player/player_settings_cases.dart': case51.main,
-  'player/player_window_cases.dart': case52.main,
-  'player/player_window_launch_cases.dart': case53.main,
-  'player/subtitle_menu_cases.dart': case54.main,
-  'player/subtitle_slots_cases.dart': case55.main,
-  'settings_page_cases.dart': case56.main,
-  'widgets/app_empty_view_cases.dart': case57.main,
-  'widgets/app_hover_card_cases.dart': case58.main,
-  'widgets/backdrop_scrim_cases.dart': case59.main,
-  'widgets/liquid_glass_cases.dart': case60.main,
-  'widgets/media_image_cases.dart': case61.main,
-  'widgets/poster_card_cases.dart': case62.main,
-  'widgets/scrim_icon_button_cases.dart': case63.main,
-  'widgets/skeleton_cases.dart': case64.main,
+  'auth/backup_import/backup_import_cases.dart': case6.main,
+  'auth/change_password_cases.dart': case7.main,
+  'auth/connect_page_cases.dart': case8.main,
+  'auth/library_counts_cases.dart': case9.main,
+  'auth/line_management_cases.dart': case10.main,
+  'auth/server_list_store_cases.dart': case11.main,
+  'auth/server_management_cases.dart': case12.main,
+  'catalog/catalog_browse_cases.dart': case13.main,
+  'catalog/catalog_cache_cases.dart': case14.main,
+  'catalog/catalog_controller_cases.dart': case15.main,
+  'catalog/emby_catalog_client_cases.dart': case16.main,
+  'catalog/item_detail_cases.dart': case17.main,
+  'catalog/library_filter_cases.dart': case18.main,
+  'catalog/shelf_grid_scroll_rebuild_cases.dart': case19.main,
+  'emby/emby_client_cases.dart': case20.main,
+  'emby/emby_device_cases.dart': case21.main,
+  'emby/emby_item_image_cases.dart': case22.main,
+  'emby/emby_socket_cases.dart': case23.main,
+  'emby/emby_url_cases.dart': case24.main,
+  'emby/media_source_format_cases.dart': case25.main,
+  'home/hero_carousel_cases.dart': case26.main,
+  'home/home_page_cases.dart': case27.main,
+  'home/library_nav_prefs_cases.dart': case28.main,
+  'library/item_format_cases.dart': case29.main,
+  'player/capability_record_cases.dart': case30.main,
+  'player/danmaku/dandanplay_client_cases.dart': case31.main,
+  'player/danmaku/danmaku_controller_cases.dart': case32.main,
+  'player/danmaku/danmaku_hash_cases.dart': case33.main,
+  'player/danmaku/danmaku_layout_cases.dart': case34.main,
+  'player/danmaku/danmaku_renderer_cases.dart': case35.main,
+  'player/danmaku/danmaku_settings_cases.dart': case36.main,
+  'player/danmaku/danmaku_timeline_cases.dart': case37.main,
+  'player/desktop_player_window_host_cases.dart': case38.main,
+  'player/device_profile_cases.dart': case39.main,
+  'player/emby_playback_client_cases.dart': case40.main,
+  'player/playback_check_in_cases.dart': case41.main,
+  'player/playback_http_proxy_cases.dart': case42.main,
+  'player/playback_resolver_cases.dart': case43.main,
+  'player/playback_session_cases.dart': case44.main,
+  'player/playback_session_snapshot_cases.dart': case45.main,
+  'player/playback_wake_lock_cases.dart': case46.main,
+  'player/player_controls_cases.dart': case47.main,
+  'player/player_host_command_cases.dart': case48.main,
+  'player/player_process_control_cases.dart': case49.main,
+  'player/player_process_protocol_cases.dart': case50.main,
+  'player/player_runtime_options_cases.dart': case51.main,
+  'player/player_settings_cases.dart': case52.main,
+  'player/player_window_cases.dart': case53.main,
+  'player/player_window_launch_cases.dart': case54.main,
+  'player/subtitle_menu_cases.dart': case55.main,
+  'player/subtitle_slots_cases.dart': case56.main,
+  'settings_page_cases.dart': case57.main,
+  'widgets/app_empty_view_cases.dart': case58.main,
+  'widgets/app_hover_card_cases.dart': case59.main,
+  'widgets/backdrop_scrim_cases.dart': case60.main,
+  'widgets/liquid_glass_cases.dart': case61.main,
+  'widgets/media_image_cases.dart': case62.main,
+  'widgets/poster_card_cases.dart': case63.main,
+  'widgets/scrim_icon_button_cases.dart': case64.main,
+  'widgets/skeleton_cases.dart': case65.main,
 };
