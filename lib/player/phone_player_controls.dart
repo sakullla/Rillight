@@ -11,7 +11,9 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
+import 'package:rillight/library/item_format.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
+import 'package:rillight/player/episode_browser.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
@@ -42,9 +44,9 @@ Widget? _phoneTrackMeta(BuildContext context, MediaStreamInfo track) {
   );
 }
 
-/// Phone controls with a title bar, central transport and a full-width timeline.
-/// Common options have direct bottom shortcuts; the full settings panel keeps
-/// the less frequent picture, volume and media choices together.
+/// Phone controls with a title bar, a timeline, and transport sitting on the
+/// timeline instead of covering the picture. Series playback gets an episode
+/// list. Less frequent picture, volume and media choices stay in the panel.
 ///
 /// The video surface and control scrims extend to the screen edges. Buttons
 /// and center content avoid gesture regions and cutouts. In landscape an OEM
@@ -164,6 +166,34 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   VoidCallback? _seekRelease;
   int? _androidSdk;
 
+  /// Seek bar is unmounted while a sheet is open, and for the frame that
+  /// sheet route leaves. Rebuilding a [Slider] in that frame leaves its
+  /// semantics node parented to a render object that is no longer its ancestor.
+  bool _holdSeek = false;
+  bool _seekReleaseScheduled = false;
+
+  void _syncHoldSeek() {
+    if (widget.interaction.panel != null) {
+      _holdSeek = true;
+      return;
+    }
+    if (!_holdSeek || _seekReleaseScheduled) return;
+    _seekReleaseScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _seekReleaseScheduled = false;
+      if (!mounted || widget.interaction.panel != null) return;
+      setState(() => _holdSeek = false);
+    });
+  }
+
+  double _seekSlotHeight(BuildContext context) {
+    final theme = SliderTheme.of(context);
+    final overlay = theme.overlayShape?.getPreferredSize(true, false).height;
+    final thumb = theme.thumbShape?.getPreferredSize(true, false).height;
+    final track = theme.trackHeight ?? 0;
+    return math.max(track, math.max(overlay ?? 0, thumb ?? 0));
+  }
+
   bool get locked => widget.interaction.locked;
 
   PlayerController get _controller => widget.controller;
@@ -226,9 +256,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
 
   @override
   Widget build(BuildContext context) {
+    _syncHoldSeek();
     final media = MediaQuery.of(context);
     final insets = phonePlayerControlInsets(media, androidSdkInt: _androidSdk);
-    final landscape = media.size.width > media.size.height;
     return IconTheme(
       data: const IconThemeData(color: Colors.white),
       child: DefaultTextStyle.merge(
@@ -245,11 +275,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 child: locked
                     ? const SizedBox.shrink()
                     : _canControl
-                    ? Center(child: _buildTransport(context, landscape))
+                    ? Align(
+                        alignment: Alignment.bottomCenter,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildTransport(context),
+                          ),
+                        ),
+                      )
                     : widget.center,
               ),
             ),
-            if (!locked) _buildBottomBar(context, insets, landscape),
+            if (!locked) _buildBottomBar(context, insets),
           ],
         ),
       ),
@@ -357,13 +396,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
 
   Widget _title(AppLocalizations l) {
     final item = _controller.item;
-    final title = item?.name ?? l.playerLoading;
+    final rawTitle = item?.name ?? l.playerLoading;
     final series = item != null && item.isEpisode ? item.seriesName : null;
+    final code = item != null && item.isEpisode
+        ? seasonEpisodeCode(item)
+        : null;
+    final title =
+        code == null || rawTitle.toLowerCase().startsWith(code.toLowerCase())
+        ? rawTitle
+        : '$code · $rawTitle';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (series != null && series.isNotEmpty && series != title)
+        if (series != null && series.isNotEmpty && series != rawTitle)
           Text(
             series,
             maxLines: 1,
@@ -384,47 +430,55 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     );
   }
 
-  Widget _buildTransport(BuildContext context, bool landscape) {
+  Widget _buildTransport(BuildContext context) {
     final l = AppLocalizations.of(context);
     final c = _controller;
     final canSeek = widget.interaction.canSeek(c);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _transportButton(
-          key: const Key('mobile-player-rewind'),
-          tooltip: l.mobileRewind,
-          onPressed: canSeek
-              ? () => c.seekRelative(const Duration(seconds: -10))
-              : null,
-          icon: Icons.replay_10,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .46),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: .18)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _transportButton(
+              key: const Key('mobile-player-rewind'),
+              tooltip: l.mobileRewind,
+              onPressed: canSeek
+                  ? () => c.seekRelative(const Duration(seconds: -10))
+                  : null,
+              icon: Icons.replay_10_rounded,
+            ),
+            const SizedBox(width: 8),
+            _transportButton(
+              key: const Key('mobile-player-toggle'),
+              tooltip: c.isPlaying ? l.pause : l.play,
+              onPressed: c.togglePlay,
+              icon: c.isPlaying
+                  ? Icons.pause_rounded
+                  : Icons.play_arrow_rounded,
+              primary: true,
+            ),
+            const SizedBox(width: 8),
+            _transportButton(
+              key: const Key('mobile-player-forward'),
+              tooltip: l.mobileForward,
+              onPressed: canSeek
+                  ? () => c.seekRelative(const Duration(seconds: 10))
+                  : null,
+              icon: Icons.forward_10_rounded,
+            ),
+          ],
         ),
-        SizedBox(width: landscape ? 40 : 28),
-        _transportButton(
-          key: const Key('mobile-player-toggle'),
-          tooltip: c.isPlaying ? l.pause : l.play,
-          onPressed: c.togglePlay,
-          icon: c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          primary: true,
-        ),
-        SizedBox(width: landscape ? 40 : 28),
-        _transportButton(
-          key: const Key('mobile-player-forward'),
-          tooltip: l.mobileForward,
-          onPressed: canSeek
-              ? () => c.seekRelative(const Duration(seconds: 10))
-              : null,
-          icon: Icons.forward_10,
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildBottomBar(
-    BuildContext context,
-    EdgeInsets insets,
-    bool landscape,
-  ) {
+  Widget _buildBottomBar(BuildContext context, EdgeInsets insets) {
     final l = AppLocalizations.of(context);
     final c = _controller;
     final canSeek = widget.interaction.canSeek(c);
@@ -522,50 +576,60 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ),
               ),
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                showValueIndicator: ShowValueIndicator.onDrag,
-                valueIndicatorColor: Colors.white,
-                valueIndicatorTextStyle: const TextStyle(
-                  color: Colors.black,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+            if (playerShowsByteCache(c.bufferSnapshot)) ...[
+              BufferedByteCoverageBar(
+                key: const Key('mobile-player-byte-cache-track'),
+                coverage: c.bufferSnapshot.byteCoverage,
               ),
-              child: BufferedRangesTrack(
-                snapshot: c.bufferSnapshot,
-                duration: c.duration,
-                trackHeight: 6,
-                child: Slider(
-                  key: const Key('mobile-player-seek'),
-                  value: (_seek ?? c.position.inMilliseconds.toDouble()).clamp(
-                    0,
-                    durationMs,
+              const SizedBox(height: 6),
+            ],
+            if (_holdSeek)
+              SizedBox(height: _seekSlotHeight(context))
+            else
+              SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  showValueIndicator: ShowValueIndicator.onDrag,
+                  valueIndicatorColor: Colors.white,
+                  valueIndicatorTextStyle: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   ),
-                  max: durationMs.clamp(1, double.infinity),
-                  label: phonePlayerClock(
-                    Duration(
-                      milliseconds: (_seek ?? c.position.inMilliseconds)
-                          .round(),
+                ),
+                child: BufferedRangesTrack(
+                  snapshot: c.bufferSnapshot,
+                  duration: c.duration,
+                  trackHeight: 6,
+                  child: Slider(
+                    key: const Key('mobile-player-seek'),
+                    value: (_seek ?? c.position.inMilliseconds.toDouble())
+                        .clamp(0, durationMs),
+                    max: durationMs.clamp(1, double.infinity),
+                    label: phonePlayerClock(
+                      Duration(
+                        milliseconds: (_seek ?? c.position.inMilliseconds)
+                            .round(),
+                      ),
                     ),
+                    onChangeStart: canSeek
+                        ? (_) {
+                            _seekRelease ??= widget.interaction.occupy();
+                            c.setControlsPinned(true);
+                          }
+                        : null,
+                    onChanged: canSeek
+                        ? (v) => setState(() => _seek = v)
+                        : null,
+                    onChangeEnd: (v) {
+                      setState(() => _seek = null);
+                      if (widget.interaction.canSeek(c)) {
+                        c.seekTo(Duration(milliseconds: v.round()));
+                      }
+                      _releaseSeek();
+                    },
                   ),
-                  onChangeStart: canSeek
-                      ? (_) {
-                          _seekRelease ??= widget.interaction.occupy();
-                          c.setControlsPinned(true);
-                        }
-                      : null,
-                  onChanged: canSeek ? (v) => setState(() => _seek = v) : null,
-                  onChangeEnd: (v) {
-                    setState(() => _seek = null);
-                    if (widget.interaction.canSeek(c)) {
-                      c.seekTo(Duration(milliseconds: v.round()));
-                    }
-                    _releaseSeek();
-                  },
                 ),
               ),
-            ),
             Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               alignment: WrapAlignment.spaceBetween,
@@ -597,6 +661,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             const SizedBox(height: 4),
             Row(
               children: [
+                if (c.canBrowseEpisodes)
+                  _shortcut(
+                    'mobile-player-episodes',
+                    Icons.video_library_rounded,
+                    l.playerEpisodes,
+                    _openEpisodes,
+                  ),
                 _shortcut(
                   'mobile-player-speed',
                   Icons.speed,
@@ -671,7 +742,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     required IconData icon,
     bool primary = false,
   }) {
-    final size = primary ? 76.0 : 54.0;
+    const size = 48.0;
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: size,
@@ -680,7 +751,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         key: key,
         tooltip: tooltip,
         onPressed: onPressed,
-        icon: Icon(icon, size: primary ? 40 : 28),
+        icon: Icon(icon, size: primary ? 30 : 24),
         style: IconButton.styleFrom(
           foregroundColor: primary ? scheme.surface : Colors.white,
           backgroundColor: primary
@@ -690,14 +761,58 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               ? null
               : BorderSide(color: Colors.white.withValues(alpha: .28)),
           shape: const CircleBorder(),
-          fixedSize: Size(size, size),
-          minimumSize: const Size(48, 48),
+          fixedSize: const Size(size, size),
+          minimumSize: const Size(size, size),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           visualDensity: VisualDensity.standard,
           padding: EdgeInsets.zero,
         ),
       ),
     );
+  }
+
+  Future<void> _openEpisodes() async {
+    final c = _controller;
+    if (!c.canBrowseEpisodes || c.loading) return;
+    final route = ModalRoute.of(context);
+    final release = widget.interaction.occupy();
+    widget.interaction.setPanel('episodes');
+    c.setControlsPinned(true);
+    unawaited(c.loadEpisodeList());
+    try {
+      await _showOptionsPanel(
+        panelKey: const Key('mobile-player-episodes-sheet'),
+        (sheetContext) => LayoutBuilder(
+          builder: (context, constraints) {
+            final maxHeight = constraints.maxHeight;
+            final height = maxHeight.isFinite
+                ? maxHeight
+                : MediaQuery.sizeOf(context).height * .8;
+            return SizedBox(
+              height: height,
+              child: ListenableBuilder(
+                listenable: c,
+                builder: (context, _) => PlayerEpisodeBrowser(
+                  controller: c,
+                  closeOnPlay: true,
+                  onClose: () => Navigator.pop(sheetContext),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    } finally {
+      if (mounted && widget.interaction.panel == 'episodes') {
+        widget.interaction.setPanel(null);
+      }
+      if (mounted) release();
+      if (mounted &&
+          !widget.interaction.occupied &&
+          (route == null || route.isCurrent)) {
+        c.setControlsPinned(false);
+      }
+    }
   }
 
   Future<void> _openMore({String? section}) async {
@@ -1263,7 +1378,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     }
   }
 
-  Future<void> _showOptionsPanel(WidgetBuilder builder) {
+  Future<void> _showOptionsPanel(
+    WidgetBuilder builder, {
+    Key panelKey = const Key('mobile-player-options'),
+  }) {
     final media = MediaQuery.of(context);
     if (media.size.width <= media.size.height) {
       return PhoneMotion.showBottomPanel<void>(
@@ -1274,7 +1392,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         builder: (context) => SafeArea(
           top: false,
           child: ConstrainedBox(
-            key: const Key('mobile-player-options'),
+            key: panelKey,
             constraints: BoxConstraints(
               maxHeight: MediaQuery.sizeOf(context).height * .8,
             ),
@@ -1302,7 +1420,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 width: math.min(360, MediaQuery.sizeOf(context).width * .65),
                 height: double.infinity,
                 child: Material(
-                  key: const Key('mobile-player-options'),
+                  key: panelKey,
                   color: Theme.of(context).colorScheme.surface,
                   borderRadius: const BorderRadius.horizontal(
                     left: Radius.circular(20),

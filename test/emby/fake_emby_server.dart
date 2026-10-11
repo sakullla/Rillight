@@ -158,9 +158,16 @@ class FakeChapter {
 
 /// 详情 People 数组中的演职员/制作人员条目。
 class FakePerson {
-  const FakePerson({required this.name, this.type, this.role, this.imageTag});
+  const FakePerson({
+    required this.name,
+    this.id,
+    this.type,
+    this.role,
+    this.imageTag,
+  });
 
   final String name;
+  final String? id;
   final String? type;
   final String? role;
   final String? imageTag;
@@ -168,6 +175,7 @@ class FakePerson {
   Map<String, dynamic> toJson() {
     return {
       'Name': name,
+      if (id != null) 'Id': id,
       if (type != null) 'Type': type,
       if (role != null) 'Role': role,
       if (imageTag != null) 'PrimaryImageTag': imageTag,
@@ -240,6 +248,7 @@ class FakeEmbyItem {
     this.mediaStreams = const [],
     this.chapters = const [],
     this.people = const [],
+    this.personIds = const [],
     this.extraSources = const [],
     this.remotePath,
   }) : dateCreated = dateCreated ?? DateTime.utc(2024, 1, 1),
@@ -300,6 +309,9 @@ class FakeEmbyItem {
 
   /// 详情 People;仅详情路径请求 People 字段时客户端才会读取。
   List<FakePerson> people;
+
+  /// `PersonIds` 查询命中的人物。不写入条目 JSON，详情演职员保持原样。
+  List<String> personIds;
 
   /// 额外媒体源(多版本场景,如同片 1080p/4K 两版)。
   List<FakeMediaSource> extraSources;
@@ -530,6 +542,13 @@ class FakeEmbyServer {
   int? latestMovieStatus;
   int? latestEpisodeStatus;
   int? itemsStatus;
+
+  /// 非 null 时 `GET /Users/{id}/Items` 在响应前等待，用来停在人物页加载骨架。
+  Completer<void>? holdItems;
+
+  /// 为真时列表忽略 IncludeItemTypes，用来确认客户端仍会丢掉非电影/剧集。
+  bool ignoreItemTypeFilter = false;
+
   int? searchStatus;
   int? itemStatus;
   int? similarStatus;
@@ -731,6 +750,14 @@ class FakeEmbyServer {
         segments[1] == 'Counts' &&
         method == 'GET') {
       return _handleItemCounts();
+    }
+
+    if (holdItems != null &&
+        method == 'GET' &&
+        segments.length == 3 &&
+        segments[0] == 'Users' &&
+        segments[2] == 'Items') {
+      await holdItems!.future;
     }
 
     if (segments.length == 1 && segments.first == 'Genres' && method == 'GET') {
@@ -1501,8 +1528,23 @@ class FakeEmbyServer {
           !item.name.toLowerCase().contains(searchTerm.toLowerCase())) {
         return false;
       }
-      if (typeFilter.isNotEmpty && !typeFilter.contains(item.type)) {
+      if (!ignoreItemTypeFilter &&
+          typeFilter.isNotEmpty &&
+          !typeFilter.contains(item.type)) {
         return false;
+      }
+      final personIds = (options.uri.queryParameters['PersonIds'] ?? '')
+          .split(',')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      if (personIds.isNotEmpty) {
+        final owned = <String>{
+          ...item.personIds,
+          for (final person in item.people)
+            if (person.id != null && person.id!.isNotEmpty) person.id!,
+        };
+        if (!owned.any(personIds.contains)) return false;
       }
       if (parentId != null && parentId.isNotEmpty) {
         if (!_belongsTo(item, parentId, recursive: recursive)) {

@@ -32,7 +32,9 @@ Map<String, dynamic> androidDeviceProfile({
     'DirectPlayProfiles': [
       if (video.isNotEmpty && audio.isNotEmpty)
         {
-          'Container': 'mp4,m4v,mkv',
+          // hls/ts are opened by the owned core. Without them the server
+          // transcodes an HLS source into another HLS playlist.
+          'Container': 'mp4,m4v,mkv,hls,m3u8,ts,mpegts',
           'Type': 'Video',
           'VideoCodec': video.join(','),
           'AudioCodec': audio.join(','),

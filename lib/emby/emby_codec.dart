@@ -467,6 +467,7 @@ PlaybackMediaSource decodeEmbyPlaybackMediaSource(Map<String, dynamic> json) {
     supportsDirectPlay: json['SupportsDirectPlay'] == true,
     supportsDirectStream: json['SupportsDirectStream'] == true,
     supportsTranscoding: json['SupportsTranscoding'] == true,
+    isRemote: json['IsRemote'] == true,
     isInfiniteStream: json['IsInfiniteStream'] == true,
     directStreamUrl: json['DirectStreamUrl']?.toString(),
     transcodingUrl: json['TranscodingUrl']?.toString(),

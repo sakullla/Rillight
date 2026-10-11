@@ -130,6 +130,7 @@ class PlaybackMediaSource {
     this.supportsDirectPlay = false,
     this.supportsDirectStream = false,
     this.supportsTranscoding = false,
+    this.isRemote = false,
     this.isInfiniteStream = false,
     this.directStreamUrl,
     this.transcodingUrl,
@@ -156,6 +157,7 @@ class PlaybackMediaSource {
   final bool supportsDirectPlay;
   final bool supportsDirectStream;
   final bool supportsTranscoding;
+  final bool isRemote;
   final bool isInfiniteStream;
   final String? directStreamUrl;
   final String? transcodingUrl;

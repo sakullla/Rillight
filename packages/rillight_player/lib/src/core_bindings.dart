@@ -26,6 +26,10 @@ final class NativeCoreSnapshot extends Struct {
   external int audioStreamIndex;
   @Int32()
   external int subtitleStreamIndex;
+  @Int32()
+  external int secondarySubtitleStreamIndex;
+  @Int32()
+  external int subtitleSelectionPending;
   @Int64()
   external int durationUs;
   @Int64()
@@ -148,11 +152,12 @@ class CoreBindings {
   CoreBindings({String? libraryPath})
     : libraryPath = libraryPath ?? defaultLibraryPath,
       _library = DynamicLibrary.open(libraryPath ?? defaultLibraryPath) {
-    if (abiVersion() != 10) {
+    if (abiVersion() != 11) {
       throw StateError('Unsupported Rillight core ABI ${abiVersion()}');
     }
-    // ABI 10 is incomplete without its required presentation entry point.
+    // ABI 11 requires presentation and both-slot selection entry points.
     setSubtitlePresentation;
+    selectSubtitleSlot;
   }
 
   static String get defaultLibraryPath {
@@ -230,6 +235,11 @@ class CoreBindings {
         Int32 Function(Pointer<Void>, Int32, Uint64),
         int Function(Pointer<Void>, int, int)
       >('rillight_core_select_subtitle');
+  late final selectSubtitleSlot = _library
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Int32, Int32, Uint64),
+        int Function(Pointer<Void>, int, int, int)
+      >('rillight_core_select_subtitle_slot');
   late final addExternalSubtitle = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint64),

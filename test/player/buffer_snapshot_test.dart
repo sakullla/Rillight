@@ -49,7 +49,7 @@ void main() {
     expect(() => snapshot.ranges.clear(), throwsUnsupportedError);
   });
 
-  test('drops byte coverage while time or HLS timing is still unknown', () {
+  test('keeps byte coverage while media time is still unknown', () {
     final snapshot = BufferSnapshot(
       sessionId: 1,
       resourceId: 'media',
@@ -63,19 +63,51 @@ void main() {
         ranges: const [BufferedByteRange(0, 40)],
       ),
     );
-    expect(withoutPrematureByteCoverage(snapshot).byteCoverage, isNull);
+    expect(snapshot.byteCoverage, isNotNull);
+    expect(snapshot.isKnown, isFalse);
     expect(snapshot.hidesByteCoverage, isTrue);
+    expect(playerShowsByteCache(snapshot), isTrue);
     final settled = BufferSnapshot(
       sessionId: 1,
       resourceId: 'media',
       representationVersion: 'v1',
       trackVersion: 0,
       sequence: 3,
-      ranges: const [],
-      unknownReason: 'containerTrackOrTimingUnknown',
+      ranges: const [BufferedRange(Duration.zero, Duration(seconds: 4))],
       byteCoverage: snapshot.byteCoverage,
     );
-    expect(withoutPrematureByteCoverage(settled).byteCoverage, isNotNull);
+    expect(settled.isKnown, isTrue);
+    expect(playerShowsByteCache(settled), isFalse);
+  });
+
+  test('resume keeps the download bar until bytes map to media time', () {
+    final snapshot = BufferSnapshot(
+      sessionId: 1,
+      resourceId: 'media',
+      representationVersion: 'v1',
+      trackVersion: 0,
+      sequence: 4,
+      ranges: const [],
+      byteCoverage: BufferedByteCoverage(
+        totalBytes: 1000,
+        ranges: const [BufferedByteRange(400, 520)],
+      ),
+    );
+    expect(snapshot.isKnown, isTrue);
+    expect(snapshot.ranges, isEmpty);
+    expect(playerShowsByteCache(snapshot), isTrue);
+    final mapped = BufferSnapshot(
+      sessionId: 1,
+      resourceId: 'media',
+      representationVersion: 'v1',
+      trackVersion: 0,
+      sequence: 5,
+      ranges: const [
+        BufferedRange(Duration(seconds: 20), Duration(seconds: 28)),
+      ],
+      byteCoverage: snapshot.byteCoverage,
+    );
+    expect(playerShowsByteCache(mapped), isFalse);
   });
 
   test('rejects late versions and keeps unknown coverage empty', () {

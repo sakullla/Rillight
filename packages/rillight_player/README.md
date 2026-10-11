@@ -153,7 +153,7 @@ current native session ID and a display rectangle, visible font target, scale,
 safe margins and original-ASS switch. Ordinary text uses pinned libass with
 statically linked, pinned libunibreak 6.1 for Unicode line wrapping. All SDK
 builders enable this feature and subtitle-enabled SDK verification rejects
-missing source provenance. Rebuild older subtitle SDKs before building ABI 9.
+missing source provenance. Rebuild older subtitle SDKs before building ABI 11.
 
 CPU composition and HDR/GPU subtitle planes share the same rendering policy.
 The core retains one clean displayed frame when subtitles are active, so sizing
@@ -163,3 +163,29 @@ selective-override heuristic; original-ASS mode restores authored text sizes.
 Bitmap subtitles are unaffected. Unconfigured desktop/TV rendering retains the
 original scale. Native pixel tests exercise layout and timing; they do not prove
 Android displayed frames, physical audio, or hardware decoder acceptance.
+
+
+### Dual subtitle slots (ABI 11)
+
+`rillight_core_select_subtitle_slot(core, slot, stream, operation)` uses slot 0
+for primary and slot 1 for secondary. The legacy `select_subtitle` call targets
+primary. Both snapshot indices are authoritative; `subtitle_selection_pending`
+remains set until the demux transaction has retired the old decoder. A source
+cannot occupy both slots. Selection failure preserves the confirmed slots.
+Plain secondary text defaults to top center; authored ASS and bitmap positions
+are retained. Both slots share the existing clock and CPU/GPU composition plane.
+
+CorePlayer `subtitle`, `subtitleOff` and `subtitleUri` commands accept `slot`
+(default 0); `subtitle` also accepts `nativeIndex` for session-local external
+tracks. Results expose `primarySubtitleNativeIndex`,
+`secondarySubtitleNativeIndex`, and mapped `secondarySubtitleIndex`. Native
+indices expire when the core session opens again. The Dart transport serializes
+track/seek/rate requests and discards queued work belonging to a replaced session.
+The external loader remains bounded and single pending. Re-register external
+sources after reopening before restoring either slot.
+
+Run `python tool/subtitle_native_checks.py --sdk <verified-sdk>` from the repo
+root to verify dependency provenance, build the candidate and require all four
+subtitle CTests. Logs are retained in `build/subtitle-native-checks/checks.log`.
+These tests establish native parsing/composition behavior; device-window and
+physical output acceptance require separate evidence.

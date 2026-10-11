@@ -94,6 +94,7 @@ CatalogRequest catalogItemsRequest({
   List<String>? filters,
   List<String>? genres,
   List<int>? years,
+  List<String>? personIds,
   String fields = MediaServerClient.gridFields,
   String imageTypes = MediaServerClient.imageTypes,
 }) {
@@ -112,6 +113,7 @@ CatalogRequest catalogItemsRequest({
     if (genres != null && genres.isNotEmpty) 'genres': genres.join('|'),
     if (years != null && years.isNotEmpty) 'years': years.join(','),
     'enableImageTypes': imageTypes,
+    'personIds': ?_personIdsQueryValue(personIds),
   });
 }
 
@@ -838,6 +840,7 @@ Future<Object> executeCatalogRequest(
         filters: q['filters']?.split(','),
         genres: q['genres']?.split('|'),
         years: q['years']?.split(',').map(int.parse).toList(),
+        personIds: q['personIds']?.split(','),
         fields: q['fields'] ?? MediaServerClient.gridFields,
         imageTypes: q['enableImageTypes'] ?? MediaServerClient.imageTypes,
       );
@@ -861,4 +864,12 @@ Future<Object> executeCatalogRequest(
     'pagination': page.pagination.availability.name,
     'paginationReason': page.pagination.reason,
   };
+}
+
+String? _personIdsQueryValue(List<String>? ids) {
+  final values = ids
+      ?.map((id) => id.trim())
+      .where((id) => id.isNotEmpty)
+      .toList();
+  return values == null || values.isEmpty ? null : values.join(',');
 }

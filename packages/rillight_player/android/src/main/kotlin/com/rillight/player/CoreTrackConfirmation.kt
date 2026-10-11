@@ -6,11 +6,13 @@ internal object CoreTrackConfirmation {
         tracks.firstOrNull { it.size >= 5 && it[1] == 1 }?.get(4) ?: 0
 
     fun matches(snapshot: LongArray?, timeline: Long, expected: Int,
-                subtitle: Boolean): Boolean {
+                subtitle: Boolean, slot: Int = 0): Boolean {
         if (snapshot == null || snapshot.size < 8) return false
         // READY through RECOVERING are live states. ENDED/FAILED cannot confirm
         // a command, even if their last selected index happens to match.
         if (snapshot[0] !in 2L..6L || snapshot[3] != timeline) return false
-        return snapshot[if (subtitle) 7 else 6] == expected.toLong()
+        if (subtitle && snapshot.getOrNull(37) == 1L) return false
+        val index = if (!subtitle) 6 else if (slot == 1) 36 else 7
+        return snapshot.size > index && snapshot[index] == expected.toLong()
     }
 }

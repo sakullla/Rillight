@@ -30,6 +30,7 @@ class _CatalogProvider implements MediaServerClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.gridFields,
     String imageTypes = MediaServerClient.imageTypes,
   }) async {

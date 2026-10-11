@@ -39,7 +39,9 @@ ResolvedPlayback? resolveEmbyPlayback({
     // profile has no strm container and the server therefore clears
     // SupportsDirectPlay.
     if (remoteMedia != null &&
-        (source.supportsDirectPlay || _isStrmSource(source))) {
+        (source.supportsDirectPlay ||
+            source.isRemote ||
+            _isStrmSource(source))) {
       return _direct(
         source,
         info.playSessionId,
@@ -97,6 +99,16 @@ ResolvedPlayback? resolveEmbyPlayback({
     );
   }
 
+  // Unprobed STRM is a pointer even when the server cannot direct-play it.
+  if (!forceTranscode && _isStrmSource(source)) {
+    return _direct(
+      source,
+      info.playSessionId,
+      itemId,
+      _strmPointerUri(source, baseUrl, accessToken, itemId, info.playSessionId),
+      expandStrm: true,
+    );
+  }
   final transcoding = source.transcodingUrl;
   if (transcoding != null && transcoding.isNotEmpty) {
     // AC-3, E-AC-3 and TrueHD must stay on the original track. An AAC

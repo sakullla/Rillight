@@ -444,9 +444,16 @@ class PlexClient extends MediaServerClient
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.gridFields,
     String imageTypes = MediaServerClient.imageTypes,
   }) async {
+    if (personIds?.isNotEmpty == true) {
+      throw const MediaServerException(
+        MediaServerFailureKind.unsupported,
+        detail: 'Plex 暂不支持按人物查询作品',
+      );
+    }
     final section = parentId?.startsWith('section:') == true;
     // Hub search is a recommendation preview (three hits per hub by default),
     // not the paginated, filterable media query used by the search screen.
@@ -527,6 +534,7 @@ class PlexClient extends MediaServerClient
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.itemFields,
   }) async => (await queryItems(
     parentId: parentId,
@@ -540,6 +548,7 @@ class PlexClient extends MediaServerClient
     filters: filters,
     genres: genres,
     years: years,
+    personIds: personIds,
     fields: fields,
   )).items;
   @override

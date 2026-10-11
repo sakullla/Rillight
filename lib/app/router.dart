@@ -20,6 +20,7 @@ import 'package:rillight/library/library_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/library/server_library_page.dart';
+import 'package:rillight/library/person_works_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/home/tv_shelf_page.dart';
@@ -125,7 +126,8 @@ GoRouter createAppRouter({
           command is PlayerHostOpenItemCommand &&
           command.source != null &&
           (AppRoutes.isItem(state.uri.path) ||
-              state.uri.path.startsWith('/shelf/'))) {
+              state.uri.path.startsWith('/shelf/') ||
+              AppRoutes.isPerson(state.uri.path))) {
         final permit = permitForAccount(
           auth.sources,
           command.source!.account,
@@ -269,6 +271,14 @@ GoRouter createAppRouter({
                 child: _shelfPage(auth, state, environment),
               ),
             ),
+            GoRoute(
+              path: '/person/:personId',
+              pageBuilder: (context, state) => PhoneMotion.sharedAxisPage(
+                context: context,
+                state: state,
+                child: _personWorks(state),
+              ),
+            ),
           ],
         ),
       ],
@@ -316,6 +326,10 @@ GoRouter createAppRouter({
             GoRoute(
               path: '/shelf/:source',
               builder: (context, state) => _shelfPage(auth, state, environment),
+            ),
+            GoRoute(
+              path: '/person/:personId',
+              builder: (context, state) => _personWorks(state),
             ),
             GoRoute(
               path: '/item/:itemId',
@@ -404,6 +418,11 @@ GoRouter createAppRouter({
               path: '/shelf/:source',
               pageBuilder: (context, state) =>
                   _desktopPage(state, _shelfPage(auth, state, environment)),
+            ),
+            GoRoute(
+              path: '/person/:personId',
+              pageBuilder: (context, state) =>
+                  _desktopPage(state, _personWorks(state)),
             ),
             GoRoute(
               path: '/item/:itemId',
@@ -514,6 +533,34 @@ Widget _shelfPage(
     command: command,
     showComparison: false,
     child: child,
+  );
+}
+
+Widget _personWorks(GoRouterState state) {
+  final personId = state.pathParameters['personId'] ?? '';
+  final name = state.uri.queryParameters['name'] ?? '';
+  final page = PersonWorksPage(
+    key: ValueKey(state.uri.toString()),
+    personId: personId,
+    name: name,
+  );
+  final command = state.extra is PlayerHostOpenItemCommand
+      ? state.extra as PlayerHostOpenItemCommand
+      : null;
+  final source = command?.source;
+  final libraryId = command?.libraryId?.trim() ?? '';
+  if (source == null) return page;
+  if (libraryId.isEmpty) return const SizedBox.shrink();
+  return ServerSessionImages(
+    key: ValueKey((
+      state.uri.toString(),
+      source,
+      command?.regionGeneration,
+      libraryId,
+    )),
+    account: source.account,
+    libraryId: libraryId,
+    child: page,
   );
 }
 

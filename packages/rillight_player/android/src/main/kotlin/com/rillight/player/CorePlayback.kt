@@ -38,7 +38,7 @@ internal class CorePlayback(
                                var audioThread: Thread? = null,
                                val drainedAudioTimeline: AtomicLong = AtomicLong(-1))
     private data class TrackRequest(val result: MethodChannel.Result, val expected: Int,
-                                    val subtitle: Boolean, val timeline: Long)
+                                    val subtitle: Boolean, val timeline: Long, val slot: Int = 0)
     private data class ServerStream(val index: Int, val type: String,
                                     val language: String?, val external: Boolean)
     private val serial = Executors.newSingleThreadExecutor()
@@ -74,6 +74,7 @@ internal class CorePlayback(
     private var running: Running? = null
     private var pendingOpen: MethodChannel.Result? = null
     private var pendingTrack: TrackRequest? = null
+    private var externalSlot = 0
     private var externalPending: MethodChannel.Result? = null
     private val openTimeout = Runnable { fail("Media ready / first frame timed out") }
     private val trackTimeout = Runnable {
@@ -368,7 +369,7 @@ internal class CorePlayback(
                 }
                 "audio", "subtitle" -> {
                     val server = (args["index"] as? Number)?.toInt()
-                    val stream = server?.let(mapping::get)
+                    val stream = (args["nativeIndex"] as? Number)?.toInt() ?: server?.let(mapping::get)
                     if (stream == null) {
                         result.error("unsupported", "Container track cannot be mapped", mapOf("sessionId" to session))
                         return
@@ -376,11 +377,11 @@ internal class CorePlayback(
                     val code = synchronized(outputLock) {
                         val selected = if (method == "audio")
                             CoreNative.selectAudio(handle, stream, operation.incrementAndGet())
-                        else CoreNative.selectSubtitle(handle, stream, operation.incrementAndGet())
+                        else CoreNative.selectSubtitleSlot(handle, (args["slot"] as? Number)?.toInt() ?: 0, stream, operation.incrementAndGet())
                         if (selected == 0) audioOutput?.flush()
                         selected
                     }
-                    if (code == 0) { beginTrack(result, stream, method == "subtitle", handle); return }
+                    if (code == 0) { beginTrack(result, stream, method == "subtitle", handle, (args["slot"] as? Number)?.toInt() ?: 0); return }
                     code
                 }
                 "subtitlePresentation" -> {
@@ -398,12 +399,12 @@ internal class CorePlayback(
                 "subtitleOff" -> {
                     val code = synchronized(outputLock) {
                         val timeline = CoreNative.snapshot(handle)?.get(3)
-                        val selected = CoreNative.selectSubtitle(handle, -1, operation.incrementAndGet())
+                        val selected = CoreNative.selectSubtitleSlot(handle, (args["slot"] as? Number)?.toInt() ?: 0, -1, operation.incrementAndGet())
                         if (selected == 0 && CoreNative.snapshot(handle)?.get(3) != timeline)
                             audioOutput?.flush()
                         selected
                     }
-                    if (code == 0) { beginTrack(result, -1, true, handle); return }
+                    if (code == 0) { beginTrack(result, -1, true, handle, (args["slot"] as? Number)?.toInt() ?: 0); return }
                     code
                 }
                 "subtitleUri" -> {
@@ -412,7 +413,7 @@ internal class CorePlayback(
                         result.error("source", "External subtitle must be app-private", mapOf("sessionId" to session)); return
                     }
                     val code = CoreNative.addSubtitle(handle, url, operation.incrementAndGet())
-                    if (code == 0) { externalPending = result; handler.postDelayed(trackTimeout, 6_000); return }
+                    if (code == 0) { externalSlot = (args["slot"] as? Number)?.toInt() ?: 0; externalPending = result; handler.postDelayed(trackTimeout, 6_000); return }
                     code
                 }
                 else -> { result.notImplemented(); return }
@@ -463,14 +464,14 @@ internal class CorePlayback(
     }
 
     private fun beginTrack(result: MethodChannel.Result, expected: Int,
-                           subtitle: Boolean, handle: Long) {
+                           subtitle: Boolean, handle: Long, slot: Int = 0) {
         val timeline = CoreNative.snapshot(handle)?.getOrNull(3)
         if (timeline == null) {
             result.error("track", "Native track timeline unavailable", mapOf("sessionId" to session))
             return
         }
         pendingTrack?.result?.error("superseded", "Track selection superseded", mapOf("sessionId" to session))
-        pendingTrack = TrackRequest(result, expected, subtitle, timeline)
+        pendingTrack = TrackRequest(result, expected, subtitle, timeline, slot)
         handler.removeCallbacks(trackTimeout)
         handler.postDelayed(trackTimeout, 12_000)
     }
@@ -834,11 +835,11 @@ internal class CorePlayback(
                 externalPending = null
                 handler.removeCallbacks(trackTimeout)
                 val code = synchronized(outputLock) {
-                    val chosen = CoreNative.selectSubtitle(active.handle, selected[0], operation.incrementAndGet())
+                    val chosen = CoreNative.selectSubtitleSlot(active.handle, externalSlot, selected[0], operation.incrementAndGet())
                     if (chosen == 0) audioOutput?.flush()
                     chosen
                 }
-                if (code == 0) beginTrack(external, selected[0], true, active.handle)
+                if (code == 0) beginTrack(external, selected[0], true, active.handle, externalSlot)
                 else external.error("track", "External subtitle selection failed", mapOf("sessionId" to session))
             }
         }
@@ -878,7 +879,7 @@ internal class CorePlayback(
     private fun confirmTrack(active: Running, snapshot: LongArray?): Boolean {
         val track = pendingTrack ?: return false
         if (!CoreTrackConfirmation.matches(snapshot, track.timeline, track.expected,
-                track.subtitle)) return false
+                track.subtitle, track.slot)) return false
         pendingTrack = null
         handler.removeCallbacks(trackTimeout)
         updateTrackMapping(active.handle)
@@ -938,7 +939,10 @@ internal class CorePlayback(
         val reasons: IntArray? = null
         val epoch = outputClock.observe(snap, reasons)
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,
-            "subtitleIndex" to subtitleIndex, "playableAudio" to playableAudio,
+            "subtitleIndex" to subtitleIndex,
+            "secondarySubtitleIndex" to snap?.getOrNull(36)?.toInt()?.let { native -> mapping.entries.firstOrNull { it.value == native }?.key },
+            "primarySubtitleNativeIndex" to snap?.getOrNull(7)?.toInt(),
+            "secondarySubtitleNativeIndex" to snap?.getOrNull(36)?.toInt(), "playableAudio" to playableAudio,
             "rejectedAudio" to rejectedAudio, "playableSubtitle" to playableText,
             "rejectedSubtitle" to rejectedText,
             "videoTrackId" to containerIds?.getOrNull(0)?.takeIf { it > 0 },

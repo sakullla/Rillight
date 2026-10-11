@@ -1508,10 +1508,53 @@ class PlaybackHttpProxy {
       throw ArgumentError('Media resource identifier is too large');
     }
     final token = _routes.seal(url, role.index, context);
-    final suffix = url.path.split('/').last;
     return Uri.parse(
-      'http://127.0.0.1:${_server.port}/$_secret/$token/${Uri.encodeComponent(suffix.substring(0, min(suffix.length, 128)))}',
+      'http://127.0.0.1:${_server.port}/$_secret/$token/${_proxyFileName(url, role)}',
     );
+  }
+
+  /// FFmpeg 9 HLS rejects a segment or playlist whose URL has no multimedia
+  /// extension (`extension_picky` defaults on). The sealed token is the
+  /// route; this suffix is only for the demuxer.
+  String _proxyFileName(Uri url, PlaybackResourceRole role) {
+    var suffix = url.path.split('/').last;
+    if (suffix.length > 128) {
+      suffix = suffix.substring(suffix.length - 128);
+    }
+    const known = {
+      'm3u8',
+      'm3u',
+      'ts',
+      'm2ts',
+      'mts',
+      'mpegts',
+      'm4s',
+      'mp4',
+      'm4v',
+      'mkv',
+      'aac',
+      'mp3',
+      'vtt',
+      'key',
+    };
+    final dot = suffix.lastIndexOf('.');
+    final extension = dot >= 0 ? suffix.substring(dot + 1).toLowerCase() : '';
+    if (!known.contains(extension)) {
+      switch (role) {
+        case PlaybackResourceRole.playlist:
+          suffix = 'index.m3u8';
+        case PlaybackResourceRole.segment:
+          suffix = 'segment.ts';
+        case PlaybackResourceRole.initialization:
+          suffix = 'init.mp4';
+        case PlaybackResourceRole.key:
+          suffix = 'key.key';
+        case PlaybackResourceRole.media:
+        case PlaybackResourceRole.subtitle:
+          break;
+      }
+    }
+    return Uri.encodeComponent(suffix);
   }
 
   String _validatedPrivateSubtitle(Uri uri) {

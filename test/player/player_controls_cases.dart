@@ -218,6 +218,10 @@ void main() {
     fail('still found $finder');
   }
 
+  PlayerController controllerOf(WidgetTester tester) {
+    return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
+  }
+
   Future<void> openPlayable(WidgetTester tester, String itemId) async {
     final libraryId = server.items
         .firstWhere((item) => item.id == itemId)
@@ -245,17 +249,16 @@ void main() {
     await tester.pump();
     await waitFor(tester, find.byType(PlayerPage));
     for (var i = 0; i < 40; i++) {
-      if (find.byKey(PlayerKeys.playPause).evaluate().isNotEmpty ||
+      // Controls are visible while loading so episodes can be changed early.
+      if ((find.byKey(PlayerKeys.playPause).evaluate().isNotEmpty &&
+              !controllerOf(tester).loading &&
+              controllerOf(tester).resolved != null) ||
           find.byKey(PlayerKeys.resumeContinue).evaluate().isNotEmpty) {
         return;
       }
       await tester.pump(const Duration(milliseconds: 20));
     }
     fail('player did not show controls or resume prompt');
-  }
-
-  PlayerController controllerOf(WidgetTester tester) {
-    return tester.state<PlayerPageState>(find.byType(PlayerPage)).controller!;
   }
 
   Future<void> disposeApp(WidgetTester tester) async {

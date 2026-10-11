@@ -2089,7 +2089,14 @@ class PlayerController extends ChangeNotifier {
     if (next == null) {
       return;
     }
-    await _playItem(next.id, fromStart: true, finishCurrent: finishCurrent);
+    // The button is an explicit play request. Carrying a pause from the
+    // finished episode leaves the next item on a still frame.
+    await _playItem(
+      next.id,
+      fromStart: true,
+      finishCurrent: finishCurrent,
+      startPaused: false,
+    );
   }
 
   /// 切到任意集(剧集列表入口):源 id 每集不同,保留显示名以便对齐同名版本;
@@ -2115,11 +2122,13 @@ class PlayerController extends ChangeNotifier {
     String targetId, {
     required bool fromStart,
     bool finishCurrent = false,
+    bool? startPaused,
   }) async {
     final actual = origin;
     // Native open and rate/seek recovery may finish before playing arrives,
     // even after buffering clears. That observation is not a user pause.
-    final paused = !playbackEnded && !_handlingCompleted && _pauseIntent;
+    final paused =
+        startPaused ?? (!playbackEnded && !_handlingCompleted && _pauseIntent);
     if (runtime == null && switchDispatcher != null) {
       await switchDispatcher!({'action': 'authorizeItem', 'item': targetId});
       if (_disposed || _revoked) return;
@@ -2686,8 +2695,8 @@ class PlayerController extends ChangeNotifier {
   }
 
   BufferSnapshot _stabilizeBufferSnapshot(BufferSnapshot next) {
-    final local = withoutPrematureByteCoverage(next);
-    final stripped = _streamOrigin <= Duration.zero
+    final local = next;
+    next = _streamOrigin <= Duration.zero
         ? local
         : BufferSnapshot(
             sessionId: local.sessionId,
@@ -2707,33 +2716,54 @@ class PlayerController extends ChangeNotifier {
           );
     final previous = bufferSnapshot;
     final same =
-        previous.sessionId == stripped.sessionId &&
+        previous.sessionId == next.sessionId &&
         previous.resourceId.isNotEmpty &&
-        previous.resourceId == stripped.resourceId &&
-        previous.representationVersion == stripped.representationVersion &&
-        previous.trackVersion == stripped.trackVersion;
-    final transient = _transientBufferGap(stripped.unknownReason);
+        previous.resourceId == next.resourceId &&
+        previous.representationVersion == next.representationVersion &&
+        previous.trackVersion == next.trackVersion;
+    final transient = _transientBufferGap(next.unknownReason);
     if (transient && same && previous.isKnown && previous.ranges.isNotEmpty) {
       _knownBufferHeldAt ??= DateTime.now();
       if (DateTime.now().difference(_knownBufferHeldAt!) <
           const Duration(seconds: 2)) {
         return BufferSnapshot(
-          sessionId: stripped.sessionId,
-          resourceId: stripped.resourceId,
-          representationVersion: stripped.representationVersion,
-          trackVersion: stripped.trackVersion,
-          sequence: stripped.sequence,
+          sessionId: next.sessionId,
+          resourceId: next.resourceId,
+          representationVersion: next.representationVersion,
+          trackVersion: next.trackVersion,
+          sequence: next.sequence,
           ranges: previous.ranges,
         );
       }
     }
-    _knownBufferHeldAt = stripped.isKnown && stripped.ranges.isNotEmpty
+    _knownBufferHeldAt = next.isKnown && next.ranges.isNotEmpty
         ? null
         : _knownBufferHeldAt;
     if (!transient || !same) {
       _knownBufferHeldAt = null;
     }
-    return stripped;
+    return next;
+  }
+
+  bool _sameBufferPresentation(BufferSnapshot a, BufferSnapshot b) {
+    if (a.isKnown != b.isKnown || a.ranges.length != b.ranges.length) {
+      return false;
+    }
+    for (var i = 0; i < a.ranges.length; i++) {
+      if (a.ranges[i] != b.ranges[i]) return false;
+    }
+    if (playerShowsByteCache(a) != playerShowsByteCache(b)) return false;
+    if (!playerShowsByteCache(a)) return true;
+    final aBytes = a.byteCoverage!;
+    final bBytes = b.byteCoverage!;
+    if (aBytes.totalBytes != bBytes.totalBytes ||
+        aBytes.ranges.length != bBytes.ranges.length) {
+      return false;
+    }
+    for (var i = 0; i < aBytes.ranges.length; i++) {
+      if (aBytes.ranges[i] != bBytes.ranges[i]) return false;
+    }
+    return true;
   }
 
   bool _transientBufferGap(String? reason) {
@@ -3925,8 +3955,17 @@ class PlayerController extends ChangeNotifier {
               next.trackVersion < bufferSnapshot.trackVersion) {
             return;
           }
+          final previous = bufferSnapshot;
           bufferSnapshot = _stabilizeBufferSnapshot(next);
           _updateNetworkSlow();
+          // Speed readouts are throttled. Retry often has no position tick,
+          // so a changed download bar has to rebuild on its own.
+          if (!_sameBufferPresentation(previous, bufferSnapshot) ||
+              _playbackUiDue()) {
+            _lastPlaybackUi = DateTime.now();
+            _emit();
+          }
+          return;
         case VideoEventKind.cacheSpeed:
           final value = event.value;
           final next = value is num && value.isFinite && value > 0

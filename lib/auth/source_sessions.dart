@@ -11,6 +11,7 @@ import 'region_access.dart';
 import 'server_list_store.dart';
 import '../media_server/errors.dart';
 import '../media_server/playback.dart';
+import 'server_import_models.dart';
 
 /// Account identity only. Media item/version identity belongs to aggregation.
 class SourceAccount {
@@ -442,6 +443,217 @@ class SourceSessionRegistry {
     _loaded = true;
   }
 
+  /// Offline, additive import. Each record shares the configuration/credential
+  /// writer and is published only after both stores have committed.
+  Future<ServerImportResult> importServers(
+    Iterable<ServerImportDraft> drafts, {
+    AccessRegion region = AccessRegion.ordinary,
+  }) async {
+    final generation = access.generation;
+    // Snapshot caller-owned lists before the first asynchronous operation.
+    final input = [
+      for (final draft in drafts)
+        ServerImportDraft(
+          name: draft.name,
+          username: draft.username,
+          lines: List.unmodifiable(draft.lines),
+          credentials: draft.credentials,
+          userAgent: draft.userAgent,
+          isPrivate: draft.isPrivate,
+        ),
+    ];
+    if (!_loaded) await load();
+    final results = <ServerImportItemResult>[];
+    var storageUncertain = false;
+    for (var index = 0; index < input.length; index++) {
+      final draft = input[index];
+      ServerImportItemResult result(
+        ServerImportStatus status, {
+        String? id,
+        ServerImportReason? reason,
+      }) => ServerImportItemResult(
+        index: index,
+        status: status,
+        serverId: id,
+        reason: reason,
+      );
+      if (storageUncertain) {
+        results.add(
+          result(
+            ServerImportStatus.failed,
+            reason: ServerImportReason.rollbackFailed,
+          ),
+        );
+        continue;
+      }
+      if ((draft.isPrivate && region != AccessRegion.private) ||
+          !access.allows(region)) {
+        results.add(
+          result(
+            ServerImportStatus.skipped,
+            reason: ServerImportReason.privateAccessRequired,
+          ),
+        );
+        continue;
+      }
+      final lines = <ServerLine>[];
+      try {
+        if (draft.lines.isEmpty ||
+            draft.userAgent?.contains(RegExp(r'[\r\n]')) == true ||
+            (draft.credentials != null &&
+                draft.credentials!.username != draft.username)) {
+          throw const FormatException();
+        }
+        for (final line in draft.lines) {
+          final raw = Uri.parse(
+            line.address.contains('://')
+                ? line.address.trim()
+                : 'http://${line.address.trim()}',
+          );
+          if (raw.userInfo.isNotEmpty || raw.hasQuery || raw.hasFragment) {
+            throw const _UnsupportedImportOptions();
+          }
+          final address = normalizeServerAddress(line.address).toString();
+          if (lines.any((line) => line.address == address)) continue;
+          lines.add(
+            ServerLine(
+              id: generateLineId(),
+              address: address,
+              nickname: line.name,
+            ),
+          );
+        }
+      } catch (error) {
+        results.add(
+          result(
+            ServerImportStatus.failed,
+            reason: error is _UnsupportedImportOptions
+                ? ServerImportReason.unsupportedConnectionOptions
+                : ServerImportReason.invalidConfiguration,
+          ),
+        );
+        continue;
+      }
+      final id = 'config-${generateDeviceId()}';
+      final scope = _scopes[id] ?? 0;
+      void guard() {
+        if (!access.allows(region) ||
+            (region == AccessRegion.private &&
+                access.generation != generation) ||
+            (_scopes[id] ?? 0) != scope ||
+            _transitioning.contains(id)) {
+          throw const _ImportRevoked();
+        }
+      }
+
+      await _enqueue(() async {
+        try {
+          guard();
+          final addresses = lines.map((line) => line.address).toSet();
+          for (final existing in _servers.where(
+            (s) => s.region == region && s.serviceType == MediaServerType.emby,
+          )) {
+            if (!existing.lines.any((line) {
+              try {
+                return addresses.contains(
+                  normalizeServerAddress(line.address).toString(),
+                );
+              } catch (_) {
+                return false;
+              }
+            })) {
+              continue;
+            }
+            final stored = await credentials.read(existing.id);
+            guard();
+            final incomingUser = draft.credentials?.userId ?? '';
+            final existingUser = stored?.userId ?? '';
+            final sameAccount =
+                incomingUser.isNotEmpty && existingUser.isNotEmpty
+                ? incomingUser == existingUser
+                : draft.username.isNotEmpty &&
+                      draft.username == existing.username;
+            if (sameAccount) {
+              results.add(result(ServerImportStatus.duplicate));
+              return;
+            }
+          }
+          final server = SavedServer(
+            id: id,
+            name: draft.name,
+            username: draft.username,
+            lines: List.unmodifiable(lines),
+            activeLineId: lines.first.id,
+            userAgent: draft.userAgent,
+            region: region,
+            identityPending: true,
+          );
+          final previous = ServerListSnapshot(
+            servers: List.of(_servers),
+            lastServerId: _lastServerId,
+          );
+          var configurationAttempted = false;
+          try {
+            if (draft.credentials != null) {
+              await credentials.write(id, draft.credentials!);
+            }
+            guard();
+            final next = [..._servers, server];
+            configurationAttempted = true;
+            await store.save(
+              ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+            );
+            guard();
+            _servers = next;
+            results.add(result(ServerImportStatus.added, id: id));
+          } catch (error) {
+            var rollbackFailed = false;
+            try {
+              await credentials.delete(id);
+            } catch (_) {
+              rollbackFailed = true;
+            }
+            if (configurationAttempted) {
+              try {
+                await store.save(previous);
+              } catch (_) {
+                rollbackFailed = true;
+              }
+            }
+            if (rollbackFailed) {
+              storageUncertain = true;
+              results.add(
+                result(
+                  ServerImportStatus.failed,
+                  reason: ServerImportReason.rollbackFailed,
+                ),
+              );
+            } else {
+              results.add(
+                result(
+                  ServerImportStatus.failed,
+                  reason: error is _ImportRevoked
+                      ? ServerImportReason.accessRevoked
+                      : ServerImportReason.persistenceFailed,
+                ),
+              );
+            }
+          }
+        } catch (error) {
+          results.add(
+            result(
+              ServerImportStatus.failed,
+              reason: error is _ImportRevoked
+                  ? ServerImportReason.accessRevoked
+                  : ServerImportReason.persistenceFailed,
+            ),
+          );
+        }
+      });
+    }
+    return ServerImportResult(results);
+  }
+
   List<SavedServer> project(AccessRegion region) {
     if (!access.allows(region)) return const [];
     return List.unmodifiable(
@@ -591,7 +803,8 @@ class SourceSessionRegistry {
         final old = _servers.where((s) => s.id == server.id).firstOrNull;
         if (old != null &&
             (old.serviceType != server.serviceType ||
-                (old.verifiedServerId ?? old.id) != server.verifiedServerId ||
+                (old.expectedServerId != null &&
+                    old.expectedServerId != server.verifiedServerId) ||
                 old.region != server.region)) {
           throw StateError('Source identity changed');
         }
@@ -771,8 +984,9 @@ class SourceSessionRegistry {
   /// starts during secure-store IO, restore the old value before it can commit.
   Future<void> commitOrdinaryCredentials(
     CredentialCommit commit,
-    StoredCredentials? value,
-  ) => _enqueue(() async {
+    StoredCredentials? value, {
+    String? verifiedServerId,
+  }) => _enqueue(() async {
     _guardCredentials(commit);
     final configured = _servers.where((s) => s.id == commit.id).firstOrNull;
     if (value != null &&
@@ -797,14 +1011,27 @@ class SourceSessionRegistry {
       _guardCredentials(writing);
       if (value != null &&
           configured != null &&
-          previous?.userId != value.userId) {
+          (previous?.userId != value.userId || verifiedServerId != null)) {
         final next = _servers
             .map(
               (s) => s.id == commit.id
-                  ? s.copyWith(libraryIds: const [], scopeKnown: false)
+                  ? s.copyWith(
+                      libraryIds: previous?.userId != value.userId
+                          ? const []
+                          : s.libraryIds,
+                      scopeKnown: previous?.userId != value.userId
+                          ? false
+                          : s.scopeKnown,
+                      verifiedServerId: verifiedServerId,
+                      identityPending: verifiedServerId == null
+                          ? s.identityPending
+                          : false,
+                      username: value.username,
+                    )
                   : s,
             )
             .toList();
+        savedConfig = true;
         await store.save(
           ServerListSnapshot(servers: next, lastServerId: _lastServerId),
         );
@@ -1256,7 +1483,8 @@ class SourceSessionRegistry {
       client.setUserAgent(server.userAgent);
       final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
       authorization.requireValid();
-      if (info.id != (server.verifiedServerId ?? id)) {
+      if (server.expectedServerId != null &&
+          info.id != server.expectedServerId) {
         throw StateError('Server identity mismatch');
       }
       final result = await client.authenticateByName(
@@ -1271,6 +1499,7 @@ class SourceSessionRegistry {
         server: server.copyWith(
           username: username,
           verifiedServerId: info.id,
+          identityPending: false,
           authorizationMethod: AuthorizationMethod.password,
         ),
         value: StoredCredentials(
@@ -1316,7 +1545,9 @@ class SourceSessionRegistry {
     if (reused != null) return reused;
     final pending = _sessionAcquisitions[id];
     if (pending != null) return pending;
-    final created = _attachStoredSession(server, scope, generation);
+    final created = server.identityPending
+        ? authenticate(id)
+        : _attachStoredSession(server, scope, generation);
     _sessionAcquisitions[id] = created;
     try {
       return await created;
@@ -1455,8 +1686,13 @@ class SourceSessionRegistry {
     if (user.id != value.userId) throw StateError('Account identity mismatch');
   }
 
-  Future<SourceSession> authenticate(String id) async {
+  Future<SourceSession> authenticate(String id, {String? lineId}) async {
     final server = _allowed(id);
+    final line = lineId == null
+        ? server.activeLine
+        : server.lines.where((line) => line.id == lineId).firstOrNull;
+    if (line == null) throw StateError('Unknown authentication line');
+    final baseUrl = Uri.parse(line.address);
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
@@ -1468,26 +1704,74 @@ class SourceSessionRegistry {
       throw StateError('Client factory must be independent');
     }
     try {
-      final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+      final info = await client.getPublicInfo(baseUrl);
       _requireCurrent(server, scope, generation);
-      final expected = server.verifiedServerId ?? server.id;
-      if (info.id != expected) throw StateError('Server identity mismatch');
+      final expected = server.expectedServerId;
+      if (expected != null && info.id != expected) {
+        throw StateError('Server identity mismatch');
+      }
       final stored = await credentials.read(id);
       _requireCurrent(server, scope, generation);
       if (stored == null || !_credentialsMatch(server, stored)) {
         throw StateError('Login required');
       }
-      client.attachSession(
-        baseUrl: Uri.parse(server.baseUrl),
-        accessToken: stored.accessToken,
-        userId: stored.userId,
-        userAgent: server.userAgent,
-      );
-      await sessionIdentityVerifier?.call(server, stored, client);
+      var verified = stored;
+      var tokenAccepted = false;
+      if (stored.accessToken.isNotEmpty && stored.userId.isNotEmpty) {
+        client.attachSession(
+          baseUrl: baseUrl,
+          accessToken: stored.accessToken,
+          userId: stored.userId,
+          userAgent: server.userAgent,
+        );
+        try {
+          await sessionIdentityVerifier?.call(server, stored, client);
+          _requireCurrent(server, scope, generation);
+          final user = await client.getUser();
+          if (user.id != stored.userId) {
+            throw StateError('Account identity mismatch');
+          }
+          tokenAccepted = true;
+        } on MediaServerException catch (error) {
+          if (!server.identityPending ||
+              server.serviceType == MediaServerType.plex ||
+              (error.kind != MediaServerFailureKind.sessionExpired &&
+                  error.kind != MediaServerFailureKind.invalidCredentials)) {
+            rethrow;
+          }
+        }
+      }
       _requireCurrent(server, scope, generation);
-      final user = await client.getUser();
-      if (user.id != stored.userId) {
-        throw StateError('Account identity mismatch');
+      if (!tokenAccepted) {
+        if (!server.identityPending ||
+            server.serviceType == MediaServerType.plex ||
+            stored.password == null ||
+            stored.username.isEmpty) {
+          throw StateError('Login required');
+        }
+        final auth = await client.authenticateByName(
+          baseUrl: baseUrl,
+          username: stored.username,
+          password: stored.password!,
+          serverId: info.id,
+        );
+        if (stored.userId.isNotEmpty && stored.userId != auth.user.id) {
+          throw StateError('Account identity mismatch');
+        }
+        verified = StoredCredentials(
+          serviceType: stored.serviceType,
+          authorizationMethod: stored.authorizationMethod,
+          accessToken: auth.accessToken,
+          userId: auth.user.id,
+          username: stored.username,
+          password: stored.password,
+        );
+        client.attachSession(
+          baseUrl: baseUrl,
+          accessToken: verified.accessToken,
+          userId: verified.userId,
+          userAgent: server.userAgent,
+        );
       }
       if ((_scopes[id] ?? 0) != scope ||
           _allowed(id).region != server.region ||
@@ -1495,6 +1779,51 @@ class SourceSessionRegistry {
               generation != access.generation)) {
         throw StateError('Access revoked');
       }
+      if (_authAttempts[id] != attempt) {
+        throw StateError('Authentication superseded');
+      }
+      await _enqueue(() async {
+        void guard() {
+          _requireCurrent(server, scope, generation);
+          if (_authAttempts[id] != attempt) {
+            throw StateError('Authentication superseded');
+          }
+        }
+
+        guard();
+        final previous = ServerListSnapshot(
+          servers: List.of(_servers),
+          lastServerId: _lastServerId,
+        );
+        var configurationAttempted = false;
+        try {
+          if (!identical(verified, stored)) {
+            await credentials.write(id, verified);
+          }
+          guard();
+          final next = _servers
+              .map(
+                (current) => current.id == id
+                    ? current.copyWith(
+                        verifiedServerId: info.id,
+                        identityPending: false,
+                      )
+                    : current,
+              )
+              .toList();
+          configurationAttempted = true;
+          await store.save(
+            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+          );
+          guard();
+          _servers = next;
+        } catch (_) {
+          if (!identical(verified, stored)) await credentials.write(id, stored);
+          if (configurationAttempted) await store.save(previous);
+          rethrow;
+        }
+      });
+      _requireCurrent(server, scope, generation);
       if (_authAttempts[id] != attempt) {
         throw StateError('Authentication superseded');
       }
@@ -1506,7 +1835,7 @@ class SourceSessionRegistry {
           homeUserId: stored.homeUserId,
           configuredServerId: id,
           verifiedServerId: info.id,
-          userId: user.id,
+          userId: verified.userId,
         ),
         client,
         ++_revision,
@@ -1520,10 +1849,6 @@ class SourceSessionRegistry {
         }
         client.clearSession();
       };
-      await _update(
-        id,
-        (current) => current.copyWith(verifiedServerId: info.id),
-      );
       _requireCurrent(server, scope, generation);
       if (_authAttempts[id] != attempt) {
         throw StateError('Authentication superseded');
@@ -1628,7 +1953,8 @@ class SourceSessionRegistry {
       status = await (() async {
         final info = await client.getPublicInfo(Uri.parse(line.address));
         guard();
-        if (info.id != (server.verifiedServerId ?? id)) {
+        if (server.expectedServerId != null &&
+            info.id != server.expectedServerId) {
           return ManualCheckStatus.identityMismatch;
         }
         final stored = await credentials.read(id);
@@ -1799,6 +2125,7 @@ class SourceSessionRegistry {
               'libraryIds',
               'scopeKnown',
               'verifiedServerId',
+              'identityPending',
               'checkedAt',
               'checkStatus',
             ]) {
@@ -1916,6 +2243,14 @@ class SourceSessionRegistry {
     _sessions.clear();
     _sourceRevocations.clear();
   }
+}
+
+class _UnsupportedImportOptions implements Exception {
+  const _UnsupportedImportOptions();
+}
+
+class _ImportRevoked implements Exception {
+  const _ImportRevoked();
 }
 
 /// Compatibility projection for the existing single-service AuthController.

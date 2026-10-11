@@ -22,6 +22,18 @@ abstract final class AppRoutes {
   /// 条目详情:顶栏浮在 backdrop 上,不占一条实心底。
   static bool isItem(String path) => path.startsWith('/item/');
 
+  /// 人物作品页。姓名在查询参数 `name`，不放进路径。
+  static bool isPerson(String path) => path.startsWith('/person/');
+
+  static String person(String personId, {String? name}) {
+    final trimmed = name?.trim() ?? '';
+    if (trimmed.isEmpty) return '/person/$personId';
+    return Uri(
+      path: '/person/$personId',
+      queryParameters: {'name': trimmed},
+    ).toString();
+  }
+
   static String library(String viewId) => '/library/$viewId';
 
   /// 某一台服务器的继续观看完整列表，和首页「更多」打开的是同一类货架。

@@ -240,6 +240,10 @@ FakeEmbyServer captureServer() {
       item.favorite = i.isEven;
     }
   }
+  // PersonIds 只参与人物页筛选，不写入条目 JSON，首页和详情画面保持原样。
+  movie.personIds = const ['person-carl'];
+  server.items.firstWhere((item) => item.id == 'series-friends').personIds =
+      const ['person-carl'];
   movie.mediaStreams = streams;
   movie.extraSources = const [
     FakeMediaSource(

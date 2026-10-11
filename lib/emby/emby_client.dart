@@ -416,6 +416,17 @@ class EmbyClient implements MediaServerClient {
   /// transparent title logo when the server has one.
   static const featuredImageTypes = 'Primary,Backdrop,Thumb,Logo';
 
+  /// `PersonIds` 的查询值。空白 id 去掉；没有有效 id 时返回 null，调用方不带参数。
+  static String? personIdsQueryValue(List<String>? personIds) {
+    if (personIds == null) return null;
+    final ids = [
+      for (final id in personIds)
+        if (id.trim().isNotEmpty) id.trim(),
+    ];
+    if (ids.isEmpty) return null;
+    return ids.join(',');
+  }
+
   String _requireUserId() {
     final userId = _userId;
     if (!hasSession || userId == null || userId.isEmpty) {
@@ -536,6 +547,7 @@ class EmbyClient implements MediaServerClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.itemFields,
   }) async {
     return (await queryItems(
@@ -550,6 +562,7 @@ class EmbyClient implements MediaServerClient {
       filters: filters,
       genres: genres,
       years: years,
+      personIds: personIds,
       fields: fields,
     )).items;
   }
@@ -569,6 +582,7 @@ class EmbyClient implements MediaServerClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.gridFields,
     String imageTypes = MediaServerClient.imageTypes,
   }) {
@@ -588,6 +602,7 @@ class EmbyClient implements MediaServerClient {
         if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
         if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
         if (years != null && years.isNotEmpty) 'Years': years.join(','),
+        'PersonIds': ?personIdsQueryValue(personIds),
         'EnableImageTypes': _imageProjection(imageTypes),
       },
     );

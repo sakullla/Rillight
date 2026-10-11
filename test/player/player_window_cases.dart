@@ -218,6 +218,14 @@ void main() {
       final controller = tester
           .state<PlayerPageState>(find.byType(PlayerPage))
           .controller!;
+      for (
+        var i = 0;
+        i < 40 && (controller.loading || controller.resolved == null);
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(controller.loading, isFalse);
       final original = controller.resolved!;
       final originalSubtitle = controller.subtitleStreamIndex;
       controller.subtitleStreamIndex = null;

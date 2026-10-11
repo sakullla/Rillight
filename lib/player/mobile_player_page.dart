@@ -697,6 +697,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     return danmaku.danmakuOn && danmaku.hasComments;
   }
 
+  EdgeInsets _phoneChromeInsets(BuildContext context) {
+    return phonePlayerControlInsets(MediaQuery.of(context));
+  }
+
+  /// Title row is the inset plus a 48dp control and its 12dp padding.
+  double _phoneNextEpisodeTop(BuildContext context) {
+    return _phoneChromeInsets(context).top + 48 + 12 + 8;
+  }
+
   bool _danmakuNeedsAttention(DanmakuController danmaku) {
     if (!danmaku.danmakuOn) return false;
     switch (danmaku.status) {
@@ -869,9 +878,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                     c.error == null &&
                     !c.sessionExpired)
                   Positioned(
-                    left: 12,
-                    right: 12,
-                    top: 64,
+                    left: 12 + _phoneChromeInsets(context).left,
+                    right: 12 + _phoneChromeInsets(context).right,
+                    top: _phoneNextEpisodeTop(context),
                     child: NextEpisodeCard(controller: c),
                   ),
                 if (!ended &&
@@ -882,10 +891,19 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                     !c.loading &&
                     _danmakuNeedsAttention(danmaku))
                   Positioned(
-                    top: c.nextEpisode != null ? 148 : 8,
-                    left: 12,
-                    right: 12,
+                    top: c.nextEpisode != null
+                        ? _phoneNextEpisodeTop(context) + 96
+                        : 8,
+                    left: c.nextEpisode != null
+                        ? 12 + _phoneChromeInsets(context).left
+                        : 12,
+                    right: c.nextEpisode != null
+                        ? 12 + _phoneChromeInsets(context).right
+                        : 12,
                     child: SafeArea(
+                      top: c.nextEpisode == null,
+                      left: c.nextEpisode == null,
+                      right: c.nextEpisode == null,
                       child: _PhoneDanmakuFailure(
                         danmaku: danmaku,
                         onRetry: _retryDanmaku,

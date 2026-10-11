@@ -516,6 +516,56 @@ void main() {
     );
   });
 
+  test('PersonIds is part of the cache key and the client request', () async {
+    final disk = _FakeDiskStore();
+    final cache = newCache(disk);
+    final ada = catalogItemsRequest(
+      userId: 'user-alice',
+      personIds: const ['person-ada'],
+      includeItemTypes: 'Movie,Series',
+      recursive: true,
+      limit: 60,
+      startIndex: 0,
+      sortBy: 'PremiereDate',
+      sortOrder: 'Descending',
+    );
+    final bob = catalogItemsRequest(
+      userId: 'user-alice',
+      personIds: const ['person-bob'],
+      includeItemTypes: 'Movie,Series',
+      recursive: true,
+      limit: 60,
+      startIndex: 0,
+      sortBy: 'PremiereDate',
+      sortOrder: 'Descending',
+    );
+    final before = server.requests.length;
+    await client.queryItems(
+      personIds: const ['person-ada'],
+      includeItemTypes: 'Movie,Series',
+      recursive: true,
+      limit: 60,
+      startIndex: 0,
+      sortBy: 'PremiereDate',
+      sortOrder: 'Descending',
+    );
+    final viaClient = server.requests[before];
+    await cache.fetch(client, ada);
+    expect(server.requests[before + 1], viaClient);
+    await cache.fetch(client, bob);
+    await cache.flushPendingWrites();
+    expect(disk.files, hasLength(2));
+    expect(
+      disk.files.keys.where((key) => key.contains('personIds=person-ada')),
+      hasLength(1),
+    );
+    expect(
+      disk.files.keys.where((key) => key.contains('personIds=person-bob')),
+      hasLength(1),
+    );
+    expect(viaClient, isNot(contains('ParentId=')));
+  });
+
   test('mergeItemsById dedupes pagination overlaps by item id', () {
     MediaItem item(String id) =>
         decodeEmbyMediaItem({'Id': id, 'Name': 'Item $id', 'Type': 'Movie'});

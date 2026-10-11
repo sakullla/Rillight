@@ -762,14 +762,19 @@ void blend_subtitles(RillightCoreFrame *frame,
 
 void render_gpu_subtitles(VideoOutputFrame* frame,
                           const std::vector<SubtitleCue>& cues, AssRenderer* ass,
-                          BitmapSubtitleOverlayCache* cache) {
+                          BitmapSubtitleOverlayCache* cache, AssRenderer* secondary = nullptr,
+                          const std::vector<SubtitleCue>* secondary_cues = nullptr) {
   // Bitmap display sets remain unchanged across video frames. Share immutable
   // composed pixels until a cue changes; animated ASS must still render at PTS.
   bool cacheable = true;
 #if RILLIGHT_HAVE_LIBASS
-  cacheable = !ass->track;
+  cacheable = !ass->track && (!secondary || !secondary->track);
 #endif
   auto key = bitmap_subtitle_key(cues, frame->pts_us, frame->width, frame->height);
+  const std::vector<SubtitleCue> empty_cues;
+  if (!secondary_cues) secondary_cues = &empty_cues;
+  const auto secondary_key = bitmap_subtitle_key(*secondary_cues, frame->pts_us, frame->width, frame->height);
+  key.cues.insert(key.cues.end(), secondary_key.cues.begin(), secondary_key.cues.end());
   if (cacheable && cache->valid && cache->key == key) {
     frame->subtitle_pixels = cache->pixels;
     frame->subtitle_overlay = cache->overlay;
@@ -794,12 +799,21 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
     left = std::min(left, x0); top = std::min(top, y0);
     right = std::max(right, x1); bottom = std::max(bottom, y1);
   };
-  for (const auto& cue : cues) {
+  for (const auto* group : {&cues, secondary_cues})
+  for (const auto& cue : *group) {
     if (frame->pts_us < cue.start_us || frame->pts_us >= cue.end_us) continue;
     for (const auto& bitmap : cue.bitmaps) include(bitmap.x, bitmap.y, bitmap.width, bitmap.height);
   }
 #if RILLIGHT_HAVE_LIBASS
   const ASS_Image* images = nullptr;
+  const ASS_Image* secondary_images = nullptr;
+  if (secondary && secondary->track && frame->pts_us >= 0) {
+    int changed = 0;
+    secondary_images = ass_render_frame(secondary->renderer, secondary->track, frame->pts_us / 1000, &changed);
+    for (auto* image = secondary_images; image; image = image->next)
+      if (image->bitmap && image->stride >= image->w)
+        include(image->dst_x, image->dst_y, image->w, image->h);
+  }
   if (ass->track && frame->pts_us >= 0) {
     ass_set_storage_size(ass->renderer, frame->width, frame->height);
     ass_set_frame_size(ass->renderer, frame->width, frame->height);
@@ -810,7 +824,7 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
         include(image->dst_x, image->dst_y, image->w, image->h);
   }
 #else
-  (void)ass;
+  (void)ass; (void)secondary;
 #endif
   if (left >= right || top >= bottom) { remember(); return; }
   const int width = right - left, height = bottom - top;
@@ -830,7 +844,8 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
     }
     pixel[3] = static_cast<uint8_t>(alpha + (pixel[3] * (255 - alpha) + 127) / 255);
   };
-  for (const auto& cue : cues) {
+  for (const auto* group : {&cues, secondary_cues})
+  for (const auto& cue : *group) {
     if (frame->pts_us < cue.start_us || frame->pts_us >= cue.end_us) continue;
     for (const auto& bitmap : cue.bitmaps) {
       for (int row = 0; row < bitmap.height; ++row) {
@@ -844,7 +859,8 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
     }
   }
 #if RILLIGHT_HAVE_LIBASS
-  for (auto* image = images; image; image = image->next) {
+  for (const auto* head : {images, secondary_images})
+  for (auto* image = head; image; image = image->next) {
     if (!image->bitmap || image->w <= 0 || image->h <= 0 || image->stride < image->w) continue;
     const unsigned int opacity = 255 - (image->color & 255);
     for (int row = 0; row < image->h; ++row) {
@@ -935,6 +951,8 @@ struct RillightCoreImpl {
   std::mutex lifecycle_mutex;
   std::mutex subtitle_mutex;
   AssRenderer ass;
+  AssRenderer secondary_ass;
+  std::vector<SubtitleCue> secondary_cues;
   std::vector<SubtitleCue> subtitle_cues;
   BitmapSubtitleOverlayCache bitmap_subtitle_cache;
   RillightCoreSubtitlePresentation subtitle_presentation{};
@@ -983,10 +1001,13 @@ struct RillightCoreImpl {
   int video_track_id = -1;
   int audio_track_id = -1;
   int subtitle_index = -1;
+  int secondary_subtitle_index = -1;
+  int requested_subtitle_slot = 0;
   int requested_audio = -1;
   bool audio_change = false;
   int requested_subtitle = -1;
   bool subtitle_change = false;
+  bool subtitle_selection_pending = false;
   bool external_subtitle_pending = false;
   std::string requested_external_subtitle;
   int64_t seek_target = -1;
@@ -2251,6 +2272,48 @@ int64_t media_pts_us(const RillightCoreImpl *core, int64_t pts_us) {
   return pts_us - core->media_origin_us;
 }
 
+// format->start_time is often unset for HLS/MPEG-TS. A stream start still
+// names the same absolute clock the packet PTS uses.
+int64_t container_origin_us(const AVFormatContext *format) {
+  if (!format) return 0;
+  if (format->start_time != AV_NOPTS_VALUE && format->start_time > 0)
+    return format->start_time;
+  int64_t origin = 0;
+  for (unsigned int index = 0; index < format->nb_streams; ++index) {
+    const AVStream *stream = format->streams[index];
+    if (!stream || stream->start_time == AV_NOPTS_VALUE ||
+        stream->start_time <= 0)
+      continue;
+    const int64_t us = av_rescale_q(
+        stream->start_time, stream->time_base, AVRational{1, 1000000});
+    if (us > 0 && (origin == 0 || us < origin)) origin = us;
+  }
+  return origin;
+}
+
+// Samples more than a few seconds past the program are still on the MPEG-TS
+// clock. Adopting one as base_position jumps the seek bar to the end and,
+// once that adoption is refused, the picture is never released.
+constexpr int64_t kAbsolutePtsSlackUs = 5LL * 1000000;
+
+void rebase_absolute_program_pts(RillightCoreImpl *core,
+                                 RillightCoreFrame *frame) {
+  const int64_t pts = frame->pts_us;
+  const int64_t duration = core->duration;
+  if (pts < 0 || duration <= 0 || pts <= duration + kAbsolutePtsSlackUs)
+    return;
+  if (core->media_origin_us <= 0) {
+    // A resume seek is already past the program start. That picture is not
+    // the origin. From-zero playback, including transcode HLS, is.
+    if (core->presentation_floor_us > 0) return;
+    core->media_origin_us = pts;
+    frame->pts_us = 0;
+    return;
+  }
+  if (pts + duration >= core->media_origin_us)
+    frame->pts_us = pts - core->media_origin_us;
+}
+
 RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  uint64_t session, uint64_t timeline,
                                  const AVStream *stream,
@@ -2721,6 +2784,7 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
              int video_index, uint64_t timeline) {
   if (!frame) return 0;
   std::unique_lock lock(core->mutex);
+  rebase_absolute_program_pts(core, frame);
   const bool audio = rillight_core_frame_is_audio(frame->type);
   auto &queue = audio ? core->audio : core->video;
   auto &bytes = audio ? core->audio_bytes : core->video_bytes;
@@ -2855,7 +2919,7 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     output_height = core->output_height;
     hdr_video = core->hdr_video;
     macos_edr = core->macos_edr;
-    gpu_video = core->gpu_video && (core->subtitle_index < 0 || hdr_video);
+    gpu_video = core->gpu_video && ((core->subtitle_index < 0 && core->secondary_subtitle_index < 0) || hdr_video);
     const int64_t clock = playback_position(core);
     discard = core->timeline != timeline ||
         (pts >= 0 &&
@@ -3676,7 +3740,7 @@ Decoder open_video_decoder(RillightCoreImpl *core, AVFormatContext *format,
 void run(RillightCoreImpl *core, uint64_t session) {
   AVFormatContext *format = avformat_alloc_context();
   Source *main_source = nullptr;
-  Decoder video, audio, subtitle;
+  Decoder video, audio, subtitle, secondary_subtitle;
   int enhancement_index = -1;
   bool fel_required = false;
   int fel_nal_length = 0;
@@ -3858,9 +3922,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         ? format->streams[audio.stream]->id : -1;
     core->subtitle_index = subtitle.stream;
     core->duration = format->duration == AV_NOPTS_VALUE ? -1 : format->duration;
-    core->media_origin_us =
-        format->start_time != AV_NOPTS_VALUE && format->start_time > 0
-            ? format->start_time : 0;
+    core->media_origin_us = container_origin_us(format);
     core->tracks.clear();
 #if RILLIGHT_HAVE_LIBASS
     core->embedded_stream_count = format->nb_streams;
@@ -4006,25 +4068,31 @@ void run(RillightCoreImpl *core, uint64_t session) {
       if (!packet) return 0;
       std::lock_guard lock(subtitle_mutex);
       int result = 0;
+      auto &selected_decoder = packet->stream_index == secondary_subtitle.stream
+          ? secondary_subtitle : subtitle;
+      [[maybe_unused]] auto &selected_ass = packet->stream_index == secondary_subtitle.stream
+          ? core->secondary_ass : ass;
+      auto &selected_cues = packet->stream_index == secondary_subtitle.stream
+          ? core->secondary_cues : subtitle_cues;
 
-      if (subtitle.context) {
+      if (selected_decoder.context) {
         const auto codec =
-            format->streams[subtitle.stream]->codecpar->codec_id;
+            format->streams[selected_decoder.stream]->codecpar->codec_id;
         if (bitmap_subtitle_codec(codec))
-          result = decode_bitmap_subtitle(subtitle, packet,
-              format->streams[subtitle.stream]->time_base, &subtitle_cues,
+          result = decode_bitmap_subtitle(selected_decoder, packet,
+              format->streams[selected_decoder.stream]->time_base, &selected_cues,
               core->media_origin_us);
 #if RILLIGHT_HAVE_LIBASS
-        else if (text_subtitle_codec(codec) && ass.track)
-          result = decode_text_subtitle(subtitle, packet,
-              format->streams[subtitle.stream]->time_base, &ass,
+        else if (text_subtitle_codec(codec) && selected_ass.track)
+          result = decode_text_subtitle(selected_decoder, packet,
+              format->streams[selected_decoder.stream]->time_base, &selected_ass,
               core->media_origin_us);
 #endif
       }
 #if RILLIGHT_HAVE_LIBASS
-      else if (ass.track)
-        process_ass(&ass, packet,
-                    format->streams[subtitle.stream]->time_base,
+      else if (selected_ass.track)
+        process_ass(&selected_ass, packet,
+                    format->streams[selected_decoder.stream]->time_base,
                     core->media_origin_us);
 #endif
 
@@ -4038,6 +4106,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
     bool change_audio;
     bool change_subtitle;
     int selected_subtitle;
+    int selected_subtitle_slot;
     bool change_speed;
     double selected_speed;
     {
@@ -4068,6 +4137,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
       core->audio_change = false;
       change_subtitle = core->subtitle_change;
       selected_subtitle = core->requested_subtitle;
+      selected_subtitle_slot = core->requested_subtitle_slot;
       core->subtitle_change = false;
       change_speed = core->speed_change;
       selected_speed = core->requested_speed;
@@ -4099,9 +4169,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
       }
       pending_packets.Clear();
       int64_t seek_ts = seek;
-      if (format->start_time != AV_NOPTS_VALUE && format->start_time > 0 &&
-          seek <= std::numeric_limits<int64_t>::max() - format->start_time) {
-        seek_ts = seek + format->start_time;
+      const int64_t origin = core->media_origin_us > 0
+          ? core->media_origin_us
+          : container_origin_us(format);
+      if (origin > 0 &&
+          seek <= std::numeric_limits<int64_t>::max() - origin) {
+        seek_ts = seek + origin;
       }
       result = av_seek_frame(format, -1, seek_ts, AVSEEK_FLAG_BACKWARD);
       {
@@ -4173,10 +4246,14 @@ void run(RillightCoreImpl *core, uint64_t session) {
       if (audio.context) avcodec_flush_buffers(audio.context);
       audio.dts_recovery.reset();
       if (subtitle.context) avcodec_flush_buffers(subtitle.context);
+      if (secondary_subtitle.context) avcodec_flush_buffers(secondary_subtitle.context);
       close_audio_filter(&audio_filter);
       std::lock_guard subtitle_lock(subtitle_mutex);
       subtitle_cues.clear();
+      core->secondary_cues.clear();
 #if RILLIGHT_HAVE_LIBASS
+      if (core->secondary_ass.track && !core->secondary_ass.external)
+        ass_flush_events(core->secondary_ass.track);
       if (ass.track && !ass.external) ass_flush_events(ass.track);
 #endif
     }
@@ -4201,6 +4278,10 @@ void run(RillightCoreImpl *core, uint64_t session) {
       }
     }
     if (change_subtitle) {
+      Decoder &primary_subtitle = subtitle;
+      auto &subtitle = selected_subtitle_slot == 1 ? secondary_subtitle : primary_subtitle;
+      auto &ass = selected_subtitle_slot == 1 ? core->secondary_ass : core->ass;
+      auto &subtitle_cues = selected_subtitle_slot == 1 ? core->secondary_cues : core->subtitle_cues;
       Decoder replacement;
       bool ass_selected = false;
 #if RILLIGHT_HAVE_LIBASS
@@ -4269,16 +4350,26 @@ void run(RillightCoreImpl *core, uint64_t session) {
         subtitle_cues.clear();
         close_ass(&ass);
 #if RILLIGHT_HAVE_LIBASS
-        if (ass_selected) ass = replacement_ass;
+        if (ass_selected) {
+          ass = replacement_ass;
+          // Only plain text has a default slot position. ASS authored layout
+          // is preserved. Style fields already hold libass's internal encoding
+          // (numpad values are converted while parsing), so top center is
+          // HALIGN_CENTER | VALIGN_TOP, not the numpad value 8.
+          if (selected_subtitle_slot == 1 && ass.plain_text)
+            for (int i = 0; i < ass.track->n_styles; ++i)
+              ass.track->styles[i].Alignment = HALIGN_CENTER | VALIGN_TOP;
+        }
 #endif
         }
         std::lock_guard lock(core->mutex);
-        core->subtitle_index = subtitle.stream;
+        (selected_subtitle_slot == 1 ? core->secondary_subtitle_index : core->subtitle_index) = subtitle.stream;
         core->error = 0;
       } else {
         std::lock_guard lock(core->mutex);
         core->error = AVERROR_DECODER_NOT_FOUND;
       }
+      { std::lock_guard lock(core->mutex); core->subtitle_selection_pending = false; }
     }
     if (change_speed) {
       close_audio_filter(&audio_filter);
@@ -4291,7 +4382,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
       format->streams[i]->discard =
           static_cast<int>(i) == video.stream ||
           static_cast<int>(i) == audio.stream ||
-          static_cast<int>(i) == subtitle.stream
+          static_cast<int>(i) == subtitle.stream ||
+          static_cast<int>(i) == secondary_subtitle.stream
               ? AVDISCARD_DEFAULT : AVDISCARD_ALL;
     }
     conversion_lane.Resume();
@@ -4390,7 +4482,8 @@ void run(RillightCoreImpl *core, uint64_t session) {
       result = video_lane.Push(packet, timeline);
     else if (packet->stream_index == audio.stream)
       result = audio_lane.Push(packet, timeline);
-    else if (packet->stream_index == subtitle.stream)
+    else if (packet->stream_index == subtitle.stream ||
+             packet->stream_index == secondary_subtitle.stream)
       result = subtitle_lane.Push(packet, timeline);
     else result = 0;
     av_packet_free(&packet);
@@ -4414,6 +4507,7 @@ finish:
   avcodec_free_context(&video.context);
   avcodec_free_context(&audio.context);
   avcodec_free_context(&subtitle.context);
+  avcodec_free_context(&secondary_subtitle.context);
   if (format) avformat_close_input(&format);
   close_source(main_source);
   std::lock_guard lock(core->mutex);
@@ -4870,6 +4964,7 @@ void rillight_core_destroy(RillightCore *pointer) {
     rillight_core_release_frame(core->displayed_clean);
     rillight_core_release_frame(core->subtitle_preview);
     close_ass(&core->ass);
+    close_ass(&core->secondary_ass);
   }
   delete core;
 }
@@ -4950,7 +5045,8 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
   {
     std::lock_guard lock(core->mutex);
     reset_frames(core);
-    { std::lock_guard subtitle_lock(core->subtitle_mutex); close_ass(&core->ass); }
+    { std::lock_guard subtitle_lock(core->subtitle_mutex); close_ass(&core->ass); close_ass(&core->secondary_ass);
+      core->secondary_cues.clear(); }
     core->stop = false;
     core->decode_abort = false;
     core->decode_error = 0;
@@ -4961,6 +5057,8 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->timeline_signal = core->timeline;
     core->url = url;
     core->video_index = core->audio_index = core->subtitle_index = -1;
+    core->secondary_subtitle_index = -1;
+    core->requested_subtitle_slot = 0;
     core->video_frame_rate = 0;
     core->android_color_buffers = false;
     core->android_native_dolby = false;
@@ -4983,6 +5081,7 @@ int rillight_core_open_at(RillightCore *pointer, const char *url,
     core->audio_change = false;
     core->requested_audio = -1;
     core->subtitle_change = false;
+    core->subtitle_selection_pending = false;
     core->requested_subtitle = -1;
     core->external_subtitle_pending = false;
     core->requested_external_subtitle.clear();
@@ -5087,7 +5186,12 @@ static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core, bool r
 
 int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
                                    uint64_t operation_id) {
-  if (!pointer || stream_index < -1) return -1;
+  return rillight_core_select_subtitle_slot(pointer, 0, stream_index, operation_id);
+}
+
+int rillight_core_select_subtitle_slot(RillightCore *pointer, int slot, int stream_index,
+                                   uint64_t operation_id) {
+  if (!pointer || stream_index < -1 || slot < 0 || slot > 1) return -1;
   auto *core = impl(pointer);
   std::unique_lock lock(core->mutex);
   if (core->state == RILLIGHT_CORE_IDLE ||
@@ -5100,9 +5204,14 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
                      return track.type == RILLIGHT_CORE_TRACK_SUBTITLE &&
                             track.stream_index == stream_index;
                    })) return -1;
+  // Commands share one demux transaction. Reject concurrent replacement rather
+  // than losing a different slot's pending selection.
+  if (core->subtitle_selection_pending) return -1;
+  if (stream_index >= 0 && stream_index ==
+      (slot == 1 ? core->subtitle_index : core->secondary_subtitle_index)) return -1;
+  auto &selected_index = slot == 1 ? core->secondary_subtitle_index : core->subtitle_index;
   if (!accept_operation(core, operation_id)) return -1;
-  if (core->subtitle_index == stream_index &&
-      (!core->subtitle_change || core->requested_subtitle == stream_index))
+  if (selected_index == stream_index)
     return 0;
   if (core->input_exhausted) return -1;
   if (stream_index == -1 && !core->subtitle_change &&
@@ -5110,9 +5219,13 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
     // Hiding captions needs no media seek or codec flush. Publish the choice
     // immediately, including while paused or waiting for network data; the
     // demux worker retires only the subtitle decoder at its next safe point.
-    core->subtitle_index = -1;
+    // The hide is not a demux transaction: a stalled read must not keep the
+    // slot marked pending, and cues stay gated by the published index.
+    selected_index = -1;
+    core->requested_subtitle_slot = slot;
     core->requested_subtitle = -1;
     core->subtitle_change = true;
+    core->subtitle_selection_pending = false;
     core->error = 0;
     if (core->displayed_clean) {
       rillight_core_release_frame(core->subtitle_preview);
@@ -5123,8 +5236,10 @@ int rillight_core_select_subtitle(RillightCore *pointer, int stream_index,
     return 0;
   }
   core->base_position = playback_position(core);
+  core->requested_subtitle_slot = slot;
   core->requested_subtitle = stream_index;
   core->subtitle_change = true;
+  core->subtitle_selection_pending = true;
   ++core->timeline;
   core->timeline_signal = core->timeline;
   reset_frames(core);
@@ -5348,6 +5463,8 @@ int rillight_core_snapshot(RillightCore *pointer,
   snapshot->video_stream_index = core->video_index;
   snapshot->audio_stream_index = core->audio_index;
   snapshot->subtitle_stream_index = core->subtitle_index;
+  snapshot->secondary_subtitle_stream_index = core->secondary_subtitle_index;
+  snapshot->subtitle_selection_pending = core->subtitle_selection_pending;
   snapshot->duration_us = core->duration;
   snapshot->position_us = playback_position(core);
   snapshot->first_video_frame_ready = core->first_video;
@@ -5452,21 +5569,35 @@ static RillightCoreFrame *compose_displayed_frame(RillightCoreImpl *core,
     frame = subtitle_frame_copy(core->displayed_clean);
     if (!frame) return nullptr;
     frame->subtitle_redraw = redraw;
-    if (core->subtitle_index < 0) return frame;
+    if (core->subtitle_index < 0 && core->secondary_subtitle_index < 0) return frame;
     std::lock_guard subtitle_lock(core->subtitle_mutex);
     core->subtitle_cues.erase(std::remove_if(core->subtitle_cues.begin(),
         core->subtitle_cues.end(), [frame](const SubtitleCue &cue) {
           return cue.end_us < frame->pts_us;
         }), core->subtitle_cues.end());
-    apply_subtitle_presentation(&core->ass, frame->width, frame->height,
+    core->secondary_cues.erase(std::remove_if(core->secondary_cues.begin(),
+        core->secondary_cues.end(), [frame](const SubtitleCue &cue) {
+          return cue.end_us < frame->pts_us;
+        }), core->secondary_cues.end());
+    const std::vector<SubtitleCue> empty_cues;
+    const auto &cues = core->subtitle_index >= 0 ? core->subtitle_cues : empty_cues;
+    const auto &secondary_cues = core->secondary_subtitle_index >= 0 ? core->secondary_cues : empty_cues;
+    AssRenderer empty;
+    auto *primary = core->subtitle_index >= 0 ? &core->ass : &empty;
+    auto *secondary = core->secondary_subtitle_index >= 0 ? &core->secondary_ass : &empty;
+    apply_subtitle_presentation(secondary, frame->width, frame->height,
+                                core->subtitle_presentation);
+    apply_subtitle_presentation(primary, frame->width, frame->height,
                                 core->subtitle_presentation);
     if (frame->type == RILLIGHT_CORE_VIDEO_RGBA) {
-      blend_subtitles(frame, core->subtitle_cues);
-      blend_ass(frame, &core->ass);
+      blend_subtitles(frame, cues);
+      blend_subtitles(frame, secondary_cues);
+      blend_ass(frame, primary);
+      blend_ass(frame, secondary);
     } else {
       const int bytes = frame->data_size;
-      render_gpu_subtitles(frame, core->subtitle_cues, &core->ass,
-                           &core->bitmap_subtitle_cache);
+      render_gpu_subtitles(frame, cues, primary,
+                           &core->bitmap_subtitle_cache, secondary, &secondary_cues);
       if (frame->data) frame->data_size = bytes;
     }
     return frame;
@@ -5588,7 +5719,7 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
     core->paused_video_frame_emitted = true;
     rillight_core_release_frame(core->displayed_clean);
     core->displayed_clean = nullptr;
-    if (core->subtitle_index >= 0) {
+    if (core->subtitle_index >= 0 || core->secondary_subtitle_index >= 0) {
       core->displayed_clean = frame;
       frame = compose_displayed_frame(core, false);
       if (!frame) {

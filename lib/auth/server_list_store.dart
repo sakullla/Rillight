@@ -162,6 +162,7 @@ class SavedServer {
     this.cloudAccountId,
     this.homeUserId,
     this.resourceCredentialRef,
+    this.identityPending = false,
     this.checkedAt,
     this.checkStatus = 'unknown',
   });
@@ -179,6 +180,12 @@ class SavedServer {
   final List<String> libraryIds;
   final bool scopeKnown;
   final String? verifiedServerId;
+
+  /// Legacy records used the remote ID as their key. Imported records have an
+  /// independent local key and must be authenticated before first use.
+  final bool identityPending;
+  String? get expectedServerId =>
+      verifiedServerId ?? (identityPending ? null : id);
   final DateTime? checkedAt;
   final String checkStatus;
 
@@ -234,6 +241,7 @@ class SavedServer {
     'libraryIds': libraryIds,
     'scopeKnown': scopeKnown,
     'verifiedServerId': verifiedServerId,
+    'identityPending': identityPending,
     'checkedAt': checkedAt?.toIso8601String(),
     'checkStatus': checkStatus,
     'activeLineId': activeLineId,
@@ -307,6 +315,7 @@ class SavedServer {
       libraryIds: List<String>.unmodifiable(rawLibraryIds.cast<String>()),
       scopeKnown: _storedBool(json, 'scopeKnown', false),
       verifiedServerId: _storedString(json, 'verifiedServerId'),
+      identityPending: _storedBool(json, 'identityPending', false),
       checkedAt: _storedDate(json, 'checkedAt'),
       checkStatus:
           _storedString(json, 'checkStatus', nullable: false) ?? 'unknown',
@@ -368,6 +377,7 @@ class SavedServer {
     String? cloudAccountId,
     String? homeUserId,
     String? resourceCredentialRef,
+    bool? identityPending,
     DateTime? checkedAt,
     String? checkStatus,
   }) {
@@ -391,6 +401,7 @@ class SavedServer {
       homeUserId: homeUserId ?? this.homeUserId,
       resourceCredentialRef:
           resourceCredentialRef ?? this.resourceCredentialRef,
+      identityPending: identityPending ?? this.identityPending,
       checkedAt: checkedAt ?? this.checkedAt,
       checkStatus: checkStatus ?? this.checkStatus,
     );

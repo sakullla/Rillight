@@ -166,6 +166,7 @@ abstract interface class MediaCatalog {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.itemFields,
   });
   Future<MediaItemPage> queryItems({
@@ -180,6 +181,7 @@ abstract interface class MediaCatalog {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.gridFields,
     String imageTypes = MediaServerClient.imageTypes,
   });

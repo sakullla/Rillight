@@ -10,20 +10,17 @@ import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
-import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
-import 'package:rillight/library/item_format.dart';
-import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/danmaku/danmaku_match_query.dart';
 import 'package:rillight/player/danmaku/danmaku_panel.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
+import 'package:rillight/player/episode_browser.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/next_episode_card.dart';
@@ -42,47 +39,15 @@ import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 
+export 'package:rillight/player/episode_browser.dart'
+    show kPlayerEpisodeRowExtent, playerEpisodeListOffset;
+
 /// 播放器顶栏命中高度:内边距 + 标题行。剧集面板从这之下铺开,避免挡住关闭/置顶。
 const double kPlayerChromeBarExtent =
     AppSpacing.sm + kWindowChromeHeight + AppSpacing.sm + AppSpacing.lg;
 
 /// 顶栏实时网速占用宽度,给标题右侧留空。
 const double kPlayerNetworkSpeedExtent = 148;
-
-/// 剧集行固定高度,给 ListView 按 index 做 O(1) jumpTo。
-///
-/// [Scrollable.ensureVisible] 只能滚到已经建出来的行;120 集时当前集
-/// 往往还在 builder 窗口外,打开面板会停在第 1 集。行高固定后
-/// `offset = index * extent` 不必先构建前面的行。
-const double kPlayerEpisodeRowExtent = 112;
-
-/// 把当前集放到视口约 [alignment] 处;打开面板用 jumpTo,不 animate,
-/// 避免长列表滑过上百行。
-double playerEpisodeListOffset({
-  required int index,
-  required int itemCount,
-  required double itemExtent,
-  required double viewport,
-  double alignment = 0.25,
-}) {
-  if (index <= 0 || itemCount <= 0 || itemExtent <= 0) {
-    return 0;
-  }
-  final maxOffset = itemCount * itemExtent > viewport
-      ? itemCount * itemExtent - viewport
-      : 0.0;
-  if (maxOffset <= 0) {
-    return 0;
-  }
-  final raw = index * itemExtent - viewport * alignment;
-  if (raw < 0) {
-    return 0;
-  }
-  if (raw > maxOffset) {
-    return maxOffset;
-  }
-  return raw;
-}
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
@@ -691,15 +656,14 @@ class PlayerPageState extends State<PlayerPage> {
                       if (_errorText(l10n, current) != null)
                         AppErrorView(
                           message: _errorText(l10n, current)!,
-                          onRetry: current.start,
+                          onRetry: () {
+                            unawaited(current.retryPlayback());
+                          },
                         ),
-                      if (!current.loading &&
-                          current.resolved != null &&
-                          !current.playbackEnded &&
-                          current.error == null)
+                      if (!current.playbackEnded && current.error == null)
                         _ControlsBar(
                           controller: current,
-                          visible: current.controlsVisible,
+                          visible: current.controlsVisible || current.loading,
                           dragging: _dragSeeking,
                           dragValue: _dragValue,
                           danmaku: _danmaku,
@@ -821,7 +785,7 @@ class PlayerPageState extends State<PlayerPage> {
                           onClose: _closeDanmakuSearch,
                         ),
                       if (_episodesOpen && current.canBrowseEpisodes)
-                        _EpisodeListPanel(
+                        _EpisodeOverlay(
                           controller: current,
                           onClose: _closeEpisodeList,
                         ),
@@ -1217,9 +1181,14 @@ class _NextEpisodeBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Fade padding, seek row, gap, button row, and the bar's own bottom inset.
+    const controlsStack =
+        AppSpacing.huge + 48 + AppSpacing.xs + 48 + AppSpacing.md;
     return Positioned(
       right: AppSpacing.xl,
-      bottom: controller.controlsVisible ? 112 : AppSpacing.xl,
+      bottom: controller.controlsVisible
+          ? controlsStack + AppSpacing.md
+          : AppSpacing.xl,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: (MediaQuery.sizeOf(context).width - AppSpacing.xl * 2)
@@ -1288,21 +1257,15 @@ class _SkipSegmentButton extends StatelessWidget {
 }
 
 /// 播放中的剧集列表:点遮罩或关闭钮收起,列表从顶栏下方开始以免挡住窗口关闭。
-class _EpisodeListPanel extends StatelessWidget {
-  const _EpisodeListPanel({required this.controller, required this.onClose});
+class _EpisodeOverlay extends StatelessWidget {
+  const _EpisodeOverlay({required this.controller, required this.onClose});
 
   final PlayerController controller;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final seasons = controller.seasons;
-    final currentSeason = seasons
-        .where((season) => season.id == controller.episodeSeasonId)
-        .toList();
+    final scheme = Theme.of(context).colorScheme;
     return Positioned(
       top: kPlayerChromeBarExtent,
       left: 0,
@@ -1327,788 +1290,21 @@ class _EpisodeListPanel extends StatelessWidget {
             bottom: 0,
             right: 0,
             width: AppViewport.fit(
-              400,
+              420,
               MediaQuery.sizeOf(context).width,
               MediaQuery.sizeOf(context),
             ),
             child: Material(
-              key: const Key('player-episodes-panel'),
               color: scheme.surfaceContainerHigh,
               elevation: 8,
               shadowColor: scheme.shadow,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  AppSpacing.md,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _episodePanelTitle(l10n),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: scheme.onSurface,
-                            ),
-                          ),
-                        ),
-                        if (seasons.length > 1)
-                          _SeasonPicker(controller: controller)
-                        else if (currentSeason.length == 1)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.sm,
-                            ),
-                            child: Text(
-                              currentSeason.first.name,
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        IconButton(
-                          key: const Key('player-episodes-close'),
-                          tooltip: MaterialLocalizations.of(
-                            context,
-                          ).closeButtonTooltip,
-                          color: scheme.onSurface,
-                          onPressed: onClose,
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Expanded(child: _episodeListBody(context, l10n, scheme)),
-                  ],
-                ),
+              child: PlayerEpisodeBrowser(
+                controller: controller,
+                onClose: onClose,
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  String _episodePanelTitle(AppLocalizations l10n) {
-    final seriesName = controller.item?.seriesName?.trim();
-    if (seriesName != null && seriesName.isNotEmpty) {
-      return seriesName;
-    }
-    return l10n.playerEpisodes;
-  }
-
-  Widget _episodeListBody(
-    BuildContext context,
-    AppLocalizations l10n,
-    ColorScheme scheme,
-  ) {
-    if (controller.episodeListLoading && controller.episodes.isEmpty) {
-      return ListView.separated(
-        padding: EdgeInsets.zero,
-        itemCount: 6,
-        separatorBuilder: (context, index) =>
-            const SizedBox(height: AppSpacing.xxs),
-        itemBuilder: (context, index) => const _EpisodeRowSkeleton(),
-      );
-    }
-    if (controller.episodeListFailed && controller.episodes.isEmpty) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            l10n.playbackFailed,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          OutlinedButton(
-            key: const Key('player-episodes-retry'),
-            onPressed: () {
-              unawaited(controller.loadEpisodeList());
-            },
-            child: Text(l10n.retry),
-          ),
-        ],
-      );
-    }
-    return _EpisodeListView(
-      episodes: controller.episodes,
-      currentId: controller.itemId,
-      currentIndexNumber: controller.item?.indexNumber,
-      currentSeasonId: controller.item?.seasonId,
-      hasEarlier: controller.hasEarlierEpisodes,
-      hasMore: controller.hasMoreEpisodes,
-      loadingEarlier: controller.episodeLoadingEarlier,
-      loadingMore: controller.episodeLoadingMore,
-      progressFor: (episode, isCurrent) => _episodeProgress(episode, isCurrent),
-      onPlay: (episode) {
-        unawaited(controller.playEpisode(episode));
-      },
-      onLoadEarlier: () => unawaited(controller.loadEarlierEpisodes()),
-      onLoadMore: () => unawaited(controller.loadMoreEpisodes()),
-    );
-  }
-
-  double _episodeProgress(MediaItem episode, bool isCurrent) {
-    if (isCurrent) {
-      final duration = controller.duration;
-      if (duration > Duration.zero) {
-        return (controller.position.inMilliseconds / duration.inMilliseconds)
-            .clamp(0.0, 1.0);
-      }
-    }
-    return episode.playbackProgress;
-  }
-}
-
-/// 季选择菜单(仅多季时显示)。
-class _SeasonPicker extends StatelessWidget {
-  const _SeasonPicker({required this.controller});
-
-  final PlayerController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final seasons = controller.seasons;
-    var current = seasons.first;
-    for (final season in seasons) {
-      if (season.id == controller.episodeSeasonId) {
-        current = season;
-        break;
-      }
-    }
-    return PopupMenuButton<String>(
-      key: const Key('player-season-picker'),
-      tooltip: AppLocalizations.of(context).seasons,
-      onSelected: (seasonId) {
-        unawaited(controller.selectSeason(seasonId));
-      },
-      initialValue: current.id,
-      constraints: () {
-        final viewport = MediaQuery.sizeOf(context);
-        final maxWidth = AppViewport.fit(280, viewport.width * 0.5, viewport);
-        final minWidth = AppViewport.dp(160, viewport);
-        return BoxConstraints(
-          minWidth: minWidth < maxWidth ? minWidth : maxWidth,
-          maxWidth: maxWidth,
-        );
-      }(),
-      padding: EdgeInsets.zero,
-      splashRadius: 20,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: AppViewport.dp(120, MediaQuery.sizeOf(context)),
-              ),
-              child: Text(
-                current.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelMedium,
-              ),
-            ),
-            const Icon(Icons.arrow_drop_down_rounded, size: 20),
-          ],
-        ),
-      ),
-      itemBuilder: (context) => [
-        for (final season in seasons)
-          PopupMenuItem(value: season.id, child: Text(season.name)),
-      ],
-    );
-  }
-}
-
-/// 单集行:16:9 缩略图 + 集号标题 + 时长/进度 + 简介,当前集高亮。
-/// 固定高度交给外层 [itemExtent],内部用 Flexible 吃掉多余文案,避免 ListTile 撑破。
-class _EpisodeRow extends StatefulWidget {
-  const _EpisodeRow({
-    required this.episode,
-    required this.isCurrent,
-    required this.progress,
-    required this.onTap,
-  });
-
-  static const thumbWidth = 128.0;
-  static const thumbHeight = thumbWidth * 9 / 16;
-
-  final MediaItem episode;
-  final bool isCurrent;
-  final double progress;
-  final VoidCallback onTap;
-
-  @override
-  State<_EpisodeRow> createState() => _EpisodeRowState();
-}
-
-class _EpisodeRowState extends State<_EpisodeRow> {
-  bool get _isCurrent => widget.isCurrent;
-  MediaItem get episode => widget.episode;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final number = episode.indexNumber;
-    final title = number == null ? episode.name : '$number. ${episode.name}';
-    final played = episode.userData.played;
-    final overview = _playerEpisodeOverview(episode.overview);
-    final meta = <String>[
-      ?runtimeLabel(l10n, episode),
-      if (_isCurrent) l10n.nowPlayingEpisode,
-      if (!_isCurrent && episode.canResume)
-        l10n.playbackProgress((widget.progress * 100).round()),
-    ];
-    return MouseRegion(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(
-              width: 3,
-              color: _isCurrent ? scheme.primary : Colors.transparent,
-            ),
-          ),
-        ),
-        child: Material(
-          color: _isCurrent
-              ? scheme.surfaceContainerHighest
-              : Colors.transparent,
-          child: InkWell(
-            key: Key('player-episode-${episode.id}'),
-            onTap: widget.onTap,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.sm,
-                AppSpacing.xs,
-                AppSpacing.sm,
-                AppSpacing.xs,
-              ),
-              child: Row(
-                children: [
-                  _EpisodeThumb(
-                    episode: episode,
-                    isCurrent: _isCurrent,
-                    played: played,
-                    progress: widget.progress,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: scheme.onSurface,
-                            fontWeight: _isCurrent
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                          ),
-                        ),
-                        if (meta.isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.xxs),
-                          Text(
-                            meta.join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: _isCurrent
-                                  ? scheme.primary
-                                  : scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                        if (overview != null) ...[
-                          const SizedBox(height: AppSpacing.xxs),
-                          Expanded(
-                            child: Text(
-                              overview,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurface.withValues(alpha: 0.72),
-                                height: 1.35,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// 保留为兼容旧测试构造的详情卡；剧集行不再挂载此悬停浮层。
-// ignore: unused_element
-class _EpisodeHoverCard extends StatelessWidget {
-  const _EpisodeHoverCard({
-    required this.episode,
-    required this.left,
-    required this.top,
-    required this.width,
-    required this.onPlay,
-    required this.onEnter,
-    required this.onExit,
-  });
-
-  final MediaItem episode;
-  final double left;
-  final double top;
-  final double width;
-  final VoidCallback onPlay;
-  final VoidCallback onEnter;
-  final VoidCallback onExit;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final number = episode.indexNumber;
-    final title = number == null ? episode.name : '$number. ${episode.name}';
-    final overview = _playerEpisodeOverview(episode.overview);
-    final meta = <String>[
-      ?seasonEpisodeCode(episode),
-      ?runtimeLabel(l10n, episode),
-      if (episode.productionYear != null && episode.productionYear! > 0)
-        '${episode.productionYear}',
-    ];
-    return Positioned(
-      left: left,
-      top: top,
-      child: MouseRegion(
-        onEnter: (_) => onEnter(),
-        onExit: (_) => onExit(),
-        child: Material(
-          color: scheme.surfaceContainerHigh,
-          elevation: 16,
-          shadowColor: Colors.black.withValues(alpha: 0.5),
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-            side: BorderSide(
-              color: Colors.white.withValues(alpha: AppGlass.edgeLight),
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SizedBox(
-            width: width,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                MediaImage(
-                  key: ValueKey('episode-hover-${episode.id}'),
-                  item: episode,
-                  width: width,
-                  height: width * 9 / 16,
-                  preferThumb: true,
-                  maxWidth: 640,
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (meta.isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          meta.join(' · '),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                      if (overview != null) ...[
-                        const SizedBox(height: AppSpacing.xs),
-                        // Overlay 中高度无界,Flexible 失效;
-                        // 固定上限避免长简介把卡片撑出屏幕。
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 148),
-                          child: SingleChildScrollView(
-                            child: Text(
-                              overview,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onSurface.withValues(alpha: 0.78),
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: AppSpacing.sm),
-                      FilledButton.icon(
-                        onPressed: onPlay,
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: Text(
-                          episode.canResume ? l10n.resumePlay : l10n.play,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EpisodeThumb extends StatelessWidget {
-  const _EpisodeThumb({
-    required this.episode,
-    required this.isCurrent,
-    required this.played,
-    required this.progress,
-  });
-
-  final MediaItem episode;
-  final bool isCurrent;
-  final bool played;
-  final double progress;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.sm),
-      child: SizedBox(
-        width: _EpisodeRow.thumbWidth,
-        height: _EpisodeRow.thumbHeight,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            RepaintBoundary(
-              child: MediaImage(
-                key: ValueKey(episode.id),
-                item: episode,
-                width: _EpisodeRow.thumbWidth,
-                height: _EpisodeRow.thumbHeight,
-                preferThumb: true,
-                maxWidth: 240,
-              ),
-            ),
-            if (isCurrent)
-              ColoredBox(
-                color: scheme.scrim.withValues(alpha: 0.42),
-                child: Icon(
-                  Icons.play_arrow_rounded,
-                  color: scheme.onSurface,
-                  size: 28,
-                ),
-              ),
-            if (played && !isCurrent)
-              Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.all(AppSpacing.xxs),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.scrim.withValues(alpha: 0.55),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(2),
-                      child: Icon(
-                        Icons.check_rounded,
-                        size: 14,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (progress > 0 && (isCurrent || episode.canResume))
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: _EpisodeProgressBar(value: progress),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EpisodeProgressBar extends StatelessWidget {
-  const _EpisodeProgressBar({required this.value});
-
-  final double value;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 3,
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.45),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: FractionallySizedBox(
-            widthFactor: value.clamp(0.0, 1.0),
-            child: ColoredBox(color: Theme.of(context).colorScheme.primary),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EpisodeRowSkeleton extends StatelessWidget {
-  const _EpisodeRowSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SkeletonBlock(
-            width: _EpisodeRow.thumbWidth,
-            height: _EpisodeRow.thumbHeight,
-          ),
-          SizedBox(width: AppSpacing.sm),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SkeletonBlock(width: 168, height: 14),
-              SizedBox(height: AppSpacing.xs),
-              SkeletonBlock(width: 88, height: 12),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String? _playerEpisodeOverview(String? raw) {
-  final text = raw?.trim();
-  if (text == null || text.isEmpty) {
-    return null;
-  }
-  final stripped = text
-      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
-      .replaceAll(RegExp(r'<[^>]+>'), '')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  return stripped.isEmpty ? null : stripped;
-}
-
-/// 惰性剧集列表:按固定行高 jumpTo 当前集,长季不必先构建第 1..N 行。
-class _EpisodeListView extends StatefulWidget {
-  const _EpisodeListView({
-    required this.episodes,
-    required this.currentId,
-    this.currentIndexNumber,
-    this.currentSeasonId,
-    required this.hasEarlier,
-    required this.hasMore,
-    required this.loadingEarlier,
-    required this.loadingMore,
-    required this.progressFor,
-    required this.onPlay,
-    required this.onLoadEarlier,
-    required this.onLoadMore,
-  });
-
-  final List<MediaItem> episodes;
-  final String currentId;
-
-  /// 当前集的集号与季 id;媒体库把同一集重复入库为多个条目时,
-  /// 列表里的条目 id 与播放中的 itemId 不同,按 id 匹配不到,
-  /// 需要按 季+集号 兜底定位与高亮。
-  final int? currentIndexNumber;
-  final String? currentSeasonId;
-  final bool hasEarlier;
-  final bool hasMore;
-  final bool loadingEarlier;
-  final bool loadingMore;
-  final double Function(MediaItem episode, bool isCurrent) progressFor;
-  final ValueChanged<MediaItem> onPlay;
-  final VoidCallback onLoadEarlier;
-  final VoidCallback onLoadMore;
-
-  bool isCurrentEpisode(MediaItem episode) {
-    if (episode.id == currentId) {
-      return true;
-    }
-    final indexNumber = currentIndexNumber;
-    final seasonId = currentSeasonId;
-    return indexNumber != null &&
-        episode.indexNumber == indexNumber &&
-        seasonId != null &&
-        seasonId.isNotEmpty &&
-        episode.seasonId == seasonId;
-  }
-
-  @override
-  State<_EpisodeListView> createState() => _EpisodeListViewState();
-}
-
-class _EpisodeListViewState extends State<_EpisodeListView> {
-  static const _estimatedViewport = 560.0;
-  static const _edgeExtent = kPlayerEpisodeRowExtent * 2;
-
-  late final ScrollController _scroll = ScrollController(
-    initialScrollOffset: _offsetFor(_estimatedViewport),
-  );
-
-  int get _currentIndex {
-    return widget.episodes.indexWhere(widget.isCurrentEpisode);
-  }
-
-  double _offsetFor(double viewport) {
-    return playerEpisodeListOffset(
-      index: _currentIndex < 0 ? 0 : _currentIndex,
-      itemCount: widget.episodes.length,
-      itemExtent: kPlayerEpisodeRowExtent,
-      viewport: viewport,
-    );
-  }
-
-  int _prependedCount(List<MediaItem> previous, List<MediaItem> next) {
-    if (previous.isEmpty || next.length <= previous.length) {
-      return 0;
-    }
-    final index = next.indexWhere((episode) => episode.id == previous.first.id);
-    return index > 0 ? index : 0;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _scroll.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _jumpToCurrent();
-      _maybeLoadEdges();
-    });
-  }
-
-  @override
-  void didUpdateWidget(_EpisodeListView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final prepended = _prependedCount(oldWidget.episodes, widget.episodes);
-    if (prepended > 0 && _scroll.hasClients) {
-      _scroll.position.correctBy(prepended * kPlayerEpisodeRowExtent);
-    }
-    final wasIn = oldWidget.episodes.any(oldWidget.isCurrentEpisode);
-    final isIn = widget.episodes.any(widget.isCurrentEpisode);
-    final shouldJump =
-        oldWidget.currentId != widget.currentId || (!wasIn && isIn);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (shouldJump) {
-        _jumpToCurrent();
-      }
-      _maybeLoadEdges();
-    });
-  }
-
-  void _onScroll() => _maybeLoadEdges();
-
-  void _maybeLoadEdges() {
-    if (!mounted || !_scroll.hasClients) {
-      return;
-    }
-    final position = _scroll.position;
-    if (widget.hasEarlier &&
-        !widget.loadingEarlier &&
-        position.pixels <= _edgeExtent) {
-      widget.onLoadEarlier();
-    }
-    if (widget.hasMore &&
-        !widget.loadingMore &&
-        position.pixels >= position.maxScrollExtent - _edgeExtent) {
-      widget.onLoadMore();
-    }
-  }
-
-  void _jumpToCurrent() {
-    if (!mounted || !_scroll.hasClients) {
-      return;
-    }
-    final viewport = _scroll.position.viewportDimension;
-    if (viewport <= 0) {
-      return;
-    }
-    final next = _offsetFor(viewport);
-    if ((next - _scroll.offset).abs() < 1) {
-      return;
-    }
-    _scroll.jumpTo(next);
-  }
-
-  @override
-  void dispose() {
-    _scroll.removeListener(_onScroll);
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scrollbar(
-      controller: _scroll,
-      child: ListView.builder(
-        key: const Key('player-episodes-list'),
-        controller: _scroll,
-        itemExtent: kPlayerEpisodeRowExtent,
-        itemCount: widget.episodes.length,
-        itemBuilder: (context, index) {
-          final episode = widget.episodes[index];
-          final isCurrent = widget.isCurrentEpisode(episode);
-          return ClipRect(
-            child: SizedBox(
-              height: kPlayerEpisodeRowExtent,
-              child: _EpisodeRow(
-                episode: episode,
-                isCurrent: isCurrent,
-                progress: widget.progressFor(episode, isCurrent),
-                onTap: () => widget.onPlay(episode),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -2280,7 +1476,7 @@ class _SeekTimeline extends StatelessWidget {
                   0.0,
                   1.0,
                 ));
-    return Row(
+    final timeline = Row(
       children: [
         Text(_clock(controller.position), style: _overlayTimeStyle(theme)),
         const SizedBox(width: AppSpacing.sm),
@@ -2313,6 +1509,18 @@ class _SeekTimeline extends StatelessWidget {
         ),
         const SizedBox(width: AppSpacing.sm),
         Text(_clock(controller.duration), style: _overlayTimeStyle(theme)),
+      ],
+    );
+    if (!playerShowsByteCache(controller.bufferSnapshot)) return timeline;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        BufferedByteCoverageBar(
+          key: const Key('player-byte-cache-track'),
+          coverage: controller.bufferSnapshot.byteCoverage,
+        ),
+        const SizedBox(height: 6),
+        timeline,
       ],
     );
   }
@@ -2348,8 +1556,33 @@ class _ControlsRow extends StatelessWidget {
               ? Icons.pause_rounded
               : Icons.play_arrow_rounded,
         ),
+        _PlayerIconButton(
+          key: const Key('player-rewind'),
+          tooltip: l10n.mobileRewind,
+          onPressed: () =>
+              unawaited(controller.seekRelative(const Duration(seconds: -10))),
+          icon: Icons.replay_10_rounded,
+        ),
+        _PlayerIconButton(
+          key: const Key('player-forward'),
+          tooltip: l10n.mobileForward,
+          onPressed: () =>
+              unawaited(controller.seekRelative(const Duration(seconds: 10))),
+          icon: Icons.forward_10_rounded,
+        ),
         _VolumeControl(controller: controller),
         const Spacer(),
+        if (controller.canBrowseEpisodes)
+          TextButton.icon(
+            key: const Key('player-episodes'),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              visualDensity: VisualDensity.compact,
+            ),
+            onPressed: onOpenEpisodes,
+            icon: const Icon(Icons.video_library_rounded, size: 22),
+            label: Text(l10n.playerEpisodes),
+          ),
         if (danmakuController != null && danmakuController.isConfigured)
           _DanmakuButton(
             danmaku: danmakuController,
@@ -2357,14 +1590,6 @@ class _ControlsRow extends StatelessWidget {
           ),
         if (controller.canConfigureSubtitles)
           SubtitleTrackMenu(controller: controller),
-        if (controller.canBrowseEpisodes)
-          _PlayerIconButton(
-            key: const Key('player-episodes'),
-            tooltip: l10n.playerEpisodes,
-            onPressed: onOpenEpisodes,
-            iconSize: 22,
-            icon: Icons.video_library_rounded,
-          ),
         PlaybackSettingsMenu(controller: controller),
         _PlayerIconButton(
           key: PlayerKeys.fullscreen,

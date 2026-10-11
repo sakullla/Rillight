@@ -106,7 +106,7 @@ int write_video_packets(AVFormatContext *format, AVCodecContext *encoder,
 
 Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = false,
                      int width = 320, int height = 180,
-                     const char *override_text = nullptr) {
+                     const char *override_text = nullptr, const char *secondary_text = nullptr) {
   AVFormatContext *format = nullptr;
   const bool mov_text = subtitle_codec == AV_CODEC_ID_MOV_TEXT;
   assert(avformat_alloc_output_context2(&format, nullptr,
@@ -170,6 +170,13 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
     std::memcpy(subtitle->codecpar->extradata, kAssHeader, header_size);
     subtitle->codecpar->extradata_size = static_cast<int>(header_size);
   }
+  AVStream *secondary = nullptr;
+  if (secondary_text) {
+    secondary = avformat_new_stream(format, nullptr);
+    assert(secondary);
+    secondary->time_base = subtitle->time_base;
+    assert(avcodec_parameters_copy(secondary->codecpar, subtitle->codecpar) == 0);
+  }
   assert(avformat_write_header(format, nullptr) == 0);
 
   const char *event = subtitle_codec == AV_CODEC_ID_ASS ?
@@ -190,6 +197,16 @@ Bytes make_ass_video(AVCodecID subtitle_codec = AV_CODEC_ID_ASS, bool hdr = fals
   subtitle_packet->duration = av_rescale_q(4000, {1, 1000}, subtitle->time_base);
   assert(av_interleaved_write_frame(format, subtitle_packet) == 0);
   av_packet_free(&subtitle_packet);
+  if (secondary) {
+    auto *packet = av_packet_alloc();
+    assert(packet && av_new_packet(packet, std::strlen(secondary_text)) == 0);
+    std::memcpy(packet->data, secondary_text, packet->size);
+    packet->stream_index = secondary->index;
+    packet->pts = packet->dts = 0;
+    packet->duration = av_rescale_q(4000, {1, 1000}, secondary->time_base);
+    assert(av_interleaved_write_frame(format, packet) == 0);
+    av_packet_free(&packet);
+  }
 
   AVFrame *frame = av_frame_alloc();
   assert(frame);
@@ -338,6 +355,9 @@ bool wait_for(RillightCore *core, Predicate predicate,
   return false;
 }
 struct InkBounds {
+  std::vector<int> line_widths;
+  std::vector<int> line_tops;
+  std::vector<int> line_lefts;
   int left = 100000, top = 100000, right = -1, bottom = -1;
   int height() const { return bottom - top + 1; }
   int width() const { return right - left + 1; }
@@ -362,11 +382,32 @@ InkBounds ink_bounds(const RillightCoreFrame *frame) {
       bounds.bottom = std::max(bounds.bottom, y + (plane ? overlay.y : 0));
     }
   }
+  bool in_line = false;
+  int line_width = 0, line_top = 0, line_left = 0;
+  for (int y = 0; y < height; ++y) {
+    int left = width, right = -1;
+    for (int x = 0; x < width; ++x) {
+      const auto *pixel = data + y * stride + x * 4;
+      if (pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180) {
+        left = std::min(left, x); right = x;
+      }
+    }
+    if (right >= left) {
+      if (!in_line) { line_top = y; line_left = left; }
+      in_line = true; line_width = std::max(line_width, right - left + 1);
+    } else if (in_line) {
+      bounds.line_widths.push_back(line_width);
+      bounds.line_tops.push_back(line_top);
+      bounds.line_lefts.push_back(line_left);
+      in_line = false; line_width = 0;
+    }
+  }
+  if (in_line) bounds.line_widths.push_back(line_width);
   return bounds;
 }
 
 InkBounds render_fixture(const char *text, AVCodecID codec, bool plane,
-                         bool original = false, double scale = 1) {
+                         bool original = false, double scale = 1, bool external = false) {
   Media media{};
   media.video = make_ass_video(codec, plane, 320, 180, text);
   RillightCoreIo io{&media, open, read, seek, close, cancel, cancel_media_io};
@@ -379,6 +420,28 @@ InkBounds render_fixture(const char *text, AVCodecID codec, bool plane,
   assert(rillight_core_open(core, "synthetic.mkv", 1) == 0);
   assert(rillight_core_set_playing(core, 0, 2) == 0);
   assert(wait_for(core, [](auto state) { return state.first_video_frame_ready; }));
+  if (external) {
+    std::string source;
+    const char *url;
+    if (codec == AV_CODEC_ID_ASS) {
+      // Fixtures use a standard ASS chunk prefix; retain authored payload verbatim.
+      const auto payload = std::string(text).substr(std::strlen("0,0,Default,,0,0,0,,"));
+      source = std::string(kAssHeader) + "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,," + payload + "\n";
+      media.external = text_bytes(source.c_str()); url = "external.ass";
+    } else if (codec == AV_CODEC_ID_SUBRIP) {
+      source = std::string("1\n00:00:00,000 --> 00:00:04,000\n") + text + "\n\n";
+      media.external_srt = text_bytes(source.c_str()); url = "external.srt";
+    } else {
+      source = std::string("WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n") + text + "\n\n";
+      media.external_vtt = text_bytes(source.c_str()); url = "external.vtt";
+    }
+    assert(rillight_core_add_external_subtitle(core, url, 3) == 0);
+    assert(wait_for(core, [](auto s) { return !s.external_subtitle_pending; }));
+    RillightCoreTrack track{}; track.struct_size = sizeof(track);
+    assert(rillight_core_get_track(core, 2, &track) == 0);
+    assert(rillight_core_select_subtitle(core, track.stream_index, 4) == 0);
+    assert(wait_for(core, [](auto s) { return s.first_video_frame_ready && !s.subtitle_selection_pending && s.state != RILLIGHT_CORE_RECOVERING; }));
+  }
   const auto state = snapshot(core);
   RillightCoreSubtitlePresentation p{sizeof(p), 1, 1, original ? 1 : 0,
       360, 202.5, 20, scale, 12, 8};
@@ -392,6 +455,82 @@ InkBounds render_fixture(const char *text, AVCodecID codec, bool plane,
   rillight_core_release_frame(frame);
   rillight_core_destroy(core);
   return bounds;
+}
+
+void explicit_lines_test() {
+  for (const auto codec : {AV_CODEC_ID_SUBRIP, AV_CODEC_ID_WEBVTT}) {
+    for (const char *separator : {"\n", "\r\n"}) {
+      for (const int count : {2, 3}) {
+        std::string text = "III";
+        for (int i = 1; i < count; ++i) text += std::string(separator) + std::string(3 + i * 4, 'I');
+        for (const bool external : {false, true})
+        for (double scale : {1.0, 1.5}) {
+          const auto ink = render_fixture(text.c_str(), codec, false, false, scale, external);
+          assert(ink.line_widths.size() == static_cast<size_t>(count));
+          for (int i = 1; i < count; ++i) assert(ink.line_widths[i] > ink.line_widths[i - 1]);
+        }
+      }
+    }
+  }
+  const auto ass = render_fixture("0,0,Default,,0,0,0,,III\\NIIIIIII\\NIIIIIIIIIII", AV_CODEC_ID_ASS, false, true);
+  assert(ass.line_widths.size() == 3);
+  assert(ass.line_widths[0] < ass.line_widths[1] && ass.line_widths[1] < ass.line_widths[2]);
+  const auto soft = render_fixture("0,0,Default,,0,0,0,,{\\q2}III\\nIIIIIII", AV_CODEC_ID_ASS, false, true);
+  const auto space = render_fixture("0,0,Default,,0,0,0,,{\\q0}III\\nIIIIIII", AV_CODEC_ID_ASS, false, true);
+  assert(soft.line_widths.size() == 2 && space.line_widths.size() == 1);
+  std::puts("Explicit LF/CRLF two/three lines and ASS hard breaks retain distinct ordered pixel bands");
+}
+
+void dual_subtitle_test(bool embedded) {
+  Media media{};
+  media.video = make_ass_video(AV_CODEC_ID_SUBRIP, false, 320, 180, "III", embedded ? "IIIIIII\nIIIIIIIIIII" : nullptr);
+  media.external_srt = text_bytes("1\r\n00:00:00,000 --> 00:00:04,000\r\nIIIIIII\r\nIIIIIIIIIII\r\n\r\n");
+  media.invalid_srt = text_bytes("invalid");
+  RillightCoreIo io{&media, open, read, seek, close, cancel, cancel_media_io};
+  auto *core = rillight_core_create(&io);
+  assert(rillight_core_open(core, "synthetic.mkv", 1) == 0);
+  assert(rillight_core_set_playing(core, 0, 2) == 0);
+  assert(wait_for(core, [](auto s) { return s.first_video_frame_ready; }));
+  const int primary = snapshot(core).subtitle_stream_index;
+  if (!embedded) {
+    assert(rillight_core_add_external_subtitle(core, "external.srt", 3) == 0);
+    assert(wait_for(core, [](auto s) { return !s.external_subtitle_pending; }));
+  }
+  RillightCoreTrack track{}; track.struct_size = sizeof(track);
+  assert(rillight_core_get_track(core, 2, &track) == 0);
+  const int secondary = track.stream_index;
+  assert(rillight_core_select_subtitle_slot(core, 1, secondary, 4) == 0);
+  assert(wait_for(core, [=](auto s) { return s.secondary_subtitle_stream_index == secondary && s.first_video_frame_ready && s.state != RILLIGHT_CORE_RECOVERING; }));
+  auto *frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+  assert(frame);
+  auto ink = ink_bounds(frame);
+  assert(ink.line_widths.size() == 3);
+  assert(ink.line_widths[0] > ink.line_widths[2] && ink.line_widths[1] > ink.line_widths[0]);
+  // Slot 1 plain text defaults to the top region; the primary cue stays low.
+  assert(ink.line_tops[1] < ink.line_tops[2]);
+  assert(ink.line_tops[0] < frame->height / 3);
+  assert(ink.line_tops[2] > frame->height / 2);
+  rillight_core_release_frame(frame);
+  assert(rillight_core_select_subtitle_slot(core, 0, secondary, 5) != 0);
+  assert(rillight_core_select_subtitle_slot(core, 1, 9999, 5) != 0);
+  assert(snapshot(core).subtitle_stream_index == primary);
+  assert(snapshot(core).secondary_subtitle_stream_index == secondary);
+  assert(rillight_core_add_external_subtitle(core, "invalid.srt", 5) == 0);
+  assert(wait_for(core, [](auto s) { return !s.external_subtitle_pending; }));
+  assert(snapshot(core).ffmpeg_error != 0);
+  assert(snapshot(core).secondary_subtitle_stream_index == secondary);
+  assert(rillight_core_seek(core, 1000000, 6) == 0);
+  assert(wait_for(core, [](auto s) { return s.first_video_frame_ready && s.state != RILLIGHT_CORE_RECOVERING; }));
+  frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+  assert(frame && ink_bounds(frame).line_widths.size() == 3);
+  rillight_core_release_frame(frame);
+  assert(rillight_core_select_subtitle(core, -1, 7) == 0);
+  frame = rillight_core_take_frame(core, RILLIGHT_CORE_VIDEO_RGBA);
+  assert(frame && ink_bounds(frame).line_widths.size() == 2);
+  rillight_core_release_frame(frame);
+  assert(snapshot(core).secondary_subtitle_stream_index == secondary);
+  rillight_core_destroy(core);
+  std::puts("Dual slot pixels, duplicate rejection, failed load rollback, seek and independent hide passed");
 }
 
 void layout_presentation_test() {
@@ -521,7 +660,7 @@ void presentation_test() {
 int main(int argc, char** argv) {
   assert(rillight_core_abi_version() == RILLIGHT_CORE_ABI_VERSION);
   if (argc > 1 && std::strcmp(argv[1], "--presentation") == 0) {
-    presentation_test(); layout_presentation_test(); ended_subtitle_redraw_test(); return 0;
+    presentation_test(); layout_presentation_test(); explicit_lines_test(); dual_subtitle_test(false); dual_subtitle_test(true); ended_subtitle_redraw_test(); return 0;
   }
   if (argc > 1 && std::strcmp(argv[1], "--mov-text-only") == 0) {
     Media media{};
@@ -554,7 +693,8 @@ int main(int argc, char** argv) {
     assert(after_disable.first_video_frame_ready);
     assert(after_disable.state != RILLIGHT_CORE_RECOVERING);
     assert(wait_for(core, [](const auto& state) {
-      return state.subtitle_stream_index == -1 && state.first_video_frame_ready;
+      return state.subtitle_stream_index == -1 && !state.subtitle_selection_pending &&
+             state.first_video_frame_ready;
     }));
     assert(rillight_core_select_subtitle(core, selected, 3) == 0);
     assert(wait_for(core, [selected](const auto& state) {
@@ -837,6 +977,7 @@ int main(int argc, char** argv) {
     assert(rillight_core_select_subtitle(core, -1, 2) == 0);
     assert(wait_for(core, [](const auto &state) {
       return state.subtitle_stream_index == -1 &&
+             !state.subtitle_selection_pending &&
              state.first_video_frame_ready && state.state != RILLIGHT_CORE_FAILED;
     }));
     assert(rillight_core_select_subtitle(core, text_track.stream_index, 3) == 0);

@@ -430,6 +430,7 @@ class JellyfinClient extends MediaServerClient
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.gridFields,
     String imageTypes = MediaServerClient.imageTypes,
   }) => _page('Items', {
@@ -444,6 +445,7 @@ class JellyfinClient extends MediaServerClient
     'filters': filters?.join(','),
     'genres': genres?.join('|'),
     'years': years?.join(','),
+    'personIds': personIds?.join(','),
     'fields': _detailFields,
     'enableUserData': true,
     'enableTotalRecordCount': true,
@@ -461,6 +463,7 @@ class JellyfinClient extends MediaServerClient
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = MediaServerClient.itemFields,
   }) async => (await queryItems(
     parentId: parentId,
@@ -474,6 +477,7 @@ class JellyfinClient extends MediaServerClient
     filters: filters,
     genres: genres,
     years: years,
+    personIds: personIds,
     fields: fields,
   )).items;
   @override

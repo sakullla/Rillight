@@ -708,7 +708,9 @@
     "id": "player-episode-list",
     "feature": "player",
     "platforms": [
-      "desktop"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
@@ -836,7 +838,9 @@
     "id": "player-season-picker",
     "feature": "player",
     "platforms": [
-      "desktop"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
@@ -1703,5 +1707,25 @@
       "phone",
       "tv"
     ]
+  },
+  {
+    "id": "person-loading",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
+    "id": "person-works",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
+    "id": "person-empty",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
+    "id": "person-error",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
   }
 ]

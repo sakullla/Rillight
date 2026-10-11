@@ -492,6 +492,43 @@ void main() {
     expect(server.requests.last, contains('Years=1994'));
   });
 
+  test('queryItems sends PersonIds and omits ParentId when absent', () async {
+    final emby = client();
+    final auth = await emby.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: server.serverId,
+    );
+    emby.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: auth.accessToken,
+      userId: auth.user.id,
+    );
+
+    await emby.queryItems(
+      personIds: const ['person-ada', ' person-bob '],
+      includeItemTypes: 'Movie,Series',
+      recursive: true,
+      limit: 60,
+      sortBy: 'PremiereDate',
+      sortOrder: 'Descending',
+    );
+    final request = server.requests.last;
+    expect(request, contains('PersonIds=person-ada%2Cperson-bob'));
+    expect(request, contains('IncludeItemTypes=Movie%2CSeries'));
+    expect(request, contains('SortBy=PremiereDate'));
+    expect(request, contains('SortOrder=Descending'));
+    expect(request, contains('Recursive=true'));
+    expect(request, isNot(contains('ParentId=')));
+    expect(request, isNot(contains('PersonTypes')));
+    expect(request, isNot(contains('People')));
+
+    await emby.queryItems(parentId: 'view-movies', recursive: true);
+    expect(server.requests.last, isNot(contains('PersonIds=')));
+    expect(server.requests.last, contains('ParentId=view-movies'));
+  });
+
   test('fromJson parses PremiereDate, DateCreated and People', () {
     final item = decodeEmbyMediaItem({
       'Id': 'ep-1',

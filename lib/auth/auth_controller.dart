@@ -12,6 +12,7 @@ import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/auth/server_import_models.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -320,6 +321,10 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (last.identityPending) {
+      await switchTo(last.id);
+      return;
+    }
     try {
       await _activate(last, stored, generation: generation);
     } catch (error) {
@@ -368,11 +373,19 @@ class AuthController extends ChangeNotifier {
       _requireActivation(generation);
       final existing = _savedServers
           .where(
-            (s) =>
-                s.serviceType == client.serviceType &&
-                (s.verifiedServerId ?? s.id) == publicInfo.id,
+            (server) =>
+                server.serviceType == client.serviceType &&
+                server.username == username &&
+                (server.expectedServerId == publicInfo.id ||
+                    server.lines.any(
+                      (line) => normalizeServerAddress(line.address) == baseUrl,
+                    )),
           )
           .firstOrNull;
+      if (existing?.expectedServerId != null &&
+          existing!.expectedServerId != publicInfo.id) {
+        throw StateError('Server identity mismatch');
+      }
       final configuredId = existing?.id ?? 'source-${generateDeviceId()}';
       final credentialCommit = await sources.beginOrdinaryCredentials(
         configuredId,
@@ -402,7 +415,11 @@ class AuthController extends ChangeNotifier {
         username: username,
         password: password.isEmpty ? null : password,
       );
-      await sources.commitOrdinaryCredentials(credentialCommit, stored);
+      await sources.commitOrdinaryCredentials(
+        credentialCommit,
+        stored,
+        verifiedServerId: publicInfo.id,
+      );
       _requireActivation(generation);
       await _upsertServer(server);
       _requireActivation(generation);
@@ -547,11 +564,32 @@ class AuthController extends ChangeNotifier {
         return;
       }
     }
-    final server =
+    var server =
         (requestedLineId != null && requestedLineId != found.activeLineId)
         ? found.copyWith(activeLineId: requestedLineId)
         : found;
-    final stored = await credentials.read(serverId);
+    var stored = await credentials.read(serverId);
+    if (!_ownsActivation(generation)) return;
+    guard?.call();
+    if (server.identityPending) {
+      try {
+        await sources.authenticate(serverId, lineId: requestedLineId);
+        if (!_ownsActivation(generation)) return;
+        guard?.call();
+        await reloadSavedServers();
+        if (!_ownsActivation(generation)) return;
+        server = _serverById(serverId)!.copyWith(activeLineId: requestedLineId);
+        stored = await credentials.read(serverId);
+      } catch (_) {
+        if (!_ownsActivation(generation)) return;
+        _prefill = server;
+        _failure = const MediaServerException(
+          MediaServerFailureKind.invalidCredentials,
+        );
+        notifyListeners();
+        return;
+      }
+    }
     if (!_ownsActivation(generation)) return;
     guard?.call();
     final sameServer = _session?.server.id == serverId;
@@ -565,7 +603,7 @@ class AuthController extends ChangeNotifier {
         String detail;
         try {
           final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
-          if (info.id != (server.verifiedServerId ?? server.id)) {
+          if (info.id != server.expectedServerId) {
             detail = '线路返回的服务器身份与当前服务器不一致';
           } else {
             detail = '';
@@ -631,6 +669,23 @@ class AuthController extends ChangeNotifier {
     _prefill = server;
     _failure = null;
     notifyListeners();
+  }
+
+  /// Refresh the ordinary projection without restoring or selecting a session.
+  Future<void> reloadSavedServers() async {
+    final snapshot = await servers.load();
+    _savedServers = snapshot.servers;
+    _rememberedServerId = snapshot.lastServerId;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<ServerImportResult> importServers(
+    Iterable<ServerImportDraft> drafts, {
+    AccessRegion region = AccessRegion.ordinary,
+  }) async {
+    final result = await sources.importServers(drafts, region: region);
+    await reloadSavedServers();
+    return result;
   }
 
   /// 给当前已登录服务器追加备用线路,不切换正在使用的地址。
@@ -1254,8 +1309,8 @@ class AuthController extends ChangeNotifier {
       for (final item in _savedServers) item.id == server.id ? server : item,
       if (!exists) server,
     ];
-    _savedServers = next;
     await servers.save(ServerListSnapshot(servers: next, lastServerId: lastId));
+    _savedServers = next;
     _rememberedServerId = lastId;
   }
 
@@ -1278,11 +1333,13 @@ class AuthController extends ChangeNotifier {
         return false;
       }
       selectedClient.setUserAgent(session.server.normalizedUserAgent);
+      final verifiedServerId = session.server.expectedServerId;
+      if (verifiedServerId == null) return false;
       final auth = await selectedClient.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
         password: password,
-        serverId: session.server.verifiedServerId ?? session.server.id,
+        serverId: verifiedServerId,
       );
       final next = StoredCredentials(
         serviceType: stored.serviceType,
