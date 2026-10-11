@@ -341,4 +341,56 @@ void main() {
       Brightness.light,
     );
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('window caption colors follow the page theme', (tester) async {
+    const channel = MethodChannel('com.rillight/window');
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    int byteOf(Color color, int shift) => (color.toARGB32() >> shift) & 0xFF;
+
+    void expectTone(MethodCall call, Tones tones, {required bool dark}) {
+      expect(call.method, 'setCaptionColors');
+      final args = call.arguments as Map;
+      expect(args['dark'], dark);
+      expect(args['captionRed'], byteOf(tones.base, 16));
+      expect(args['captionGreen'], byteOf(tones.base, 8));
+      expect(args['captionBlue'], byteOf(tones.base, 0));
+      expect(args['symbolRed'], byteOf(tones.onSurface, 16));
+      expect(args['symbolGreen'], byteOf(tones.onSurface, 8));
+      expect(args['symbolBlue'], byteOf(tones.onSurface, 0));
+    }
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: WindowChromeHost(
+          brightness: Brightness.light,
+          child: SizedBox.expand(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(calls, hasLength(1));
+    expectTone(calls.single, AppTheme.lightTones, dark: false);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: WindowChromeHost(
+          brightness: Brightness.dark,
+          child: SizedBox.expand(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(calls, hasLength(2));
+    expectTone(calls.last, AppTheme.darkTones, dark: true);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

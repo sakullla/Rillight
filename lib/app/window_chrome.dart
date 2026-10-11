@@ -4,9 +4,42 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/product.dart';
+import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/window_geometry.dart';
 import 'package:window_manager/window_manager.dart';
+
+/// 主窗口标题栏颜色。播放进程不走这条通道。
+const MethodChannel _kWindowCaptionChannel = MethodChannel(
+  'com.rillight/window',
+);
+
+int _colorByte(Color color, int shift) => (color.toARGB32() >> shift) & 0xFF;
+
+/// 把页面色和符号色交给 runner。Windows 11 会在标题按钮上盖一块不透明底,
+/// 浅色页面上就是右上角那块白。底由原生去掉,边框跟页面走。
+Future<void> _publishWindowsCaptionColors(Brightness brightness) async {
+  if (defaultTargetPlatform != TargetPlatform.windows) {
+    return;
+  }
+  final (page, symbol) = AppTheme.windowChromeColors(brightness);
+  try {
+    await _kWindowCaptionChannel.invokeMethod<void>('setCaptionColors', {
+      'dark': brightness == Brightness.dark,
+      'captionRed': _colorByte(page, 16),
+      'captionGreen': _colorByte(page, 8),
+      'captionBlue': _colorByte(page, 0),
+      'symbolRed': _colorByte(symbol, 16),
+      'symbolGreen': _colorByte(symbol, 8),
+      'symbolBlue': _colorByte(symbol, 0),
+    });
+  } on MissingPluginException {
+    // 组件测试和尚未接上 runner 的宿主没有这条通道。
+  } on PlatformException {
+    // 颜色没写上时仍保留 Flutter 画的符号,不打断界面。
+  }
+}
 
 /// 顶栏铬高度,与 window_manager [kWindowCaptionHeight] 对齐。
 const double kWindowChromeHeight = kWindowCaptionHeight;
@@ -214,6 +247,28 @@ class WindowChromeHost extends StatefulWidget {
 class _WindowChromeHostState extends State<WindowChromeHost> {
   Offset? _pointerDown;
   bool _dragging = false;
+  Brightness? _captionBrightness;
+
+  void _publishCaptionColors() {
+    final brightness = widget.brightness ?? Theme.of(context).brightness;
+    if (_captionBrightness == brightness) {
+      return;
+    }
+    _captionBrightness = brightness;
+    _publishWindowsCaptionColors(brightness);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _publishCaptionColors();
+  }
+
+  @override
+  void didUpdateWidget(WindowChromeHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _publishCaptionColors();
+  }
 
   bool _inDragZone(Offset position, double width) {
     if (position.dy > kWindowChromeHeight) {

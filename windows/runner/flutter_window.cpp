@@ -1,10 +1,27 @@
 #include "flutter_window.h"
 
+#include <flutter/encodable_value.h>
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
+
 #include <dwmapi.h>
 #include <optional>
 #include <windowsx.h>
 
 #include "flutter/generated_plugin_registrant.h"
+
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+#ifndef DWMWA_COLOR_NONE
+#define DWMWA_COLOR_NONE 0xFFFFFFFE
+#endif
 
 namespace {
 
@@ -67,6 +84,33 @@ LRESULT CaptionButtonHitTest(HWND hwnd, LPARAM lparam) {
   return HTMINBUTTON;
 }
 
+int ChannelInt(const flutter::EncodableMap& map, const char* key) {
+  const auto it = map.find(flutter::EncodableValue(key));
+  if (it == map.end()) {
+    return -1;
+  }
+  const std::optional<int64_t> value = it->second.TryGetLongValue();
+  if (!value.has_value() || *value < 0 || *value > 255) {
+    return -1;
+  }
+  return static_cast<int>(*value);
+}
+
+bool ChannelColor(const flutter::EncodableMap& map,
+                  const char* red_key,
+                  const char* green_key,
+                  const char* blue_key,
+                  COLORREF* out) {
+  const int red = ChannelInt(map, red_key);
+  const int green = ChannelInt(map, green_key);
+  const int blue = ChannelInt(map, blue_key);
+  if (red < 0 || green < 0 || blue < 0) {
+    return false;
+  }
+  *out = RGB(red, green, blue);
+  return true;
+}
+
 LRESULT CALLBACK FlutterViewWndProc(HWND hwnd,
                                     UINT message,
                                     WPARAM wparam,
@@ -124,6 +168,52 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  if (native_caption_buttons_) {
+    caption_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(), "com.rillight/window",
+            &flutter::StandardMethodCodec::GetInstance());
+    caption_channel_->SetMethodCallHandler(
+        [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+               std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                   result) {
+          if (call.method_name() != "setCaptionColors") {
+            result->NotImplemented();
+            return;
+          }
+          const auto* args_value = call.arguments();
+          if (args_value == nullptr ||
+              !std::holds_alternative<flutter::EncodableMap>(*args_value)) {
+            result->Error("bad_args", "setCaptionColors expects a map");
+            return;
+          }
+          const auto& args = std::get<flutter::EncodableMap>(*args_value);
+          const auto dark_it = args.find(flutter::EncodableValue("dark"));
+          if (dark_it == args.end() ||
+              !std::holds_alternative<bool>(dark_it->second)) {
+            result->Error("bad_args", "dark must be a bool");
+            return;
+          }
+          COLORREF border = 0;
+          COLORREF symbol = 0;
+          if (!ChannelColor(args, "captionRed", "captionGreen", "captionBlue",
+                            &border) ||
+              !ChannelColor(args, "symbolRed", "symbolGreen", "symbolBlue",
+                            &symbol)) {
+            result->Error("bad_args", "caption and symbol colors are 0-255");
+            return;
+          }
+          caption_dark_ = std::get<bool>(dark_it->second);
+          caption_border_ = border;
+          caption_symbol_ = symbol;
+          caption_colors_set_ = true;
+          ApplyCaptionChrome();
+          result->Success();
+        });
+    // Title-bar style is applied later from Dart and can restore the default
+    // white plate. Clear it now, then again once the theme colors arrive.
+    SuppressCaptionPlate();
+  }
   HWND flutter_view = flutter_controller_->view()->GetNativeWindow();
   SetChildContent(flutter_view);
 
@@ -146,7 +236,38 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::SuppressCaptionPlate() noexcept {
+  const HWND hwnd = GetHandle();
+  if (!hwnd || !native_caption_buttons_) {
+    return;
+  }
+  // HTMINBUTTON/HTMAXBUTTON/HTCLOSE make Windows 11 paint an opaque caption
+  // plate over the client area. Matching the page color still hides the
+  // Flutter glyphs, so the plate must not be rendered.
+  const COLORREF caption = DWMWA_COLOR_NONE;
+  DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
+}
+
+void FlutterWindow::ApplyCaptionChrome() noexcept {
+  const HWND hwnd = GetHandle();
+  if (!hwnd || !native_caption_buttons_ || !caption_colors_set_) {
+    return;
+  }
+  const BOOL dark = caption_dark_ ? TRUE : FALSE;
+  DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark,
+                        sizeof(dark));
+  SuppressCaptionPlate();
+  DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &caption_symbol_,
+                        sizeof(caption_symbol_));
+  DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &caption_border_,
+                        sizeof(caption_border_));
+}
+
 void FlutterWindow::OnDestroy() {
+  if (caption_channel_) {
+    caption_channel_->SetMethodCallHandler(nullptr);
+    caption_channel_.reset();
+  }
   if (flutter_view_hwnd_ && g_original_flutter_view_proc) {
     auto current = reinterpret_cast<WNDPROC>(
         GetWindowLongPtr(flutter_view_hwnd_, GWLP_WNDPROC));
@@ -216,5 +337,17 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       break;
   }
 
-  return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+  const LRESULT handled =
+      Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+  // UpdateTheme follows the system app theme and can put a white plate or
+  // white symbols back over a light page. Re-apply the app's own colors.
+  if (native_caption_buttons_ &&
+      (message == WM_DWMCOLORIZATIONCOLORCHANGED || message == WM_ACTIVATE)) {
+    if (caption_colors_set_) {
+      ApplyCaptionChrome();
+    } else if (message == WM_DWMCOLORIZATIONCOLORCHANGED) {
+      SuppressCaptionPlate();
+    }
+  }
+  return handled;
 }

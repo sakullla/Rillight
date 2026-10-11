@@ -111,9 +111,9 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
     final expand = widget.expand;
-    // 桌面/TV 的按钮压在深色遮罩上,前景固定白;手机版式落在页面底色上,
-    // 跟随主题取色。
-    final onScrim = !expand;
+    // 深色桌面/TV 的按钮压在遮罩上,前景固定白。浅色桌面/TV 落在纸色说明卡上,
+    // 播放用强调色,详情用描边。手机版式两种主题都跟随页面底色。
+    final onScrim = !expand && scheme.brightness != Brightness.light;
     final play = FilledButton.icon(
       key: ValueKey('hero-resume-${widget.item.id}'),
       onPressed: _opening ? null : _resume,
@@ -134,27 +134,41 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
       ),
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 48),
-        backgroundColor: onScrim ? Colors.white : null,
-        foregroundColor: onScrim ? Colors.black : null,
+        backgroundColor: onScrim
+            ? Colors.white
+            : expand
+            ? null
+            : scheme.primary,
+        foregroundColor: onScrim
+            ? Colors.black
+            : expand
+            ? null
+            : scheme.onPrimary,
       ),
     );
-    final details = onScrim
-        ? OutlinedButton(
-            onPressed: widget.onDetails,
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 48),
-              foregroundColor: Colors.white,
-              backgroundColor: Colors.white.withValues(alpha: .16),
-              side: BorderSide(color: Colors.white.withValues(alpha: .28)),
-            ),
-            child: Text(l10n.details),
-          )
-        : FilledButton.tonal(
+    final details = expand
+        ? FilledButton.tonal(
             onPressed: widget.onDetails,
             style: FilledButton.styleFrom(
               minimumSize: const Size(0, 48),
               backgroundColor: scheme.surfaceContainerHighest,
               foregroundColor: scheme.onSurface,
+            ),
+            child: Text(l10n.details),
+          )
+        : OutlinedButton(
+            onPressed: widget.onDetails,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 48),
+              foregroundColor: onScrim ? Colors.white : scheme.onSurface,
+              backgroundColor: onScrim
+                  ? Colors.white.withValues(alpha: .16)
+                  : scheme.surfaceContainerLowest,
+              side: BorderSide(
+                color: onScrim
+                    ? Colors.white.withValues(alpha: .28)
+                    : scheme.outline,
+              ),
             ),
             child: Text(l10n.details),
           );

@@ -11,7 +11,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
-import 'package:rillight/app/widgets/scrim_icon_button.dart';
+import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'helpers/synthetic_source_fixture.dart';
@@ -417,24 +417,21 @@ void main() {
 
         final back = find.byKey(CatalogKeys.back);
         expect(back, findsOneWidget);
-        final button = tester.widget<ScrimIconButton>(back);
+        final button = tester.widget<DesktopBackButton>(
+          find.byType(DesktopBackButton),
+        );
         final expectedTooltip = MaterialLocalizations.of(
           tester.element(back),
         ).backButtonTooltip;
         expect(button.tooltip, expectedTooltip);
+        expect(button.label, '返回');
         expect(find.byTooltip(expectedTooltip), findsOneWidget);
         expect(
-          find.descendant(of: back, matching: find.byType(IconButton)),
+          find.descendant(of: back, matching: find.text('返回')),
           findsOneWidget,
         );
-        expect(
-          find.descendant(
-            of: find.byKey(AppShell.topBarKey),
-            matching: find.byType(ScrimIconButton),
-          ),
-          findsOneWidget,
-        );
-        expect(tester.getSize(back), const Size(40, 40));
+        expect(tester.getSize(back).height, 36);
+        expect(tester.getSize(back).width, greaterThan(36));
         expect(
           find.descendant(
             of: find.byKey(AppShell.topBarKey),

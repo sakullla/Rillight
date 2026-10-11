@@ -1206,6 +1206,7 @@ class _EpisodeThumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
     final showProgress = progress > 0 && !played;
     return SizedBox(
       width: width,
@@ -1255,19 +1256,23 @@ class _EpisodeThumb extends StatelessWidget {
                 Center(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: .42),
+                      color: light
+                          ? scheme.primary
+                          : Colors.black.withValues(alpha: .42),
                       shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: .85),
-                        width: 1.5,
-                      ),
+                      border: light
+                          ? null
+                          : Border.all(
+                              color: Colors.white.withValues(alpha: .85),
+                              width: 1.5,
+                            ),
                     ),
-                    child: const Padding(
-                      padding: EdgeInsets.all(6),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
                       child: Icon(
                         Icons.play_arrow_rounded,
-                        key: Key('phone-episode-current'),
-                        color: Colors.white,
+                        key: const Key('phone-episode-current'),
+                        color: light ? scheme.onPrimary : Colors.white,
                         size: 24,
                       ),
                     ),
