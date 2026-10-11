@@ -915,6 +915,87 @@ void main() {
     },
   );
 
+  for (final deletedId in ['a', 'b']) {
+    test(
+      'delete $deletedId after durable revocation clears only its selected session when cleanup fails',
+      () async {
+        final a = source('a', MediaServerType.emby);
+        final b = source('b', MediaServerType.emby);
+        final values = {
+          'rillight.emby.v1.a': jsonEncode(credential(a).toJson()),
+          'rillight.emby.v1.b': jsonEncode(credential(b).toJson()),
+        };
+        final credentials = SecureCredentialStore(
+          fallback: MemoryCredentialStore(),
+          readSecure: (key) async => values[key],
+          writeSecure: (key, value) async {
+            values[key] = value;
+          },
+          deleteSecure: (key) async {
+            if (key == 'rillight.emby.v1.$deletedId') {
+              throw const OSError('synthetic cleanup failure');
+            }
+            values.remove(key);
+          },
+        );
+        final store = MemoryServerListStore(
+          ServerListSnapshot(servers: [a, b], lastServerId: 'a'),
+        );
+        final registry = SourceSessionRegistry(
+          access: RegionAccessController(),
+          store: store,
+          credentials: credentials,
+          createClient: () => IdentityClient(MediaServerType.emby),
+        );
+        final client = IdentityClient(MediaServerType.emby);
+        final auth = AuthController(
+          client: client,
+          credentials: credentials,
+          servers: store,
+          sources: registry,
+        );
+        addTearDown(auth.dispose);
+        await auth.restore();
+        await auth.loadLibraryCounts();
+        final bPermit = registry.permit(
+          (await registry.authenticate('b')).account,
+        );
+        final notifiedSessions = <String?>[];
+        auth.addListener(() => notifiedSessions.add(auth.session?.server.id));
+        await expectLater(
+          auth.deleteServer(deletedId),
+          throwsA(isA<CredentialRevocationException>()),
+        );
+        expect(await credentials.read(deletedId), isNull);
+        if (deletedId == 'a') {
+          expect(auth.isLoggedIn, isFalse);
+          expect(client.hasSession, isFalse);
+          expect(client.accessToken, isNull);
+          expect(auth.libraryCounts, isNull);
+          expect(auth.libraryCountsServerId, isNull);
+          expect(auth.failure, isNotNull);
+          expect(notifiedSessions, contains(null));
+          expect(bPermit.isValid, isTrue);
+          expect(
+            (await credentials.read('b'))!.accessToken,
+            credential(b).accessToken,
+          );
+        } else {
+          expect(auth.session!.server.id, 'a');
+          expect(client.accessToken, credential(a).accessToken);
+          expect(auth.libraryCounts, isNotNull);
+          expect(bPermit.isValid, isFalse);
+          expect(
+            (await credentials.read('a'))!.accessToken,
+            credential(a).accessToken,
+          );
+        }
+        // Configuration stays available for retry when credential cleanup failed.
+        expect((await store.load()).servers.map((s) => s.id), ['a', 'b']);
+      },
+    );
+  }
+
   test(
     'cancelled authorization discards the verifier result before publishing a session',
     () async {

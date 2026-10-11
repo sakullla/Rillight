@@ -679,7 +679,29 @@ class AuthController extends ChangeNotifier {
         if (item.id != serverId) item,
     ];
     final credentialCommit = await sources.beginOrdinaryCredentials(serverId);
-    await sources.commitOrdinaryCredentials(credentialCommit, null);
+    try {
+      await sources.commitOrdinaryCredentials(credentialCommit, null);
+    } on CredentialRevocationException catch (error) {
+      // The durable credential is already revoked even when old-key cleanup
+      // failed. Do not leave the selected client authenticated or restore it.
+      // Check the live selection: another source may have been selected during IO.
+      if (_session?.server.id == serverId) {
+        _session = null;
+        client.clearSession();
+        _failure = MediaServerException(
+          MediaServerFailureKind.unknown,
+          detail: error.toString(),
+          cause: error,
+        );
+        _lineSwitchFailure = null;
+        connectDraft = null;
+        _resetLibraryCounts();
+      }
+      if (_prefill?.id == serverId) _prefill = null;
+      if (_rememberedServerId == serverId) _rememberedServerId = null;
+      if (!_disposed) notifyListeners();
+      rethrow;
+    }
     _savedServers = next;
     // 删除的是当前服务器时不再保留 lastServerId,避免下次启动凭空预选。
     final lastId = (current != null && current != serverId) ? current : null;
