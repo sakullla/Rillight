@@ -2272,6 +2272,48 @@ int64_t media_pts_us(const RillightCoreImpl *core, int64_t pts_us) {
   return pts_us - core->media_origin_us;
 }
 
+// format->start_time is often unset for HLS/MPEG-TS. A stream start still
+// names the same absolute clock the packet PTS uses.
+int64_t container_origin_us(const AVFormatContext *format) {
+  if (!format) return 0;
+  if (format->start_time != AV_NOPTS_VALUE && format->start_time > 0)
+    return format->start_time;
+  int64_t origin = 0;
+  for (unsigned int index = 0; index < format->nb_streams; ++index) {
+    const AVStream *stream = format->streams[index];
+    if (!stream || stream->start_time == AV_NOPTS_VALUE ||
+        stream->start_time <= 0)
+      continue;
+    const int64_t us = av_rescale_q(
+        stream->start_time, stream->time_base, AVRational{1, 1000000});
+    if (us > 0 && (origin == 0 || us < origin)) origin = us;
+  }
+  return origin;
+}
+
+// Samples more than a few seconds past the program are still on the MPEG-TS
+// clock. Adopting one as base_position jumps the seek bar to the end and,
+// once that adoption is refused, the picture is never released.
+constexpr int64_t kAbsolutePtsSlackUs = 5LL * 1000000;
+
+void rebase_absolute_program_pts(RillightCoreImpl *core,
+                                 RillightCoreFrame *frame) {
+  const int64_t pts = frame->pts_us;
+  const int64_t duration = core->duration;
+  if (pts < 0 || duration <= 0 || pts <= duration + kAbsolutePtsSlackUs)
+    return;
+  if (core->media_origin_us <= 0) {
+    // A resume seek is already past the program start. That picture is not
+    // the origin. From-zero playback, including transcode HLS, is.
+    if (core->presentation_floor_us > 0) return;
+    core->media_origin_us = pts;
+    frame->pts_us = 0;
+    return;
+  }
+  if (pts + duration >= core->media_origin_us)
+    frame->pts_us = pts - core->media_origin_us;
+}
+
 RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
                                  uint64_t session, uint64_t timeline,
                                  const AVStream *stream,
@@ -2742,6 +2784,7 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
              int video_index, uint64_t timeline) {
   if (!frame) return 0;
   std::unique_lock lock(core->mutex);
+  rebase_absolute_program_pts(core, frame);
   const bool audio = rillight_core_frame_is_audio(frame->type);
   auto &queue = audio ? core->audio : core->video;
   auto &bytes = audio ? core->audio_bytes : core->video_bytes;
@@ -3879,9 +3922,7 @@ void run(RillightCoreImpl *core, uint64_t session) {
         ? format->streams[audio.stream]->id : -1;
     core->subtitle_index = subtitle.stream;
     core->duration = format->duration == AV_NOPTS_VALUE ? -1 : format->duration;
-    core->media_origin_us =
-        format->start_time != AV_NOPTS_VALUE && format->start_time > 0
-            ? format->start_time : 0;
+    core->media_origin_us = container_origin_us(format);
     core->tracks.clear();
 #if RILLIGHT_HAVE_LIBASS
     core->embedded_stream_count = format->nb_streams;
@@ -4128,9 +4169,12 @@ void run(RillightCoreImpl *core, uint64_t session) {
       }
       pending_packets.Clear();
       int64_t seek_ts = seek;
-      if (format->start_time != AV_NOPTS_VALUE && format->start_time > 0 &&
-          seek <= std::numeric_limits<int64_t>::max() - format->start_time) {
-        seek_ts = seek + format->start_time;
+      const int64_t origin = core->media_origin_us > 0
+          ? core->media_origin_us
+          : container_origin_us(format);
+      if (origin > 0 &&
+          seek <= std::numeric_limits<int64_t>::max() - origin) {
+        seek_ts = seek + origin;
       }
       result = av_seek_frame(format, -1, seek_ts, AVSEEK_FLAG_BACKWARD);
       {

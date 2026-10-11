@@ -1151,6 +1151,41 @@ void main() {
     },
   );
 
+  test('extensionless HLS children keep a multimedia suffix', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    upstream.listen((request) async {
+      request.response.headers.contentType = ContentType(
+        'application',
+        'vnd.apple.mpegurl',
+      );
+      request.response.write(
+        '#EXTM3U\n#EXT-X-MAP:URI="init"\n#EXTINF:2,\nseg/1\n#EXT-X-ENDLIST\n',
+      );
+      await request.response.close();
+    });
+    try {
+      final playlist = await (await client.getUrl(
+        proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/live/playlist'),
+          role: PlaybackResourceRole.playlist,
+        ),
+      )).close().then((response) => response.transform(utf8.decoder).join());
+      final lines = playlist.split('\n');
+      final map = RegExp('URI="([^"]+)"').firstMatch(playlist)![1]!;
+      expect(Uri.parse(map).path, endsWith('/init.mp4'));
+      final segment = lines
+          .map((line) => line.trim())
+          .firstWhere((line) => line.startsWith('http://'));
+      expect(Uri.parse(segment).path, endsWith('/segment.ts'));
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  });
+
   test(
     'HLS parallel 403 disables speculation without expiring playback',
     () async {

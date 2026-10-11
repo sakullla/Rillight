@@ -60,6 +60,8 @@ void main() {
     );
     expect(video['Container'], contains('mkv'));
     expect(video['Container'], contains('mp4'));
+    expect(video['Container'], contains('hls'));
+    expect(video['Container'], contains('ts'));
     expect(profile['Name'], 'Rillight owned FFmpeg core');
     expect(video['VideoCodec'], 'h264');
     expect(video['AudioCodec'], 'aac');
