@@ -3,7 +3,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -26,7 +26,7 @@ void main() {
                 children: [
                   for (final id in ['first', 'second'])
                     EpisodeThumbCard(
-                      item: EmbyItem(id: id, name: id, type: 'Episode'),
+                      item: MediaItem(id: id, name: id, type: 'Episode'),
                       width: 296,
                       selected: selected == id,
                       onTap: () {},

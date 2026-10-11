@@ -1,3 +1,4 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -8,9 +9,10 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/featured_items.dart';
@@ -123,7 +125,7 @@ void main() {
   test(
     'season posters fall back to the series endpoint without a missing-image request',
     () {
-      const series = EmbyItem(
+      const series = MediaItem(
         id: 'series',
         name: '',
         type: 'Series',
@@ -131,7 +133,7 @@ void main() {
       );
       for (final tag in <String?>[null, 'season-poster', 'series-poster']) {
         final season = seasonArtworkItem(
-          EmbyItem(
+          MediaItem(
             id: 'season',
             name: '',
             type: 'Season',
@@ -152,7 +154,7 @@ void main() {
     },
   );
 
-  const episode = EmbyItem(
+  const episode = MediaItem(
     id: 'episode',
     name: 'Generated frame',
     type: 'Episode',
@@ -182,7 +184,7 @@ void main() {
   });
   test('series metadata fills missing episode promotional artwork', () {
     final sources = heroArtworkSources(
-      const EmbyItem(
+      const MediaItem(
         id: 'ep',
         name: 'Ep',
         type: 'Episode',
@@ -190,7 +192,7 @@ void main() {
         primaryImageTag: 'generated',
       ),
       series: const [
-        EmbyItem(
+        MediaItem(
           id: 'series',
           name: 'Series',
           type: 'Series',
@@ -203,7 +205,7 @@ void main() {
     expect(sources.posters.single.tag, 'poster');
     expect(
       heroArtworkSources(
-        const EmbyItem(
+        const MediaItem(
           id: 'ep',
           name: 'Ep',
           type: 'Episode',
@@ -231,7 +233,7 @@ void main() {
     catalog.resume = const CatalogRowState(items: [episode]);
     catalog.latestSeries = const CatalogRowState(
       items: [
-        EmbyItem(
+        MediaItem(
           id: 'series',
           name: 'Series',
           type: 'Series',
@@ -241,7 +243,7 @@ void main() {
     );
     catalog.latestMovies = const CatalogRowState(
       items: [
-        EmbyItem(
+        MediaItem(
           id: 'movie',
           name: 'Movie',
           type: 'Movie',
@@ -263,7 +265,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     catalog.resume = CatalogRowState(
       items: [
-        EmbyItem.fromJson({
+        decodeEmbyMediaItem({
           'Id': 'episode',
           'Name': 'Resume episode',
           'Type': 'Episode',
@@ -345,13 +347,13 @@ void main() {
     catalog.latestSeries = const CatalogRowState();
     catalog.latestMovies = const CatalogRowState(
       items: [
-        EmbyItem(
+        MediaItem(
           id: 'poster-only',
           name: 'Poster only',
           type: 'Movie',
           primaryImageTag: 'poster',
         ),
-        EmbyItem(id: 'artless', name: 'Artless', type: 'Movie'),
+        MediaItem(id: 'artless', name: 'Artless', type: 'Movie'),
       ],
     );
     expect(featuredHomeItems(catalog).map((item) => item.id), ['poster-only']);
@@ -388,7 +390,7 @@ void main() {
       catalog.latestMovies = CatalogRowState(
         items: List.generate(
           6,
-          (i) => EmbyItem(
+          (i) => MediaItem(
             id: '$i',
             name: '一个很长的影片名称用于检查手机两行标题与大号字体',
             type: 'Movie',
@@ -521,7 +523,7 @@ class _HeroImageClient extends EmbyClient {
   _HeroImageClient(this.poster, {Uint8List? backdrop})
     : backdrop = backdrop ?? Uint8List.fromList([1, 2, 3]),
       super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'hero-images',

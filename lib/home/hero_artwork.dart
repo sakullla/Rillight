@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/media_image/blurred_artwork.dart';
 
@@ -21,7 +21,7 @@ class HeroArtworkSources {
   bool get isEmpty => backdrops.isEmpty && posters.isEmpty;
 
   /// Route handoff keeps the navigated item ID while discarding episode stills.
-  EmbyItem handoffItem(EmbyItem original) => EmbyItem(
+  MediaItem handoffItem(MediaItem original) => MediaItem(
     id: original.id,
     name: original.name,
     type: original.type,
@@ -40,10 +40,10 @@ class HeroArtworkSources {
     seriesPrimaryImageTag: original.isEpisode ? posters.firstOrNull?.tag : null,
   );
 
-  EmbyItem? get themeItem {
+  MediaItem? get themeItem {
     final source = backdrops.firstOrNull ?? posters.firstOrNull;
     if (source == null) return null;
-    return EmbyItem(
+    return MediaItem(
       id: source.itemId,
       name: '',
       type: 'Movie',
@@ -54,8 +54,8 @@ class HeroArtworkSources {
 }
 
 HeroArtworkSources heroArtworkSources(
-  EmbyItem item, {
-  List<EmbyItem> series = const [],
+  MediaItem item, {
+  List<MediaItem> series = const [],
 }) {
   final backdrops = <ItemImageRef>[];
   final posters = <ItemImageRef>[];
@@ -468,7 +468,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
   }
 }
 
-EmbyItem seasonArtworkItem(EmbyItem season, EmbyItem series) => EmbyItem(
+MediaItem seasonArtworkItem(MediaItem season, MediaItem series) => MediaItem(
   id: season.id,
   name: season.name,
   type: 'Season',

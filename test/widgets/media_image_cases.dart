@@ -20,15 +20,16 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-media-image',
@@ -93,7 +94,7 @@ void main() {
     );
   }
 
-  Widget buildSubject(AuthController auth, EmbyItem item) {
+  Widget buildSubject(AuthController auth, MediaItem item) {
     return wrap(auth, MediaImage(item: item, width: 120, height: 180));
   }
 
@@ -113,7 +114,7 @@ void main() {
     return server.requests.where((request) => request.contains('/Images/'));
   }
 
-  const withTag = EmbyItem(
+  const withTag = MediaItem(
     id: 'img-movie',
     name: '海报电影',
     type: 'Movie',
@@ -121,7 +122,7 @@ void main() {
   );
 
   testWidgets('warm posters stop observing every scroll pixel', (tester) async {
-    const warmPoster = EmbyItem(
+    const warmPoster = MediaItem(
       id: 'warm-scroll-poster',
       name: '滚动海报',
       type: 'Movie',
@@ -194,7 +195,7 @@ void main() {
       addTearDown(auth.dispose);
       final disk = _FakeDiskStore();
       MediaImageCache.instance.debugSetDiskStore(disk);
-      const item = EmbyItem(
+      const item = MediaItem(
         id: 'img-movie',
         name: '带回退的海报',
         type: 'Movie',
@@ -365,7 +366,7 @@ void main() {
             itemBuilder: (context, index) {
               return MediaImage(
                 key: ValueKey('poster-$index'),
-                item: EmbyItem(
+                item: MediaItem(
                   id: 'poster-$index',
                   name: '海报$index',
                   type: 'Movie',
@@ -393,7 +394,7 @@ void main() {
     final client = _ControlledImageClient();
     final auth = detachedAuth(client);
     addTearDown(auth.dispose);
-    const season = EmbyItem(
+    const season = MediaItem(
       id: 'img-season',
       name: '第 3 季',
       type: 'Season',
@@ -604,10 +605,16 @@ void main() {
     'transient image failure retries while absent image remains negative cached',
     (tester) async {
       for (final failure in [
-        const EmbyException(EmbyFailureKind.timeout),
-        const EmbyException(EmbyFailureKind.unreachable),
-        const EmbyException(EmbyFailureKind.unknown, statusCode: 429),
-        const EmbyException(EmbyFailureKind.unknown, statusCode: 503),
+        const MediaServerException(MediaServerFailureKind.timeout),
+        const MediaServerException(MediaServerFailureKind.unreachable),
+        const MediaServerException(
+          MediaServerFailureKind.unknown,
+          statusCode: 429,
+        ),
+        const MediaServerException(
+          MediaServerFailureKind.unknown,
+          statusCode: 503,
+        ),
       ]) {
         MediaImage.debugClearCache();
         final client = _ControlledImageClient()..failures.add(failure);
@@ -622,7 +629,10 @@ void main() {
       MediaImage.debugClearCache();
       final absent = _ControlledImageClient()
         ..failures.add(
-          const EmbyException(EmbyFailureKind.unknown, statusCode: 404),
+          const MediaServerException(
+            MediaServerFailureKind.unknown,
+            statusCode: 404,
+          ),
         );
       await tester.pumpWidget(buildSubject(detachedAuth(absent), withTag));
       await tester.pump();
@@ -640,7 +650,10 @@ void main() {
         ..failures.addAll(
           List.filled(
             10,
-            const EmbyException(EmbyFailureKind.unknown, statusCode: 503),
+            const MediaServerException(
+              MediaServerFailureKind.unknown,
+              statusCode: 503,
+            ),
           ),
         );
       final auth = detachedAuth(client);
@@ -945,7 +958,7 @@ void main() {
     tester,
   ) async {
     final auth = await connect(tester);
-    const missing = EmbyItem(
+    const missing = MediaItem(
       id: 'img-missing',
       name: '缺失海报',
       type: 'Movie',
@@ -1416,7 +1429,7 @@ void main() {
               itemCount: 8,
               itemBuilder: (context, index) {
                 return MediaImage(
-                  item: EmbyItem(
+                  item: MediaItem(
                     id: 'scroll-$index',
                     name: '海报$index',
                     type: 'Movie',
@@ -1694,7 +1707,7 @@ void main() {
                 for (var index = 0; index < 2; index++)
                   Expanded(
                     child: MediaImage(
-                      item: EmbyItem(
+                      item: MediaItem(
                         id: 'poster-$index',
                         name: '海报$index',
                         type: 'Movie',
@@ -1742,7 +1755,7 @@ void main() {
               for (var index = 0; index < 4; index++)
                 MediaImage(
                   key: ValueKey('visible-poster-$index'),
-                  item: EmbyItem(
+                  item: MediaItem(
                     id: 'poster-$index',
                     name: '海报$index',
                     type: 'Movie',
@@ -1876,7 +1889,7 @@ class _ControlledImageClient extends EmbyClient {
   bool hold = false;
   final requested = <String>[];
   final pending = <String, Completer<Uint8List>>{};
-  final failures = <EmbyException>[];
+  final failures = <MediaServerException>[];
   int active = 0;
   int maxActive = 0;
 

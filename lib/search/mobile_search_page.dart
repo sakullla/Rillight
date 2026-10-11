@@ -10,7 +10,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/catalog_filter_button.dart';
@@ -362,7 +362,7 @@ class _PageFailure extends StatelessWidget {
 class _ResultGrid extends StatelessWidget {
   const _ResultGrid({required this.items, required this.width});
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final double width;
 
   @override

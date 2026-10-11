@@ -4,23 +4,24 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/library_latest_row.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'home',
   deviceId: 'library-latest-row',
   version: '1',
 );
 
-const _library = EmbyItem(
+const _library = MediaItem(
   id: 'view-tv',
   name: '剧集',
   type: 'CollectionFolder',

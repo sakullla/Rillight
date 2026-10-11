@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 

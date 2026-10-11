@@ -6,7 +6,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -1125,7 +1125,7 @@ class NextEpisodeCard extends StatelessWidget {
   static const sectionKey = Key('episode-next-section');
   static const cardKey = Key('episode-next-card');
 
-  final EmbyItem? episode;
+  final MediaItem? episode;
   final VoidCallback? onTap;
 
   @override
@@ -1211,7 +1211,7 @@ class EpisodeMetadataSection extends StatelessWidget {
 
   static const sectionKey = Key('episode-metadata');
 
-  final EmbyItem item;
+  final MediaItem item;
 
   /// 当前片源；手机信息表据此给出容器、文件大小与码率。
   final ItemMediaSource? source;

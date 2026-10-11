@@ -14,9 +14,10 @@ import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -32,7 +33,7 @@ import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-home-rails',
@@ -107,7 +108,7 @@ void main() {
     await _pumpRails(tester, width: 360, height: 560);
     final catalog = CatalogScope.of(tester.element(find.byType(PhoneHome)));
     catalog.libraries = const [
-      EmbyItem(
+      MediaItem(
         id: 'view-late',
         name: '靠后片库',
         type: 'CollectionFolder',
@@ -664,7 +665,7 @@ Future<void> _pumpRails(
     ..resume = CatalogRowState(
       items: [
         for (var i = 1; i <= 2; i++)
-          EmbyItem(
+          MediaItem(
             id: 'ep-$i',
             name: '第 $i 集',
             type: 'Episode',
@@ -673,8 +674,8 @@ Future<void> _pumpRails(
             seriesPrimaryImageTag: 'series-poster',
             parentIndexNumber: 1,
             indexNumber: i,
-            userData: const EmbyUserData(
-              playbackPositionTicks: 1,
+            userData: const MediaUserData(
+              playbackPosition: Duration(microseconds: (1) ~/ 10),
               playedPercentage: 40,
             ),
           ),
@@ -684,13 +685,13 @@ Future<void> _pumpRails(
     // 轮播只吃最近入库:给两部带海报的电影,让横幅出现在继续观看行之上。
     ..latestMovies = const CatalogRowState(
       items: [
-        EmbyItem(
+        MediaItem(
           id: 'hero-1',
           name: '新片一',
           type: 'Movie',
           primaryImageTag: 'poster-1',
         ),
-        EmbyItem(
+        MediaItem(
           id: 'hero-2',
           name: '新片二',
           type: 'Movie',
@@ -700,7 +701,7 @@ Future<void> _pumpRails(
     )
     ..latestSeries = const CatalogRowState(hidden: true)
     ..libraries = const [
-      EmbyItem(
+      MediaItem(
         id: 'view-movies',
         name: '电影',
         type: 'CollectionFolder',
@@ -712,8 +713,8 @@ Future<void> _pumpRails(
   await tester.pump();
 }
 
-EmbyItem _movie(String id, String name) {
-  return EmbyItem(id: id, name: name, type: 'Movie', productionYear: 2024);
+MediaItem _movie(String id, String name) {
+  return MediaItem(id: id, name: name, type: 'Movie', productionYear: 2024);
 }
 
 Widget _homeApp(CatalogController catalog, {bool nav = false}) {

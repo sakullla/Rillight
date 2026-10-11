@@ -8,8 +8,8 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/poster_card.dart';
@@ -55,17 +55,17 @@ class MediaShelf extends StatefulWidget {
   final String shelfId;
   final Key? rowKey;
   final String title;
-  final List<EmbyItem> items;
-  final ValueChanged<EmbyItem> onTap;
+  final List<MediaItem> items;
+  final ValueChanged<MediaItem> onTap;
   final bool loading;
-  final EmbyException? error;
+  final MediaServerException? error;
   final VoidCallback? onRetry;
   final VoidCallback? onMore;
   final bool showProgress;
   final bool wide;
   final double? extent;
-  final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
-  final ValueChanged<EmbyItem>? onRemoveFromResume;
+  final Widget Function(BuildContext context, MediaItem item)? itemBuilder;
+  final ValueChanged<MediaItem>? onRemoveFromResume;
   final Widget? headerAction;
 
   /// 首次布局及该值变化时把对应条目滚到行中央(集详情的"本季分集"条

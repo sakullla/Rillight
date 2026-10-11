@@ -8,7 +8,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/home/catalog_keys.dart';
 
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -52,7 +52,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final auth = SyntheticSourceAuth(
       adapter: FakeEmbyAdapter([server]),
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'tv',
         deviceId: 'tv-widget',
@@ -198,9 +198,11 @@ void main() {
           seasonId: 'season-friends-1',
           indexNumber: index,
           parentIndexNumber: 1,
-          playbackPositionTicks: index == 12 ? minute * 5 : 0,
+          playbackPosition: Duration(
+            microseconds: (index == 12 ? minute * 5 : 0) ~/ 10,
+          ),
           playedPercentage: index == 12 ? 20 : null,
-          runTimeTicks: minute * 22,
+          runtime: Duration(microseconds: (minute * 22) ~/ 10),
         ),
     ]);
     final app = await start(tester, server);
@@ -238,7 +240,7 @@ void main() {
           indexNumber: 1,
           parentIndexNumber: 1,
           played: true,
-          runTimeTicks: minute * 22,
+          runtime: Duration(microseconds: (minute * 22) ~/ 10),
         ),
         const FakeEpisode(
           id: 'episode-friends-s1e2',
@@ -246,9 +248,9 @@ void main() {
           seasonId: 'season-friends-1',
           indexNumber: 2,
           parentIndexNumber: 1,
-          playbackPositionTicks: minute * 5,
+          playbackPosition: Duration(microseconds: (minute * 5) ~/ 10),
           playedPercentage: 20,
-          runTimeTicks: minute * 22,
+          runtime: Duration(microseconds: (minute * 22) ~/ 10),
         ),
         for (var index = 1; index <= 16; index++)
           FakeEpisode(
@@ -257,9 +259,11 @@ void main() {
             seasonId: 'season-friends-2',
             indexNumber: index,
             parentIndexNumber: 2,
-            playbackPositionTicks: index == 12 ? minute * 4 : 0,
+            playbackPosition: Duration(
+              microseconds: (index == 12 ? minute * 4 : 0) ~/ 10,
+            ),
             playedPercentage: index == 12 ? 25 : null,
-            runTimeTicks: minute * 22,
+            runtime: Duration(microseconds: (minute * 22) ~/ 10),
           ),
       ]);
       final app = await start(tester, server);
@@ -318,7 +322,7 @@ void main() {
           indexNumber: 1,
           parentIndexNumber: 1,
           played: true,
-          runTimeTicks: minute * 22,
+          runtime: Duration(microseconds: (minute * 22) ~/ 10),
         ),
         const FakeEpisode(
           id: 'episode-friends-s1e2',
@@ -326,9 +330,9 @@ void main() {
           seasonId: 'season-friends-1',
           indexNumber: 2,
           parentIndexNumber: 1,
-          playbackPositionTicks: minute * 5,
+          playbackPosition: Duration(microseconds: (minute * 5) ~/ 10),
           playedPercentage: 20,
-          runTimeTicks: minute * 22,
+          runtime: Duration(microseconds: (minute * 22) ~/ 10),
           primaryImageTag: 'tag-e2',
         ),
         const FakeEpisode(
@@ -337,7 +341,7 @@ void main() {
           seasonId: 'season-friends-1',
           indexNumber: 3,
           parentIndexNumber: 1,
-          runTimeTicks: minute * 22,
+          runtime: Duration(microseconds: (minute * 22) ~/ 10),
         ),
         for (var index = 4; index <= 40; index++)
           FakeEpisode(
@@ -346,7 +350,7 @@ void main() {
             seasonId: 'season-friends-1',
             indexNumber: index,
             parentIndexNumber: 1,
-            runTimeTicks: minute * 22,
+            runtime: Duration(microseconds: (minute * 22) ~/ 10),
           ),
       ]);
       final app = await start(tester, server);

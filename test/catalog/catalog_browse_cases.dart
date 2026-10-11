@@ -6,7 +6,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import '../helpers/synthetic_source_fixture.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/library/aggregation_page.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
@@ -19,7 +19,7 @@ import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import '../helpers/top_bar_hit.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-catalog-ui',

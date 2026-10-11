@@ -3,12 +3,12 @@ import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/library_nav_prefs.dart';
 
 Future<String?> showMoreLibrariesDialog({
   required BuildContext context,
-  required List<EmbyItem> libraries,
+  required List<MediaItem> libraries,
 }) {
   return showDialog<String>(
     context: context,
@@ -69,7 +69,7 @@ Future<String?> showMoreLibrariesDialog({
 
 Future<void> showLibraryNavDialog({
   required BuildContext context,
-  required List<EmbyItem> libraries,
+  required List<MediaItem> libraries,
   required LibraryNavController nav,
   required int maxPinned,
 }) {
@@ -92,7 +92,7 @@ class _LibraryNavDialog extends StatefulWidget {
     required this.maxPinned,
   });
 
-  final List<EmbyItem> libraries;
+  final List<MediaItem> libraries;
   final LibraryNavController nav;
   final int maxPinned;
 
@@ -102,7 +102,7 @@ class _LibraryNavDialog extends StatefulWidget {
 
 class _LibraryNavDialogState extends State<_LibraryNavDialog> {
   late List<String> _pinned;
-  late final Map<String, EmbyItem> _byId;
+  late final Map<String, MediaItem> _byId;
 
   @override
   void initState() {
@@ -117,14 +117,14 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     _pinned = [for (final library in layout.pinned) library.id];
   }
 
-  List<EmbyItem> get _pinnedLibraries {
+  List<MediaItem> get _pinnedLibraries {
     return [
       for (final id in _pinned)
         if (_byId.containsKey(id)) _byId[id]!,
     ];
   }
 
-  List<EmbyItem> get _uncheckedLibraries {
+  List<MediaItem> get _uncheckedLibraries {
     final pinned = _pinned.toSet();
     return [
       for (final library in widget.libraries)
@@ -132,7 +132,7 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     ];
   }
 
-  void _setPinned(bool checked, EmbyItem library) {
+  void _setPinned(bool checked, MediaItem library) {
     setState(() {
       if (checked) {
         if (_pinned.length >= widget.maxPinned ||
@@ -261,7 +261,7 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
 
   Widget _pinnedRow(
     BuildContext context,
-    EmbyItem library,
+    MediaItem library,
     int index,
     int count,
   ) {
@@ -315,7 +315,7 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     );
   }
 
-  Widget _uncheckedRow(BuildContext context, EmbyItem library) {
+  Widget _uncheckedRow(BuildContext context, MediaItem library) {
     return ListTile(
       key: ValueKey(library.id),
       dense: true,

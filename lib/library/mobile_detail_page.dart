@@ -17,8 +17,8 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/auth/failure_message.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -48,10 +48,10 @@ class MobileDetailPage extends StatefulWidget {
 
 class _MobileDetailPageState extends State<MobileDetailPage> {
   DetailController? _controller;
-  List<EmbyItem> _similar = const [];
-  EmbyItem? _nextEpisode;
-  EmbyItem? _previousEpisode;
-  EmbyException? _similarError;
+  List<MediaItem> _similar = const [];
+  MediaItem? _nextEpisode;
+  MediaItem? _previousEpisode;
+  MediaServerException? _similarError;
   int _extrasRevision = 0;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
@@ -176,15 +176,18 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       } catch (failure) {
         if (owns()) {
           setState(
-            () => _similarError = failure is EmbyException
+            () => _similarError = failure is MediaServerException
                 ? failure
-                : EmbyException(EmbyFailureKind.unknown, cause: failure),
+                : MediaServerException(
+                    MediaServerFailureKind.unknown,
+                    cause: failure,
+                  ),
           );
         }
       }
     }
     if (item.isEpisode) {
-      final neighbors = await Future.wait<EmbyItem?>([
+      final neighbors = await Future.wait<MediaItem?>([
         client.getNextEpisode(item).catchError((Object _) => null),
         client.getPreviousEpisode(item).catchError((Object _) => null),
       ]);
@@ -200,15 +203,15 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   Future<void> _openPlayer(
     String itemId, {
     bool fromStart = false,
-    int? startTimeTicks,
+    Duration? startPosition,
   }) async {
     final controller = _controller;
     final item = controller?.item;
     if (controller == null || item == null) return;
-    final ticks = startTimeTicks;
-    if (ticks != null && ticks > 0) {
+    final position = startPosition;
+    if (position != null && position > Duration.zero) {
       // /play 目前只把 autoResume 交给播放页。在它读取起点前写上章节时间。
-      _deliverStartTicks(context, ticks);
+      _deliverStartPosition(context, position);
     }
     await context.push(
       '/play/$itemId',
@@ -226,10 +229,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 (_audioStreamIndex != null || _subtitleStreamIndex != null)
             ? controller.mediaSourceId
             : null,
-        autoResume: !fromStart && (ticks == null || ticks <= 0),
+        autoResume:
+            !fromStart && (position == null || position <= Duration.zero),
         audioStreamIndex: item.isSeries ? null : _audioStreamIndex,
         subtitleStreamIndex: item.isSeries ? null : _subtitleStreamIndex,
-        startTimeTicks: ticks,
+        startPosition: position,
       ),
     );
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
@@ -255,7 +259,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
   }
 
-  void _deliverStartTicks(BuildContext context, int ticks) {
+  void _deliverStartPosition(BuildContext context, Duration position) {
     var frames = 0;
     void apply(Duration _) {
       if (!context.mounted) return;
@@ -266,7 +270,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         }
         return;
       }
-      player.startTimeTicks = ticks;
+      player.startPosition = position;
       player.autoResume = false;
     }
 
@@ -317,7 +321,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
   }
 
-  void _openSeries(EmbyItem episode) {
+  void _openSeries(MediaItem episode) {
     final seriesId = episode.seriesId;
     if (seriesId == null || seriesId.isEmpty) {
       return;
@@ -400,7 +404,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     await controller.selectSeason(seasonId, startAt: start);
   }
 
-  void _openGenre(EmbyItem item, String genre) {
+  void _openGenre(MediaItem item, String genre) {
     if (DetailSourceScope.maybeOf(context) != null) return;
     final types = item.isSeries || item.isEpisode ? 'Series' : 'Movie';
     final parent = item.isEpisode ? null : item.parentId;
@@ -415,7 +419,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
   }
 
-  ItemMediaSource? _source(EmbyItem item) {
+  ItemMediaSource? _source(MediaItem item) {
     final selected = _controller?.mediaSourceId;
     for (final source in item.mediaSources) {
       if (source.id == selected) return source;
@@ -433,9 +437,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 
   /// 标题下只留辨认这部片子的一行:年份、时长、评分和画质/声道标签。
   /// 流派在简介下方单独一行，首播和入库日期在下方的详细信息里。
-  List<PhoneMetaEntry> _bannerMeta(AppLocalizations l, EmbyItem item) {
+  List<PhoneMetaEntry> _bannerMeta(AppLocalizations l, MediaItem item) {
     if (item.isSeries) {
-      final seasons = _controller?.seasons ?? const <EmbyItem>[];
+      final seasons = _controller?.seasons ?? const <MediaItem>[];
       return [
         if (item.productionYear != null)
           PhoneMetaEntry('${item.productionYear}'),
@@ -468,8 +472,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
 
   String _playLabel(
     AppLocalizations l,
-    EmbyItem item,
-    EmbyItem? target, {
+    MediaItem item,
+    MediaItem? target, {
     bool full = false,
   }) {
     if (target == null || !target.isPlayable) return l.noPlayableStream;
@@ -729,7 +733,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           onChapter: item.isPlayable
                               ? (chapter) => _openPlayer(
                                   item.id,
-                                  startTimeTicks: chapter.startPositionTicks,
+                                  startPosition: chapter.startPosition,
                                 )
                               : null,
                           onOpenSimilar:
@@ -1012,8 +1016,8 @@ class _PhoneItemDetail extends StatelessWidget {
     required this.onOpenSimilar,
   });
 
-  final EmbyItem item;
-  final List<EmbyItem> similar;
+  final MediaItem item;
+  final List<MediaItem> similar;
   final ItemMediaSource? mediaSource;
   final int? selectedAudioIndex;
   final int? selectedSubtitleIndex;
@@ -1178,7 +1182,7 @@ class _ChapterCard extends StatelessWidget {
                             vertical: 2,
                           ),
                           child: Text(
-                            chapterClock(chapter.startPositionTicks),
+                            chapterClock(chapter.startPosition),
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: Colors.white,
                               fontFeatures: const [
@@ -1258,7 +1262,7 @@ class _DetailSimilar extends StatelessWidget {
     required this.onOpenSimilar,
   });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final ValueChanged<String> onOpenItem;
   final VoidCallback? onOpenSimilar;
 

@@ -1,9 +1,9 @@
+import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
 import '../../auth/source_sessions.dart';
-import '../../emby/emby_client.dart';
 import '../history/history_writer.dart';
 import 'aggregation_query.dart';
 
@@ -212,7 +212,7 @@ class SameSourceQueryController extends ChangeNotifier {
                 recursive: true,
                 startIndex: cursor,
                 limit: query.scope!.pageSize,
-                fields: EmbyClient.itemFields,
+                fields: MediaServerClient.itemFields,
               ),
             )
             .timeout(query.timeout);
@@ -234,7 +234,7 @@ class SameSourceQueryController extends ChangeNotifier {
           page.items
               .where((i) => i.isEpisode)
               .map(
-                (i) => EpisodeSource.fromEmby(
+                (i) => EpisodeSource.fromMediaItem(
                   SourceReference(
                     account: target.reference.account,
                     itemId: i.id,

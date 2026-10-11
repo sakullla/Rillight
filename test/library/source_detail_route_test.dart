@@ -13,13 +13,13 @@ import 'package:rillight/app/router.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/poster_card.dart';
@@ -124,8 +124,8 @@ void main() {
     'server shelf play and detail retain source and concrete parent',
     (tester) async {
       final transport = _Transport();
-      EmbyClient client() => EmbyClient(
-        device: const EmbyDeviceInfo(
+      MediaServerClient client() => EmbyClient(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'source-card',
@@ -175,7 +175,7 @@ void main() {
       );
       await tester.runAsync(auth.restore);
       final host = OverlayPlayerWindowHost();
-      const item = EmbyItem(
+      const item = MediaItem(
         id: 'episode-no-parent',
         name: 'Episode',
         type: 'Episode',
@@ -293,8 +293,8 @@ void main() {
         PaintingBinding.instance.imageCache.clearLiveImages();
       });
       final transport = _Transport();
-      EmbyClient client() => EmbyClient(
-        device: const EmbyDeviceInfo(
+      MediaServerClient client() => EmbyClient(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'private-images',
@@ -376,7 +376,7 @@ void main() {
                   return Column(
                     children: [
                       const MediaImage(
-                        item: EmbyItem(
+                        item: MediaItem(
                           id: 'movie',
                           name: 'private poster',
                           type: 'Movie',
@@ -390,7 +390,7 @@ void main() {
                         valueListenable: showLatePoster,
                         builder: (_, show, _) => show
                             ? const MediaImage(
-                                item: EmbyItem(
+                                item: MediaItem(
                                   id: 'late-poster',
                                   name: 'late private poster',
                                   type: 'Movie',
@@ -649,8 +649,8 @@ void main() {
             MediaImageCache.instance.debugSetDiskStore(null);
           });
           final transport = _Transport();
-          EmbyClient client() => EmbyClient(
-            device: const EmbyDeviceInfo(
+          MediaServerClient client() => EmbyClient(
+            device: const ClientDeviceInfo(
               clientName: 'test',
               deviceName: 'test',
               deviceId: 'detail',
@@ -859,8 +859,8 @@ void main() {
         MediaImageCache.instance.debugSetDiskStore(null);
       });
       final transport = _Transport();
-      EmbyClient client() => EmbyClient(
-        device: const EmbyDeviceInfo(
+      MediaServerClient client() => EmbyClient(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'detail',

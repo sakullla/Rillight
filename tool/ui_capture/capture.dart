@@ -22,7 +22,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/auth/tv_lan_pair.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home_sections.dart';
@@ -122,7 +122,7 @@ void main() {
           store: servers,
           credentials: credentials,
           createClient: () => EmbyClient(
-            device: const EmbyDeviceInfo(
+            device: const ClientDeviceInfo(
               clientName: '灯川原型',
               deviceName: 'UI capture',
               deviceId: 'synthetic-ui',
@@ -144,7 +144,7 @@ void main() {
         );
         final auth = AuthController(
           client: EmbyClient(
-            device: const EmbyDeviceInfo(
+            device: const ClientDeviceInfo(
               clientName: '灯川原型',
               deviceName: 'UI capture',
               deviceId: 'synthetic-ui',
@@ -508,9 +508,9 @@ void main() {
               backend = CaptureBackend();
               final ticks = server.items
                   .firstWhere((item) => item.id == itemId)
-                  .runTimeTicks;
+                  .runtime;
               if (ticks != null) {
-                backend.duration = Duration(microseconds: ticks ~/ 10);
+                backend.duration = ticks;
               }
               final request = PlayerOpenRequest(
                 itemId: itemId,
@@ -633,7 +633,7 @@ void main() {
           if (config.$1 == 'tv') {
             final probeAuth = AuthController(
               client: EmbyClient(
-                device: const EmbyDeviceInfo(
+                device: const ClientDeviceInfo(
                   clientName: '灯川原型',
                   deviceName: 'UI capture',
                   deviceId: 'synthetic-ui-lan',

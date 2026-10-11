@@ -4,19 +4,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-const _movie = EmbyItem(
+const _movie = MediaItem(
   id: 'movie-1',
   name: '可播电影',
   type: 'Movie',
   productionYear: 2020,
-  runTimeTicks: 27000000000,
+  runtime: Duration(microseconds: (27000000000) ~/ 10),
 );
 
 Widget _wrap({required OverlayPlayerWindowHost host, required Widget child}) {
@@ -76,7 +76,7 @@ void main() {
                       itemCount: 12,
                       itemBuilder: (context, index) => ShelfGridPage.gridCard(
                         context,
-                        EmbyItem(
+                        MediaItem(
                           id: 'grid-$index',
                           name: '中文 日本語 Ag 🎬 Ⅰ $index',
                           type: 'Series',

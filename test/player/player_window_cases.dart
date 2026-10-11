@@ -11,13 +11,13 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -28,7 +28,7 @@ import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-player-window',
@@ -112,7 +112,7 @@ void main() {
   }) async {
     final credentials = MemoryCredentialStore();
     final store = MemoryServerListStore();
-    EmbyClient client() =>
+    MediaServerClient client() =>
         EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final sources = SourceSessionRegistry(
       access: RegionAccessController(),

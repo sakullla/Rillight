@@ -1,4 +1,4 @@
-import 'playback_models.dart';
+import '../media_server/playback.dart';
 
 /// A switch carries intent, not native indices from a different edition.
 enum SwitchResumeChoice { currentPosition, beginning, cancel }
@@ -58,10 +58,10 @@ class PlaybackSwitchPlan {
   };
 
   static Map<String, dynamic> _streamJson(MediaStreamInfo s) => {
-    'Index': s.index,
-    'Type': s.type,
-    'Language': s.language,
-    'DisplayTitle': s.displayTitle,
+    'index': s.index,
+    'type': s.type,
+    'language': s.language,
+    'title': s.displayTitle,
   };
 
   factory PlaybackSwitchPlan.fromJson(Map<String, dynamic> json) =>
@@ -78,14 +78,22 @@ class PlaybackSwitchPlan {
         subtitleNeedsChoice: json['subtitleNeedsChoice'] as bool,
         audioChoices: (json['audioChoices'] as List)
             .map(
-              (s) =>
-                  MediaStreamInfo.fromJson(Map<String, dynamic>.from(s as Map)),
+              (s) => MediaStreamInfo(
+                index: (s as Map)['index'] as int,
+                type: s['type'] as String,
+                language: s['language'] as String?,
+                displayTitle: s['title'] as String?,
+              ),
             )
             .toList(),
         subtitleChoices: (json['subtitleChoices'] as List)
             .map(
-              (s) =>
-                  MediaStreamInfo.fromJson(Map<String, dynamic>.from(s as Map)),
+              (s) => MediaStreamInfo(
+                index: (s as Map)['index'] as int,
+                type: s['type'] as String,
+                language: s['language'] as String?,
+                displayTitle: s['title'] as String?,
+              ),
             )
             .toList(),
       );
@@ -166,7 +174,9 @@ class PlaybackSwitchPlan {
       positionTicks: positionTicks,
       paused: paused,
       maxStreamingBitrate: maxStreamingBitrate,
-      targetRuntimeTicks: target.runTimeTicks,
+      targetRuntimeTicks: target.runtime == null
+          ? null
+          : target.runtime!.inMicroseconds * 10,
       // Equal durations/names do not prove identical editing.
       timelineConfirmed: sameVersion || timelineConfirmed,
       audioIndex: audio,

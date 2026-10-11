@@ -12,9 +12,10 @@ import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/library_counts_panel.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -23,7 +24,7 @@ import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-library-counts',
@@ -169,7 +170,7 @@ void main() {
       Widget host({
         LibraryCounts? counts,
         bool loading = false,
-        EmbyException? failure,
+        MediaServerException? failure,
       }) {
         return MaterialApp(
           theme: AppTheme.dark(),
@@ -215,8 +216,8 @@ void main() {
       // 失败:保留面板并显示原因。
       await tester.pumpWidget(
         host(
-          failure: const EmbyException(
-            EmbyFailureKind.unknown,
+          failure: const MediaServerException(
+            MediaServerFailureKind.unknown,
             statusCode: 403,
             detail: 'HTTP 403: counts unavailable',
           ),

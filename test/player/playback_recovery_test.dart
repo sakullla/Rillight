@@ -6,7 +6,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -16,7 +16,7 @@ import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'Rillight test',
   deviceName: 'recovery',
   deviceId: 'recovery-test',
@@ -269,12 +269,12 @@ void main() {
         episode.chapters = const [
           FakeChapter(
             name: 'Intro',
-            startPositionTicks: 0,
+            startPosition: Duration(microseconds: (0) ~/ 10),
             markerType: 'IntroStart',
           ),
           FakeChapter(
             name: 'Intro End',
-            startPositionTicks: 1140000000,
+            startPosition: Duration(microseconds: (1140000000) ~/ 10),
             markerType: 'IntroEnd',
           ),
         ];
@@ -853,7 +853,7 @@ void main() {
     'out-of-range switch requires beginning or cancel, never clamps',
     () async {
       final movie = server.items.firstWhere((item) => item.id == 'movie-up');
-      movie.runTimeTicks = 30 * 10000000;
+      movie.runtime = Duration(microseconds: (30 * 10000000) ~/ 10);
       movie.extraSources = const [
         FakeMediaSource(
           id: 'alternate',

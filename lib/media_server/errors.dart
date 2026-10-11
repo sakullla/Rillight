@@ -4,33 +4,46 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
-enum EmbyFailureKind {
+enum MediaServerFailureKind {
   invalidAddress,
   unreachable,
   timeout,
   certificate,
-  notEmby,
+  incompatibleServer,
+  forbidden,
+  rateLimited,
+  cancelled,
+  unsupported,
+  invalidResponse,
+  authorizationExpired,
+  signatureRejected,
+  clockSkew,
   invalidCredentials,
   sessionExpired,
   unknown,
 }
 
-class EmbyException implements Exception {
-  const EmbyException(this.kind, {this.statusCode, this.detail, this.cause});
+class MediaServerException implements Exception {
+  const MediaServerException(
+    this.kind, {
+    this.statusCode,
+    this.detail,
+    this.cause,
+  });
 
-  final EmbyFailureKind kind;
+  final MediaServerFailureKind kind;
   final int? statusCode;
   final String? detail;
   final Object? cause;
 
-  factory EmbyException.fromDio(
+  factory MediaServerException.fromDio(
     DioException error, {
     bool authenticating = false,
   }) {
     final detail = _detailFromDio(error);
     if (_isCertificateFailure(error)) {
-      return EmbyException(
-        EmbyFailureKind.certificate,
+      return MediaServerException(
+        MediaServerFailureKind.certificate,
         detail: detail,
         cause: error,
       );
@@ -41,63 +54,73 @@ class EmbyException implements Exception {
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
       case DioExceptionType.transformTimeout:
-        return EmbyException(
-          EmbyFailureKind.timeout,
+        return MediaServerException(
+          MediaServerFailureKind.timeout,
           detail: detail,
           cause: error,
         );
       case DioExceptionType.badCertificate:
-        return EmbyException(
-          EmbyFailureKind.certificate,
+        return MediaServerException(
+          MediaServerFailureKind.certificate,
           detail: detail,
           cause: error,
         );
       case DioExceptionType.connectionError:
-        return EmbyException(
-          EmbyFailureKind.unreachable,
+        return MediaServerException(
+          MediaServerFailureKind.unreachable,
           detail: detail,
           cause: error,
         );
       case DioExceptionType.badResponse:
         final code = error.response?.statusCode;
+        if (code == 403 || code == 429) {
+          return MediaServerException(
+            code == 403
+                ? MediaServerFailureKind.forbidden
+                : MediaServerFailureKind.rateLimited,
+            statusCode: code,
+            detail: detail,
+            cause: error,
+          );
+        }
         if (authenticating && (code == 401 || code == 400)) {
-          return EmbyException(
-            EmbyFailureKind.invalidCredentials,
+          return MediaServerException(
+            MediaServerFailureKind.invalidCredentials,
             statusCode: code,
             detail: detail,
             cause: error,
           );
         }
         if (!authenticating && code == 401) {
-          return EmbyException(
-            EmbyFailureKind.sessionExpired,
+          return MediaServerException(
+            MediaServerFailureKind.sessionExpired,
             statusCode: code,
             detail: detail,
             cause: error,
           );
         }
-        return EmbyException(
-          EmbyFailureKind.unknown,
+        return MediaServerException(
+          MediaServerFailureKind.unknown,
           statusCode: code,
           detail: detail,
           cause: error,
         );
       case DioExceptionType.unknown:
         if (error.error is SocketException) {
-          return EmbyException(
-            EmbyFailureKind.unreachable,
+          return MediaServerException(
+            MediaServerFailureKind.unreachable,
             detail: detail,
             cause: error,
           );
         }
-        return EmbyException(
-          EmbyFailureKind.unknown,
+        return MediaServerException(
+          MediaServerFailureKind.unknown,
           detail: detail,
           cause: error,
         );
       case DioExceptionType.cancel:
-        return EmbyException(
-          EmbyFailureKind.unknown,
+        return MediaServerException(
+          MediaServerFailureKind.cancelled,
           detail: detail,
           cause: error,
         );
@@ -106,7 +129,7 @@ class EmbyException implements Exception {
 
   @override
   String toString() =>
-      'EmbyException($kind, statusCode: $statusCode, detail: $detail)';
+      'MediaServerException($kind, statusCode: $statusCode, detail: $detail)';
 }
 
 bool _isCertificateFailure(DioException error) {

@@ -1,3 +1,4 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,13 +8,12 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_hero.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
-import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/player/player_window_host.dart';
 
@@ -39,13 +39,15 @@ Future<(AuthController, CatalogController)> _seriesFixture(
         seasonId: 'season-friends-1',
         indexNumber: 2,
         parentIndexNumber: 1,
-        playbackPositionTicks: mode == 'resume' ? 120000000 : 0,
+        playbackPosition: Duration(
+          microseconds: (mode == 'resume' ? 120000000 : 0) ~/ 10,
+        ),
       ),
     ],
   ]);
   final auth = AuthController.memory(
     client: EmbyClient(
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'test',
         deviceId: 'series-hero',
@@ -67,7 +69,7 @@ Future<(AuthController, CatalogController)> _seriesFixture(
   );
   catalog.latestSeries = CatalogRowState(
     items: [
-      EmbyItem.fromJson(
+      decodeEmbyMediaItem(
         server.items.firstWhere((item) => item.id == 'series-friends').toJson(),
       ),
     ],
@@ -212,7 +214,7 @@ void main() {
     final host = OverlayPlayerWindowHost();
     addTearDown(host.dispose);
     var details = false;
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'episode',
       'Name': 'Episode',
       'Type': 'Episode',

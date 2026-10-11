@@ -13,7 +13,7 @@ import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -24,7 +24,7 @@ import 'package:rillight/player/video_backend.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-line-management',
@@ -237,7 +237,7 @@ void main() {
       expect(auth.session?.username, 'alice');
       expect(auth.session?.accessToken, token);
       expect(auth.client.userAgent, 'UA/1');
-      await auth.client.getJson('/System/Info');
+      await (auth.client as EmbyClient).getJson('/System/Info');
       expect(wan3.lastUserAgent, 'UA/1');
       final snapshot = await servers.load();
       expect(

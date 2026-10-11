@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/android_playback_lifecycle.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -14,7 +14,7 @@ class _Controller extends PlayerController {
   _Controller()
     : super(
         client: EmbyClient(
-          device: const EmbyDeviceInfo(
+          device: const ClientDeviceInfo(
             clientName: 'test',
             deviceName: 'test',
             deviceId: 'test',
@@ -41,7 +41,7 @@ class _ReleaseProbe extends PlayerController {
   _ReleaseProbe()
     : super(
         client: EmbyClient(
-          device: const EmbyDeviceInfo(
+          device: const ClientDeviceInfo(
             clientName: 'test',
             deviceName: 'test',
             deviceId: 'test',

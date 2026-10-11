@@ -1,17 +1,17 @@
+import 'package:rillight/media_server/serialization.dart';
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/player/player_process_protocol.dart';
 
 /// Fresh, launch-scoped metadata, fetched while the desktop child boots.
 /// PlaybackInfo still runs in the child after applying its current settings.
 class PlayerStartupData {
   const PlayerStartupData(this.item, this.user);
-  final EmbyItem item;
-  final EmbyUser? user;
+  final MediaItem item;
+  final MediaUser? user;
 
   static Future<PlayerStartupData?> receive(
     PlayerProcessProtocol protocol, {
@@ -28,21 +28,21 @@ class PlayerStartupData {
         }
         final failure = message['failure'];
         if (failure is String) {
-          throw EmbyException(
-            EmbyFailureKind.values.firstWhere(
+          throw MediaServerException(
+            MediaServerFailureKind.values.firstWhere(
               (kind) => kind.name == failure,
-              orElse: () => EmbyFailureKind.unknown,
+              orElse: () => MediaServerFailureKind.unknown,
             ),
           );
         }
         final rawItem = message['item'];
         if (rawItem is! Map) return null;
         try {
-          final item = EmbyItem.fromJson(Map<String, dynamic>.from(rawItem));
+          final item = decodeMediaItem(Map<String, dynamic>.from(rawItem));
           if (item.id != itemId) return null;
           final rawUser = message['user'];
           final user = rawUser is Map
-              ? EmbyUser.fromJson(Map<String, dynamic>.from(rawUser))
+              ? decodeMediaUser(Map<String, dynamic>.from(rawUser))
               : null;
           if (user != null && user.id != userId) return null;
           return PlayerStartupData(item, user);
@@ -59,35 +59,17 @@ class PlayerStartupData {
 }
 
 class PlayerStartupPreparation {
-  PlayerStartupPreparation(EmbyClient client, String itemId) {
+  PlayerStartupPreparation(MediaServerClient client, String itemId) {
     final userId = client.userId;
     final base = client.baseUrl;
     final token = client.accessToken;
     payload = () async {
       try {
         final results = await Future.wait<Map<String, dynamic>?>([
-          client.getJson(
-            '/Users/$userId/Items/$itemId',
-            queryParameters: {
-              'Fields': EmbyClient.itemFields,
-              'EnableImageTypes': EmbyClient.detailImageTypes,
-            },
-            cancelToken: _cancel,
-          ),
+          client.getItem(itemId, cancelToken: _cancel).then(encodeMediaItem),
           client
-              .getJson('/Users/$userId', cancelToken: _cancel)
-              .then<Map<String, dynamic>?>((value) {
-                // Carry playback preferences only, not the user's full policy.
-                final user = EmbyUser.fromJson(value);
-                return {
-                  'Id': user.id,
-                  'Name': user.name,
-                  'Configuration': {
-                    'EnableNextEpisodeAutoPlay': user.enableNextEpisodeAutoPlay,
-                    'ResumeRewindSeconds': user.resumeRewindSeconds,
-                  },
-                };
-              })
+              .getUser(cancelToken: _cancel)
+              .then<Map<String, dynamic>?>(encodeMediaUser)
               .catchError((Object _) => null),
         ], eagerError: true);
         if (_cancel.isCancelled ||
@@ -106,7 +88,9 @@ class PlayerStartupPreparation {
         return {
           'itemId': itemId,
           'userId': userId,
-          'failure': error is EmbyException ? error.kind.name : 'unknown',
+          'failure': error is MediaServerException
+              ? error.kind.name
+              : 'unknown',
         };
       }
     }();

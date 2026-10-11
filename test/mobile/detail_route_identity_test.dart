@@ -7,8 +7,9 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -193,8 +194,8 @@ void main() {
 
 AuthController _authFor(FakeEmbyServer server) {
   final adapter = FakeEmbyAdapter([server]);
-  EmbyClient client() => EmbyClient(
-    device: const EmbyDeviceInfo(
+  MediaServerClient client() => EmbyClient(
+    device: const ClientDeviceInfo(
       clientName: 'test',
       deviceName: 'test',
       deviceId: 'route-identity',

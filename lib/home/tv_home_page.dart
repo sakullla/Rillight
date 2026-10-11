@@ -9,7 +9,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -248,7 +248,7 @@ class _TvHomePageState extends State<TvHomePage> {
 class _TvLibraryLatest extends StatelessWidget {
   const _TvLibraryLatest({required this.library});
 
-  final EmbyItem library;
+  final MediaItem library;
 
   @override
   Widget build(BuildContext context) {
@@ -304,10 +304,10 @@ class _TvLibraryLatest extends StatelessWidget {
 class _TvFeatured extends StatefulWidget {
   const _TvFeatured({required this.items, this.series = const []});
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
 
   /// 最新剧集行:单集条目借用所属剧集的宣传图。
-  final List<EmbyItem> series;
+  final List<MediaItem> series;
 
   @override
   State<_TvFeatured> createState() => _TvFeaturedState();
@@ -326,7 +326,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
   }
 
   /// 电影直接播;剧集先解析出该播的那一集,没有可播集时提示。
-  Future<void> _play(EmbyItem item) async {
+  Future<void> _play(MediaItem item) async {
     if (_opening) return;
     _opening = true;
     try {
@@ -349,7 +349,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
     }
   }
 
-  HeroArtworkSources _sources(EmbyItem item) =>
+  HeroArtworkSources _sources(MediaItem item) =>
       heroArtworkSources(item, series: widget.series);
 
   @override
@@ -376,7 +376,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final artwork = _sources(item);
     final multiple = items.length > 1;
     final page = theme.scaffoldBackgroundColor;
-    final neighbours = <EmbyItem>{
+    final neighbours = <MediaItem>{
       if (multiple) items[(index + 1) % items.length],
       if (items.length > 2) items[(index - 1 + items.length) % items.length],
     };
@@ -593,7 +593,7 @@ class _TvFeaturedCaption extends StatelessWidget {
     required this.logoHeight,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final double logoWidth;
   final double logoHeight;
 

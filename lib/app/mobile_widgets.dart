@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -92,7 +92,7 @@ Key phoneCardBadgesKey(String itemId) => Key('phone-card-badges-$itemId');
 /// 入场时取一次数据,不随 reloadHomeRows 刷新,播动态角标会停留旧值。
 List<String> phoneCardBadgeLabels(
   AppLocalizations l10n,
-  EmbyItem item, {
+  MediaItem item, {
   bool includePlayback = true,
   bool includeResumeText = true,
 }) {
@@ -185,7 +185,7 @@ class PhonePosterCard extends StatelessWidget {
     this.onTap,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
 
   /// 横向行里的固定卡宽;null 时铺满父级宽度(网格)。
   final double? width;
@@ -318,7 +318,7 @@ class PhonePosterCard extends StatelessWidget {
 }
 
 /// 海报主图是否存在:无标签的 Primary 兜底不算有图,避免把占位交出去。
-bool phonePosterHasImage(EmbyItem item) {
+bool phonePosterHasImage(MediaItem item) {
   return item
       .imageCandidates(preferBackdrop: false)
       .any((ref) => ref.tag != null && ref.tag!.isNotEmpty);
@@ -339,7 +339,7 @@ class PhoneGridPosterCard extends StatelessWidget {
     this.onTap,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
 
   /// 是否参与 Hero 飞行;仅在有图时生效。
   final bool hero;
@@ -429,10 +429,10 @@ class MobileGrid extends StatelessWidget {
     this.padding = EdgeInsets.zero,
   });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
 
   /// 自定义卡片构建;null 时用 [PhoneGridPosterCard]。调用方负责条目 key。
-  final Widget Function(BuildContext context, EmbyItem item)? itemBuilder;
+  final Widget Function(BuildContext context, MediaItem item)? itemBuilder;
 
   final EdgeInsetsGeometry padding;
 

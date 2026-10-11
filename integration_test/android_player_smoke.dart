@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:rillight/emby/emby_codec.dart';
 // Real owned-core smoke entrypoint. Build with -t and ANDROID_SMOKE_BASE; failures
 // emit RILLIGHT_ANDROID_SMOKE_FAIL, never the success marker. Host tooling must
 // separately inspect displayed frames/audio; position is not output evidence.
@@ -5,11 +7,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -104,11 +107,8 @@ class _SmokeState extends State<_Smoke> {
         await runHlsSubtitles();
         return;
       }
-      final profile = await backend.deviceProfile(8000000);
-      check(
-        (profile['DirectPlayProfiles'] as List).isNotEmpty,
-        'Baseline decoder missing',
-      );
+      final profile = await backend.playbackCapabilities(8000000);
+      check(profile.h264 && profile.aac, 'Baseline decoder missing');
       await backend.open(request(1));
       check(firstFrames > 0, 'open completed without actual first frame');
       await waitFor(
@@ -424,7 +424,7 @@ class _SmokeState extends State<_Smoke> {
 class _HlsSubtitleClient extends EmbyClient {
   _HlsSubtitleClient()
     : super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'Rillight smoke',
           deviceName: 'synthetic',
           deviceId: 'synthetic-hls',
@@ -433,25 +433,28 @@ class _HlsSubtitleClient extends EmbyClient {
       );
 
   @override
-  Future<EmbyItem> getItem(String itemId, {String? fields}) async =>
-      EmbyItem.fromJson({
-        'Id': itemId,
-        'Name': 'Synthetic HLS',
-        'Type': 'Movie',
-        'RunTimeTicks': 120000000,
-      });
+  Future<MediaItem> getItem(
+    String itemId, {
+    String? fields,
+    CancelToken? cancelToken,
+  }) async => decodeEmbyMediaItem({
+    'Id': itemId,
+    'Name': 'Synthetic HLS',
+    'Type': 'Movie',
+    'RunTimeTicks': 120000000,
+  });
 
   @override
   Future<PlaybackInfo> getPlaybackInfo({
     required String itemId,
     int? maxStreamingBitrate,
-    int? startTimeTicks,
+    Duration? startPosition,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
     String? mediaSourceId,
-    Map<String, dynamic>? deviceProfile,
+    PlaybackCapabilities? capabilities,
     bool forceTranscode = false,
-  }) async => PlaybackInfo.fromJson({
+  }) async => decodeEmbyPlaybackInfo({
     'PlaySessionId': 'synthetic-hls-session',
     'MediaSources': [
       {

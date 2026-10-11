@@ -7,10 +7,10 @@ import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/playback.dart';
 
-const device = EmbyDeviceInfo(
+const device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'test',
   deviceId: 'test',
@@ -140,7 +140,7 @@ void main() {
           final body =
               jsonDecode(await utf8.decoder.bind(request).join()) as Map;
           expect(body['ItemId'], 'item');
-          expect(body['PositionTicks'], 123);
+          expect(body['PositionTicks'], 120);
           request.response.write('{}');
         } else {
           request.response.write(jsonEncode({'Id': 'user', 'Name': 'user'}));
@@ -192,7 +192,7 @@ void main() {
           mediaSourceId: 'version',
           playSessionId: 'play',
           playMethod: PlayMethod.directPlay,
-          positionTicks: 123,
+          position: Duration(microseconds: (123) ~/ 10),
         ),
       );
       RestrictedStopPermit? closing;

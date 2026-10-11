@@ -1,6 +1,6 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/emby/media_source_format.dart';
+import 'package:rillight/media_server/media_source_format.dart';
 
 void main() {
   test('scene filename becomes specs plus release group', () {
@@ -41,7 +41,7 @@ void main() {
   });
 
   test('item source presentation uses MediaStreams', () {
-    final source = ItemMediaSource.fromJson({
+    final source = decodeEmbyItemMediaSource({
       'Id': 'src-1',
       'Name': '2160p.BILI.WD.264.AAC-UBWEB',
       'Size': 8500000000,

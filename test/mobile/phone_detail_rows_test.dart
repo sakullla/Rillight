@@ -12,9 +12,10 @@ import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -28,7 +29,7 @@ import 'package:rillight/media_image/media_image.dart';
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-detail-rows',
@@ -51,7 +52,7 @@ void main() {
   ) async {
     final episodes = [
       for (var index = 0; index < 80; index++)
-        EmbyItem(
+        MediaItem(
           id: 'episode-$index',
           name: '第 $index 集',
           type: 'Episode',
@@ -71,7 +72,7 @@ void main() {
           body: Builder(
             builder: (context) => CustomScrollView(
               slivers: MobileSeriesPage(
-                item: const EmbyItem(id: 'series', name: '剧', type: 'Series'),
+                item: const MediaItem(id: 'series', name: '剧', type: 'Series'),
                 seasons: const [],
                 seasonId: null,
                 episodes: episodes,
@@ -109,7 +110,7 @@ void main() {
   ) async {
     final episodes = [
       for (var index = 0; index < 80; index++)
-        EmbyItem(
+        MediaItem(
           id: 'episode-$index',
           name: '第 $index 集',
           type: 'Episode',
@@ -136,7 +137,7 @@ void main() {
             builder: (context) => CustomScrollView(
               controller: scroll,
               slivers: MobileSeriesPage(
-                item: const EmbyItem(id: 'series', name: '剧', type: 'Series'),
+                item: const MediaItem(id: 'series', name: '剧', type: 'Series'),
                 seasons: const [],
                 seasonId: null,
                 episodes: episodes,
@@ -280,7 +281,9 @@ void main() {
                 name: i == 0
                     ? 'A chapter title that is much too long to fit beside the card'
                     : 'Chapter $i',
-                startPositionTicks: i * 60 * 10000000,
+                startPosition: Duration(
+                  microseconds: (i * 60 * 10000000) ~/ 10,
+                ),
               ),
           ];
           movie.people = const [
@@ -883,7 +886,7 @@ void main() {
             body: Builder(
               builder: (context) {
                 final page = MobileSeriesPage(
-                  item: EmbyItem(
+                  item: MediaItem(
                     id: 'series',
                     name: '剧',
                     type: 'Series',
@@ -898,7 +901,7 @@ void main() {
                   ),
                   seasons: [
                     for (var index = 1; index <= 12; index++)
-                      EmbyItem(
+                      MediaItem(
                         id: 'season-$index',
                         name: '第$index季',
                         type: 'Season',
@@ -907,7 +910,7 @@ void main() {
                   seasonId: 'season-1',
                   episodes: [
                     for (var index = 0; index < 30; index++)
-                      EmbyItem(
+                      MediaItem(
                         id: 'episode-$index',
                         name: '第 $index 集',
                         type: 'Episode',
@@ -919,7 +922,7 @@ void main() {
                   playTargetId: null,
                   similar: [
                     for (var index = 0; index < 8; index++)
-                      EmbyItem(
+                      MediaItem(
                         id: 'similar-$index',
                         name: '类似$index',
                         type: 'Series',
@@ -1022,8 +1025,10 @@ void main() {
               seasonId: 'season-friends-1',
               indexNumber: index,
               parentIndexNumber: 1,
-              playbackPositionTicks: index == 29 ? 6000000000 : 0,
-              runTimeTicks: 36000000000,
+              playbackPosition: Duration(
+                microseconds: (index == 29 ? 6000000000 : 0) ~/ 10,
+              ),
+              runtime: Duration(microseconds: (36000000000) ~/ 10),
             ),
         ]);
       },
@@ -1119,14 +1124,14 @@ Future<void> _pumpSeasonPlaceholder(WidgetTester tester, double width) async {
         body: ListView(
           children: [
             MobileSeriesPage(
-              item: const EmbyItem(
+              item: const MediaItem(
                 id: 'series',
                 name: '剧',
                 type: 'Series',
                 overview: '概览',
               ),
               seasons: const [
-                EmbyItem(id: 'season-1', name: '第 1 季', type: 'Season'),
+                MediaItem(id: 'season-1', name: '第 1 季', type: 'Season'),
               ],
               seasonId: 'season-1',
               episodes: const [],
@@ -1267,7 +1272,7 @@ Future<_Started> _start(
   );
   final catalog = CatalogController(auth: auth);
   catalog.libraries = const [
-    EmbyItem(
+    MediaItem(
       id: 'view-movies',
       name: '电影',
       type: 'CollectionFolder',

@@ -11,7 +11,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/player/playback_output_panel.dart';
 import 'package:rillight/player/playback_output_status.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';

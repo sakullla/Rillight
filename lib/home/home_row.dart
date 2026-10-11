@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/media_shelf.dart';
 
@@ -23,12 +23,12 @@ class HomeMediaRow extends StatelessWidget {
   final String shelfId;
   final String title;
   final CatalogRowState state;
-  final ValueChanged<EmbyItem> onTap;
+  final ValueChanged<MediaItem> onTap;
   final VoidCallback onRetry;
   final VoidCallback onMore;
   final bool showProgress;
   final bool wide;
-  final ValueChanged<EmbyItem>? onRemoveFromResume;
+  final ValueChanged<MediaItem>? onRemoveFromResume;
 
   /// 货架标题右侧的附加控件(首页把手动刷新钮挂在这里)。
   final Widget? headerAction;

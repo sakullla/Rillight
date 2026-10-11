@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 
@@ -12,7 +12,7 @@ class LibraryPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final libraries = CatalogScope.maybeOf(context)?.libraries ?? const [];
-    EmbyItem? current;
+    MediaItem? current;
     for (final library in libraries) {
       if (library.id == viewId) {
         current = library;

@@ -21,7 +21,7 @@ import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/phone_orientation.dart';
 import 'package:rillight/player/phone_player_controls.dart';
 import 'package:rillight/player/phone_player_gestures.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'player_window_host.dart';
@@ -485,7 +485,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       streamUrl: resolved.isTranscode ? null : resolved.streamUrl,
       duration: current.duration > Duration.zero
           ? current.duration
-          : durationFromTicks(resolved.mediaSource.runTimeTicks ?? 0),
+          : (resolved.mediaSource.runtime ?? Duration.zero),
       isMovie: !item.isEpisode,
       productionYear: item.productionYear,
     );

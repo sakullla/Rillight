@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/cache/cache_limits.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';

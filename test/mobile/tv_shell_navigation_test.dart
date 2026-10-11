@@ -12,7 +12,7 @@ import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -37,7 +37,7 @@ void main() {
       final server = FakeEmbyServer();
       final auth = AuthController.memory(
         client: EmbyClient(
-          device: const EmbyDeviceInfo(
+          device: const ClientDeviceInfo(
             clientName: 'test',
             deviceName: 'tv',
             deviceId: 'tv-rapid-navigation',
@@ -134,7 +134,7 @@ void main() {
     final server = FakeEmbyServer();
     final auth = AuthController.memory(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'tv',
           deviceId: 'tv-nav-up-return',
@@ -197,7 +197,7 @@ void main() {
     final server = FakeEmbyServer();
     final auth = AuthController.memory(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'phone',
           deviceId: 'phone-shell-navigation',
@@ -255,7 +255,7 @@ void main() {
     final server = FakeEmbyServer();
     final auth = AuthController.memory(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'tv',
           deviceId: 'tv-settings-appearance',
@@ -320,7 +320,7 @@ void main() {
     final server = FakeEmbyServer();
     final auth = AuthController.memory(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'tv',
           deviceId: 'tv-search-private',

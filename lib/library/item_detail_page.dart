@@ -17,10 +17,9 @@ import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/library/detail_source_scope.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
@@ -83,8 +82,8 @@ class ItemDetailPage extends StatefulWidget {
 
 class _ItemDetailPageState extends State<ItemDetailPage> {
   late String _itemId;
-  EmbyItem? _item;
-  EmbyItem? _sharedBackdrop;
+  MediaItem? _item;
+  MediaItem? _sharedBackdrop;
 
   /// 切集时列表条目经常没有演职员、流派和剧照。先沿用上一集已经画出来的内容，
   /// 详情回来再换成这一集自己的；没变就不用拆掉重画。
@@ -94,26 +93,26 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   /// 打开剧集时头图保持剧集自己的海报。点选某一季之后才换成那一季的图。
   var _applySeasonArtwork = false;
-  List<EmbyItem> _seasons = const [];
-  List<EmbyItem> _episodes = const [];
-  List<EmbyItem> _similar = const [];
+  List<MediaItem> _seasons = const [];
+  List<MediaItem> _episodes = const [];
+  List<MediaItem> _similar = const [];
   String? _seasonId;
   String? _seriesId;
   String? _seriesOverview;
   String? _focusedEpisodeId;
-  EmbyItem? _previousEpisode;
-  EmbyItem? _nextEpisode;
+  MediaItem? _previousEpisode;
+  MediaItem? _nextEpisode;
   bool _loading = true;
   bool _busyPlayed = false;
   final _busyPlayedIds = <String>{};
-  EmbyException? _error;
-  EmbyException? _similarError;
+  MediaServerException? _error;
+  MediaServerException? _similarError;
 
   /// 季切换/重试失败时分集分区内联显示的错误;成功后清空。
-  EmbyException? _episodeError;
+  MediaServerException? _episodeError;
 
   /// 已有剧集时，继续加载下一窗或跳到未加载集数失败；列表保留，分区内说明并重试。
-  EmbyException? _episodeLoadMoreError;
+  MediaServerException? _episodeLoadMoreError;
 
   /// 跳转窗口失败时要重试的集号。为空表示 [_episodeLoadMoreError] 来自继续加载。
   int? _pendingJumpNumber;
@@ -193,7 +192,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  void _syncDetailSections(EmbyItem next, {required bool holdMissing}) {
+  void _syncDetailSections(MediaItem next, {required bool holdMissing}) {
     final current = _item;
     final previousBackdrop = _sharedBackdrop ?? current;
     final hasParentBackdrop =
@@ -223,7 +222,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  bool _sameShow(EmbyItem current, EmbyItem next) {
+  bool _sameShow(MediaItem current, MediaItem next) {
     if (!current.isEpisode || !next.isEpisode) {
       return false;
     }
@@ -246,7 +245,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       return;
     }
     _itemId = itemId;
-    EmbyItem? preview;
+    MediaItem? preview;
     for (final episode in _episodes) {
       if (episode.id == itemId) {
         preview = episode;
@@ -378,7 +377,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               _requestedSeasonId() == null &&
               !(keep && _seasonId != null)
           ? repository.resumeEpisode(item.id).catchError((Object _) => null)
-          : Future<EmbyItem?>.value();
+          : Future<MediaItem?>.value();
       var seasons = _seasons;
       if (!(reuseCatalog && seasons.isNotEmpty) &&
           seriesId != null &&
@@ -470,12 +469,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           try {
             final next = await client.getNextEpisode(item);
             if (catalogCurrent()) setState(() => _nextEpisode = next);
-          } on EmbyException {
+          } on MediaServerException {
             // Optional next-season navigation must not hold the visible list.
           }
         }());
       }
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!current()) return;
       setState(() {
         if (!liveItemReady) {
@@ -489,7 +488,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  Future<void> _loadSimilar(EmbyClient client, EmbyItem item, int gen) async {
+  Future<void> _loadSimilar(
+    MediaServerClient client,
+    MediaItem item,
+    int gen,
+  ) async {
     try {
       final similar = await _repository(client).similar(item.id, limit: 24);
       if (!mounted || gen != _loadGen) return;
@@ -497,7 +500,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _similar = similar.where((entry) => entry.id != item.id).toList();
         _similarError = null;
       });
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted || gen != _loadGen) return;
       setState(() => _similarError = _hideSimilar(error) ? null : error);
     }
@@ -510,7 +513,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     int serial, {
     int start = 0,
     int limit = _episodePageSize,
-    EmbyItem? current,
+    MediaItem? current,
   }) async {
     try {
       final cached = await repository.cachedEpisodes(
@@ -552,14 +555,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   DetailRepository? _detailRepository;
 
-  DetailRepository _repository(EmbyClient client) {
+  DetailRepository _repository(MediaServerClient client) {
     final existing = _detailRepository;
     if (existing != null && identical(existing.client, client)) return existing;
     return _detailRepository = DetailRepository(client, _cache);
   }
 
   /// 经缓存层拉取单条详情(总是走网络并写穿缓存)。
-  Future<EmbyItem> _fetchItem(EmbyClient client, String itemId) =>
+  Future<MediaItem> _fetchItem(MediaServerClient client, String itemId) =>
       _repository(client).item(itemId);
 
   /// 路由指定的季优先于自动续播定位。
@@ -573,7 +576,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   /// 单集所属季:优先条目自带的 seasonId/parentId,即使季列表里没有它
   /// (服务端季数据缺失或错位)也按真实归属查询;缺失时才按季号与首季兜底。
-  String? _preferredSeasonId(EmbyItem item, List<EmbyItem> seasons) {
+  String? _preferredSeasonId(MediaItem item, List<MediaItem> seasons) {
     final own = item.seasonId ?? item.parentId;
     if (own != null && own.isNotEmpty) {
       return own;
@@ -589,8 +592,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return seasons.isEmpty ? null : seasons.first.id;
   }
 
-  Future<EmbyItemPage> _queryEpisodes(
-    EmbyClient client,
+  Future<MediaItemPage> _queryEpisodes(
+    MediaServerClient client,
     String seasonId,
     int startIndex, {
     int? limit,
@@ -603,9 +606,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   /// 集详情页一次拉整季(上限 [_episodeDetailSeasonLimit]):本季分集
   /// 横排是切集导航,只给当前窗口会出现"无法向左翻页"。超限季退回窗口。
   Future<_EpisodeWindow> _loadSeasonEpisodes(
-    EmbyClient client,
+    MediaServerClient client,
     String seasonId,
-    EmbyItem current,
+    MediaItem current,
   ) async {
     final page = await _queryEpisodes(
       client,
@@ -626,9 +629,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   /// 当前集缺席但存在唯一同季同集条目时替换目录别名，不补出重复卡片。
   /// 服务端实际返回的多个版本仍保留。
   Future<_EpisodeWindow> _loadEpisodeWindow(
-    EmbyClient client, {
+    MediaServerClient client, {
     required String seasonId,
-    EmbyItem? current,
+    MediaItem? current,
     int? aroundNumber,
   }) async {
     final index = aroundNumber ?? current?.indexNumber;
@@ -700,7 +703,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _loadingMore = false;
         _episodeLoadMoreError = null;
       });
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted ||
           gen != _loadGen ||
           serial != _jumpSerial ||
@@ -735,7 +738,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           limit: 1,
         );
         total = page.totalRecordCount ?? _episodes.length;
-      } on EmbyException {
+      } on MediaServerException {
         total = _episodes.length;
       }
     }
@@ -793,7 +796,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       if (!mounted || serial != _jumpSerial || _seasonId != seasonId) {
         return;
       }
-      EmbyItem? target;
+      MediaItem? target;
       for (final episode in window.items) {
         if (episode.indexNumber == number) {
           target = episode;
@@ -810,7 +813,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _pendingJumpNumber = null;
       });
       _openOrRevealEpisode(target.id);
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted || serial != _jumpSerial || _seasonId != seasonId) {
         return;
       }
@@ -904,7 +907,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _applyWindow(window);
         _episodesLoading = false;
       });
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted ||
           gen != _loadGen ||
           serial != _jumpSerial ||
@@ -920,7 +923,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   Future<void> _openPlayer(
     String itemId, {
-    int? startTimeTicks,
+    Duration? startPosition,
     bool fromBeginning = false,
   }) async {
     try {
@@ -932,7 +935,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           regionGeneration: DetailSourceScope.maybeOf(
             context,
           )?.permit.regionGeneration,
-          autoResume: !fromBeginning && startTimeTicks == null,
+          autoResume: !fromBeginning && startPosition == null,
           mediaSourceId: _item?.id == itemId && _pickedMediaSource
               ? _mediaSourceId
               : null,
@@ -942,7 +945,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           subtitleStreamIndex: _item?.id == itemId && _pickedMediaSource
               ? _subtitleStreamIndex
               : null,
-          startTimeTicks: startTimeTicks,
+          startPosition: startPosition,
         ),
       );
     } catch (error) {
@@ -963,15 +966,18 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     await _setItemPlayed(item, played);
   }
 
-  EmbyUserData _optimisticPlayed(EmbyUserData current, {required bool played}) {
+  MediaUserData _optimisticPlayed(
+    MediaUserData current, {
+    required bool played,
+  }) {
     return current.copyWith(
       played: played,
-      playbackPositionTicks: 0,
+      playbackPosition: Duration(microseconds: (0) ~/ 10),
       playedPercentage: played ? 100 : 0,
     );
   }
 
-  void _patchPlayed(String id, EmbyUserData userData) {
+  void _patchPlayed(String id, MediaUserData userData) {
     _episodes = [
       for (final episode in _episodes)
         if (episode.id == id) episode.copyWith(userData: userData) else episode,
@@ -983,7 +989,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   /// 标记已看/未看:先改列表与当前条目,再写 Emby PlayedItems,最后回读详情。
-  Future<void> _setItemPlayed(EmbyItem target, bool played) async {
+  Future<void> _setItemPlayed(MediaItem target, bool played) async {
     if (_busyPlayedIds.contains(target.id)) {
       return;
     }
@@ -1015,7 +1021,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         _patchPlayed(target.id, updated.userData);
       });
       await CatalogScope.maybeOf(context)?.reloadHomeRows();
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted) {
         return;
       }
@@ -1037,7 +1043,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
   }
 
-  String? _displayOverview(EmbyItem item) {
+  String? _displayOverview(MediaItem item) {
     final own = plainOverview(item.overview);
     if (own != null) {
       return own;
@@ -1049,8 +1055,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   Future<String?> _seriesOverviewTask(
-    EmbyClient client, {
-    required EmbyItem item,
+    MediaServerClient client, {
+    required MediaItem item,
     required String? seriesId,
     required String? cached,
   }) async {
@@ -1068,14 +1074,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     }
     try {
       return (await client.getItem(seriesId)).overview ?? '';
-    } on EmbyException {
+    } on MediaServerException {
       return '';
     }
   }
 
   /// 详情 /Items/{id} 有时不带 ticks,继续观看列表却有百分比。
   /// 首页已拉过 Resume 时,把那份 UserData 补到当前条目。
-  EmbyItem _withCatalogResume(EmbyItem item) {
+  MediaItem _withCatalogResume(MediaItem item) {
     if (item.canResume || DetailSourceScope.maybeOf(context) != null) {
       return item;
     }
@@ -1088,7 +1094,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return item;
   }
 
-  EmbyItem? _playTarget(EmbyItem item) {
+  MediaItem? _playTarget(MediaItem item) {
     if (item.isPlayable) {
       return item;
     }
@@ -1106,21 +1112,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return null;
   }
 
-  EmbyItem? _nextEpisodeAfter(EmbyItem item) {
+  MediaItem? _nextEpisodeAfter(MediaItem item) {
     if (!item.isEpisode) {
       return null;
     }
     return _nextEpisode ?? _siblingAfter(item, _episodes);
   }
 
-  EmbyItem? _previousEpisodeBefore(EmbyItem item) {
+  MediaItem? _previousEpisodeBefore(MediaItem item) {
     if (!item.isEpisode) {
       return null;
     }
     return _previousEpisode ?? _siblingBefore(item, _episodes);
   }
 
-  EmbyItem? _siblingBefore(EmbyItem item, List<EmbyItem> episodes) {
+  MediaItem? _siblingBefore(MediaItem item, List<MediaItem> episodes) {
     final index = episodes.indexWhere((episode) => episode.id == item.id);
     if (index <= 0) {
       return null;
@@ -1128,7 +1134,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return episodes[index - 1];
   }
 
-  EmbyItem? _siblingAfter(EmbyItem item, List<EmbyItem> episodes) {
+  MediaItem? _siblingAfter(MediaItem item, List<MediaItem> episodes) {
     final index = episodes.indexWhere((episode) => episode.id == item.id);
     if (index < 0 || index + 1 >= episodes.length) {
       return null;
@@ -1136,7 +1142,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return episodes[index + 1];
   }
 
-  Future<String?> _resolveSeriesId(EmbyClient client, EmbyItem item) async {
+  Future<String?> _resolveSeriesId(
+    MediaServerClient client,
+    MediaItem item,
+  ) async {
     if (item.isSeries) {
       return item.id;
     }
@@ -1159,25 +1168,25 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           fromSeason != seasonId) {
         return fromSeason;
       }
-    } on EmbyException {
+    } on MediaServerException {
       return null;
     }
     return null;
   }
 
-  int? _defaultAudio(EmbyItem item, String? sourceId) {
+  int? _defaultAudio(MediaItem item, String? sourceId) {
     final source = _sourceById(item, sourceId);
     final audios = source?.audioStreams ?? const [];
     return audios.isEmpty ? null : audios.first.index;
   }
 
-  int? _defaultSubtitle(EmbyItem item, String? sourceId) {
+  int? _defaultSubtitle(MediaItem item, String? sourceId) {
     final source = _sourceById(item, sourceId);
     final subs = source?.subtitleStreams ?? const [];
     return subs.isEmpty ? null : subs.first.index;
   }
 
-  ItemMediaSource? _sourceById(EmbyItem item, String? sourceId) {
+  ItemMediaSource? _sourceById(MediaItem item, String? sourceId) {
     if (item.mediaSources.isEmpty) {
       return null;
     }
@@ -1192,7 +1201,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return item.mediaSources.first;
   }
 
-  bool _hideSimilar(EmbyException error) {
+  bool _hideSimilar(MediaServerException error) {
     final code = error.statusCode;
     return code == 404 || code == 400 || code == 501;
   }
@@ -1311,8 +1320,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               ? null
               : () => _openPlayer(
                   playTarget.id,
-                  startTimeTicks: playTarget.canResume
-                      ? playTarget.resumePositionTicks
+                  startPosition: playTarget.canResume
+                      ? playTarget.resumePosition
                       : null,
                 ),
           onPlayFromStart: playTarget == null || !playTarget.canResume
@@ -1366,7 +1375,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             if (playId == null) {
               return;
             }
-            _openPlayer(playId, startTimeTicks: chapter.startPositionTicks);
+            _openPlayer(playId, startPosition: chapter.startPosition);
           },
         ),
       if (item.isSeries) ...[
@@ -1773,7 +1782,7 @@ class _ChapterTile extends StatelessWidget {
                               vertical: 2,
                             ),
                             child: Text(
-                              chapterClock(chapter.startPositionTicks),
+                              chapterClock(chapter.startPosition),
                               style: theme.textTheme.labelSmall?.copyWith(
                                 color: Colors.white,
                                 fontFeatures: const [
@@ -1869,7 +1878,7 @@ class _EpisodeShelfActions extends StatelessWidget {
     this.onLocate,
   });
 
-  final List<EmbyItem> seasons;
+  final List<MediaItem> seasons;
   final String? seasonId;
   final ValueChanged<String> onSelectSeason;
   final VoidCallback? onLocate;
@@ -1909,7 +1918,7 @@ class _EpisodeNumberPicker extends StatefulWidget {
   final int total;
   final int? current;
   final String seasonId;
-  final EmbyClient client;
+  final MediaServerClient client;
 
   @override
   State<_EpisodeNumberPicker> createState() => _EpisodeNumberPickerState();
@@ -1919,7 +1928,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
   static const _pageSize = 30;
   late int _rangeStart;
   final _jump = TextEditingController();
-  List<EmbyItem> _page = const [];
+  List<MediaItem> _page = const [];
   bool _loading = true;
 
   @override
@@ -1958,7 +1967,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
         _page = page.items;
         _loading = false;
       });
-    } on EmbyException {
+    } on MediaServerException {
       if (!mounted) {
         return;
       }
@@ -2094,13 +2103,13 @@ class _SeasonJump extends StatelessWidget {
     required this.onSelected,
   });
 
-  final List<EmbyItem> seasons;
+  final List<MediaItem> seasons;
   final String? seasonId;
   final ValueChanged<String> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    EmbyItem current = seasons.first;
+    MediaItem current = seasons.first;
     for (final season in seasons) {
       if (season.id == seasonId) {
         current = season;
@@ -2196,7 +2205,7 @@ class _EpisodeWindow {
     required this.end,
   });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
 
   /// 季内分集总数(服务端 TotalRecordCount)。
   final int total;
@@ -2210,7 +2219,7 @@ const _episodePageSize = 80;
 /// 集详情页整季拉取上限;超过该集数的季退回当前集窗口。
 const _episodeDetailSeasonLimit = 300;
 
-List<EmbyItem> _dedupeById(Iterable<EmbyItem> items) {
+List<MediaItem> _dedupeById(Iterable<MediaItem> items) {
   final seen = <String>{};
   return [
     for (final item in items)
@@ -2218,9 +2227,9 @@ List<EmbyItem> _dedupeById(Iterable<EmbyItem> items) {
   ];
 }
 
-List<EmbyItem> _mergeCurrentEpisode(
-  Iterable<EmbyItem> entries,
-  EmbyItem current,
+List<MediaItem> _mergeCurrentEpisode(
+  Iterable<MediaItem> entries,
+  MediaItem current,
 ) {
   final items = _dedupeById(entries);
   if (items.any((entry) => entry.id == current.id)) return items;
@@ -2244,7 +2253,7 @@ List<EmbyItem> _mergeCurrentEpisode(
 }
 
 /// 按集号稳定排序:同号多版本保持原有相对顺序,无集号者排最后。
-List<EmbyItem> _sortedByIndex(List<EmbyItem> items) {
+List<MediaItem> _sortedByIndex(List<MediaItem> items) {
   final indexed = [for (var i = 0; i < items.length; i++) (i, items[i])];
   indexed.sort((a, b) {
     final left = a.$2.indexNumber ?? 1 << 30;
@@ -2293,10 +2302,10 @@ class _DetailHeader extends StatelessWidget {
     this.genres = const [],
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final List<String> genres;
-  final EmbyItem? artworkItem;
-  final EmbyItem? backdropItem;
+  final MediaItem? artworkItem;
+  final MediaItem? backdropItem;
   final String? runtime;
   final bool busyPlayed;
   final VoidCallback? onPlay;
@@ -2305,8 +2314,8 @@ class _DetailHeader extends StatelessWidget {
   final double topOverlap;
   final int seasonCount;
   final String? seriesId;
-  final EmbyItem? previousEpisode;
-  final EmbyItem? nextEpisode;
+  final MediaItem? previousEpisode;
+  final MediaItem? nextEpisode;
   final VoidCallback? onOpenPreviousEpisode;
   final VoidCallback? onOpenNextEpisode;
   final String? mediaSourceId;
@@ -2470,7 +2479,7 @@ class _DetailHeader extends StatelessWidget {
 class _DetailPoster extends StatelessWidget {
   const _DetailPoster({required this.item, required this.layoutWidth});
 
-  final EmbyItem item;
+  final MediaItem item;
   final double layoutWidth;
 
   static double posterWidthFor(double width) {
@@ -2571,7 +2580,7 @@ class _DetailInfo extends StatelessWidget {
     this.mediaSource,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final List<String> genres;
   final ItemMediaSource? mediaSource;
   final String? runtime;
@@ -2582,7 +2591,7 @@ class _DetailInfo extends StatelessWidget {
   final Widget actions;
   final String? overview;
   final Widget? overviewWidget;
-  final EmbyItem? playEpisode;
+  final MediaItem? playEpisode;
 
   /// 简介行宽上限:约 70–90 个汉字/行,超过后行长过长可读性下降。
   static const double overviewMaxWidth = 720;
@@ -2670,10 +2679,10 @@ class _MetaRow extends StatelessWidget {
     this.badges = const [],
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final String? runtime;
   final int seasonCount;
-  final EmbyItem? playEpisode;
+  final MediaItem? playEpisode;
   final VoidCallback? onLocateEpisode;
 
   /// 画质/声道/字幕描边标签，跟在事实与评分后面。
@@ -2834,7 +2843,7 @@ class _MetaRow extends StatelessWidget {
   }
 }
 
-ItemMediaSource? _headerSource(EmbyItem item, String? id) {
+ItemMediaSource? _headerSource(MediaItem item, String? id) {
   for (final source in item.mediaSources) {
     if (source.id == id) return source;
   }
@@ -2876,14 +2885,14 @@ class _DetailActions extends StatelessWidget {
     this.onSubtitle,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final bool busyPlayed;
   final ValueChanged<bool> onPlayedChanged;
   final VoidCallback? onPlay;
   final VoidCallback? onPlayFromStart;
   final VoidCallback? onOpenPreviousEpisode;
   final VoidCallback? onOpenNextEpisode;
-  final EmbyItem? playEpisode;
+  final MediaItem? playEpisode;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
@@ -3175,7 +3184,7 @@ class _DetailSkeleton extends StatelessWidget {
   }
 }
 
-List<ItemMediaStream> _audioChoices(EmbyItem item, String? sourceId) {
+List<ItemMediaStream> _audioChoices(MediaItem item, String? sourceId) {
   if (item.mediaSources.isEmpty) {
     return const [];
   }
@@ -3191,7 +3200,7 @@ List<ItemMediaStream> _audioChoices(EmbyItem item, String? sourceId) {
   return source.audioStreams;
 }
 
-List<ItemMediaStream> _subtitleChoices(EmbyItem item, String? sourceId) {
+List<ItemMediaStream> _subtitleChoices(MediaItem item, String? sourceId) {
   if (item.mediaSources.isEmpty) {
     return const [];
   }

@@ -58,7 +58,7 @@ void main() {
                   mediaSourceId: 'version-b',
                   audioStreamIndex: 4,
                   subtitleStreamIndex: 7,
-                  startTimeTicks: 123456789,
+                  startPosition: Duration(microseconds: 123456789 ~/ 10),
                   startPaused: true,
                   subtitleOff: true,
                   maxStreamingBitrate: 12000000,
@@ -73,7 +73,7 @@ void main() {
       expect(restored.mediaSourceId, 'version-b');
       expect(restored.audioStreamIndex, 4);
       expect(restored.subtitleStreamIndex, 7);
-      expect(restored.startTimeTicks, 123456789);
+      expect(restored.startPosition, Duration(microseconds: (123456789) ~/ 10));
       expect(restored.startPaused, isTrue);
       expect(restored.subtitleOff, isTrue);
       expect(restored.maxStreamingBitrate, 12000000);

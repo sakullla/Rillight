@@ -1,14 +1,13 @@
-import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/player/playback_persistence.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'playback_runtime.dart';
-import 'package:dio/dio.dart';
-import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 
 /// Compensates an interrupted foreground session only for its original owner.
 /// A private client freezes credentials across awaited requests and never
 /// refreshes or sends an old report with a newly selected identity.
 Future<bool> recoverAndroidSession(
-  EmbyClient client,
+  MediaServerClient client,
   PlaybackSessionSnapshotStore store, {
   PlaybackRuntime? runtime,
 }) async {
@@ -36,7 +35,9 @@ Future<bool> recoverAndroidSession(
   if (base == null || user == null || token == null) return false;
   final snapshot = await store.read();
   if (snapshot == null) return false;
-  if (snapshot.baseUrl != base.toString() || snapshot.userId != user) {
+  if (snapshot.serviceType != client.serviceType ||
+      snapshot.baseUrl != base.toString() ||
+      snapshot.userId != user) {
     await store.delete();
     return false;
   }
@@ -45,8 +46,7 @@ Future<bool> recoverAndroidSession(
       client.accessToken != token) {
     return false;
   }
-  final dio = Dio();
-  final frozen = EmbyClient(device: client.device, dio: dio)
+  final frozen = client.createDetached()
     ..attachSession(
       baseUrl: base,
       userId: user,
@@ -61,11 +61,11 @@ Future<bool> recoverAndroidSession(
       return false;
     }
     await frozen
-        .reportStopped(PlaybackReport.fromSnapshot(snapshot))
+        .stopPlayback(playbackReportFromSnapshot(snapshot))
         .timeout(const Duration(seconds: 3));
     await store.delete();
     return true;
   } finally {
-    dio.close(force: true);
+    frozen.clearSession();
   }
 }

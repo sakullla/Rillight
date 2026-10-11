@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 
 /// Shared search paging and stale-result ownership for all presentations.
 class SearchController extends ChangeNotifier {
@@ -15,7 +15,7 @@ class SearchController extends ChangeNotifier {
   final AuthController auth;
   final CatalogCache cache;
   static const pageSize = 50;
-  List<EmbyItem> items = const [];
+  List<MediaItem> items = const [];
   String term = '';
   String? watch;
   int fetched = 0;
@@ -25,7 +25,7 @@ class SearchController extends ChangeNotifier {
   /// the cursor used by subsequent pages.
   bool liveFirstPageReady = false;
   bool refreshingFirstPage = false;
-  EmbyException? error, pageError;
+  MediaServerException? error, pageError;
   int _revision = 0;
   bool _disposed = false;
   late Object _identity;
@@ -139,10 +139,10 @@ class SearchController extends ChangeNotifier {
     );
   }
 
-  void _accept(List<EmbyItem> raw, int start) {
+  void _accept(List<MediaItem> raw, int start) {
     items = {
       for (final item in [
-        ...(start == 0 ? <EmbyItem>[] : items),
+        ...(start == 0 ? <MediaItem>[] : items),
         ...raw.where((item) => item.isMovieOrSeries),
       ])
         item.id: item,
@@ -153,9 +153,10 @@ class SearchController extends ChangeNotifier {
     _emit();
   }
 
-  EmbyException _failure(Object failure) => failure is EmbyException
+  MediaServerException _failure(Object failure) =>
+      failure is MediaServerException
       ? failure
-      : EmbyException(EmbyFailureKind.unknown, cause: failure);
+      : MediaServerException(MediaServerFailureKind.unknown, cause: failure);
   void _emit() {
     if (!_disposed) notifyListeners();
   }

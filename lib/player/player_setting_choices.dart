@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/emby/device_profile.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
 
 /// 整数倍速写成 `1x`，小数保留原样。

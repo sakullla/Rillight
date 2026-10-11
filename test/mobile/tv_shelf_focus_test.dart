@@ -2,21 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 void main() {
   testWidgets('focused TV poster keeps its node when refreshed order changes', (
     tester,
   ) async {
-    const first = EmbyItem(id: 'first', name: 'First', type: 'Movie');
-    const second = EmbyItem(id: 'second', name: 'Second', type: 'Movie');
-    const third = EmbyItem(id: 'third', name: 'Third', type: 'Movie');
+    const first = MediaItem(id: 'first', name: 'First', type: 'Movie');
+    const second = MediaItem(id: 'second', name: 'Second', type: 'Movie');
+    const third = MediaItem(id: 'third', name: 'Third', type: 'Movie');
     const metrics = TvGridMetrics(
       columns: 2,
       imageMaxWidth: 200,
       childAspectRatio: 0.7,
     );
-    Widget page(List<EmbyItem> items) => MaterialApp(
+    Widget page(List<MediaItem> items) => MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(

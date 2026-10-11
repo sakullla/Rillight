@@ -18,8 +18,8 @@ import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -63,7 +63,7 @@ void main() {
     final catalog = [server, ...extraServers];
     final auth = SyntheticSourceAuth(
       adapter: FakeEmbyAdapter(catalog),
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'phone',
         deviceId: 'mobile-widget',
@@ -541,10 +541,7 @@ void main() {
       final updated = server.items.firstWhere(
         (item) => item.id == 'movie-inception',
       );
-      expect(
-        updated.playbackPositionTicks,
-        greaterThan(movie.runTimeTicks! ~/ 2),
-      );
+      expect(updated.playbackPosition, greaterThan(movie.runtime! ~/ 2));
       final percent = (updated.playedPercentage ?? 0).round();
       expect(percent, isNot(40));
       expect(find.text('已看 40%'), findsNothing);
@@ -1219,7 +1216,7 @@ void main() {
 
       catalog.edit((page) {
         page.resume = const CatalogRowState(
-          error: EmbyException(EmbyFailureKind.unknown),
+          error: MediaServerException(MediaServerFailureKind.unknown),
         );
       });
       await tester.pump();
@@ -1264,7 +1261,9 @@ void main() {
 
       catalog.edit((page) {
         page.librariesLoading = false;
-        page.librariesError = const EmbyException(EmbyFailureKind.unknown);
+        page.librariesError = const MediaServerException(
+          MediaServerFailureKind.unknown,
+        );
       });
       await tester.pump();
       expect(find.text('加载失败'), findsOneWidget);

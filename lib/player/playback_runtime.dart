@@ -1,3 +1,5 @@
+import 'package:rillight/player/playback_persistence.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
@@ -6,10 +8,8 @@ import '../auth/auth_controller.dart';
 import '../auth/source_sessions.dart';
 import '../aggregation/history/history_writer.dart';
 import '../aggregation/identity/media_identity.dart';
-import '../emby/emby_client.dart';
-import '../emby/emby_models.dart';
 import 'player_window_host.dart';
-import 'playback_models.dart';
+import '../media_server/playback.dart';
 
 /// A resolved origin is a lease, not merely a value reference or auth.client.
 class PlaybackOrigin {
@@ -24,7 +24,7 @@ class PlaybackOrigin {
   final SourceReference work;
   final String libraryId;
   final OperationPermit permit;
-  final EmbyClient client;
+  final MediaServerClient client;
 }
 
 /// Created only by the application bootstrap, never by the player helper.
@@ -177,7 +177,7 @@ class PlaybackRuntime {
 
   PreferenceResolution preference(
     PlaybackOrigin origin,
-    EmbyItem item,
+    MediaItem item,
     List<PlaybackMediaSource> versions,
   ) {
     final candidates = versions.map(
@@ -212,7 +212,7 @@ class PlaybackRuntime {
         episodeLookups: {
           origin.source.account: EpisodeLookup(
             EpisodeLookupStatus.confirmed,
-            source: EpisodeSource.fromEmby(origin.source, item),
+            source: EpisodeSource.fromMediaItem(origin.source, item),
           ),
         },
       );
@@ -236,8 +236,8 @@ class PlaybackRuntime {
     );
     final index = WorkIndex()
       ..upsert([
-        WorkSource.fromEmby(original.work, oldWork),
-        WorkSource.fromEmby(target.work, newWork),
+        WorkSource.fromMediaItem(original.work, oldWork),
+        WorkSource.fromMediaItem(target.work, newWork),
       ]);
     final group = index.groupFor(original.work);
     if (group == null || !group.contains(target.work)) {
@@ -255,14 +255,14 @@ class PlaybackRuntime {
       }
       final lookup = locateEpisode(
         series: group,
-        origin: EpisodeSource.fromEmby(
+        origin: EpisodeSource.fromMediaItem(
           original.source,
           oldItem,
           numberingScheme: numberingScheme,
         ),
         targetAccount: target.source.account,
         available: [
-          EpisodeSource.fromEmby(
+          EpisodeSource.fromMediaItem(
             target.source,
             newItem,
             numberingScheme: numberingScheme,
@@ -358,7 +358,7 @@ class PlaybackRuntime {
         source.itemId != snapshot.itemId ||
         source.mediaSourceId != snapshot.mediaSourceId ||
         snapshot.userId != source.account.userId ||
-        snapshot.positionTicks < 0) {
+        snapshot.position < Duration.zero) {
       return false;
     }
     if (source.account.region == AccessRegion.private &&
@@ -395,7 +395,7 @@ class PlaybackRuntime {
         source.itemId != snapshot.itemId ||
         source.mediaSourceId != snapshot.mediaSourceId ||
         snapshot.userId != source.account.userId ||
-        snapshot.positionTicks < 0) {
+        snapshot.position < Duration.zero) {
       return false;
     }
     // Reject permanent scope/generation removal without probing. A missing
@@ -439,9 +439,8 @@ class PlaybackRuntime {
     }
     await origin.permit
         .dispatch(
-          (_) => origin.client.reportStopped(
-            PlaybackReport.fromSnapshot(snapshot),
-          ),
+          (_) =>
+              origin.client.stopPlayback(playbackReportFromSnapshot(snapshot)),
         )
         .timeout(const Duration(seconds: 3));
     return origin.permit.isValid;

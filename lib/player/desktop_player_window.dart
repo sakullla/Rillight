@@ -1,3 +1,6 @@
+import 'package:rillight/media_server/capabilities.dart';
+import 'package:rillight/media_server/provider_registry.dart';
+import 'package:rillight/player/playback_persistence.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -20,9 +23,9 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -46,6 +49,7 @@ class PlayerWindowLaunch {
 
   const PlayerWindowLaunch({
     required this.request,
+    this.serviceType = MediaServerType.emby,
     required this.baseUrl,
     required this.accessToken,
     required this.userId,
@@ -59,10 +63,11 @@ class PlayerWindowLaunch {
   });
 
   final PlayerOpenRequest request;
+  final MediaServerType serviceType;
   final String baseUrl;
   final String accessToken;
   final String userId;
-  final EmbyDeviceInfo device;
+  final ClientDeviceInfo device;
   final String? userAgent;
   final PlayerProcessProtocol? protocol;
   final int? regionGeneration;
@@ -89,6 +94,7 @@ class PlayerWindowLaunch {
       accessToken: token,
       userId: userId,
       device: client.device,
+      serviceType: client.serviceType,
       userAgent: client.customUserAgent,
       preparedStartup: preparedStartup,
       lines: matched?.lines ?? const [],
@@ -106,7 +112,13 @@ class PlayerWindowLaunch {
   }
 
   factory PlayerWindowLaunch.fromJson(Map<String, dynamic> json) {
+    final name = json['serviceType'] as String? ?? 'emby';
+    final type = MediaServerType.values
+        .where((type) => type.name == name)
+        .firstOrNull;
+    if (type == null) throw const FormatException('Unknown media service');
     return PlayerWindowLaunch(
+      serviceType: type,
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
         source: json['source'] is Map
@@ -128,9 +140,11 @@ class PlayerWindowLaunch {
         subtitleStreamIndex: json['subtitleStreamIndex'] is int
             ? json['subtitleStreamIndex'] as int
             : int.tryParse('${json['subtitleStreamIndex'] ?? ''}'),
-        startTimeTicks: json['startTimeTicks'] is int
-            ? json['startTimeTicks'] as int
-            : int.tryParse('${json['startTimeTicks'] ?? ''}'),
+        startPosition: json['startUs'] is int
+            ? Duration(microseconds: json['startUs'] as int)
+            : json['startTimeTicks'] is int
+            ? durationFromTicks(json['startTimeTicks'] as int)
+            : null,
       ),
       regionGeneration: json['regionGeneration'] as int?,
       baseUrl: json['baseUrl'] as String? ?? '',
@@ -146,7 +160,7 @@ class PlayerWindowLaunch {
       protocol: json['processSessionId'] == null
           ? null
           : PlayerProcessProtocol.fromJson(json),
-      device: EmbyDeviceInfo(
+      device: ClientDeviceInfo(
         clientName: json['clientName'] as String? ?? kHttpClientName,
         deviceName: json['deviceName'] as String? ?? 'desktop',
         deviceId: json['deviceId'] as String? ?? 'rillight-player',
@@ -175,8 +189,10 @@ class PlayerWindowLaunch {
         'audioStreamIndex': request.audioStreamIndex,
       if (request.subtitleStreamIndex != null)
         'subtitleStreamIndex': request.subtitleStreamIndex,
-      if (request.startTimeTicks != null)
-        'startTimeTicks': request.startTimeTicks,
+      if (request.startPosition != null)
+        'startUs': request.startPosition!.inMicroseconds,
+      'serviceType': serviceType.name,
+      'schema': 2,
       'baseUrl': baseUrl,
       'accessToken': accessToken,
       'userId': userId,
@@ -400,7 +416,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                         language: settings?.subtitleLanguage,
                         title: settings?.subtitleTitle,
                       )),
-            startTimeTicks: request.startTimeTicks,
+            startPosition: request.startPosition,
             startPaused: request.startPaused,
             subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
             maxStreamingBitrate:
@@ -411,6 +427,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           accessToken: origin.client.accessToken!,
           userId: origin.source.account.userId,
           device: origin.client.device,
+          serviceType: origin.client.serviceType,
           userAgent: origin.client.customUserAgent,
           regionGeneration: origin.permit.regionGeneration,
           lines: lines,
@@ -699,7 +716,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     final token = client.accessToken;
     try {
       await client
-          .reportStopped(PlaybackReport.fromSnapshot(snapshot))
+          .stopPlayback(playbackReportFromSnapshot(snapshot))
           .timeout(reportTimeout);
     } catch (_) {
       _notify(PlayerHostNotice.progressSyncFailed);
@@ -1002,7 +1019,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               String? numbering;
               if (currentDto.isEpisode && candidate.decision.confirmed) {
                 if (mappedTarget == targetRef) {
-                  final original = EpisodeSource.fromEmby(
+                  final original = EpisodeSource.fromMediaItem(
                     current.source,
                     currentDto,
                   );
@@ -1193,7 +1210,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               libraryId: old.libraryId,
               mediaSourceId: oldVersion,
               autoResume: false,
-              startTimeTicks: plan.positionTicks,
+              startPosition: durationFromTicks(plan.positionTicks),
               startPaused: plan.paused,
               audioStreamIndex: command['audio'] as int?,
               subtitleStreamIndex: command['subtitle'] as int?,
@@ -1232,9 +1249,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             work: target.work,
             libraryId: target.libraryId,
             mediaSourceId: pending.plan.sourceId,
-            startTimeTicks: choice == SwitchResumeChoice.beginning
-                ? 0
-                : pending.plan.positionTicks,
+            startPosition: choice == SwitchResumeChoice.beginning
+                ? Duration.zero
+                : durationFromTicks(pending.plan.positionTicks),
             autoResume: false,
             startPaused: pending.plan.paused,
             maxStreamingBitrate: pending.plan.maxStreamingBitrate,
@@ -1473,7 +1490,7 @@ class PlayerWindowApp extends StatefulWidget {
   const PlayerWindowApp.testing({
     super.key,
     required this.launch,
-    required EmbyClient client,
+    required MediaServerClient client,
     required PlayerBindings bindings,
     required VoidCallback onExit,
   }) : _client = client,
@@ -1481,7 +1498,7 @@ class PlayerWindowApp extends StatefulWidget {
        _onExit = onExit;
 
   final PlayerWindowLaunch launch;
-  final EmbyClient? _client;
+  final MediaServerClient? _client;
   final PlayerBindings? _bindings;
   final VoidCallback? _onExit;
 
@@ -1565,7 +1582,9 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   }
 
   AuthController _authFor(PlayerWindowLaunch launch) {
-    final client = widget._client ?? EmbyClient(device: launch.device);
+    final client =
+        widget._client ??
+        MediaServerProviders.create(launch.serviceType, launch.device);
     client.attachSession(
       baseUrl: Uri.parse(launch.baseUrl),
       accessToken: launch.accessToken,
@@ -1707,7 +1726,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       'observationSequence': observationSequence,
       'item': report.itemId,
       'version': report.mediaSourceId,
-      'position': report.positionTicks,
+      'position': report.position.inMicroseconds * 10,
       'actuallyPlaying': true,
       'played': played,
       'timeline': timeline.toJson(),
@@ -1828,7 +1847,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             mediaSourceId: request.mediaSourceId,
             audioStreamIndex: request.audioStreamIndex,
             subtitleStreamIndex: request.subtitleStreamIndex,
-            startTimeTicks: request.startTimeTicks,
+            startPosition: request.startPosition,
             onClosed: () {
               unawaited(_closeWindow());
             },
@@ -1852,6 +1871,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                   accessToken: _auth.client.accessToken ?? _launch.accessToken,
                   userId: _auth.client.userId ?? _launch.userId,
                   device: _launch.device,
+                  serviceType: _launch.serviceType,
                   userAgent: _auth.client.customUserAgent ?? _launch.userAgent,
                   protocol: _launch.protocol,
                   regionGeneration: _launch.regionGeneration,

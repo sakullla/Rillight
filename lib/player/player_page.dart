@@ -14,7 +14,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -27,7 +27,6 @@ import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/next_episode_card.dart';
-import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_wake_lock.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -93,7 +92,7 @@ class PlayerPage extends StatefulWidget {
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
-    this.startTimeTicks,
+    this.startPosition,
     this.sourceRequest,
     this.onClosed,
     this.onOpenItem,
@@ -107,7 +106,7 @@ class PlayerPage extends StatefulWidget {
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
-  final int? startTimeTicks;
+  final Duration? startPosition;
   final PlayerOpenRequest? sourceRequest;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
@@ -191,7 +190,7 @@ class PlayerPageState extends State<PlayerPage> {
       preferredMediaSourceId: widget.mediaSourceId,
       preferredAudioStreamIndex: widget.audioStreamIndex,
       preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
-      startTimeTicks: widget.startTimeTicks,
+      startPosition: widget.startPosition,
       progressInterval: bindings.progressInterval,
       controlsHideAfter: bindings.controlsHideAfter,
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
@@ -321,7 +320,7 @@ class PlayerPageState extends State<PlayerPage> {
       streamUrl: resolved.isTranscode ? null : resolved.streamUrl,
       duration: current.duration > Duration.zero
           ? current.duration
-          : durationFromTicks(resolved.mediaSource.runTimeTicks ?? 0),
+          : (resolved.mediaSource.runtime ?? Duration.zero),
       isMovie: !item.isEpisode,
       productionYear: item.productionYear,
     );
@@ -1457,7 +1456,7 @@ class _EpisodeListPanel extends StatelessWidget {
     );
   }
 
-  double _episodeProgress(EmbyItem episode, bool isCurrent) {
+  double _episodeProgress(MediaItem episode, bool isCurrent) {
     if (isCurrent) {
       final duration = controller.duration;
       if (duration > Duration.zero) {
@@ -1545,7 +1544,7 @@ class _EpisodeRow extends StatefulWidget {
   static const thumbWidth = 128.0;
   static const thumbHeight = thumbWidth * 9 / 16;
 
-  final EmbyItem episode;
+  final MediaItem episode;
   final bool isCurrent;
   final double progress;
   final VoidCallback onTap;
@@ -1556,7 +1555,7 @@ class _EpisodeRow extends StatefulWidget {
 
 class _EpisodeRowState extends State<_EpisodeRow> {
   bool get _isCurrent => widget.isCurrent;
-  EmbyItem get episode => widget.episode;
+  MediaItem get episode => widget.episode;
 
   @override
   Widget build(BuildContext context) {
@@ -1674,7 +1673,7 @@ class _EpisodeHoverCard extends StatelessWidget {
     required this.onExit,
   });
 
-  final EmbyItem episode;
+  final MediaItem episode;
   final double left;
   final double top;
   final double width;
@@ -1798,7 +1797,7 @@ class _EpisodeThumb extends StatelessWidget {
     required this.progress,
   });
 
-  final EmbyItem episode;
+  final MediaItem episode;
   final bool isCurrent;
   final bool played;
   final double progress;
@@ -1953,7 +1952,7 @@ class _EpisodeListView extends StatefulWidget {
     required this.onLoadMore,
   });
 
-  final List<EmbyItem> episodes;
+  final List<MediaItem> episodes;
   final String currentId;
 
   /// 当前集的集号与季 id;媒体库把同一集重复入库为多个条目时,
@@ -1965,12 +1964,12 @@ class _EpisodeListView extends StatefulWidget {
   final bool hasMore;
   final bool loadingEarlier;
   final bool loadingMore;
-  final double Function(EmbyItem episode, bool isCurrent) progressFor;
-  final ValueChanged<EmbyItem> onPlay;
+  final double Function(MediaItem episode, bool isCurrent) progressFor;
+  final ValueChanged<MediaItem> onPlay;
   final VoidCallback onLoadEarlier;
   final VoidCallback onLoadMore;
 
-  bool isCurrentEpisode(EmbyItem episode) {
+  bool isCurrentEpisode(MediaItem episode) {
     if (episode.id == currentId) {
       return true;
     }
@@ -2008,7 +2007,7 @@ class _EpisodeListViewState extends State<_EpisodeListView> {
     );
   }
 
-  int _prependedCount(List<EmbyItem> previous, List<EmbyItem> next) {
+  int _prependedCount(List<MediaItem> previous, List<MediaItem> next) {
     if (previous.isEmpty || next.length <= previous.length) {
       return 0;
     }

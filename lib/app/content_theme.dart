@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'artwork_color_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// 从当前海报取出的内容方案(亮度跟随当前主题)。页面局部套用，不改应用外壳。
@@ -22,7 +22,7 @@ class ContentTheme extends StatefulWidget {
     this.fillSurface = true,
   });
 
-  final EmbyItem? item;
+  final MediaItem? item;
   final Widget child;
   final bool preferBackdrop;
   final bool preferParentBackdrop;

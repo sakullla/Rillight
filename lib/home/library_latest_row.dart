@@ -3,9 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
@@ -20,7 +19,7 @@ class LibraryLatestData extends StatefulWidget {
     required this.builder,
   });
 
-  final EmbyItem library;
+  final MediaItem library;
   final Widget Function(BuildContext context, LibraryLatestSnapshot snapshot)
   builder;
 
@@ -36,16 +35,16 @@ class LibraryLatestSnapshot {
     required this.retry,
   });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final bool loading;
-  final EmbyException? error;
+  final MediaServerException? error;
   final VoidCallback retry;
 }
 
 class _LibraryLatestDataState extends State<LibraryLatestData> {
-  List<EmbyItem> _items = const [];
+  List<MediaItem> _items = const [];
   var _loading = true;
-  EmbyException? _error;
+  MediaServerException? _error;
   var _started = false;
   Object? _identity;
   var _generation = 0;
@@ -105,7 +104,7 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
       // 与片库页默认「更新日期」相同，首页预览才是点进去后的前几项。
       sortBy: CatalogSort.initial.sortBy,
       sortOrder: CatalogSort.initial.sortOrder,
-      fields: EmbyClient.homePosterFields,
+      fields: MediaServerClient.homePosterFields,
     );
     final network = catalog.loadLibraryPreview(request);
     unawaited(network.then<void>((_) {}, onError: (Object _) {}));
@@ -144,9 +143,12 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
         return;
       }
       setState(() {
-        _error = error is EmbyException
+        _error = error is MediaServerException
             ? error
-            : EmbyException(EmbyFailureKind.unknown, cause: error);
+            : MediaServerException(
+                MediaServerFailureKind.unknown,
+                cause: error,
+              );
         _loading = false;
       });
     }
@@ -172,7 +174,7 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
   }
 }
 
-String _latestTypes(EmbyItem library) {
+String _latestTypes(MediaItem library) {
   return switch (library.collectionTypeNormalized) {
     'movies' => 'Movie',
     'tvshows' => 'Series',

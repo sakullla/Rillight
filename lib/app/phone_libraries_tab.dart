@@ -5,7 +5,7 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -121,7 +121,7 @@ class PhoneLibrariesTab extends StatelessWidget {
 class _LibraryBlock extends StatelessWidget {
   const _LibraryBlock({required this.library, required this.onTap});
 
-  final EmbyItem library;
+  final MediaItem library;
   final VoidCallback onTap;
 
   bool get _hasImage {

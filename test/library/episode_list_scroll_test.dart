@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/episode_list.dart';
 
 void main() {
@@ -18,7 +18,7 @@ void main() {
     addTearDown(selected.dispose);
     final episodes = List.generate(
       200,
-      (index) => EmbyItem(
+      (index) => MediaItem(
         id: 'episode-$index',
         name: '分集 $index',
         type: 'Episode',

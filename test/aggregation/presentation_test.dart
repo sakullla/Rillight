@@ -15,8 +15,9 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -273,8 +274,8 @@ class _Fixture {
     adapter = sourceAdapter ?? FakeEmbyAdapter([a, b]);
     final credentials = MemoryCredentialStore();
     final servers = MemoryServerListStore();
-    EmbyClient client() => EmbyClient(
-      device: const EmbyDeviceInfo(
+    MediaServerClient client() => EmbyClient(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'test',
         deviceId: 'test',
@@ -521,7 +522,7 @@ Future<void> _switchMappedEpisode(
     await comparison.lookupEpisode(
       target: candidate.source,
       episode: withConfirmedEpisodeMapping(
-        EpisodeSource.fromEmby(origin.source, item),
+        EpisodeSource.fromMediaItem(origin.source, item),
       ),
       verifiedNumberingScheme: userConfirmedEpisodeNumbering,
     );
@@ -1930,9 +1931,13 @@ void main() {
           snapshotStore: MemoryPlaybackSessionSnapshotStore(),
         ),
       );
-      f.a.items.first.playbackPositionTicks = 150000000;
+      f.a.items.first.playbackPosition = Duration(
+        microseconds: 150000000 ~/ 10,
+      );
       f.a.items.first.productionYear = 2010;
-      f.b.items.first.playbackPositionTicks = 350000000;
+      f.b.items.first.playbackPosition = Duration(
+        microseconds: 350000000 ~/ 10,
+      );
       f.b.items.first.productionYear = 2011;
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -1977,9 +1982,13 @@ void main() {
       final f = _Fixture();
       await tester.runAsync(f.open);
       addTearDown(f.close);
-      f.a.items.first.playbackPositionTicks = 150000000;
+      f.a.items.first.playbackPosition = Duration(
+        microseconds: 150000000 ~/ 10,
+      );
       f.a.items.first.productionYear = 1999;
-      f.b.items.first.playbackPositionTicks = 350000000;
+      f.b.items.first.playbackPosition = Duration(
+        microseconds: 350000000 ~/ 10,
+      );
       f.b.items.first.productionYear = 2001;
       f.b.items.first.overview = 'B续播来源';
       final app = f.app(PresentationEnvironment.desktop);
@@ -2554,7 +2563,7 @@ void main() {
             seasonId: 'season-a',
             indexNumber: 2,
             parentIndexNumber: 1,
-            runTimeTicks: 1200000000,
+            runtime: Duration(microseconds: (1200000000) ~/ 10),
           ),
         ]);
         f.b.setEpisodes('series', [
@@ -2564,7 +2573,7 @@ void main() {
             seasonId: 'season-b',
             indexNumber: 2,
             parentIndexNumber: 1,
-            runTimeTicks: 1200000000,
+            runtime: Duration(microseconds: (1200000000) ~/ 10),
           ),
         ]);
         await tester.runAsync(f.open);
@@ -2863,7 +2872,7 @@ void main() {
                     libraryId: 'view-movies',
                     regionGeneration: generation,
                     mediaSourceId: 'private-version',
-                    startTimeTicks: 70000000,
+                    startPosition: Duration(microseconds: 70000000 ~/ 10),
                   ),
                 )
                 as PlayerOpenRequest;
@@ -3130,10 +3139,10 @@ void main() {
       await tester.runAsync(f.open);
       addTearDown(f.close);
       f.a.items.first
-        ..playbackPositionTicks = 100
+        ..playbackPosition = Duration(microseconds: (100) ~/ 10)
         ..primaryImageTag = 'a-poster';
       f.b.items.first
-        ..playbackPositionTicks = 200
+        ..playbackPosition = Duration(microseconds: (200) ~/ 10)
         ..primaryImageTag = 'b-poster';
       for (final view in f.a.views) {
         if (view.id == 'view-movies') view.primaryImageTag = 'a-library';
@@ -3241,7 +3250,7 @@ void main() {
       await tester.runAsync(() => f.open(configure: false));
       addTearDown(f.close);
       f.b.items.first
-        ..playbackPositionTicks = 200
+        ..playbackPosition = Duration(microseconds: (200) ~/ 10)
         ..primaryImageTag = 'b-poster';
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;

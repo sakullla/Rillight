@@ -11,7 +11,7 @@ import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 
 Map<String, dynamic> _movie(
   String id, {
@@ -120,7 +120,7 @@ class _Fixture {
           ),
       }),
       createClient: () => EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'query-test',
           deviceName: 'test',
           deviceId: 'test',

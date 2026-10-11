@@ -9,7 +9,7 @@ import '../app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/source_sessions.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -45,7 +45,7 @@ class DetailSourceScope extends InheritedWidget {
       hasLibraryBoundary != oldWidget.hasLibraryBoundary;
   static PlaybackOrigin? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<DetailSourceScope>()?.origin;
-  static EmbyClient clientOf(BuildContext context) {
+  static MediaServerClient clientOf(BuildContext context) {
     final origin = maybeOf(context);
     origin?.permit.requireValid();
     return origin?.client ?? AuthScope.of(context).client;
@@ -450,7 +450,7 @@ class _ServerSessionImagesState extends State<ServerSessionImages> {
       libraryId: widget.libraryId,
     );
     if (permit == null || !permit.isValid) return;
-    EmbyClient? client;
+    MediaServerClient? client;
     final pending = permit.dispatch((raw) async {
       client = raw.withRequestGuard(permit.requireValid);
       return client!;

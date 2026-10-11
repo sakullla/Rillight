@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/detail_controller.dart';
@@ -56,7 +56,7 @@ void main() {
     dio = dioForFakeEmby(FakeEmbyAdapter([server, alternate]));
     auth = AuthController.memory(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'mobile-catalog',

@@ -1,3 +1,6 @@
+import 'package:rillight/media_server/capabilities.dart';
+import 'package:rillight/media_server/serialization.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -6,9 +9,8 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 
 /// 目录请求描述:path + 查询参数。
 ///
@@ -30,7 +32,7 @@ class CatalogCacheHit {
 }
 
 // ---------------------------------------------------------------------------
-// 请求构造:与 [EmbyClient] 对应查询方法的 path 与参数(含插入顺序)一致,
+// 请求构造:与 [MediaServerClient] 对应查询方法的 path 与参数(含插入顺序)一致,
 // 保证经缓存层发出的请求与直连完全相同。
 // ---------------------------------------------------------------------------
 
@@ -40,16 +42,16 @@ CatalogRequest catalogResumeRequest({
   int? startIndex,
   String? sortBy,
   String? sortOrder,
-  String fields = EmbyClient.gridFields,
+  String fields = MediaServerClient.gridFields,
 }) {
-  return CatalogRequest('/Users/$userId/Items/Resume', {
-    'Limit': '$limit',
-    'MediaTypes': 'Video',
-    'Fields': fields,
-    'EnableImageTypes': EmbyClient.imageTypes,
-    if (startIndex != null) 'StartIndex': '$startIndex',
-    'SortBy': ?sortBy,
-    'SortOrder': ?sortOrder,
+  return CatalogRequest('resume', {
+    'limit': '$limit',
+    'mediaTypes': 'Video',
+    'fields': fields,
+    'enableImageTypes': MediaServerClient.imageTypes,
+    if (startIndex != null) 'startIndex': '$startIndex',
+    'sortBy': ?sortBy,
+    'sortOrder': ?sortOrder,
   });
 }
 
@@ -59,24 +61,24 @@ CatalogRequest catalogNextUpRequest({
   int? startIndex,
   String? sortBy,
   String? sortOrder,
-  String fields = EmbyClient.gridFields,
+  String fields = MediaServerClient.gridFields,
 }) {
-  return CatalogRequest('/Shows/NextUp', {
-    'UserId': userId,
-    'Limit': '$limit',
-    'Fields': fields,
-    'EnableImageTypes': EmbyClient.imageTypes,
-    if (startIndex != null) 'StartIndex': '$startIndex',
-    'SortBy': ?sortBy,
-    'SortOrder': ?sortOrder,
+  return CatalogRequest('nextUp', {
+    'userId': userId,
+    'limit': '$limit',
+    'fields': fields,
+    'enableImageTypes': MediaServerClient.imageTypes,
+    if (startIndex != null) 'startIndex': '$startIndex',
+    'sortBy': ?sortBy,
+    'sortOrder': ?sortOrder,
   });
 }
 
 CatalogRequest catalogViewsRequest({required String userId}) {
-  return CatalogRequest('/Users/$userId/Views');
+  return CatalogRequest('views');
 }
 
-/// 筛选参数与 [EmbyClient.queryItems] 完全镜像(含插入顺序),
+/// 筛选参数与 [MediaServerClient.queryItems] 完全镜像(含插入顺序),
 /// 由 request-parity 测试锁定。
 CatalogRequest catalogItemsRequest({
   required String userId,
@@ -91,34 +93,34 @@ CatalogRequest catalogItemsRequest({
   List<String>? filters,
   List<String>? genres,
   List<int>? years,
-  String fields = EmbyClient.gridFields,
-  String imageTypes = EmbyClient.imageTypes,
+  String fields = MediaServerClient.gridFields,
+  String imageTypes = MediaServerClient.imageTypes,
 }) {
-  return CatalogRequest('/Users/$userId/Items', {
-    if (parentId != null && parentId.isNotEmpty) 'ParentId': parentId,
-    'SearchTerm': ?searchTerm,
+  return CatalogRequest('items', {
+    if (parentId != null && parentId.isNotEmpty) 'parentId': parentId,
+    'searchTerm': ?searchTerm,
     if (includeItemTypes != null && includeItemTypes.isNotEmpty)
-      'IncludeItemTypes': includeItemTypes,
-    'Recursive': '$recursive',
-    if (limit != null) 'Limit': '$limit',
-    if (startIndex != null) 'StartIndex': '$startIndex',
-    'Fields': fields,
-    'SortBy': ?sortBy,
-    'SortOrder': ?sortOrder,
-    if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
-    if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
-    if (years != null && years.isNotEmpty) 'Years': years.join(','),
-    'EnableImageTypes': imageTypes,
+      'includeItemTypes': includeItemTypes,
+    'recursive': '$recursive',
+    if (limit != null) 'limit': '$limit',
+    if (startIndex != null) 'startIndex': '$startIndex',
+    'fields': fields,
+    'sortBy': ?sortBy,
+    'sortOrder': ?sortOrder,
+    if (filters != null && filters.isNotEmpty) 'filters': filters.join(','),
+    if (genres != null && genres.isNotEmpty) 'genres': genres.join('|'),
+    if (years != null && years.isNotEmpty) 'years': years.join(','),
+    'enableImageTypes': imageTypes,
   });
 }
 
-/// 与 [EmbyClient.searchByName] 同构:Movie,Series、递归、按标题升序。
+/// 与 [MediaServerClient.searchByName] 同构:Movie,Series、递归、按标题升序。
 CatalogRequest catalogSearchRequest({
   required String userId,
   required String searchTerm,
   int? startIndex,
   int limit = 50,
-  String fields = EmbyClient.itemFields,
+  String fields = MediaServerClient.itemFields,
   List<String>? filters,
 }) {
   return catalogItemsRequest(
@@ -141,26 +143,26 @@ CatalogRequest catalogSimilarRequest({
   int? limit,
   String? sortBy,
   String? sortOrder,
-  String fields = EmbyClient.gridFields,
+  String fields = MediaServerClient.gridFields,
 }) {
-  return CatalogRequest('/Items/$itemId/Similar', {
-    'UserId': userId,
-    if (limit != null) 'Limit': '$limit',
-    'Fields': fields,
-    'EnableImageTypes': EmbyClient.imageTypes,
-    'SortBy': ?sortBy,
-    'SortOrder': ?sortOrder,
+  return CatalogRequest('similar:$itemId', {
+    'userId': userId,
+    if (limit != null) 'limit': '$limit',
+    'fields': fields,
+    'enableImageTypes': MediaServerClient.imageTypes,
+    'sortBy': ?sortBy,
+    'sortOrder': ?sortOrder,
   });
 }
 
 CatalogRequest catalogItemRequest({
   required String userId,
   required String itemId,
-  String fields = EmbyClient.itemFields,
+  String fields = MediaServerClient.itemFields,
 }) {
-  return CatalogRequest('/Users/$userId/Items/$itemId', {
-    'Fields': fields,
-    'EnableImageTypes': EmbyClient.detailImageTypes,
+  return CatalogRequest('item:$itemId', {
+    'fields': fields,
+    'enableImageTypes': MediaServerClient.detailImageTypes,
   });
 }
 
@@ -168,27 +170,44 @@ CatalogRequest catalogItemRequest({
 // 响应解析
 // ---------------------------------------------------------------------------
 
-/// 解析 {Items, TotalRecordCount} 分页响应。
-///
-/// [EmbyClient.getJson] 会把数组响应包成 {'value': [...]},这里一并解包,
-/// 与 EmbyClient._getItemList 对数组/Map 两种形态的容忍度一致。
-EmbyItemPage parseCatalogPage(Object json) {
+/// 读取统一目录缓存；旧 Emby 缓存仅在此持久化边界兼容读取。
+MediaItemPage parseCatalogPage(Object json) {
+  if (json is Map && json['schema'] == 1) {
+    return MediaItemPage(
+      items: [
+        for (final item in json['items'] as List)
+          decodeMediaItem(Map<String, dynamic>.from(item as Map)),
+      ],
+      totalRecordCount: json['total'] as int?,
+      offset: json['offset'] as int? ?? 0,
+      pagination: CapabilityStatus(
+        CapabilityAvailability.values.byName(
+          json['pagination'] as String? ?? 'unknown',
+        ),
+        reason: json['paginationReason'] as String? ?? '未核实分页能力',
+      ),
+    );
+  }
+  // Read-only compatibility for pre-contract persisted cache entries.
   var data = json;
   if (data is Map && data.length == 1 && data['value'] is List) {
     data = data['value']!;
   }
-  return EmbyItemPage(
+  return MediaItemPage(
     items: parseEmbyItemList(data),
     totalRecordCount: parseEmbyTotalCount(data),
   );
 }
 
 /// 解析单条目详情响应。
-EmbyItem parseCatalogItem(Object json) {
-  if (json is Map) {
-    return EmbyItem.fromJson(Map<String, dynamic>.from(json));
+MediaItem parseCatalogItem(Object json) {
+  if (json is Map && json['schema'] == 1) {
+    return decodeMediaItem(Map<String, dynamic>.from(json['item'] as Map));
   }
-  throw const EmbyException(EmbyFailureKind.unknown);
+  if (json is Map) {
+    return decodeEmbyMediaItem(Map<String, dynamic>.from(json));
+  }
+  throw const MediaServerException(MediaServerFailureKind.unknown);
 }
 
 // ---------------------------------------------------------------------------
@@ -576,16 +595,14 @@ class CatalogCache {
   /// 后台重拉:总是走网络(不读缓存),成功后写入内存并排队落盘。
   /// 失败原样抛出,已有缓存不受影响。
   Future<Object> fetch(
-    EmbyClient client,
+    MediaServerClient client,
     CatalogRequest request, {
     CancelToken? cancelToken,
   }) async {
     final generation = _writeGeneration;
-    final json = await client.getJson(
-      request.path,
-      queryParameters: request.query,
-      cancelToken: cancelToken,
-    );
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
+    final json = await executeCatalogRequest(client, request);
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
     if (generation == _writeGeneration) unawaited(write(request, json));
     return json;
   }
@@ -746,4 +763,74 @@ class CatalogCache {
       // 清理失败无碍,下次读取仍按过期处理。
     }
   }
+}
+
+/// Dispatches only supported business operations; arbitrary paths cannot escape.
+Future<Object> executeCatalogRequest(
+  MediaServerClient client,
+  CatalogRequest request,
+) async {
+  final q = request.query ?? const <String, String>{};
+  int? number(String key) => int.tryParse(q[key] ?? '');
+  final op = request.path;
+  if (op.startsWith('item:')) {
+    final item = await client.getItem(op.substring(5), fields: q['fields']);
+    return {'schema': 1, 'item': encodeMediaItem(item)};
+  }
+  final MediaItemPage page;
+  switch (op) {
+    case 'resume':
+      page = await client.queryResumeItems(
+        limit: number('limit') ?? 24,
+        startIndex: number('startIndex'),
+        sortBy: q['sortBy'],
+        sortOrder: q['sortOrder'],
+        fields: q['fields'] ?? MediaServerClient.gridFields,
+      );
+    case 'nextUp':
+      page = await client.queryNextUp(
+        limit: number('limit') ?? 24,
+        startIndex: number('startIndex'),
+        sortBy: q['sortBy'],
+        sortOrder: q['sortOrder'],
+        fields: q['fields'] ?? MediaServerClient.gridFields,
+      );
+    case 'views':
+      page = MediaItemPage(items: await client.getViews());
+    case 'items':
+      page = await client.queryItems(
+        parentId: q['parentId'],
+        searchTerm: q['searchTerm'],
+        includeItemTypes: q['includeItemTypes'],
+        recursive: q['recursive'] == 'true',
+        limit: number('limit'),
+        startIndex: number('startIndex'),
+        sortBy: q['sortBy'],
+        sortOrder: q['sortOrder'],
+        filters: q['filters']?.split(','),
+        genres: q['genres']?.split('|'),
+        years: q['years']?.split(',').map(int.parse).toList(),
+        fields: q['fields'] ?? MediaServerClient.gridFields,
+        imageTypes: q['enableImageTypes'] ?? MediaServerClient.imageTypes,
+      );
+    default:
+      if (!op.startsWith('similar:')) {
+        throw ArgumentError.value(op, 'operation');
+      }
+      page = await client.querySimilar(
+        op.substring(8),
+        limit: number('limit'),
+        sortBy: q['sortBy'],
+        sortOrder: q['sortOrder'],
+        fields: q['fields'] ?? MediaServerClient.gridFields,
+      );
+  }
+  return {
+    'schema': 1,
+    'items': page.items.map(encodeMediaItem).toList(),
+    'total': page.totalRecordCount,
+    'offset': page.offset,
+    'pagination': page.pagination.availability.name,
+    'paginationReason': page.pagination.reason,
+  };
 }

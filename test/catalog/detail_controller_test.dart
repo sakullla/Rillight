@@ -7,8 +7,9 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/library/detail_repository.dart';
 
@@ -38,7 +39,7 @@ void main() {
     () async {
       final server = _SlowSeasonsServer()..hold = false;
       final client = EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'cached-lists',
@@ -111,7 +112,7 @@ void main() {
     () async {
       final server = _SlowSeasonsServer();
       final client = EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: '灯川 Rillight',
           deviceName: 'test',
           deviceId: 'detail-controller-test',
@@ -172,7 +173,7 @@ void main() {
       ]);
       final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
       final client = EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: '灯川 Rillight',
           deviceName: 'test',
           deviceId: 'detail-season-race',
@@ -200,7 +201,7 @@ void main() {
         includeItemTypes: 'Season',
         sortBy: 'IndexNumber',
         sortOrder: 'Ascending',
-        fields: EmbyClient.itemFields,
+        fields: MediaServerClient.itemFields,
       );
       await cache.fetch(client, seasonsRequest);
       server.setSeasons('series-friends', const [

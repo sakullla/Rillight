@@ -1,4 +1,6 @@
-const int kCoreMaxStreamingBitrate = 140000000;
+import 'package:rillight/media_server/playback.dart';
+export 'package:rillight/media_server/playback.dart'
+    show kCoreMaxStreamingBitrate, kTranscodeBitrates;
 
 /// Codecs are advertised only when the caller has probed the owned core.
 /// Direct play is not limited to 8-bit, 1080p, or two audio channels.
@@ -103,11 +105,18 @@ Map<String, dynamic> ownedCoreDeviceProfile({
   'Name': 'Rillight owned FFmpeg core',
 };
 
-const List<int> kTranscodeBitrates = [
-  kCoreMaxStreamingBitrate,
-  20000000,
-  8000000,
-  4000000,
-  2000000,
-  1000000,
-];
+Map<String, dynamic> encodeEmbyDeviceProfile(
+  PlaybackCapabilities capabilities,
+) => ownedCoreDeviceProfile(
+  h264: capabilities.h264,
+  aac: capabilities.aac,
+  hevc: capabilities.hevc,
+  ac3: capabilities.ac3,
+  eac3: capabilities.eac3,
+  truehd: capabilities.truehd,
+  dts: capabilities.dts,
+  pgs: capabilities.pgs,
+  ass: capabilities.ass,
+  ssa: capabilities.ssa,
+  maxStreamingBitrate: capabilities.maxStreamingBitrate,
+);

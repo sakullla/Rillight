@@ -1,11 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/library_nav_prefs.dart';
 
-EmbyItem _lib(String id, String name) {
-  return EmbyItem(id: id, name: name, type: 'CollectionFolder');
+MediaItem _lib(String id, String name) {
+  return MediaItem(id: id, name: name, type: 'CollectionFolder');
 }
 
 void main() {

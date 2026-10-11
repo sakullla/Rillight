@@ -5,7 +5,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/media_shelf.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/theme/tokens.dart';
 
 void main() {
@@ -29,7 +29,7 @@ void main() {
               LibraryTiles(
                 libraries: [
                   for (var i = 0; i < 8; i++)
-                    EmbyItem(
+                    MediaItem(
                       id: 'lib-$i',
                       name: '片库$i',
                       type: 'CollectionFolder',
@@ -56,7 +56,7 @@ void main() {
   testWidgets('library entry stays one horizontal row', (tester) async {
     final libraries = [
       for (var index = 0; index < 8; index++)
-        EmbyItem(
+        MediaItem(
           id: 'lib-$index',
           name: '片库$index',
           type: 'CollectionFolder',
@@ -113,7 +113,7 @@ void main() {
           body: LibraryTiles(
             libraries: [
               for (var index = 0; index < 4; index++)
-                EmbyItem(
+                MediaItem(
                   id: 'lib-$index',
                   name: '库$index',
                   type: 'CollectionFolder',
@@ -149,7 +149,7 @@ void main() {
           body: LibraryTiles(
             libraries: [
               for (var index = 0; index < 8; index++)
-                EmbyItem(
+                MediaItem(
                   id: 'lib-$index',
                   name: '库$index',
                   type: 'CollectionFolder',

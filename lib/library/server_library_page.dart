@@ -8,9 +8,8 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/source_sessions.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/tv_shelf_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -22,7 +21,7 @@ import 'package:rillight/search/search_action.dart';
 Future<void> openServerItem(
   BuildContext context, {
   required SourceAccount account,
-  required EmbyItem item,
+  required MediaItem item,
 }) async {
   final overlay = SearchOverlayController.maybeOf(context);
   final registry = AuthScope.of(context).sources;
@@ -91,11 +90,11 @@ class ServerLibraryPage extends StatefulWidget {
 }
 
 class _ServerLibraryPageState extends State<ServerLibraryPage> {
-  EmbyClient? _client;
+  MediaServerClient? _client;
   SourceAccount? _account;
   String _title = '';
   String _includeItemTypes = 'Movie,Series';
-  EmbyException? _error;
+  MediaServerException? _error;
   bool _loading = true;
   bool _started = false;
   int _attempt = 0;
@@ -122,7 +121,7 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
       if (!mounted || attempt != _attempt) return;
       final views = await session.client.getViews();
       if (!mounted || attempt != _attempt) return;
-      EmbyItem? view;
+      MediaItem? view;
       for (final item in views) {
         if (item.id == widget.viewId) {
           view = item;
@@ -144,9 +143,12 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
       if (!mounted || attempt != _attempt) return;
       setState(() {
         _loading = false;
-        _error = error is EmbyException
+        _error = error is MediaServerException
             ? error
-            : EmbyException(EmbyFailureKind.unknown, cause: error);
+            : MediaServerException(
+                MediaServerFailureKind.unknown,
+                cause: error,
+              );
       });
     }
   }
@@ -226,9 +228,9 @@ class ServerResumePage extends StatefulWidget {
 }
 
 class _ServerResumePageState extends State<ServerResumePage> {
-  EmbyClient? _client;
+  MediaServerClient? _client;
   SourceAccount? _account;
-  EmbyException? _error;
+  MediaServerException? _error;
   bool _loading = true;
   bool _started = false;
   int _attempt = 0;
@@ -261,9 +263,12 @@ class _ServerResumePageState extends State<ServerResumePage> {
       if (!mounted || attempt != _attempt) return;
       setState(() {
         _loading = false;
-        _error = error is EmbyException
+        _error = error is MediaServerException
             ? error
-            : EmbyException(EmbyFailureKind.unknown, cause: error);
+            : MediaServerException(
+                MediaServerFailureKind.unknown,
+                cause: error,
+              );
       });
     }
   }
@@ -328,7 +333,7 @@ class _ServerResumePageState extends State<ServerResumePage> {
 Widget _tvPending(
   BuildContext context,
   String title,
-  EmbyException? error,
+  MediaServerException? error,
   VoidCallback retry,
 ) {
   final padding = TvFrame.contentPadding(context);

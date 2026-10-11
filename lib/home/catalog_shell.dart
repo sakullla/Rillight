@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_socket.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/library_nav_prefs.dart';
@@ -26,7 +26,7 @@ class _CatalogShellState extends State<CatalogShell> {
 
   // WebSocket 增强通道:登录会话(服务器/线路/令牌)变化时重连,
   // 登出/销毁时断开。仅为可选通知推送,失败静默降级。
-  EmbySocket? _socket;
+  CatalogNotifications? _socket;
   Uri? _socketBase;
   String? _socketToken;
 
@@ -60,21 +60,21 @@ class _CatalogShellState extends State<CatalogShell> {
     _teardownSocket();
     _socketBase = base;
     _socketToken = token;
-    _socket = EmbySocket(
-      baseUrl: base,
-      apiKey: token,
-      cache: _catalog.cache,
+    _socket = widget.auth.client.watchCatalog(
       onUserDataChanged: () async {
+        await _catalog.cache.invalidateSession();
         if (widget.auth.isLoggedIn) {
           await _catalog.reloadHomeRows();
         }
       },
       onLibraryChanged: () async {
+        await _catalog.cache.invalidateSession();
         if (widget.auth.isLoggedIn) {
           await _catalog.reload();
         }
       },
-    )..start();
+    );
+    _socket?.start();
   }
 
   void _teardownSocket() {

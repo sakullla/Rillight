@@ -5,7 +5,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/provider_marks.dart';
 

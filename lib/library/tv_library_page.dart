@@ -4,7 +4,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/shelf_sort.dart';
@@ -251,7 +251,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
 }
 
 Widget _posterGrid(
-  List<EmbyItem> items,
+  List<MediaItem> items,
   TvGridMetrics metrics,
   TvReturnFocus focus,
 ) {

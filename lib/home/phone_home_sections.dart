@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 /// 首页区块。片库入口和每个片库的最近添加都能单独开关、排序。
 /// 关掉只影响首页，片库页仍列出全部片库。
@@ -83,7 +83,7 @@ List<String> arrangePhoneHomeSections(
   return ordered;
 }
 
-List<String> phoneHomeSectionIdsFor(List<EmbyItem> libraries) {
+List<String> phoneHomeSectionIdsFor(List<MediaItem> libraries) {
   return [
     ...PhoneHomeSectionId.fixed,
     for (final library in libraries)
@@ -179,11 +179,11 @@ class PhoneHomeSectionController extends ChangeNotifier {
 
   String? get serverId => _serverId;
 
-  List<String> orderedIds(List<EmbyItem> libraries) {
+  List<String> orderedIds(List<MediaItem> libraries) {
     return arrangePhoneHomeSections(_prefs, phoneHomeSectionIdsFor(libraries));
   }
 
-  List<String> visibleIds(List<EmbyItem> libraries) {
+  List<String> visibleIds(List<MediaItem> libraries) {
     return [
       for (final id in orderedIds(libraries))
         if (!_prefs.hidden.contains(id)) id,
@@ -223,7 +223,7 @@ class PhoneHomeSectionController extends ChangeNotifier {
   Future<void> reorderVisible(
     int oldIndex,
     int newIndex,
-    List<EmbyItem> libraries,
+    List<MediaItem> libraries,
   ) async {
     final order = orderedIds(libraries);
     final shown = [
@@ -250,7 +250,7 @@ class PhoneHomeSectionController extends ChangeNotifier {
     );
   }
 
-  Future<void> move(String id, int delta, List<EmbyItem> libraries) async {
+  Future<void> move(String id, int delta, List<MediaItem> libraries) async {
     final order = orderedIds(libraries);
     final index = order.indexOf(id);
     final next = index + delta;
@@ -306,7 +306,7 @@ class PhoneHomeSectionEditor extends StatelessWidget {
   });
 
   final PhoneHomeSectionController controller;
-  final List<EmbyItem> libraries;
+  final List<MediaItem> libraries;
 
   static Key tileKey(String id) => Key('phone-home-section-$id');
 

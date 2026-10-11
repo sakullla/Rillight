@@ -41,7 +41,7 @@ class _Encode extends Converter<Object?, Object?> {
         'mediaSourceId': input.mediaSourceId,
         'audioStreamIndex': input.audioStreamIndex,
         'subtitleStreamIndex': input.subtitleStreamIndex,
-        'startTimeTicks': input.startTimeTicks,
+        'startUs': input.startPosition?.inMicroseconds,
         'startPaused': input.startPaused,
         'subtitleOff': input.subtitleOff,
         'maxStreamingBitrate': input.maxStreamingBitrate,
@@ -87,7 +87,11 @@ class _Decode extends Converter<Object?, Object?> {
           mediaSourceId: value['mediaSourceId'] as String?,
           audioStreamIndex: value['audioStreamIndex'] as int?,
           subtitleStreamIndex: value['subtitleStreamIndex'] as int?,
-          startTimeTicks: value['startTimeTicks'] as int?,
+          startPosition: value['startUs'] is int
+              ? Duration(microseconds: value['startUs'] as int)
+              : value['startTimeTicks'] is int
+              ? Duration(microseconds: (value['startTimeTicks'] as int) ~/ 10)
+              : null,
           startPaused: value['startPaused'] as bool,
           subtitleOff: value['subtitleOff'] as bool,
           maxStreamingBitrate: value['maxStreamingBitrate'] as int?,

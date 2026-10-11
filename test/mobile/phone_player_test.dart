@@ -16,7 +16,7 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/danmaku/danmaku_hash.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/danmaku/danmaku_renderer.dart';
@@ -29,8 +29,7 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/phone_orientation.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -61,7 +60,7 @@ List<bool> _systemBarHidden(List<MethodCall> calls) {
       .toList();
 }
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-player',
@@ -1435,8 +1434,8 @@ void main() {
         final movie = server.items.firstWhere(
           (item) => item.id == 'movie-inception',
         );
-        movie.runTimeTicks = 0;
-        movie.playbackPositionTicks = 0;
+        movie.runtime = Duration(microseconds: (0) ~/ 10);
+        movie.playbackPosition = Duration(microseconds: 0 ~/ 10);
       },
       wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
     );

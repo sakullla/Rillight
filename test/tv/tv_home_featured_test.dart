@@ -9,8 +9,8 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 import 'dart:async';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
@@ -45,7 +45,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final auth = SyntheticSourceAuth(
       adapter: FakeEmbyAdapter([server]),
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'tv',
         deviceId: 'tv-widget',
@@ -292,10 +292,8 @@ void main() {
     for (final item in server.items) {
       item.nextUp = false;
     }
-    server.items
-            .firstWhere((item) => item.id == 'movie-up')
-            .playbackPositionTicks =
-        1000;
+    server.items.firstWhere((item) => item.id == 'movie-up').playbackPosition =
+        Duration(microseconds: (1000) ~/ 10);
     await start(tester, server);
     await login(tester, server);
 
@@ -420,8 +418,8 @@ void main() {
         await phoneFile.writeAsString(phoneJson);
         final tvFile = File('${root.path}/tv_home_sections.json');
         const libraries = [
-          EmbyItem(id: 'view-movies', name: '电影', type: 'CollectionFolder'),
-          EmbyItem(id: 'view-tv', name: '剧集', type: 'CollectionFolder'),
+          MediaItem(id: 'view-movies', name: '电影', type: 'CollectionFolder'),
+          MediaItem(id: 'view-tv', name: '剧集', type: 'CollectionFolder'),
         ];
         final first = TvSectionController(store: FileTvSectionStore(tvFile));
         addTearDown(first.dispose);
@@ -530,7 +528,7 @@ void main() {
         final editing = TvSectionController(store: FileTvSectionStore(tvFile));
         addTearDown(editing.dispose);
         await editing.load('server-a');
-        await editing.move(PhoneHomeSectionId.resume, 1, const <EmbyItem>[]);
+        await editing.move(PhoneHomeSectionId.resume, 1, const <MediaItem>[]);
         await editing.setVisible(PhoneHomeSectionId.banner, false);
 
         final stored = jsonDecode(tvFile.readAsStringSync());
@@ -559,8 +557,8 @@ void main() {
         addTearDown(restarted.dispose);
         await restarted.load('server-a');
         const libraries = [
-          EmbyItem(id: 'view-movies', name: '电影', type: 'CollectionFolder'),
-          EmbyItem(id: 'view-tv', name: '剧集', type: 'CollectionFolder'),
+          MediaItem(id: 'view-movies', name: '电影', type: 'CollectionFolder'),
+          MediaItem(id: 'view-tv', name: '剧集', type: 'CollectionFolder'),
         ];
         expect(restarted.orderedIds(libraries), [
           PhoneHomeSectionId.banner,
@@ -806,7 +804,7 @@ void _showContinueAndNext(FakeEmbyServer server) {
   );
   current.played = false;
   current.playedPercentage = 40;
-  current.playbackPositionTicks = 1000;
+  current.playbackPosition = Duration(microseconds: 1000 ~/ 10);
 }
 
 Future<void> _press(WidgetTester tester, LogicalKeyboardKey logicalKey) async {

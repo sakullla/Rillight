@@ -8,7 +8,7 @@ class PlayerOpenRequest {
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
-    this.startTimeTicks,
+    this.startPosition,
     this.source,
     this.work,
     this.libraryId,
@@ -23,7 +23,7 @@ class PlayerOpenRequest {
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
-  final int? startTimeTicks;
+  final Duration? startPosition;
   final SourceReference? source;
   final SourceReference? work;
   final String? libraryId;

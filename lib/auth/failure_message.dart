@@ -1,7 +1,7 @@
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/errors.dart';
 
-String embyFailureMessage(AppLocalizations l10n, EmbyException error) {
+String embyFailureMessage(AppLocalizations l10n, MediaServerException error) {
   final detail = error.detail?.trim();
   if (error.statusCode == 403 &&
       (detail == null || detail.isEmpty || detail == 'HTTP 403')) {
@@ -11,21 +11,30 @@ String embyFailureMessage(AppLocalizations l10n, EmbyException error) {
     return detail;
   }
   switch (error.kind) {
-    case EmbyFailureKind.invalidAddress:
+    case MediaServerFailureKind.invalidAddress:
       return l10n.errorInvalidAddress;
-    case EmbyFailureKind.unreachable:
+    case MediaServerFailureKind.unreachable:
       return l10n.errorUnreachable;
-    case EmbyFailureKind.timeout:
+    case MediaServerFailureKind.timeout:
       return l10n.errorTimeout;
-    case EmbyFailureKind.certificate:
+    case MediaServerFailureKind.certificate:
       return l10n.errorCertificate;
-    case EmbyFailureKind.notEmby:
+    case MediaServerFailureKind.incompatibleServer:
       return l10n.errorNotEmby;
-    case EmbyFailureKind.invalidCredentials:
+    case MediaServerFailureKind.invalidCredentials:
       return l10n.errorInvalidCredentials;
-    case EmbyFailureKind.sessionExpired:
+    case MediaServerFailureKind.sessionExpired:
       return l10n.errorSessionExpired;
-    case EmbyFailureKind.unknown:
+    case MediaServerFailureKind.forbidden:
+      return l10n.errorForbidden;
+    case MediaServerFailureKind.rateLimited:
+    case MediaServerFailureKind.cancelled:
+    case MediaServerFailureKind.unsupported:
+    case MediaServerFailureKind.invalidResponse:
+    case MediaServerFailureKind.authorizationExpired:
+    case MediaServerFailureKind.signatureRejected:
+    case MediaServerFailureKind.clockSkew:
+    case MediaServerFailureKind.unknown:
       return l10n.errorUnknown;
   }
 }

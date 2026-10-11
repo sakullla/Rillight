@@ -11,23 +11,24 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_carousel.dart';
 import 'package:rillight/home/home_hero.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/library/poster_card.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-home-page',
@@ -337,7 +338,7 @@ void main() {
               focusItemId: 'item-8',
               items: List.generate(
                 12,
-                (i) => EmbyItem(id: 'item-$i', name: '电影 $i', type: 'Movie'),
+                (i) => MediaItem(id: 'item-$i', name: '电影 $i', type: 'Movie'),
               ),
               onTap: (_) {},
             ),
@@ -372,8 +373,8 @@ void main() {
             shelfId: 'latest-movies',
             title: '最近电影',
             items: const [],
-            error: const EmbyException(
-              EmbyFailureKind.unknown,
+            error: const MediaServerException(
+              MediaServerFailureKind.unknown,
               detail: '货架加载失败',
             ),
             onRetry: () => retried += 1,
@@ -420,7 +421,7 @@ void main() {
                 wide: true,
                 items: [
                   for (var i = 0; i < count; i++)
-                    EmbyItem(id: 'peek-$i', name: '电影 $i', type: 'Movie'),
+                    MediaItem(id: 'peek-$i', name: '电影 $i', type: 'Movie'),
                 ],
                 onTap: _ignoreItem,
               ),
@@ -471,4 +472,4 @@ void main() {
   );
 }
 
-void _ignoreItem(EmbyItem item) {}
+void _ignoreItem(MediaItem item) {}

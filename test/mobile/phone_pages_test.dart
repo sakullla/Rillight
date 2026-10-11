@@ -23,10 +23,11 @@ import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -58,7 +59,7 @@ import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
-const _connectDevice = EmbyDeviceInfo(
+const _connectDevice = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-connect',
@@ -74,21 +75,21 @@ const _path = Key('android-connect-path');
 const _userAgent = Key('android-connect-user-agent');
 const _addLine = Key('android-connect-add-line');
 
-const _homeDevice = EmbyDeviceInfo(
+const _homeDevice = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-home',
   version: '1',
 );
 
-const _libraryDevice = EmbyDeviceInfo(
+const _libraryDevice = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-library',
   version: '1',
 );
 
-const _mineDevice = EmbyDeviceInfo(
+const _mineDevice = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'phone',
   deviceId: 'phone-mine',
@@ -225,7 +226,7 @@ void main() {
       expect(find.byType(AndroidConnectPage), findsOneWidget);
       expect(find.text('请输入有效的服务器地址'), findsOneWidget);
       expect(find.text('重试'), findsOneWidget);
-      expect(find.textContaining('EmbyException'), findsNothing);
+      expect(find.textContaining('MediaServerException'), findsNothing);
 
       await tester.enterText(find.byKey(_address), server.baseUrl.toString());
       await tester.enterText(find.byKey(_password), 'wrong');
@@ -877,7 +878,7 @@ void main() {
       _usePhoneSurface(tester);
       final catalog = _catalog(
         resume: [
-          const EmbyItem(
+          const MediaItem(
             id: 'episode-resume',
             name: '第二集',
             type: 'Episode',
@@ -885,29 +886,29 @@ void main() {
             seriesId: 'series-demo',
             parentIndexNumber: 1,
             indexNumber: 2,
-            userData: EmbyUserData(
-              playbackPositionTicks: 1,
+            userData: MediaUserData(
+              playbackPosition: Duration(microseconds: (1) ~/ 10),
               playedPercentage: 40,
             ),
           ),
-          const EmbyItem(
+          const MediaItem(
             id: 'movie-progress',
             name: '进度电影',
             type: 'Movie',
             productionYear: 2024,
-            userData: EmbyUserData(
-              playbackPositionTicks: 1,
+            userData: MediaUserData(
+              playbackPosition: Duration(microseconds: (1) ~/ 10),
               playedPercentage: 10,
             ),
           ),
-          const EmbyItem(
+          const MediaItem(
             id: 'movie-played',
             name: '已看电影',
             type: 'Movie',
             productionYear: 2023,
-            userData: EmbyUserData(played: true),
+            userData: MediaUserData(played: true),
           ),
-          const EmbyItem(
+          const MediaItem(
             id: 'series-long',
             name: '长剧集',
             type: 'Series',
@@ -1014,7 +1015,10 @@ void main() {
         series: const [],
       );
       catalog.nextUp = const CatalogRowState(
-        error: EmbyException(EmbyFailureKind.unknown, statusCode: 503),
+        error: MediaServerException(
+          MediaServerFailureKind.unknown,
+          statusCode: 503,
+        ),
       );
       addTearDown(catalog.auth.dispose);
       addTearDown(catalog.dispose);
@@ -1273,7 +1277,7 @@ void main() {
       addTearDown(tester.view.resetViewPadding);
       final auth = AuthController.memory(
         client: EmbyClient(
-          device: const EmbyDeviceInfo(
+          device: const ClientDeviceInfo(
             clientName: 'test',
             deviceName: 'phone',
             deviceId: 'phone-detail',
@@ -1389,7 +1393,7 @@ void main() {
             parentIndexNumber: 1,
             played: true,
             overview: 'Monica gets a new apartment.',
-            runTimeTicks: minute * 22,
+            runtime: Duration(microseconds: (minute * 22) ~/ 10),
           ),
           FakeEpisode(
             id: 'episode-friends-s2e1',
@@ -1397,10 +1401,10 @@ void main() {
             seasonId: 'season-friends-2',
             indexNumber: 1,
             parentIndexNumber: 2,
-            playbackPositionTicks: minute * 5,
+            playbackPosition: Duration(microseconds: (minute * 5) ~/ 10),
             playedPercentage: 20,
             overview: 'Halfway through season two.',
-            runTimeTicks: minute * 22,
+            runtime: Duration(microseconds: (minute * 22) ~/ 10),
             primaryImageTag: 'tag-s2e1',
           ),
           const FakeEpisode(
@@ -1410,7 +1414,7 @@ void main() {
             indexNumber: 2,
             parentIndexNumber: 2,
             overview: 'The next night.',
-            runTimeTicks: minute * 22,
+            runtime: Duration(microseconds: (minute * 22) ~/ 10),
           ),
         ]);
         final (router, backend) = await start(tester, server, bottomInset: 48);
@@ -1527,7 +1531,7 @@ void main() {
       final extra =
           GoRouterState.of(tester.element(find.byType(MobilePlayerPage))).extra
               as PlayerOpenRequest;
-      expect(extra.startTimeTicks, 7 * minute);
+      expect(extra.startPosition, Duration(microseconds: (7 * minute) ~/ 10));
       await closePlayer(tester);
 
       await tester.ensureVisible(find.text('演员'));
@@ -1738,8 +1742,10 @@ void main() {
             indexNumber: i + 1,
             parentIndexNumber: 1,
             played: i < 50,
-            playbackPositionTicks: i == 50 ? minute * 3 : 0,
-            runTimeTicks: minute * 22,
+            playbackPosition: Duration(
+              microseconds: (i == 50 ? minute * 3 : 0) ~/ 10,
+            ),
+            runtime: Duration(microseconds: (minute * 22) ~/ 10),
           ),
       ]);
       final (router, backend) = await start(tester, server);
@@ -2584,9 +2590,9 @@ Widget _harness(AuthController auth, {int generation = 0}) {
 }
 
 CatalogController _catalog({
-  required List<EmbyItem> resume,
-  required List<EmbyItem> movies,
-  required List<EmbyItem> series,
+  required List<MediaItem> resume,
+  required List<MediaItem> movies,
+  required List<MediaItem> series,
 }) {
   final catalog = CatalogController(auth: AuthController.memory());
   catalog.resume = CatalogRowState(items: resume);
@@ -2597,7 +2603,7 @@ CatalogController _catalog({
   return catalog;
 }
 
-EmbyItem _item(
+MediaItem _item(
   String id,
   String name,
   String type, {
@@ -2605,7 +2611,7 @@ EmbyItem _item(
   String? seriesName,
   String? overview,
 }) {
-  return EmbyItem(
+  return MediaItem(
     id: id,
     name: name,
     type: type,
@@ -2615,13 +2621,16 @@ EmbyItem _item(
     overview: overview,
     primaryImageTag: 'tag-$id',
     userData: percent == null
-        ? const EmbyUserData()
-        : EmbyUserData(playbackPositionTicks: 1, playedPercentage: percent),
+        ? const MediaUserData()
+        : MediaUserData(
+            playbackPosition: Duration(microseconds: (1) ~/ 10),
+            playedPercentage: percent,
+          ),
   );
 }
 
-EmbyItem _homeMovie(String id, String name, {double? percent}) {
-  return EmbyItem(
+MediaItem _homeMovie(String id, String name, {double? percent}) {
+  return MediaItem(
     id: id,
     name: name,
     type: 'Movie',
@@ -2631,8 +2640,11 @@ EmbyItem _homeMovie(String id, String name, {double? percent}) {
     productionYear: id == 'movie-inception' ? 2010 : 2009,
     primaryImageTag: 'tag-$id',
     userData: percent == null
-        ? const EmbyUserData()
-        : EmbyUserData(playbackPositionTicks: 1, playedPercentage: percent),
+        ? const MediaUserData()
+        : MediaUserData(
+            playbackPosition: Duration(microseconds: (1) ~/ 10),
+            playedPercentage: percent,
+          ),
   );
 }
 
@@ -2891,7 +2903,7 @@ Future<void> _pumpMotionHome(
   );
   catalog.latestSeries = CatalogRowState(
     items: [
-      const EmbyItem(
+      const MediaItem(
         id: 'series-friends',
         name: '老友记',
         type: 'Series',

@@ -4,11 +4,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:rillight/emby/device_profile.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_transport_session.dart';
 import 'package:rillight/player/player_runtime_options.dart';
@@ -391,7 +390,9 @@ class RillightVideoBackend extends VideoBackend
   }
 
   @override
-  Future<Map<String, dynamic>> deviceProfile(int maxStreamingBitrate) async {
+  Future<PlaybackCapabilities> playbackCapabilities(
+    int maxStreamingBitrate,
+  ) async {
     final Map<String, bool> probed;
     if (Platform.isAndroid) {
       final player = _player;
@@ -416,7 +417,7 @@ class RillightVideoBackend extends VideoBackend
     } else {
       probed = _desktopDecoderProbe();
     }
-    return ownedCoreDeviceProfile(
+    return PlaybackCapabilities(
       h264: probed['h264'] == true,
       hevc: probed['hevc'] == true,
       aac: probed['aac'] == true,

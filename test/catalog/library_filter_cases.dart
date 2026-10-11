@@ -9,14 +9,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-library-filters',

@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
 class BrowseController extends ChangeNotifier {
@@ -25,7 +25,7 @@ class BrowseController extends ChangeNotifier {
   /// 与桌面货架每页 60 条相同。
   static const pageSize = 60;
 
-  List<EmbyItem> items = const [];
+  List<MediaItem> items = const [];
   bool loading = false, loadingMore = false, hasMore = false;
   bool _liveFirstPageReady = false;
   String? type, watch, genre;
@@ -33,7 +33,7 @@ class BrowseController extends ChangeNotifier {
   List<int> years = const [];
   List<String> genres = const [];
   String sortBy = CatalogSort.initial.sortBy;
-  EmbyException? error;
+  MediaServerException? error;
   int _revision = 0, _offset = 0;
   bool _disposed = false;
   late Object _identity;
@@ -77,7 +77,7 @@ class BrowseController extends ChangeNotifier {
     );
   }
 
-  void _apply(EmbyItemPage page, int offset, {required bool more}) {
+  void _apply(MediaItemPage page, int offset, {required bool more}) {
     if (more) {
       final before = items.length;
       items = {
@@ -144,9 +144,12 @@ class BrowseController extends ChangeNotifier {
       _apply(page, offset, more: more);
     } catch (failure) {
       if (!_owns(revision)) return;
-      error = failure is EmbyException
+      error = failure is MediaServerException
           ? failure
-          : EmbyException(EmbyFailureKind.unknown, cause: failure);
+          : MediaServerException(
+              MediaServerFailureKind.unknown,
+              cause: failure,
+            );
     }
     if (!_owns(revision)) return;
     loading = false;

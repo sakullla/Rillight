@@ -6,8 +6,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
@@ -128,21 +128,21 @@ class EpisodeList extends StatefulWidget {
     this.onRetryLoadMore,
   });
 
-  final List<EmbyItem> episodes;
+  final List<MediaItem> episodes;
   final String? currentId;
   final int revealToken;
   final bool loading;
-  final EmbyException? error;
+  final MediaServerException? error;
   final VoidCallback? onRetry;
   final bool hasMore;
   final bool loadingMore;
   final VoidCallback onLoadMore;
-  final EmbyException? loadMoreError;
+  final MediaServerException? loadMoreError;
   final VoidCallback? onRetryLoadMore;
   final Widget headerAction;
-  final ValueChanged<EmbyItem> onTap;
-  final ValueChanged<EmbyItem> onPlay;
-  final ValueChanged<EmbyItem> onTogglePlayed;
+  final ValueChanged<MediaItem> onTap;
+  final ValueChanged<MediaItem> onPlay;
+  final ValueChanged<MediaItem> onTogglePlayed;
   final Set<String> busyPlayedIds;
   final VoidCallback? onMore;
 
@@ -413,7 +413,7 @@ class EpisodeRow extends StatefulWidget {
     required this.onTogglePlayed,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final bool selected;
   final bool busyPlayed;
   final VoidCallback onTap;
@@ -583,7 +583,7 @@ class _EpisodeThumb extends StatelessWidget {
     required this.onTogglePlayed,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final String? runtime;
   final bool hovered;
   final bool selected;

@@ -1,11 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
+
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-catalog',
@@ -56,7 +57,11 @@ void main() {
     expect(
       () => client.getNextUp(),
       throwsA(
-        isA<EmbyException>().having((error) => error.statusCode, 'status', 404),
+        isA<MediaServerException>().having(
+          (error) => error.statusCode,
+          'status',
+          404,
+        ),
       ),
     );
   });
@@ -184,7 +189,7 @@ void main() {
     () async {
       expect(
         () => client.getPrimaryImage('movie-broken', tag: 'tag-broken'),
-        throwsA(isA<EmbyException>()),
+        throwsA(isA<MediaServerException>()),
       );
       final ok = await client.getPrimaryImage('movie-up', tag: 'tag-up');
       expect(ok, isNotEmpty);

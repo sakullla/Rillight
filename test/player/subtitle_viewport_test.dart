@@ -4,7 +4,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -21,7 +21,7 @@ void main() {
     final server = FakeEmbyServer();
     final auth = AuthController(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'Rillight',
           deviceName: 'test',
           deviceId: 'subtitle-viewport',

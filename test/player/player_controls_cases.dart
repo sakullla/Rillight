@@ -1,3 +1,4 @@
+import 'package:rillight/player/playback_persistence.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
 import 'package:rillight/aggregation/query/aggregation_query.dart'
@@ -16,9 +17,8 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:rillight/player/phone_player_controls.dart';
@@ -37,7 +37,7 @@ import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-player-ui',
@@ -666,7 +666,10 @@ void main() {
       );
       final previous = episode.chapters;
       episode.chapters = const [
-        FakeChapter(name: '片尾', startPositionTicks: 2 * minute),
+        FakeChapter(
+          name: '片尾',
+          startPosition: Duration(microseconds: (2 * minute) ~/ 10),
+        ),
       ];
       addTearDown(() => episode.chapters = previous);
       final controller = await startStandaloneController(
@@ -725,16 +728,16 @@ void main() {
     );
     episode.played = false;
     episode.playedPercentage = 2;
-    episode.playbackPositionTicks = 20 * second;
+    episode.playbackPosition = Duration(microseconds: (20 * second) ~/ 10);
     episode.chapters = const [
       FakeChapter(
         name: 'Intro',
-        startPositionTicks: 0,
+        startPosition: Duration(microseconds: (0) ~/ 10),
         markerType: 'IntroStart',
       ),
       FakeChapter(
         name: 'Intro End',
-        startPositionTicks: 90 * second,
+        startPosition: Duration(microseconds: (90 * second) ~/ 10),
         markerType: 'IntroEnd',
       ),
     ];
@@ -754,9 +757,12 @@ void main() {
       (item) => item.id == 'episode-friends-s1e1',
     );
     episode.played = false;
-    episode.playbackPositionTicks = 0;
+    episode.playbackPosition = Duration(microseconds: 0 ~/ 10);
     episode.chapters = const [
-      FakeChapter(name: '片尾', startPositionTicks: 20 * minute),
+      FakeChapter(
+        name: '片尾',
+        startPosition: Duration(microseconds: (20 * minute) ~/ 10),
+      ),
     ];
     final controller = await startStandaloneController(
       itemId: 'episode-friends-s1e1',
@@ -781,9 +787,12 @@ void main() {
       (item) => item.id == 'episode-friends-s1e2',
     );
     episode.played = false;
-    episode.playbackPositionTicks = 0;
+    episode.playbackPosition = Duration(microseconds: 0 ~/ 10);
     episode.chapters = const [
-      FakeChapter(name: '片尾', startPositionTicks: 20 * minute),
+      FakeChapter(
+        name: '片尾',
+        startPosition: Duration(microseconds: (20 * minute) ~/ 10),
+      ),
     ];
     final controller = await startStandaloneController(
       itemId: 'episode-friends-s1e2',
@@ -810,7 +819,9 @@ void main() {
     );
     episode.played = false;
     episode.playedPercentage = 86;
-    episode.playbackPositionTicks = 19 * minute + 10 * 10000000;
+    episode.playbackPosition = Duration(
+      microseconds: (19 * minute + 10 * 10000000) ~/ 10,
+    );
     final controller = await startStandaloneController(
       itemId: 'episode-friends-s1e1',
     );

@@ -1,3 +1,4 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -7,9 +8,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -17,7 +18,7 @@ import '../helpers/image_cache_fixture.dart';
 
 void main() {
   const fallback = Text('Text title', key: Key('fallback'));
-  const item = EmbyItem(
+  const item = MediaItem(
     id: 'movie',
     name: 'Movie',
     type: 'Movie',
@@ -25,7 +26,7 @@ void main() {
   );
 
   test('the model reads ImageTags.Logo', () {
-    final parsed = EmbyItem.fromJson({
+    final parsed = decodeEmbyMediaItem({
       'Id': 'movie',
       'Name': 'Movie',
       'Type': 'Movie',
@@ -35,7 +36,7 @@ void main() {
     expect(parsed.copyWith().logoImageTag, 'l');
     expect(HeroLogo.available(parsed), isTrue);
     expect(
-      HeroLogo.available(const EmbyItem(id: 'x', name: '', type: 'Movie')),
+      HeroLogo.available(const MediaItem(id: 'x', name: '', type: 'Movie')),
       isFalse,
     );
   });
@@ -44,9 +45,9 @@ void main() {
     final plain = catalogItemsRequest(userId: 'u');
     final featured = catalogItemsRequest(
       userId: 'u',
-      imageTypes: EmbyClient.featuredImageTypes,
+      imageTypes: MediaServerClient.featuredImageTypes,
     );
-    expect(plain.query!['EnableImageTypes'], EmbyClient.imageTypes);
+    expect(plain.query!['EnableImageTypes'], MediaServerClient.imageTypes);
     expect(plain.query!['EnableImageTypes'], isNot(contains('Logo')));
     expect(featured.query!['EnableImageTypes'], contains('Logo'));
   });
@@ -191,7 +192,7 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() ready) async {
 class _LogoClient extends EmbyClient {
   _LogoClient(this.logo)
     : super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'hero-logo',

@@ -11,8 +11,8 @@ import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -135,7 +135,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         // 片库入口单独不算「已有海报」。可见行仍在安静重试时要保持整页骨架，
         // 重试耗尽后仍是整页失败，而不是被片库入口换成空页。
         final pageHasContent = hasItems || hasBanner || wantsLibraries;
-        EmbyException? firstError;
+        MediaServerException? firstError;
         for (final state in states) {
           if (state.error != null) {
             firstError = state.error;
@@ -305,7 +305,7 @@ double _cardWidthOf(BuildContext context, {required bool wide}) {
 /// 既有测试与调用方的 import 不变。
 Key phoneHomeBadgesKey(String itemId) => phoneCardBadgesKey(itemId);
 
-String _resumeTitle(EmbyItem item) {
+String _resumeTitle(MediaItem item) {
   final series = item.seriesName?.trim();
   if (item.isEpisode && series != null && series.isNotEmpty) {
     return series;
@@ -313,7 +313,7 @@ String _resumeTitle(EmbyItem item) {
   return item.name;
 }
 
-String _resumeMeta(EmbyItem item, String title) {
+String _resumeMeta(MediaItem item, String title) {
   if (!item.isEpisode) {
     final year = item.productionYear;
     return year != null && year > 0 ? '$year' : '';
@@ -416,7 +416,7 @@ class _PhoneHomeRow extends StatelessWidget {
 
   final _HomeSection section;
   final VoidCallback retry;
-  final Future<void> Function(EmbyItem item) onRemoveFromResume;
+  final Future<void> Function(MediaItem item) onRemoveFromResume;
 
   /// 同一条目只让第一张海报参与飞行，避免同一路由里标签重复。
   final bool Function(String id) sharePoster;
@@ -494,7 +494,7 @@ class _WideCard extends StatelessWidget {
     this.onRemove,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final bool shared;
   final double width;
   final VoidCallback? onRemove;
@@ -681,7 +681,7 @@ class _WideCard extends StatelessWidget {
   }
 }
 
-bool _libraryHasImage(EmbyItem library) {
+bool _libraryHasImage(MediaItem library) {
   bool tagged(String? tag) => tag != null && tag.isNotEmpty;
   return tagged(library.primaryImageTag) ||
       tagged(library.backdropImageTag) ||
@@ -691,7 +691,7 @@ bool _libraryHasImage(EmbyItem library) {
 class _PhoneLibraryEntry extends StatelessWidget {
   const _PhoneLibraryEntry({required this.libraries});
 
-  final List<EmbyItem> libraries;
+  final List<MediaItem> libraries;
 
   @override
   Widget build(BuildContext context) {
@@ -789,7 +789,7 @@ class _PhoneLibraryEntry extends StatelessWidget {
 class _PhoneLibraryLatest extends StatelessWidget {
   const _PhoneLibraryLatest({required this.library, required this.sharePoster});
 
-  final EmbyItem library;
+  final MediaItem library;
   final bool Function(String id) sharePoster;
 
   @override
@@ -847,7 +847,7 @@ class _PhoneLibraryLatest extends StatelessWidget {
   }
 }
 
-Widget _sharedPosterImage(EmbyItem item, bool shared) {
+Widget _sharedPosterImage(MediaItem item, bool shared) {
   final image = MediaImage(
     item: item,
     fit: BoxFit.cover,

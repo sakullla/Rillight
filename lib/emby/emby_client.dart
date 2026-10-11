@@ -1,15 +1,22 @@
+import 'emby_socket.dart';
+import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/authentication.dart';
+import 'package:rillight/media_server/resources.dart';
+import 'package:rillight/player/bif_preview.dart';
+import 'package:rillight/emby/emby_playback.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/capabilities.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:rillight/emby/device_profile.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/emby/emby_url.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/playback.dart';
 
 /// 图和 JSON 共用一个 Host。Dart 默认不限制每主机连接数；这里显式限制为 16，
 /// 为有界图片并发之外的目录/API 请求保留空间。
@@ -41,68 +48,154 @@ Dio _createEmbyDio({
   return dio;
 }
 
-/// `/Items/Counts` 返回中除电影/剧集/单集外的一类条目数量。
-class LibraryCountEntry {
-  const LibraryCountEntry({required this.type, required this.count});
-
-  /// 服务器返回的类型名(字段名去掉 `Count` 后缀),如 `MusicAlbum`、`Photo`。
-  final String type;
-
-  /// 该类型的条目数量;为 0 也保留,由界面照常展示。
-  final int count;
-}
-
-/// 当前登录用户可见的库规模,来自 `GET /Items/Counts`。
-///
-/// 电影/剧集/单集固定成员,响应缺失时按 0 处理;其余类型仅收录服务器
-/// 实际返回的字段(0 也收录),顺序与响应一致。
-class LibraryCounts {
-  const LibraryCounts({
-    required this.movie,
-    required this.series,
-    required this.episode,
-    required this.others,
+class EmbyClient implements MediaServerClient {
+  @override
+  MediaServerType get serviceType => MediaServerType.emby;
+  @override
+  ServiceCapabilities get capabilities => ServiceCapabilities({
+    for (final capability in [
+      ServiceCapability.passwordLogin,
+      ServiceCapability.changePassword,
+      ServiceCapability.resume,
+      ServiceCapability.nextUp,
+      ServiceCapability.latest,
+      ServiceCapability.search,
+      ServiceCapability.filters,
+      ServiceCapability.pagination,
+      ServiceCapability.watchedState,
+      ServiceCapability.directPlay,
+      ServiceCapability.directStream,
+      ServiceCapability.transcode,
+      ServiceCapability.chapters,
+      ServiceCapability.notifications,
+    ])
+      capability: CapabilityStatus(
+        CapabilityAvailability.available,
+        reason: 'Emby 协议提供此能力，单次操作仍须检查权限和响应',
+      ),
+    for (final capability in [
+      ServiceCapability.quickConnect,
+      ServiceCapability.browserAuthorization,
+      ServiceCapability.accountResources,
+      ServiceCapability.homeUsers,
+    ])
+      capability: CapabilityStatus(
+        CapabilityAvailability.unsupported,
+        reason: 'Emby 密码会话不提供此认证流程',
+      ),
   });
+  @override
+  InteractiveAuthentication? get interactiveAuthentication => null;
+  @override
+  AccountResourceAuthentication? get accountAuthentication => null;
+  final Map<String, PlaybackResourceLease> _resources = {};
+  PlaybackResourceLease _resourceLease(String sessionId) {
+    final base = baseUrl!, user = userId!, token = accessToken!;
+    return _resources.putIfAbsent('$base|$user|$sessionId', () {
+      final frozen = EmbyClient(device: device, dio: _dio)
+        ..attachSession(
+          baseUrl: base,
+          accessToken: token,
+          userId: user,
+          userAgent: userAgent,
+        );
+      return PlaybackResourceLease(
+        id: sessionId,
+        release: () async {
+          await frozen._requestJson(
+            'DELETE',
+            '/Videos/ActiveEncodings',
+            queryParameters: {
+              'DeviceId': device.deviceId,
+              'PlaySessionId': sessionId,
+            },
+          );
+        },
+      );
+    });
+  }
 
-  final int movie;
-  final int series;
-  final int episode;
-  final List<LibraryCountEntry> others;
-
-  factory LibraryCounts.fromJson(Map<String, dynamic> json) {
-    var movie = 0, series = 0, episode = 0;
-    final others = <LibraryCountEntry>[];
-    for (final entry in json.entries) {
-      final value = entry.value;
-      if (value is! num || !entry.key.endsWith('Count')) {
-        continue;
-      }
-      final type = entry.key.substring(0, entry.key.length - 'Count'.length);
-      if (type.isEmpty) {
-        continue;
-      }
-      final count = value.toInt();
-      switch (type) {
-        case 'Movie':
-          movie = count;
-        case 'Series':
-          series = count;
-        case 'Episode':
-          episode = count;
-        default:
-          others.add(LibraryCountEntry(type: type, count: count));
-      }
+  @override
+  Future<void> releasePlayback(PlaybackReport report) async {
+    if (report.playMethod != PlayMethod.transcode ||
+        report.playSessionId.isEmpty) {
+      return;
     }
-    return LibraryCounts(
-      movie: movie,
-      series: series,
-      episode: episode,
-      others: others,
+    await _resourceLease(report.playSessionId).release();
+  }
+
+  @override
+  Future<MediaPreview?> openPreview(String itemId) async {
+    if (!await hasVideoPreviewThumbnails(itemId)) return null;
+    final bif = BifPreview.parse(await getVideoPreviewBif(itemId));
+    if (bif == null) {
+      throw const MediaServerException(
+        MediaServerFailureKind.unknown,
+        detail: 'Invalid preview index',
+      );
+    }
+    return _EmbyPreview(itemId, bif);
+  }
+
+  @override
+  CatalogNotifications? watchCatalog({
+    required Future<void> Function() onUserDataChanged,
+    required Future<void> Function() onLibraryChanged,
+  }) => hasSession
+      ? EmbySocket(
+          baseUrl: baseUrl!,
+          apiKey: accessToken!,
+          onUserDataChanged: onUserDataChanged,
+          onLibraryChanged: onLibraryChanged,
+        )
+      : null;
+  @override
+  EmbyClient createDetached() => EmbyClient(device: device);
+  @override
+  ResolvedPlayback? resolvePlayback({
+    required PlaybackInfo info,
+    required String itemId,
+    String? mediaSourceId,
+    bool forceTranscode = false,
+  }) {
+    final result = resolveEmbyPlayback(
+      info: info,
+      baseUrl: baseUrl!,
+      accessToken: accessToken!,
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      forceTranscode: forceTranscode,
+    );
+    if (result == null) return null;
+    final authorization = ResourceAuthorization(
+      headersByOrigin: {baseUrl!.origin: sessionHeaders},
+      publicHeaders: {'User-Agent': userAgent},
+    );
+    return ResolvedPlayback(
+      playMethod: result.playMethod,
+      streamUrl: result.streamUrl,
+      playSessionId: result.playSessionId,
+      mediaSource: result.mediaSource,
+      itemId: result.itemId,
+      requiresStrmExpansion: result.requiresStrmExpansion,
+      authorization: authorization,
+      resources: info.resources,
+      timeline: MediaTimeline([
+        MediaPart(
+          id: result.mediaSource.id,
+          duration: result.mediaSource.runtime,
+          resource: AuthorizedMediaResource(
+            url: result.streamUrl.toString(),
+            authorization: authorization,
+          ),
+        ),
+      ]),
     );
   }
-}
 
-class EmbyClient {
+  @override
+  Uri resolveResource(String resource) =>
+      embyResourceUri(baseUrl!, resource, accessToken!);
   EmbyClient({
     required this.device,
     Dio? dio,
@@ -117,12 +210,14 @@ class EmbyClient {
              receiveTimeout: receiveTimeout,
            );
 
-  final EmbyDeviceInfo device;
+  @override
+  final ClientDeviceInfo device;
   final Dio _dio;
 
   /// Independent request/receipt gate for a consumer's frozen source lease.
   /// Shares the transport, not mutable session credentials or interceptors.
-  EmbyClient withRequestGuard(void Function() guard) {
+  @override
+  MediaServerClient withRequestGuard(void Function() guard) {
     final dio = Dio(_dio.options.copyWith());
     dio.httpClientAdapter = _dio.httpClientAdapter;
     dio.interceptors.add(
@@ -158,7 +253,9 @@ class EmbyClient {
     );
   }
 
+  @override
   void Function()? onSessionExpired;
+  @override
   Future<bool> Function()? onRefreshSession;
   Future<bool>? _refreshing;
 
@@ -167,20 +264,29 @@ class EmbyClient {
   String? _userId;
   String? _customUserAgent;
 
+  @override
   Uri? get baseUrl => _baseUrl;
+  @override
   String? get accessToken => _accessToken;
+  @override
   String? get userId => _userId;
+  @override
   String get userAgent => resolveUserAgent(_customUserAgent, device);
+  @override
   String? get customUserAgent => _customUserAgent;
+  @override
   bool get hasSession =>
       _baseUrl != null && _accessToken != null && _accessToken!.isNotEmpty;
+  @override
   Map<String, String> get sessionHeaders =>
       _headers(token: _accessToken, userId: _userId);
 
+  @override
   void setUserAgent(String? userAgent) {
     _customUserAgent = normalizeUserAgent(userAgent);
   }
 
+  @override
   void attachSession({
     required Uri baseUrl,
     required String accessToken,
@@ -193,6 +299,7 @@ class EmbyClient {
     setUserAgent(userAgent);
   }
 
+  @override
   void clearSession() {
     _baseUrl = null;
     _accessToken = null;
@@ -200,6 +307,7 @@ class EmbyClient {
     _customUserAgent = null;
   }
 
+  @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
     final uri = joinEmbyApiPath(baseUrl, '/System/Info/Public');
     try {
@@ -207,17 +315,18 @@ class EmbyClient {
         uri,
         options: Options(headers: _headers()),
       );
-      return PublicServerInfo.fromJson(
+      return decodeEmbyPublicServerInfo(
         _asJsonMap(response.data, notEmby: true),
         fallbackName: baseUrl.host,
       );
-    } on EmbyException {
+    } on MediaServerException {
       rethrow;
     } on DioException catch (error) {
       throw _mapPublicInfoFailure(error);
     }
   }
 
+  @override
   Future<AuthenticationResult> authenticateByName({
     required Uri baseUrl,
     required String username,
@@ -233,25 +342,26 @@ class EmbyClient {
           headers: {..._headers(), 'Content-Type': 'application/json'},
         ),
       );
-      return AuthenticationResult.fromJson(
+      return decodeEmbyAuthenticationResult(
         _asJsonMap(response.data, notEmby: false),
         fallbackServerId: serverId,
       );
-    } on EmbyException {
+    } on MediaServerException {
       rethrow;
     } on DioException catch (error) {
-      throw EmbyException.fromDio(error, authenticating: true);
+      throw MediaServerException.fromDio(error, authenticating: true);
     }
   }
 
+  @override
   Future<void> logout() async {
     if (!hasSession) {
       return;
     }
     try {
       await postJson('/Sessions/Logout');
-    } on EmbyException catch (error) {
-      if (error.kind == EmbyFailureKind.sessionExpired) {
+    } on MediaServerException catch (error) {
+      if (error.kind == MediaServerFailureKind.sessionExpired) {
         return;
       }
       rethrow;
@@ -285,12 +395,13 @@ class EmbyClient {
   String _requireUserId() {
     final userId = _userId;
     if (!hasSession || userId == null || userId.isEmpty) {
-      throw const EmbyException(EmbyFailureKind.sessionExpired);
+      throw const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
     return userId;
   }
 
-  Future<List<EmbyItem>> getResumeItems({
+  @override
+  Future<List<MediaItem>> getResumeItems({
     int limit = 24,
     int? startIndex,
     String? sortBy,
@@ -304,19 +415,20 @@ class EmbyClient {
     )).items;
   }
 
-  Future<EmbyItemPage> queryResumeItems({
+  @override
+  Future<MediaItemPage> queryResumeItems({
     int limit = 24,
     int? startIndex,
     String? sortBy,
     String? sortOrder,
-    String fields = gridFields,
+    String fields = MediaServerClient.gridFields,
   }) {
     return _getItemPage(
       '/Users/${_requireUserId()}/Items/Resume',
       queryParameters: {
         'Limit': '$limit',
         'MediaTypes': 'Video',
-        'Fields': fields,
+        'Fields': _projection(fields),
         'EnableImageTypes': imageTypes,
         if (startIndex != null) 'StartIndex': '$startIndex',
         'SortBy': ?sortBy,
@@ -325,7 +437,8 @@ class EmbyClient {
     );
   }
 
-  Future<List<EmbyItem>> getNextUp({
+  @override
+  Future<List<MediaItem>> getNextUp({
     int limit = 24,
     int? startIndex,
     String? sortBy,
@@ -339,13 +452,14 @@ class EmbyClient {
     )).items;
   }
 
-  Future<EmbyItemPage> queryNextUp({
+  @override
+  Future<MediaItemPage> queryNextUp({
     String? parentId,
     int limit = 24,
     int? startIndex,
     String? sortBy,
     String? sortOrder,
-    String fields = gridFields,
+    String fields = MediaServerClient.gridFields,
   }) {
     return _getItemPage(
       '/Shows/NextUp',
@@ -353,7 +467,7 @@ class EmbyClient {
         'ParentId': ?parentId,
         'UserId': _requireUserId(),
         'Limit': '$limit',
-        'Fields': fields,
+        'Fields': _projection(fields),
         'EnableImageTypes': imageTypes,
         if (startIndex != null) 'StartIndex': '$startIndex',
         'SortBy': ?sortBy,
@@ -362,7 +476,8 @@ class EmbyClient {
     );
   }
 
-  Future<List<EmbyItem>> getLatestItems({
+  @override
+  Future<List<MediaItem>> getLatestItems({
     required String includeItemTypes,
     bool groupItems = true,
     int limit = 24,
@@ -379,11 +494,13 @@ class EmbyClient {
     );
   }
 
-  Future<List<EmbyItem>> getViews() {
+  @override
+  Future<List<MediaItem>> getViews() {
     return _getItemList('/Users/${_requireUserId()}/Views');
   }
 
-  Future<List<EmbyItem>> getItems({
+  @override
+  Future<List<MediaItem>> getItems({
     String? parentId,
     String? searchTerm,
     String? includeItemTypes,
@@ -395,7 +512,7 @@ class EmbyClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
-    String fields = itemFields,
+    String fields = MediaServerClient.itemFields,
   }) async {
     return (await queryItems(
       parentId: parentId,
@@ -415,7 +532,8 @@ class EmbyClient {
 
   /// 官方筛选参数:[filters] 对应 `Filters`(IsPlayed/IsUnplayed 等已看状态),
   /// [genres] 对应 `Genres`(竖线分隔),[years] 对应 `Years`(逗号分隔)。
-  Future<EmbyItemPage> queryItems({
+  @override
+  Future<MediaItemPage> queryItems({
     String? parentId,
     String? searchTerm,
     String? includeItemTypes,
@@ -427,7 +545,8 @@ class EmbyClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
-    String fields = gridFields,
+    String fields = MediaServerClient.gridFields,
+    String imageTypes = MediaServerClient.imageTypes,
   }) {
     return _getItemPage(
       '/Users/${_requireUserId()}/Items',
@@ -439,18 +558,19 @@ class EmbyClient {
         'Recursive': '$recursive',
         if (limit != null) 'Limit': '$limit',
         if (startIndex != null) 'StartIndex': '$startIndex',
-        'Fields': fields,
+        'Fields': _projection(fields),
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
         if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
         if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
         if (years != null && years.isNotEmpty) 'Years': years.join(','),
-        'EnableImageTypes': imageTypes,
+        'EnableImageTypes': _imageProjection(imageTypes),
       },
     );
   }
 
-  Future<List<EmbyItem>> searchByName(String searchTerm, {int? startIndex}) {
+  @override
+  Future<List<MediaItem>> searchByName(String searchTerm, {int? startIndex}) {
     final term = searchTerm.trim();
     if (term.isEmpty) {
       throw ArgumentError.value(searchTerm, 'searchTerm');
@@ -468,6 +588,7 @@ class EmbyClient {
 
   /// Emby exposes library-wide genres separately from a paginated item result.
   /// Never derive the complete filter list from the first 60 posters alone.
+  @override
   Future<List<String>> getLibraryGenres(String? parentId) async {
     final names = <String>{};
     var offset = 0;
@@ -501,7 +622,8 @@ class EmbyClient {
     return names.toList()..sort();
   }
 
-  Future<List<EmbyItem>> getSimilar(
+  @override
+  Future<List<MediaItem>> getSimilar(
     String itemId, {
     int? limit,
     String? sortBy,
@@ -515,19 +637,20 @@ class EmbyClient {
     )).items;
   }
 
-  Future<EmbyItemPage> querySimilar(
+  @override
+  Future<MediaItemPage> querySimilar(
     String itemId, {
     int? limit,
     String? sortBy,
     String? sortOrder,
-    String fields = gridFields,
+    String fields = MediaServerClient.gridFields,
   }) {
     return _getItemPage(
       '/Items/$itemId/Similar',
       queryParameters: {
         'UserId': _requireUserId(),
         if (limit != null) 'Limit': '$limit',
-        'Fields': fields,
+        'Fields': _projection(fields),
         'EnableImageTypes': imageTypes,
         'SortBy': ?sortBy,
         'SortOrder': ?sortOrder,
@@ -538,25 +661,33 @@ class EmbyClient {
   /// 单条目详情。[fields] 覆盖默认 [itemFields];集详情路径传
   /// `'$itemFields,People'` 以取演职员,季列表等高频路径不要带 People
   /// (同 [gridFields] 注释,大字段会拖慢 /Items)。
-  Future<EmbyItem> getItem(String itemId, {String? fields}) async {
+  @override
+  Future<MediaItem> getItem(
+    String itemId, {
+    String? fields,
+    CancelToken? cancelToken,
+  }) async {
     final data = await _request(
       'GET',
       '/Users/${_requireUserId()}/Items/$itemId',
+      cancelToken: cancelToken,
       queryParameters: {
-        'Fields': fields ?? itemFields,
+        'Fields': _projection(fields ?? MediaServerClient.itemFields),
         'EnableImageTypes': detailImageTypes,
       },
     );
     if (data is Map) {
-      return EmbyItem.fromJson(Map<String, dynamic>.from(data));
+      return decodeEmbyMediaItem(Map<String, dynamic>.from(data));
     }
-    throw const EmbyException(EmbyFailureKind.unknown);
+    throw const MediaServerException(MediaServerFailureKind.unknown);
   }
 
+  @override
   Future<void> markPlayed(String itemId) async {
     await postJson('/Users/${_requireUserId()}/PlayedItems/$itemId');
   }
 
+  @override
   Future<void> markUnplayed(String itemId) async {
     await deleteJson('/Users/${_requireUserId()}/PlayedItems/$itemId');
   }
@@ -564,13 +695,14 @@ class EmbyClient {
   /// 从继续观看移除:优先 HideFromResume,旧版 Emby 则清零播放进度。
   ///
   /// Emby/Jellyfin 的 Hide 查询参数缺省为 false,不传则请求成功但条目仍留在 Resume。
+  @override
   Future<void> hideFromResume(String itemId) async {
     try {
       await postJson(
         '/Users/${_requireUserId()}/Items/$itemId/HideFromResume',
         queryParameters: const {'Hide': 'true'},
       );
-    } on EmbyException {
+    } on MediaServerException {
       await postJson(
         '/Users/${_requireUserId()}/Items/$itemId/UserData',
         body: {
@@ -583,19 +715,25 @@ class EmbyClient {
     }
   }
 
-  Future<EmbyUser> getUser() async {
-    final data = await getJson('/Users/${_requireUserId()}');
-    return EmbyUser.fromJson(data);
+  @override
+  Future<MediaUser> getUser({CancelToken? cancelToken}) async {
+    final data = await getJson(
+      '/Users/${_requireUserId()}',
+      cancelToken: cancelToken,
+    );
+    return decodeEmbyMediaUser(data);
   }
 
-  /// 当前登录用户可见的库规模统计。失败/无权限按 [EmbyException] 抛出,
+  /// 当前登录用户可见的库规模统计。失败/无权限按 [MediaServerException] 抛出,
   /// 由调用方决定留在原界面并展示原因。
+  @override
   Future<LibraryCounts> getItemCounts() async {
     final data = await getJson('/Items/Counts');
-    return LibraryCounts.fromJson(data);
+    return decodeEmbyLibraryCounts(data);
   }
 
   /// 修改当前登录用户的密码。旧密码可留空照常提交,是否要求由服务器裁决。
+  @override
   Future<void> changePassword({
     String? currentPassword,
     required String newPassword,
@@ -610,18 +748,19 @@ class EmbyClient {
     );
   }
 
+  @override
   Future<PlaybackInfo> getPlaybackInfo({
     required String itemId,
     int? maxStreamingBitrate,
-    int? startTimeTicks,
+    Duration? startPosition,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
     String? mediaSourceId,
-    Map<String, dynamic>? deviceProfile,
+    PlaybackCapabilities? capabilities,
     bool forceTranscode = false,
   }) async {
     final bitrate =
-        deviceProfile?['MaxStreamingBitrate'] as int? ??
+        capabilities?.maxStreamingBitrate ??
         maxStreamingBitrate ??
         kCoreMaxStreamingBitrate;
     final data = await postJson(
@@ -629,15 +768,16 @@ class EmbyClient {
       queryParameters: {'UserId': _requireUserId()},
       body: {
         'UserId': _requireUserId(),
-        'DeviceProfile':
-            deviceProfile ??
-            ownedCoreDeviceProfile(
-              h264: true,
-              aac: true,
-              maxStreamingBitrate: bitrate,
-            ),
+        'DeviceProfile': capabilities != null
+            ? encodeEmbyDeviceProfile(capabilities)
+            : ownedCoreDeviceProfile(
+                h264: true,
+                aac: true,
+                maxStreamingBitrate: bitrate,
+              ),
         'MaxStreamingBitrate': bitrate,
-        'StartTimeTicks': ?startTimeTicks,
+        if (startPosition != null)
+          'StartTimeTicks': startPosition.inMicroseconds * 10,
         'AutoOpenLiveStream': true,
         'EnableDirectPlay': !forceTranscode,
         'EnableDirectStream': !forceTranscode,
@@ -647,24 +787,43 @@ class EmbyClient {
         'MediaSourceId': ?mediaSourceId,
       },
     );
-    return PlaybackInfo.fromJson(data);
+    final info = decodeEmbyPlaybackInfo(data);
+    return PlaybackInfo(
+      playSessionId: info.playSessionId,
+      mediaSources: info.mediaSources,
+      resources: info.playSessionId.isEmpty
+          ? null
+          : _resourceLease(info.playSessionId),
+    );
   }
 
+  @override
   Future<void> reportPlaying(PlaybackReport report) {
-    return postJson('/Sessions/Playing', body: report.toJson());
+    return postJson(
+      '/Sessions/Playing',
+      body: encodeEmbyPlaybackReport(report),
+    );
   }
 
+  @override
   Future<void> reportProgress(PlaybackReport report) {
-    return postJson('/Sessions/Playing/Progress', body: report.toJson());
+    return postJson(
+      '/Sessions/Playing/Progress',
+      body: encodeEmbyPlaybackReport(report),
+    );
   }
 
+  @override
   Future<void> reportStopped(PlaybackReport report) {
-    return postJson('/Sessions/Playing/Stopped', body: report.toJson());
+    return postJson(
+      '/Sessions/Playing/Stopped',
+      body: encodeEmbyPlaybackReport(report),
+    );
   }
 
   /// 同一季里紧邻的一集。只取一小页，避免为了上一集/下一集拉整季。
-  Future<EmbyItem?> _adjacentEpisode(
-    EmbyItem episode, {
+  Future<MediaItem?> _adjacentEpisode(
+    MediaItem episode, {
     required bool after,
   }) async {
     final seasonId = episode.seasonId ?? episode.parentId;
@@ -682,7 +841,7 @@ class EmbyClient {
       limit: 5,
       fields: itemFields,
     );
-    EmbyItem? neighbor;
+    MediaItem? neighbor;
     for (final candidate in page.items) {
       final candidateNumber = candidate.indexNumber;
       if (candidate.id == episode.id || candidateNumber == null) {
@@ -709,14 +868,16 @@ class EmbyClient {
     return neighbor;
   }
 
-  Future<EmbyItem?> getPreviousEpisode(EmbyItem episode) async {
+  @override
+  Future<MediaItem?> getPreviousEpisode(MediaItem episode) async {
     if (!episode.isEpisode) {
       return null;
     }
     return _adjacentEpisode(episode, after: false);
   }
 
-  Future<EmbyItem?> getNextEpisode(EmbyItem episode) async {
+  @override
+  Future<MediaItem?> getNextEpisode(MediaItem episode) async {
     if (!episode.isEpisode) {
       return null;
     }
@@ -749,6 +910,7 @@ class EmbyClient {
     return episodes[index + 1];
   }
 
+  @override
   Uri subtitleStreamUrl({
     required String itemId,
     required String mediaSourceId,
@@ -767,6 +929,7 @@ class EmbyClient {
   /// 请求头用 [sessionHeaders],其中 User-Agent 是该服务器级配置的值;
   /// 跨域跳转后仍携带同一 User-Agent,但不再携带会话鉴权头。
   /// 服务器第一次提取会跑 ffmpeg,失败后缓存往往已就绪,因此超时和 5xx 再试。
+  @override
   Future<List<int>> readAuthorizedBytes(
     Uri uri, {
     Duration receiveTimeout = const Duration(seconds: 60),
@@ -774,7 +937,7 @@ class EmbyClient {
     int? maxBytes,
   }) async {
     if (!hasSession) {
-      throw const EmbyException(EmbyFailureKind.sessionExpired);
+      throw const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
     Object? last;
     for (var attempt = 0; attempt < attempts; attempt++) {
@@ -893,10 +1056,10 @@ class EmbyClient {
           }
           throw StateError('Too many subtitle redirects');
         });
-      } on EmbyException catch (error) {
+      } on MediaServerException catch (error) {
         last = error;
         final retry =
-            error.kind == EmbyFailureKind.timeout ||
+            error.kind == MediaServerFailureKind.timeout ||
             (error.statusCode != null && error.statusCode! >= 500);
         if (!retry || attempt == attempts - 1) {
           rethrow;
@@ -906,6 +1069,7 @@ class EmbyClient {
     throw last ?? StateError('Unread response');
   }
 
+  @override
   Future<List<int>> getPrimaryImage(
     String itemId, {
     String? tag,
@@ -921,6 +1085,7 @@ class EmbyClient {
     );
   }
 
+  @override
   Future<List<int>> getChapterImage(
     String itemId, {
     required int index,
@@ -969,7 +1134,9 @@ class EmbyClient {
     String itemId, {
     CancelToken? cancelToken,
   }) async {
-    if (!hasSession) throw const EmbyException(EmbyFailureKind.sessionExpired);
+    if (!hasSession) {
+      throw const MediaServerException(MediaServerFailureKind.sessionExpired);
+    }
     final uri = joinEmbyApiPath(
       _baseUrl!,
       '/Videos/$itemId/index.bif',
@@ -1002,6 +1169,7 @@ class EmbyClient {
     });
   }
 
+  @override
   Future<List<int>> getItemImage(
     String itemId, {
     String type = 'Primary',
@@ -1023,6 +1191,7 @@ class EmbyClient {
     );
   }
 
+  @override
   Future<List<int>> getOriginalItemImage(
     String itemId, {
     String type = 'Backdrop',
@@ -1067,21 +1236,26 @@ class EmbyClient {
     return _requestJson('DELETE', path);
   }
 
-  Future<List<EmbyItem>> _getItemList(
+  Future<List<MediaItem>> _getItemList(
     String path, {
     Map<String, dynamic>? queryParameters,
   }) async {
     return (await _getItemPage(path, queryParameters: queryParameters)).items;
   }
 
-  Future<EmbyItemPage> _getItemPage(
+  Future<MediaItemPage> _getItemPage(
     String path, {
     Map<String, dynamic>? queryParameters,
   }) async {
     final data = await _request('GET', path, queryParameters: queryParameters);
-    return EmbyItemPage(
+    return MediaItemPage(
       items: parseEmbyItemList(data),
       totalRecordCount: parseEmbyTotalCount(data),
+      offset: int.tryParse('${queryParameters?['StartIndex']}') ?? 0,
+      pagination: const CapabilityStatus(
+        CapabilityAvailability.available,
+        reason: 'Emby 目录支持偏移分页',
+      ),
     );
   }
 
@@ -1119,7 +1293,7 @@ class EmbyClient {
     CancelToken? cancelToken,
   }) async {
     if (!hasSession) {
-      throw const EmbyException(EmbyFailureKind.sessionExpired);
+      throw const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
     final uri = joinEmbyApiPath(
       _baseUrl!,
@@ -1145,7 +1319,7 @@ class EmbyClient {
     CancelToken? cancelToken,
   }) async {
     if (!hasSession) {
-      throw const EmbyException(EmbyFailureKind.sessionExpired);
+      throw const MediaServerException(MediaServerFailureKind.sessionExpired);
     }
     final uri = joinEmbyApiPath(
       _baseUrl!,
@@ -1168,21 +1342,21 @@ class EmbyClient {
       if (data is List<int>) {
         return data;
       }
-      throw const EmbyException(EmbyFailureKind.unknown);
+      throw const MediaServerException(MediaServerFailureKind.unknown);
     });
   }
 
   Future<T> _withAuthRetry<T>(Future<T> Function() send) async {
     try {
       return await send();
-    } on EmbyException {
+    } on MediaServerException {
       rethrow;
     } on DioException catch (error) {
       if (error.type == DioExceptionType.cancel) {
-        throw EmbyException.fromDio(error);
+        throw MediaServerException.fromDio(error);
       }
-      final mapped = EmbyException.fromDio(error);
-      if (mapped.kind != EmbyFailureKind.sessionExpired) {
+      final mapped = MediaServerException.fromDio(error);
+      if (mapped.kind != MediaServerFailureKind.sessionExpired) {
         throw mapped;
       }
       if (!await _refreshIfExpired()) {
@@ -1191,11 +1365,11 @@ class EmbyClient {
       }
       try {
         return await send();
-      } on EmbyException {
+      } on MediaServerException {
         rethrow;
       } on DioException catch (retryError) {
-        final retryMapped = EmbyException.fromDio(retryError);
-        if (retryMapped.kind == EmbyFailureKind.sessionExpired) {
+        final retryMapped = MediaServerException.fromDio(retryError);
+        if (retryMapped.kind == MediaServerFailureKind.sessionExpired) {
           onSessionExpired?.call();
         }
         throw retryMapped;
@@ -1247,7 +1421,8 @@ class EmbyClient {
   }
 
   Map<String, String> _headers({String? token, String? userId}) {
-    final authorization = device.authorizationHeader(
+    final authorization = embyAuthorizationHeader(
+      device,
       userId: userId,
       token: token,
     );
@@ -1266,24 +1441,26 @@ class EmbyClient {
     if (data is Map) {
       return Map<String, dynamic>.from(data);
     }
-    throw EmbyException(
-      notEmby ? EmbyFailureKind.notEmby : EmbyFailureKind.unknown,
+    throw MediaServerException(
+      notEmby
+          ? MediaServerFailureKind.incompatibleServer
+          : MediaServerFailureKind.unknown,
     );
   }
 
-  EmbyException _mapPublicInfoFailure(DioException error) {
-    final mapped = EmbyException.fromDio(error);
-    if (mapped.kind == EmbyFailureKind.timeout ||
-        mapped.kind == EmbyFailureKind.certificate ||
-        mapped.kind == EmbyFailureKind.unreachable) {
+  MediaServerException _mapPublicInfoFailure(DioException error) {
+    final mapped = MediaServerException.fromDio(error);
+    if (mapped.kind == MediaServerFailureKind.timeout ||
+        mapped.kind == MediaServerFailureKind.certificate ||
+        mapped.kind == MediaServerFailureKind.unreachable) {
       return mapped;
     }
     if (mapped.detail != null && mapped.detail!.trim().isNotEmpty) {
       return mapped;
     }
     if (error.response != null) {
-      return EmbyException(
-        EmbyFailureKind.notEmby,
+      return MediaServerException(
+        MediaServerFailureKind.incompatibleServer,
         statusCode: error.response?.statusCode,
         detail: mapped.detail,
         cause: error,
@@ -1292,3 +1469,44 @@ class EmbyClient {
     return mapped;
   }
 }
+
+class _EmbyPreview implements MediaPreview {
+  _EmbyPreview(this.itemId, this._bif);
+  @override
+  final String itemId;
+  BifPreview? _bif;
+  @override
+  CapabilityStatus get availability => const CapabilityStatus(
+    CapabilityAvailability.available,
+    reason: '服务返回经过校验的 BIF 索引',
+  );
+  @override
+  Future<PreviewFrame?> frameAt(Duration position) async {
+    final bif = _bif;
+    return bif == null ? null : PreviewFrame(bytes: bif.imageAt(position));
+  }
+
+  @override
+  Future<void> close() async {
+    _bif = null;
+  }
+}
+
+String _projection(String projection) => switch (projection) {
+  MediaServerClient.itemFields => EmbyClient.itemFields,
+  MediaServerClient.gridFields => EmbyClient.gridFields,
+  MediaServerClient.homePosterFields => EmbyClient.homePosterFields,
+  MediaServerClient.detailWithPeople => '${EmbyClient.itemFields},People',
+  // Explicit adapter inputs are used only by protocol regression fixtures.
+  EmbyClient.itemFields ||
+  EmbyClient.gridFields ||
+  EmbyClient.homePosterFields => projection,
+  _ when projection == '${EmbyClient.itemFields},People' => projection,
+  _ => throw ArgumentError.value(projection, 'projection'),
+};
+String _imageProjection(String projection) => switch (projection) {
+  MediaServerClient.imageTypes => EmbyClient.imageTypes,
+  MediaServerClient.detailImageTypes => EmbyClient.detailImageTypes,
+  MediaServerClient.featuredImageTypes => EmbyClient.featuredImageTypes,
+  _ => throw ArgumentError.value(projection, 'imageProjection'),
+};

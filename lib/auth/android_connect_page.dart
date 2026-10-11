@@ -1,3 +1,4 @@
+import 'package:rillight/media_server/server_address.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -10,8 +11,7 @@ import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_url.dart';
+import 'package:rillight/media_server/errors.dart';
 
 /// Independent touch-first connection form; drafts live only in the auth flow.
 class AndroidConnectPage extends StatefulWidget {
@@ -154,10 +154,13 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
       return _address.text;
     }
     try {
-      return normalizeEmbyBaseUrl(
-        joinEmbyPath(normalizeEmbyBaseUrl(_address.text), extraPath).toString(),
+      return normalizeServerAddress(
+        joinServerPath(
+          normalizeServerAddress(_address.text),
+          extraPath,
+        ).toString(),
       ).toString();
-    } on EmbyException {
+    } on MediaServerException {
       return _address.text;
     }
   }

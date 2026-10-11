@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_list.dart';
 
@@ -10,13 +10,13 @@ void main() {
   testWidgets('episode cards stay compact enough to scan a season', (
     tester,
   ) async {
-    final item = EmbyItem(
+    final item = MediaItem(
       id: 'e1',
       name: '勇者的相遇',
       type: 'Episode',
       indexNumber: 1,
       overview: '很长的本集简介。' * 40,
-      runTimeTicks: 23 * 60 * 10000000,
+      runtime: Duration(microseconds: (23 * 60 * 10000000) ~/ 10),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -73,7 +73,7 @@ void main() {
     (tester) async {
       var played = 0;
       var opened = 0;
-      Widget row(EmbyItem item) => MaterialApp(
+      Widget row(MediaItem item) => MaterialApp(
         locale: const Locale('zh'),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -96,13 +96,17 @@ void main() {
       );
       await tester.pumpWidget(
         row(
-          const EmbyItem(
+          const MediaItem(
             id: 'e2',
             name: '半途',
             type: 'Episode',
             indexNumber: 2,
-            runTimeTicks: 24 * 60 * 10000000,
-            userData: EmbyUserData(playbackPositionTicks: 10 * 60 * 10000000),
+            runtime: Duration(microseconds: (24 * 60 * 10000000) ~/ 10),
+            userData: MediaUserData(
+              playbackPosition: Duration(
+                microseconds: (10 * 60 * 10000000) ~/ 10,
+              ),
+            ),
           ),
         ),
       );
@@ -131,12 +135,12 @@ void main() {
 
       await tester.pumpWidget(
         row(
-          const EmbyItem(
+          const MediaItem(
             id: 'e3',
             name: '看完',
             type: 'Episode',
             indexNumber: 3,
-            userData: EmbyUserData(played: true),
+            userData: MediaUserData(played: true),
           ),
         ),
       );
@@ -162,15 +166,17 @@ void main() {
             child: SizedBox(
               width: 320,
               child: EpisodeRow(
-                item: EmbyItem(
+                item: MediaItem(
                   id: 'e4',
                   name: '续看',
                   type: 'Episode',
                   indexNumber: 4,
                   premiereDate: DateTime(2024, 5, 2),
-                  runTimeTicks: 24 * 60 * 10000000,
-                  userData: const EmbyUserData(
-                    playbackPositionTicks: 10 * 60 * 10000000,
+                  runtime: Duration(microseconds: (24 * 60 * 10000000) ~/ 10),
+                  userData: const MediaUserData(
+                    playbackPosition: Duration(
+                      microseconds: (10 * 60 * 10000000) ~/ 10,
+                    ),
                   ),
                 ),
                 selected: false,
@@ -227,13 +233,13 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     tester.view.devicePixelRatio = 1;
-    final item = EmbyItem(
+    final item = MediaItem(
       id: 'e1',
       name: '相遇',
       type: 'Episode',
       indexNumber: 1,
       overview: '简介',
-      runTimeTicks: 23 * 60 * 10000000,
+      runtime: Duration(microseconds: (23 * 60 * 10000000) ~/ 10),
     );
 
     Future<double> titleHeight(Size view) async {

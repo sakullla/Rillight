@@ -7,9 +7,8 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
@@ -29,14 +28,14 @@ class TvShelfPage extends StatefulWidget {
   final String title;
 
   /// 其他服务器的会话:不切换首页服务器,也不写入当前服务器的目录缓存。
-  final EmbyClient? client;
+  final MediaServerClient? client;
 
   /// `items` 来源的片库与类型。
   final String? parentId;
   final String? includeItemTypes;
 
   /// 覆盖默认的打开详情(其他服务器的条目要带来源)。
-  final void Function(EmbyItem item)? onOpen;
+  final void Function(MediaItem item)? onOpen;
 
   factory TvShelfPage.fromState(GoRouterState state) {
     return TvShelfPage(
@@ -61,12 +60,12 @@ class TvShelfPage extends StatefulWidget {
 class _TvShelfPageState extends State<TvShelfPage> {
   static const _pageSize = 60;
 
-  List<EmbyItem> _items = const [];
+  List<MediaItem> _items = const [];
   var _loading = true;
   var _loadingMore = false;
   var _refreshing = false;
   var _hasMore = false;
-  EmbyException? _error, _pageError, _refreshError;
+  MediaServerException? _error, _pageError, _refreshError;
   var _fetched = 0;
   var _generation = 0;
   AuthController? _auth;
@@ -139,7 +138,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
     };
   }
 
-  CatalogRequest _request(EmbyClient client, int startIndex) {
+  CatalogRequest _request(MediaServerClient client, int startIndex) {
     final userId = client.userId ?? '';
     final sort = CatalogSort.initial;
     return switch (widget.source) {
@@ -199,9 +198,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
     final request = _request(client, start);
     final keep = !more && _items.isNotEmpty;
     final Future<Object> network = override != null
-        ? override
-              .getJson(request.path, queryParameters: request.query)
-              .then<Object>((json) => json as Object)
+        ? executeCatalogRequest(override, request)
         : cache.fetch(client, request);
     unawaited(network.then<void>((_) {}, onError: (Object _) {}));
     setState(() {
@@ -265,9 +262,12 @@ class _TvShelfPageState extends State<TvShelfPage> {
     } catch (error) {
       if (!owns()) return;
       setState(() {
-        final failure = error is EmbyException
+        final failure = error is MediaServerException
             ? error
-            : EmbyException(EmbyFailureKind.unknown, cause: error);
+            : MediaServerException(
+                MediaServerFailureKind.unknown,
+                cause: error,
+              );
         if (more) {
           _pageError = failure;
         } else if (_items.isNotEmpty) {

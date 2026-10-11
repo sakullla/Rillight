@@ -11,8 +11,8 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/episode_list.dart';
@@ -25,7 +25,7 @@ import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-browsing-polish',
@@ -272,19 +272,19 @@ void main() {
   testWidgets(
     'a TV card shows watched and progress once, and focus uses one ring',
     (tester) async {
-      final played = const EmbyItem(
+      final played = const MediaItem(
         id: 'played',
         name: '看完的一集',
         type: 'Episode',
-        userData: EmbyUserData(played: true),
+        userData: MediaUserData(played: true),
       );
-      final resume = const EmbyItem(
+      final resume = const MediaItem(
         id: 'resume',
         name: '看到一半',
         type: 'Episode',
-        runTimeTicks: 20 * 60 * 10000000,
-        userData: EmbyUserData(
-          playbackPositionTicks: 8 * 60 * 10000000,
+        runtime: Duration(microseconds: (20 * 60 * 10000000) ~/ 10),
+        userData: MediaUserData(
+          playbackPosition: Duration(microseconds: (8 * 60 * 10000000) ~/ 10),
           playedPercentage: 40,
         ),
       );

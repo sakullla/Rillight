@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/detail_controller.dart';
@@ -10,9 +10,9 @@ import 'package:rillight/player/player_window_host.dart';
 /// 轮播的「播放」要落到一条可播的流。电影直接可播;剧集按详情页同样的
 /// 规则解析出该播的那一集(有进度的接着看,否则第一集未看的)。
 /// 没有可播集时返回 null,调用方提示 [AppLocalizations.noPlayableStream]。
-Future<EmbyItem?> resolveHeroPlayTarget(
+Future<MediaItem?> resolveHeroPlayTarget(
   BuildContext context,
-  EmbyItem item, {
+  MediaItem item, {
   CatalogController? catalog,
 }) async {
   if (!item.isSeries) {
@@ -50,7 +50,7 @@ class HeroPlaybackActions extends StatefulWidget {
     this.catalog,
     this.expand = false,
   });
-  final EmbyItem item;
+  final MediaItem item;
   final VoidCallback onDetails;
 
   /// Phone navigation owns a route; desktop callers use the window host.

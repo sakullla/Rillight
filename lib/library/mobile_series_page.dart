@@ -8,8 +8,8 @@ import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/failure_message.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -69,11 +69,11 @@ class PhoneItemBanner extends StatelessWidget {
   /// 承接共享图过渡的那一张（海报卡或背景），参数与来源卡片一致。
   static const handoffImageKey = Key('phone-detail-handoff-image');
 
-  final EmbyItem item;
+  final MediaItem item;
 
   /// 海报卡显示的条目。剧集切季时背景跟着季走，海报卡仍是剧集本身，
   /// 失效或缺失的季海报不会被请求。缺省为 [item]。
-  final EmbyItem? posterItem;
+  final MediaItem? posterItem;
   final String title;
 
   /// 加载中的标题占位；非空时替代 [title]。
@@ -110,7 +110,7 @@ class PhoneItemBanner extends StatelessWidget {
   bool get _showPoster => !item.isEpisode || !preferBackdrop;
 
   /// 是否有可铺满横幅的横版画面。单集的主图本身就是 16:9 剧照。
-  static bool hasLandscapeArt(EmbyItem item) =>
+  static bool hasLandscapeArt(MediaItem item) =>
       item.isEpisode ||
       (item.backdropImageTag?.isNotEmpty ?? false) ||
       (item.parentBackdropImageTag?.isNotEmpty ?? false) ||
@@ -296,7 +296,7 @@ class _PosterCard extends StatelessWidget {
     required this.maxWidth,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final double width;
   final bool handoff;
   final int maxWidth;
@@ -681,12 +681,12 @@ class MobileSeriesPage extends StatelessWidget {
 
   static const seasonSummaryKey = Key('phone-season-summary');
 
-  final EmbyItem item;
-  final List<EmbyItem> seasons;
+  final MediaItem item;
+  final List<MediaItem> seasons;
   final String? seasonId;
-  final List<EmbyItem> episodes;
+  final List<MediaItem> episodes;
   final bool episodesLoading;
-  final EmbyException? episodeError;
+  final MediaServerException? episodeError;
   final bool hasMore;
   final String? playTargetId;
 
@@ -694,7 +694,7 @@ class MobileSeriesPage extends StatelessWidget {
   final int? episodeTotal;
   final String? focusEpisodeId;
   final EpisodeScrollCoordinator? scrollCoordinator;
-  final List<EmbyItem> similar;
+  final List<MediaItem> similar;
   final VoidCallback? onPickEpisode;
   final ValueChanged<String>? onOpenGenre;
   final ValueChanged<String> onSelectSeason;
@@ -735,7 +735,7 @@ class MobileSeriesPage extends StatelessWidget {
     ];
   }
 
-  Widget _episodeWidget(EmbyItem episode, int index) => _RevealEpisode(
+  Widget _episodeWidget(MediaItem episode, int index) => _RevealEpisode(
     key: ValueKey('episode-${episode.id}'),
     index: index,
     scrollCoordinator: scrollCoordinator,
@@ -944,7 +944,7 @@ class EpisodeScrollCoordinator {
   int _generation = 0;
   bool _disposed = false;
 
-  void locate(List<EmbyItem> episodes, String? episodeId) {
+  void locate(List<MediaItem> episodes, String? episodeId) {
     if (_disposed || episodeId == null || episodeId.isEmpty) return;
     final target = episodes.indexWhere((episode) => episode.id == episodeId);
     if (target < 0) return;
@@ -1071,7 +1071,7 @@ class _EpisodeRow extends StatelessWidget {
     required this.onTap,
   });
 
-  final EmbyItem episode;
+  final MediaItem episode;
   final bool current;
   final VoidCallback onTap;
 
@@ -1163,7 +1163,7 @@ class _EpisodeRow extends StatelessWidget {
                     ),
                   ],
                 ),
-                // 该集简介:EmbyItem.overview 缺失(无字段/纯空白/HTML 残迹)
+                // 该集简介:MediaItem.overview 缺失(无字段/纯空白/HTML 残迹)
                 // 时整行隐藏,卡片优雅降级为剧照 + 标题。
                 if (overview != null)
                   Padding(
@@ -1197,7 +1197,7 @@ class _EpisodeThumb extends StatelessWidget {
     required this.progress,
   });
 
-  final EmbyItem episode;
+  final MediaItem episode;
   final double width;
   final bool current;
   final bool played;
@@ -1288,7 +1288,7 @@ class _SimilarRow extends StatelessWidget {
     required this.onOpenSimilar,
   });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final ValueChanged<String> onOpenItem;
   final VoidCallback? onOpenSimilar;
 

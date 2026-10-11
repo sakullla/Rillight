@@ -6,7 +6,7 @@ import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -27,7 +27,7 @@ void main() {
         final server = FakeEmbyServer();
         final auth = AuthController.memory(
           client: EmbyClient(
-            device: const EmbyDeviceInfo(
+            device: const ClientDeviceInfo(
               clientName: 'test',
               deviceName: 'test',
               deviceId: 'ended-route',

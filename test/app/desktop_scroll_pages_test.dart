@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -41,7 +41,7 @@ void main() {
     final adapter = FakeEmbyAdapter([server]);
     final auth = SyntheticSourceAuth(
       adapter: adapter,
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'desktop',
         deviceId: 'desktop-wheel-pages',

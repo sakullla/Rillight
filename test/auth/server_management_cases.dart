@@ -7,11 +7,11 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-server-management',
@@ -88,7 +88,7 @@ void main() {
       expect(auth.session?.accessToken, token);
       expect(auth.client.baseUrl, second.baseUrl);
       expect(
-        await auth.client.getJson('/System/Info'),
+        await (auth.client as EmbyClient).getJson('/System/Info'),
         containsPair('ServerName', '第二台'),
       );
       // 列表只余当前服务器,被删服务器与本机凭据一并移除。

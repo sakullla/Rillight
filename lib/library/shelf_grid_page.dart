@@ -17,9 +17,8 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -71,9 +70,9 @@ class ShelfClientOverride extends InheritedWidget {
     required super.child,
   });
 
-  final EmbyClient client;
+  final MediaServerClient client;
 
-  static EmbyClient? maybeOf(BuildContext context) =>
+  static MediaServerClient? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<ShelfClientOverride>()?.client;
 
   @override
@@ -85,9 +84,9 @@ class ShelfClientOverride extends InheritedWidget {
 class ShelfItemOpen extends InheritedWidget {
   const ShelfItemOpen({super.key, required this.onOpen, required super.child});
 
-  final ValueChanged<EmbyItem> onOpen;
+  final ValueChanged<MediaItem> onOpen;
 
-  static ValueChanged<EmbyItem>? maybeOf(BuildContext context) =>
+  static ValueChanged<MediaItem>? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<ShelfItemOpen>()?.onOpen;
 
   @override
@@ -187,9 +186,9 @@ class ShelfGridPage extends StatefulWidget {
   /// 网格卡片:宽度取自单元格约束,顶部对齐,多余高度留在底部。
   static Widget gridCard(
     BuildContext context,
-    EmbyItem item, {
+    MediaItem item, {
     required VoidCallback onTap,
-    ValueChanged<EmbyItem>? onRemoveFromResume,
+    ValueChanged<MediaItem>? onRemoveFromResume,
     bool wide = false,
   }) {
     return LayoutBuilder(
@@ -219,11 +218,11 @@ class ShelfGridPage extends StatefulWidget {
   }
 
   /// 分页追加按 itemId 去重:服务器排序窗口重叠时不会出现重复条目。
-  static List<EmbyItem> mergeItemsById(
-    Iterable<EmbyItem> existing,
-    Iterable<EmbyItem> incoming,
+  static List<MediaItem> mergeItemsById(
+    Iterable<MediaItem> existing,
+    Iterable<MediaItem> incoming,
   ) {
-    final merged = List<EmbyItem>.of(existing);
+    final merged = List<MediaItem>.of(existing);
     final seen = <String>{for (final item in merged) item.id};
     for (final item in incoming) {
       if (seen.add(item.id)) {
@@ -252,7 +251,7 @@ class ShelfGridPage extends StatefulWidget {
 }
 
 class _ShelfGridPageState extends State<ShelfGridPage> {
-  List<EmbyItem> _items = const [];
+  List<MediaItem> _items = const [];
   bool _loading = true;
   bool _loadingMore = false;
   bool _refreshing = false;
@@ -267,8 +266,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     return _total ?? (_hasMore ? null : _items.length);
   }
 
-  EmbyException? _error;
-  EmbyException? _pageError;
+  MediaServerException? _error;
+  MediaServerException? _pageError;
   late CatalogSort _sort = _defaultSort;
 
   /// 片库组合筛选:类型/年份/流派/已看,与排序叠加生效。
@@ -281,7 +280,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   final Set<String> _knownGenres = {};
 
   CatalogCache? _scopeCache;
-  EmbyClient? _overrideClient;
+  MediaServerClient? _overrideClient;
   final CatalogCache _isolatedCache = CatalogCache();
 
   /// 目录缓存:其他服务器的网格不写入首页会话缓存。
@@ -293,7 +292,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
         CatalogScope.maybeOf(context)?.cache ?? CatalogCache();
   }
 
-  EmbyClient _activeClient() => _overrideClient ?? AuthScope.of(context).client;
+  MediaServerClient _activeClient() =>
+      _overrideClient ?? AuthScope.of(context).client;
 
   @override
   void didChangeDependencies() {
@@ -345,7 +345,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
   List<String> get _genreOptions => [..._knownGenres]..sort();
 
-  void _collectFilterDimensions(List<EmbyItem> items) {
+  void _collectFilterDimensions(List<MediaItem> items) {
     for (final item in items) {
       final year = item.productionYear;
       if (year != null) {
@@ -437,7 +437,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     _loadMore();
   }
 
-  List<EmbyItem> _applyFilter(List<EmbyItem> items) {
+  List<MediaItem> _applyFilter(List<MediaItem> items) {
     if (!widget.moviesOrSeriesOnly) {
       return items;
     }
@@ -510,7 +510,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           _fillViewportIfNeeded();
         }
       });
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted || gen != _loadGen) {
         return;
       }
@@ -561,7 +561,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           _fillViewportIfNeeded();
         }
       });
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (!mounted || gen != _loadGen) {
         return;
       }
@@ -577,7 +577,11 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     }
   }
 
-  CatalogRequest _requestFor(EmbyClient client, int startIndex, int limit) {
+  CatalogRequest _requestFor(
+    MediaServerClient client,
+    int startIndex,
+    int limit,
+  ) {
     final userId = client.userId ?? '';
     switch (widget.source) {
       case 'resume':
@@ -644,8 +648,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
   }
 
   /// 经缓存层拉取:总是走网络并写穿缓存(分页追加不读缓存)。
-  Future<EmbyItemPage> _fetch(
-    EmbyClient client,
+  Future<MediaItemPage> _fetch(
+    MediaServerClient client,
     int startIndex,
     int limit,
   ) async {
@@ -905,7 +909,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     );
   }
 
-  Widget _failureNotice(EmbyException error, VoidCallback retry) {
+  Widget _failureNotice(MediaServerException error, VoidCallback retry) {
     final l10n = AppLocalizations.of(context);
     return CatalogInlineFailure(
       message: catalogFailureMessage(l10n, error),
@@ -964,7 +968,7 @@ class _ShelfChildDelegate extends SliverChildBuilderDelegate {
     required NullableIndexedWidgetBuilder builder,
   }) : super(builder, childCount: items.length, addAutomaticKeepAlives: false);
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final bool wide;
 
   @override

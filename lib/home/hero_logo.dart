@@ -6,7 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 /// Decoded logo bytes and their intrinsic size.
@@ -39,7 +39,7 @@ class HeroLogo extends StatefulWidget {
     this.prefetch = false,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final Widget fallback;
   final double maxWidth;
   final double maxHeight;
@@ -49,7 +49,8 @@ class HeroLogo extends StatefulWidget {
   final bool prefetch;
 
   /// Whether [item] can show a logo at all; callers may skip layout work.
-  static bool available(EmbyItem item) => item.logoImageTag?.isNotEmpty == true;
+  static bool available(MediaItem item) =>
+      item.logoImageTag?.isNotEmpty == true;
 
   /// Request width for a logo slot: physical pixels, bounded for decode cost.
   static int requestWidthFor(double maxWidth, double devicePixelRatio) =>
@@ -243,7 +244,7 @@ class _HeroLogoState extends State<HeroLogo> {
     );
   }
 
-  static String _semanticTitle(EmbyItem item) =>
+  static String _semanticTitle(MediaItem item) =>
       item.isEpisode && item.seriesName?.isNotEmpty == true
       ? item.seriesName!
       : item.name;

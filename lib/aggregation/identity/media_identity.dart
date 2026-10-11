@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import '../../auth/source_sessions.dart';
-import '../../emby/emby_models.dart';
+import '../../media_server/models.dart';
 
 export '../../auth/source_sessions.dart' show SourceAccount;
 export '../../auth/region_access.dart' show AccessRegion;
@@ -80,7 +80,7 @@ class WorkSource {
     this.year,
     Map<String, String> providerIds = const {},
   }) : providerIds = normalizeProviderIds(providerIds);
-  factory WorkSource.fromEmby(SourceReference reference, EmbyItem item) {
+  factory WorkSource.fromMediaItem(SourceReference reference, MediaItem item) {
     if (reference.itemId != item.id) {
       throw ArgumentError('Item does not belong to reference');
     }
@@ -380,9 +380,9 @@ class EpisodeSource {
     this.numberingScheme,
     Map<String, String> providerIds = const {},
   }) : providerIds = normalizeProviderIds(providerIds);
-  factory EpisodeSource.fromEmby(
+  factory EpisodeSource.fromMediaItem(
     SourceReference reference,
-    EmbyItem item, {
+    MediaItem item, {
     String? numberingScheme,
   }) {
     if (!item.isEpisode || reference.itemId != item.id) {

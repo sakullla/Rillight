@@ -6,7 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
@@ -200,7 +200,7 @@ Future<void> main(List<String> args) async {
         try {
           await unstable(true);
           await controller.playEpisode(
-            EmbyItem.fromJson({
+            decodeEmbyMediaItem({
               'Id': 'cache-long',
               'Type': 'Movie',
               'Name': 'cache-long',
@@ -307,7 +307,7 @@ Future<void> main(List<String> args) async {
           await record('cache-long-before-switch', await backend.diagnostics());
           await controller
               .playEpisode(
-                EmbyItem.fromJson({
+                decodeEmbyMediaItem({
                   'Id': 'baseline',
                   'Type': 'Movie',
                   'Name': 'baseline',
@@ -316,7 +316,7 @@ Future<void> main(List<String> args) async {
               .timeout(const Duration(seconds: 40));
           await loaded('cache-long-reopened-baseline');
           await controller.playEpisode(
-            EmbyItem.fromJson({
+            decodeEmbyMediaItem({
               'Id': 'cache-long',
               'Type': 'Movie',
               'Name': 'cache-long',
@@ -377,7 +377,7 @@ Future<void> main(List<String> args) async {
 
       controller.addListener(observeReportFailure);
       final delayedSwitch = controller.playEpisode(
-        EmbyItem.fromJson({
+        decodeEmbyMediaItem({
           'Id': 'delayed-report',
           'Type': 'Movie',
           'Name': 'delayed-report',
@@ -433,7 +433,7 @@ Future<void> main(List<String> args) async {
       var observedSubtitleRequests = 0;
       final subtitleSwitch = controller
           .playEpisode(
-            EmbyItem.fromJson({
+            decodeEmbyMediaItem({
               'Id': 'delayed-subtitle',
               'Type': 'Movie',
               'Name': 'delayed-subtitle',
@@ -559,7 +559,7 @@ Future<void> main(List<String> args) async {
       // is still pending; its later failure must not warn or stop this session.
       // playEpisode intentionally ignores the current item, so leave it first.
       await controller.playEpisode(
-        EmbyItem.fromJson({
+        decodeEmbyMediaItem({
           'Id': 'baseline',
           'Type': 'Movie',
           'Name': 'baseline',
@@ -569,7 +569,7 @@ Future<void> main(List<String> args) async {
       subtitleFinished = false;
       final supersededSubtitle = controller
           .playEpisode(
-            EmbyItem.fromJson({
+            decodeEmbyMediaItem({
               'Id': 'delayed-subtitle',
               'Type': 'Movie',
               'Name': 'delayed-subtitle',
@@ -627,7 +627,11 @@ Future<void> main(List<String> args) async {
         try {
           await controller
               .playEpisode(
-                EmbyItem.fromJson({'Id': item, 'Type': 'Movie', 'Name': item}),
+                decodeEmbyMediaItem({
+                  'Id': item,
+                  'Type': 'Movie',
+                  'Name': item,
+                }),
               )
               .timeout(const Duration(seconds: 30));
         } finally {
@@ -729,7 +733,7 @@ Future<void> main(List<String> args) async {
         }
 
         await controller.playEpisode(
-          EmbyItem.fromJson({
+          decodeEmbyMediaItem({
             'Id': '1080p60-long',
             'Type': 'Movie',
             'Name': '1080p60-long',
@@ -801,7 +805,7 @@ Future<void> main(List<String> args) async {
         await windowManager.setSize(const Size(1280, 720));
       }
       await controller.playEpisode(
-        EmbyItem.fromJson({
+        decodeEmbyMediaItem({
           'Id': 'baseline',
           'Type': 'Movie',
           'Name': 'baseline',
@@ -914,7 +918,11 @@ Future<void> main(List<String> args) async {
       await loaded('restarted-for-power-check');
       await checkDisplayRequest('restarted', true);
       await controller.playEpisode(
-        EmbyItem.fromJson({'Id': 'broken', 'Type': 'Movie', 'Name': 'broken'}),
+        decodeEmbyMediaItem({
+          'Id': 'broken',
+          'Type': 'Movie',
+          'Name': 'broken',
+        }),
       );
       if (controller.error == null || controller.isPlaying) {
         throw StateError('Failed open did not stop');
@@ -922,7 +930,7 @@ Future<void> main(List<String> args) async {
       await record('failed-open-stopped');
       await checkDisplayRequest('failed-open', false);
       await controller.playEpisode(
-        EmbyItem.fromJson({
+        decodeEmbyMediaItem({
           'Id': 'baseline',
           'Type': 'Movie',
           'Name': 'baseline',

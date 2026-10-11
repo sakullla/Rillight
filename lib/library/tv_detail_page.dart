@@ -8,7 +8,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/library/detail_source_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
@@ -45,7 +45,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
 
   /// 单集的前后集：条目载入后各取一次，供头部「上一集/下一集」。
   String? _neighborsFor;
-  EmbyItem? _previous, _next;
+  MediaItem? _previous, _next;
 
   @override
   void initState() {
@@ -134,12 +134,12 @@ class _TvDetailPageState extends State<TvDetailPage> {
     );
   }
 
-  void _loadNeighbors(EmbyItem item) {
+  void _loadNeighbors(MediaItem item) {
     if (!item.isEpisode || _neighborsFor == item.id) return;
     _neighborsFor = item.id;
     _previous = _next = null;
     final client = DetailSourceScope.clientOf(context);
-    Future.wait<EmbyItem?>([
+    Future.wait<MediaItem?>([
       client.getPreviousEpisode(item).catchError((Object _) => null),
       client.getNextEpisode(item).catchError((Object _) => null),
     ]).then((neighbors) {
@@ -151,7 +151,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
     });
   }
 
-  void _openEpisode(EmbyItem episode) {
+  void _openEpisode(MediaItem episode) {
     context.push(
       DetailSourceScope.itemLocation(context, episode.id),
       extra: DetailSourceScope.command(context, episode.id),
@@ -334,7 +334,11 @@ class _TvDetailPageState extends State<TvDetailPage> {
     );
   }
 
-  List<Widget> _actions(BuildContext context, EmbyItem item, EmbyItem? target) {
+  List<Widget> _actions(
+    BuildContext context,
+    MediaItem item,
+    MediaItem? target,
+  ) {
     final l = AppLocalizations.of(context);
     final c = _controller!;
     return [
@@ -389,7 +393,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
   }
 
   /// 剧集页的主操作写明要播哪一集，进页面就知道按下去会发生什么。
-  String _playLabel(AppLocalizations l, EmbyItem item, EmbyItem? target) {
+  String _playLabel(AppLocalizations l, MediaItem item, MediaItem? target) {
     if (target == null) return l.noPlayableStream;
     if (item.isSeries && target.isEpisode) {
       final code = seasonEpisodeCode(target) ?? episodeLabel(target);
@@ -401,7 +405,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
   List<Widget> _episodes(
     BuildContext context,
     DetailController c,
-    EmbyItem? target,
+    MediaItem? target,
   ) {
     final l = AppLocalizations.of(context);
     final s = TvDesign.scaleOf(context);
@@ -497,7 +501,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
 }
 
 /// 分集行要露出的那一集:从分集详情进来时是该集,否则是这一季的续播或下一集。
-String? _tvEpisodeAnchor(DetailController controller, EmbyItem? playTarget) {
+String? _tvEpisodeAnchor(DetailController controller, MediaItem? playTarget) {
   final requested = controller.initialEpisodeId?.trim();
   if (requested != null &&
       requested.isNotEmpty &&
@@ -523,10 +527,10 @@ class _TvEpisodeRow extends StatefulWidget {
     this.more,
   });
 
-  final List<EmbyItem> episodes;
+  final List<MediaItem> episodes;
   final String? currentId;
   final TvCardMetrics metrics;
-  final FocusNode Function(EmbyItem episode) nodeFor;
+  final FocusNode Function(MediaItem episode) nodeFor;
   final Widget? more;
 
   @override
@@ -706,8 +710,8 @@ class _TvDetailBackdrop extends StatelessWidget {
     required this.scrolled,
   });
 
-  final EmbyItem item;
-  final EmbyItem? artwork;
+  final MediaItem item;
+  final MediaItem? artwork;
   final ValueListenable<double> scrolled;
 
   @override
@@ -772,14 +776,14 @@ class _TvDetailHeader extends StatelessWidget {
     this.resume,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final List<Widget> actions;
 
   /// 当前片源：头部画质/声道标签只描述它。
   final ItemMediaSource? source;
 
   /// 有续播进度的播放目标（电影/单集本身，或剧集的续播集）。
-  final EmbyItem? resume;
+  final MediaItem? resume;
 
   @override
   Widget build(BuildContext context) {
@@ -953,7 +957,7 @@ class _TvBadge extends StatelessWidget {
 class _TvResumeBar extends StatelessWidget {
   const _TvResumeBar({required this.item});
 
-  final EmbyItem item;
+  final MediaItem item;
 
   @override
   Widget build(BuildContext context) {
@@ -1079,7 +1083,7 @@ class _TvDetailSkeleton extends StatelessWidget {
   }
 }
 
-ItemMediaSource? _tvSource(EmbyItem item, String? id) {
+ItemMediaSource? _tvSource(MediaItem item, String? id) {
   for (final source in item.mediaSources) {
     if (source.id == id) {
       return source;

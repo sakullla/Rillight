@@ -1,16 +1,17 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
 
 void main() {
   test(
     'ProviderIds and LastPlayedDate are facts, links and positions are not identities/timestamps',
     () {
-      final item = EmbyItem.fromJson({
+      final item = decodeEmbyMediaItem({
         'Id': '1',
         'Name': 'Movie',
         'Type': 'Movie',
@@ -37,7 +38,7 @@ void main() {
         item.userData.copyWith(played: true).lastPlayedDate,
         item.userData.lastPlayedDate,
       );
-      final missing = EmbyItem.fromJson({
+      final missing = decodeEmbyMediaItem({
         'Id': '2',
         'ExternalUrls': [
           {'Name': 'IMDb', 'Url': 'https://imdb.com/title/tt123'},
@@ -46,14 +47,14 @@ void main() {
       });
       expect(missing.providerIds, isEmpty);
       expect(missing.userData.lastPlayedDate, isNull);
-      expect(EmbyUserData.fromJson(null).lastPlayedDate, isNull);
+      expect(decodeEmbyMediaUserData(null).lastPlayedDate, isNull);
     },
   );
 
   test(
     'media versions parse comparison/language fields without fabricated defaults',
     () {
-      final source = ItemMediaSource.fromJson({
+      final source = decodeEmbyItemMediaSource({
         'Id': 'version',
         'RunTimeTicks': 900,
         'Size': 1234,
@@ -88,7 +89,7 @@ void main() {
           },
         ],
       });
-      expect(source.runTimeTicks, 900);
+      expect(source.runtime, 900);
       expect(source.streams.first.profile, 'Main 10');
       expect(source.streams.first.averageFrameRate, 23.976);
       expect(source.audioStreams.single.language, 'zho');
@@ -97,13 +98,13 @@ void main() {
       expect(source.audioStreams.single.sampleRate, 48000);
       expect(source.subtitleStreams.single.isForced, isTrue);
       expect(source.subtitleStreams.single.isExternal, isTrue);
-      final unknown = ItemMediaSource.fromJson({
+      final unknown = decodeEmbyItemMediaSource({
         'Id': 'unknown',
         'MediaStreams': [
           {'Index': 0, 'Type': 'Audio'},
         ],
       });
-      expect(unknown.runTimeTicks, isNull);
+      expect(unknown.runtime, isNull);
       expect(unknown.bitrate, isNull);
       expect(unknown.streams.single.language, isNull);
       expect(unknown.streams.single.isDefault, isNull);
@@ -141,7 +142,7 @@ void main() {
       });
       final client =
           EmbyClient(
-            device: const EmbyDeviceInfo(
+            device: const ClientDeviceInfo(
               clientName: 'test',
               deviceName: 'test',
               deviceId: 'test',
@@ -161,8 +162,8 @@ void main() {
         expect(queries.single['Fields'], contains('UserData'));
         expect(queries.single['Fields'], contains('MediaSources'));
         for (final fields in [
-          EmbyClient.gridFields,
-          EmbyClient.homePosterFields,
+          MediaServerClient.gridFields,
+          MediaServerClient.homePosterFields,
         ]) {
           expect(fields, contains('ProviderIds'));
           expect(fields, contains('UserData'));

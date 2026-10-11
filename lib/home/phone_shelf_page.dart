@@ -11,9 +11,8 @@ import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/catalog_filter_button.dart';
@@ -78,18 +77,18 @@ class PhoneShelfPage extends StatefulWidget {
 }
 
 class _PhoneShelfPageState extends State<PhoneShelfPage> {
-  List<EmbyItem> _items = const [];
+  List<MediaItem> _items = const [];
   bool _loading = true;
   bool _loadingMore = false;
 
   /// 已有条目上的筛选刷新。飞行期间禁止加载更多。
   bool _refreshing = false;
   bool _hasMore = false;
-  EmbyException? _error;
-  EmbyException? _pageError;
+  MediaServerException? _error;
+  MediaServerException? _pageError;
 
   /// 筛选刷新失败时保留原列表；重试重拉第 0 页，而不是分页追加。
-  EmbyException? _refreshError;
+  MediaServerException? _refreshError;
   int _fetched = 0;
   int _loadGen = 0;
   CatalogCache? _fallbackCache;
@@ -180,7 +179,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   List<String>? get _filters =>
       _watch == null || !_filterable ? null : [_watch!];
 
-  CatalogRequest _request(EmbyClient client, int startIndex, int limit) {
+  CatalogRequest _request(MediaServerClient client, int startIndex, int limit) {
     final userId = client.userId ?? '';
     final sort = CatalogSort.initial;
     final filters = _filters;
@@ -266,10 +265,10 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     };
   }
 
-  Future<EmbyItemPage> _fetch(int startIndex) async {
+  Future<MediaItemPage> _fetch(int startIndex) async {
     final similarId = widget.itemId?.trim() ?? '';
     if (widget.source == 'similar' && similarId.isEmpty) {
-      return const EmbyItemPage(items: []);
+      return const MediaItemPage(items: []);
     }
     final client = AuthScope.of(context).client;
     final json = await _cache.fetch(
@@ -393,22 +392,22 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
     }
   }
 
-  EmbyException _asEmby(Object error) {
-    if (error is EmbyException) {
+  MediaServerException _asEmby(Object error) {
+    if (error is MediaServerException) {
       return error;
     }
-    return EmbyException(EmbyFailureKind.unknown, cause: error);
+    return MediaServerException(MediaServerFailureKind.unknown, cause: error);
   }
 
   /// 这一页没铺满，或和已有条目完全重复时，不再请求下一页。
-  bool _continues(EmbyItemPage page, int fetched, {required bool grew}) {
+  bool _continues(MediaItemPage page, int fetched, {required bool grew}) {
     if (!_paged || !grew || page.items.length < PhoneShelfPage.pageSize) {
       return false;
     }
     return page.hasMore(fetched: fetched, pageSize: PhoneShelfPage.pageSize);
   }
 
-  List<EmbyItem> _merge(List<EmbyItem> existing, List<EmbyItem> incoming) {
+  List<MediaItem> _merge(List<MediaItem> existing, List<MediaItem> incoming) {
     final merged = [...existing];
     final seen = {for (final item in merged) item.id};
     for (final item in incoming) {

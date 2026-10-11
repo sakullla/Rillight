@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 /// 从首页带进剧集页或详情页的那张图。
 ///
@@ -15,7 +15,7 @@ class PhoneImageHandoff {
     required this.maxWidth,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final bool preferBackdrop;
   final int maxWidth;
 }
@@ -43,7 +43,7 @@ abstract final class PhoneMotion {
 
   static void openItem(
     BuildContext context,
-    EmbyItem item, {
+    MediaItem item, {
     bool preferBackdrop = false,
     int maxWidth = posterRequestWidth,
   }) {

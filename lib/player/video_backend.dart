@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_output_status.dart';
 
 class VideoOpenRequest {
@@ -40,7 +40,7 @@ class VideoOpenRequest {
 
 /// Optional backend contract; existing desktop and fake defaults are unchanged.
 abstract interface class VideoBackendCapabilities {
-  Future<Map<String, dynamic>> deviceProfile(int maxStreamingBitrate);
+  Future<PlaybackCapabilities> playbackCapabilities(int maxStreamingBitrate);
 }
 
 enum TranscodeSubtitleDelivery { burnIn, external, manifest }

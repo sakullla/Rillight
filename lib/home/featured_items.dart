@@ -1,4 +1,4 @@
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/hero_artwork.dart';
 
@@ -10,18 +10,18 @@ import 'package:rillight/home/hero_artwork.dart';
 ///
 /// 只收有正式背景或海报的条目:仅海报的条目走海报聚焦版式,两者皆无的条目
 /// 直接剔除,全部落空时各端隐藏轮播。
-List<EmbyItem> featuredHomeItems(CatalogController catalog, {int limit = 5}) {
+List<MediaItem> featuredHomeItems(CatalogController catalog, {int limit = 5}) {
   final seen = <String>{};
-  final items = <EmbyItem>[];
+  final items = <MediaItem>[];
 
-  bool hasArtwork(EmbyItem item) {
+  bool hasArtwork(MediaItem item) {
     return !heroArtworkSources(
       item,
       series: catalog.latestSeries.items,
     ).isEmpty;
   }
 
-  bool add(EmbyItem item) {
+  bool add(MediaItem item) {
     if (items.length >= limit) {
       return false;
     }
@@ -56,7 +56,7 @@ List<EmbyItem> featuredHomeItems(CatalogController catalog, {int limit = 5}) {
 }
 
 /// 从 [source] 推进到下一条可入选的条目;源耗尽时返回 false。
-bool _addNext(Iterator<EmbyItem> source, bool Function(EmbyItem) add) {
+bool _addNext(Iterator<MediaItem> source, bool Function(MediaItem) add) {
   while (source.moveNext()) {
     if (add(source.current)) {
       return true;

@@ -1,5 +1,7 @@
+import 'package:rillight/emby/emby_playback.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_resolver.dart';
 
 void main() {
@@ -69,7 +71,7 @@ void main() {
   test(
     'explicit compatibility fallback cannot silently choose direct again',
     () {
-      final info = PlaybackInfo.fromJson({
+      final info = decodeEmbyPlaybackInfo({
         'PlaySessionId': 'fallback',
         'MediaSources': [
           {
@@ -79,7 +81,7 @@ void main() {
           },
         ],
       });
-      final result = resolvePlayback(
+      final result = resolveEmbyPlayback(
         info: info,
         baseUrl: Uri.parse(base),
         accessToken: token,
@@ -87,13 +89,13 @@ void main() {
         forceTranscode: true,
       );
       expect(result!.playMethod, PlayMethod.transcode);
-      final unavailable = PlaybackInfo.fromJson({
+      final unavailable = decodeEmbyPlaybackInfo({
         'MediaSources': [
           {'Id': 's', 'SupportsDirectPlay': true},
         ],
       });
       expect(
-        resolvePlayback(
+        resolveEmbyPlayback(
           info: unavailable,
           baseUrl: Uri.parse(base),
           accessToken: token,
@@ -106,8 +108,8 @@ void main() {
   );
 
   test('prefers Direct Stream over transcode when the server allows it', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-1',
         'MediaSources': [
           {
@@ -135,8 +137,8 @@ void main() {
 
   test('original Dolby audio is not replaced by an AAC transcode', () {
     for (final codec in ['ac3', 'eac3', 'truehd', 'true-hd', 'atmos', 'ec-3']) {
-      final resolved = resolvePlayback(
-        info: PlaybackInfo.fromJson({
+      final resolved = resolveEmbyPlayback(
+        info: decodeEmbyPlaybackInfo({
           'PlaySessionId': 'dolby-$codec',
           'MediaSources': [
             {
@@ -158,8 +160,8 @@ void main() {
       );
       expect(resolved, isNull, reason: codec);
     }
-    final aac = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final aac = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'aac-transcode',
         'MediaSources': [
           {
@@ -183,8 +185,8 @@ void main() {
   });
 
   test('uses transcoding URL when direct is not supported', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-2',
         'MediaSources': [
           {
@@ -207,8 +209,8 @@ void main() {
   });
 
   test('builds static stream URL when DirectStreamUrl is omitted', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-3',
         'MediaSources': [
           {
@@ -230,7 +232,7 @@ void main() {
 
   test('returns null when there is no media source', () {
     expect(
-      resolvePlayback(
+      resolveEmbyPlayback(
         info: const PlaybackInfo(playSessionId: 'x', mediaSources: []),
         baseUrl: Uri.parse(base),
         accessToken: token,
@@ -241,7 +243,7 @@ void main() {
   });
 
   test('selects the requested media source when switching', () {
-    final info = PlaybackInfo.fromJson({
+    final info = decodeEmbyPlaybackInfo({
       'PlaySessionId': 'play-multi',
       'MediaSources': [
         {
@@ -264,7 +266,7 @@ void main() {
         },
       ],
     });
-    final resolved = resolvePlayback(
+    final resolved = resolveEmbyPlayback(
       info: info,
       baseUrl: Uri.parse(base),
       accessToken: token,
@@ -276,7 +278,7 @@ void main() {
     expect(resolved.mediaSource.label, '4K 版本');
     expect(resolved.streamUrl.queryParameters['MediaSourceId'], 'src-4k');
     // 缺省仍取第一个源。
-    final fallback = resolvePlayback(
+    final fallback = resolveEmbyPlayback(
       info: info,
       baseUrl: Uri.parse(base),
       accessToken: token,
@@ -284,7 +286,7 @@ void main() {
     );
     expect(fallback!.mediaSource.id, 'src-1080');
     // 未知 id 回退第一个源。
-    final unknown = resolvePlayback(
+    final unknown = resolveEmbyPlayback(
       info: info,
       baseUrl: Uri.parse(base),
       accessToken: token,
@@ -370,7 +372,7 @@ void main() {
   });
 
   test('PlaybackInfo looks up sources by id', () {
-    final info = PlaybackInfo.fromJson({
+    final info = decodeEmbyPlaybackInfo({
       'PlaySessionId': 'play-multi',
       'MediaSources': [
         {'Id': 'src-a'},
@@ -382,8 +384,8 @@ void main() {
   });
 
   test('strm pointer with a remote path ignores stream.strm', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-strm-both',
         'MediaSources': [
           {
@@ -414,8 +416,8 @@ void main() {
   });
 
   test('local strm expands the pointer instead of playing stream.strm', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-strm-local',
         'MediaSources': [
           {
@@ -455,8 +457,8 @@ https://cdn.example.com/movie.mkv
   });
 
   test('strm remote path direct plays the original URL without token', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-strm',
         'MediaSources': [
           {
@@ -571,8 +573,8 @@ https://cdn.example.com/movie.mkv
   test(
     'transcoding URL on a foreign host drops the token while same origin keeps it',
     () {
-      final foreign = resolvePlayback(
-        info: PlaybackInfo.fromJson({
+      final foreign = resolveEmbyPlayback(
+        info: decodeEmbyPlaybackInfo({
           'PlaySessionId': 'play-foreign',
           'MediaSources': [
             {
@@ -595,8 +597,8 @@ https://cdn.example.com/movie.mkv
       expect(foreign.streamUrl.origin, 'https://transcode.example.com');
       expect(foreign.streamUrl.queryParameters.containsKey('api_key'), isFalse);
       expect(foreign.streamUrl.queryParameters['MediaSourceId'], 'src-foreign');
-      final own = resolvePlayback(
-        info: PlaybackInfo.fromJson({
+      final own = resolveEmbyPlayback(
+        info: decodeEmbyPlaybackInfo({
           'PlaySessionId': 'play-own',
           'MediaSources': [
             {
@@ -621,8 +623,8 @@ https://cdn.example.com/movie.mkv
   );
 
   test('strm source without remote path falls back to the static stream', () {
-    final resolved = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final resolved = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-strm2',
         'MediaSources': [
           {
@@ -702,7 +704,7 @@ https://cdn.example.com/movie.mkv
   );
 
   test('falls back to default then first text subtitle', () {
-    final source = PlaybackMediaSource.fromJson({
+    final source = decodeEmbyPlaybackMediaSource({
       'Id': 'src',
       'DefaultSubtitleStreamIndex': 3,
       'MediaStreams': [
@@ -724,7 +726,7 @@ https://cdn.example.com/movie.mkv
     expect(fallbackSubtitleStreamIndex(source), 3);
     expect(source.streamByIndex(2)!.isExternal, isFalse);
     expect(
-      MediaStreamInfo.fromJson({
+      decodeEmbyMediaStreamInfo({
         'Index': 4,
         'Type': 'Subtitle',
         'IsExternal': true,
@@ -733,7 +735,7 @@ https://cdn.example.com/movie.mkv
     );
     expect(
       fallbackSubtitleStreamIndex(
-        PlaybackMediaSource.fromJson({
+        decodeEmbyPlaybackMediaSource({
           'Id': 'src-2',
           'MediaStreams': [
             {
@@ -754,8 +756,8 @@ https://cdn.example.com/movie.mkv
   test('same-origin live stream follows the existing selection rules', () {
     final baseUri = Uri.parse(base);
     // 直播可直连:DirectStreamUrl 拼上 baseUrl,api_key 保留。
-    final directLive = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final directLive = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-live-direct',
         'MediaSources': [
           {
@@ -781,8 +783,8 @@ https://cdn.example.com/movie.mkv
     expect(directLive.streamUrl.queryParameters['api_key'], token);
     expect(directLive.streamUrl.queryParameters['MediaSourceId'], 'src-live-1');
     // 直播不可直连但有转码地址:按现有规则选转码,同域令牌保留。
-    final transcodedLive = resolvePlayback(
-      info: PlaybackInfo.fromJson({
+    final transcodedLive = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
         'PlaySessionId': 'play-live-transcode',
         'MediaSources': [
           {

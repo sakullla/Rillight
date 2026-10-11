@@ -7,7 +7,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -24,13 +24,13 @@ class LibraryTiles extends StatefulWidget {
     this.cardBuilder,
   });
 
-  final List<EmbyItem> libraries;
+  final List<MediaItem> libraries;
   final Widget? headerAction;
 
   /// 电视端换成可聚焦的卡片。缺省是指针悬停卡。
   final Widget Function(
     BuildContext context,
-    EmbyItem library,
+    MediaItem library,
     double width,
     double height,
   )?
@@ -280,7 +280,7 @@ class LibraryCardFace extends StatelessWidget {
     required this.height,
   });
 
-  final EmbyItem library;
+  final MediaItem library;
   final double width;
   final double height;
 
@@ -348,7 +348,7 @@ class _LibraryCard extends StatelessWidget {
     required this.height,
   });
 
-  final EmbyItem library;
+  final MediaItem library;
   final double width;
   final double height;
 

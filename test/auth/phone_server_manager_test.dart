@@ -6,7 +6,7 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 
 const _first = SavedServer(
   id: 'one',
@@ -24,7 +24,7 @@ const _second = SavedServer(
 Future<AuthController> _auth() async {
   final auth = AuthController(
     client: EmbyClient(
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'phone',
         deviceId: 'server-manager-test',

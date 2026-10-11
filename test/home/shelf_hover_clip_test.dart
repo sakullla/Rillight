@@ -4,7 +4,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/media_shelf.dart';
@@ -16,7 +16,7 @@ void main() {
       (tester) async {
         final items = [
           for (var i = 0; i < 8; i++)
-            EmbyItem(
+            MediaItem(
               id: '$i',
               name: '卡片$i',
               type: libraries ? 'CollectionFolder' : 'Movie',

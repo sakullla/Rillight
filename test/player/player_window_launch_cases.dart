@@ -3,13 +3,13 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-launch',
@@ -24,7 +24,7 @@ PlayerWindowLaunch _launch({String? userAgent}) {
       mediaSourceId: 'source-up',
       audioStreamIndex: 2,
       subtitleStreamIndex: 3,
-      startTimeTicks: 600000000,
+      startPosition: Duration(microseconds: 600000000 ~/ 10),
     ),
     baseUrl: 'http://emby.test:8096/',
     accessToken: 'token-1',
@@ -45,7 +45,10 @@ void main() {
       expect(decoded.request.mediaSourceId, 'source-up');
       expect(decoded.request.audioStreamIndex, 2);
       expect(decoded.request.subtitleStreamIndex, 3);
-      expect(decoded.request.startTimeTicks, 600000000);
+      expect(
+        decoded.request.startPosition,
+        Duration(microseconds: (600000000) ~/ 10),
+      );
       expect(decoded.baseUrl, 'http://emby.test:8096/');
       expect(decoded.accessToken, 'token-1');
       expect(decoded.userId, 'user-alice');

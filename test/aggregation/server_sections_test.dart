@@ -9,7 +9,7 @@ import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
 Map<String, dynamic> _item(
@@ -255,7 +255,7 @@ class _Harness {
             ),
       }),
       createClient: () => EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'section-test',
           deviceName: 'test',
           deviceId: 'test',

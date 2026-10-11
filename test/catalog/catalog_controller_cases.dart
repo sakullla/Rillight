@@ -7,12 +7,12 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'Rillight',
   deviceName: 'test',
   deviceId: 'device-catalog-controller',
@@ -123,7 +123,7 @@ void main() {
       server.resumeStatus = null;
       for (final item in server.items) {
         if (item.id == 'movie-up') {
-          item.playbackPositionTicks = 60 * 10000000;
+          item.playbackPosition = Duration(microseconds: (60 * 10000000) ~/ 10);
         }
       }
       await second.reloadHomeRows();

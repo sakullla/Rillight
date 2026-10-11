@@ -10,7 +10,7 @@ import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/auth/pin_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 
 Future<AuthController> createProductionAuth() async {
   final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];
@@ -27,7 +27,7 @@ Future<AuthController> createProductionAuth() async {
 
   final deviceId = await loadOrCreateDeviceId(File('${dir.path}/device_id'));
   final client = EmbyClient(
-    device: EmbyDeviceInfo(
+    device: ClientDeviceInfo(
       clientName: kHttpClientName,
       deviceName: Platform.operatingSystem,
       deviceId: deviceId,
@@ -45,7 +45,7 @@ Future<AuthController> createProductionAuth() async {
     access: access,
     store: servers,
     credentials: credentials,
-    createClient: () => EmbyClient(device: client.device),
+    createClient: client.createDetached,
   );
   await sources.load();
   final controller = AuthController(

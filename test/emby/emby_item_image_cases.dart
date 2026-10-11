@@ -1,9 +1,10 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 void main() {
   test('movie without ImageTags still tries Primary', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'movie-no-tag',
       'Name': '无标签',
       'Type': 'Movie',
@@ -16,7 +17,7 @@ void main() {
   });
 
   test('parses nested ImageTags Tag objects', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'movie-nested',
       'Name': '嵌套标签',
       'Type': 'Movie',
@@ -28,7 +29,7 @@ void main() {
   });
 
   test('parses PrimaryImageTag when ImageTags is omitted', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'series-tag-only',
       'Name': '完美的谎言',
       'Type': 'Series',
@@ -44,8 +45,8 @@ void main() {
   });
 
   test('TotalRecordCount drives hasMore past a short first page', () {
-    const page = EmbyItemPage(
-      items: [EmbyItem(id: 'a', name: 'A', type: 'Series')],
+    const page = MediaItemPage(
+      items: [MediaItem(id: 'a', name: 'A', type: 'Series')],
       totalRecordCount: 80,
     );
     expect(page.hasMore(fetched: 1, pageSize: 60), isTrue);
@@ -53,7 +54,7 @@ void main() {
   });
 
   test('parses episode thumb and series image tags', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-1',
       'Name': '北风',
       'Type': 'Episode',
@@ -68,7 +69,7 @@ void main() {
     expect(item.seriesPrimaryImageTag, 'series-primary');
     expect(item.parentBackdropItemId, 'series-1');
     expect(item.parentBackdropImageTag, 'back-1');
-    expect(ItemChapter.fromJson({'Name': 'C', 'ImageIndex': 2}).imageIndex, 2);
+    expect(decodeEmbyItemChapter({'Name': 'C', 'ImageIndex': 2}).imageIndex, 2);
 
     final refs = item.imageCandidates(preferThumb: true);
     expect(refs.first.type, 'Thumb');
@@ -80,7 +81,7 @@ void main() {
   });
 
   test('episode without a still falls back to series landscape art', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-empty',
       'Name': '无剧照',
       'Type': 'Episode',
@@ -102,7 +103,7 @@ void main() {
   });
 
   test('episode landscape skips series poster used as Primary', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-2',
       'Name': '无剧照',
       'Type': 'Episode',
@@ -126,7 +127,7 @@ void main() {
   });
 
   test('episode billboard prefers episode thumb over series backdrop', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-3',
       'Name': '小魔崽子',
       'Type': 'Episode',
@@ -145,7 +146,7 @@ void main() {
   });
 
   test('episode hero backdrop prefers series backdrop over own still', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-5',
       'Name': '剧集底图',
       'Type': 'Episode',
@@ -163,7 +164,7 @@ void main() {
     );
     expect(refs.first.itemId, 'series-1');
 
-    final noParent = EmbyItem.fromJson({
+    final noParent = decodeEmbyMediaItem({
       'Id': 'ep-6',
       'Name': '无剧集底图',
       'Type': 'Episode',
@@ -174,7 +175,7 @@ void main() {
   });
 
   test('image candidates always carry tags for cache keys', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-4',
       'Name': '多图',
       'Type': 'Episode',
@@ -202,7 +203,7 @@ void main() {
   });
 
   test('parses chapters with image tags for the unified pipeline', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'movie-chapters',
       'Name': '章节片',
       'Type': 'Movie',
@@ -229,7 +230,7 @@ void main() {
   });
 
   test('parses Emby chapter MarkerType for intro and credits', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'episode-markers',
       'Name': '标记集',
       'Type': 'Episode',
@@ -256,7 +257,7 @@ void main() {
 
   test('plot falls back to ShortOverview and Taglines', () {
     expect(
-      EmbyItem.fromJson({
+      decodeEmbyMediaItem({
         'Id': 'movie-short',
         'Name': '短简介',
         'Type': 'Movie',
@@ -265,7 +266,7 @@ void main() {
       '只有短简介',
     );
     expect(
-      EmbyItem.fromJson({
+      decodeEmbyMediaItem({
         'Id': 'movie-tagline',
         'Name': '标语',
         'Type': 'Movie',
@@ -274,7 +275,7 @@ void main() {
       '第一句标语',
     );
     expect(
-      EmbyItem.fromJson({
+      decodeEmbyMediaItem({
         'Id': 'movie-overview',
         'Name': '正文',
         'Type': 'Movie',

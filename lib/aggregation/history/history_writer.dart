@@ -1,9 +1,9 @@
+import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../auth/region_access.dart';
 import '../../auth/source_sessions.dart';
-import '../../emby/emby_client.dart';
 import '../../player/player_settings.dart';
 import '../identity/media_identity.dart';
 import 'history_models.dart';
@@ -300,7 +300,7 @@ class HistoryWriter implements Listenable {
   /// newer observations. The callback receives the independent permitted client.
   Future<void> synchronize(
     WatchRecord record,
-    Future<void> Function(EmbyClient client, WatchRecord actual) report,
+    Future<void> Function(MediaServerClient client, WatchRecord actual) report,
   ) async {
     final session = sessionById(record.sessionId);
     if (session == null || !identical(_records[record.source.key], record)) {

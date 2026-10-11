@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 
 class _PreviewAdapter implements HttpClientAdapter {
   final List<RequestOptions> requests = [];
@@ -53,7 +53,7 @@ void main() {
   setUp(() {
     adapter = _PreviewAdapter();
     client = EmbyClient(
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'test',
         deviceId: 'preview',

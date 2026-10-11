@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_carousel.dart';
@@ -24,7 +24,7 @@ void main() {
     catalog.latestSeries = const CatalogRowState();
     catalog.latestMovies = const CatalogRowState(
       items: [
-        EmbyItem(
+        MediaItem(
           id: 'movie-a',
           name: 'Movie A',
           type: 'Movie',
@@ -32,7 +32,7 @@ void main() {
           productionYear: 2024,
           communityRating: 8.5,
         ),
-        EmbyItem(
+        MediaItem(
           id: 'movie-b',
           name: 'Movie B',
           type: 'Movie',
@@ -81,7 +81,7 @@ void main() {
         catalog.latestMovies = CatalogRowState(
           items: [
             for (final id in ['a', 'b', 'c'])
-              EmbyItem(
+              MediaItem(
                 id: 'movie-$id',
                 name: 'Movie $id',
                 type: 'Movie',
@@ -284,7 +284,7 @@ void main() {
     testWidgets('a single candidate never arms the timer', (tester) async {
       catalog.latestMovies = const CatalogRowState(
         items: [
-          EmbyItem(
+          MediaItem(
             id: 'movie-a',
             name: 'Movie A',
             type: 'Movie',

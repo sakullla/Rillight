@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -8,15 +9,16 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/player/player_settings.dart';
 
 class _Client extends EmbyClient {
   _Client()
     : super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'history',
@@ -27,7 +29,8 @@ class _Client extends EmbyClient {
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async =>
       PublicServerInfo(id: baseUrl.host, serverName: baseUrl.host);
   @override
-  Future<EmbyUser> getUser() async => EmbyUser(id: userId!, name: 'user');
+  Future<MediaUser> getUser({CancelToken? cancelToken}) async =>
+      MediaUser(id: userId!, name: 'user');
 }
 
 class _FailingStore extends MemoryHistoryStore {

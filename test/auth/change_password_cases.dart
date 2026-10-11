@@ -12,14 +12,14 @@ import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-change-password',
@@ -114,7 +114,7 @@ void main() {
       );
       expect(server.effectivePassword('user-alice'), 'correct-horse');
       // 会话仍可用。
-      final info = await auth.client.getJson('/System/Info');
+      final info = await (auth.client as EmbyClient).getJson('/System/Info');
       expect(info['ServerName'], server.serverName);
     },
   );
@@ -155,7 +155,7 @@ void main() {
       expect(changed, isTrue);
       expect(auth.isLoggedIn, isFalse);
       expect(auth.prefill?.id, server.serverId);
-      expect(auth.failure?.kind, EmbyFailureKind.sessionExpired);
+      expect(auth.failure?.kind, MediaServerFailureKind.sessionExpired);
       // 本机已保存新密码。
       expect(
         (await auth.credentials.read(server.serverId))?.password,
@@ -169,7 +169,7 @@ void main() {
         password: 'correct-horse',
       );
       expect(auth.isLoggedIn, isFalse);
-      expect(auth.failure?.kind, EmbyFailureKind.invalidCredentials);
+      expect(auth.failure?.kind, MediaServerFailureKind.invalidCredentials);
 
       // 新密码可重新进入。
       await auth.connect(

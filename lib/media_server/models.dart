@@ -1,5 +1,5 @@
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/media_source_format.dart';
+import 'capabilities.dart';
+import 'package:rillight/media_server/media_source_format.dart';
 
 class PublicServerInfo {
   const PublicServerInfo({
@@ -11,26 +11,10 @@ class PublicServerInfo {
   final String id;
   final String serverName;
   final String? version;
-
-  factory PublicServerInfo.fromJson(
-    Map<String, dynamic> json, {
-    String? fallbackName,
-  }) {
-    final id = json['Id']?.toString().trim() ?? '';
-    if (id.isEmpty) {
-      throw const EmbyException(EmbyFailureKind.notEmby);
-    }
-    final name = json['ServerName']?.toString().trim() ?? '';
-    return PublicServerInfo(
-      id: id,
-      serverName: name.isEmpty ? (fallbackName ?? id) : name,
-      version: json['Version']?.toString(),
-    );
-  }
 }
 
-class EmbyUser {
-  const EmbyUser({
+class MediaUser {
+  const MediaUser({
     required this.id,
     required this.name,
     this.enableNextEpisodeAutoPlay = true,
@@ -41,27 +25,6 @@ class EmbyUser {
   final String name;
   final bool enableNextEpisodeAutoPlay;
   final int resumeRewindSeconds;
-
-  factory EmbyUser.fromJson(Map<String, dynamic> json) {
-    final id = json['Id']?.toString() ?? '';
-    if (id.isEmpty) {
-      throw const EmbyException(EmbyFailureKind.unknown);
-    }
-    var autoPlay = true;
-    var rewind = 0;
-    final configuration = json['Configuration'];
-    if (configuration is Map) {
-      final map = Map<String, dynamic>.from(configuration);
-      autoPlay = map['EnableNextEpisodeAutoPlay'] != false;
-      rewind = _asInt(map['ResumeRewindSeconds']) ?? 0;
-    }
-    return EmbyUser(
-      id: id,
-      name: json['Name']?.toString() ?? '',
-      enableNextEpisodeAutoPlay: autoPlay,
-      resumeRewindSeconds: rewind,
-    );
-  }
 }
 
 class AuthenticationResult {
@@ -73,69 +36,33 @@ class AuthenticationResult {
 
   final String accessToken;
   final String serverId;
-  final EmbyUser user;
-
-  factory AuthenticationResult.fromJson(
-    Map<String, dynamic> json, {
-    required String fallbackServerId,
-  }) {
-    final token = json['AccessToken']?.toString() ?? '';
-    if (token.isEmpty) {
-      throw const EmbyException(EmbyFailureKind.unknown);
-    }
-    final userJson = json['User'];
-    if (userJson is! Map) {
-      throw const EmbyException(EmbyFailureKind.unknown);
-    }
-    final serverId = json['ServerId']?.toString().trim();
-    return AuthenticationResult(
-      accessToken: token,
-      serverId: (serverId == null || serverId.isEmpty)
-          ? fallbackServerId
-          : serverId,
-      user: EmbyUser.fromJson(Map<String, dynamic>.from(userJson)),
-    );
-  }
+  final MediaUser user;
 }
 
-class EmbyUserData {
-  const EmbyUserData({
+class MediaUserData {
+  const MediaUserData({
     this.played = false,
-    this.playbackPositionTicks = 0,
+    this.playbackPosition = Duration.zero,
     this.playedPercentage,
     this.lastPlayedDate,
   });
 
   final bool played;
-  final int playbackPositionTicks;
+  final Duration playbackPosition;
   final double? playedPercentage;
 
   /// Unknown when absent or invalid; never inferred from response order.
   final DateTime? lastPlayedDate;
 
-  factory EmbyUserData.fromJson(dynamic json) {
-    if (json is! Map) {
-      return const EmbyUserData();
-    }
-    final map = Map<String, dynamic>.from(json);
-    return EmbyUserData(
-      played: map['Played'] == true,
-      playbackPositionTicks: _asInt(map['PlaybackPositionTicks']) ?? 0,
-      playedPercentage: _asDouble(map['PlayedPercentage']),
-      lastPlayedDate: _asDateTime(map['LastPlayedDate']),
-    );
-  }
-
-  EmbyUserData copyWith({
+  MediaUserData copyWith({
     bool? played,
-    int? playbackPositionTicks,
+    Duration? playbackPosition,
     double? playedPercentage,
     DateTime? lastPlayedDate,
   }) {
-    return EmbyUserData(
+    return MediaUserData(
       played: played ?? this.played,
-      playbackPositionTicks:
-          playbackPositionTicks ?? this.playbackPositionTicks,
+      playbackPosition: playbackPosition ?? this.playbackPosition,
       playedPercentage: playedPercentage ?? this.playedPercentage,
       lastPlayedDate: lastPlayedDate ?? this.lastPlayedDate,
     );
@@ -145,31 +72,19 @@ class EmbyUserData {
 class ItemChapter {
   const ItemChapter({
     required this.name,
-    required this.startPositionTicks,
+    required this.startPosition,
     this.imageTag,
     this.imageIndex,
     this.markerType,
   });
 
   final String name;
-  final int startPositionTicks;
+  final Duration startPosition;
   final String? imageTag;
   final int? imageIndex;
 
   /// Emby/Jellyfin 扫描标记:`IntroStart` / `IntroEnd` / `CreditsStart` 等。
   final String? markerType;
-
-  factory ItemChapter.fromJson(Map<String, dynamic> json) {
-    final tag = json['ImageTag']?.toString().trim();
-    final marker = json['MarkerType']?.toString().trim();
-    return ItemChapter(
-      name: json['Name']?.toString() ?? '',
-      startPositionTicks: _asInt(json['StartPositionTicks']) ?? 0,
-      imageTag: (tag == null || tag.isEmpty) ? null : tag,
-      imageIndex: _asInt(json['ImageIndex']),
-      markerType: (marker == null || marker.isEmpty) ? null : marker,
-    );
-  }
 }
 
 class ItemMediaStream {
@@ -216,38 +131,6 @@ class ItemMediaStream {
   bool get isAudio => type == 'Audio';
   bool get isSubtitle => type == 'Subtitle';
   bool get isVideo => type == 'Video';
-
-  factory ItemMediaStream.fromJson(Map<String, dynamic> json) {
-    final title = json['DisplayTitle']?.toString().trim();
-    final language = json['Language']?.toString().trim();
-    final codec = json['Codec']?.toString().trim();
-    return ItemMediaStream(
-      index: _asInt(json['Index']) ?? 0,
-      type: json['Type']?.toString() ?? '',
-      codec: codec,
-      language: _stringTag(json['Language']),
-      isDefault: json['IsDefault'] is bool ? json['IsDefault'] as bool : null,
-      isForced: json['IsForced'] is bool ? json['IsForced'] as bool : null,
-      isExternal: json['IsExternal'] is bool
-          ? json['IsExternal'] as bool
-          : null,
-      profile: _stringTag(json['Profile']),
-      averageFrameRate: _asDouble(json['AverageFrameRate']),
-      sampleRate: _asInt(json['SampleRate']),
-      channelLayout: _stringTag(json['ChannelLayout']),
-      channels: _asInt(json['Channels']),
-      width: _asInt(json['Width']),
-      height: _asInt(json['Height']),
-      bitRate: _asInt(json['BitRate']),
-      videoRange: json['VideoRange']?.toString(),
-      videoRangeType: json['VideoRangeType']?.toString(),
-      label: (title != null && title.isNotEmpty)
-          ? title
-          : (language != null && language.isNotEmpty)
-          ? language
-          : codec,
-    );
-  }
 }
 
 class ItemMediaSource {
@@ -260,7 +143,7 @@ class ItemMediaSource {
     this.width,
     this.height,
     this.streams = const [],
-    this.runTimeTicks,
+    this.runtime,
   });
 
   final String id;
@@ -271,7 +154,7 @@ class ItemMediaSource {
   final int? width;
   final int? height;
   final List<ItemMediaStream> streams;
-  final int? runTimeTicks;
+  final Duration? runtime;
 
   String get label {
     final title = name?.trim();
@@ -317,26 +200,6 @@ class ItemMediaSource {
     for (final stream in streams)
       if (stream.isSubtitle) stream,
   ];
-
-  factory ItemMediaSource.fromJson(Map<String, dynamic> json) {
-    final raw = json['MediaStreams'];
-    return ItemMediaSource(
-      id: json['Id']?.toString() ?? '',
-      name: json['Name']?.toString() ?? json['Path']?.toString(),
-      container: json['Container']?.toString(),
-      size: _asInt(json['Size']),
-      bitrate: _asInt(json['Bitrate']),
-      runTimeTicks: _asInt(json['RunTimeTicks']),
-      width: _asInt(json['Width']),
-      height: _asInt(json['Height']),
-      streams: [
-        if (raw is List)
-          for (final stream in raw)
-            if (stream is Map)
-              ItemMediaStream.fromJson(Map<String, dynamic>.from(stream)),
-      ],
-    );
-  }
 }
 
 /// 详情 People 数组中的演职员/制作人员条目。
@@ -351,11 +214,11 @@ class ItemPerson {
 
   final String name;
 
-  /// Emby Person 条目 Id;头像按 `/Items/{id}/Images/Primary` 构造,
+  /// 人物条目的不透明 Id；头像由服务图片接口取得,
   /// 缺失时 UI 只能做文字兜底。
   final String? id;
 
-  /// Emby PersonType:`Actor` / `Director` / `Writer` 等。
+  /// 人物类型:`Actor` / `Director` / `Writer` 等。
   final String? type;
 
   /// 演员饰演的角色名;非演员条目通常为 null。
@@ -363,23 +226,13 @@ class ItemPerson {
 
   /// 头像 Primary 图 tag,缺失时由 UI 做文字兜底。
   final String? primaryImageTag;
-
-  factory ItemPerson.fromJson(Map<String, dynamic> json) {
-    return ItemPerson(
-      name: json['Name']?.toString() ?? '',
-      id: _stringTag(json['Id']),
-      type: _stringTag(json['Type']),
-      role: _stringTag(json['Role']),
-      primaryImageTag: _stringTag(json['PrimaryImageTag']),
-    );
-  }
 }
 
 /// 进度达到该比例视为看完(对齐 Jellyfin/Emby MaxResumePct 默认 90%)。
 const double kPlaybackCompleteProgress = 0.9;
 
-class EmbyItem {
-  const EmbyItem({
+class MediaItem {
+  const MediaItem({
     required this.id,
     required this.name,
     required this.type,
@@ -388,7 +241,7 @@ class EmbyItem {
     this.productionYear,
     this.premiereDate,
     this.dateCreated,
-    this.runTimeTicks,
+    this.runtime,
     this.childCount,
     this.seriesName,
     this.seriesId,
@@ -415,7 +268,7 @@ class EmbyItem {
     this.mediaSources = const [],
     this.chapters = const [],
     this.people = const [],
-    this.userData = const EmbyUserData(),
+    this.userData = const MediaUserData(),
   });
 
   final String id;
@@ -431,7 +284,7 @@ class EmbyItem {
   /// 入库日期(Emby `DateCreated`);ISO8601 解析失败或缺失时为 null。
   final DateTime? dateCreated;
 
-  final int? runTimeTicks;
+  final Duration? runtime;
   final int? childCount;
   final String? seriesName;
   final String? seriesId;
@@ -469,7 +322,7 @@ class EmbyItem {
 
   /// 演职员与制作人员;仅详情路径请求 People 字段后才有值。
   final List<ItemPerson> people;
-  final EmbyUserData userData;
+  final MediaUserData userData;
 
   bool get isMovie => type == 'Movie';
   bool get isSeries => type == 'Series';
@@ -543,21 +396,21 @@ class EmbyItem {
     if (progress > 0) {
       return true;
     }
-    return userData.playbackPositionTicks > 0;
+    return userData.playbackPosition > Duration.zero;
   }
 
   /// 续播起点。只有百分比时按片长换算,供播放器 seek。
-  int get resumePositionTicks {
-    final ticks = userData.playbackPositionTicks;
-    if (ticks > 0) {
+  Duration get resumePosition {
+    final ticks = userData.playbackPosition;
+    if (ticks > Duration.zero) {
       return ticks;
     }
     final percent = userData.playedPercentage;
-    final runtime = runTimeTicks ?? 0;
-    if (percent == null || percent <= 0 || runtime <= 0) {
-      return 0;
+    final total = runtime ?? Duration.zero;
+    if (percent == null || percent <= 0 || total <= Duration.zero) {
+      return Duration.zero;
     }
-    return (runtime * (percent / 100)).round();
+    return total * (percent / 100);
   }
 
   /// 海报/剧照候选:横图优先本集 Thumb;剧海报与本集 Primary 相同时跳过,避免一排同一张剧图。
@@ -658,105 +511,16 @@ class EmbyItem {
     if (percent != null) {
       return (percent / 100).clamp(0.0, 1.0);
     }
-    final runtime = runTimeTicks ?? 0;
-    if (runtime <= 0) {
+    final total = runtime ?? Duration.zero;
+    if (total <= Duration.zero) {
       return 0;
     }
-    return (userData.playbackPositionTicks / runtime).clamp(0.0, 1.0);
+    return (userData.playbackPosition.inMicroseconds / total.inMicroseconds)
+        .clamp(0.0, 1.0);
   }
 
-  factory EmbyItem.fromJson(Map<String, dynamic> json) {
-    final id = json['Id']?.toString().trim() ?? '';
-    if (id.isEmpty) {
-      throw const EmbyException(EmbyFailureKind.unknown);
-    }
-    final tags = json['ImageTags'];
-    final tagMap = tags is Map ? Map<dynamic, dynamic>.from(tags) : const {};
-    final primaryTag =
-        _mapImageTag(tagMap, 'Primary') ?? _stringTag(json['PrimaryImageTag']);
-    final thumbTag = _mapImageTag(tagMap, 'Thumb');
-    final logoTag = _mapImageTag(tagMap, 'Logo');
-    final backdropTags = _listTags(json['BackdropImageTags']);
-    final parentBackdropTags = _listTags(json['ParentBackdropImageTags']);
-    final backdropTag =
-        backdropTags.firstOrNull ?? _mapImageTag(tagMap, 'Backdrop');
-    final parentBackdropTag = parentBackdropTags.firstOrNull;
-    final rawSources = json['MediaSources'];
-    final rawChapters = json['Chapters'];
-    final rawGenres = json['Genres'];
-    final rawLinks = json['ExternalUrls'];
-    final rawPeople = json['People'];
-    return EmbyItem(
-      id: id,
-      name: json['Name']?.toString() ?? '',
-      type: json['Type']?.toString() ?? '',
-      collectionType: json['CollectionType']?.toString(),
-      overview: _plotFromJson(json),
-      productionYear: _asInt(json['ProductionYear']),
-      premiereDate: _asDateTime(json['PremiereDate']),
-      dateCreated: _asDateTime(json['DateCreated']),
-      runTimeTicks: _asInt(json['RunTimeTicks']),
-      childCount: _asInt(json['ChildCount']),
-      seriesName: json['SeriesName']?.toString(),
-      seriesId: json['SeriesId']?.toString(),
-      seasonId: json['SeasonId']?.toString(),
-      parentId: json['ParentId']?.toString(),
-      indexNumber: _asInt(json['IndexNumber']),
-      indexNumberEnd: _asInt(json['IndexNumberEnd']),
-      parentIndexNumber: _asInt(json['ParentIndexNumber']),
-      primaryImageTag: primaryTag,
-      thumbImageTag: thumbTag,
-      logoImageTag: logoTag,
-      backdropImageTag: backdropTag,
-      backdropImageTags: backdropTags,
-      parentBackdropImageTags: parentBackdropTags,
-      seriesPrimaryImageTag: _stringTag(json['SeriesPrimaryImageTag']),
-      parentThumbItemId: _stringTag(json['ParentThumbItemId']),
-      parentThumbImageTag: _stringTag(json['ParentThumbImageTag']),
-      parentBackdropItemId: _stringTag(json['ParentBackdropItemId']),
-      parentBackdropImageTag: parentBackdropTag,
-      communityRating: _asDouble(json['CommunityRating']),
-      genres: [
-        if (rawGenres is List)
-          for (final genre in rawGenres)
-            if (genre != null) genre.toString(),
-      ],
-      providerIds: {
-        if (json['ProviderIds'] is Map)
-          for (final entry in (json['ProviderIds'] as Map).entries)
-            if (entry.value != null && entry.value.toString().trim().isNotEmpty)
-              entry.key.toString(): entry.value.toString().trim(),
-      },
-      externalUrls: [
-        if (rawLinks is List)
-          for (final link in rawLinks)
-            if (link is Map)
-              ItemExternalUrl.fromJson(Map<String, dynamic>.from(link)),
-      ].where((link) => link.url.isNotEmpty).toList(),
-      mediaSources: [
-        if (rawSources is List)
-          for (final source in rawSources)
-            if (source is Map)
-              ItemMediaSource.fromJson(Map<String, dynamic>.from(source)),
-      ],
-      chapters: [
-        if (rawChapters is List)
-          for (final chapter in rawChapters)
-            if (chapter is Map)
-              ItemChapter.fromJson(Map<String, dynamic>.from(chapter)),
-      ],
-      people: [
-        if (rawPeople is List)
-          for (final person in rawPeople)
-            if (person is Map)
-              ItemPerson.fromJson(Map<String, dynamic>.from(person)),
-      ],
-      userData: EmbyUserData.fromJson(json['UserData']),
-    );
-  }
-
-  EmbyItem copyWith({EmbyUserData? userData}) {
-    return EmbyItem(
+  MediaItem copyWith({MediaUserData? userData}) {
+    return MediaItem(
       id: id,
       name: name,
       type: type,
@@ -765,7 +529,7 @@ class EmbyItem {
       productionYear: productionYear,
       premiereDate: premiereDate,
       dateCreated: dateCreated,
-      runTimeTicks: runTimeTicks,
+      runtime: runtime,
       childCount: childCount,
       seriesName: seriesName,
       seriesId: seriesId,
@@ -802,23 +566,27 @@ class ItemExternalUrl {
 
   final String name;
   final String url;
-
-  static ItemExternalUrl fromJson(Map<String, dynamic> json) {
-    return ItemExternalUrl(
-      name: json['Name']?.toString() ?? '',
-      url: json['Url']?.toString() ?? '',
-    );
-  }
 }
 
-class EmbyItemPage {
-  const EmbyItemPage({required this.items, this.totalRecordCount});
+class MediaItemPage {
+  const MediaItemPage({
+    required this.items,
+    this.totalRecordCount,
+    this.offset = 0,
+    this.pagination = const CapabilityStatus(
+      CapabilityAvailability.unknown,
+      reason: '尚未核实分页能力',
+    ),
+  });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final int? totalRecordCount;
+  final int offset;
+  final CapabilityStatus pagination;
 
   bool hasMore({required int fetched, required int pageSize}) {
-    if (items.isEmpty) {
+    if (items.isEmpty ||
+        pagination.availability == CapabilityAvailability.unsupported) {
       return false;
     }
     final total = totalRecordCount;
@@ -829,48 +597,6 @@ class EmbyItemPage {
   }
 }
 
-int? parseEmbyTotalCount(dynamic data) {
-  if (data is! Map) {
-    return null;
-  }
-  final raw = data['TotalRecordCount'];
-  if (raw is int) {
-    return raw;
-  }
-  if (raw is num) {
-    return raw.toInt();
-  }
-  if (raw is String) {
-    return int.tryParse(raw);
-  }
-  return null;
-}
-
-List<EmbyItem> parseEmbyItemList(dynamic data) {
-  if (data == null) {
-    return const [];
-  }
-  if (data is List) {
-    return [
-      for (final item in data)
-        if (item is Map) EmbyItem.fromJson(Map<String, dynamic>.from(item)),
-    ];
-  }
-  if (data is Map) {
-    final items = data['Items'];
-    if (items == null) {
-      return const [];
-    }
-    if (items is List) {
-      return [
-        for (final item in items)
-          if (item is Map) EmbyItem.fromJson(Map<String, dynamic>.from(item)),
-      ];
-    }
-  }
-  throw const EmbyException(EmbyFailureKind.unknown);
-}
-
 class ItemImageRef {
   const ItemImageRef({required this.itemId, required this.type, this.tag});
 
@@ -879,109 +605,31 @@ class ItemImageRef {
   final String? tag;
 }
 
-String? _stringTag(dynamic value) {
-  final tag = value?.toString().trim();
-  if (tag == null || tag.isEmpty) {
-    return null;
-  }
-  return tag;
+/// `/Items/Counts` 返回中除电影/剧集/单集外的一类条目数量。
+class LibraryCountEntry {
+  const LibraryCountEntry({required this.type, required this.count});
+
+  /// 服务器返回的类型名(字段名去掉 `Count` 后缀),如 `MusicAlbum`、`Photo`。
+  final String type;
+
+  /// 该类型的条目数量;为 0 也保留,由界面照常展示。
+  final int count;
 }
 
-String? _mapImageTag(Map<dynamic, dynamic> tags, String key) {
-  final direct = tags[key] ?? tags[key.toLowerCase()];
-  if (direct != null) {
-    return _imageTagValue(direct);
-  }
-  final wanted = key.toLowerCase();
-  for (final entry in tags.entries) {
-    if (entry.key.toString().toLowerCase() == wanted) {
-      return _imageTagValue(entry.value);
-    }
-  }
-  return null;
-}
+/// 当前登录用户可见的库规模,来自 `GET /Items/Counts`。
+///
+/// 电影/剧集/单集固定成员,响应缺失时按 0 处理;其余类型仅收录服务器
+/// 实际返回的字段(0 也收录),顺序与响应一致。
+class LibraryCounts {
+  const LibraryCounts({
+    required this.movie,
+    required this.series,
+    required this.episode,
+    required this.others,
+  });
 
-String? _imageTagValue(dynamic value) {
-  if (value is Map) {
-    return _stringTag(value['Tag'] ?? value['tag']);
-  }
-  return _stringTag(value);
-}
-
-List<String> _listTags(dynamic value) {
-  if (value is! List) {
-    return const [];
-  }
-  return [
-    for (final entry in value)
-      if (_stringTag(entry) != null) _stringTag(entry)!,
-  ];
-}
-
-/// 条目剧情:优先 Overview,部分 Emby/刮削只填 ShortOverview 或 Taglines。
-String? _plotFromJson(Map<String, dynamic> json) {
-  final overview = _nonEmptyText(json['Overview']);
-  if (overview != null) {
-    return overview;
-  }
-  final shortOverview = _nonEmptyText(json['ShortOverview']);
-  if (shortOverview != null) {
-    return shortOverview;
-  }
-  final taglines = json['Taglines'];
-  if (taglines is List) {
-    for (final tagline in taglines) {
-      final text = _nonEmptyText(tagline);
-      if (text != null) {
-        return text;
-      }
-    }
-  }
-  return null;
-}
-
-String? _nonEmptyText(dynamic value) {
-  final text = value?.toString().trim();
-  if (text == null || text.isEmpty) {
-    return null;
-  }
-  return text;
-}
-
-/// Emby 日期是 ISO8601 字符串(小数秒可达 7 位 ticks,DateTime.parse 截断处理);
-/// 缺失或非法值一律置 null,由 UI 省略对应展示项。
-DateTime? _asDateTime(dynamic value) {
-  if (value is DateTime) {
-    return value;
-  }
-  if (value is String) {
-    return DateTime.tryParse(value);
-  }
-  return null;
-}
-
-int? _asInt(dynamic value) {
-  if (value is int) {
-    return value;
-  }
-  if (value is num) {
-    return value.toInt();
-  }
-  if (value is String) {
-    return int.tryParse(value) ?? double.tryParse(value)?.toInt();
-  }
-  return null;
-}
-
-double? _asDouble(dynamic value) {
-  if (value is double) {
-    return value;
-  }
-  if (value is num) {
-    return value.toDouble();
-  }
-  if (value is String) {
-    return double.tryParse(value);
-  }
-  return null;
+  final int? movie;
+  final int? series;
+  final int? episode;
+  final List<LibraryCountEntry> others;
 }

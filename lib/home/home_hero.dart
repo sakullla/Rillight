@@ -5,7 +5,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/featured_items.dart';
@@ -93,7 +93,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
 
   /// 背景图校验失败落到海报时修正版式(反之亦然),按条目记忆。
   void _onArtworkResolved(
-    EmbyItem item,
+    MediaItem item,
     HeroArtworkSources sources,
     HeroArtworkData data,
   ) {
@@ -220,7 +220,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
       );
 
-  HeroPlaybackActions _actions(BuildContext context, EmbyItem item) =>
+  HeroPlaybackActions _actions(BuildContext context, MediaItem item) =>
       HeroPlaybackActions(
         key: ValueKey('hero-actions-${item.id}'),
         item: item,
@@ -231,8 +231,8 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   /// 宽版舞台:背景层 / 常驻遮罩 / 文字层 / 右下控件,各自独立过渡。
   Widget _stageLayers(
     BuildContext context,
-    EmbyItem item,
-    List<EmbyItem> items,
+    MediaItem item,
+    List<MediaItem> items,
     int index,
     double width,
   ) {
@@ -281,7 +281,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
           );
 
     // 只预取下一条(悬停/聚焦时连上一条),换页时新图已解码就绪。
-    final prefetch = <EmbyItem>{
+    final prefetch = <MediaItem>{
       if (multiple) items[(index + 1) % items.length],
       if (multiple && items.length > 2 && (_hovered || _focusWithin))
         items[(index - 1 + items.length) % items.length],
@@ -364,7 +364,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
 
   /// [‹] 圆点 [›]:圆点常驻;箭头只在悬停或键盘焦点在卡内时浮现,
   /// 透明时仍可点击,触屏桌面不会失去入口。
-  Widget _controlCluster(int index, List<EmbyItem> items) {
+  Widget _controlCluster(int index, List<MediaItem> items) {
     final l10n = AppLocalizations.of(context);
     final reveal = _hovered || _focusWithin;
     final fade = AppMotion.durationOf(context, AppMotion.normal);
@@ -429,8 +429,8 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   /// 窄窗口(<720):文字叠在画面底部整宽排布,整页一起淡入切换。
   Widget _compactSlides(
     BuildContext context,
-    EmbyItem item,
-    List<EmbyItem> items,
+    MediaItem item,
+    List<MediaItem> items,
     int index,
     double width,
   ) {
@@ -487,7 +487,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     );
   }
 
-  List<Widget> _compactControls(int index, List<EmbyItem> items) {
+  List<Widget> _compactControls(int index, List<MediaItem> items) {
     final l10n = AppLocalizations.of(context);
     final reveal = _hovered || _focusWithin;
     final fade = AppMotion.durationOf(context, AppMotion.normal);

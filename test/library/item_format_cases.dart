@@ -1,5 +1,6 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/item_format.dart';
 
 void main() {
@@ -13,7 +14,7 @@ void main() {
   });
 
   test('continue watching keeps a real episode title and drops filenames', () {
-    EmbyItem episode(String name) => EmbyItem.fromJson({
+    MediaItem episode(String name) => decodeEmbyMediaItem({
       'Id': 'ep',
       'Name': name,
       'Type': 'Episode',
@@ -32,7 +33,7 @@ void main() {
   });
 
   test('numbered episode titles do not repeat a number already named', () {
-    EmbyItem episode(String name, int? number) => EmbyItem.fromJson({
+    MediaItem episode(String name, int? number) => decodeEmbyMediaItem({
       'Id': 'ep',
       'Name': name,
       'Type': 'Episode',

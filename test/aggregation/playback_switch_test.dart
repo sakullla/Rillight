@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_switch_preflight.dart';
 
 void main() {
   const original = PlaybackMediaSource(
     id: 'old',
-    runTimeTicks: 1000,
+    runtime: Duration(microseconds: (1000) ~/ 10),
     mediaStreams: [
       MediaStreamInfo(index: 1, type: 'Audio', language: 'jpn'),
       MediaStreamInfo(index: 2, type: 'Subtitle', language: 'zho'),
@@ -28,7 +28,7 @@ void main() {
     final plan = inspect(
       const PlaybackMediaSource(
         id: 'target',
-        runTimeTicks: 1000,
+        runtime: Duration(microseconds: (1000) ~/ 10),
         mediaStreams: [
           MediaStreamInfo(index: 1, type: 'Audio', language: 'eng'),
           MediaStreamInfo(index: 8, type: 'Audio', language: 'jpn'),
@@ -52,7 +52,7 @@ void main() {
     final plan = inspect(
       const PlaybackMediaSource(
         id: 'old',
-        runTimeTicks: 1000,
+        runtime: Duration(microseconds: (1000) ~/ 10),
         mediaStreams: [
           MediaStreamInfo(index: 1, type: 'Audio', language: 'eng'),
         ],
@@ -67,7 +67,7 @@ void main() {
     final plan = inspect(
       const PlaybackMediaSource(
         id: 'target',
-        runTimeTicks: 1000,
+        runtime: Duration(microseconds: (1000) ~/ 10),
         mediaStreams: [
           MediaStreamInfo(index: 1, type: 'Audio', language: 'eng'),
           MediaStreamInfo(index: 2, type: 'Subtitle', language: 'eng'),
@@ -84,7 +84,10 @@ void main() {
     'end boundary and unknown runtime forbid attempting current position',
     () {
       final atEnd = inspect(
-        const PlaybackMediaSource(id: 'target', runTimeTicks: 100),
+        const PlaybackMediaSource(
+          id: 'target',
+          runtime: Duration(microseconds: (100) ~/ 10),
+        ),
       );
       expect(atEnd.positionTicks, 100);
       expect(atEnd.canTryCurrentPosition, false);
@@ -100,7 +103,7 @@ void main() {
     final plan = inspect(
       const PlaybackMediaSource(
         id: 'target',
-        runTimeTicks: 1000,
+        runtime: Duration(microseconds: (1000) ~/ 10),
         mediaStreams: [
           MediaStreamInfo(
             index: 7,

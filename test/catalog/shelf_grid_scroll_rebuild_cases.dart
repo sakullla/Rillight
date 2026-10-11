@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/player/player_bindings.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -13,7 +13,7 @@ import '../emby/fake_emby_server.dart';
 import '../helpers/synthetic_source_fixture.dart';
 import 'package:rillight/home/catalog_keys.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-grid-scroll',

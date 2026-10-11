@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
@@ -31,25 +31,25 @@ void _ignore(String _) {}
 
 void _noop() {}
 
-EmbyItem _episode(int index, {bool played = false}) => EmbyItem(
+MediaItem _episode(int index, {bool played = false}) => MediaItem(
   id: 'episode-$index',
   name: '第 $index 集',
   type: 'Episode',
   seasonId: 'season-1',
   indexNumber: index,
   parentIndexNumber: 1,
-  runTimeTicks: 24 * _minute,
-  userData: EmbyUserData(played: played),
+  runtime: Duration(microseconds: (24 * _minute) ~/ 10),
+  userData: MediaUserData(played: played),
 );
 
 MobileSeriesPage _series({
-  required List<EmbyItem> seasons,
-  required List<EmbyItem> episodes,
+  required List<MediaItem> seasons,
+  required List<MediaItem> episodes,
   bool hasMore = false,
   int? episodeTotal,
 }) {
   return MobileSeriesPage(
-    item: const EmbyItem(
+    item: const MediaItem(
       id: 'series',
       name: '剧',
       type: 'Series',
@@ -135,7 +135,7 @@ void main() {
           _slivers(
             _series(
               seasons: [
-                EmbyItem(
+                MediaItem(
                   id: 'season-1',
                   name: '第 1 季',
                   type: 'Season',
@@ -184,13 +184,13 @@ void main() {
           _slivers(
             _series(
               seasons: const [
-                EmbyItem(
+                MediaItem(
                   id: 'season-1',
                   name: '第 1 季',
                   type: 'Season',
                   productionYear: 2024,
                 ),
-                EmbyItem(id: 'season-2', name: '第 2 季', type: 'Season'),
+                MediaItem(id: 'season-2', name: '第 2 季', type: 'Season'),
               ],
               episodes: [_episode(1, played: true), _episode(2)],
               hasMore: true,
@@ -220,11 +220,11 @@ void main() {
   });
 
   group('phone info table', () {
-    final item = EmbyItem(
+    final item = MediaItem(
       id: 'movie',
       name: '片',
       type: 'Movie',
-      runTimeTicks: 106 * _minute,
+      runtime: Duration(microseconds: (106 * _minute) ~/ 10),
       premiereDate: DateTime(1974, 12, 15),
       dateCreated: DateTime(2026, 10, 3),
     );

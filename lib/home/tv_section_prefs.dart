@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home_sections.dart';
@@ -132,11 +132,11 @@ class TvSectionController extends ChangeNotifier {
 
   String? get serverId => _serverId;
 
-  List<String> orderedIds(List<EmbyItem> libraries) {
+  List<String> orderedIds(List<MediaItem> libraries) {
     return arrangePhoneHomeSections(_prefsForArrange(), _knownIds(libraries));
   }
 
-  List<String> visibleIds(List<EmbyItem> libraries) {
+  List<String> visibleIds(List<MediaItem> libraries) {
     return [
       for (final id in orderedIds(libraries))
         if (!_prefs.hidden.contains(id)) id,
@@ -149,7 +149,7 @@ class TvSectionController extends ChangeNotifier {
     return PhoneHomeSectionPrefs(order: _prefs.order, hidden: _prefs.hidden);
   }
 
-  List<String> _knownIds(List<EmbyItem> libraries) {
+  List<String> _knownIds(List<MediaItem> libraries) {
     return phoneHomeSectionIdsFor(libraries);
   }
 
@@ -188,7 +188,7 @@ class TvSectionController extends ChangeNotifier {
   }
 
   /// 只在当前已知栏目里移动。不在本次片库中的已保存 id 留在原来的相对位置。
-  Future<void> move(String id, int delta, List<EmbyItem> libraries) async {
+  Future<void> move(String id, int delta, List<MediaItem> libraries) async {
     final known = orderedIds(libraries);
     final index = known.indexOf(id);
     final next = index + delta;
@@ -462,7 +462,7 @@ class TvSectionEditor extends StatelessWidget {
     required String label,
     required int index,
     required int count,
-    required List<EmbyItem> libraries,
+    required List<MediaItem> libraries,
     required FocusNode? initialFocus,
   }) {
     final l10n = AppLocalizations.of(context);

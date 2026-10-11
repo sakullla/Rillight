@@ -1,9 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/library/shelf_sort.dart';
@@ -12,7 +11,7 @@ import 'package:rillight/library/shelf_sort.dart';
 const aggregationRowLimit = 24;
 
 /// 剧集写出季集，电影和其它条目写出年份。
-String? aggregationContinueCaption(EmbyItem item) {
+String? aggregationContinueCaption(MediaItem item) {
   if (item.isEpisode) {
     return seasonEpisodeCode(item);
   }
@@ -31,13 +30,13 @@ class ServerSectionSlice {
     this.loading = false,
   });
 
-  final List<EmbyItem> items;
-  final EmbyException? error;
+  final List<MediaItem> items;
+  final MediaServerException? error;
   final bool loading;
 
   ServerSectionSlice copyWith({
-    List<EmbyItem>? items,
-    EmbyException? error,
+    List<MediaItem>? items,
+    MediaServerException? error,
     bool clearError = false,
     bool? loading,
   }) {
@@ -255,11 +254,11 @@ class ServerSectionsLoader extends ChangeNotifier {
     );
   }
 
-  Future<ServerSectionSlice> _continueWatching(EmbyClient client) async {
+  Future<ServerSectionSlice> _continueWatching(MediaServerClient client) async {
     Object? resumeError;
     Object? nextError;
-    var resume = const <EmbyItem>[];
-    var nextUp = const <EmbyItem>[];
+    var resume = const <MediaItem>[];
+    var nextUp = const <MediaItem>[];
     await Future.wait([
       () async {
         try {
@@ -275,7 +274,7 @@ class ServerSectionsLoader extends ChangeNotifier {
           nextUp = (await client.getNextUp(
             limit: aggregationRowLimit,
           )).where((item) => item.isEpisode).toList();
-        } on EmbyException catch (error) {
+        } on MediaServerException catch (error) {
           if (!_nextUpUnsupported(error)) {
             nextError = error;
           }
@@ -294,14 +293,14 @@ class ServerSectionsLoader extends ChangeNotifier {
     return ServerSectionSlice(items: items);
   }
 
-  Future<ServerSectionSlice> _favorites(EmbyClient client) async {
+  Future<ServerSectionSlice> _favorites(MediaServerClient client) async {
     try {
       final page = await client.queryItems(
         includeItemTypes: 'Movie,Series',
         recursive: true,
         limit: aggregationRowLimit,
         filters: [CatalogWatchFilter.favorite.param!],
-        fields: EmbyClient.gridFields,
+        fields: MediaServerClient.gridFields,
       );
       return ServerSectionSlice(
         items: [
@@ -314,10 +313,10 @@ class ServerSectionsLoader extends ChangeNotifier {
     }
   }
 
-  Future<ServerSectionSlice> _libraries(EmbyClient client) async {
+  Future<ServerSectionSlice> _libraries(MediaServerClient client) async {
     try {
       final views = await client.getViews();
-      final libraries = <EmbyItem>[];
+      final libraries = <MediaItem>[];
       for (var start = 0; start < views.length; start += 3) {
         final group = views.skip(start).take(3).toList();
         final accepted = await Future.wait(
@@ -336,7 +335,10 @@ class ServerSectionsLoader extends ChangeNotifier {
   }
 
   /// 与首页 Views 的电影剧集判定相同。照片和音乐不进入聚合视界。
-  Future<bool> _isMovieOrTvLibrary(EmbyClient client, EmbyItem view) async {
+  Future<bool> _isMovieOrTvLibrary(
+    MediaServerClient client,
+    MediaItem view,
+  ) async {
     if (view.isMovieOrTvCollection) {
       return true;
     }
@@ -364,21 +366,21 @@ class ServerSectionsLoader extends ChangeNotifier {
       const video = {'Movie', 'Series', 'Episode'};
       return children.every((item) => allowed.contains(item.type)) &&
           children.any((item) => video.contains(item.type));
-    } on EmbyException {
+    } on MediaServerException {
       return false;
     }
   }
 
-  bool _nextUpUnsupported(EmbyException error) {
+  bool _nextUpUnsupported(MediaServerException error) {
     final code = error.statusCode;
     return code == 404 || code == 400 || code == 501;
   }
 
-  EmbyException _asEmby(Object error) {
-    if (error is EmbyException) {
+  MediaServerException _asEmby(Object error) {
+    if (error is MediaServerException) {
       return error;
     }
-    return EmbyException(EmbyFailureKind.unknown, cause: error);
+    return MediaServerException(MediaServerFailureKind.unknown, cause: error);
   }
 
   bool _current(int generation, String serverId, int attempt) =>

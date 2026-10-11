@@ -7,7 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/theme.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/featured_items.dart';
 import 'package:rillight/home/hero_artwork.dart';
@@ -31,7 +31,7 @@ class PhoneHero extends StatefulWidget {
   });
 
   final CatalogController catalog;
-  final ValueChanged<EmbyItem>? onItem;
+  final ValueChanged<MediaItem>? onItem;
 
   /// 轮播排在首页第一位时伸进状态栏与透明顶栏之下;排在后面时不再预留。
   final bool extendBehindTopBar;
@@ -40,7 +40,7 @@ class PhoneHero extends StatefulWidget {
   static const openKey = Key('phone-hero-open');
   static const maxFeatured = 5;
   static Key itemKey(String id) => ValueKey('phone-hero-$id');
-  static List<EmbyItem> featuredItemsOf(CatalogController catalog) =>
+  static List<MediaItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
 
   /// 顶栏到海报、海报到文字、文字到按钮、按钮到圆点的垂直节奏。
@@ -114,7 +114,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   bool _touching = false;
   PageController _page = PageController();
   Drag? _bannerDrag;
-  List<EmbyItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
+  List<MediaItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
   @override
   void dispose() {
@@ -177,14 +177,14 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     );
   }
 
-  HeroArtworkSources _artworkOf(EmbyItem item) =>
+  HeroArtworkSources _artworkOf(MediaItem item) =>
       heroArtworkSources(item, series: widget.catalog.latestSeries.items);
 
   /// 卡片实际画出的是海报时，进详情也带这张海报。横图只在没有海报时才用，
   /// 避免飞过去的是海报、落地后又换成背景，动态色跟着取两次。
-  bool _posterLed(EmbyItem item) => _artworkOf(item).posters.isNotEmpty;
+  bool _posterLed(MediaItem item) => _artworkOf(item).posters.isNotEmpty;
 
-  void _open(EmbyItem item) {
+  void _open(MediaItem item) {
     final media = MediaQuery.of(context);
     final posterWidth = PhoneHero.posterWidthFor(
       media.size.width,
@@ -258,7 +258,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                 22 * 1.2 * 2 * scale,
               )
             : null;
-        final neighbours = <EmbyItem>{
+        final neighbours = <MediaItem>{
           if (logo != null && items.length > 1) ...[
             items[(index + 1) % items.length],
             items[(index - 1 + items.length) % items.length],
@@ -420,7 +420,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   }
 
   Widget _poster(
-    EmbyItem item, {
+    MediaItem item, {
     required int page,
     required int index,
     required int count,
@@ -500,7 +500,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     );
   }
 
-  Future<void> _play(EmbyItem item) async {
+  Future<void> _play(MediaItem item) async {
     final l10n = AppLocalizations.of(context);
     final target = await resolveHeroPlayTarget(
       context,
@@ -520,7 +520,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     );
   }
 
-  void _report(EmbyItem item) {
+  void _report(MediaItem item) {
     final callback = widget.onItem;
     if (callback == null || _reportedId == item.id) return;
     _reportedId = item.id;
@@ -596,7 +596,7 @@ class _Ambient extends StatelessWidget {
 class _Caption extends StatelessWidget {
   const _Caption({super.key, required this.item, this.logo});
 
-  final EmbyItem item;
+  final MediaItem item;
 
   /// Logo slot (dark theme only); null keeps the text title.
   final Size? logo;

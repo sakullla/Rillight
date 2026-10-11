@@ -10,7 +10,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -349,7 +349,7 @@ class _HomePageState extends State<HomePage> {
 class _DesktopLibraryLatest extends StatelessWidget {
   const _DesktopLibraryLatest({required this.library, this.headerAction});
 
-  final EmbyItem library;
+  final MediaItem library;
   final Widget? headerAction;
 
   @override

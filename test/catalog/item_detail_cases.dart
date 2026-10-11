@@ -16,8 +16,9 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
@@ -28,7 +29,7 @@ import 'package:rillight/player/player_window_host.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-item-detail',
@@ -369,7 +370,7 @@ void main() {
             Uri.parse(
                   request.substring(request.indexOf(' ') + 1),
                 ).queryParameters['Fields'] ==
-                EmbyClient.itemFields,
+                MediaServerClient.itemFields,
       ),
       isTrue,
     );
@@ -480,8 +481,8 @@ void main() {
             seasonId: 'season-3',
             indexNumber: 13,
             parentIndexNumber: 3,
-            playbackPositionTicks: 100000000,
-            runTimeTicks: 200000000,
+            playbackPosition: Duration(microseconds: (100000000) ~/ 10),
+            runtime: Duration(microseconds: (200000000) ~/ 10),
           ),
         ]);
         final app = await pumpApp(tester);

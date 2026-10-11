@@ -1,3 +1,4 @@
+import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 import 'package:rillight/app/app_shell.dart';
 
@@ -11,7 +12,6 @@ import '../aggregation/query/same_source_query.dart';
 import '../aggregation/history/history_models.dart'
     show RemoteWatch, ResumeKind;
 import '../emby/catalog_cache.dart';
-import '../emby/emby_models.dart';
 import '../auth/auth_scope.dart';
 import '../auth/source_management.dart';
 
@@ -25,8 +25,7 @@ import '../app/widgets/app_empty_view.dart';
 import '../app/widgets/option_pill.dart';
 import '../auth/auth_controller.dart';
 import '../auth/server_list_store.dart';
-import '../emby/emby_client.dart';
-import '../emby/emby_errors.dart';
+import '../media_server/errors.dart';
 import '../home/media_shelf.dart';
 import '../search/search_action.dart';
 import '../search/search_overlay.dart';
@@ -755,7 +754,7 @@ class _AggregationPageState extends State<AggregationPage> {
                                                 ?.item ??
                                             // Records without a currently loaded DTO still navigate
                                             // by the recorded source, never by the selected auth.
-                                            EmbyItem(
+                                            MediaItem(
                                               id: record.source.itemId,
                                               name: l.aggregationLocalRecord,
                                               type: 'Movie',
@@ -817,13 +816,14 @@ class _AggregationPageState extends State<AggregationPage> {
     final choice = query.resolveResume(
       item.reference,
       remote: query.items
-          .where((i) => i.item.userData.playbackPositionTicks > 0)
+          .where((i) => i.item.userData.playbackPosition > Duration.zero)
           .map(
             (i) => RemoteWatch(
               source: i.reference,
               work: i.reference.item,
               libraryId: i.libraryId,
-              positionTicks: i.item.userData.playbackPositionTicks,
+              positionTicks:
+                  i.item.userData.playbackPosition.inMicroseconds * 10,
               playedAt: i.item.userData.lastPlayedDate,
             ),
           ),
@@ -939,7 +939,7 @@ void _resumeRecord(BuildContext context, WatchRecord record) {
     libraryId: record.libraryId,
     regionGeneration: permit.regionGeneration,
     mediaSourceId: record.source.mediaSourceId,
-    startTimeTicks: record.positionTicks,
+    startPosition: Duration(microseconds: record.positionTicks ~/ 10),
     autoResume: false,
   );
   if (PresentationScope.of(context).isDesktop) {
@@ -1143,14 +1143,14 @@ class _QueryCardState extends State<_QueryCard> {
   }
 }
 
-String _versionFacts(EmbyItem item, AppLocalizations l) {
+String _versionFacts(MediaItem item, AppLocalizations l) {
   String fact(Object? value) => value?.toString() ?? l.aggregationUnknown;
   if (item.mediaSources.isEmpty) return l.aggregationUnknown;
   return item.mediaSources
       .map(
         (s) =>
             '${fact(s.name)}\n'
-            '分辨率 ${fact(s.width)}×${fact(s.height)} · 码率 ${fact(s.bitrate)} · 大小 ${fact(s.size)} · 时长 ${fact(s.runTimeTicks)}\n'
+            '分辨率 ${fact(s.width)}×${fact(s.height)} · 码率 ${fact(s.bitrate)} · 大小 ${fact(s.size)} · 时长 ${fact(s.runtime)}\n'
             '${s.streams.map((v) => '${v.type}: ${fact(v.codec)} / ${fact(v.language)} / ${fact(v.videoRange)}').join('; ')}',
       )
       .join('\n');
@@ -1177,7 +1177,7 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
       );
       EpisodeSource? episode;
       if (dto.isEpisode && dto.seriesId != null) {
-        episode = EpisodeSource.fromEmby(origin.source, dto);
+        episode = EpisodeSource.fromMediaItem(origin.source, dto);
         dto = await origin.permit.dispatch((c) => c.getItem(dto.seriesId!));
       }
       if (!mounted || !origin.permit.isValid) return;
@@ -1386,7 +1386,7 @@ class _ComparisonDialog extends StatelessWidget {
                                 QueryItem(
                                   ref,
                                   target.libraryId,
-                                  EmbyItem(
+                                  MediaItem(
                                     id: ref.itemId,
                                     name: l.aggregationEpisodeConfirmed,
                                     type: 'Episode',
@@ -1461,7 +1461,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     _AggregationSegment.libraries => section.libraries,
   };
 
-  void _open(ServerSections section, EmbyItem item) {
+  void _open(ServerSections section, MediaItem item) {
     if (_segment == _AggregationSegment.libraries) {
       final current = AuthScope.of(context).session?.server.id;
       if (current == section.serverId) {
@@ -1839,7 +1839,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
   Widget _libraryCard(
     BuildContext context,
     ServerSections section,
-    EmbyItem item,
+    MediaItem item,
   ) {
     final width = MediaShelf.wideCardWidthFor(MediaQuery.sizeOf(context).width);
     return PosterCard(
@@ -1865,14 +1865,14 @@ class _SearchHit {
   final String serverId;
   final String serverName;
   final SourceAccount? account;
-  final List<EmbyItem> items;
-  final EmbyException? error;
+  final List<MediaItem> items;
+  final MediaServerException? error;
   final bool loading;
 
   _SearchHit copyWith({
     SourceAccount? account,
-    List<EmbyItem>? items,
-    EmbyException? error,
+    List<MediaItem>? items,
+    MediaServerException? error,
     bool clearError = false,
     bool? loading,
   }) {
@@ -2076,7 +2076,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         includeItemTypes: 'Movie,Series',
         recursive: true,
         limit: aggregationRowLimit,
-        fields: EmbyClient.gridFields,
+        fields: MediaServerClient.gridFields,
       );
       final items = [
         for (final item in page.items)
@@ -2094,15 +2094,21 @@ class _AggregationSearchState extends State<_AggregationSearch> {
       return _SearchHit(
         serverId: server.id,
         serverName: server.displayName,
-        error: EmbyException(EmbyFailureKind.unknown, cause: error),
+        error: MediaServerException(
+          MediaServerFailureKind.unknown,
+          cause: error,
+        ),
       );
     } catch (error) {
       return _SearchHit(
         serverId: server.id,
         serverName: server.displayName,
-        error: error is EmbyException
+        error: error is MediaServerException
             ? error
-            : EmbyException(EmbyFailureKind.unknown, cause: error),
+            : MediaServerException(
+                MediaServerFailureKind.unknown,
+                cause: error,
+              ),
       );
     }
   }

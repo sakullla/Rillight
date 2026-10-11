@@ -9,9 +9,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
 
@@ -22,7 +23,7 @@ final _png = base64Decode(
 class _AlbumClient extends EmbyClient {
   _AlbumClient()
     : super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'Rillight',
           deviceName: 'test',
           deviceId: 'album-test',
@@ -62,7 +63,7 @@ class _AlbumClient extends EmbyClient {
 }
 
 void main() {
-  const item = EmbyItem(
+  const item = MediaItem(
     id: 'album',
     name: 'Album',
     type: 'Movie',
@@ -101,7 +102,7 @@ void main() {
     ]) {
       expect(
         detailAlbumOf(
-          EmbyItem(
+          MediaItem(
             id: 'single',
             name: 'Single',
             type: 'Movie',
@@ -112,7 +113,7 @@ void main() {
       );
       expect(
         detailAlbumOf(
-          EmbyItem(
+          MediaItem(
             id: 'episode',
             name: 'Episode',
             type: 'Episode',
@@ -126,7 +127,7 @@ void main() {
     expect(detailAlbumOf(item)?.tags, ['a', 'b']);
     expect(
       detailAlbumOf(
-        const EmbyItem(
+        const MediaItem(
           id: 'episode',
           name: 'Episode',
           type: 'Episode',
@@ -159,7 +160,7 @@ void main() {
             body: ListView(
               children: [
                 DetailAlbumStrip(
-                  item: EmbyItem(
+                  item: MediaItem(
                     id: 'album',
                     name: 'Album',
                     type: 'Movie',

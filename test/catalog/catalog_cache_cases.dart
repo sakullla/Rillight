@@ -1,17 +1,18 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-catalog-cache',
@@ -83,7 +84,7 @@ class _PausedReadDiskStore extends _FakeDiskStore {
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
-  late EmbyClient client;
+  late MediaServerClient client;
 
   setUp(() async {
     server = FakeEmbyServer();
@@ -498,12 +499,12 @@ void main() {
     expect(disk.files, hasLength(5));
     expect(disk.files.keys, everyElement(contains('view-movies')));
     expect(
-      disk.files.keys.where((key) => key.contains('Filters=IsUnplayed')),
+      disk.files.keys.where((key) => key.contains('filters=IsUnplayed')),
       hasLength(1),
     );
     expect(
       disk.files.keys.where(
-        (key) => key.contains('Years=2025') && key.contains('Genres=SciFi'),
+        (key) => key.contains('years=2025') && key.contains('genres=SciFi'),
       ),
       hasLength(1),
       reason: '组合筛选的 key 同时纳入全部筛选参数',
@@ -511,8 +512,8 @@ void main() {
   });
 
   test('mergeItemsById dedupes pagination overlaps by item id', () {
-    EmbyItem item(String id) =>
-        EmbyItem.fromJson({'Id': id, 'Name': 'Item $id', 'Type': 'Movie'});
+    MediaItem item(String id) =>
+        decodeEmbyMediaItem({'Id': id, 'Name': 'Item $id', 'Type': 'Movie'});
     final items = [item('item-0'), item('item-1'), item('item-2')];
     final next = [item('item-2'), item('item-3')];
     final merged = ShelfGridPage.mergeItemsById(items, next);

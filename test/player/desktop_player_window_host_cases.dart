@@ -13,7 +13,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -26,7 +26,7 @@ import 'package:window_manager/window_manager.dart';
 import '../emby/fake_emby_server.dart';
 import 'fake_player_process_control.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-host',
@@ -154,7 +154,7 @@ void main() {
       itemId: 'movie-up',
       mediaSourceId: 'source-up',
       playSessionId: 'play-host-1',
-      positionTicks: positionTicks,
+      position: Duration(microseconds: (positionTicks) ~/ 10),
       baseUrl: baseUrl ?? auth.client.baseUrl!.toString(),
       userId: userId ?? auth.client.userId!,
       timestamp: DateTime.utc(2026, 9, 14),
@@ -184,7 +184,7 @@ void main() {
       }
       final payload = await control.startupPayloads.single!;
       expect(payload['itemId'], 'movie-up');
-      expect((payload['item'] as Map)['Id'], 'movie-up');
+      expect((payload['item'] as Map)['id'], 'movie-up');
       expect(host.current, isNull);
       control.spawnHold!.complete();
       await opening;
@@ -506,7 +506,7 @@ void main() {
 
         expect(host.current, isNull);
         expect(stoppedEvents(), hasLength(1));
-        expect(stoppedEvents().single.body['PositionTicks'], 777);
+        expect(stoppedEvents().single.body['PositionTicks'], 770);
         expect(calls, ['spawn:$pid']);
         async.elapse(const Duration(milliseconds: 20));
         async.flushMicrotasks();

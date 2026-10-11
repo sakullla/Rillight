@@ -1,11 +1,10 @@
+import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
 import '../../auth/source_sessions.dart';
-import '../../emby/emby_client.dart';
-import '../../emby/emby_errors.dart';
-import '../../emby/emby_models.dart';
+import '../../media_server/errors.dart';
 import '../history/history_writer.dart';
 import '../identity/media_identity.dart';
 
@@ -147,8 +146,8 @@ class QueryItem {
   const QueryItem(this.reference, this.libraryId, this.item);
   final SourceReference reference;
   final String libraryId;
-  final EmbyItem item;
-  WorkSource get work => WorkSource.fromEmby(reference, item);
+  final MediaItem item;
+  WorkSource get work => WorkSource.fromMediaItem(reference, item);
 }
 
 /// Shared desktop/phone/TV browse/search controller. No timer or background
@@ -503,7 +502,7 @@ class AggregationQueryController extends ChangeNotifier {
                     parentId: state.key.libraryId,
                     limit: scope.pageSize,
                     startIndex: state.cursor,
-                    fields: EmbyClient.itemFields,
+                    fields: MediaServerClient.itemFields,
                   )
                 : client.queryItems(
                     parentId: state.key.libraryId,
@@ -529,7 +528,7 @@ class AggregationQueryController extends ChangeNotifier {
                       if (scope.played != null)
                         scope.played! ? 'IsPlayed' : 'IsUnplayed',
                     ],
-                    fields: EmbyClient.itemFields,
+                    fields: MediaServerClient.itemFields,
                   ),
           )
           .timeout(timeout);
@@ -627,14 +626,14 @@ class AggregationQueryController extends ChangeNotifier {
 SourceQueryStatus classifyQueryFailure(Object error, {bool expired = false}) {
   if (expired) return SourceQueryStatus.needsLogin;
   if (error is TimeoutException) return SourceQueryStatus.timeout;
-  if (error is EmbyException) {
+  if (error is MediaServerException) {
     if (error.statusCode == 403) return SourceQueryStatus.forbidden;
     return switch (error.kind) {
-      EmbyFailureKind.sessionExpired ||
-      EmbyFailureKind.invalidCredentials => SourceQueryStatus.needsLogin,
-      EmbyFailureKind.timeout => SourceQueryStatus.timeout,
-      EmbyFailureKind.unreachable ||
-      EmbyFailureKind.certificate => SourceQueryStatus.offline,
+      MediaServerFailureKind.sessionExpired ||
+      MediaServerFailureKind.invalidCredentials => SourceQueryStatus.needsLogin,
+      MediaServerFailureKind.timeout => SourceQueryStatus.timeout,
+      MediaServerFailureKind.unreachable ||
+      MediaServerFailureKind.certificate => SourceQueryStatus.offline,
       _ => SourceQueryStatus.failed,
     };
   }

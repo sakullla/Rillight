@@ -7,8 +7,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/failure_message.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -862,7 +862,7 @@ class TvFrame extends StatelessWidget {
 
 class TvFailure extends StatelessWidget {
   const TvFailure({super.key, required this.error, required this.retry});
-  final EmbyException error;
+  final MediaServerException error;
   final VoidCallback retry;
   @override
   Widget build(BuildContext context) {
@@ -1012,7 +1012,7 @@ class TvCard extends StatefulWidget {
     this.imageWidth,
     this.preferBackdrop,
   });
-  final EmbyItem item;
+  final MediaItem item;
   final bool autofocus;
   final int imageMaxWidth;
 
@@ -1039,7 +1039,7 @@ class TvCard extends StatefulWidget {
   final bool current;
 
   /// 卡片默认文字。横版剧集卡主标题为剧名,副标题为季集与集名。
-  static (String, String?) labelsFor(EmbyItem item, {required bool wide}) {
+  static (String, String?) labelsFor(MediaItem item, {required bool wide}) {
     if (wide && item.isEpisode) {
       final series = item.seriesName;
       final detail = continueWatchingSubtitle(item);
@@ -1236,7 +1236,7 @@ class TvPoster extends StatelessWidget {
     this.wide = false,
     this.onPressed,
   });
-  final EmbyItem item;
+  final MediaItem item;
   final bool autofocus;
   final int imageMaxWidth;
   final FocusNode? focusNode;
@@ -1278,7 +1278,7 @@ class TvItemRow extends StatefulWidget {
 
   /// 行标识,用于 `tv-row-<title>` 键与滚动位置记忆。
   final String title;
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final bool wide;
 
   /// 覆盖卡宽(逻辑像素,已换算)。
@@ -1286,12 +1286,12 @@ class TvItemRow extends StatefulWidget {
 
   /// 卡片是否带副标题行;默认横版剧集行带。
   final bool? subtitle;
-  final FutureOr<void> Function(EmbyItem item)? onPressed;
+  final FutureOr<void> Function(MediaItem item)? onPressed;
 
   /// 完全自定义卡片;仍由行提供焦点节点。
   final Widget Function(
     BuildContext context,
-    EmbyItem item,
+    MediaItem item,
     FocusNode focusNode,
     TvCardMetrics metrics,
   )?
@@ -1362,7 +1362,7 @@ class _TvItemRowState extends State<TvItemRow> {
     return KeyEventResult.handled;
   }
 
-  FocusNode _nodeFor(EmbyItem item) {
+  FocusNode _nodeFor(MediaItem item) {
     return _nodes.putIfAbsent(item.id, () {
       final node = FocusNode(debugLabel: 'tv-row-${item.id}');
       node.addListener(() {
@@ -1590,7 +1590,7 @@ class TvRowSkeleton extends StatelessWidget {
 
 class TvGrid extends StatelessWidget {
   const TvGrid({super.key, required this.items});
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
 
   /// 列数:960 画布内容区约 7 列。
   static int columnCount(double width, [double scale = 1]) =>
@@ -1655,7 +1655,7 @@ class TvGridMetrics {
 class TvPosterSliver extends StatelessWidget {
   const TvPosterSliver({super.key, required this.items, required this.metrics});
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final TvGridMetrics metrics;
 
   @override
@@ -1684,7 +1684,7 @@ class _TvPosterDelegate extends SliverChildBuilderDelegate {
         },
       );
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
 
   @override
   bool shouldRebuild(covariant _TvPosterDelegate oldDelegate) {

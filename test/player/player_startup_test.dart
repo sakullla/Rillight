@@ -1,141 +1,169 @@
 import 'dart:async';
-
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/serialization.dart';
 import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/player_startup.dart';
 
-class _Client extends EmbyClient {
-  _Client()
-    : super(
-        device: const EmbyDeviceInfo(
-          clientName: 'test',
-          deviceName: 'test',
-          deviceId: 'test',
-          version: '1',
-        ),
-      ) {
-    attachSession(
-      baseUrl: Uri.parse('https://synthetic.invalid'),
-      accessToken: 'synthetic',
-      userId: 'user',
-    );
-  }
-  final calls = <String, Completer<Map<String, dynamic>>>{};
+// A business fake, with no inheritance from an Emby transport.
+class _Client implements MediaServerClient {
+  @override
+  final baseUrl = Uri.parse('https://synthetic.invalid');
+  @override
+  String accessToken = 'synthetic';
+  @override
+  final userId = 'user';
+  final item = Completer<MediaItem>();
+  final user = Completer<MediaUser>();
+  final calls = <String>[];
   final cancellations = <CancelToken>[];
   @override
-  Future<Map<String, dynamic>> getJson(
-    String path, {
-    Map<String, dynamic>? queryParameters,
+  Future<MediaItem> getItem(
+    String itemId, {
+    String? fields,
     CancelToken? cancelToken,
   }) {
+    calls.add('item:$itemId');
     if (cancelToken != null) cancellations.add(cancelToken);
-    return (calls[path] = Completer<Map<String, dynamic>>()).future;
+    return item.future;
   }
+
+  @override
+  Future<MediaUser> getUser({CancelToken? cancelToken}) {
+    calls.add('user');
+    if (cancelToken != null) cancellations.add(cancelToken);
+    return user.future;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
+
+const item = MediaItem(
+  id: 'item',
+  name: 'Movie',
+  type: 'Movie',
+  userData: MediaUserData(playbackPosition: Duration(microseconds: 12)),
+);
+const user = MediaUser(id: 'user', name: 'User', resumeRewindSeconds: 5);
 
 void main() {
   test(
-    'preparation overlaps item and user requests and limits user payload',
+    'preparation overlaps business requests and serializes only user preferences',
     () async {
       final client = _Client();
       final preparation = PlayerStartupPreparation(client, 'item');
-      expect(client.calls.keys, ['/Users/user/Items/item', '/Users/user']);
-      client.calls.values.first.complete({
-        'Id': 'item',
-        'UserData': {'PlaybackPositionTicks': 123},
-      });
-      client.calls.values.last.complete({
-        'Id': 'user',
-        'Policy': {'secret': true},
-        'Configuration': {'ResumeRewindSeconds': 5},
-      });
+      expect(client.calls, ['item:item', 'user']);
+      client.item.complete(item);
+      client.user.complete(user);
       final data = await preparation.payload;
-      expect((data['item'] as Map)['UserData'], {'PlaybackPositionTicks': 123});
-      expect((data['user'] as Map).containsKey('Policy'), isFalse);
-      expect((data['user'] as Map)['Configuration']['ResumeRewindSeconds'], 5);
+      expect(
+        decodeMediaItem(
+          Map<String, dynamic>.from(data['item'] as Map),
+        ).userData.playbackPosition,
+        const Duration(microseconds: 12),
+      );
+      expect(
+        (data['user'] as Map).keys,
+        unorderedEquals([
+          'id',
+          'name',
+          'enableNextEpisodeAutoPlay',
+          'resumeRewindSeconds',
+        ]),
+      );
+      expect(
+        decodeMediaUser(
+          Map<String, dynamic>.from(data['user'] as Map),
+        ).resumeRewindSeconds,
+        5,
+      );
     },
   );
 
   test(
-    'cancelled preparation and changed authentication discard metadata',
+    'cancelled preparation and changed authentication discard late metadata',
     () async {
       for (final cancel in [true, false]) {
         final client = _Client();
         final preparation = PlayerStartupPreparation(client, 'item');
         if (cancel) {
           preparation.cancel();
+          expect(client.cancellations, hasLength(2));
           expect(
             client.cancellations.every((token) => token.isCancelled),
             isTrue,
           );
         } else {
-          client.attachSession(
-            baseUrl: Uri.parse('https://synthetic.invalid'),
-            accessToken: 'changed',
-            userId: 'user',
-          );
+          client.accessToken = 'changed';
         }
-        client.calls.values.first.complete({'Id': 'item'});
-        client.calls.values.last.complete({'Id': 'user'});
+        client.item.complete(item);
+        client.user.complete(user);
         expect((await preparation.payload).containsKey('item'), isFalse);
       }
     },
   );
 
   test(
-    'optional malformed user does not fail fresh item preparation',
+    'optional failed user request does not lose fresh item metadata',
     () async {
       final client = _Client();
       final preparation = PlayerStartupPreparation(client, 'item');
-      client.calls.values.first.complete({'Id': 'item'});
-      client.calls.values.last.complete({});
+      client.item.complete(item);
+      client.user.completeError(
+        const MediaServerException(MediaServerFailureKind.invalidResponse),
+      );
       final data = await preparation.payload;
-      expect(data['item'], {'Id': 'item'});
+      expect((data['item'] as Map)['id'], 'item');
       expect(data['user'], isNull);
     },
   );
 
-  test(
-    'mailbox validates scope, falls back on invalid data and preserves typed failure',
-    () async {
-      final protocol = await PlayerProcessProtocol.create();
-      addTearDown(protocol.dispose);
-      Future<PlayerStartupData?> receive() => PlayerStartupData.receive(
-        protocol,
-        itemId: 'item',
-        userId: 'user',
-        timeout: const Duration(milliseconds: 50),
-      );
-      await protocol.write('startup', {
-        'itemId': 'item',
-        'userId': 'user',
-        'item': {'Id': 'item'},
-        'user': {'Id': 'user'},
-      });
-      expect((await receive())?.item.id, 'item');
-      await protocol.write('startup', {
-        'itemId': 'other',
-        'userId': 'user',
-        'item': {'Id': 'other'},
-      });
-      expect(await receive(), isNull);
-      await protocol.write('startup', {
-        'itemId': 'item',
-        'userId': 'user',
-        'item': {},
-      });
-      expect(await receive(), isNull);
-      expect(await receive(), isNull);
-      await protocol.write('startup', {
-        'itemId': 'item',
-        'userId': 'user',
-        'failure': 'unauthorized',
-      });
-      await expectLater(receive(), throwsA(isA<EmbyException>()));
-    },
-  );
+  test('mailbox validates scope, malformed data and typed failure', () async {
+    final protocol = await PlayerProcessProtocol.create();
+    addTearDown(protocol.dispose);
+    Future<PlayerStartupData?> receive() => PlayerStartupData.receive(
+      protocol,
+      itemId: 'item',
+      userId: 'user',
+      timeout: const Duration(milliseconds: 50),
+    );
+    await protocol.write('startup', {
+      'itemId': 'item',
+      'userId': 'user',
+      'item': encodeMediaItem(item),
+      'user': encodeMediaUser(user),
+    });
+    expect((await receive())?.item.id, 'item');
+    await protocol.write('startup', {
+      'itemId': 'other',
+      'userId': 'user',
+      'item': encodeMediaItem(item),
+    });
+    expect(await receive(), isNull);
+    await protocol.write('startup', {
+      'itemId': 'item',
+      'userId': 'user',
+      'item': {},
+    });
+    expect(await receive(), isNull);
+    expect(await receive(), isNull);
+    await protocol.write('startup', {
+      'itemId': 'item',
+      'userId': 'user',
+      'failure': 'sessionExpired',
+    });
+    await expectLater(
+      receive(),
+      throwsA(
+        isA<MediaServerException>().having(
+          (e) => e.kind,
+          'kind',
+          MediaServerFailureKind.sessionExpired,
+        ),
+      ),
+    );
+  });
 }

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -22,7 +22,7 @@ class PosterCard extends StatelessWidget {
     this.onRemoveFromResume,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final VoidCallback onTap;
   final bool showProgress;
   final double width;
@@ -31,9 +31,9 @@ class PosterCard extends StatelessWidget {
   /// 横卡默认用背景图。媒体库拼图是主图，需要横幅时传 false。
   final bool? preferBackdrop;
   final double hoverScale;
-  final ValueChanged<EmbyItem>? onRemoveFromResume;
+  final ValueChanged<MediaItem>? onRemoveFromResume;
 
-  /// 悬停播放入口,供测试定位;仅 [EmbyItem.isPlayable] 条目会挂上。
+  /// 悬停播放入口,供测试定位;仅 [MediaItem.isPlayable] 条目会挂上。
   static Key playButtonKey(String itemId) => Key('poster-play-$itemId');
 
   @override
@@ -132,7 +132,7 @@ class EpisodeThumbCard extends StatelessWidget {
     this.selected = false,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final VoidCallback onTap;
   final double width;
   final bool selected;
@@ -256,7 +256,7 @@ class SeasonPosterCard extends StatelessWidget {
     this.width = 132,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final bool selected;
   final VoidCallback onTap;
   final double width;
@@ -445,11 +445,11 @@ class _PosterRevealOverlay extends StatelessWidget {
     this.onRemoveFromResume,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final bool revealed;
   final bool showMeta;
   final Key? playKey;
-  final ValueChanged<EmbyItem>? onRemoveFromResume;
+  final ValueChanged<MediaItem>? onRemoveFromResume;
 
   @override
   Widget build(BuildContext context) {

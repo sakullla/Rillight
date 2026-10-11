@@ -1,10 +1,11 @@
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/server_address.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_url.dart';
 
 /// 目录相关的服务器通知类型。
 ///
@@ -44,7 +45,7 @@ Future<EmbySocketConnection> connectEmbySocket(Uri uri) async {
 
 /// 由 http(s) 服务器地址与访问令牌构造 WebSocket 地址。
 Uri embyWebSocketUri(Uri baseUrl, String apiKey) {
-  final joined = joinEmbyPath(baseUrl, '/embywebsocket');
+  final joined = joinServerPath(baseUrl, '/embywebsocket');
   return joined.replace(
     scheme: joined.scheme == 'https' ? 'wss' : 'ws',
     queryParameters: {'api_key': apiKey},
@@ -82,11 +83,11 @@ EmbySocketNotificationKind? parseEmbySocketMessage(String raw) {
 ///
 /// 生命周期由调用方(CatalogShell)管理:start 后进入重连循环,
 /// 登录会话变化时重建实例,登出/关闭时调用 stop。
-class EmbySocket {
+class EmbySocket implements CatalogNotifications {
   EmbySocket({
     required Uri baseUrl,
     required String apiKey,
-    required this.cache,
+    this.cache,
     required this.onUserDataChanged,
     required this.onLibraryChanged,
     EmbySocketConnector? connector,
@@ -102,7 +103,7 @@ class EmbySocket {
   static const int defaultMaxReconnectAttempts = 5;
 
   /// 缓存层:通知到达时失效当前会话前缀。
-  final CatalogCache cache;
+  final CatalogCache? cache;
 
   /// UserDataChanged 对应的刷新(首页行,不含片库列表)。
   final Future<void> Function() onUserDataChanged;
@@ -140,6 +141,7 @@ class EmbySocket {
   bool get isStarted => _started;
 
   /// 开始连接与重连循环(幂等)。
+  @override
   void start() {
     if (_started) {
       return;
@@ -150,6 +152,7 @@ class EmbySocket {
   }
 
   /// 停止并断开;之后不再重连。可再次 start(重新开始计数)。
+  @override
   Future<void> stop() async {
     _started = false;
     _reconnectTimer?.cancel();
@@ -264,7 +267,7 @@ class EmbySocket {
     }
     // 通知不含变更细节:立即失效当前会话前缀缓存,重拉结果为准。
     unawaited(
-      cache.invalidateSession().catchError((Object _) {
+      cache?.invalidateSession().catchError((Object _) {
         // 失效失败无碍:条目仍有 TTL 兜底。
       }),
     );

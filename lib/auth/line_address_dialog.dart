@@ -1,7 +1,7 @@
+import 'package:rillight/media_server/server_address.dart';
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_url.dart';
+import 'package:rillight/media_server/errors.dart';
 
 /// 线路地址编辑对话框:添加与修改共用,只录入地址,没有 User-Agent 输入项。
 class LineAddressDialog extends StatefulWidget {
@@ -51,9 +51,9 @@ class _LineAddressDialogState extends State<LineAddressDialog> {
       return;
     }
     try {
-      final normalized = normalizeEmbyBaseUrl(value);
+      final normalized = normalizeServerAddress(value);
       Navigator.of(context).pop(normalized.toString());
-    } on EmbyException {
+    } on MediaServerException {
       setState(() => _invalid = true);
     }
   }

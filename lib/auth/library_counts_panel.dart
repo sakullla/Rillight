@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/failure_message.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_server/errors.dart';
 
 /// 服务器管理界面的「库规模」块:当前服务器各类型的条目数量。
 ///
@@ -19,7 +19,7 @@ class LibraryCountsPanel extends StatelessWidget {
 
   final LibraryCounts? counts;
   final bool loading;
-  final EmbyException? failure;
+  final MediaServerException? failure;
 
   static const loadingKey = Key('library-counts-loading');
   static const failureKey = Key('library-counts-failure');
@@ -70,8 +70,8 @@ class LibraryCountsPanel extends StatelessWidget {
     );
   }
 
-  Widget _entry(String label, int count, String type, TextStyle? style) {
-    return Text(key: entryKey(type), '$label $count', style: style);
+  Widget _entry(String label, int? count, String type, TextStyle? style) {
+    return Text(key: entryKey(type), '$label ${count ?? '—'}', style: style);
   }
 
   String _typeLabel(AppLocalizations l10n, String type) {

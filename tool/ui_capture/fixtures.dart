@@ -257,10 +257,22 @@ FakeEmbyServer captureServer() {
       '一段关于约定、勇气与重新出发的旅程。老人卡尔带着满屋气球飞向远方，却意外遇见了热心的小伙伴。穿过云海与群山，他们发现最珍贵的冒险就在彼此身边。';
   // 没有服务器剪影的章节：详情页画序号底板，不是一排灰块。
   movie.chapters = const [
-    FakeChapter(name: '启程', startPositionTicks: 0),
-    FakeChapter(name: '飞越云海', startPositionTicks: 8 * 60 * 10000000),
-    FakeChapter(name: '天堂瀑布', startPositionTicks: 31 * 60 * 10000000),
-    FakeChapter(name: '归途', startPositionTicks: 72 * 60 * 10000000),
+    FakeChapter(
+      name: '启程',
+      startPosition: Duration(microseconds: (0) ~/ 10),
+    ),
+    FakeChapter(
+      name: '飞越云海',
+      startPosition: Duration(microseconds: (8 * 60 * 10000000) ~/ 10),
+    ),
+    FakeChapter(
+      name: '天堂瀑布',
+      startPosition: Duration(microseconds: (31 * 60 * 10000000) ~/ 10),
+    ),
+    FakeChapter(
+      name: '归途',
+      startPosition: Duration(microseconds: (72 * 60 * 10000000) ~/ 10),
+    ),
   ];
   server.setSeasons('series-friends', const [
     FakeSeason(
@@ -286,7 +298,7 @@ FakeEmbyServer captureServer() {
         indexNumber: i,
         parentIndexNumber: 1,
         primaryImageTag: 'e$i',
-        runTimeTicks: 14400000000,
+        runtime: Duration(microseconds: (14400000000) ~/ 10),
         overview: '朋友们相聚在熟悉的咖啡馆，一次意料之外的邀请打破了平静的日常。',
         mediaStreams: streams,
         nextUp: i == 2,
@@ -310,7 +322,7 @@ FakeEmbyServer captureServer() {
       type: 'Movie',
       parentId: 'view-movies',
       productionYear: 2013,
-      runTimeTicks: 54000000000,
+      runtime: Duration(microseconds: (54000000000) ~/ 10),
       primaryImageTag: 'tag-dense',
       overview: '验收用条目:六十条字幕轨与二十个片源版本。',
       genres: const ['科幻', '动作'],

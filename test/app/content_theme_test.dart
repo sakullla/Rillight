@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -20,7 +20,7 @@ void main() {
     Widget page(String episode, String backdrop) => MaterialApp(
       theme: AppTheme.dark(),
       home: ContentTheme(
-        item: EmbyItem(
+        item: MediaItem(
           id: episode,
           name: '',
           type: 'Episode',
@@ -61,7 +61,7 @@ void main() {
       MaterialApp(
         theme: AppTheme.dark(),
         home: ContentTheme(
-          item: const EmbyItem(id: 'poster', name: '', type: 'Movie'),
+          item: const MediaItem(id: 'poster', name: '', type: 'Movie'),
           child: Builder(
             builder: (context) {
               builds++;
@@ -101,7 +101,7 @@ void main() {
               : AppTheme.light(),
           home: Scaffold(
             body: ContentTheme(
-              item: const EmbyItem(id: 'genre', name: '', type: 'Movie'),
+              item: const MediaItem(id: 'genre', name: '', type: 'Movie'),
               child: Builder(
                 builder: (context) {
                   report = ArtworkColorScope.maybeOf(context)!;
@@ -258,7 +258,7 @@ void main() {
               children: [
                 Expanded(
                   child: ContentTheme(
-                    item: EmbyItem(id: id, name: id, type: 'Movie'),
+                    item: MediaItem(id: id, name: id, type: 'Movie'),
                     child: Builder(
                       builder: (context) {
                         leftReport = ArtworkColorScope.maybeOf(context)!;
@@ -270,7 +270,7 @@ void main() {
                 ),
                 Expanded(
                   child: ContentTheme(
-                    item: const EmbyItem(id: 'right', name: '', type: 'Movie'),
+                    item: const MediaItem(id: 'right', name: '', type: 'Movie'),
                     child: Builder(
                       builder: (context) {
                         rightReport = ArtworkColorScope.maybeOf(context)!;

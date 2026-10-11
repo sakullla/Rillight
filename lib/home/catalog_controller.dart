@@ -3,9 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 
 class CatalogRowState {
   const CatalogRowState({
@@ -16,25 +15,25 @@ class CatalogRowState {
     this.notice,
   });
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final bool loading;
   final bool hidden;
-  final EmbyException? error;
+  final MediaServerException? error;
 
   /// 已有内容仍可用时的局部刷新提示;不改变 [error] 的失败态契约。
-  final EmbyException? notice;
+  final MediaServerException? notice;
 }
 
 /// 继续观看 = 看到一半的条目，再接上已看完、还没开播的下一集。
 ///
 /// 同一部剧已经有进行中的一集时，不再并列它的下一集。
-List<EmbyItem> continueWatchingItems(
-  List<EmbyItem> resume,
-  List<EmbyItem> nextUp,
+List<MediaItem> continueWatchingItems(
+  List<MediaItem> resume,
+  List<MediaItem> nextUp,
 ) {
   final seen = <String>{};
   final seriesInProgress = <String>{};
-  final items = <EmbyItem>[];
+  final items = <MediaItem>[];
   for (final item in resume) {
     if (!seen.add(item.id)) {
       continue;
@@ -75,9 +74,9 @@ class CatalogController extends ChangeNotifier {
   CatalogRowState nextUp = const CatalogRowState(loading: true);
   CatalogRowState latestMovies = const CatalogRowState(loading: true);
   CatalogRowState latestSeries = const CatalogRowState(loading: true);
-  List<EmbyItem> libraries = const [];
-  EmbyException? librariesError;
-  EmbyException? librariesNotice;
+  List<MediaItem> libraries = const [];
+  MediaServerException? librariesError;
+  MediaServerException? librariesNotice;
   bool librariesLoading = true;
 
   int _loadGen = 0;
@@ -86,11 +85,11 @@ class CatalogController extends ChangeNotifier {
   int libraryPreviewRevision = 0;
   final _previewLoads = _PreviewLoadGate(2);
   final _libraryPreviews =
-      <String, ({DateTime storedAt, Future<List<EmbyItem>> items})>{};
+      <String, ({DateTime storedAt, Future<List<MediaItem>> items})>{};
 
   /// Keep parsed preview data across lazy row disposal. Refresh/session changes
   /// invalidate it; failures are never retained as successful empty libraries.
-  Future<List<EmbyItem>> loadLibraryPreview(CatalogRequest request) {
+  Future<List<MediaItem>> loadLibraryPreview(CatalogRequest request) {
     final key = Uri(
       path: request.path,
       queryParameters: request.query,
@@ -107,7 +106,7 @@ class CatalogController extends ChangeNotifier {
       if (_disposed ||
           generation != libraryPreviewRevision ||
           session != _sessionKey) {
-        return const <EmbyItem>[];
+        return const <MediaItem>[];
       }
       return parseCatalogPage(await cache.fetch(source, request)).items;
     });
@@ -130,7 +129,7 @@ class CatalogController extends ChangeNotifier {
   final Map<String, Timer> _retryTimers = {};
   final Map<String, int> _retryCounts = {};
 
-  EmbyClient get client => auth.client;
+  MediaServerClient get client => auth.client;
 
   /// 重拉全部/首页行数据。
   ///
@@ -184,7 +183,7 @@ class CatalogController extends ChangeNotifier {
   Future<void> reloadHomeRows() =>
       reload(includeLibraries: false, showCachedFirst: false);
 
-  Future<void> hideFromResume(EmbyItem item) async {
+  Future<void> hideFromResume(MediaItem item) async {
     await client.hideFromResume(item.id);
     final remaining = [
       for (final entry in resume.items)
@@ -233,7 +232,7 @@ class CatalogController extends ChangeNotifier {
   Future<void> _showCachedRow(
     String key,
     CatalogRequest request,
-    bool Function(EmbyItem item) filter,
+    bool Function(MediaItem item) filter,
     int gen,
     CatalogRowState Function() current,
     void Function(CatalogRowState) assign, {
@@ -361,8 +360,8 @@ class CatalogController extends ChangeNotifier {
       limit: 24,
       sortBy: 'DateLastContentAdded',
       sortOrder: 'Descending',
-      fields: EmbyClient.gridFields,
-      imageTypes: EmbyClient.featuredImageTypes,
+      fields: MediaServerClient.gridFields,
+      imageTypes: MediaServerClient.featuredImageTypes,
     );
     final network = cache.fetch(client, request);
     var fresh = false;
@@ -413,8 +412,8 @@ class CatalogController extends ChangeNotifier {
       limit: 24,
       sortBy: 'DateLastContentAdded',
       sortOrder: 'Descending',
-      fields: EmbyClient.gridFields,
-      imageTypes: EmbyClient.featuredImageTypes,
+      fields: MediaServerClient.gridFields,
+      imageTypes: MediaServerClient.featuredImageTypes,
     );
     final network = cache.fetch(client, request);
     var fresh = false;
@@ -472,7 +471,7 @@ class CatalogController extends ChangeNotifier {
           return;
         }
         final views = parseCatalogPage(hit.json).items;
-        final cached = <EmbyItem>[];
+        final cached = <MediaItem>[];
         for (final view in views) {
           if (view.isMovieOrTvCollection || view.isPhotoCollection) {
             cached.add(view);
@@ -489,7 +488,7 @@ class CatalogController extends ChangeNotifier {
     }
     try {
       final views = parseCatalogPage(await network).items;
-      final libraries = <EmbyItem>[];
+      final libraries = <MediaItem>[];
       // Unknown collection types need a child probe. Bound those probes while
       // preserving the server's library order and stop new groups on reload.
       for (var start = 0; start < views.length; start += 3) {
@@ -532,20 +531,20 @@ class CatalogController extends ChangeNotifier {
 
   /// Views 缓存恢复用:类型可本地判定的视图(媒体库/排除集合),
   /// 无需依赖 _isMovieOrTvLibrary 的网络探测。
-  bool _isDeterministicView(EmbyItem view) {
+  bool _isDeterministicView(MediaItem view) {
     return view.isMovieOrTvCollection ||
         view.isExcludedCollection ||
         !view.isUntypedCollection;
   }
 
-  EmbyException _asEmby(Object error) {
-    if (error is EmbyException) {
+  MediaServerException _asEmby(Object error) {
+    if (error is MediaServerException) {
       return error;
     }
-    return EmbyException(EmbyFailureKind.unknown, cause: error);
+    return MediaServerException(MediaServerFailureKind.unknown, cause: error);
   }
 
-  Future<bool> _isMovieOrTvLibrary(EmbyItem view) async {
+  Future<bool> _isMovieOrTvLibrary(MediaItem view) async {
     if (view.isMovieOrTvCollection) {
       return true;
     }
@@ -573,7 +572,7 @@ class CatalogController extends ChangeNotifier {
       const video = {'Movie', 'Series', 'Episode'};
       return children.every((item) => allowed.contains(item.type)) &&
           children.any((item) => video.contains(item.type));
-    } on EmbyException {
+    } on MediaServerException {
       return false;
     }
   }
@@ -636,7 +635,7 @@ class CatalogController extends ChangeNotifier {
     _retryCounts.clear();
   }
 
-  bool _isNextUpUnsupported(EmbyException error) {
+  bool _isNextUpUnsupported(MediaServerException error) {
     final code = error.statusCode;
     return code == 404 || code == 400 || code == 501;
   }

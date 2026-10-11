@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -8,15 +9,16 @@ import 'package:rillight/auth/pin_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_server/errors.dart';
 
 class TestClient extends EmbyClient {
   TestClient()
     : super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'test',
@@ -42,11 +44,13 @@ class TestClient extends EmbyClient {
     loginStarted?.complete();
     await loginGate?.future;
     if (rejectLogin) {
-      throw const EmbyException(EmbyFailureKind.invalidCredentials);
+      throw const MediaServerException(
+        MediaServerFailureKind.invalidCredentials,
+      );
     }
     return AuthenticationResult(
       accessToken: 'replacement-token',
-      user: EmbyUser(id: loginUser, name: username),
+      user: MediaUser(id: loginUser, name: username),
       serverId: serverId ?? baseUrl.host,
     );
   }
@@ -72,9 +76,9 @@ class TestClient extends EmbyClient {
   }
 
   @override
-  Future<List<EmbyItem>> getViews() async => [
-    const EmbyItem(id: 'movies', name: 'Movies', type: 'CollectionFolder'),
-    const EmbyItem(
+  Future<List<MediaItem>> getViews() async => [
+    const MediaItem(id: 'movies', name: 'Movies', type: 'CollectionFolder'),
+    const MediaItem(
       id: 'new-library',
       name: 'New library',
       type: 'CollectionFolder',
@@ -85,12 +89,14 @@ class TestClient extends EmbyClient {
   Future<LibraryCounts> getItemCounts() async =>
       const LibraryCounts(movie: 1, series: 1, episode: 1, others: []);
   @override
-  Future<EmbyUser> getUser() async {
+  Future<MediaUser> getUser({CancelToken? cancelToken}) async {
     userRequests++;
     userStarted?.complete();
     await userGate?.future;
-    if (expired) throw const EmbyException(EmbyFailureKind.sessionExpired);
-    return EmbyUser(id: userId!, name: 'user');
+    if (expired) {
+      throw const MediaServerException(MediaServerFailureKind.sessionExpired);
+    }
+    return MediaUser(id: userId!, name: 'user');
   }
 }
 

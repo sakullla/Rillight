@@ -1,3 +1,4 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -7,22 +8,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations_zh.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/home/catalog_failure.dart';
+
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 
 import 'fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-test',
   version: '0.1.0',
 );
 
-Matcher _kind(EmbyFailureKind kind) =>
-    isA<EmbyException>().having((error) => error.kind, 'kind', kind);
+Matcher _kind(MediaServerFailureKind kind) =>
+    isA<MediaServerException>().having((error) => error.kind, 'kind', kind);
 
 void main() {
   test(
@@ -77,13 +79,13 @@ void main() {
       }
     },
   );
-  EmbyException responseFailure(
+  MediaServerException responseFailure(
     Object data, {
     String? contentType,
     int status = 403,
   }) {
     final request = RequestOptions(path: '/');
-    return EmbyException.fromDio(
+    return MediaServerException.fromDio(
       DioException(
         requestOptions: request,
         type: DioExceptionType.badResponse,
@@ -111,7 +113,7 @@ void main() {
       ]) {
         final error = responseFailure(body);
         expect(error.statusCode, 403);
-        expect(error.kind, EmbyFailureKind.unknown);
+        expect(error.kind, MediaServerFailureKind.forbidden);
         expect(error.detail, 'HTTP 403');
       }
       for (final mime in [
@@ -234,34 +236,34 @@ void main() {
     server.publicInfoHtml = true;
     expect(
       () => client().getPublicInfo(server.baseUrl),
-      throwsA(_kind(EmbyFailureKind.notEmby)),
+      throwsA(_kind(MediaServerFailureKind.incompatibleServer)),
     );
   });
 
   test('connection errors and certificate failures map from Dio', () {
-    final unreachable = EmbyException.fromDio(
+    final unreachable = MediaServerException.fromDio(
       DioException(
         requestOptions: RequestOptions(path: '/'),
         type: DioExceptionType.connectionError,
         error: const SocketException('Connection refused'),
       ),
     );
-    expect(unreachable.kind, EmbyFailureKind.unreachable);
+    expect(unreachable.kind, MediaServerFailureKind.unreachable);
 
-    final certificate = EmbyException.fromDio(
+    final certificate = MediaServerException.fromDio(
       DioException(
         requestOptions: RequestOptions(path: '/'),
         type: DioExceptionType.connectionError,
         error: const HandshakeException('CERTIFICATE_VERIFY_FAILED'),
       ),
     );
-    expect(certificate.kind, EmbyFailureKind.certificate);
+    expect(certificate.kind, MediaServerFailureKind.certificate);
   });
 
   test('unknown host stays unreachable', () async {
     expect(
       () => client().getPublicInfo(Uri.parse('http://missing.invalid:8096')),
-      throwsA(_kind(EmbyFailureKind.unreachable)),
+      throwsA(_kind(MediaServerFailureKind.unreachable)),
     );
   });
 
@@ -271,7 +273,7 @@ void main() {
       () => client(
         timeout: const Duration(milliseconds: 80),
       ).getPublicInfo(server.baseUrl),
-      throwsA(_kind(EmbyFailureKind.timeout)),
+      throwsA(_kind(MediaServerFailureKind.timeout)),
     );
   });
 
@@ -295,7 +297,7 @@ void main() {
     expect(
       () => client().getPublicInfo(server.baseUrl),
       throwsA(
-        isA<EmbyException>()
+        isA<MediaServerException>()
             .having((error) => error.statusCode, 'statusCode', 403)
             .having(
               (error) => error.detail,
@@ -314,7 +316,7 @@ void main() {
         password: 'wrong',
         serverId: server.serverId,
       ),
-      throwsA(_kind(EmbyFailureKind.invalidCredentials)),
+      throwsA(_kind(MediaServerFailureKind.invalidCredentials)),
     );
   });
 
@@ -337,7 +339,7 @@ void main() {
 
     expect(
       emby.getJson('/System/Info'),
-      throwsA(_kind(EmbyFailureKind.sessionExpired)),
+      throwsA(_kind(MediaServerFailureKind.sessionExpired)),
     );
     await pumpEventQueue();
     expect(expired, isTrue);
@@ -491,7 +493,7 @@ void main() {
   });
 
   test('fromJson parses PremiereDate, DateCreated and People', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-1',
       'Name': 'The Pilot',
       'Type': 'Episode',
@@ -525,7 +527,7 @@ void main() {
   test(
     'canResume treats PlayedPercentage as progress when ticks are missing',
     () {
-      final item = EmbyItem.fromJson({
+      final item = decodeEmbyMediaItem({
         'Id': 'movie-percent',
         'Name': 'Percent Only',
         'Type': 'Movie',
@@ -534,12 +536,12 @@ void main() {
       });
       expect(item.canResume, isTrue);
       expect(item.playbackProgress, closeTo(0.37, 0.001));
-      expect(item.resumePositionTicks, 10000000 * 60 * 37);
+      expect(item.resumePosition, const Duration(minutes: 37));
     },
   );
 
   test('canResume hides continue when Played or past MaxResumePct', () {
-    final markedPlayed = EmbyItem.fromJson({
+    final markedPlayed = decodeEmbyMediaItem({
       'Id': 'movie-played',
       'Name': 'Played',
       'Type': 'Movie',
@@ -551,7 +553,7 @@ void main() {
     });
     expect(markedPlayed.canResume, isFalse);
 
-    final finished = EmbyItem.fromJson({
+    final finished = decodeEmbyMediaItem({
       'Id': 'movie-finished',
       'Name': 'Finished',
       'Type': 'Movie',
@@ -563,7 +565,7 @@ void main() {
     });
     expect(finished.canResume, isFalse);
 
-    final watching = EmbyItem.fromJson({
+    final watching = decodeEmbyMediaItem({
       'Id': 'movie-watching',
       'Name': 'Watching',
       'Type': 'Movie',
@@ -571,7 +573,7 @@ void main() {
     });
     expect(watching.canResume, isTrue);
 
-    final pastThreshold = EmbyItem.fromJson({
+    final pastThreshold = decodeEmbyMediaItem({
       'Id': 'movie-ending',
       'Name': 'Ending',
       'Type': 'Movie',
@@ -581,18 +583,18 @@ void main() {
   });
 
   test('fromJson parses PlaybackPositionTicks sent as a decimal string', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'movie-ticks',
       'Name': 'Ticks',
       'Type': 'Movie',
       'UserData': {'Played': false, 'PlaybackPositionTicks': '2240000000.0'},
     });
-    expect(item.userData.playbackPositionTicks, 2240000000);
+    expect(item.userData.playbackPosition, const Duration(seconds: 224));
     expect(item.canResume, isTrue);
   });
 
   test('fromJson maps missing or invalid dates to null and empty people', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-2',
       'Name': 'No Dates',
       'Type': 'Episode',
@@ -606,7 +608,7 @@ void main() {
   });
 
   test('copyWith keeps premiereDate, dateCreated and people', () {
-    final item = EmbyItem.fromJson({
+    final item = decodeEmbyMediaItem({
       'Id': 'ep-3',
       'Name': 'Copy',
       'Type': 'Episode',
@@ -617,7 +619,7 @@ void main() {
       ],
     });
 
-    final copy = item.copyWith(userData: const EmbyUserData(played: true));
+    final copy = item.copyWith(userData: const MediaUserData(played: true));
     expect(copy.userData.played, isTrue);
     expect(copy.premiereDate, item.premiereDate);
     expect(copy.dateCreated, item.dateCreated);

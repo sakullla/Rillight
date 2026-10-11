@@ -1,5 +1,5 @@
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/playback.dart';
 import '../auth/source_sessions.dart';
 import '../aggregation/history/history_writer.dart';
 
@@ -17,7 +17,7 @@ class PlaybackSession {
        accessToken = client.accessToken;
 
   final int id;
-  final EmbyClient client;
+  final MediaServerClient client;
   final String? baseUrl;
   final String? userId;
   final String? accessToken;

@@ -1,6 +1,7 @@
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 SourceAccount account(
   String server, {
@@ -466,9 +467,9 @@ void main() {
       },
     );
     test('combined episodes remain uncertain even with verified ordering', () {
-      final parsed = EpisodeSource.fromEmby(
+      final parsed = EpisodeSource.fromMediaItem(
         ref('b', id: 'combined'),
-        EmbyItem.fromJson({
+        decodeEmbyMediaItem({
           'Id': 'combined',
           'Type': 'Episode',
           'SeriesId': 'same',
@@ -487,9 +488,9 @@ void main() {
     });
 
     test('Emby numbering alone is unknown until verified', () {
-      final parsed = EpisodeSource.fromEmby(
+      final parsed = EpisodeSource.fromMediaItem(
         ref('a', id: 'ep'),
-        const EmbyItem(
+        const MediaItem(
           id: 'ep',
           name: 'Episode',
           type: 'Episode',

@@ -1,13 +1,14 @@
+import 'package:rillight/emby/emby_playback.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/device_profile.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/playback.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-playback',
@@ -17,7 +18,7 @@ const _device = EmbyDeviceInfo(
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
-  late EmbyClient client;
+  late MediaServerClient client;
 
   setUp(() async {
     server = FakeEmbyServer();
@@ -51,8 +52,8 @@ void main() {
 
   test('Dolby audio transcode is not a playable stream', () {
     ResolvedPlayback? resolve(Map<String, Object?> source) {
-      return resolvePlayback(
-        info: PlaybackInfo.fromJson({
+      return resolveEmbyPlayback(
+        info: decodeEmbyPlaybackInfo({
           'PlaySessionId': 'play-dolby',
           'MediaSources': [source],
         }),
@@ -110,16 +111,17 @@ void main() {
   test(
     'PlaybackInfo accepts Android capability profile without mutating defaults',
     () async {
-      final profile = androidDeviceProfile(h264: true, aac: true);
+      const profile = PlaybackCapabilities(
+        h264: true,
+        aac: true,
+        maxStreamingBitrate: 20000000,
+      );
       await client.getPlaybackInfo(
         itemId: 'movie-inception',
-        deviceProfile: profile,
+        capabilities: profile,
         forceTranscode: true,
       );
-      expect(
-        server.lastDeviceProfile!['Name'],
-        'Rillight Android owned FFmpeg core',
-      );
+      expect(server.lastDeviceProfile!['Name'], 'Rillight owned FFmpeg core');
       await client.getPlaybackInfo(itemId: 'movie-inception');
       expect(server.lastDeviceProfile!['Name'], 'Rillight owned FFmpeg core');
       expect(
@@ -155,7 +157,7 @@ void main() {
         type: 'Movie',
         parentId: 'view-movies',
         productionYear: 2016,
-        runTimeTicks: 10000000 * 80,
+        runtime: Duration(microseconds: (10000000 * 80) ~/ 10),
         mediaStreams: const [
           FakeMediaStream(
             index: 0,
@@ -211,7 +213,7 @@ void main() {
         mediaSourceId: 'movie-inception',
         playSessionId: 'play-1',
         playMethod: PlayMethod.directStream,
-        positionTicks: 10000000,
+        position: Duration(microseconds: (10000000) ~/ 10),
       );
       await client.reportPlaying(report);
       await client.reportProgress(report.copyWith(eventName: 'TimeUpdate'));

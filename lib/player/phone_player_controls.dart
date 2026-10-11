@@ -24,7 +24,7 @@ import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/track_picker.dart';
 
 /// 轨道选项的辅助行(内嵌/外挂、编码、默认),复用桌面同款描述。

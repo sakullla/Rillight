@@ -10,15 +10,14 @@ import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/source_switch_menu.dart';
@@ -45,7 +44,7 @@ void main() {
     }
     final auth = AuthController.memory(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'tv',
           deviceId: 'tv-controls',

@@ -10,7 +10,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/search/mobile_search_page.dart';
@@ -45,7 +45,7 @@ void main() {
         final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
         final auth = AuthController.memory(
           client: EmbyClient(
-            device: const EmbyDeviceInfo(
+            device: const ClientDeviceInfo(
               clientName: 'test',
               deviceName: 'search-refresh',
               deviceId: 'search-refresh',

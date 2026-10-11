@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'playback_runtime.dart';
-import 'playback_models.dart';
+import '../media_server/playback.dart';
 import '../aggregation/history/history_models.dart';
 
 import 'package:rillight/player/danmaku/dandanplay_client.dart';

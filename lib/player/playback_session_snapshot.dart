@@ -1,9 +1,8 @@
+import 'package:rillight/player/playback_persistence.dart';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:rillight/player/playback_models.dart';
-
-export 'package:rillight/player/playback_models.dart'
+export 'package:rillight/player/playback_persistence.dart'
     show PlaybackSessionSnapshot;
 
 /// 会话快照的持久化入口。

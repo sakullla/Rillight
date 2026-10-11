@@ -1,3 +1,4 @@
+import 'package:rillight/emby/emby_playback.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -5,7 +6,6 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/playback_http_proxy.dart';
-import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/player/cache/http_cache_policy.dart';
 

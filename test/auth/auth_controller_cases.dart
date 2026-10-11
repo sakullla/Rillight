@@ -6,12 +6,12 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
   deviceName: 'test',
   deviceId: 'device-auth',
@@ -91,7 +91,9 @@ void main() {
       await restored.restore();
       expect(restored.isLoggedIn, isTrue);
       expect(restored.client.baseUrl, international.baseUrl);
-      final info = await restored.client.getJson('/System/Info');
+      final info = await (restored.client as EmbyClient).getJson(
+        '/System/Info',
+      );
       expect(info['ServerName'], international.serverName);
     },
   );
@@ -135,7 +137,7 @@ void main() {
     );
 
     expect(auth.isLoggedIn, isFalse);
-    expect(auth.failure?.kind, EmbyFailureKind.invalidCredentials);
+    expect(auth.failure?.kind, MediaServerFailureKind.invalidCredentials);
     expect(await auth.credentials.read(server.serverId), isNull);
   });
 
@@ -149,7 +151,7 @@ void main() {
     );
 
     expect(auth.isLoggedIn, isFalse);
-    expect(auth.failure?.kind, EmbyFailureKind.certificate);
+    expect(auth.failure?.kind, MediaServerFailureKind.certificate);
   });
 
   for (final duringAuthentication in [false, true]) {
@@ -172,7 +174,7 @@ void main() {
         );
         expect(auth.isLoggedIn, isFalse);
         expect(auth.client.baseUrl, isNull);
-        expect(auth.failure?.kind, EmbyFailureKind.unknown);
+        expect(auth.failure?.kind, MediaServerFailureKind.forbidden);
         expect(auth.failure?.statusCode, 403);
         expect(auth.failure?.detail, 'HTTP 403');
         expect(
@@ -195,7 +197,7 @@ void main() {
     );
 
     expect(auth.isLoggedIn, isFalse);
-    expect(auth.failure?.kind, EmbyFailureKind.unreachable);
+    expect(auth.failure?.kind, MediaServerFailureKind.unreachable);
   });
 
   test(
@@ -235,7 +237,7 @@ void main() {
     final expired = auth.session!.accessToken;
     server.issuedTokens.remove(expired);
 
-    final info = await auth.client.getJson('/System/Info');
+    final info = await (auth.client as EmbyClient).getJson('/System/Info');
     expect(info['ServerName'], server.serverName);
     expect(auth.isLoggedIn, isTrue);
     expect(auth.session!.accessToken, isNot(expired));
@@ -266,19 +268,19 @@ void main() {
     server.issuedTokens.remove(stored.accessToken);
 
     await expectLater(
-      auth.client.getJson('/System/Info'),
+      (auth.client as EmbyClient).getJson('/System/Info'),
       throwsA(
-        isA<EmbyException>().having(
+        isA<MediaServerException>().having(
           (error) => error.kind,
           'kind',
-          EmbyFailureKind.sessionExpired,
+          MediaServerFailureKind.sessionExpired,
         ),
       ),
     );
     await pumpEventQueue();
 
     expect(auth.isLoggedIn, isFalse);
-    expect(auth.failure?.kind, EmbyFailureKind.sessionExpired);
+    expect(auth.failure?.kind, MediaServerFailureKind.sessionExpired);
     expect(auth.prefill?.id, server.serverId);
     expect((await credentials.read(server.serverId))?.username, 'alice');
   });
@@ -578,7 +580,7 @@ void main() {
       expect(auth.client.baseUrl, server.baseUrl);
       // User-Agent is server-level: switching lines keeps the server's UA.
       expect(auth.client.userAgent, 'WanUA/2');
-      await auth.client.getJson('/System/Info');
+      await (auth.client as EmbyClient).getJson('/System/Info');
       expect(server.lastUserAgent, 'WanUA/2');
     },
   );
@@ -618,7 +620,7 @@ void main() {
       expect(auth.client.baseUrl, server.baseUrl);
       // Deleting a line keeps the server-level User-Agent.
       expect(auth.client.userAgent, 'WanUA/2');
-      await auth.client.getJson('/System/Info');
+      await (auth.client as EmbyClient).getJson('/System/Info');
       expect(server.lastUserAgent, 'WanUA/2');
     },
   );

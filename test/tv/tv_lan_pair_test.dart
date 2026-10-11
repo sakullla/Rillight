@@ -11,12 +11,12 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/auth/tv_lan_pair.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 
 import '../emby/fake_emby_server.dart';
 
 const _password = 'pw-lan-secret';
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'test',
   deviceName: 'tv',
   deviceId: 'tv-lan-pair',

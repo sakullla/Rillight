@@ -26,8 +26,8 @@ import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/playback_runtime.dart';
 
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/models.dart';
 
 String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
   origin.source.account.region.name,
@@ -181,13 +181,13 @@ class MediaImage extends StatefulWidget {
     this.blurFill = false,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final double? width;
   final double? height;
   final bool preferBackdrop;
   final bool preferThumb;
 
-  /// 优先所属剧集的 Backdrop(单集 hero 底图),见 [EmbyItem.imageCandidates]。
+  /// 优先所属剧集的 Backdrop(单集 hero 底图),见 [MediaItem.imageCandidates]。
   final bool preferParentBackdrop;
   final int? maxWidth;
   final Alignment alignment;
@@ -281,10 +281,10 @@ String? mediaImageAccountScope(AuthController? auth) {
 
 bool _isTransientImageFailure(Object error) {
   if (error is TimeoutException || error is SocketException) return true;
-  if (error is! EmbyException) return false;
+  if (error is! MediaServerException) return false;
   final status = error.statusCode;
-  return error.kind == EmbyFailureKind.timeout ||
-      error.kind == EmbyFailureKind.unreachable ||
+  return error.kind == MediaServerFailureKind.timeout ||
+      error.kind == MediaServerFailureKind.unreachable ||
       status == 408 ||
       status == 429 ||
       (status != null && status >= 500);

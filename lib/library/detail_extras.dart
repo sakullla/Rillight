@@ -10,8 +10,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -21,7 +20,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// 详情页相册用的剧照。优先本条目的多张背景图，单集没有时用剧集背景图。
-({String itemId, List<String> tags})? detailAlbumOf(EmbyItem item) {
+({String itemId, List<String> tags})? detailAlbumOf(MediaItem item) {
   if (item.backdropImageTags.length > 1) {
     return (itemId: item.id, tags: item.backdropImageTags);
   }
@@ -34,7 +33,7 @@ import 'package:webview_flutter/webview_flutter.dart';
   return null;
 }
 
-void openGenreShelf(BuildContext context, EmbyItem item, String genre) {
+void openGenreShelf(BuildContext context, MediaItem item, String genre) {
   final types = item.isSeries || item.isEpisode ? 'Series' : 'Movie';
   final parent = item.isEpisode ? null : item.parentId;
   context.push(
@@ -57,7 +56,7 @@ class DetailGenreRow extends StatelessWidget {
     this.dense = false,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
 
   /// 嵌在桌面头部信息栏里：细描边小胶囊，压在背景图上不抢标题。
   final bool dense;
@@ -421,7 +420,7 @@ class _AlbumSource {
   _AlbumSource(this.client, this.origin, this.policy) {
     policy?.addListener(_revoke);
   }
-  final EmbyClient client;
+  final MediaServerClient client;
   final PlaybackOrigin? origin;
   final MediaImageSourcePolicy? policy;
   final Set<MemoryImage> _images = {};
@@ -433,7 +432,7 @@ class _AlbumSource {
 
   Future<List<int>> load(String id, String tag, int index, int? width) async {
     requireValid();
-    Future<List<int>> request(EmbyClient client) => width == null
+    Future<List<int>> request(MediaServerClient client) => width == null
         ? client.getOriginalItemImage(
             id,
             type: 'Backdrop',
@@ -484,7 +483,7 @@ class DetailAlbumStrip extends StatelessWidget {
     this.album,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final double thumbnailWidth;
 
   /// 切集时列表条目往往没有剧照。调用方可以沿用上一集已经显示的相册。
@@ -576,7 +575,7 @@ class _AlbumRail extends StatefulWidget {
     this.inset = 0,
   });
 
-  final EmbyClient client;
+  final MediaServerClient client;
   final PlaybackOrigin? origin;
   final MediaImageSourcePolicy? policy;
   final String itemId;

@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -8,11 +10,10 @@ import 'package:rillight/player/cache/session_byte_cache.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -24,7 +25,7 @@ import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'Rillight',
   deviceName: 'test',
   deviceId: 'session-test',
@@ -91,8 +92,8 @@ void main() {
     controller.dispose();
   });
 
-  EmbyItem episode(String id) =>
-      EmbyItem.fromJson({'Id': id, 'Type': 'Episode', 'Name': id});
+  MediaItem episode(String id) =>
+      decodeEmbyMediaItem({'Id': id, 'Type': 'Episode', 'Name': id});
 
   test(
     'prepared metadata retains fresh resume preferences without duplicate requests',
@@ -108,12 +109,12 @@ void main() {
         snapshotStore: snapshots,
         startupData: Future.value(
           PlayerStartupData(
-            EmbyItem.fromJson({
+            decodeEmbyMediaItem({
               'Id': 'movie-up',
               'Type': 'Movie',
               'UserData': {'PlaybackPositionTicks': 300000000},
             }),
-            EmbyUser(id: client.userId!, name: 'test', resumeRewindSeconds: 5),
+            MediaUser(id: client.userId!, name: 'test', resumeRewindSeconds: 5),
           ),
         ),
       );
@@ -1421,13 +1422,13 @@ class _ControlledClient extends EmbyClient {
   int userRequests = 0;
 
   @override
-  Future<EmbyUser> getUser() {
+  Future<MediaUser> getUser({CancelToken? cancelToken}) {
     userRequests++;
     return super.getUser();
   }
 
   @override
-  Future<EmbyItemPage> queryItems({
+  Future<MediaItemPage> queryItems({
     String? parentId,
     String? searchTerm,
     String? includeItemTypes,
@@ -1439,7 +1440,8 @@ class _ControlledClient extends EmbyClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
-    String fields = EmbyClient.gridFields,
+    String fields = MediaServerClient.gridFields,
+    String imageTypes = MediaServerClient.imageTypes,
   }) async {
     queryCount++;
     final gate = queryGate;
@@ -1462,7 +1464,11 @@ class _ControlledClient extends EmbyClient {
   }
 
   @override
-  Future<EmbyItem> getItem(String itemId, {String? fields}) async {
+  Future<MediaItem> getItem(
+    String itemId, {
+    String? fields,
+    CancelToken? cancelToken,
+  }) async {
     final result = await super.getItem(itemId, fields: fields);
     requestedItems.add(itemId);
     await itemGates[itemId]?.future;

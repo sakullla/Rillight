@@ -3,15 +3,15 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/player/bif_preview.dart';
 import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/playback_settings_menu.dart';
-import 'package:rillight/player/playback_models.dart';
-import 'package:rillight/player/playback_resolver.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/player_setting_choices.dart';
@@ -27,7 +27,7 @@ void main() {
     store = MemoryPlayerSettingsStore();
     controller = PlayerController(
       client: EmbyClient(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'overlay',
@@ -518,7 +518,7 @@ void main() {
         'next episode fits $width in $brightness without tall actions',
         (tester) async {
           controller.nextEpisode = NextEpisodeOffer(
-            item: const EmbyItem(
+            item: const MediaItem(
               id: 'next',
               name: '一个很长的下一集标题用于检查窄屏截断',
               type: 'Episode',

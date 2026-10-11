@@ -1,12 +1,12 @@
+import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
 import 'credential_store.dart';
 import 'region_access.dart';
 import 'server_list_store.dart';
-import '../emby/emby_client.dart';
-import '../emby/emby_errors.dart';
-import '../player/playback_models.dart';
+import '../media_server/errors.dart';
+import '../media_server/playback.dart';
 
 /// Account identity only. Media item/version identity belongs to aggregation.
 class SourceAccount {
@@ -43,7 +43,7 @@ class CredentialCommit {
 class SourceSession {
   SourceSession._(this.account, this.client, this.revision);
   final SourceAccount account;
-  final EmbyClient client;
+  final MediaServerClient client;
   final int revision;
 }
 
@@ -72,7 +72,9 @@ class OperationPermit {
   }
 
   /// Both dispatch and receipt use the same frozen permit.
-  Future<T> dispatch<T>(Future<T> Function(EmbyClient client) request) async {
+  Future<T> dispatch<T>(
+    Future<T> Function(MediaServerClient client) request,
+  ) async {
     requireValid();
     final client = _owner._sessions[account.configuredServerId]!.client;
     try {
@@ -97,7 +99,7 @@ class FrozenSourceStop {
   );
   final SourceSessionRegistry _owner;
   final SourceAccount account;
-  final EmbyClient _client;
+  final MediaServerClient _client;
   PlaybackReport _report;
   final int _generation;
 
@@ -126,7 +128,7 @@ class FrozenSourceStop {
     }
     _used = true;
     try {
-      await _client.reportStopped(_report);
+      await _client.stopPlayback(_report);
     } finally {
       _client.clearSession();
     }
@@ -153,7 +155,7 @@ class ManualCheckResult {
   final DateTime checkedAt;
 }
 
-typedef SourceClientFactory = EmbyClient Function();
+typedef SourceClientFactory = MediaServerClient Function();
 typedef MembershipCleanup =
     Future<void> Function(SourceAccount? account, String serverId);
 
@@ -195,7 +197,7 @@ class SourceSessionRegistry {
   FrozenSourceStop freezeStop(
     OperationPermit permit,
     PlaybackReport report, {
-    EmbyClient? actualClient,
+    MediaServerClient? actualClient,
   }) {
     permit.requireValid();
     if (!identical(permit._owner, this) ||
@@ -975,11 +977,12 @@ class SourceSessionRegistry {
       })().timeout(timeout);
     } on TimeoutException {
       status = ManualCheckStatus.timeout;
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       status = switch (error.kind) {
-        EmbyFailureKind.timeout => ManualCheckStatus.timeout,
-        EmbyFailureKind.sessionExpired ||
-        EmbyFailureKind.invalidCredentials => ManualCheckStatus.needsLogin,
+        MediaServerFailureKind.timeout => ManualCheckStatus.timeout,
+        MediaServerFailureKind.sessionExpired ||
+        MediaServerFailureKind.invalidCredentials =>
+          ManualCheckStatus.needsLogin,
         _ => ManualCheckStatus.offline,
       };
     } catch (_) {

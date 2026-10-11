@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
@@ -35,7 +35,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final auth = SyntheticSourceAuth(
       adapter: FakeEmbyAdapter([server]),
-      device: const EmbyDeviceInfo(
+      device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'tv',
         deviceId: 'tv-widget',

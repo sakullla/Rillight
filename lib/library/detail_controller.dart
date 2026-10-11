@@ -3,16 +3,15 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/library/detail_repository.dart';
 
 class DetailController extends ChangeNotifier {
   DetailController({
     required this.auth,
-    EmbyClient? client,
+    MediaServerClient? client,
     required CatalogCache cache,
     required this.itemId,
     this.seasonId,
@@ -24,30 +23,30 @@ class DetailController extends ChangeNotifier {
     auth.addListener(_onAuth);
   }
   final AuthController auth;
-  final EmbyClient? _sourceClient;
+  final MediaServerClient? _sourceClient;
   final DetailRepository repository;
   final String itemId;
   final String? initialEpisodeId;
   final bool _hasExplicitSeason;
-  EmbyItem? item;
+  MediaItem? item;
 
-  void applyItem(EmbyItem next) {
+  void applyItem(MediaItem next) {
     item = next;
     notifyListeners();
   }
 
-  List<EmbyItem> seasons = const [], episodes = const [];
+  List<MediaItem> seasons = const [], episodes = const [];
   String? seasonId, mediaSourceId;
   int episodeTotal = 0;
   int windowStart = 0;
-  EmbyException? error, seasonError, episodeError;
+  MediaServerException? error, seasonError, episodeError;
   bool loading = true,
       seasonsLoading = false,
       episodesLoading = false,
       hasMore = false;
 
   /// 续播集在已加载页之外时记住它。列表仍停在当前页，主操作不退回第一条。
-  EmbyItem? resumeBeyondPage;
+  MediaItem? resumeBeyondPage;
   Future<void>? _resumeScan;
   CancelToken? _resumeCancel;
   bool playedBusy = false;
@@ -141,10 +140,10 @@ class DetailController extends ChangeNotifier {
     final network = repository.seasons(current.id);
     final episodeId = initialEpisodeId?.trim();
     final initialEpisode = episodeId == null || episodeId.isEmpty
-        ? Future<EmbyItem?>.value()
+        ? Future<MediaItem?>.value()
         : repository
               .item(episodeId)
-              .then<EmbyItem?>((item) => item, onError: (Object _) => null);
+              .then<MediaItem?>((item) => item, onError: (Object _) => null);
     if (seasons.isEmpty) {
       unawaited(() async {
         try {
@@ -282,7 +281,7 @@ class DetailController extends ChangeNotifier {
       }
       episodes = {
         for (final episode in [
-          ...(more ? episodes : <EmbyItem>[]),
+          ...(more ? episodes : <MediaItem>[]),
           ...page.items,
         ])
           episode.id: episode,
@@ -303,7 +302,7 @@ class DetailController extends ChangeNotifier {
     notifyListeners();
   }
 
-  EmbyItem? get playTarget {
+  MediaItem? get playTarget {
     final current = item;
     if (current == null) return null;
     if (!current.isSeries) return current;
@@ -321,7 +320,7 @@ class DetailController extends ChangeNotifier {
         episodes.firstOrNull;
   }
 
-  bool _inSelectedSeason(EmbyItem episode) {
+  bool _inSelectedSeason(MediaItem episode) {
     final season = seasonId;
     if (season == null || season.isEmpty) return false;
     return episode.seasonId == season || episode.parentId == season;
@@ -338,7 +337,7 @@ class DetailController extends ChangeNotifier {
     _resumeCancel = cancelToken;
     final revision = _seasonRevision;
     final identity = _identity;
-    EmbyItem? resume, firstUnwatched;
+    MediaItem? resume, firstUnwatched;
     String? resumeSeason, firstUnwatchedSeason;
     try {
       for (final season in seasons) {
@@ -352,7 +351,7 @@ class DetailController extends ChangeNotifier {
               episodes.isNotEmpty &&
               !episodesLoading;
           final page = visiblePage
-              ? EmbyItemPage(items: episodes)
+              ? MediaItemPage(items: episodes)
               : await repository.scanEpisodes(
                   season.id,
                   start: start,
@@ -427,12 +426,12 @@ class DetailController extends ChangeNotifier {
   }
 
   /// 乐观更新已看状态:本地立即生效,失败回滚。手机与 TV 详情共用。
-  void applyPlayed(EmbyItem target, {required bool played}) {
+  void applyPlayed(MediaItem target, {required bool played}) {
     applyItem(
       target.copyWith(
         userData: target.userData.copyWith(
           played: played,
-          playbackPositionTicks: 0,
+          playbackPosition: Duration(microseconds: (0) ~/ 10),
           playedPercentage: played ? 100 : 0,
         ),
       ),
@@ -472,9 +471,9 @@ class DetailController extends ChangeNotifier {
     }
   }
 
-  EmbyException _failure(Object value) => value is EmbyException
+  MediaServerException _failure(Object value) => value is MediaServerException
       ? value
-      : EmbyException(EmbyFailureKind.unknown, cause: value);
+      : MediaServerException(MediaServerFailureKind.unknown, cause: value);
   @override
   void dispose() {
     _resumeCancel?.cancel('detail-disposed');

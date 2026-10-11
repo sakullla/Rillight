@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 /// 每个服务器一组顶栏钉选顺序。未自定义时用片库默认前 N 个,其余进更多。
 /// 自定义后未勾选的不出现在顶栏、更多和首页片库。
@@ -40,13 +40,13 @@ class LibraryNavLayout {
     this.hidden = const [],
   });
 
-  final List<EmbyItem> pinned;
-  final List<EmbyItem> overflow;
-  final List<EmbyItem> hidden;
+  final List<MediaItem> pinned;
+  final List<MediaItem> overflow;
+  final List<MediaItem> hidden;
 }
 
 LibraryNavLayout arrangeLibraries(
-  List<EmbyItem> libraries,
+  List<MediaItem> libraries,
   List<String> pinnedIds, {
   required int maxPinned,
   bool customized = false,
@@ -152,7 +152,7 @@ class LibraryNavController extends ChangeNotifier {
 
   bool get customized => _customized;
 
-  LibraryNavLayout layout(List<EmbyItem> libraries, {required int maxPinned}) {
+  LibraryNavLayout layout(List<MediaItem> libraries, {required int maxPinned}) {
     return arrangeLibraries(
       libraries,
       _pinnedIds,

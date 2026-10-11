@@ -8,21 +8,21 @@ import 'package:flutter/scheduler.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/hero_artwork.dart';
 import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/library/item_format.dart';
 
 /// 轮播标题:单集用所属剧集名。
-String heroTitle(EmbyItem item) =>
+String heroTitle(MediaItem item) =>
     item.isEpisode && item.seriesName?.isNotEmpty == true
     ? item.seriesName!
     : item.name;
 
 /// 轮播 meta 行:年份 · 流派(最多两个) · 时长 / 季数。
 /// 只描述作品本身,不带任何观看记录(已看、进度、下一集)。
-List<String> heroMetaLabels(AppLocalizations l10n, EmbyItem item) {
+List<String> heroMetaLabels(AppLocalizations l10n, MediaItem item) {
   final year = item.productionYear;
   final seasons = item.childCount ?? 0;
   return [
@@ -40,7 +40,7 @@ List<String> heroMetaLabels(AppLocalizations l10n, EmbyItem item) {
 }
 
 /// 轮播条目的「为什么在这里」:最新电影 / 最新剧集。
-String heroKicker(AppLocalizations l10n, EmbyItem item) =>
+String heroKicker(AppLocalizations l10n, MediaItem item) =>
     item.isMovie ? l10n.heroNewMovie : l10n.heroNewSeries;
 
 /// 小号大写感的引导标签,放在标题上方;[onScrim] 决定用遮罩白还是主题强调色。
@@ -224,7 +224,7 @@ class HeroTextBlock extends StatelessWidget {
     this.logoMaxWidth,
   });
 
-  final EmbyItem item;
+  final MediaItem item;
   final Widget actions;
   final bool showOverview;
   final bool compact;

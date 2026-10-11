@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/emby/media_source_format.dart';
+import 'package:rillight/media_server/media_source_format.dart';
 
 /// 片源菜单两行:规格标题 + 来源/体积补充。
 class MediaSourceMenuTile extends StatelessWidget {

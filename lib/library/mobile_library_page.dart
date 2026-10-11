@@ -10,7 +10,7 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/browse_controller.dart';
@@ -87,7 +87,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
 
   BrowseController _newController() {
     final libraries = CatalogScope.of(context).libraries;
-    EmbyItem? view;
+    MediaItem? view;
     for (final library in libraries) {
       if (library.id == widget.viewId) {
         view = library;
@@ -505,7 +505,7 @@ int phoneLibraryColumnCount(double width, {double textScale = 1}) =>
 class _PhonePosterSliver extends StatelessWidget {
   const _PhonePosterSliver({required this.items, required this.gridWidth});
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final double gridWidth;
 
   @override
@@ -561,7 +561,7 @@ class _PhonePosterDelegate extends SliverChildBuilderDelegate {
         addAutomaticKeepAlives: false,
       );
 
-  final List<EmbyItem> items;
+  final List<MediaItem> items;
   final int imageMaxWidth;
 
   @override

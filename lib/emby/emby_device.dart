@@ -1,33 +1,23 @@
-class EmbyDeviceInfo {
-  const EmbyDeviceInfo({
-    required this.clientName,
-    required this.deviceName,
-    required this.deviceId,
-    required this.version,
-  });
+import 'package:rillight/media_server/device.dart';
 
-  final String clientName;
-  final String deviceName;
-  final String deviceId;
-  final String version;
-
-  String get defaultUserAgent => 'Rillight/$version';
-
-  String authorizationHeader({String? userId, String? token}) {
-    final parts = <String>[
-      'MediaBrowser Client="${_headerValue(clientName)}"',
-      'Device="${_headerValue(deviceName)}"',
-      'DeviceId="${_headerValue(deviceId)}"',
-      'Version="${_headerValue(version)}"',
-    ];
-    if (userId != null && userId.isNotEmpty) {
-      parts.add('UserId="${_headerValue(userId)}"');
-    }
-    if (token != null && token.isNotEmpty) {
-      parts.add('Token="${_headerValue(token)}"');
-    }
-    return parts.join(', ');
+String embyAuthorizationHeader(
+  ClientDeviceInfo device, {
+  String? userId,
+  String? token,
+}) {
+  final parts = <String>[
+    'MediaBrowser Client="${_headerValue(device.clientName)}"',
+    'Device="${_headerValue(device.deviceName)}"',
+    'DeviceId="${_headerValue(device.deviceId)}"',
+    'Version="${_headerValue(device.version)}"',
+  ];
+  if (userId != null && userId.isNotEmpty) {
+    parts.add('UserId="${_headerValue(userId)}"');
   }
+  if (token != null && token.isNotEmpty) {
+    parts.add('Token="${_headerValue(token)}"');
+  }
+  return parts.join(', ');
 }
 
 String _headerValue(String value) {
@@ -40,16 +30,4 @@ String _headerValue(String value) {
   }
   final trimmed = ascii.toString().trim();
   return trimmed.isEmpty ? 'Rillight' : trimmed;
-}
-
-String? normalizeUserAgent(String? value) {
-  final trimmed = value?.trim();
-  if (trimmed == null || trimmed.isEmpty) {
-    return null;
-  }
-  return trimmed;
-}
-
-String resolveUserAgent(String? custom, EmbyDeviceInfo device) {
-  return normalizeUserAgent(custom) ?? device.defaultUserAgent;
 }

@@ -1,3 +1,4 @@
+import 'package:rillight/player/playback_persistence.dart';
 import 'dart:async';
 import 'package:rillight/player/player_host_command.dart';
 import 'dart:convert';
@@ -5,11 +6,10 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:rillight/emby/device_profile.dart';
-import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/emby/media_source_format.dart';
+import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/media_source_format.dart';
 import 'package:rillight/player/cache/next_episode_prefix.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
@@ -32,7 +32,6 @@ import 'package:rillight/player/playback_switch_preflight.dart';
 export 'package:rillight/player/playback_switch_preflight.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/network_throughput.dart';
-import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -121,7 +120,7 @@ const List<double> kPlaybackRateLadder = [
 class NextEpisodeOffer {
   const NextEpisodeOffer({required this.item, this.remaining});
 
-  final EmbyItem item;
+  final MediaItem item;
   final Duration? remaining;
 
   bool get autoplay => remaining != null;
@@ -151,7 +150,7 @@ class PlayerController extends ChangeNotifier {
     this.preferredMediaSourceId,
     this.preferredAudioStreamIndex,
     this.preferredSubtitleStreamIndex,
-    this.startTimeTicks,
+    this.startPosition,
     this.settingsStore,
     this.runtime,
     this.observationSink,
@@ -174,7 +173,7 @@ class PlayerController extends ChangeNotifier {
            snapshotStore ??
            FilePlaybackSessionSnapshotStore.forCurrentProcess() {
     _pauseIntent = openRequest?.startPaused ?? false;
-    startTimeTicks ??= openRequest?.startTimeTicks;
+    startPosition ??= openRequest?.startPosition;
     preferredMediaSourceId ??= openRequest?.mediaSourceId;
     preferredAudioStreamIndex ??= openRequest?.audioStreamIndex;
     preferredSubtitleStreamIndex ??= openRequest?.subtitleStreamIndex;
@@ -199,7 +198,7 @@ class PlayerController extends ChangeNotifier {
   /// 关窗/换集时等待 Stopped 送达的上限;超时视为失败,不再阻塞。
   static const Duration stoppedDeadline = Duration(seconds: 3);
 
-  EmbyClient client;
+  MediaServerClient client;
   final PlaybackRuntime? runtime;
   final PlaybackObservationSink? observationSink;
   final PlaybackSwitchDispatcher? switchDispatcher;
@@ -223,11 +222,11 @@ class PlayerController extends ChangeNotifier {
   ({Uri baseUrl, String accessToken, String userId, String? userAgent})?
   _sharedClientRestore;
   PlaybackOrigin? _switchTarget;
-  EmbyItem? _switchTargetItem;
+  MediaItem? _switchTargetItem;
   ({
     PlaybackOrigin origin,
     ResolvedPlayback playback,
-    EmbyItem? item,
+    MediaItem? item,
     int position,
     int? audio,
     int? subtitle,
@@ -289,7 +288,7 @@ class PlayerController extends ChangeNotifier {
   String? preferredMediaSourceId;
   int? preferredAudioStreamIndex;
   int? preferredSubtitleStreamIndex;
-  int? startTimeTicks;
+  Duration? startPosition;
 
   final PlaybackCheckInMachine checkIn = PlaybackCheckInMachine();
 
@@ -423,12 +422,12 @@ class PlayerController extends ChangeNotifier {
   DateTime? _slowSince;
   DateTime _lastPlaybackUi = DateTime.fromMillisecondsSinceEpoch(0);
   PlayerErrorKind? error;
-  EmbyException? loadFailure;
+  MediaServerException? loadFailure;
   SubtitleNoticeKind? subtitleNotice;
   NextEpisodeOffer? nextEpisode;
   bool playbackEnded = false;
-  EmbyItem? item;
-  EmbyUser? user;
+  MediaItem? item;
+  MediaUser? user;
   ResolvedPlayback? resolved;
   PlayerSeriesPreference? _rememberedPreference;
   Map<String, PlayerSeriesPreference> _seriesPreferences = const {};
@@ -437,8 +436,8 @@ class PlayerController extends ChangeNotifier {
   // --- 剧集列表与切集(R7) ---
   bool episodeListLoading = false;
   bool episodeListFailed = false;
-  List<EmbyItem> seasons = const [];
-  List<EmbyItem> episodes = const [];
+  List<MediaItem> seasons = const [];
+  List<MediaItem> episodes = const [];
   String? episodeSeasonId;
   int episodeTotal = 0;
   int episodeWindowStart = 0;
@@ -692,8 +691,8 @@ class PlayerController extends ChangeNotifier {
       if (!_accepts(operation)) return;
       onStage?.call('catalog metadata');
 
-      late EmbyItem loadedItem;
-      EmbyUser? loadedUser;
+      late MediaItem loadedItem;
+      MediaUser? loadedUser;
       await Future.wait<void>([
         _restoreSettings(operation),
         () async {
@@ -716,7 +715,7 @@ class PlayerController extends ChangeNotifier {
             () async {
               try {
                 loadedUser = await _sourceRequest(client.getUser);
-              } on EmbyException {
+              } on MediaServerException {
                 // Optional preferences must not fail otherwise playable media.
               }
             }(),
@@ -744,7 +743,7 @@ class PlayerController extends ChangeNotifier {
         _resetEpisodeWindow();
       }
       user = loadedUser;
-      _catalogRuntime = durationFromTicks(item!.runTimeTicks ?? 0);
+      _catalogRuntime = (item!.runtime ?? Duration.zero);
       duration = _catalogRuntime;
       _applyRememberedPreference();
       final memory = _rememberedPreference;
@@ -759,11 +758,11 @@ class PlayerController extends ChangeNotifier {
           preferredAudioStreamIndex ??
           memory?.audioStreamIndex ??
           audioStreamIndex;
-      final chapterTicks = startTimeTicks;
-      if (chapterTicks != null && chapterTicks > 0) {
+      final chapterPosition = startPosition;
+      if (chapterPosition != null && chapterPosition > Duration.zero) {
         await _open(
           operation: operation,
-          startTicks: chapterTicks,
+          startTicks: ticksFromDuration(chapterPosition),
           startPaused:
               startPaused ??
               (openRequest?.itemId == itemId &&
@@ -775,7 +774,9 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      final resumeTicks = item!.canResume ? item!.resumePositionTicks : 0;
+      final resumeTicks = item!.canResume
+          ? ticksFromDuration(item!.resumePosition)
+          : 0;
       if (!autoResume) {
         await _open(
           operation: operation,
@@ -802,7 +803,7 @@ class PlayerController extends ChangeNotifier {
         subtitleOff: memorySubtitleOff,
         onStage: onStage,
       );
-    } on EmbyException catch (failure) {
+    } on MediaServerException catch (failure) {
       if (!_accepts(operation)) {
         return;
       }
@@ -1916,7 +1917,7 @@ class PlayerController extends ChangeNotifier {
   /// 切到任意集(剧集列表入口):源 id 每集不同,保留显示名以便对齐同名版本;
   /// 续播语义由 start() 按新集的进度决定。
   /// 已经到片尾再切走时,把当前集标成已看。
-  Future<void> playEpisode(EmbyItem episode) async {
+  Future<void> playEpisode(MediaItem episode) async {
     if (episode.id == itemId) {
       return;
     }
@@ -2021,7 +2022,7 @@ class PlayerController extends ChangeNotifier {
     preferredMediaSourceId = null;
     preferredAudioStreamIndex = null;
     preferredSubtitleStreamIndex = null;
-    startTimeTicks = null;
+    startPosition = null;
     autoResume = !fromStart;
     // Freeze credentials after retiring the old owner and installing the
     // verified concrete next-item line client.
@@ -2066,7 +2067,7 @@ class PlayerController extends ChangeNotifier {
           recursive: true,
           sortBy: 'IndexNumber',
           sortOrder: 'Ascending',
-          fields: EmbyClient.gridFields,
+          fields: MediaServerClient.gridFields,
         ),
       );
       if (!_accepts(operation)) {
@@ -2097,7 +2098,7 @@ class PlayerController extends ChangeNotifier {
       _episodeSeriesId = seriesId;
       episodeListLoading = false;
       _emit();
-    } on EmbyException {
+    } on MediaServerException {
       if (!_accepts(operation)) {
         return;
       }
@@ -2122,7 +2123,7 @@ class PlayerController extends ChangeNotifier {
         seasonId,
         aroundCurrent: item?.seasonId == seasonId,
       );
-    } on EmbyException {
+    } on MediaServerException {
       if (!_accepts(operation)) {
         return;
       }
@@ -2152,7 +2153,7 @@ class PlayerController extends ChangeNotifier {
     _emit();
     try {
       await _loadSeasonEpisodes(seasonId, aroundCurrent: true);
-    } on EmbyException {
+    } on MediaServerException {
       if (!_accepts(operation)) {
         return;
       }
@@ -2190,7 +2191,7 @@ class PlayerController extends ChangeNotifier {
             ? episodeTotal
             : episodeWindowEnd + page.items.length;
       }
-    } on EmbyException {
+    } on MediaServerException {
       if (!_accepts(operation) || gen != _episodePageGen) {
         return;
       }
@@ -2230,7 +2231,7 @@ class PlayerController extends ChangeNotifier {
         episodeTotal = page.totalRecordCount ?? episodeTotal;
         episodeWindowStart = start;
       }
-    } on EmbyException {
+    } on MediaServerException {
       if (!_accepts(operation) || gen != _episodePageGen) {
         return;
       }
@@ -2280,7 +2281,7 @@ class PlayerController extends ChangeNotifier {
     episodeWindowEnd = start + page.items.length;
   }
 
-  Future<EmbyItemPage> _querySeasonEpisodes(
+  Future<MediaItemPage> _querySeasonEpisodes(
     String seasonId,
     int startIndex, {
     int limit = kPlayerEpisodePageSize,
@@ -2294,7 +2295,7 @@ class PlayerController extends ChangeNotifier {
         sortOrder: 'Ascending',
         startIndex: startIndex,
         limit: limit,
-        fields: EmbyClient.gridFields,
+        fields: MediaServerClient.gridFields,
       ),
     );
   }
@@ -2307,7 +2308,7 @@ class PlayerController extends ChangeNotifier {
     episodeLoadingEarlier = false;
   }
 
-  List<EmbyItem> _dedupeEpisodes(Iterable<EmbyItem> items) {
+  List<MediaItem> _dedupeEpisodes(Iterable<MediaItem> items) {
     final seen = <String>{};
     return [
       for (final episode in items)
@@ -2357,7 +2358,7 @@ class PlayerController extends ChangeNotifier {
     final named = <PlayerSkipSegment>[];
     for (var i = 0; i < chapters.length; i++) {
       final chapter = chapters[i];
-      final start = durationFromTicks(chapter.startPositionTicks);
+      final start = chapter.startPosition;
       final type = chapter.markerType?.trim().toLowerCase() ?? '';
       switch (type) {
         case 'introstart':
@@ -2381,7 +2382,7 @@ class PlayerController extends ChangeNotifier {
         continue;
       }
       var end = i + 1 < chapters.length
-          ? durationFromTicks(chapters[i + 1].startPositionTicks)
+          ? chapters[i + 1].startPosition
           : (duration > start ? duration : start + const Duration(seconds: 30));
       if (end <= start) {
         continue;
@@ -2568,6 +2569,9 @@ class PlayerController extends ChangeNotifier {
         playSessionId: playback.playSessionId,
         mediaSource: playback.mediaSource,
         itemId: playback.itemId,
+        authorization: playback.authorization,
+        timeline: playback.timeline,
+        resources: playback.resources,
       );
     } catch (_) {
       return _strmTranscodeFallback(playback);
@@ -2592,10 +2596,13 @@ class PlayerController extends ChangeNotifier {
     }
     return ResolvedPlayback(
       playMethod: PlayMethod.transcode,
-      streamUrl: embyResourceUri(base, transcoding, token),
+      streamUrl: client.resolveResource(transcoding),
       playSessionId: playback.playSessionId,
       mediaSource: playback.mediaSource,
       itemId: playback.itemId,
+      authorization: playback.authorization,
+      timeline: playback.timeline,
+      resources: playback.resources,
     );
   }
 
@@ -2659,7 +2666,7 @@ class PlayerController extends ChangeNotifier {
       nextEpisode = NextEpisodeOffer(item: next);
       _noteNextOffer();
       _emit();
-    } on EmbyException {
+    } on MediaServerException {
       if (_accepts(operation)) {
         _nextUpOffered = false;
         _outroSkipAllowed = true;
@@ -2671,7 +2678,7 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  void _beginNextEpisodeCountdown(EmbyItem next) {
+  void _beginNextEpisodeCountdown(MediaItem next) {
     final operation = _operations.current;
     if (!_accepts(operation)) return;
     nextEpisode = NextEpisodeOffer(item: next, remaining: nextEpisodeCountdown);
@@ -3148,7 +3155,7 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<EmbyClient> _preflightSessionLine(ServerLine line) async {
+  Future<MediaServerClient> _preflightSessionLine(ServerLine line) async {
     final current = resolved;
     final token = client.accessToken;
     final userId = client.userId;
@@ -3195,7 +3202,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<({int startTicks, int? audio, int? subtitle, bool paused})> _linePlan(
-    EmbyClient next,
+    MediaServerClient next,
     ResolvedPlayback? current,
   ) async {
     if (current == null) throw StateError('Playback unavailable');
@@ -3793,7 +3800,7 @@ class PlayerController extends ChangeNotifier {
     try {
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
-          ? await (backend as VideoBackendCapabilities).deviceProfile(
+          ? await (backend as VideoBackendCapabilities).playbackCapabilities(
               maxStreamingBitrate,
             )
           : null;
@@ -3806,15 +3813,13 @@ class PlayerController extends ChangeNotifier {
               maxStreamingBitrate: maxStreamingBitrate,
               audioStreamIndex: audioStreamIndex,
               subtitleStreamIndex: subtitleStreamIndex,
-              deviceProfile: profile,
+              capabilities: profile,
             )
             .timeout(const Duration(seconds: 15)),
       );
       if (!_accepts(operation) || !identical(resolved, current)) return;
-      final resolvedNext = resolvePlayback(
+      final resolvedNext = client.resolvePlayback(
         info: info,
-        baseUrl: client.baseUrl!,
-        accessToken: client.accessToken!,
         itemId: itemId,
         mediaSourceId: current.mediaSource.id,
       );
@@ -3925,7 +3930,7 @@ class PlayerController extends ChangeNotifier {
       // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
-          ? await (backend as VideoBackendCapabilities).deviceProfile(
+          ? await (backend as VideoBackendCapabilities).playbackCapabilities(
               requestedBitrate ?? maxStreamingBitrate,
             )
           : null;
@@ -3934,14 +3939,14 @@ class PlayerController extends ChangeNotifier {
         () => requestClient.getPlaybackInfo(
           itemId: itemId,
           maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
-          startTimeTicks: startTicks > 0 ? startTicks : null,
+          startPosition: startTicks > 0 ? durationFromTicks(startTicks) : null,
           audioStreamIndex:
               audio ?? (strictTracks ? null : preferredAudioStreamIndex),
           subtitleStreamIndex: subtitleOff
               ? null
               : (subtitle ??
                     (strictTracks ? null : preferredSubtitleStreamIndex)),
-          deviceProfile: profile,
+          capabilities: profile,
           forceTranscode: forceTranscode,
         ),
       );
@@ -4018,10 +4023,8 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      final resolvedNext = resolvePlayback(
+      final resolvedNext = client.resolvePlayback(
         info: info,
-        baseUrl: client.baseUrl!,
-        accessToken: client.accessToken!,
         itemId: itemId,
         mediaSourceId: chosenId,
         forceTranscode: forceTranscode,
@@ -4044,8 +4047,10 @@ class PlayerController extends ChangeNotifier {
       }
       resolved = next;
       final sourceRuntime =
-          next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
-      if (startTicks > 0 && sourceRuntime > 0 && startTicks >= sourceRuntime) {
+          next.mediaSource.runtime ?? item?.runtime ?? Duration.zero;
+      if (startTicks > 0 &&
+          sourceRuntime > Duration.zero &&
+          durationFromTicks(startTicks) >= sourceRuntime) {
         await _failOpen(
           operation,
           detail: 'Resume position is outside target timeline',
@@ -4175,9 +4180,9 @@ class PlayerController extends ChangeNotifier {
         );
         if (!_accepts(operation)) return;
         final runtime =
-            next.mediaSource.runTimeTicks ?? item?.runTimeTicks ?? 0;
-        _catalogRuntime = durationFromTicks(runtime);
-        if (runtime > 0) {
+            next.mediaSource.runtime ?? item?.runtime ?? Duration.zero;
+        _catalogRuntime = runtime;
+        if (runtime > Duration.zero) {
           duration = _catalogRuntime;
         }
         _setPosition(_displayedPosition(backend.position));
@@ -4316,7 +4321,7 @@ class PlayerController extends ChangeNotifier {
       } else {
         await _failOpen(operation, detail: failure.toString());
       }
-    } on EmbyException catch (failure) {
+    } on MediaServerException catch (failure) {
       await _failOpen(operation, failure: failure);
     } catch (error) {
       await _failOpen(operation, detail: error.toString());
@@ -4370,7 +4375,7 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> _failOpen(
     PlaybackOperation operation, {
-    EmbyException? failure,
+    MediaServerException? failure,
     String? detail,
   }) async {
     if (!_accepts(operation)) return;
@@ -4504,7 +4509,7 @@ class PlayerController extends ChangeNotifier {
     if (!current()) return;
     final deliveryUrl = stream.deliveryUrl;
     final remote = deliveryUrl != null && deliveryUrl.isNotEmpty
-        ? embyResourceUri(client.baseUrl!, deliveryUrl, client.accessToken!)
+        ? client.resolveResource(deliveryUrl)
         : client.subtitleStreamUrl(
             itemId: itemId,
             mediaSourceId: source.id,
@@ -4723,7 +4728,7 @@ class PlayerController extends ChangeNotifier {
       if (!_ownsSession(session) || !_accepts(operation)) return;
       _onReportSucceeded();
       _writeSnapshot(session, report);
-    } on EmbyException catch (failure) {
+    } on MediaServerException catch (failure) {
       if (!_ownsSession(session) || !_accepts(operation)) return;
       _onReportFailed(failure);
     } catch (_) {
@@ -4782,7 +4787,7 @@ class PlayerController extends ChangeNotifier {
       await reportOutcomeSink?.call(report, observationSequence, true);
       _onReportSucceeded();
       _writeSnapshot(session, report);
-    } on EmbyException catch (failure) {
+    } on MediaServerException catch (failure) {
       if (_ownsSession(session)) {
         if (sent) {
           await reportOutcomeSink?.call(report, observationSequence, false);
@@ -4843,7 +4848,7 @@ class PlayerController extends ChangeNotifier {
     try {
       await session.observations.timeout(stoppedTimeout);
       await session
-          .enqueue(() => session.client.reportStopped(report))
+          .enqueue(() => session.client.stopPlayback(report))
           .timeout(stoppedTimeout);
       if (!session.ownsCredentials) return;
       if (_session == null &&
@@ -4860,7 +4865,7 @@ class PlayerController extends ChangeNotifier {
           await snapshotStore.delete();
         }
       });
-    } on EmbyException catch (failure) {
+    } on MediaServerException catch (failure) {
       if (_session == null &&
           session.ownsCredentials &&
           (_operations.current?.id == session.id ||
@@ -4890,12 +4895,12 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// [failure] 为 null 表示超时。
-  void _onReportFailed(EmbyException? failure) {
+  void _onReportFailed(MediaServerException? failure) {
     if (_operations.isClosed || _disposed) {
       progressSyncFailed = true;
       return;
     }
-    if (failure?.kind == EmbyFailureKind.sessionExpired) {
+    if (failure?.kind == MediaServerFailureKind.sessionExpired) {
       _progressTimer?.cancel();
       _progressTimer = null;
       _progressFailBannerTimer?.cancel();
@@ -4938,11 +4943,14 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     final snapshot = PlaybackSessionSnapshot(
+      serviceType: client.serviceType,
       itemId: report.itemId,
       mediaSourceId: report.mediaSourceId,
       playSessionId: report.playSessionId,
       playMethod: report.playMethod,
-      positionTicks: report.positionTicks,
+      position: Duration(
+        microseconds: (report.position.inMicroseconds * 10) ~/ 10,
+      ),
       baseUrl: baseUrl,
       userId: userId,
       timestamp: DateTime.now(),
@@ -5176,7 +5184,7 @@ class PlayerController extends ChangeNotifier {
             .interrupt(backend.stop, ensureRetired: true)
             .timeout(disposeTimeout),
         if (reportStopped && session != null && report != null)
-          session.client.reportStopped(report).timeout(stoppedTimeout),
+          session.client.stopPlayback(report).timeout(stoppedTimeout),
         _enqueueSnapshot(snapshotStore.delete),
       ]);
     } finally {
@@ -5257,7 +5265,9 @@ class PlayerController extends ChangeNotifier {
       mediaSourceId: resolvedPlayback?.mediaSource.id ?? itemId,
       playSessionId: resolvedPlayback?.playSessionId ?? '',
       playMethod: resolvedPlayback?.playMethod ?? PlayMethod.directStream,
-      positionTicks: positionTicks ?? ticksFromDuration(position),
+      position: Duration(
+        microseconds: (positionTicks ?? ticksFromDuration(position)) ~/ 10,
+      ),
       isPaused: !isPlaying,
       volumeLevel: volume,
       audioStreamIndex: audioStreamIndex,
@@ -5316,7 +5326,7 @@ class PlayerController extends ChangeNotifier {
           episode.copyWith(
             userData: episode.userData.copyWith(
               played: true,
-              playbackPositionTicks: 0,
+              playbackPosition: Duration(microseconds: (0) ~/ 10),
               playedPercentage: 100,
             ),
           )
@@ -5373,12 +5383,12 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       _presentCompletedNext(next);
-    } on EmbyException {
+    } on MediaServerException {
       // 结束卡已在。
     }
   }
 
-  void _presentCompletedNext(EmbyItem next) {
+  void _presentCompletedNext(MediaItem next) {
     if (_disposed) {
       return;
     }
@@ -5418,7 +5428,7 @@ class PlayerController extends ChangeNotifier {
     unawaited(_armNextPrefix(next));
   }
 
-  Future<void> _armNextPrefix(EmbyItem next) async {
+  Future<void> _armNextPrefix(MediaItem next) async {
     final operation = _operations.current;
     if (!_accepts(operation) || _userPausedPrefix) return;
     if (nextEpisode?.item.id != next.id) return;
@@ -5428,7 +5438,7 @@ class PlayerController extends ChangeNotifier {
     try {
       final requestClient = client;
       final profile = backend is VideoBackendCapabilities
-          ? await (backend as VideoBackendCapabilities).deviceProfile(
+          ? await (backend as VideoBackendCapabilities).playbackCapabilities(
               maxStreamingBitrate,
             )
           : null;
@@ -5441,7 +5451,7 @@ class PlayerController extends ChangeNotifier {
         () => requestClient.getPlaybackInfo(
           itemId: next.id,
           maxStreamingBitrate: maxStreamingBitrate,
-          deviceProfile: profile,
+          capabilities: profile,
         ),
       );
       if (!_accepts(operation) ||
@@ -5449,10 +5459,8 @@ class PlayerController extends ChangeNotifier {
           nextEpisode?.item.id != next.id) {
         return;
       }
-      final resolvedPlayback = resolvePlayback(
+      final resolvedPlayback = client.resolvePlayback(
         info: info,
-        baseUrl: base,
-        accessToken: token,
         itemId: next.id,
         mediaSourceId: preferredPlaybackSourceId(
           sources: info.mediaSources,
@@ -5688,7 +5696,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   int _rewound(int ticks) {
-    final rewind = (user?.resumeRewindSeconds ?? 0) * kEmbyTicksPerSecond;
+    final rewind = (user?.resumeRewindSeconds ?? 0) * kLegacyTicksPerSecond;
     final value = ticks - rewind;
     return value < 0 ? 0 : value;
   }

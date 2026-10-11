@@ -1,11 +1,12 @@
+import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
-import 'package:rillight/player/bif_preview.dart';
+import 'package:rillight/media_server/resources.dart';
 import 'package:rillight/player/player_controller.dart';
 
 /// Decorates the slider without replacing its input, keyboard or semantics.
@@ -29,8 +30,8 @@ class _SeekPreviewState extends State<SeekPreview> {
   Timer? _debounce;
   CancelToken? _cancel;
   String? _itemId;
-  Future<BifPreview?>? _bifFuture;
-  BifPreview? _bif;
+  Future<MediaPreview?>? _bifFuture;
+  MediaPreview? _bif;
   Uint8List? _image;
   ItemChapter? _chapter;
   Future<Uint8List?>? _chapterFuture;
@@ -41,6 +42,7 @@ class _SeekPreviewState extends State<SeekPreview> {
     super.didUpdateWidget(oldWidget);
     if (_itemId != widget.controller.itemId) {
       _cancel?.cancel();
+      unawaited(_bif?.close());
       _bifFuture = null;
       _bif = null;
       _chapter = null;
@@ -56,6 +58,7 @@ class _SeekPreviewState extends State<SeekPreview> {
   void dispose() {
     _debounce?.cancel();
     _cancel?.cancel();
+    unawaited(_bif?.close());
     super.dispose();
   }
 
@@ -69,28 +72,24 @@ class _SeekPreviewState extends State<SeekPreview> {
     final revision = ++_revision;
     final fraction = widget.dragValue ?? _hover;
     if (fraction == null) return;
-    if (_bif != null) {
-      _image = _bif!.imageAt(_position(fraction));
-      return;
-    }
     _debounce = Timer(
       const Duration(milliseconds: 150),
       () => unawaited(_loadImage(revision)),
     );
   }
 
-  Future<BifPreview?> _loadBif() async {
+  Future<MediaPreview?> _loadBif() async {
     final client = widget.controller.client;
     final id = widget.controller.itemId;
     _itemId = id;
     final cancel = _cancel = CancelToken();
     try {
-      if (!await client.hasVideoPreviewThumbnails(id, cancelToken: cancel)) {
+      final preview = await client.openPreview(id);
+      if (cancel.isCancelled) {
+        await preview?.close();
         return null;
       }
-      return BifPreview.parse(
-        await client.getVideoPreviewBif(id, cancelToken: cancel),
-      );
+      return preview;
     } catch (_) {
       return null;
     }
@@ -106,15 +105,18 @@ class _SeekPreviewState extends State<SeekPreview> {
     final fraction = widget.dragValue ?? _hover;
     if (fraction == null) return;
     if (bif != null) {
-      setState(() => _image = bif.imageAt(_position(fraction)));
+      final frame = await bif.frameAt(_position(fraction));
+      if (!mounted || revision != _revision) return;
+      final bytes = frame == null ? null : await _previewBytes(frame);
+      if (!mounted || revision != _revision) return;
+      setState(() => _image = bytes);
       return;
     }
-    final ticks = _position(fraction).inMicroseconds * 10;
+    final position = _position(fraction);
     ItemChapter? chapter;
     for (final entry in widget.controller.item?.chapters ?? <ItemChapter>[]) {
-      if (entry.imageTag == null || entry.startPositionTicks > ticks) continue;
-      if (chapter == null ||
-          entry.startPositionTicks > chapter.startPositionTicks) {
+      if (entry.imageTag == null || entry.startPosition > position) continue;
+      if (chapter == null || entry.startPosition > chapter.startPosition) {
         chapter = entry;
       }
     }
@@ -270,4 +272,51 @@ String _clock(Duration time) {
   return time.inHours > 0
       ? '${time.inHours}:$minutes:$seconds'
       : '$minutes:$seconds';
+}
+
+Future<Uint8List> _previewBytes(PreviewFrame frame) async {
+  final tile = frame.tile;
+  if (tile == null) return frame.bytes;
+  if (tile.x < 0 ||
+      tile.y < 0 ||
+      tile.width <= 0 ||
+      tile.height <= 0 ||
+      tile.width > 4096 ||
+      tile.height > 4096) {
+    throw const FormatException('Invalid preview tile');
+  }
+  final codec = await ui.instantiateImageCodec(frame.bytes);
+  final image = (await codec.getNextFrame()).image;
+  codec.dispose();
+  try {
+    if (tile.x + tile.width > image.width ||
+        tile.y + tile.height > image.height) {
+      throw const FormatException('Preview tile outside image');
+    }
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    canvas.drawImageRect(
+      image,
+      ui.Rect.fromLTWH(
+        tile.x.toDouble(),
+        tile.y.toDouble(),
+        tile.width.toDouble(),
+        tile.height.toDouble(),
+      ),
+      ui.Rect.fromLTWH(0, 0, tile.width.toDouble(), tile.height.toDouble()),
+      ui.Paint(),
+    );
+    final picture = recorder.endRecording();
+    final cropped = await picture.toImage(tile.width, tile.height);
+    picture.dispose();
+    try {
+      return (await cropped.toByteData(
+        format: ui.ImageByteFormat.png,
+      ))!.buffer.asUint8List();
+    } finally {
+      cropped.dispose();
+    }
+  } finally {
+    image.dispose();
+  }
 }

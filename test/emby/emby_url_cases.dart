@@ -1,18 +1,19 @@
+import 'package:rillight/media_server/server_address.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/emby/emby_errors.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/emby/emby_url.dart';
 
 void main() {
   test('defaults missing scheme to http and strips trailing slash', () {
     expect(
-      normalizeEmbyBaseUrl('192.168.1.8:8096/'),
+      normalizeServerAddress('192.168.1.8:8096/'),
       Uri.parse('http://192.168.1.8:8096'),
     );
   });
 
   test('keeps https and optional subpath', () {
     expect(
-      normalizeEmbyBaseUrl(' https://emby.example.com/emby/ '),
+      normalizeServerAddress(' https://emby.example.com/emby/ '),
       Uri.parse('https://emby.example.com/emby'),
     );
   });
@@ -24,18 +25,18 @@ void main() {
       'https://例子。example',
       'https://xn--fsqu00a.example',
     ]) {
-      final url = normalizeEmbyBaseUrl(input);
+      final url = normalizeServerAddress(input);
       expect(url.toString(), 'https://xn--fsqu00a.example');
-      expect(normalizeEmbyBaseUrl(url.toString()), url);
+      expect(normalizeServerAddress(url.toString()), url);
     }
     expect(
-      normalizeEmbyBaseUrl('BÜCHER.example:8096').toString(),
+      normalizeServerAddress('BÜCHER.example:8096').toString(),
       'http://xn--bcher-kva.example:8096',
     );
   });
 
   test('internationalized hosts preserve ports and escaped proxy paths', () {
-    final url = normalizeEmbyBaseUrl('https://例子.example:8920/媒体/a%2Fb/');
+    final url = normalizeServerAddress('https://例子.example:8920/媒体/a%2Fb/');
     expect(url.host, 'xn--fsqu00a.example');
     expect(url.port, 8920);
     expect(url.path, '/%E5%AA%92%E4%BD%93/a%2Fb');
@@ -54,7 +55,7 @@ void main() {
       'http://localhost:8096',
       'https://a.123.example',
     ]) {
-      expect(normalizeEmbyBaseUrl(address), Uri.parse(address));
+      expect(normalizeServerAddress(address), Uri.parse(address));
     }
   });
 
@@ -66,13 +67,13 @@ void main() {
       'https://[invalid]',
     ]) {
       expect(
-        () => normalizeEmbyBaseUrl(address),
+        () => normalizeServerAddress(address),
         throwsA(
-          isA<EmbyException>()
+          isA<MediaServerException>()
               .having(
                 (error) => error.kind,
                 'kind',
-                EmbyFailureKind.invalidAddress,
+                MediaServerFailureKind.invalidAddress,
               )
               .having((error) => error.detail, 'detail', isNull),
         ),
@@ -82,22 +83,22 @@ void main() {
 
   test('rejects empty and non-http schemes', () {
     expect(
-      () => normalizeEmbyBaseUrl('  '),
+      () => normalizeServerAddress('  '),
       throwsA(
-        isA<EmbyException>().having(
+        isA<MediaServerException>().having(
           (error) => error.kind,
           'kind',
-          EmbyFailureKind.invalidAddress,
+          MediaServerFailureKind.invalidAddress,
         ),
       ),
     );
     expect(
-      () => normalizeEmbyBaseUrl('ftp://emby.local'),
+      () => normalizeServerAddress('ftp://emby.local'),
       throwsA(
-        isA<EmbyException>().having(
+        isA<MediaServerException>().having(
           (error) => error.kind,
           'kind',
-          EmbyFailureKind.invalidAddress,
+          MediaServerFailureKind.invalidAddress,
         ),
       ),
     );
@@ -105,7 +106,7 @@ void main() {
 
   test('joins paths without dropping a subpath prefix', () {
     expect(
-      joinEmbyPath(
+      joinServerPath(
         Uri.parse('http://emby.local/emby'),
         '/System/Info/Public',
       ).toString(),
@@ -154,7 +155,7 @@ void main() {
     }
     // Joining the user-entered mount itself is not an API operation.
     expect(
-      joinEmbyPath(Uri.parse('https://emby.local'), '/media').path,
+      joinServerPath(Uri.parse('https://emby.local'), '/media').path,
       '/media',
     );
   });

@@ -1,10 +1,9 @@
+import 'package:rillight/media_server/server_address.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
-
-import '../emby/emby_url.dart';
 
 import 'cache/http_cache_policy.dart';
 import 'cache/hls_cache_index.dart';
@@ -1537,7 +1536,7 @@ class PlaybackHttpProxy {
         .map((e) => e.value)
         .where((e) => e.isNotEmpty)
         .toSet();
-    return withoutEmbyTokenValues(url, tokens);
+    return withoutCredentialValues(url, tokens);
   }
 
   Future<(HttpClientResponse, Uri)> _fetch(

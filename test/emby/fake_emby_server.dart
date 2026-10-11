@@ -104,11 +104,11 @@ class FakeEpisode {
     required this.seasonId,
     this.indexNumber,
     this.parentIndexNumber,
-    this.runTimeTicks,
+    this.runtime,
     this.overview,
     this.primaryImageTag,
     this.played = false,
-    this.playbackPositionTicks = 0,
+    this.playbackPosition = Duration.zero,
     this.playedPercentage,
     this.nextUp = false,
     this.dateCreated,
@@ -121,11 +121,11 @@ class FakeEpisode {
   final String seasonId;
   final int? indexNumber;
   final int? parentIndexNumber;
-  final int? runTimeTicks;
+  final Duration? runtime;
   final String? overview;
   final String? primaryImageTag;
   final bool played;
-  final int playbackPositionTicks;
+  final Duration playbackPosition;
   final double? playedPercentage;
   final bool nextUp;
   final DateTime? dateCreated;
@@ -136,20 +136,20 @@ class FakeEpisode {
 class FakeChapter {
   const FakeChapter({
     required this.name,
-    required this.startPositionTicks,
+    required this.startPosition,
     this.imageTag,
     this.markerType,
   });
 
   final String name;
-  final int startPositionTicks;
+  final Duration startPosition;
   final String? imageTag;
   final String? markerType;
 
   Map<String, dynamic> toJson() {
     return {
       'Name': name,
-      'StartPositionTicks': startPositionTicks,
+      'StartPositionTicks': startPosition.inMicroseconds * 10,
       if (imageTag != null) 'ImageTag': imageTag,
       if (markerType != null) 'MarkerType': markerType,
     };
@@ -203,7 +203,7 @@ class FakeEmbyItem {
     this.collectionType,
     this.overview,
     this.productionYear,
-    this.runTimeTicks,
+    this.runtime,
     this.childCount,
     this.seriesName,
     this.seriesId,
@@ -220,7 +220,7 @@ class FakeEmbyItem {
     this.parentBackdropItemId,
     this.parentBackdropImageTag,
     this.played = false,
-    this.playbackPositionTicks = 0,
+    this.playbackPosition = Duration.zero,
     this.playedPercentage,
     this.hideFromResume = false,
     this.nextUp = false,
@@ -255,7 +255,7 @@ class FakeEmbyItem {
   String? collectionType;
   String? overview;
   int? productionYear;
-  int? runTimeTicks;
+  Duration? runtime;
   int? childCount;
   String? seriesName;
   String? seriesId;
@@ -278,7 +278,7 @@ class FakeEmbyItem {
   /// 剧集背景图列表。非空时优先于单张 [parentBackdropImageTag]。
   List<String> parentBackdropImageTags = const [];
   bool played;
-  int playbackPositionTicks;
+  Duration playbackPosition;
   double? playedPercentage;
   bool hideFromResume;
   bool nextUp;
@@ -316,7 +316,7 @@ class FakeEmbyItem {
       if (collectionType != null) 'CollectionType': collectionType,
       if (overview != null) 'Overview': overview,
       if (productionYear != null) 'ProductionYear': productionYear,
-      if (runTimeTicks != null) 'RunTimeTicks': runTimeTicks,
+      if (runtime != null) 'RunTimeTicks': runtime!.inMicroseconds * 10,
       if (childCount != null) 'ChildCount': childCount,
       if (seriesName != null) 'SeriesName': seriesName,
       if (seriesId != null) 'SeriesId': seriesId,
@@ -368,7 +368,7 @@ class FakeEmbyItem {
       'UserData': {
         'IsFavorite': favorite,
         'Played': played,
-        'PlaybackPositionTicks': playbackPositionTicks,
+        'PlaybackPositionTicks': playbackPosition.inMicroseconds * 10,
         if (playedPercentage != null) 'PlayedPercentage': playedPercentage,
         if (lastPlayedDate != null)
           'LastPlayedDate': lastPlayedDate!.toIso8601String(),
@@ -448,6 +448,8 @@ final Uint8List kTinyPng = Uint8List.fromList(const [
 ]);
 
 class FakeEmbyServer {
+  final releasedPlaybackSessions = <String>[];
+  int? releaseEncodingStatus;
   FakeEmbyServer({
     this.serverId = 'server-id-1',
     this.serverName = '灯川测试',
@@ -631,11 +633,11 @@ class FakeEmbyServer {
           parentIndexNumber:
               episode.parentIndexNumber ??
               _itemById(episode.seasonId)?.indexNumber,
-          runTimeTicks: episode.runTimeTicks,
+          runtime: episode.runtime,
           overview: episode.overview,
           primaryImageTag: episode.primaryImageTag,
           played: episode.played,
-          playbackPositionTicks: episode.playbackPositionTicks,
+          playbackPosition: episode.playbackPosition,
           playedPercentage: episode.playedPercentage,
           nextUp: episode.nextUp,
           dateCreated: episode.dateCreated,
@@ -780,6 +782,20 @@ class FakeEmbyServer {
     List<String> segments,
     Stream<Uint8List>? requestStream,
   ) async {
+    if (method == 'DELETE' && segments.join('/') == 'Videos/ActiveEncodings') {
+      final session = options.uri.queryParameters['PlaySessionId'];
+      if (session == null ||
+          session.isEmpty ||
+          options.uri.queryParameters['DeviceId']?.isNotEmpty != true) {
+        return _json(400, {'error': 'Missing playback owner'});
+      }
+      if (releaseEncodingStatus != null) {
+        return _json(releaseEncodingStatus!, {'error': 'cleanup failed'});
+      }
+      releasedPlaybackSessions.add(session);
+      return _json(200, {});
+    }
+
     if (segments.length == 2 && segments[0] == 'Users' && method == 'GET') {
       return _handleUser(segments[1]);
     }
@@ -1044,7 +1060,7 @@ class FakeEmbyServer {
       'SupportsDirectPlay': direct,
       'SupportsDirectStream': direct,
       'SupportsTranscoding': true,
-      'RunTimeTicks': item.runTimeTicks ?? 0,
+      'RunTimeTicks': (item.runtime?.inMicroseconds ?? 0) * 10,
       'DefaultAudioStreamIndex': ?defaultAudio,
       'DefaultSubtitleStreamIndex': ?defaultSubtitle,
       'MediaStreams': [for (final stream in streams) stream.toJson()],
@@ -1128,12 +1144,13 @@ class FakeEmbyServer {
     if (itemId != null && ticks is num) {
       final item = _itemById(itemId);
       if (item != null) {
-        item.playbackPositionTicks = ticks.toInt();
-        final runtime = item.runTimeTicks;
-        if (runtime != null && runtime > 0) {
-          item.playedPercentage = (ticks.toInt() / runtime * 100)
-              .clamp(0, 100)
-              .toDouble();
+        item.playbackPosition = Duration(microseconds: ticks.toInt() ~/ 10);
+        final runtime = item.runtime;
+        if (runtime != null && runtime > Duration.zero) {
+          item.playedPercentage =
+              (ticks.toInt() / (runtime.inMicroseconds * 10) * 100)
+                  .clamp(0, 100)
+                  .toDouble();
         }
       }
     }
@@ -1256,7 +1273,7 @@ class FakeEmbyServer {
                   (item.type == 'Movie' || item.type == 'Episode') &&
                   !item.played &&
                   !item.hideFromResume &&
-                  item.playbackPositionTicks > 0,
+                  item.playbackPosition > Duration.zero,
             )
             .toList(),
         options,
@@ -1292,7 +1309,7 @@ class FakeEmbyServer {
       if (item == null) {
         return _json(404, {'error': 'not found'});
       }
-      item.playbackPositionTicks = 0;
+      item.playbackPosition = Duration.zero;
       item.playedPercentage = 0;
       item.played = false;
       return _json(200, item.toJson()['UserData'] as Map<String, dynamic>);
@@ -1319,7 +1336,7 @@ class FakeEmbyServer {
       }
       if (method == 'POST') {
         item.played = true;
-        item.playbackPositionTicks = 0;
+        item.playbackPosition = Duration.zero;
         item.playedPercentage = 100;
         item.nextUp = false;
         return _json(200, item.toJson()['UserData'] as Map<String, dynamic>);
@@ -1464,7 +1481,7 @@ class FakeEmbyServer {
         return false;
       }
       if (filters.contains('IsResumable') &&
-          (item.played || item.playbackPositionTicks <= 0)) {
+          (item.played || item.playbackPosition <= Duration.zero)) {
         return false;
       }
       if (searchTerm != null &&
@@ -1552,7 +1569,9 @@ class FakeEmbyServer {
               b.lastPlayedDate ?? DateTime.fromMillisecondsSinceEpoch(0),
             );
       case 'Runtime':
-        return (a.runTimeTicks ?? 0).compareTo(b.runTimeTicks ?? 0);
+        return (a.runtime ?? Duration.zero).compareTo(
+          b.runtime ?? Duration.zero,
+        );
       case 'Random':
         return a.id.compareTo(b.id);
       case 'IndexNumber':
@@ -1841,15 +1860,21 @@ List<FakeEmbyItem> defaultCatalogItems() {
       parentId: 'view-movies',
       overview: 'A thief who steals corporate secrets through dream-sharing.',
       productionYear: 2010,
-      runTimeTicks: hour * 2 + minute * 28,
-      playbackPositionTicks: minute * 59,
+      runtime: Duration(microseconds: (hour * 2 + minute * 28) ~/ 10),
+      playbackPosition: Duration(microseconds: (minute * 59) ~/ 10),
       playedPercentage: 40,
       primaryImageTag: 'tag-inception',
       dateCreated: DateTime.utc(2024, 1, 1),
       communityRating: 8.8,
       chapters: const [
-        FakeChapter(name: 'Chapter 1', startPositionTicks: 0),
-        FakeChapter(name: 'Chapter 2', startPositionTicks: 7 * 60 * 10000000),
+        FakeChapter(
+          name: 'Chapter 1',
+          startPosition: Duration(microseconds: (0) ~/ 10),
+        ),
+        FakeChapter(
+          name: 'Chapter 2',
+          startPosition: Duration(microseconds: (7 * 60 * 10000000) ~/ 10),
+        ),
       ],
       mediaStreams: const [
         FakeMediaStream(
@@ -1886,7 +1911,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       parentId: 'view-movies',
       overview: 'An old man flies his house to Paradise Falls.',
       productionYear: 2009,
-      runTimeTicks: minute * 96,
+      runtime: Duration(microseconds: (minute * 96) ~/ 10),
       primaryImageTag: 'tag-up',
       dateCreated: DateTime.utc(2026, 1, 1),
     ),
@@ -1905,7 +1930,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       type: 'Movie',
       parentId: 'view-movies',
       productionYear: 2012,
-      runTimeTicks: minute * 90,
+      runtime: Duration(microseconds: (minute * 90) ~/ 10),
       forceTranscode: true,
       supportsDirectPlay: false,
       supportsDirectStream: false,
@@ -1917,7 +1942,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       type: 'Movie',
       parentId: 'view-movies',
       productionYear: 2015,
-      runTimeTicks: minute * 80,
+      runtime: Duration(microseconds: (minute * 80) ~/ 10),
       dateCreated: DateTime.utc(2023, 6, 1),
       mediaStreams: const [
         FakeMediaStream(
@@ -1978,7 +2003,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       overview: 'Monica gets a new apartment.',
       played: true,
       playedPercentage: 100,
-      runTimeTicks: minute * 22,
+      runtime: Duration(microseconds: (minute * 22) ~/ 10),
       dateCreated: DateTime.utc(2024, 5, 2),
     ),
     FakeEmbyItem(
@@ -1992,7 +2017,7 @@ List<FakeEmbyItem> defaultCatalogItems() {
       indexNumber: 2,
       parentIndexNumber: 1,
       nextUp: true,
-      runTimeTicks: minute * 22,
+      runtime: Duration(microseconds: (minute * 22) ~/ 10),
       primaryImageTag: 'tag-e2',
       dateCreated: DateTime.utc(2026, 2, 1),
     ),

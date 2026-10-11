@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/tv_widgets.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 void main() {
   testWidgets('root dialog keeps its editor focus above a nested TV route', (
@@ -71,7 +71,7 @@ void main() {
         title: name,
         items: List.generate(
           count,
-          (i) => EmbyItem(id: '$name-$i', name: '$name-$i', type: 'Movie'),
+          (i) => MediaItem(id: '$name-$i', name: '$name-$i', type: 'Movie'),
         ),
         trailing: trailing
             ? (_, metrics) =>

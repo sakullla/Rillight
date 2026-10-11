@@ -3,7 +3,7 @@ import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/catalog_filter_button.dart';
 import 'package:rillight/library/tv_library_page.dart';
@@ -148,7 +148,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
 }
 
 Widget _posterGrid(
-  List<EmbyItem> items,
+  List<MediaItem> items,
   TvGridMetrics metrics,
   TvReturnFocus focus,
 ) {

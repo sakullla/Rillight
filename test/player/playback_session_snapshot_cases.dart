@@ -1,7 +1,9 @@
+import 'package:rillight/player/playback_persistence.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 
 PlaybackSessionSnapshot _snapshot({int positionTicks = 12345678}) {
@@ -10,7 +12,7 @@ PlaybackSessionSnapshot _snapshot({int positionTicks = 12345678}) {
     mediaSourceId: 'source-up',
     playSessionId: 'play-1',
     playMethod: PlayMethod.transcode,
-    positionTicks: positionTicks,
+    position: Duration(microseconds: (positionTicks) ~/ 10),
     baseUrl: 'https://emby.example.com/',
     userId: 'user-alice',
     timestamp: DateTime.utc(2026, 9, 14, 12, 30),
@@ -27,7 +29,10 @@ void main() {
       expect(decoded.mediaSourceId, original.mediaSourceId);
       expect(decoded.playSessionId, original.playSessionId);
       expect(decoded.playMethod, PlayMethod.transcode);
-      expect(decoded.positionTicks, original.positionTicks);
+      expect(
+        decoded.position.inMicroseconds * 10,
+        original.position.inMicroseconds * 10,
+      );
       expect(decoded.baseUrl, original.baseUrl);
       expect(decoded.userId, original.userId);
       expect(decoded.timestamp, original.timestamp);
@@ -50,13 +55,13 @@ void main() {
 
   group('PlaybackReport.fromSnapshot', () {
     test('produces a Stopped payload consistent with toJson', () {
-      final report = PlaybackReport.fromSnapshot(_snapshot());
-      final json = report.toJson();
+      final report = playbackReportFromSnapshot(_snapshot());
+      final json = encodeEmbyPlaybackReport(report);
       expect(json['ItemId'], 'movie-up');
       expect(json['MediaSourceId'], 'source-up');
       expect(json['PlaySessionId'], 'play-1');
       expect(json['PlayMethod'], 'Transcode');
-      expect(json['PositionTicks'], 12345678);
+      expect(json['PositionTicks'], 12345670);
       expect(json['IsPaused'], isTrue);
       expect(json.containsKey('EventName'), isFalse);
     });
@@ -118,13 +123,16 @@ void main() {
         final restored = await store.read();
         expect(restored, isNotNull);
         expect(restored!.itemId, 'movie-up');
-        expect(restored.positionTicks, 99);
+        expect(restored.position, const Duration(microseconds: 9));
         expect(restored.baseUrl, 'https://emby.example.com/');
         expect(restored.userId, 'user-alice');
 
         // 覆盖写:最新位置生效。
         await store.write(_snapshot(positionTicks: 100));
-        expect((await store.read())!.positionTicks, 100);
+        expect(
+          (await store.read())!.position,
+          const Duration(microseconds: 10),
+        );
 
         // 损坏内容读取为 null,而不是抛出。
         await store.file.writeAsString('not json');

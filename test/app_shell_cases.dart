@@ -17,7 +17,7 @@ import 'package:rillight/auth/connect_page.dart';
 import 'helpers/synthetic_source_fixture.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
-import 'package:rillight/emby/emby_device.dart';
+import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/home_page.dart';
 import 'package:rillight/library/item_detail_page.dart';
@@ -29,7 +29,7 @@ import 'package:rillight/search/search_overlay.dart';
 
 import 'emby/fake_emby_server.dart';
 
-const _device = EmbyDeviceInfo(
+const _device = ClientDeviceInfo(
   clientName: 'Rillight',
   deviceName: 'test',
   deviceId: 'device-app-shell',

@@ -1,3 +1,4 @@
+import 'package:rillight/media_server/server_address.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -6,10 +7,10 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_errors.dart';
-import 'package:rillight/emby/emby_url.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/errors.dart';
 
 class AuthSession {
   const AuthSession({
@@ -46,7 +47,7 @@ class AuthController extends ChangeNotifier {
           access: RegionAccessController(),
           store: servers,
           credentials: credentials,
-          createClient: () => EmbyClient(device: client.device),
+          createClient: client.createDetached,
         );
     this.servers = this.sources.ordinaryStore;
     this.sources.addMembershipCleanup(_clearSourceContribution);
@@ -54,12 +55,12 @@ class AuthController extends ChangeNotifier {
     client.onRefreshSession = _refreshSession;
   }
 
-  factory AuthController.memory({EmbyClient? client}) {
+  factory AuthController.memory({MediaServerClient? client}) {
     return AuthController(
       client:
           client ??
           EmbyClient(
-            device: const EmbyDeviceInfo(
+            device: const ClientDeviceInfo(
               clientName: 'Rillight',
               deviceName: 'test',
               deviceId: 'rillight-memory-device',
@@ -71,7 +72,7 @@ class AuthController extends ChangeNotifier {
     );
   }
 
-  final EmbyClient client;
+  final MediaServerClient client;
   final CredentialStore credentials;
   late final ServerListStore servers;
   late final SourceSessionRegistry sources;
@@ -100,12 +101,12 @@ class AuthController extends ChangeNotifier {
   List<SavedServer> _savedServers = const [];
   SavedServer? _prefill;
   String? _rememberedServerId;
-  EmbyException? _failure;
+  MediaServerException? _failure;
   LineSwitchFailure? _lineSwitchFailure;
   bool _busy = false;
   bool _handlingExpiry = false;
   LibraryCounts? _libraryCounts;
-  EmbyException? _libraryCountsFailure;
+  MediaServerException? _libraryCountsFailure;
   String? _libraryCountsServerId;
   bool _libraryCountsLoading = false;
   int _libraryCountsSeq = 0;
@@ -114,7 +115,7 @@ class AuthController extends ChangeNotifier {
   AuthSession? get session => _session;
   List<SavedServer> get savedServers => _savedServers;
   SavedServer? get prefill => _prefill;
-  EmbyException? get failure => _failure;
+  MediaServerException? get failure => _failure;
   LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
   bool get isLoggedIn => _session != null;
@@ -123,7 +124,7 @@ class AuthController extends ChangeNotifier {
   LibraryCounts? get libraryCounts => _libraryCounts;
 
   /// 最近一次库规模拉取失败的原因;成功或开始新一次拉取时清空。
-  EmbyException? get libraryCountsFailure => _libraryCountsFailure;
+  MediaServerException? get libraryCountsFailure => _libraryCountsFailure;
 
   /// 库规模所属的服务器;切换服务器后随新一轮拉取更新。
   String? get libraryCountsServerId => _libraryCountsServerId;
@@ -152,7 +153,7 @@ class AuthController extends ChangeNotifier {
       }
       _libraryCounts = counts;
       _libraryCountsServerId = session.server.id;
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       if (_disposed || !_countsStillCurrent(seq, session)) {
         return;
       }
@@ -161,8 +162,8 @@ class AuthController extends ChangeNotifier {
       if (_disposed || !_countsStillCurrent(seq, session)) {
         return;
       }
-      _libraryCountsFailure = EmbyException(
-        EmbyFailureKind.unknown,
+      _libraryCountsFailure = MediaServerException(
+        MediaServerFailureKind.unknown,
         detail: error.toString(),
         cause: error,
       );
@@ -234,7 +235,7 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
     try {
       client.setUserAgent(userAgent);
-      final baseUrl = normalizeEmbyBaseUrl(address);
+      final baseUrl = normalizeServerAddress(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
       // Ordinary legacy login cannot replace credentials of a private member.
       final credentialCommit = await sources.beginOrdinaryCredentials(
@@ -268,13 +269,13 @@ class AuthController extends ChangeNotifier {
       _prefill = null;
       connectDraft = null;
       return true;
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       _failure = error;
       await _dropOrRestore(previous);
       return false;
     } catch (error) {
-      _failure = EmbyException(
-        EmbyFailureKind.unknown,
+      _failure = MediaServerException(
+        MediaServerFailureKind.unknown,
         detail: error.toString(),
         cause: error,
       );
@@ -329,7 +330,7 @@ class AuthController extends ChangeNotifier {
         );
       }
       await client.logout();
-    } on EmbyException {
+    } on MediaServerException {
       // Local credentials are still cleared so the user can sign in again.
     } on StateError {
       // The member may have moved before logout could capture authority.
@@ -393,7 +394,7 @@ class AuthController extends ChangeNotifier {
           } else {
             detail = '';
           }
-        } on EmbyException catch (error) {
+        } on MediaServerException catch (error) {
           detail = error.detail ?? error.toString();
         } catch (error) {
           detail = error.toString();
@@ -448,7 +449,7 @@ class AuthController extends ChangeNotifier {
         continue;
       }
       try {
-        final url = normalizeEmbyBaseUrl(trimmed).toString();
+        final url = normalizeServerAddress(trimmed).toString();
         if (server.lines.any((line) => line.address == url)) {
           continue;
         }
@@ -460,7 +461,7 @@ class AuthController extends ChangeNotifier {
           address: url,
         ).copyWith(activeLineId: current.activeLineId);
         changed = true;
-      } on EmbyException {
+      } on MediaServerException {
         continue;
       }
     }
@@ -550,8 +551,8 @@ class AuthController extends ChangeNotifier {
       return null;
     }
     try {
-      return normalizeEmbyBaseUrl(trimmed).toString();
-    } on EmbyException {
+      return normalizeServerAddress(trimmed).toString();
+    } on MediaServerException {
       return null;
     }
   }
@@ -696,10 +697,10 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  EmbyException? _passwordChangeFailure;
+  MediaServerException? _passwordChangeFailure;
 
   /// 最近一次改密被服务器拒绝的原因;开始新的改密或改密成功时清空。
-  EmbyException? get passwordChangeFailure => _passwordChangeFailure;
+  MediaServerException? get passwordChangeFailure => _passwordChangeFailure;
 
   /// 修改当前登录用户的密码;旧密码留空照常提交,客户端不做拦截。
   ///
@@ -740,12 +741,12 @@ class AuthController extends ChangeNotifier {
       );
       await _verifySessionAfterPasswordChange();
       return true;
-    } on EmbyException catch (error) {
+    } on MediaServerException catch (error) {
       _passwordChangeFailure = error;
       return false;
     } catch (error) {
-      _passwordChangeFailure = EmbyException(
-        EmbyFailureKind.unknown,
+      _passwordChangeFailure = MediaServerException(
+        MediaServerFailureKind.unknown,
         detail: error.toString(),
         cause: error,
       );
@@ -764,7 +765,7 @@ class AuthController extends ChangeNotifier {
     client.onRefreshSession = null;
     try {
       await client.getUser();
-    } on EmbyException {
+    } on MediaServerException {
       // 会话过期时回调已把用户带回登录页,这里只需吞掉探测异常。
     } finally {
       client.onRefreshSession = refresh;
@@ -929,7 +930,9 @@ class AuthController extends ChangeNotifier {
     _session = null;
     client.clearSession();
     _prefill = current.server;
-    _failure = const EmbyException(EmbyFailureKind.sessionExpired);
+    _failure = const MediaServerException(
+      MediaServerFailureKind.sessionExpired,
+    );
     _resetLibraryCounts();
     notifyListeners();
     _handlingExpiry = false;

@@ -1,5 +1,5 @@
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 
 /// 片库排序,字段与 Emby/Jellyfin 中文客户端对齐;默认 [dateUpdated]。
 enum CatalogSort {
@@ -52,7 +52,7 @@ enum CatalogSort {
     }
   }
 
-  static List<CatalogSort> optionsFor(List<EmbyItem> items) {
+  static List<CatalogSort> optionsFor(List<MediaItem> items) {
     final episodes = items.isNotEmpty && items.every((item) => item.isEpisode);
     if (episodes) {
       return [

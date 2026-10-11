@@ -14,7 +14,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/home_display_dialog.dart';
 import 'package:rillight/search/search_action.dart';
@@ -334,7 +334,7 @@ class _TopBar extends StatelessWidget {
     );
   }
 
-  Widget _bar(BuildContext context, List<EmbyItem> libraries) {
+  Widget _bar(BuildContext context, List<MediaItem> libraries) {
     final hasChrome =
         context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
     final leading = hasChrome ? windowChromeLeadingInset() : 0.0;

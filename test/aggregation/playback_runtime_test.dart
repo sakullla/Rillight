@@ -1,3 +1,6 @@
+import 'package:dio/dio.dart';
+import 'package:rillight/player/playback_persistence.dart';
+import 'package:rillight/emby/emby_codec.dart';
 import 'dart:async';
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -29,10 +32,10 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
-import 'package:rillight/emby/emby_device.dart';
-import 'package:rillight/emby/emby_models.dart';
-import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/playback_state.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
@@ -45,7 +48,7 @@ import 'package:rillight/player/video_backend.dart';
 class _Client extends EmbyClient {
   _Client(this.reports, {this.trackChoices = false})
     : super(
-        device: const EmbyDeviceInfo(
+        device: const ClientDeviceInfo(
           clientName: 'test',
           deviceName: 'test',
           deviceId: 'runtime',
@@ -61,7 +64,7 @@ class _Client extends EmbyClient {
   bool failPublic = false;
   bool offerNext = false;
   @override
-  EmbyClient withRequestGuard(void Function() guard) {
+  MediaServerClient withRequestGuard(void Function() guard) {
     final probe = _Client(reports, trackChoices: trackChoices);
     probe.attachSession(
       baseUrl: baseUrl!,
@@ -86,46 +89,50 @@ class _Client extends EmbyClient {
   }
 
   @override
-  Future<EmbyUser> getUser() async => EmbyUser(id: userId!, name: 'test');
+  Future<MediaUser> getUser({CancelToken? cancelToken}) async =>
+      MediaUser(id: userId!, name: 'test');
   @override
-  Future<EmbyItem> getItem(String id, {String? fields}) async =>
-      EmbyItem.fromJson({
-        'Id': id,
-        'Name': id,
-        'Type': id == 'library'
-            ? 'CollectionFolder'
-            : id.startsWith('episode')
-            ? 'Episode'
-            : id == 'season'
-            ? 'Season'
-            : id == 'series'
-            ? 'Series'
-            : 'Movie',
-        if (id.startsWith('episode')) ...{
-          'SeriesId': 'series',
-          'SeasonId': 'season',
-          'ParentIndexNumber': 1,
-          'IndexNumber': id == 'episode1' ? 1 : 2,
-        },
-        if (id == 'season') 'SeriesId': 'series',
-        if (id != 'library' && id != 'season' && id != 'episode-no-parent')
-          'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
-        'RunTimeTicks': 120 * kEmbyTicksPerSecond,
-        'ProviderIds': {'Tmdb': '1'},
-      });
+  Future<MediaItem> getItem(
+    String id, {
+    String? fields,
+    CancelToken? cancelToken,
+  }) async => decodeEmbyMediaItem({
+    'Id': id,
+    'Name': id,
+    'Type': id == 'library'
+        ? 'CollectionFolder'
+        : id.startsWith('episode')
+        ? 'Episode'
+        : id == 'season'
+        ? 'Season'
+        : id == 'series'
+        ? 'Series'
+        : 'Movie',
+    if (id.startsWith('episode')) ...{
+      'SeriesId': 'series',
+      'SeasonId': 'season',
+      'ParentIndexNumber': 1,
+      'IndexNumber': id == 'episode1' ? 1 : 2,
+    },
+    if (id == 'season') 'SeriesId': 'series',
+    if (id != 'library' && id != 'season' && id != 'episode-no-parent')
+      'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
+    'RunTimeTicks': 120 * kLegacyTicksPerSecond,
+    'ProviderIds': {'Tmdb': '1'},
+  });
   @override
   Future<PlaybackInfo> getPlaybackInfo({
     required String itemId,
     String? mediaSourceId,
     int? maxStreamingBitrate,
-    int? startTimeTicks,
+    Duration? startPosition,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
-    Map<String, dynamic>? deviceProfile,
+    PlaybackCapabilities? capabilities,
     bool forceTranscode = false,
   }) async {
     playbackRequests++;
-    return PlaybackInfo.fromJson({
+    return decodeEmbyPlaybackInfo({
       'PlaySessionId': 'play-${baseUrl!.host}-$itemId',
       'MediaSources': [
         for (final id in ['v', 'v2'])
@@ -135,7 +142,7 @@ class _Client extends EmbyClient {
             'Container': 'mp4',
             'SupportsDirectPlay': true,
             'SupportsDirectStream': true,
-            'RunTimeTicks': 120 * kEmbyTicksPerSecond,
+            'RunTimeTicks': 120 * kLegacyTicksPerSecond,
             'MediaStreams': [
               {'Index': id == 'v' ? 1 : 7, 'Type': 'Audio', 'Language': 'jpn'},
               if (trackChoices) ...[
@@ -162,7 +169,7 @@ class _Client extends EmbyClient {
   }
 
   @override
-  Future<EmbyItem?> getNextEpisode(EmbyItem current) async =>
+  Future<MediaItem?> getNextEpisode(MediaItem current) async =>
       offerNext ? getItem('episode2') : null;
   @override
   Future<void> markPlayed(String itemId) async {
@@ -238,16 +245,16 @@ class _Backend extends FakeVideoBackend {
 class _CapabilitiesBackend extends _Backend
     implements VideoBackendCapabilities, VideoBackendSourceRenewal {
   late Completer<void> entered;
-  Completer<Map<String, dynamic>>? gate;
+  Completer<PlaybackCapabilities>? gate;
   int renewals = 0;
   void delayNextProfile() {
     entered = Completer<void>();
-    gate = Completer<Map<String, dynamic>>();
+    gate = Completer<PlaybackCapabilities>();
   }
 
   @override
-  Future<Map<String, dynamic>> deviceProfile(int bitrate) {
-    if (gate == null) return Future.value({});
+  Future<PlaybackCapabilities> playbackCapabilities(int bitrate) {
+    if (gate == null) return Future.value(const PlaybackCapabilities());
     if (!entered.isCompleted) entered.complete();
     return gate!.future;
   }
@@ -532,7 +539,7 @@ void main() {
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 17));
       await _eventually(() => controller.activeMediaSourceId != null);
       await _eventually(
-        () => snapshots.snapshot?.positionTicks == 17 * kEmbyTicksPerSecond,
+        () => snapshots.snapshot?.position == const Duration(seconds: 17),
       );
       final snapshot = (await snapshots.read())!;
       expect(runtime.canRecoverSnapshot(snapshot), isTrue);
@@ -542,7 +549,10 @@ void main() {
       expect(runtime.canRecoverSnapshot(snapshot), isTrue);
       client.failStopped = false;
       expect(await runtime.recoverSnapshot(snapshot), isTrue);
-      expect(reports.last.positionTicks, 17 * kEmbyTicksPerSecond);
+      expect(
+        reports.last.position.inMicroseconds * 10,
+        17 * kLegacyTicksPerSecond,
+      );
       expect(reports.last.playSessionId, snapshot.playSessionId);
       final recoveryStore = MemoryPlaybackSessionSnapshotStore();
       await recoveryStore.write(snapshot);
@@ -735,7 +745,7 @@ void main() {
           );
           expect(
             runtime.history.records(AccessRegion.ordinary).single.positionTicks,
-            12 * kEmbyTicksPerSecond,
+            12 * kLegacyTicksPerSecond,
           );
           expect(c.client.baseUrl!.host, 'b');
           final bClient = c.client as _Client;
@@ -744,8 +754,8 @@ void main() {
             'play-b-$targetId',
           );
           expect(
-            bClient.progressReports.last.positionTicks,
-            12 * kEmbyTicksPerSecond,
+            bClient.progressReports.last.position.inMicroseconds * 10,
+            12 * kLegacyTicksPerSecond,
           );
           final progressCount = bClient.progressReports.length;
           await tester.runAsync(
@@ -851,14 +861,14 @@ void main() {
       expect(controller.activeMediaSourceId, 'v');
       expect(
         runtime.history.records(AccessRegion.ordinary).single.positionTicks,
-        5 * kEmbyTicksPerSecond,
+        5 * kLegacyTicksPerSecond,
       );
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 8));
       await Future<void>.delayed(Duration.zero);
       await controller.close();
       expect(
         runtime.history.records(AccessRegion.ordinary).single.positionTicks,
-        8 * kEmbyTicksPerSecond,
+        8 * kLegacyTicksPerSecond,
       );
       expect(reports.last.itemId, 'movie');
     },
@@ -991,7 +1001,10 @@ void main() {
       expect(backend.isPlaying, isTrue);
       await controller.close();
       expect(reports.last.itemId, 'movie');
-      expect(reports.last.positionTicks, 13 * kEmbyTicksPerSecond);
+      expect(
+        reports.last.position.inMicroseconds * 10,
+        13 * kLegacyTicksPerSecond,
+      );
     },
   );
 
@@ -1195,7 +1208,10 @@ void main() {
       expect(controller.activeOrigin, isNull);
       expect(controller.activeMediaSourceId, isNull);
       expect(backend.isPlaying, isFalse);
-      expect(reports.last.positionTicks, 17 * kEmbyTicksPerSecond);
+      expect(
+        reports.last.position.inMicroseconds * 10,
+        17 * kLegacyTicksPerSecond,
+      );
       expect(await snapshots.read(), isNull);
       expect(await runtime.recoverSnapshot(snapshot!), isFalse);
       await auth.regionAccess.unlock('1234');
@@ -1276,7 +1292,7 @@ void main() {
         participates: true,
         libraryIds: const {},
       );
-      delayed.gate!.complete({});
+      delayed.gate!.complete(const PlaybackCapabilities());
       await starting;
       expect(client.playbackRequests, count);
     },
@@ -1311,7 +1327,7 @@ void main() {
           participates: true,
           libraryIds: const {},
         );
-        delayed.gate!.complete({});
+        delayed.gate!.complete(const PlaybackCapabilities());
         await Future<void>.delayed(const Duration(milliseconds: 30));
         expect(client.playbackRequests, count);
         expect(delayed.renewals, 0);
@@ -1344,7 +1360,7 @@ void main() {
     await _eventually(() => controller.playbackEnded);
     await controller.close();
     final record = runtime.history.records(AccessRegion.ordinary).single;
-    expect(record.positionTicks, 120 * kEmbyTicksPerSecond);
+    expect(record.positionTicks, 120 * kLegacyTicksPerSecond);
     expect(record.played, isTrue);
     final query = AggregationQueryController(
       registry: runtime.registry,
@@ -1431,7 +1447,10 @@ void main() {
         isTrue,
       );
       expect(await store.read(), isNull);
-      expect(freshReports.last.positionTicks, saved.positionTicks);
+      expect(
+        freshReports.last.position.inMicroseconds * 10,
+        saved.position.inMicroseconds * 10,
+      );
     },
   );
 
@@ -1559,7 +1578,7 @@ void main() {
         }
 
         final first = await readEvent();
-        expect(first?['position'], 10 * kEmbyTicksPerSecond);
+        expect(first?['position'], 10 * kLegacyTicksPerSecond);
         await tester.runAsync(
           () => protocol.write('watch-ack', {
             'sequence': first!['sequence'],
@@ -1580,7 +1599,7 @@ void main() {
         await tester.runAsync(() => protocol.write('close'));
         await tester.pump(const Duration(milliseconds: 100));
         final finalEvent = await readEvent();
-        expect(finalEvent?['position'], 18 * kEmbyTicksPerSecond);
+        expect(finalEvent?['position'], 18 * kLegacyTicksPerSecond);
         expect(exited, isFalse);
         await tester.runAsync(
           () => protocol.write('watch-ack', {
@@ -1773,7 +1792,10 @@ void main() {
     await _eventually(() => host.current == null);
     expect(await store.read(), isNull);
     expect(reports.last.playSessionId, saved.playSessionId);
-    expect(reports.last.positionTicks, saved.positionTicks);
+    expect(
+      reports.last.position.inMicroseconds * 10,
+      saved.position.inMicroseconds * 10,
+    );
   });
 
   for (final environment in [
@@ -2001,10 +2023,10 @@ void main() {
     ),
     'item': 'movie',
     'version': 'v',
-    'position': 10 * kEmbyTicksPerSecond,
+    'position': 10 * kLegacyTicksPerSecond,
     'actuallyPlaying': true,
     'timeline': const WatchTimeline(
-      durationTicks: 120 * kEmbyTicksPerSecond,
+      durationTicks: 120 * kLegacyTicksPerSecond,
     ).toJson(),
   };
 
@@ -2097,7 +2119,7 @@ void main() {
         'line': 'wrong',
         'item': 'movie',
         'version': 'v',
-        'position': 10 * kEmbyTicksPerSecond,
+        'position': 10 * kLegacyTicksPerSecond,
         'paused': true,
         'bitrate': 80000000,
         'audio': 1,
@@ -2114,7 +2136,7 @@ void main() {
         'line': 'mirror',
         'item': 'movie',
         'version': 'v',
-        'position': 10 * kEmbyTicksPerSecond,
+        'position': 10 * kLegacyTicksPerSecond,
         'paused': true,
         'bitrate': 80000000,
         'audio': 1,
@@ -2135,7 +2157,10 @@ void main() {
       );
       expect(Uri.parse(launch.baseUrl).host, 'mirror');
       expect(launch.request.startPaused, isTrue);
-      expect(launch.request.startTimeTicks, 10 * kEmbyTicksPerSecond);
+      expect(
+        launch.request.startPosition,
+        Duration(microseconds: (10 * kLegacyTicksPerSecond) ~/ 10),
+      );
       expect(launch.request.audioStreamIndex, 1);
       expect(launch.request.maxStreamingBitrate, 80000000);
       expect(host.current?.source?.account, account);
@@ -2198,7 +2223,7 @@ void main() {
               'targetVersion': 'v2',
               'item': 'movie',
               'version': 'v',
-              'position': 17 * kEmbyTicksPerSecond,
+              'position': 17 * kLegacyTicksPerSecond,
               'paused': true,
               'bitrate': 80000000,
               'audio': 1,
@@ -2247,7 +2272,10 @@ void main() {
               ipc.spawnedArguments.last,
             );
             expect(Uri.parse(restored.baseUrl).host, 'a');
-            expect(restored.request.startTimeTicks, 17 * kEmbyTicksPerSecond);
+            expect(
+              restored.request.startPosition,
+              Duration(microseconds: (17 * kLegacyTicksPerSecond) ~/ 10),
+            );
             expect(restored.request.startPaused, isTrue);
             expect(restored.request.audioStreamIndex, 1);
             expect(restored.request.subtitleOff, isTrue);
@@ -2283,7 +2311,7 @@ void main() {
         'line': 'mirror',
         'item': 'movie',
         'version': 'v',
-        'position': 10 * kEmbyTicksPerSecond,
+        'position': 10 * kLegacyTicksPerSecond,
         'paused': true,
         'bitrate': 80000000,
         'audio': 1,
