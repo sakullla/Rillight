@@ -4,8 +4,10 @@ import 'dart:convert';
 import 'credential_store.dart';
 import 'region_access.dart';
 import 'server_list_store.dart';
+import 'server_import_models.dart';
 import '../emby/emby_client.dart';
 import '../emby/emby_errors.dart';
+import '../emby/emby_url.dart';
 import '../player/playback_models.dart';
 
 /// Account identity only. Media item/version identity belongs to aggregation.
@@ -265,6 +267,215 @@ class SourceSessionRegistry {
     _loaded = true;
   }
 
+  /// Offline, additive import. Each record shares the configuration/credential
+  /// writer and is published only after both stores have committed.
+  Future<ServerImportResult> importServers(
+    Iterable<ServerImportDraft> drafts, {
+    AccessRegion region = AccessRegion.ordinary,
+  }) async {
+    final generation = access.generation;
+    // Snapshot caller-owned lists before the first asynchronous operation.
+    final input = [
+      for (final draft in drafts)
+        ServerImportDraft(
+          name: draft.name,
+          username: draft.username,
+          lines: List.unmodifiable(draft.lines),
+          credentials: draft.credentials,
+          userAgent: draft.userAgent,
+          isPrivate: draft.isPrivate,
+        ),
+    ];
+    if (!_loaded) await load();
+    final results = <ServerImportItemResult>[];
+    var storageUncertain = false;
+    for (var index = 0; index < input.length; index++) {
+      final draft = input[index];
+      ServerImportItemResult result(
+        ServerImportStatus status, {
+        String? id,
+        ServerImportReason? reason,
+      }) => ServerImportItemResult(
+        index: index,
+        status: status,
+        serverId: id,
+        reason: reason,
+      );
+      if (storageUncertain) {
+        results.add(
+          result(
+            ServerImportStatus.failed,
+            reason: ServerImportReason.rollbackFailed,
+          ),
+        );
+        continue;
+      }
+      if ((draft.isPrivate && region != AccessRegion.private) ||
+          !access.allows(region)) {
+        results.add(
+          result(
+            ServerImportStatus.skipped,
+            reason: ServerImportReason.privateAccessRequired,
+          ),
+        );
+        continue;
+      }
+      final lines = <ServerLine>[];
+      try {
+        if (draft.lines.isEmpty ||
+            draft.userAgent?.contains(RegExp(r'[\r\n]')) == true ||
+            (draft.credentials != null &&
+                draft.credentials!.username != draft.username)) {
+          throw const FormatException();
+        }
+        for (final line in draft.lines) {
+          final raw = Uri.parse(
+            line.address.contains('://')
+                ? line.address.trim()
+                : 'http://${line.address.trim()}',
+          );
+          if (raw.userInfo.isNotEmpty || raw.hasQuery || raw.hasFragment) {
+            throw const _UnsupportedImportOptions();
+          }
+          final address = normalizeEmbyBaseUrl(line.address).toString();
+          if (lines.any((line) => line.address == address)) continue;
+          lines.add(
+            ServerLine(
+              id: generateLineId(),
+              address: address,
+              nickname: line.name,
+            ),
+          );
+        }
+      } catch (error) {
+        results.add(
+          result(
+            ServerImportStatus.failed,
+            reason: error is _UnsupportedImportOptions
+                ? ServerImportReason.unsupportedConnectionOptions
+                : ServerImportReason.invalidConfiguration,
+          ),
+        );
+        continue;
+      }
+      final id = 'config-${generateDeviceId()}';
+      final scope = _scopes[id] ?? 0;
+      void guard() {
+        if (!access.allows(region) ||
+            (region == AccessRegion.private &&
+                access.generation != generation) ||
+            (_scopes[id] ?? 0) != scope ||
+            _transitioning.contains(id)) {
+          throw const _ImportRevoked();
+        }
+      }
+
+      await _enqueue(() async {
+        try {
+          guard();
+          final addresses = lines.map((line) => line.address).toSet();
+          for (final existing in _servers.where((s) => s.region == region)) {
+            if (!existing.lines.any((line) {
+              try {
+                return addresses.contains(
+                  normalizeEmbyBaseUrl(line.address).toString(),
+                );
+              } catch (_) {
+                return false;
+              }
+            })) {
+              continue;
+            }
+            final stored = await credentials.read(existing.id);
+            guard();
+            final incomingUser = draft.credentials?.userId ?? '';
+            final existingUser = stored?.userId ?? '';
+            final sameAccount =
+                incomingUser.isNotEmpty && existingUser.isNotEmpty
+                ? incomingUser == existingUser
+                : draft.username.isNotEmpty &&
+                      draft.username == existing.username;
+            if (sameAccount) {
+              results.add(result(ServerImportStatus.duplicate));
+              return;
+            }
+          }
+          final server = SavedServer(
+            id: id,
+            name: draft.name,
+            username: draft.username,
+            lines: List.unmodifiable(lines),
+            activeLineId: lines.first.id,
+            userAgent: draft.userAgent,
+            region: region,
+            identityPending: true,
+          );
+          final previous = ServerListSnapshot(
+            servers: List.of(_servers),
+            lastServerId: _lastServerId,
+          );
+          var configurationAttempted = false;
+          try {
+            if (draft.credentials != null) {
+              await credentials.write(id, draft.credentials!);
+            }
+            guard();
+            final next = [..._servers, server];
+            configurationAttempted = true;
+            await store.save(
+              ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+            );
+            guard();
+            _servers = next;
+            results.add(result(ServerImportStatus.added, id: id));
+          } catch (error) {
+            var rollbackFailed = false;
+            try {
+              await credentials.delete(id);
+            } catch (_) {
+              rollbackFailed = true;
+            }
+            if (configurationAttempted) {
+              try {
+                await store.save(previous);
+              } catch (_) {
+                rollbackFailed = true;
+              }
+            }
+            if (rollbackFailed) {
+              storageUncertain = true;
+              results.add(
+                result(
+                  ServerImportStatus.failed,
+                  reason: ServerImportReason.rollbackFailed,
+                ),
+              );
+            } else {
+              results.add(
+                result(
+                  ServerImportStatus.failed,
+                  reason: error is _ImportRevoked
+                      ? ServerImportReason.accessRevoked
+                      : ServerImportReason.persistenceFailed,
+                ),
+              );
+            }
+          }
+        } catch (error) {
+          results.add(
+            result(
+              ServerImportStatus.failed,
+              reason: error is _ImportRevoked
+                  ? ServerImportReason.accessRevoked
+                  : ServerImportReason.persistenceFailed,
+            ),
+          );
+        }
+      });
+    }
+    return ServerImportResult(results);
+  }
+
   List<SavedServer> project(AccessRegion region) {
     if (!access.allows(region)) return const [];
     return List.unmodifiable(
@@ -314,8 +525,9 @@ class SourceSessionRegistry {
   /// starts during secure-store IO, restore the old value before it can commit.
   Future<void> commitOrdinaryCredentials(
     CredentialCommit commit,
-    StoredCredentials? value,
-  ) => _enqueue(() async {
+    StoredCredentials? value, {
+    String? verifiedServerId,
+  }) => _enqueue(() async {
     _guardCredentials(commit);
     final previous = await credentials.read(commit.id);
     _guardCredentials(commit);
@@ -323,6 +535,11 @@ class SourceSessionRegistry {
     _invalidate(commit.id);
     _credentialChanges.add(commit.id);
     final writing = CredentialCommit._(this, commit.id, _scopes[commit.id]!);
+    final previousSnapshot = ServerListSnapshot(
+      servers: List.of(_servers),
+      lastServerId: _lastServerId,
+    );
+    var configurationAttempted = false;
     try {
       if (value == null) {
         await credentials.delete(commit.id);
@@ -330,12 +547,33 @@ class SourceSessionRegistry {
         await credentials.write(commit.id, value);
       }
       _guardCredentials(writing);
+      if (verifiedServerId != null &&
+          _servers.any((server) => server.id == commit.id)) {
+        final next = _servers
+            .map(
+              (server) => server.id == commit.id
+                  ? server.copyWith(
+                      verifiedServerId: verifiedServerId,
+                      identityPending: false,
+                      username: value?.username,
+                    )
+                  : server,
+            )
+            .toList();
+        configurationAttempted = true;
+        await store.save(
+          ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+        );
+        _guardCredentials(writing);
+        _servers = next;
+      }
     } catch (_) {
       if (previous == null) {
         await credentials.delete(commit.id);
       } else {
         await credentials.write(commit.id, previous);
       }
+      if (configurationAttempted) await store.save(previousSnapshot);
       rethrow;
     } finally {
       _credentialChanges.remove(commit.id);
@@ -623,7 +861,8 @@ class SourceSessionRegistry {
     try {
       final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
       guard();
-      if (info.id != (server.verifiedServerId ?? id)) {
+      if (server.expectedServerId != null &&
+          info.id != server.expectedServerId) {
         throw StateError('Server identity mismatch');
       }
       final result = await client.authenticateByName(
@@ -638,6 +877,11 @@ class SourceSessionRegistry {
         guard();
         final previous = await credentials.read(id);
         guard();
+        final previousSnapshot = ServerListSnapshot(
+          servers: List.of(_servers),
+          lastServerId: _lastServerId,
+        );
+        var configurationAttempted = false;
         _credentialChanges.add(id);
         _invalidate(id);
         _sessions.remove(id)?.client.clearSession();
@@ -648,6 +892,7 @@ class SourceSessionRegistry {
               accessToken: result.accessToken,
               userId: result.user.id,
               username: username,
+              password: password,
             ),
           );
           if ((_scopes[id] ?? 0) != scope + 1 ||
@@ -658,12 +903,36 @@ class SourceSessionRegistry {
                   generation != access.generation)) {
             throw StateError('Login revoked');
           }
+          final next = _servers
+              .map(
+                (current) => current.id == id
+                    ? current.copyWith(
+                        username: username,
+                        verifiedServerId: info.id,
+                        identityPending: false,
+                      )
+                    : current,
+              )
+              .toList();
+          configurationAttempted = true;
+          await store.save(
+            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+          );
+          if ((_scopes[id] ?? 0) != scope + 1 ||
+              _allowed(id).region != server.region ||
+              _authAttempts[id] != attempt ||
+              (server.region == AccessRegion.private &&
+                  generation != access.generation)) {
+            throw StateError('Login revoked');
+          }
+          _servers = next;
         } catch (_) {
           if (previous == null) {
             await credentials.delete(id);
           } else {
             await credentials.write(id, previous);
           }
+          if (configurationAttempted) await store.save(previousSnapshot);
           rethrow;
         } finally {
           _credentialChanges.remove(id);
@@ -699,7 +968,9 @@ class SourceSessionRegistry {
     if (reused != null) return reused;
     final pending = _sessionAcquisitions[id];
     if (pending != null) return pending;
-    final created = _attachStoredSession(server, scope, generation);
+    final created = server.identityPending
+        ? authenticate(id)
+        : _attachStoredSession(server, scope, generation);
     _sessionAcquisitions[id] = created;
     try {
       return await created;
@@ -753,7 +1024,11 @@ class SourceSessionRegistry {
         client.clearSession();
         return reused;
       }
-      if (stored == null) throw StateError('Login required');
+      if (stored == null ||
+          stored.accessToken.isEmpty ||
+          stored.userId.isEmpty) {
+        throw StateError('Login required');
+      }
       client.attachSession(
         baseUrl: Uri.parse(server.baseUrl),
         accessToken: stored.accessToken,
@@ -793,8 +1068,13 @@ class SourceSessionRegistry {
     }
   }
 
-  Future<SourceSession> authenticate(String id) async {
+  Future<SourceSession> authenticate(String id, {String? lineId}) async {
     final server = _allowed(id);
+    final line = lineId == null
+        ? server.activeLine
+        : server.lines.where((line) => line.id == lineId).firstOrNull;
+    if (line == null) throw StateError('Unknown authentication line');
+    final baseUrl = Uri.parse(line.address);
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
@@ -806,22 +1086,63 @@ class SourceSessionRegistry {
       throw StateError('Client factory must be independent');
     }
     try {
-      final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+      final info = await client.getPublicInfo(baseUrl);
       _requireCurrent(server, scope, generation);
-      final expected = server.verifiedServerId ?? server.id;
-      if (info.id != expected) throw StateError('Server identity mismatch');
+      final expected = server.expectedServerId;
+      if (expected != null && info.id != expected) {
+        throw StateError('Server identity mismatch');
+      }
       final stored = await credentials.read(id);
       _requireCurrent(server, scope, generation);
       if (stored == null) throw StateError('Login required');
-      client.attachSession(
-        baseUrl: Uri.parse(server.baseUrl),
-        accessToken: stored.accessToken,
-        userId: stored.userId,
-        userAgent: server.userAgent,
-      );
-      final user = await client.getUser();
-      if (user.id != stored.userId) {
-        throw StateError('Account identity mismatch');
+      var verified = stored;
+      var tokenAccepted = false;
+      if (stored.accessToken.isNotEmpty && stored.userId.isNotEmpty) {
+        client.attachSession(
+          baseUrl: baseUrl,
+          accessToken: stored.accessToken,
+          userId: stored.userId,
+          userAgent: server.userAgent,
+        );
+        try {
+          final user = await client.getUser();
+          if (user.id != stored.userId) {
+            throw StateError('Account identity mismatch');
+          }
+          tokenAccepted = true;
+        } on EmbyException catch (error) {
+          if (error.kind != EmbyFailureKind.sessionExpired &&
+              error.kind != EmbyFailureKind.invalidCredentials) {
+            rethrow;
+          }
+        }
+      }
+      _requireCurrent(server, scope, generation);
+      if (!tokenAccepted) {
+        if (stored.password == null || stored.username.isEmpty) {
+          throw StateError('Login required');
+        }
+        final auth = await client.authenticateByName(
+          baseUrl: baseUrl,
+          username: stored.username,
+          password: stored.password!,
+          serverId: info.id,
+        );
+        if (stored.userId.isNotEmpty && stored.userId != auth.user.id) {
+          throw StateError('Account identity mismatch');
+        }
+        verified = StoredCredentials(
+          accessToken: auth.accessToken,
+          userId: auth.user.id,
+          username: stored.username,
+          password: stored.password,
+        );
+        client.attachSession(
+          baseUrl: baseUrl,
+          accessToken: verified.accessToken,
+          userId: verified.userId,
+          userAgent: server.userAgent,
+        );
       }
       if ((_scopes[id] ?? 0) != scope ||
           _allowed(id).region != server.region ||
@@ -832,12 +1153,57 @@ class SourceSessionRegistry {
       if (_authAttempts[id] != attempt) {
         throw StateError('Authentication superseded');
       }
+      await _enqueue(() async {
+        void guard() {
+          _requireCurrent(server, scope, generation);
+          if (_authAttempts[id] != attempt) {
+            throw StateError('Authentication superseded');
+          }
+        }
+
+        guard();
+        final previous = ServerListSnapshot(
+          servers: List.of(_servers),
+          lastServerId: _lastServerId,
+        );
+        var configurationAttempted = false;
+        try {
+          if (!identical(verified, stored)) {
+            await credentials.write(id, verified);
+          }
+          guard();
+          final next = _servers
+              .map(
+                (current) => current.id == id
+                    ? current.copyWith(
+                        verifiedServerId: info.id,
+                        identityPending: false,
+                      )
+                    : current,
+              )
+              .toList();
+          configurationAttempted = true;
+          await store.save(
+            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+          );
+          guard();
+          _servers = next;
+        } catch (_) {
+          if (!identical(verified, stored)) await credentials.write(id, stored);
+          if (configurationAttempted) await store.save(previous);
+          rethrow;
+        }
+      });
+      _requireCurrent(server, scope, generation);
+      if (_authAttempts[id] != attempt) {
+        throw StateError('Authentication superseded');
+      }
       final session = SourceSession._(
         SourceAccount(
           region: server.region,
           configuredServerId: id,
           verifiedServerId: info.id,
-          userId: user.id,
+          userId: verified.userId,
         ),
         client,
         ++_revision,
@@ -851,10 +1217,6 @@ class SourceSessionRegistry {
         }
         client.clearSession();
       };
-      await _update(
-        id,
-        (current) => current.copyWith(verifiedServerId: info.id),
-      );
       _requireCurrent(server, scope, generation);
       if (_authAttempts[id] != attempt) {
         throw StateError('Authentication superseded');
@@ -956,12 +1318,17 @@ class SourceSessionRegistry {
       status = await (() async {
         final info = await client.getPublicInfo(Uri.parse(line.address));
         guard();
-        if (info.id != (server.verifiedServerId ?? id)) {
+        if (server.expectedServerId != null &&
+            info.id != server.expectedServerId) {
           return ManualCheckStatus.identityMismatch;
         }
         final stored = await credentials.read(id);
         guard();
-        if (stored == null) return ManualCheckStatus.needsLogin;
+        if (stored == null ||
+            stored.accessToken.isEmpty ||
+            stored.userId.isEmpty) {
+          return ManualCheckStatus.needsLogin;
+        }
         client.attachSession(
           baseUrl: Uri.parse(line.address),
           accessToken: stored.accessToken,
@@ -1115,6 +1482,7 @@ class SourceSessionRegistry {
               'libraryIds',
               'scopeKnown',
               'verifiedServerId',
+              'identityPending',
               'checkedAt',
               'checkStatus',
             ]) {
@@ -1226,6 +1594,14 @@ class SourceSessionRegistry {
     _sessions.clear();
     _sourceRevocations.clear();
   }
+}
+
+class _UnsupportedImportOptions implements Exception {
+  const _UnsupportedImportOptions();
+}
+
+class _ImportRevoked implements Exception {
+  const _ImportRevoked();
 }
 
 /// Compatibility projection for the existing single-service AuthController.

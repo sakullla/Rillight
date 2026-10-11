@@ -860,27 +860,41 @@ void main() {
       expect(r.project(AccessRegion.private), hasLength(2));
     },
   );
-  test('account replacement and logout revoke old source permits', () async {
-    final r = await registry(RegionAccessController(), [server('a')], []);
-    final auth = AuthController(
-      client: TestClient(),
-      credentials: r.credentials,
-      servers: r.store,
-      sources: r,
-    );
-    addTearDown(auth.dispose);
-    await auth.restore();
-    final original = r.permit((await r.authenticate('a')).account);
-    expect(
-      await auth.connect(address: 'https://a', username: 'new', password: 'pw'),
-      true,
-    );
-    expect(original.isValid, false);
-    final replacement = r.permit((await r.authenticate('a')).account);
-    await auth.logout();
-    expect(replacement.isValid, false);
-    expect(await r.credentials.read('a'), isNull);
-  });
+  test(
+    'new account preserves sibling permits and logout revokes only its own',
+    () async {
+      final r = await registry(RegionAccessController(), [server('a')], []);
+      final auth = AuthController(
+        client: TestClient(),
+        credentials: r.credentials,
+        servers: r.store,
+        sources: r,
+      );
+      addTearDown(auth.dispose);
+      await auth.restore();
+      final original = r.permit((await r.authenticate('a')).account);
+      expect(
+        await auth.connect(
+          address: 'https://a',
+          username: 'new',
+          password: 'pw',
+        ),
+        true,
+      );
+      expect(original.isValid, true);
+      final addedId = auth.session!.server.id;
+      expect(addedId, isNot('a'));
+      final replacement = r.permit(
+        (await r.authenticate(addedId)).account,
+        sessionOnly: true,
+      );
+      await auth.logout();
+      expect(replacement.isValid, false);
+      expect(await r.credentials.read(addedId), isNull);
+      expect((await r.credentials.read('a'))!.accessToken, 'token-a');
+      expect(original.isValid, true);
+    },
+  );
 
   test('failed login may preserve an unchanged authorized account', () async {
     final r = await registry(RegionAccessController(), [server('a')], []);
@@ -926,7 +940,7 @@ void main() {
     await auth.switchTo('a');
     final login = auth.connect(
       address: 'https://a',
-      username: 'new',
+      username: 'user',
       password: 'pw',
       preserveSessionOnFailure: true,
     );

@@ -5,6 +5,7 @@ import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
+import 'package:rillight/auth/server_import_models.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
@@ -212,6 +213,10 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (last.identityPending) {
+      await switchTo(last.id);
+      return;
+    }
     _activate(last, stored);
     notifyListeners();
   }
@@ -237,8 +242,30 @@ class AuthController extends ChangeNotifier {
       final baseUrl = normalizeEmbyBaseUrl(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
       // Ordinary legacy login cannot replace credentials of a private member.
+      await sources.requireOrdinaryServer(publicInfo.id);
+      final existing = _savedServers
+          .where(
+            (server) =>
+                server.username == username &&
+                (server.expectedServerId == publicInfo.id ||
+                    server.lines.any(
+                      (line) => normalizeEmbyBaseUrl(line.address) == baseUrl,
+                    )),
+          )
+          .firstOrNull;
+      if (existing?.expectedServerId != null &&
+          existing!.expectedServerId != publicInfo.id) {
+        throw StateError('Server identity mismatch');
+      }
+      // Preserve legacy first-account keys, but never overwrite another account
+      // merely because the remote server ID is the same.
+      final configuredId =
+          existing?.id ??
+          (_serverById(publicInfo.id) == null
+              ? publicInfo.id
+              : 'config-${generateDeviceId()}');
       final credentialCommit = await sources.beginOrdinaryCredentials(
-        publicInfo.id,
+        configuredId,
       );
       final auth = await client.authenticateByName(
         baseUrl: baseUrl,
@@ -247,8 +274,9 @@ class AuthController extends ChangeNotifier {
         serverId: publicInfo.id,
       );
       final server = _serverWithLine(
-        existing: _serverById(publicInfo.id),
-        serverId: publicInfo.id,
+        existing: existing,
+        serverId: configuredId,
+        verifiedServerId: publicInfo.id,
         name: publicInfo.serverName,
         username: username,
         address: baseUrl.toString(),
@@ -261,7 +289,11 @@ class AuthController extends ChangeNotifier {
         username: username,
         password: password.isEmpty ? null : password,
       );
-      await sources.commitOrdinaryCredentials(credentialCommit, stored);
+      await sources.commitOrdinaryCredentials(
+        credentialCommit,
+        stored,
+        verifiedServerId: publicInfo.id,
+      );
       await _upsertServer(server);
       await sources.requireOrdinaryServer(server.id);
       _activate(server, stored);
@@ -372,13 +404,25 @@ class AuthController extends ChangeNotifier {
         return;
       }
     }
-    final server =
+    var server =
         (requestedLineId != null && requestedLineId != found.activeLineId)
         ? found.copyWith(activeLineId: requestedLineId)
         : found;
-    final stored = await credentials.read(serverId);
-    final sameServer = _session?.server.id == serverId;
-    final changingLine = sameServer && requestedLineId != currentLineId;
+    var stored = await credentials.read(serverId);
+    if (server.identityPending) {
+      try {
+        await sources.authenticate(serverId, lineId: requestedLineId);
+        await reloadSavedServers();
+        server = _serverById(serverId)!.copyWith(activeLineId: requestedLineId);
+        stored = await credentials.read(serverId);
+      } catch (_) {
+        _prefill = server;
+        _failure = const EmbyException(EmbyFailureKind.invalidCredentials);
+        notifyListeners();
+        return;
+      }
+    }
+    final changingLine = requestedLineId != currentLineId;
     if (stored != null && stored.accessToken.isNotEmpty) {
       if (changingLine) {
         // User-Agent is server-level: switching lines keeps the server's UA.
@@ -388,7 +432,7 @@ class AuthController extends ChangeNotifier {
         String detail;
         try {
           final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
-          if (info.id != server.id) {
+          if (info.id != server.expectedServerId) {
             detail = '线路返回的服务器身份与当前服务器不一致';
           } else {
             detail = '';
@@ -432,6 +476,23 @@ class AuthController extends ChangeNotifier {
     _prefill = server;
     _failure = null;
     notifyListeners();
+  }
+
+  /// Refresh the ordinary projection without restoring or selecting a session.
+  Future<void> reloadSavedServers() async {
+    final snapshot = await servers.load();
+    _savedServers = snapshot.servers;
+    _rememberedServerId = snapshot.lastServerId;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<ServerImportResult> importServers(
+    Iterable<ServerImportDraft> drafts, {
+    AccessRegion region = AccessRegion.ordinary,
+  }) async {
+    final result = await sources.importServers(drafts, region: region);
+    await reloadSavedServers();
+    return result;
   }
 
   /// 给当前已登录服务器追加备用线路,不切换正在使用的地址。
@@ -782,6 +843,7 @@ class AuthController extends ChangeNotifier {
   SavedServer _serverWithLine({
     required SavedServer? existing,
     required String serverId,
+    String? verifiedServerId,
     required String name,
     required String username,
     required String address,
@@ -825,7 +887,8 @@ class AuthController extends ChangeNotifier {
       participates: existing?.participates ?? true,
       libraryIds: existing?.libraryIds ?? const [],
       scopeKnown: existing?.scopeKnown ?? false,
-      verifiedServerId: existing?.verifiedServerId ?? serverId,
+      verifiedServerId:
+          verifiedServerId ?? existing?.verifiedServerId ?? serverId,
       checkedAt: existing?.checkedAt,
       checkStatus: existing?.checkStatus ?? 'unknown',
     );
@@ -866,8 +929,8 @@ class AuthController extends ChangeNotifier {
       for (final item in _savedServers) item.id == server.id ? server : item,
       if (!exists) server,
     ];
-    _savedServers = next;
     await servers.save(ServerListSnapshot(servers: next, lastServerId: lastId));
+    _savedServers = next;
     _rememberedServerId = lastId;
   }
 
@@ -886,11 +949,13 @@ class AuthController extends ChangeNotifier {
         return false;
       }
       client.setUserAgent(session.server.normalizedUserAgent);
+      final verifiedServerId = session.server.expectedServerId;
+      if (verifiedServerId == null) return false;
       final auth = await client.authenticateByName(
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
         password: password,
-        serverId: session.server.id,
+        serverId: verifiedServerId,
       );
       final next = StoredCredentials(
         accessToken: auth.accessToken,

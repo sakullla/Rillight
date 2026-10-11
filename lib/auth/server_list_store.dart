@@ -87,6 +87,7 @@ class SavedServer {
     this.libraryIds = const [],
     this.scopeKnown = false,
     this.verifiedServerId,
+    this.identityPending = false,
     this.checkedAt,
     this.checkStatus = 'unknown',
   });
@@ -98,6 +99,12 @@ class SavedServer {
   final List<String> libraryIds;
   final bool scopeKnown;
   final String? verifiedServerId;
+
+  /// Legacy records used the remote ID as their key. Imported records have an
+  /// independent local key and must be authenticated before first use.
+  final bool identityPending;
+  String? get expectedServerId =>
+      verifiedServerId ?? (identityPending ? null : id);
   final DateTime? checkedAt;
   final String checkStatus;
 
@@ -147,6 +154,7 @@ class SavedServer {
     'libraryIds': libraryIds,
     'scopeKnown': scopeKnown,
     'verifiedServerId': verifiedServerId,
+    'identityPending': identityPending,
     'checkedAt': checkedAt?.toIso8601String(),
     'checkStatus': checkStatus,
     'activeLineId': activeLineId,
@@ -195,6 +203,7 @@ class SavedServer {
       ),
       scopeKnown: json['scopeKnown'] == true,
       verifiedServerId: json['verifiedServerId']?.toString(),
+      identityPending: json['identityPending'] == true,
       checkedAt: DateTime.tryParse(json['checkedAt']?.toString() ?? ''),
       checkStatus: json['checkStatus']?.toString() ?? 'unknown',
     );
@@ -249,6 +258,7 @@ class SavedServer {
     List<String>? libraryIds,
     bool? scopeKnown,
     String? verifiedServerId,
+    bool? identityPending,
     DateTime? checkedAt,
     String? checkStatus,
   }) {
@@ -265,6 +275,7 @@ class SavedServer {
       libraryIds: List<String>.unmodifiable(libraryIds ?? this.libraryIds),
       scopeKnown: scopeKnown ?? this.scopeKnown,
       verifiedServerId: verifiedServerId ?? this.verifiedServerId,
+      identityPending: identityPending ?? this.identityPending,
       checkedAt: checkedAt ?? this.checkedAt,
       checkStatus: checkStatus ?? this.checkStatus,
     );
