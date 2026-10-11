@@ -534,12 +534,9 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
   }
 
   int? _neighbor(int index, bool forward) {
-    var cursor = index;
-    while (true) {
-      cursor += forward ? 1 : -1;
-      if (cursor < 0 || cursor >= widget.people.length) return null;
-      if (_personId(widget.people[cursor]).isNotEmpty) return cursor;
-    }
+    final next = index + (forward ? 1 : -1);
+    if (next < 0 || next >= widget.people.length) return null;
+    return next;
   }
 
   int _focusedIndex() {
@@ -615,15 +612,11 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
   }
 
   Widget _card(BuildContext context, int index) {
-    final person = widget.people[index];
-    final identified = _personId(person).isNotEmpty;
     return _PersonCard(
       key: ValueKey('episode-person-${widget.typeKey}-$index'),
-      person: person,
+      person: widget.people[index],
       metrics: widget.metrics,
-      focusNode: widget.rail == _PersonRail.tv && identified
-          ? _nodeFor(index)
-          : null,
+      focusNode: widget.rail == _PersonRail.tv ? _nodeFor(index) : null,
     );
   }
 
@@ -648,9 +641,8 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
         },
       );
     }
-    for (var index = 0; index < widget.people.length; index++) {
-      if (widget.rail == _PersonRail.tv &&
-          _personId(widget.people[index]).isNotEmpty) {
+    if (widget.rail == _PersonRail.tv) {
+      for (var index = 0; index < widget.people.length; index++) {
         _nodeFor(index);
       }
     }
@@ -744,15 +736,20 @@ class _PersonCard extends StatelessWidget {
       );
     }
 
-    if (_personId(person).isEmpty) return card(false);
+    // 无 Id 的卡也进入焦点顺序以便滚进视口，但确认键不打开人物页。
     if (metrics.tv) {
       return TvAction(
         focusNode: focusNode,
         variant: TvActionVariant.card,
-        onPressed: () => _openPerson(context, person),
+        onPressed: () {
+          if (_personId(person).isNotEmpty) {
+            _openPerson(context, person);
+          }
+        },
         child: Builder(builder: (context) => card(TvAction.focusedOf(context))),
       );
     }
+    if (_personId(person).isEmpty) return card(false);
     return Material(
       type: MaterialType.transparency,
       child: InkWell(

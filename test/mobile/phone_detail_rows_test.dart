@@ -478,7 +478,7 @@ void main() {
         of: unnamed,
         matching: find.byType(FocusableActionDetector),
       ),
-      findsNothing,
+      findsOneWidget,
     );
     final image = find.descendant(
       of: find.byKey(const ValueKey('episode-person-Actor-0')),
@@ -532,21 +532,110 @@ void main() {
           .hasFocus,
       isTrue,
     );
+    expect(
+      tester.getRect(unnamed).right,
+      greaterThan(width),
+      reason: 'the nameless card is still past the viewport',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    final unnamedRect = tester.getRect(unnamed);
+    _expectOnScreen(unnamedRect, width, height);
+    expect(_personFocused(tester, unnamed), isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
     expect(
-      tester
-          .widget<FocusableActionDetector>(
-            find.descendant(
-              of: find.byKey(const ValueKey('episode-person-Actor-9')),
-              matching: find.byType(FocusableActionDetector),
-            ),
-          )
-          .focusNode!
-          .hasFocus,
+      _personFocused(tester, unnamed),
       isTrue,
-      reason: 'a card without an id stays out of the focus order',
+      reason: 'the last card in the row keeps the key',
     );
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(_personFocused(tester, unnamed), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(
+      _personFocused(
+        tester,
+        find.byKey(const ValueKey('episode-person-Actor-9')),
+      ),
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tv cast without ids still reveals later cards', (tester) async {
+    const width = 960.0;
+    const height = 1600.0;
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    final people = [
+      for (var i = 0; i < 10; i++) ItemPerson(name: '路人$i', type: 'Actor'),
+      const ItemPerson(id: 'person-ada', name: '艾达', type: 'Actor'),
+    ];
+    final router = GoRouter(
+      initialLocation: '/detail',
+      routes: [
+        GoRoute(
+          path: '/detail',
+          builder: (context, state) => PresentationScope(
+            environment: PresentationEnvironment.tv,
+            child: Scaffold(body: EpisodePeopleSection(people: people)),
+          ),
+        ),
+        GoRoute(
+          path: '/person/:personId',
+          builder: (context, state) => Scaffold(
+            body: Text('person ${state.pathParameters['personId']}'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    _useSurface(tester, width, height);
+    await tester.pumpWidget(
+      MaterialApp.router(
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        theme: AppTheme.dark(),
+        routerConfig: router,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final first = find.byKey(const ValueKey('episode-person-Actor-0'));
+    final last = find.byKey(const ValueKey('episode-person-Actor-9'));
+    expect(tester.getRect(last).left, greaterThan(width));
+    tester
+        .widget<FocusableActionDetector>(
+          find.descendant(
+            of: first,
+            matching: find.byType(FocusableActionDetector),
+          ),
+        )
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
+    for (var i = 0; i < 9; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+    }
+    _expectOnScreen(tester.getRect(last), width, height);
+    expect(_personFocused(tester, last), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/detail');
+    expect(find.text('路人9'), findsWidgets);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    final identified = find.byKey(const ValueKey('episode-person-Actor-10'));
+    _expectOnScreen(tester.getRect(identified), width, height);
+    expect(_personFocused(tester, identified), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(router.state.uri.path, '/person/person-ada');
+    expect(router.state.uri.queryParameters['name'], '艾达');
     expect(tester.takeException(), isNull);
   });
 
@@ -566,15 +655,22 @@ void main() {
           const ValueKey('episode-person-Director-0'),
         );
         expect(unnamed, findsOneWidget);
-        expect(
-          find.descendant(
-            of: unnamed,
-            matching: find.byWidgetPredicate(
-              (widget) => widget is InkWell || widget is TvAction,
+        if (environment.isTv) {
+          expect(
+            find.descendant(of: unnamed, matching: find.byType(TvAction)),
+            findsOneWidget,
+          );
+        } else {
+          expect(
+            find.descendant(
+              of: unnamed,
+              matching: find.byWidgetPredicate(
+                (widget) => widget is InkWell || widget is TvAction,
+              ),
             ),
-          ),
-          findsNothing,
-        );
+            findsNothing,
+          );
+        }
 
         await _activatePerson(tester, actor, environment);
         final actorLocation = router.state.uri.toString();
@@ -588,7 +684,21 @@ void main() {
         expect(find.text('原详情').hitTestable(), findsOneWidget);
 
         await tester.ensureVisible(unnamed);
-        await tester.tap(unnamed);
+        if (environment.isTv) {
+          tester
+              .widget<FocusableActionDetector>(
+                find.descendant(
+                  of: unnamed,
+                  matching: find.byType(FocusableActionDetector),
+                ),
+              )
+              .focusNode!
+              .requestFocus();
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        } else {
+          await tester.tap(unnamed);
+        }
         await tester.pumpAndSettle();
         expect(router.state.uri.path, '/detail');
         expect(find.text('路人'), findsWidgets);
@@ -670,10 +780,23 @@ void main() {
         await expectSource(
           find.byKey(const ValueKey('episode-person-Director-0')),
         );
-        await tester.ensureVisible(
-          find.byKey(const ValueKey('episode-person-Actor-1')),
-        );
-        await tester.tap(find.byKey(const ValueKey('episode-person-Actor-1')));
+        final unnamed = find.byKey(const ValueKey('episode-person-Actor-1'));
+        await tester.ensureVisible(unnamed);
+        if (environment.isTv) {
+          tester
+              .widget<FocusableActionDetector>(
+                find.descendant(
+                  of: unnamed,
+                  matching: find.byType(FocusableActionDetector),
+                ),
+              )
+              .focusNode!
+              .requestFocus();
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        } else {
+          await tester.tap(unnamed);
+        }
         await tester.pumpAndSettle();
         expect(router.state.uri.path, '/detail');
         expect(tester.takeException(), isNull);
@@ -1687,6 +1810,18 @@ Future<void> _revealDetailOrigin(WidgetTester tester) async {
     }
   }
   await tester.pumpAndSettle();
+}
+
+bool _personFocused(WidgetTester tester, Finder card) {
+  return tester
+      .widget<FocusableActionDetector>(
+        find.descendant(
+          of: card,
+          matching: find.byType(FocusableActionDetector),
+        ),
+      )
+      .focusNode!
+      .hasFocus;
 }
 
 Future<void> _activatePerson(
