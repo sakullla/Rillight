@@ -282,6 +282,17 @@ class EmbyClient {
   /// transparent title logo when the server has one.
   static const featuredImageTypes = 'Primary,Backdrop,Thumb,Logo';
 
+  /// `PersonIds` 的查询值。空白 id 去掉；没有有效 id 时返回 null，调用方不带参数。
+  static String? personIdsQueryValue(List<String>? personIds) {
+    if (personIds == null) return null;
+    final ids = [
+      for (final id in personIds)
+        if (id.trim().isNotEmpty) id.trim(),
+    ];
+    if (ids.isEmpty) return null;
+    return ids.join(',');
+  }
+
   String _requireUserId() {
     final userId = _userId;
     if (!hasSession || userId == null || userId.isEmpty) {
@@ -395,6 +406,7 @@ class EmbyClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = itemFields,
   }) async {
     return (await queryItems(
@@ -409,12 +421,14 @@ class EmbyClient {
       filters: filters,
       genres: genres,
       years: years,
+      personIds: personIds,
       fields: fields,
     )).items;
   }
 
   /// 官方筛选参数:[filters] 对应 `Filters`(IsPlayed/IsUnplayed 等已看状态),
-  /// [genres] 对应 `Genres`(竖线分隔),[years] 对应 `Years`(逗号分隔)。
+  /// [genres] 对应 `Genres`(竖线分隔),[years] 对应 `Years`(逗号分隔),
+  /// [personIds] 对应 `PersonIds`(逗号分隔)。不传则不带该参数。
   Future<EmbyItemPage> queryItems({
     String? parentId,
     String? searchTerm,
@@ -427,6 +441,7 @@ class EmbyClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = gridFields,
   }) {
     return _getItemPage(
@@ -445,6 +460,7 @@ class EmbyClient {
         if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
         if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
         if (years != null && years.isNotEmpty) 'Years': years.join(','),
+        'PersonIds': ?personIdsQueryValue(personIds),
         'EnableImageTypes': imageTypes,
       },
     );

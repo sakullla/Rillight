@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -6,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/phone_mine_page.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -437,6 +440,37 @@ extension PageCaptures on CaptureSession {
     if (wants('search')) await searchPages(app);
     if (wants('servers')) await serverPages(app, auth);
     if (platform != 'tv' && wants('settings')) await settingsPages(app);
+    if (wants('person')) await personPages(app, server, adapter);
+  }
+
+  /// 人物作品：加载骨架、按人物 Id 的电影和剧集、空货架、失败重试。
+  Future<void> personPages(
+    RillightApp app,
+    FakeEmbyServer server,
+    CaptureAdapter adapter,
+  ) async {
+    final gate = Completer<void>();
+    adapter.catalogGate = gate;
+    try {
+      app.router.go(AppRoutes.person('person-carl', name: '卡尔'));
+      await advance(700);
+      await save('person-loading');
+      adapter.catalogGate = null;
+      gate.complete();
+      await advance(900);
+      await save('person-works');
+      app.router.go(AppRoutes.person('person-none', name: '无名'));
+      await advance(900);
+      await save('person-empty');
+      server.itemsStatus = 500;
+      app.router.go(AppRoutes.person('person-carl', name: '卡尔'));
+      await advance(900);
+      await save('person-error');
+    } finally {
+      adapter.catalogGate = null;
+      if (!gate.isCompleted) gate.complete();
+      server.itemsStatus = null;
+    }
   }
 
   Future<void> filterStates(Key openKey, String prefix) async {

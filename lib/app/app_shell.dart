@@ -350,9 +350,14 @@ class _TopBar extends StatelessWidget {
     final library = libraries
         .where((entry) => AppRoutes.library(entry.id) == location)
         .firstOrNull;
+    final personName = AppRoutes.isPerson(location)
+        ? (GoRouterState.of(context).uri.queryParameters['name']?.trim() ?? '')
+        : '';
     final title =
         library?.name ??
-        (AppRoutes.isServerResume(location)
+        (personName.isNotEmpty
+            ? personName
+            : AppRoutes.isServerResume(location)
             ? l10n.resumeRow
             : switch (location) {
                 AppRoutes.settings => l10n.settings,
@@ -552,7 +557,8 @@ class _TopBar extends StatelessWidget {
 bool _pageHasHeading(String location) =>
     location.startsWith('/library/') ||
     location.startsWith('/shelf/') ||
-    location.startsWith('/server/');
+    location.startsWith('/server/') ||
+    AppRoutes.isPerson(location);
 
 /// 顶栏返回钮:叠在作品画面上时用带底衬的圆钮保证对比度;
 /// 实心顶栏上改用安静的普通图标钮,不在浅色条上压一块深色圆片。

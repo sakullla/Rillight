@@ -1424,5 +1424,25 @@
   },
 {"id": "player-settings-output", "feature": "player", "platforms": ["desktop", "phone", "tv"]},
 {"id": "player-settings-output-focus", "feature": "player", "platforms": ["tv"]},
-{"id": "player-landscape-settings-output", "feature": "player", "platforms": ["phone"]}
+{"id": "player-landscape-settings-output", "feature": "player", "platforms": ["phone"]},
+  {
+    "id": "person-loading",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
+    "id": "person-works",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
+    "id": "person-empty",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  },
+  {
+    "id": "person-error",
+    "feature": "person",
+    "platforms": ["desktop", "phone", "tv"]
+  }
 ]

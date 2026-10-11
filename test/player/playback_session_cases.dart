@@ -1439,6 +1439,7 @@ class _ControlledClient extends EmbyClient {
     List<String>? filters,
     List<String>? genres,
     List<int>? years,
+    List<String>? personIds,
     String fields = EmbyClient.gridFields,
   }) async {
     queryCount++;
@@ -1455,6 +1456,7 @@ class _ControlledClient extends EmbyClient {
       filters: filters,
       genres: genres,
       years: years,
+      personIds: personIds,
       fields: fields,
     );
     await gate?.future;

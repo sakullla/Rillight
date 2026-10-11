@@ -91,6 +91,7 @@ CatalogRequest catalogItemsRequest({
   List<String>? filters,
   List<String>? genres,
   List<int>? years,
+  List<String>? personIds,
   String fields = EmbyClient.gridFields,
   String imageTypes = EmbyClient.imageTypes,
 }) {
@@ -108,6 +109,7 @@ CatalogRequest catalogItemsRequest({
     if (filters != null && filters.isNotEmpty) 'Filters': filters.join(','),
     if (genres != null && genres.isNotEmpty) 'Genres': genres.join('|'),
     if (years != null && years.isNotEmpty) 'Years': years.join(','),
+    'PersonIds': ?EmbyClient.personIdsQueryValue(personIds),
     'EnableImageTypes': imageTypes,
   });
 }
