@@ -97,21 +97,31 @@ class _SeekPreviewState extends State<SeekPreview> {
 
   Future<void> _loadImage(int revision) async {
     final id = widget.controller.itemId;
+    bool isCurrent() =>
+        mounted && revision == _revision && widget.controller.itemId == id;
     final bif = await (_bifFuture ??= _loadBif());
-    if (!mounted || revision != _revision || widget.controller.itemId != id) {
-      return;
-    }
+    if (!isCurrent()) return;
     _bif = bif;
     final fraction = widget.dragValue ?? _hover;
     if (fraction == null) return;
     if (bif != null) {
-      final frame = await bif.frameAt(_position(fraction));
-      if (!mounted || revision != _revision) return;
-      final bytes = frame == null ? null : await _previewBytes(frame);
-      if (!mounted || revision != _revision) return;
-      setState(() => _image = bytes);
-      return;
+      try {
+        final frame = await bif.frameAt(_position(fraction));
+        if (!isCurrent()) return;
+        final bytes = frame == null ? null : await _previewBytes(frame);
+        if (!isCurrent()) return;
+        if (bytes != null) {
+          setState(() => _image = bytes);
+          return;
+        }
+      } catch (_) {
+        // Remote frames and tiles are optional. A failed read or decode must
+        // fall back just like absent preview data, without escaping the timer.
+      }
+      if (!isCurrent()) return;
+      if (_image != null) setState(() => _image = null);
     }
+    if (!mounted || !isCurrent()) return;
     final position = _position(fraction);
     ItemChapter? chapter;
     for (final entry in widget.controller.item?.chapters ?? <ItemChapter>[]) {
@@ -141,7 +151,7 @@ class _SeekPreviewState extends State<SeekPreview> {
         );
       }
       final image = await _chapterFuture;
-      if (mounted && revision == _revision && widget.controller.itemId == id) {
+      if (isCurrent()) {
         setState(() => _image = image);
       }
     } catch (_) {}
@@ -286,8 +296,12 @@ Future<Uint8List> _previewBytes(PreviewFrame frame) async {
     throw const FormatException('Invalid preview tile');
   }
   final codec = await ui.instantiateImageCodec(frame.bytes);
-  final image = (await codec.getNextFrame()).image;
-  codec.dispose();
+  final ui.Image image;
+  try {
+    image = (await codec.getNextFrame()).image;
+  } finally {
+    codec.dispose();
+  }
   try {
     if (tile.x + tile.width > image.width ||
         tile.y + tile.height > image.height) {
@@ -307,8 +321,12 @@ Future<Uint8List> _previewBytes(PreviewFrame frame) async {
       ui.Paint(),
     );
     final picture = recorder.endRecording();
-    final cropped = await picture.toImage(tile.width, tile.height);
-    picture.dispose();
+    final ui.Image cropped;
+    try {
+      cropped = await picture.toImage(tile.width, tile.height);
+    } finally {
+      picture.dispose();
+    }
     try {
       return (await cropped.toByteData(
         format: ui.ImageByteFormat.png,
