@@ -34,78 +34,85 @@ class _SlowSeasonsServer extends FakeEmbyServer {
 }
 
 void main() {
-  test(
-    'cached seasons start episodes once while live seasons are pending',
-    () async {
-      final server = _SlowSeasonsServer()..hold = false;
-      final client = EmbyClient(
-        device: const ClientDeviceInfo(
-          clientName: 'test',
-          deviceName: 'test',
-          deviceId: 'cached-lists',
-          version: '1',
-        ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-      );
-      final auth = AuthController(
-        client: client,
-        credentials: MemoryCredentialStore(),
-        servers: MemoryServerListStore(),
-      );
-      addTearDown(auth.dispose);
-      await auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      final cache = CatalogCache()
-        ..debugSetDiskStore(null)
-        ..attachSession(serverId: server.serverId, userId: client.userId!);
-      await DetailRepository(client, cache).seasons('series-friends');
-      server.hold = true;
-      final controller = DetailController(
-        auth: auth,
-        cache: cache,
-        itemId: 'series-friends',
-        seasonId: 'season-friends-1',
-      );
-      addTearDown(controller.dispose);
-      addTearDown(() {
-        if (!server.releaseSeasons.isCompleted) {
-          server.releaseSeasons.complete();
+  for (final linked in [false, true]) {
+    test(
+      linked
+          ? 'deep link episodes do not wait for live seasons'
+          : 'cached seasons start episodes once while live seasons are pending',
+      () async {
+        final server = _SlowSeasonsServer()..hold = false;
+        final client = EmbyClient(
+          device: const ClientDeviceInfo(
+            clientName: 'test',
+            deviceName: 'test',
+            deviceId: 'cached-lists',
+            version: '1',
+          ),
+          dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+        );
+        final auth = AuthController(
+          client: client,
+          credentials: MemoryCredentialStore(),
+          servers: MemoryServerListStore(),
+        );
+        addTearDown(auth.dispose);
+        await auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        );
+        final cache = CatalogCache()
+          ..debugSetDiskStore(null)
+          ..attachSession(serverId: server.serverId, userId: client.userId!);
+        if (!linked) {
+          await DetailRepository(client, cache).seasons('series-friends');
         }
-      });
-      final episodesReady = Completer<void>();
-      final seasonsReady = Completer<void>();
-      controller.addListener(() {
-        if (controller.episodes.isNotEmpty &&
-            !controller.episodesLoading &&
-            !episodesReady.isCompleted) {
-          episodesReady.complete();
-        }
-        if (controller.seasons.isNotEmpty &&
-            !controller.seasonsLoading &&
-            !seasonsReady.isCompleted) {
-          seasonsReady.complete();
-        }
-      });
-      await controller.load();
-      await episodesReady.future.timeout(const Duration(seconds: 5));
-      expect(controller.seasonsLoading, isTrue);
-      int episodeRequests() => server.requests.where((entry) {
-        final query = Uri.parse(
-          entry.substring(entry.indexOf(' ') + 1),
-        ).queryParameters;
-        return query['ParentId'] == 'season-friends-1' &&
-            query['IncludeItemTypes'] == 'Episode';
-      }).length;
-      expect(episodeRequests(), 1);
-      server.releaseSeasons.complete();
-      await seasonsReady.future.timeout(const Duration(seconds: 5));
-      await Future<void>.delayed(Duration.zero);
-      expect(episodeRequests(), 1);
-    },
-  );
+        server.hold = true;
+        final controller = DetailController(
+          auth: auth,
+          cache: cache,
+          itemId: 'series-friends',
+          seasonId: 'season-friends-1',
+          initialEpisodeId: linked ? 'episode-friends-s1e2' : null,
+        );
+        addTearDown(controller.dispose);
+        addTearDown(() {
+          if (!server.releaseSeasons.isCompleted) {
+            server.releaseSeasons.complete();
+          }
+        });
+        final episodesReady = Completer<void>();
+        final seasonsReady = Completer<void>();
+        controller.addListener(() {
+          if (controller.episodes.isNotEmpty &&
+              !controller.episodesLoading &&
+              !episodesReady.isCompleted) {
+            episodesReady.complete();
+          }
+          if (controller.seasons.isNotEmpty &&
+              !controller.seasonsLoading &&
+              !seasonsReady.isCompleted) {
+            seasonsReady.complete();
+          }
+        });
+        await controller.load();
+        await episodesReady.future.timeout(const Duration(seconds: 5));
+        expect(controller.seasonsLoading, isTrue);
+        int episodeRequests() => server.requests.where((entry) {
+          final query = Uri.parse(
+            entry.substring(entry.indexOf(' ') + 1),
+          ).queryParameters;
+          return query['ParentId'] == 'season-friends-1' &&
+              query['IncludeItemTypes'] == 'Episode';
+        }).length;
+        expect(episodeRequests(), 1);
+        server.releaseSeasons.complete();
+        await seasonsReady.future.timeout(const Duration(seconds: 5));
+        await Future<void>.delayed(Duration.zero);
+        expect(episodeRequests(), 1);
+      },
+    );
+  }
 
   test(
     'series header is ready while season response is still pending',

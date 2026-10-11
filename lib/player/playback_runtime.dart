@@ -20,12 +20,17 @@ class PlaybackOrigin {
     required this.libraryId,
     required this.permit,
     required this.client,
+    this.resolvedItem,
   });
   final SourceReference source;
   final SourceReference work;
   final String libraryId;
   final OperationPermit permit;
   final MediaServerClient client;
+
+  /// Fresh metadata obtained while verifying membership. Only an immediate
+  /// launch may reuse it; retained switch/recovery origins must refresh.
+  final MediaItem? resolvedItem;
 }
 
 /// Created only by the application bootstrap, never by the player helper.
@@ -173,6 +178,7 @@ class PlaybackRuntime {
       libraryId: library,
       permit: permit,
       client: client,
+      resolvedItem: item,
     );
   }
 

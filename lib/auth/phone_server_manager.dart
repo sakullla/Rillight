@@ -1,4 +1,3 @@
-import 'source_management.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -461,17 +460,6 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                                 ScrollViewKeyboardDismissBehavior.onDrag,
                             itemCount: servers.length,
                             itemBuilder: (_, i) => _server(servers[i]),
-                          ),
-                  ),
-                  TextButton.icon(
-                    key: const Key('phone-manage-providers'),
-                    icon: const Icon(Icons.manage_accounts_outlined),
-                    label: Text(l.sourceManagement),
-                    onPressed: _busy
-                        ? null
-                        : () => showDialog<void>(
-                            context: context,
-                            builder: (_) => SourceManagement(auth: widget.auth),
                           ),
                   ),
                   const SizedBox(height: 8),

@@ -2752,16 +2752,17 @@ class PlayerController extends ChangeNotifier {
     for (var i = 0; i < a.ranges.length; i++) {
       if (a.ranges[i] != b.ranges[i]) return false;
     }
-    if (playerShowsByteCache(a) != playerShowsByteCache(b)) return false;
-    if (!playerShowsByteCache(a)) return true;
-    final aBytes = a.byteCoverage!;
-    final bBytes = b.byteCoverage!;
-    if (aBytes.totalBytes != bBytes.totalBytes ||
-        aBytes.ranges.length != bBytes.ranges.length) {
-      return false;
-    }
-    for (var i = 0; i < aBytes.ranges.length; i++) {
-      if (aBytes.ranges[i] != bBytes.ranges[i]) return false;
+    if (a.usesByteEstimate != b.usesByteEstimate) return false;
+    if (a.usesByteEstimate) {
+      final left = a.byteCoverage!;
+      final right = b.byteCoverage!;
+      if (left.totalBytes != right.totalBytes ||
+          left.ranges.length != right.ranges.length) {
+        return false;
+      }
+      for (var i = 0; i < left.ranges.length; i++) {
+        if (left.ranges[i] != right.ranges[i]) return false;
+      }
     }
     return true;
   }
@@ -2805,6 +2806,10 @@ class PlayerController extends ChangeNotifier {
             playback.streamStartsAtRequestedPosition,
         resources: playback.resources,
       );
+    } on MediaServerException {
+      final fallback = _strmTranscodeFallback(playback);
+      if (fallback == null) rethrow;
+      return fallback;
     } catch (_) {
       return _strmTranscodeFallback(playback);
     }
@@ -3958,8 +3963,8 @@ class PlayerController extends ChangeNotifier {
           final previous = bufferSnapshot;
           bufferSnapshot = _stabilizeBufferSnapshot(next);
           _updateNetworkSlow();
-          // Speed readouts are throttled. Retry often has no position tick,
-          // so a changed download bar has to rebuild on its own.
+          // Speed readouts are throttled. Cache coverage still updates the
+          // combined timeline without waiting for a position tick.
           if (!_sameBufferPresentation(previous, bufferSnapshot) ||
               _playbackUiDue()) {
             _lastPlaybackUi = DateTime.now();
@@ -4535,7 +4540,12 @@ class PlayerController extends ChangeNotifier {
                         stream,
                   ]
                 : next.mediaSource.mediaStreams,
+            // Keep the first decoded frame silent until the saved volume,
+            // speed and audio selection are applied at the resume position.
             startPaused: startPaused,
+            // Android tunneling requires play intent while opening its paired
+            // audio/video codecs. Keep this output hold on desktop sinks.
+            holdPlaybackForSettings: !Platform.isAndroid,
             start: next.startsAtRequestedPosition
                 ? Duration.zero
                 : durationFromTicks(boundedStartTicks) - _streamOrigin,
@@ -4554,6 +4564,12 @@ class PlayerController extends ChangeNotifier {
             ),
             warmedPrefix: _nextPrefix?.itemId == itemId
                 ? _nextPrefix!.bytes
+                : null,
+            warmedPrefixEtag: _nextPrefix?.itemId == itemId
+                ? _nextPrefix!.etag
+                : null,
+            warmedPrefixTotalBytes: _nextPrefix?.itemId == itemId
+                ? _nextPrefix!.totalBytes
                 : null,
           ),
         );
@@ -4581,17 +4597,6 @@ class PlayerController extends ChangeNotifier {
                     TranscodeSubtitleDelivery.burnIn
             ? selectedSubtitle
             : backend.selectedSubtitleIndex;
-        if (!isRecovering) {
-          loading = false;
-          state.updatePlaying(isPlaying);
-        }
-        // Publish readiness before optional commands or Playing can block.
-        _emit();
-        started = _beginSession(operation, startTicks: boundedStartTicks);
-        if (_pendingCompletion) {
-          _pendingCompletion = false;
-          unawaited(_handleCompleted());
-        }
         onStage?.call('restore volume');
         final volumeApplied = await _restoreParameter(
           operation,
@@ -4605,7 +4610,6 @@ class PlayerController extends ChangeNotifier {
         if (isRecovering && (!volumeApplied || !rateApplied)) {
           throw StateError('Required playback settings were not restored');
         }
-        await _queueSubtitlePresentation(phoneSubtitleSettings, save: false);
         onStage?.call('restore audio track');
         final audioApplied = await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
@@ -4623,6 +4627,22 @@ class PlayerController extends ChangeNotifier {
               ? selectedAudio
               : backend.selectedAudioIndex;
         }
+        if (!_accepts(operation)) return;
+        if (!startPaused && !backend.isPlaying) await backend.play();
+        if (!_accepts(operation)) return;
+        isPlaying = backend.isPlaying;
+        if (!isRecovering) {
+          loading = false;
+          state.updatePlaying(isPlaying);
+        }
+        // Optional subtitles and server reporting cannot hold audible startup.
+        _emit();
+        started = _beginSession(operation, startTicks: boundedStartTicks);
+        if (_pendingCompletion) {
+          _pendingCompletion = false;
+          unawaited(_handleCompleted());
+        }
+        await _queueSubtitlePresentation(phoneSubtitleSettings, save: false);
       });
       if (!_accepts(operation) || disconnected) return;
       final subtitleSession = _session;

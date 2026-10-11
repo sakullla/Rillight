@@ -65,8 +65,8 @@ void main() {
     );
     expect(snapshot.byteCoverage, isNotNull);
     expect(snapshot.isKnown, isFalse);
-    expect(snapshot.hidesByteCoverage, isTrue);
-    expect(playerShowsByteCache(snapshot), isTrue);
+    expect(snapshot.usesByteEstimate, isTrue);
+    expect(snapshot.ranges, isEmpty);
     final settled = BufferSnapshot(
       sessionId: 1,
       resourceId: 'media',
@@ -77,10 +77,12 @@ void main() {
       byteCoverage: snapshot.byteCoverage,
     );
     expect(settled.isKnown, isTrue);
-    expect(playerShowsByteCache(settled), isFalse);
+    expect(settled.ranges, const [
+      BufferedRange(Duration.zero, Duration(seconds: 4)),
+    ]);
   });
 
-  test('resume keeps the download bar until bytes map to media time', () {
+  test('resume preserves byte observations until media time is mapped', () {
     final snapshot = BufferSnapshot(
       sessionId: 1,
       resourceId: 'media',
@@ -95,7 +97,7 @@ void main() {
     );
     expect(snapshot.isKnown, isTrue);
     expect(snapshot.ranges, isEmpty);
-    expect(playerShowsByteCache(snapshot), isTrue);
+    expect(snapshot.byteCoverage!.ranges, const [BufferedByteRange(400, 520)]);
     final mapped = BufferSnapshot(
       sessionId: 1,
       resourceId: 'media',
@@ -107,7 +109,9 @@ void main() {
       ],
       byteCoverage: snapshot.byteCoverage,
     );
-    expect(playerShowsByteCache(mapped), isFalse);
+    expect(mapped.ranges, const [
+      BufferedRange(Duration(seconds: 20), Duration(seconds: 28)),
+    ]);
   });
 
   test('rejects late versions and keeps unknown coverage empty', () {
@@ -303,7 +307,7 @@ void main() {
 
   for (final reason in <String?>[null, 'containerTrackOrTimingUnknown']) {
     testWidgets(
-      'time track never substitutes byte fractions for media time: $reason',
+      'combined track estimates byte coverage without a time index: $reason',
       (tester) async {
         final boundaryKey = GlobalKey();
         await tester.pumpWidget(
@@ -324,12 +328,11 @@ void main() {
                       unknownReason: reason,
                       byteCoverage: BufferedByteCoverage(
                         totalBytes: 100,
-                        // A metadata probe, initial read and distant seek read
-                        // do not establish corresponding media-time ranges.
+                        // Preserve gaps when displaying the byte estimate.
                         ranges: const [
                           BufferedByteRange(0, 1),
                           BufferedByteRange(3, 11),
-                          BufferedByteRange(15, 60),
+                          BufferedByteRange(35, 60),
                         ],
                       ),
                     ),
@@ -343,7 +346,8 @@ void main() {
         );
         final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
         expect(pixels.at(30, 3), Colors.white);
-        expect(pixels.at(120, 3), const Color(0xff363c44));
+        expect(pixels.at(90, 3), const Color(0xff363c44));
+        expect(pixels.at(120, 3), const Color(0xff697783));
         expect(pixels.at(240, 3), const Color(0xff363c44));
       },
     );
@@ -403,9 +407,15 @@ void main() {
       final thumbX = (15 + seconds / 2).round();
       expect(pixels.at(thumbX, 16), Colors.white);
       expect(pixels.at(thumbX, 20), Colors.white);
-      expect(pixels.at(thumbX + 10, 20), const Color(0xff363c44));
-      expect(pixels.at(80, 20), const Color(0xff363c44));
-      expect(pixels.at(150, 20), const Color(0xff363c44));
+      expect(
+        pixels.at(thumbX + 10, 20),
+        seconds == 91 ? const Color(0xff697783) : const Color(0xff363c44),
+      );
+      expect(pixels.at(80, 20), const Color(0xff697783));
+      expect(
+        pixels.at(150, 20),
+        seconds == 91 ? const Color(0xff697783) : const Color(0xff363c44),
+      );
       if (seconds == 91) expect(pixels.at(30, 20), Colors.white);
     }
   });
@@ -418,6 +428,12 @@ BufferSnapshot _pixelSnapshot({String? unknownReason}) => BufferSnapshot(
   trackVersion: 0,
   sequence: 1,
   unknownReason: unknownReason,
+  byteCoverage: unknownReason == null
+      ? BufferedByteCoverage(
+          totalBytes: 100,
+          ranges: const [BufferedByteRange(0, 100)],
+        )
+      : null,
   ranges: const [
     BufferedRange(Duration.zero, Duration(seconds: 50)),
     BufferedRange(Duration(seconds: 70), Duration(seconds: 90)),

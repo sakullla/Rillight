@@ -1511,18 +1511,7 @@ class _SeekTimeline extends StatelessWidget {
         Text(_clock(controller.duration), style: _overlayTimeStyle(theme)),
       ],
     );
-    if (!playerShowsByteCache(controller.bufferSnapshot)) return timeline;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        BufferedByteCoverageBar(
-          key: const Key('player-byte-cache-track'),
-          coverage: controller.bufferSnapshot.byteCoverage,
-        ),
-        const SizedBox(height: 6),
-        timeline,
-      ],
-    );
+    return timeline;
   }
 }
 
@@ -1556,32 +1545,14 @@ class _ControlsRow extends StatelessWidget {
               ? Icons.pause_rounded
               : Icons.play_arrow_rounded,
         ),
-        _PlayerIconButton(
-          key: const Key('player-rewind'),
-          tooltip: l10n.mobileRewind,
-          onPressed: () =>
-              unawaited(controller.seekRelative(const Duration(seconds: -10))),
-          icon: Icons.replay_10_rounded,
-        ),
-        _PlayerIconButton(
-          key: const Key('player-forward'),
-          tooltip: l10n.mobileForward,
-          onPressed: () =>
-              unawaited(controller.seekRelative(const Duration(seconds: 10))),
-          icon: Icons.forward_10_rounded,
-        ),
         _VolumeControl(controller: controller),
         const Spacer(),
         if (controller.canBrowseEpisodes)
-          TextButton.icon(
+          _PlayerIconButton(
             key: const Key('player-episodes'),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
-              visualDensity: VisualDensity.compact,
-            ),
+            tooltip: l10n.playerEpisodes,
             onPressed: onOpenEpisodes,
-            icon: const Icon(Icons.video_library_rounded, size: 22),
-            label: Text(l10n.playerEpisodes),
+            icon: Icons.video_library_rounded,
           ),
         if (danmakuController != null && danmakuController.isConfigured)
           _DanmakuButton(
@@ -2058,6 +2029,7 @@ class _VolumeControl extends StatelessWidget {
             ),
             child: Slider(
               key: PlayerKeys.volume,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
               value: volume.toDouble(),
               min: 0,
               max: PlayerSettings.volumeMax.toDouble(),

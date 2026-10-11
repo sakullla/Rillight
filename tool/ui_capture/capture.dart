@@ -393,7 +393,6 @@ void main() {
           }
           await capture.save('player-controls');
           expect(backend.openCount, greaterThan(0));
-          backend.emitEvent(VideoEventKind.cacheSpeed, 2621440);
           backend.emitEvent(
             VideoEventKind.bufferSnapshot,
             BufferSnapshot(
@@ -402,6 +401,28 @@ void main() {
               representationVersion: 'v1',
               trackVersion: 0,
               sequence: 1,
+              ranges: const [],
+              unknownReason: 'containerTrackOrTimingUnknown',
+              byteCoverage: BufferedByteCoverage(
+                totalBytes: 1000,
+                ranges: const [
+                  BufferedByteRange(0, 350),
+                  BufferedByteRange(600, 750),
+                ],
+              ),
+            ),
+          );
+          await capture.advance(200);
+          await capture.save('player-cache-estimated');
+          backend.emitEvent(VideoEventKind.cacheSpeed, 2621440);
+          backend.emitEvent(
+            VideoEventKind.bufferSnapshot,
+            BufferSnapshot(
+              sessionId: backend.sessionId,
+              resourceId: 'capture-media',
+              representationVersion: 'v1',
+              trackVersion: 0,
+              sequence: 2,
               ranges: const [
                 BufferedRange(Duration.zero, Duration(minutes: 18)),
               ],

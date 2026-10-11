@@ -566,7 +566,9 @@ class RillightVideoBackend extends VideoBackend
         ),
         dynamicSource: request.dynamicSource,
         sessionBuffering: true,
-        continuousTransfers: Platform.isAndroid,
+        // Keep the validated response alive across cache windows on desktop
+        // too; restarting every 32 MiB repeatedly pays origin header latency.
+        continuousTransfers: true,
         readAheadConcurrency: 1,
       );
       if (_disposed || generation != _generation) {
@@ -577,7 +579,9 @@ class RillightVideoBackend extends VideoBackend
       // Start the continuous download during decoder open, not after its
       // probes have already waited for a sequence of tiny HTTP reads. The
       // transport yields its single producer to uncached index/track probes.
-      await transport.setPlaybackActive(!request.startPaused);
+      // Opening needs read-ahead even when output is held for settings restore.
+      // Apply the user's pause intent once the first frame is ready below.
+      await transport.setPlaybackActive(true);
       _openPhase = 'register';
 
       final sealed = await transport.register(request.url);
@@ -585,7 +589,12 @@ class RillightVideoBackend extends VideoBackend
       final warmed = request.warmedPrefix;
       if (warmed != null && warmed.isNotEmpty) {
         try {
-          await transport.installWarmPrefix(request.url, warmed);
+          await transport.installWarmPrefix(
+            request.url,
+            warmed,
+            etag: request.warmedPrefixEtag,
+            totalBytes: request.warmedPrefixTotalBytes,
+          );
         } catch (_) {
           // A missing prefix leaves the new item on its normal cold start.
         }
@@ -616,7 +625,7 @@ class RillightVideoBackend extends VideoBackend
           url: sealed,
           session: _coreSession,
           start: request.start,
-          paused: request.startPaused,
+          paused: request.startPaused || request.holdPlaybackForSettings,
           hardware: PlayerRuntimeOptions.coreHardware(
             settings,
             defaultTargetPlatform,
@@ -847,7 +856,11 @@ class RillightVideoBackend extends VideoBackend
               isInfiniteStream: request.isInfiniteStream,
               mediaStreams: request.mediaStreams,
               startPaused: !_wantsPlayback,
-              warmedPrefix: request.warmedPrefix,
+              // Reconnection restores tracks and gain just like first open.
+              // Android's tunneled codecs still require initial play intent.
+              holdPlaybackForSettings: !Platform.isAndroid,
+              // A recovery has its own validated transport; do not replay an
+              // old episode-start prefix after a source or timeline change.
             ),
           );
           if (epoch != _recoveryEpoch || _disposed) return;
@@ -1204,6 +1217,7 @@ class RillightVideoBackend extends VideoBackend
       isInfiniteStream: request.isInfiniteStream,
       mediaStreams: request.mediaStreams,
       startPaused: request.startPaused,
+      holdPlaybackForSettings: request.holdPlaybackForSettings,
     );
   }
 

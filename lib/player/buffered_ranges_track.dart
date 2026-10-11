@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'buffer_snapshot.dart';
 
-export 'buffer_snapshot.dart' show playerShowsByteCache;
-
 /// Installs a seek track inside the Slider's painting pass, before its thumb.
 /// Slider still owns geometry, input, focus and accessibility.
 class BufferedRangesTrack extends StatelessWidget {
@@ -138,14 +136,23 @@ void _paintTrack(
   }
 
   final total = duration.inMicroseconds;
-  // Byte offsets cannot locate cache on a media timeline: variable bitrate,
-  // metadata and seek reads produce unrelated fractions and apparent gaps.
-  // Leave unknown time coverage empty until verified media ranges arrive.
+  // Prefer exact media-time coverage. The byte fallback is a visual estimate
+  // on this same track, not a claim of playable media time.
   if (snapshot.isKnown && snapshot.ranges.isNotEmpty && total > 0) {
     for (final range in snapshot.ranges) {
       segment(
         (range.start.inMicroseconds / total).clamp(0.0, 1.0),
         (range.end.inMicroseconds / total).clamp(0.0, 1.0),
+        const Color(0xff697783),
+      );
+    }
+  }
+  if (snapshot.usesByteEstimate) {
+    final coverage = snapshot.byteCoverage!;
+    for (final range in coverage.ranges) {
+      segment(
+        (range.start / coverage.totalBytes).clamp(0.0, 1.0),
+        (range.end / coverage.totalBytes).clamp(0.0, 1.0),
         const Color(0xff697783),
       );
     }
@@ -183,74 +190,5 @@ class _ProgressPainter extends CustomPainter {
       oldDelegate.snapshot != snapshot ||
       oldDelegate.duration != duration ||
       oldDelegate.value != value ||
-      oldDelegate.textDirection != textDirection;
-}
-
-class BufferedByteCoverageBar extends StatelessWidget {
-  const BufferedByteCoverageBar({super.key, required this.coverage});
-
-  final BufferedByteCoverage? coverage;
-
-  @override
-  Widget build(BuildContext context) {
-    final value = coverage;
-    if (value == null || value.ranges.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 4,
-      width: double.infinity,
-      child: CustomPaint(
-        painter: _ByteCoveragePainter(
-          coverage: value,
-          textDirection: Directionality.of(context),
-        ),
-      ),
-    );
-  }
-}
-
-class _ByteCoveragePainter extends CustomPainter {
-  const _ByteCoveragePainter({
-    required this.coverage,
-    required this.textDirection,
-  });
-
-  final BufferedByteCoverage coverage;
-  final TextDirection textDirection;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.width <= 0 || size.height <= 0 || coverage.totalBytes <= 0) {
-      return;
-    }
-    final rect = Offset.zero & size;
-    final shape = RRect.fromRectAndRadius(
-      rect,
-      Radius.circular(size.height / 2),
-    );
-    canvas.drawRRect(shape, Paint()..color = const Color(0xff444b53));
-    canvas.save();
-    canvas.clipRRect(shape);
-    final total = coverage.totalBytes;
-    final rtl = textDirection == TextDirection.rtl;
-    for (final range in coverage.ranges) {
-      final start = (range.start / total).clamp(0.0, 1.0);
-      final end = (range.end / total).clamp(0.0, 1.0);
-      if (end <= start) continue;
-      canvas.drawRect(
-        Rect.fromLTRB(
-          size.width * (rtl ? 1 - end : start),
-          0,
-          size.width * (rtl ? 1 - start : end),
-          size.height,
-        ),
-        Paint()..color = const Color(0xff42cbd3),
-      );
-    }
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_ByteCoveragePainter oldDelegate) =>
-      oldDelegate.coverage != coverage ||
       oldDelegate.textDirection != textDirection;
 }

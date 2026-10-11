@@ -2,8 +2,25 @@
 
 #include <cassert>
 #include <chrono>
+#include <vector>
 
 int main() {
+  rillight_windows::PcmOnsetRamp ramp;
+  std::vector<int16_t> pcm(480 * 6, 24000);
+  // The gain is shared by all channels and continuous across endpoint writes.
+  ramp.Apply(pcm.data(), 100, 6);
+  ramp.Apply(pcm.data() + 100 * 6, 380, 6);
+  for (int i = 0; i < 480; ++i) {
+    const auto expected = static_cast<int16_t>(i < 240 ? 24000 * i / 239 : 24000);
+    for (int channel = 0; channel < 6; ++channel)
+      assert(pcm[i * 6 + channel] == expected);
+  }
+  ramp.Reset();
+  int16_t negative[] = {-32768, 32767, -32768, 32767};
+  ramp.Apply(negative, 2, 2);
+  assert(negative[0] == 0 && negative[1] == 0);
+  assert(negative[2] < 0 && negative[3] > 0);
+
   // Adjacent PCM packets differ by rounding at most; fill the device buffer
   // even when its tail is ahead of the audible clock. A real gap still waits.
   assert(!rillight_windows::WaitForFutureAudio(418474667, 418424666, 418474666));

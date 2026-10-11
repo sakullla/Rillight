@@ -91,12 +91,18 @@ class ProviderConnectDialog extends StatefulWidget {
     this.region = AccessRegion.ordinary,
     this.home = false,
     this.initialUserAgent,
+    this.initialType,
+    this.inline = false,
+    this.onConnected,
   });
   final AuthController auth;
   final SavedServer? existing;
   final AccessRegion region;
   final bool home;
   final String? initialUserAgent;
+  final MediaServerType? initialType;
+  final bool inline;
+  final VoidCallback? onConnected;
   @override
   State<ProviderConnectDialog> createState() => _ProviderConnectDialogState();
 }
@@ -109,6 +115,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       password = TextEditingController(),
       pin = TextEditingController();
   HomeUser? homeUser;
+  VoidCallback? _releasePresentation;
   @override
   void initState() {
     super.initState();
@@ -118,6 +125,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       region: widget.region,
       userAgent: widget.initialUserAgent,
     );
+    if (widget.initialType != null && widget.existing == null) {
+      controller.type = widget.initialType!;
+    }
+    if (widget.inline) {
+      _releasePresentation = widget.auth.retainAuthorizationPresentation();
+    }
     address.text = widget.existing?.baseUrl ?? '';
     username.text = widget.existing?.username ?? '';
     userAgent.text = controller.userAgent;
@@ -140,7 +153,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       userAgent.clear();
       if (mounted) {
         final route = ModalRoute.of(context);
-        if (route?.isActive == true) {
+        if (!widget.inline && route?.isActive == true) {
           final navigator = Navigator.of(context);
           // TV input editors are nested routes. Close them with their owner so
           // locking cannot leave an editor displaying a private identity.
@@ -155,6 +168,10 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
   void dispose() {
     widget.auth.regionAccess.removeListener(_accessChanged);
     controller.dispose();
+    final release = _releasePresentation;
+    if (release != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => release());
+    }
     userAgent.dispose();
     address.dispose();
     username.dispose();
@@ -166,7 +183,11 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
   Future<void> _finish() async {
     await controller.finish();
     if (mounted && controller.stage == ProviderConnectStage.done) {
-      Navigator.pop(context, true);
+      if (widget.inline) {
+        widget.onConnected?.call();
+      } else {
+        Navigator.pop(context, true);
+      }
     }
   }
 
@@ -204,12 +225,15 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         ),
       );
     }
-    return TextField(
-      key: Key(id),
-      controller: value,
-      obscureText: secret,
-      keyboardType: keyboardType,
-      decoration: InputDecoration(labelText: label),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: TextField(
+        key: Key(id),
+        controller: value,
+        obscureText: secret,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label),
+      ),
     );
   }
 
@@ -228,7 +252,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
         },
         child: FocusTraversalGroup(
-          child: AlertDialog(
+          child: _ProviderPresentation(
+            inline: widget.inline,
             insetPadding: const EdgeInsets.symmetric(
               horizontal: 16,
               vertical: 20,
@@ -254,33 +279,34 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                         ),
                       ),
                     if (c.stage == ProviderConnectStage.credentials) ...[
-                      DropdownButtonFormField<MediaServerType>(
-                        key: const Key('provider-type'),
-                        initialValue: c.type,
-                        decoration: InputDecoration(
-                          labelText: l.providerServiceType,
+                      if (!widget.inline)
+                        DropdownButtonFormField<MediaServerType>(
+                          key: const Key('provider-type'),
+                          initialValue: c.type,
+                          decoration: InputDecoration(
+                            labelText: l.providerServiceType,
+                          ),
+                          items: [
+                            for (final type in MediaServerType.values)
+                              DropdownMenuItem(
+                                value: type,
+                                child: Text(switch (type) {
+                                  MediaServerType.emby => 'Emby',
+                                  MediaServerType.jellyfin => 'Jellyfin',
+                                  MediaServerType.plex => 'Plex',
+                                }),
+                              ),
+                          ],
+                          onChanged: c.busy || widget.existing != null
+                              ? null
+                              : (type) {
+                                  if (type != null) {
+                                    password.clear();
+                                    pin.clear();
+                                    c.reset(type);
+                                  }
+                                },
                         ),
-                        items: [
-                          for (final type in MediaServerType.values)
-                            DropdownMenuItem(
-                              value: type,
-                              child: Text(switch (type) {
-                                MediaServerType.emby => 'Emby',
-                                MediaServerType.jellyfin => 'Jellyfin',
-                                MediaServerType.plex => 'Plex',
-                              }),
-                            ),
-                        ],
-                        onChanged: c.busy || widget.existing != null
-                            ? null
-                            : (type) {
-                                if (type != null) {
-                                  password.clear();
-                                  pin.clear();
-                                  c.reset(type);
-                                }
-                              },
-                      ),
                       const SizedBox(height: 12),
                       if (c.type != MediaServerType.plex) ...[
                         _input(
@@ -489,11 +515,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               ),
             ),
             actions: [
-              TextButton(
-                key: const Key('provider-cancel'),
-                onPressed: () => Navigator.pop(context, false),
-                child: Text(l.cancelAction),
-              ),
+              if (!widget.inline)
+                TextButton(
+                  key: const Key('provider-cancel'),
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(l.cancelAction),
+                ),
               if (c.stage == ProviderConnectStage.libraries)
                 FilledButton(
                   key: const Key('provider-finish'),
@@ -506,4 +533,36 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       );
     },
   );
+}
+
+class _ProviderPresentation extends StatelessWidget {
+  const _ProviderPresentation({
+    required this.inline,
+    required this.insetPadding,
+    required this.title,
+    required this.content,
+    required this.actions,
+  });
+  final bool inline;
+  final EdgeInsets insetPadding;
+  final Widget title, content;
+  final List<Widget> actions;
+  @override
+  Widget build(BuildContext context) => inline
+      ? Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            content,
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(alignment: WrapAlignment.end, children: actions),
+            ],
+          ],
+        )
+      : AlertDialog(
+          insetPadding: insetPadding,
+          title: title,
+          content: content,
+          actions: actions,
+        );
 }

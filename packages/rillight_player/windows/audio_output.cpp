@@ -578,6 +578,7 @@ void AudioOutput::Run() {
     bool handed_off_audio_clock = false;
     bool audio_clock_started = false;
     rillight_windows::AudioHandoffPolicy handoff_policy;
+    rillight_windows::PcmOnsetRamp onset_ramp;
     bool running = false;
     int exclusive_stalls = 0;
     uint32_t seen_generation = route_at_start;
@@ -658,6 +659,8 @@ void AudioOutput::Run() {
       } else if (opened == rillight_windows::SharedInitResult::kFatal) {
         throw std::runtime_error("WASAPI PCM output initialization failed");
       }
+      if (opened == rillight_windows::SharedInitResult::kReady)
+        onset_ramp.Reset();
       return opened;
     };
     auto fail_passthrough = [&](int kind) {
@@ -748,6 +751,7 @@ void AudioOutput::Run() {
         handed_off_audio_clock = false;
         audio_clock_started = false;
         handoff_policy.Reset();
+        onset_ramp.Reset();
         mux.reset();
         burst.clear();
         burst_pts = -1;
@@ -950,6 +954,8 @@ void AudioOutput::Run() {
                 std::memcpy(output,
                             pending->data + static_cast<size_t>(offset) * stride,
                             static_cast<size_t>(count) * stride);
+                onset_ramp.Apply(reinterpret_cast<int16_t*>(output),
+                                 static_cast<int>(count), pending->channels);
                 const HRESULT release_hr =
                     endpoint.render->ReleaseBuffer(count, 0);
                 if (client_failed(release_hr, "WASAPI buffer commit failed"))

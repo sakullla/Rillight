@@ -1,7 +1,7 @@
+import 'source_management.dart';
 import 'provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
 import 'dart:async';
-import 'source_management.dart';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -94,10 +94,6 @@ class SessionActions extends StatelessWidget {
                   .isAvailable,
               externalAccountManagement:
                   auth.client.serviceType == MediaServerType.plex,
-              onManage: () {
-                Navigator.of(dialogContext).pop();
-                unawaited(showSourceManagement(context));
-              },
               onAddServer: () {
                 Navigator.of(dialogContext).pop();
                 GoRouter.of(context).push('${AppRoutes.connect}?add=1');

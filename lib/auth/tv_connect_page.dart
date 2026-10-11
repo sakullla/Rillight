@@ -1,6 +1,5 @@
+import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
-import '../app/routes.dart';
-import 'provider_connect_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -93,23 +92,16 @@ class _TvConnectPageState extends State<TvConnectPage> {
     final selected = auth.savedServers
         .where((s) => s.id == _draft?.selectedServerId)
         .firstOrNull;
-    if (selected != null && selected.serviceType != MediaServerType.emby) {
-      final connected = await showProviderConnect(
-        context,
-        auth,
-        userAgent: _userAgent.text,
-        existing: selected,
-      );
-      if (connected == true && mounted) context.go(AppRoutes.home);
-      return;
-    }
+
     FocusScope.of(context).unfocus();
     await auth.connect(
       address: _address.text.trim(),
       username: _username.text.trim(),
       password: _password.text,
       userAgent: _userAgent.text,
-      lineId: _draft?.selectedLineId,
+      lineId: selected?.serviceType == MediaServerType.emby
+          ? _draft?.selectedLineId
+          : null,
     );
     if (mounted && auth.isLoggedIn && widget.addingAnother) context.go('/');
   }
@@ -292,142 +284,130 @@ class _TvConnectPageState extends State<TvConnectPage> {
         borderRadius: BorderRadius.circular(20 * s),
         border: Border.all(color: scheme.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          TvAction(
-            key: const Key('tv-provider-entry'),
-            expand: true,
-            onPressed: auth.isBusy
-                ? null
-                : () async {
-                    final connected = await showProviderConnect(
-                      context,
-                      auth,
-                      userAgent: _userAgent.text,
-                    );
-                    if (connected == true && context.mounted) {
-                      context.go(AppRoutes.home);
-                    }
-                  },
-            child: Text(l10n.providerConnectEntry),
-          ),
-          SizedBox(height: 8 * s),
-          TvInput(
-            key: const Key('tv-connect-address'),
-            label: l10n.serverAddress,
-            controller: _address,
-            placeholder: 'https://emby.example.com',
-            keyboardType: TextInputType.url,
-            leading: const Icon(Icons.link_rounded),
-            autofocus: true,
-          ),
-          SizedBox(height: 8 * s),
-          TvInput(
-            key: const Key('tv-connect-username'),
-            label: l10n.username,
-            controller: _username,
-            leading: const Icon(Icons.person_outline_rounded),
-          ),
-          SizedBox(height: 8 * s),
-          TvInput(
-            key: const Key('tv-connect-password'),
-            label: l10n.password,
-            controller: _password,
-            leading: const Icon(Icons.lock_outline_rounded),
-            secret: true,
-          ),
-          SizedBox(height: 8 * s),
-          TvInput(
-            label: l10n.tvUserAgentOptional,
-            controller: _userAgent,
-            leading: const Icon(Icons.badge_outlined),
-          ),
-          if (auth.failure != null) ...[
-            SizedBox(height: 12 * s),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.error_outline_rounded,
-                  size: 18 * s,
-                  color: scheme.error,
+      child: ProviderLoginForm(
+        userAgent: () => _userAgent.text,
+        selectedServer: auth.savedServers
+            .where((s) => s.id == _draft?.selectedServerId)
+            .firstOrNull,
+        embyForm: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TvInput(
+              key: const Key('tv-connect-address'),
+              label: l10n.serverAddress,
+              controller: _address,
+              placeholder: 'https://emby.example.com',
+              keyboardType: TextInputType.url,
+              leading: const Icon(Icons.link_rounded),
+              autofocus: true,
+            ),
+            SizedBox(height: 8 * s),
+            TvInput(
+              key: const Key('tv-connect-username'),
+              label: l10n.username,
+              controller: _username,
+              leading: const Icon(Icons.person_outline_rounded),
+            ),
+            SizedBox(height: 8 * s),
+            TvInput(
+              key: const Key('tv-connect-password'),
+              label: l10n.password,
+              controller: _password,
+              leading: const Icon(Icons.lock_outline_rounded),
+              secret: true,
+            ),
+            SizedBox(height: 8 * s),
+            TvInput(
+              label: l10n.tvUserAgentOptional,
+              controller: _userAgent,
+              leading: const Icon(Icons.badge_outlined),
+            ),
+            if (auth.failure != null) ...[
+              SizedBox(height: 12 * s),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.error_outline_rounded,
+                    size: 18 * s,
+                    color: scheme.error,
+                  ),
+                  SizedBox(width: 8 * s),
+                  Expanded(
+                    child: Text(
+                      embyFailureMessage(l10n, auth.failure!),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            SizedBox(height: 16 * s),
+            TvAction(
+              key: const Key('tv-connect-submit'),
+              emphasized: true,
+              expand: true,
+              onPressed: auth.isBusy ? null : _submit,
+              child: Center(
+                child: Text(
+                  auth.isBusy
+                      ? l10n.connecting
+                      : auth.failure != null
+                      ? l10n.retry
+                      : l10n.connect,
                 ),
-                SizedBox(width: 8 * s),
-                Expanded(
+              ),
+            ),
+            SizedBox(height: 14 * s),
+            Row(
+              children: [
+                Expanded(child: Divider(color: scheme.outlineVariant)),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10 * s),
                   child: Text(
-                    embyFailureMessage(l10n, auth.failure!),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.error,
+                    l10n.tvConnectOr,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ),
+                Expanded(child: Divider(color: scheme.outlineVariant)),
               ],
             ),
-          ],
-          SizedBox(height: 16 * s),
-          TvAction(
-            key: const Key('tv-connect-submit'),
-            emphasized: true,
-            expand: true,
-            onPressed: auth.isBusy ? null : _submit,
-            child: Center(
-              child: Text(
-                auth.isBusy
-                    ? l10n.connecting
-                    : auth.failure != null
-                    ? l10n.retry
-                    : l10n.connect,
-              ),
-            ),
-          ),
-          SizedBox(height: 14 * s),
-          Row(
-            children: [
-              Expanded(child: Divider(color: scheme.outlineVariant)),
+            SizedBox(height: 10 * s),
+            if (phase == TvLanPhase.expired)
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10 * s),
+                padding: EdgeInsets.only(bottom: 8 * s),
                 child: Text(
-                  l10n.tvConnectOr,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+                  l10n.tvLanExpired,
+                  key: const Key('tv-lan-expired'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
               ),
-              Expanded(child: Divider(color: scheme.outlineVariant)),
-            ],
-          ),
-          SizedBox(height: 10 * s),
-          if (phase == TvLanPhase.expired)
-            Padding(
-              padding: EdgeInsets.only(bottom: 8 * s),
-              child: Text(
-                l10n.tvLanExpired,
-                key: const Key('tv-lan-expired'),
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
+            if (phase == TvLanPhase.failed)
+              Padding(
+                padding: EdgeInsets.only(bottom: 8 * s),
+                child: Text(
+                  l10n.tvLanFailed,
+                  key: const Key('tv-lan-failed'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
               ),
+            TvAction(
+              key: const Key('tv-lan-assist'),
+              expand: true,
+              leading: const Icon(Icons.qr_code_2_rounded),
+              onPressed: auth.isBusy || _openingLan || _lanActive
+                  ? null
+                  : _openLan,
+              child: Text(l10n.tvLanAssist),
             ),
-          if (phase == TvLanPhase.failed)
-            Padding(
-              padding: EdgeInsets.only(bottom: 8 * s),
-              child: Text(
-                l10n.tvLanFailed,
-                key: const Key('tv-lan-failed'),
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-            ),
-          TvAction(
-            key: const Key('tv-lan-assist'),
-            expand: true,
-            leading: const Icon(Icons.qr_code_2_rounded),
-            onPressed: auth.isBusy || _openingLan || _lanActive
-                ? null
-                : _openLan,
-            child: Text(l10n.tvLanAssist),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -415,6 +415,8 @@ void main() {
       proxy.installWarmPrefix(
         origin,
         Uint8List(32 * kib)..fillRange(0, 32 * kib, 9),
+        etag: '"episode-two"',
+        totalBytes: total,
       );
       Future<void> read(String range) async {
         final request = await client.getUrl(route);
@@ -427,16 +429,16 @@ void main() {
       try {
         await read('bytes=0-${64 * kib - 1}');
         await proxy.refreshTimeline(const Duration(minutes: 1));
-        expect(proxy.upstreamBytes, 32 * kib);
+        expect(proxy.upstreamBytes, 32 * kib + 1);
         expect(proxy.upstreamBytesPerSecond, greaterThan(0));
         expect(proxy.diagnostics['cachedByteRanges'], [
-          {'start': 32 * kib, 'end': 64 * kib},
+          {'start': 0, 'end': 64 * kib},
         ]);
         await read('bytes=${128 * kib}-${256 * kib - 1}');
         await proxy.refreshTimeline(const Duration(minutes: 1));
         expect(proxy.upstreamBytesPerSecond, greaterThan(0));
         expect(proxy.diagnostics['cachedByteRanges'], [
-          {'start': 32 * kib, 'end': 64 * kib},
+          {'start': 0, 'end': 64 * kib},
           {'start': 128 * kib, 'end': 256 * kib},
         ]);
       } finally {
@@ -446,6 +448,74 @@ void main() {
       }
     },
   );
+  test('warm handoff downloads ahead while the decoder is paused', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      disk: true,
+      memoryBytes: 2 * mib,
+      sessionBuffering: true,
+      readAheadBytes: 16 * mib,
+      continuousTransfers: true,
+    );
+    fixture.binaryBody = Uint8List(16 * mib)..fillRange(0, 16 * mib, 120);
+    fixture.proxy.installWarmPrefix(
+      fixture.origin.resolve('/video'),
+      Uint8List(8 * mib)..fillRange(0, 8 * mib, 120),
+      etag: fixture.etag,
+      totalBytes: 16 * mib,
+    );
+    final request = await fixture.client.getUrl(fixture.url);
+    request.headers.set('range', 'bytes=0-');
+    final response = await request.close();
+    final first = Completer<void>();
+    late StreamSubscription<List<int>> reader;
+    reader = response.listen((bytes) {
+      expect(bytes, everyElement(120));
+      if (!first.isCompleted) {
+        reader.pause();
+        first.complete();
+      }
+    });
+    try {
+      await first.future.timeout(const Duration(seconds: 5));
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (fixture.proxy.upstreamBytes < 8 * mib &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await fixture.settle();
+      await fixture.proxy.refreshTimeline(const Duration(minutes: 1));
+      expect(fixture.proxy.upstreamBytes, 8 * mib + 1);
+      expect(fixture.proxy.upstreamBytesPerSecond, greaterThan(0));
+      expect(fixture.proxy.diagnostics['cachedByteRanges'], [
+        {'start': 0, 'end': 16 * mib},
+      ]);
+      expect(fixture.ranges.first, 'bytes=0-0');
+      expect(
+        fixture.ranges.skip(1),
+        everyElement(startsWith('bytes=${8 * mib}-')),
+      );
+    } finally {
+      await reader.cancel();
+    }
+  });
+
+  for (final rejection in ['etag', 'total', 'missing validator']) {
+    test('warm handoff rejects $rejection and serves current bytes', () async {
+      final fixture = await _CacheFixture.open(sessionBuffering: true);
+      fixture.proxy.installWarmPrefix(
+        fixture.origin.resolve('/video'),
+        Uint8List(8)..fillRange(0, 8, 120),
+        etag: rejection == 'missing validator'
+            ? null
+            : rejection == 'etag'
+            ? '"old"'
+            : fixture.etag,
+        totalBytes: rejection == 'total' ? 100 : fixture.body.length,
+      );
+      expect((await fixture.read('bytes=0-')).$2, fixture.body);
+    });
+  }
   test(
     'renewed source URL keeps verified bytes and refills through the new URL',
     () async {
@@ -553,73 +623,6 @@ void main() {
       }
     },
   );
-  test('a warmed prefix answers the open-ended startup range', () async {
-    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final ranges = <String?>[];
-    const total = 80;
-    upstream.listen((request) async {
-      ranges.add(request.headers.value('range'));
-      final header = request.headers.value('range') ?? '';
-      final match = RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(header);
-      final start = match == null ? 0 : int.parse(match.group(1)!);
-      final endText = match?.group(2) ?? '';
-      final end = endText.isEmpty ? total - 1 : int.parse(endText);
-      final length = end - start + 1;
-      request.response.statusCode = HttpStatus.partialContent;
-      request.response.headers.set('content-range', 'bytes $start-$end/$total');
-      request.response.contentLength = length;
-      request.response.add(Uint8List.fromList(List<int>.filled(length, 7)));
-      await request.response.close();
-    });
-    final proxy = await PlaybackHttpProxy.create();
-    final client = HttpClient();
-    final origin = Uri.parse('http://127.0.0.1:${upstream.port}/episode.mp4');
-    final warmed = Uint8List.fromList(List<int>.generate(64, (index) => index));
-    try {
-      proxy.installWarmPrefix(origin, warmed);
-      final sealed = proxy.register(origin);
-      final openEnded = await client.getUrl(sealed);
-      openEnded.headers.set(HttpHeaders.rangeHeader, 'bytes=0-');
-      final openResponse = await openEnded.close();
-      final openBody = await openResponse.fold<List<int>>(
-        <int>[],
-        (bytes, chunk) => bytes..addAll(chunk),
-      );
-      expect(openResponse.statusCode, HttpStatus.partialContent);
-      expect(openResponse.headers.value('content-range'), 'bytes 0-79/80');
-      expect(openBody.length, 80);
-      expect(openBody.sublist(0, 64), warmed);
-      expect(ranges, ['bytes=64-']);
-
-      final contained = await client.getUrl(sealed);
-      contained.headers.set(HttpHeaders.rangeHeader, 'bytes=0-15');
-      final containedResponse = await contained.close();
-      final containedBody = await containedResponse.fold<List<int>>(
-        <int>[],
-        (bytes, chunk) => bytes..addAll(chunk),
-      );
-      expect(containedResponse.headers.value('content-range'), 'bytes 0-15/80');
-      expect(containedBody, warmed.sublist(0, 16));
-      expect(ranges, ['bytes=64-', 'bytes=64-64']);
-
-      final bounded = await client.getUrl(sealed);
-      bounded.headers.set(HttpHeaders.rangeHeader, 'bytes=0-70');
-      final boundedResponse = await bounded.close();
-      final boundedBody = await boundedResponse.fold<List<int>>(
-        <int>[],
-        (bytes, chunk) => bytes..addAll(chunk),
-      );
-      expect(boundedResponse.headers.value('content-range'), 'bytes 0-70/80');
-      expect(boundedBody.length, 71);
-      expect(boundedBody.sublist(0, 64), warmed);
-      expect(ranges, ['bytes=64-', 'bytes=64-64', 'bytes=64-70']);
-    } finally {
-      client.close(force: true);
-      await proxy.close();
-      await upstream.close(force: true);
-    }
-  });
-
   test(
     'upstream diagnostics distinguish waiting headers without secrets',
     () async {

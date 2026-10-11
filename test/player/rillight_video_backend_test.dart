@@ -332,12 +332,95 @@ void main() {
         ),
       );
       final data = await backend.diagnostics();
+      expect(data['continuousTransfers'], isTrue);
       expect(data['configuredReadAheadBytes'], mib * 1024 * 1024);
       expect(data['diskSessionLimitBytes'], mib * 1024 * 1024);
       expect(data['memoryLimitBytes'], 8 * 1024 * 1024);
       expect(data['pendingLimitBytes'], defaultCachePendingBytes);
     }
   });
+
+  test(
+    'startup output hold keeps read-ahead active until settings are restored',
+    () async {
+      final driver = _CoreDriver();
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => driver,
+      );
+      addTearDown(backend.dispose);
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 31,
+          url: Uri.parse('http://127.0.0.1:8765/movie'),
+          holdPlaybackForSettings: true,
+        ),
+      );
+      expect(driver.request!.paused, isTrue);
+      expect((await backend.diagnostics())['playbackActive'], isTrue);
+      await backend.setVolume(25);
+      await backend.setRate(1.25);
+      await backend.play();
+      expect(driver.commands, containsAllInOrder(['volume', 'rate', 'play']));
+      expect(backend.isPlaying, isTrue);
+      await backend.pause();
+      expect((await backend.diagnostics())['playbackActive'], isFalse);
+    },
+  );
+
+  test(
+    'network recovery holds desktop output until saved settings are restored',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      upstream.listen((request) async {
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+        await request.response.close();
+      });
+      final first = _CoreDriver();
+      final recovered = _CoreDriver();
+      var creates = 0;
+      final backend = RillightVideoBackend(
+        settingsStore: MemoryPlayerSettingsStore(),
+        diskCacheDirectory: isolatedCache,
+        createPlayer: () async => creates++ == 0 ? first : recovered,
+      );
+      final client = HttpClient();
+      addTearDown(() async {
+        client.close(force: true);
+        await backend.dispose();
+        await upstream.close(force: true);
+      });
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 32,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/movie'),
+          holdPlaybackForSettings: true,
+        ),
+      );
+      await backend.setVolume(25);
+      await backend.setRate(1.25);
+      await backend.play();
+      // A failed demuxer request supplies the real transport failure state.
+      final response = await (await client.headUrl(first.request!.url)).close();
+      expect(response.statusCode, HttpStatus.serviceUnavailable);
+      await response.drain<void>();
+      final finished = backend.events
+          .firstWhere(
+            (event) =>
+                event.kind == VideoEventKind.buffering && event.value == false,
+          )
+          .timeout(const Duration(seconds: 8));
+      first.emit('error', 'synthetic network failure');
+      await finished;
+      expect(recovered.request!.paused, isTrue);
+      expect(
+        recovered.commands,
+        containsAllInOrder(['audio', 'volume', 'rate', 'play']),
+      );
+      expect((await backend.diagnostics())['playbackActive'], isTrue);
+    },
+  );
 
   test(
     'slow recovery headers do not trigger premature startup source renewal',
@@ -622,6 +705,8 @@ void main() {
             sessionId: 2,
             url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-two'),
             warmedPrefix: Uint8List(32768)..fillRange(0, 32768, 9),
+            warmedPrefixEtag: '"/episode-two"',
+            warmedPrefixTotalBytes: total,
           ),
         );
         await waitFor(
@@ -629,7 +714,7 @@ void main() {
             (s) =>
                 s.sessionId == 2 &&
                 s.byteCoverage?.ranges.any(
-                      (r) => r.start == 32768 && r.end == 65536,
+                      (r) => r.start == 0 && r.end >= 65536,
                     ) ==
                     true,
           ),
@@ -650,7 +735,7 @@ void main() {
         expect(speeds.any((sample) => sample.$1 == 2 && sample.$2 > 0), isTrue);
         final current = snapshots.last;
         expect(current.sessionId, 2);
-        expect(current.byteCoverage!.ranges.first.start, 32768);
+        expect(current.byteCoverage!.ranges.first.start, 0);
       } finally {
         await subscription.cancel();
         await backend.dispose();

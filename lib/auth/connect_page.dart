@@ -1,5 +1,5 @@
+import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
-import 'provider_connect_dialog.dart';
 import 'package:rillight/media_server/server_address.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -185,16 +185,7 @@ class _ConnectPageState extends State<ConnectPage> {
     final auth = AuthScope.of(context);
     if (auth.isBusy) return;
     final selected = _selectedServer(auth);
-    if (selected != null && selected.serviceType != MediaServerType.emby) {
-      final connected = await showProviderConnect(
-        context,
-        auth,
-        userAgent: _userAgent.text,
-        existing: selected,
-      );
-      if (connected == true && mounted) context.go(AppRoutes.home);
-      return;
-    }
+
     // A credential read started before submit must not change this attempt.
     _passwordRequest++;
     final adding = _addingAnother;
@@ -203,7 +194,9 @@ class _ConnectPageState extends State<ConnectPage> {
       username: _username.text.trim(),
       password: _password.text,
       userAgent: _userAgent.text,
-      lineId: adding ? null : _selectedLineId,
+      lineId: adding || selected?.serviceType != MediaServerType.emby
+          ? null
+          : _selectedLineId,
     );
     if (!mounted || !auth.isLoggedIn) {
       return;
@@ -342,25 +335,11 @@ class _ConnectPageState extends State<ConnectPage> {
                       children: [
                         _BrandHeader(l10n: l10n),
                         const SizedBox(height: AppSpacing.xl),
-                        OutlinedButton.icon(
-                          key: const Key('connect-provider-entry'),
-                          icon: const Icon(Icons.dns_outlined),
-                          label: Text(l10n.providerConnectEntry),
-                          onPressed: auth.isBusy
-                              ? null
-                              : () async {
-                                  final connected = await showProviderConnect(
-                                    context,
-                                    auth,
-                                    userAgent: _userAgent.text,
-                                  );
-                                  if (connected == true && context.mounted) {
-                                    context.go(AppRoutes.home);
-                                  }
-                                },
+                        ProviderLoginForm(
+                          userAgent: () => _userAgent.text,
+                          selectedServer: _selectedServer(auth),
+                          embyForm: _buildFormCard(context, l10n, auth),
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                        _buildFormCard(context, l10n, auth),
                         const SizedBox(height: AppSpacing.xxl),
                         _buildSavedServers(context, l10n, auth),
                       ],

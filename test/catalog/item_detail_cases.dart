@@ -20,6 +20,7 @@ import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_detail_page.dart';
@@ -205,6 +206,49 @@ void main() {
     expect(find.byType(ItemDetailPage), findsOneWidget);
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
   }
+
+  testWidgets(
+    'resume episode list renders while season and similar requests are held',
+    (tester) async {
+      final seasons = server.holdSeasons = Completer<void>();
+      final similar = server.holdSimilar = Completer<void>();
+      addTearDown(() {
+        for (final gate in [seasons, similar]) {
+          if (!gate.isCompleted) gate.complete();
+        }
+      });
+      final app = await pumpApp(tester);
+      app.router.go(AppRoutes.item('episode-friends-s1e2'));
+      await tester.pumpWidget(app);
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
+      expect(
+        tester
+            .widget<MediaShelf>(
+              find.byWidgetPredicate(
+                (w) => w is MediaShelf && w.shelfId == 'season-episodes',
+              ),
+            )
+            .items,
+        contains(
+          isA<MediaItem>().having(
+            (item) => item.id,
+            'id',
+            'episode-friends-s1e1',
+          ),
+        ),
+      );
+      expect(seasons.isCompleted, isFalse);
+      expect(similar.isCompleted, isFalse);
+      seasons.complete();
+      similar.complete();
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets(
     'header, seasons and episodes render before secondary responses',

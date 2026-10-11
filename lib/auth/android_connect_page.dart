@@ -1,6 +1,5 @@
+import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
-import 'provider_connect_dialog.dart';
-import '../app/routes.dart';
 import 'package:rillight/media_server/server_address.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -174,23 +173,17 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
       return;
     }
     final selected = _selectedServer(auth);
-    if (selected != null && selected.serviceType != MediaServerType.emby) {
-      final connected = await showProviderConnect(
-        context,
-        auth,
-        userAgent: _userAgent.text,
-        existing: selected,
-      );
-      if (connected == true && mounted) context.go(AppRoutes.home);
-      return;
-    }
+
     FocusScope.of(context).unfocus();
     await auth.connect(
       address: _composedAddress(),
       username: _username.text.trim(),
       password: _password.text,
       userAgent: _userAgent.text,
-      lineId: widget.addingAnother ? null : _draft?.selectedLineId,
+      lineId:
+          widget.addingAnother || selected?.serviceType != MediaServerType.emby
+          ? null
+          : _draft?.selectedLineId,
     );
     if (!mounted || !auth.isLoggedIn) {
       return;
@@ -310,23 +303,6 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _PhoneBrandHeader(l10n: l10n),
-                    OutlinedButton.icon(
-                      key: const Key('android-provider-entry'),
-                      icon: const Icon(Icons.dns_outlined),
-                      label: Text(l10n.providerConnectEntry),
-                      onPressed: auth.isBusy
-                          ? null
-                          : () async {
-                              final connected = await showProviderConnect(
-                                context,
-                                auth,
-                                userAgent: _userAgent.text,
-                              );
-                              if (connected == true && context.mounted) {
-                                context.go(AppRoutes.home);
-                              }
-                            },
-                    ),
                     const SizedBox(height: 32),
                     if (auth.savedServers.isNotEmpty) ...[
                       Row(
@@ -361,78 +337,93 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                       ),
                       const SizedBox(height: 20),
                     ],
-                    TextField(
-                      key: const Key('android-connect-address'),
-                      controller: _address,
-                      autofocus: false,
-                      enabled: !auth.isBusy,
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      textInputAction: TextInputAction.next,
-                      decoration: InputDecoration(
-                        labelText: l10n.serverAddress,
-                        hintText: l10n.serverAddressHint,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      key: const Key('android-connect-username'),
-                      controller: _username,
-                      enabled: !auth.isBusy,
-                      autocorrect: false,
-                      textInputAction: TextInputAction.next,
-                      decoration: InputDecoration(labelText: l10n.username),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      key: const Key('android-connect-password'),
-                      controller: _password,
-                      enabled: !auth.isBusy,
-                      obscureText: !_passwordVisible,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: l10n.password,
-                        suffixIcon: IconButton(
-                          key: const Key('android-connect-password-visibility'),
-                          tooltip: _passwordVisible
-                              ? l10n.hidePassword
-                              : l10n.showPassword,
-                          onPressed: () => setState(
-                            () => _passwordVisible = !_passwordVisible,
+                    ProviderLoginForm(
+                      userAgent: () => _userAgent.text,
+                      selectedServer: auth.savedServers
+                          .where((s) => s.id == _draft?.selectedServerId)
+                          .firstOrNull,
+                      embyForm: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          TextField(
+                            key: const Key('android-connect-address'),
+                            controller: _address,
+                            autofocus: false,
+                            enabled: !auth.isBusy,
+                            keyboardType: TextInputType.url,
+                            autocorrect: false,
+                            textInputAction: TextInputAction.next,
+                            decoration: InputDecoration(
+                              labelText: l10n.serverAddress,
+                              hintText: l10n.serverAddressHint,
+                            ),
                           ),
-                          icon: Icon(
-                            _passwordVisible
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
+                          const SizedBox(height: 16),
+                          TextField(
+                            key: const Key('android-connect-username'),
+                            controller: _username,
+                            enabled: !auth.isBusy,
+                            autocorrect: false,
+                            textInputAction: TextInputAction.next,
+                            decoration: InputDecoration(
+                              labelText: l10n.username,
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            key: const Key('android-connect-password'),
+                            controller: _password,
+                            enabled: !auth.isBusy,
+                            obscureText: !_passwordVisible,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => _submit(),
+                            decoration: InputDecoration(
+                              labelText: l10n.password,
+                              suffixIcon: IconButton(
+                                key: const Key(
+                                  'android-connect-password-visibility',
+                                ),
+                                tooltip: _passwordVisible
+                                    ? l10n.hidePassword
+                                    : l10n.showPassword,
+                                onPressed: () => setState(
+                                  () => _passwordVisible = !_passwordVisible,
+                                ),
+                                icon: Icon(
+                                  _passwordVisible
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (auth.failure != null) ...[
+                            const SizedBox(height: 16),
+                            _PhoneConnectError(
+                              message: embyFailureMessage(l10n, auth.failure!),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          FilledButton(
+                            key: const Key('android-connect-submit'),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size(48, 48),
+                            ),
+                            onPressed: auth.isBusy ? null : _submit,
+                            child: Text(
+                              auth.isBusy
+                                  ? l10n.connecting
+                                  : auth.failure != null
+                                  ? l10n.retry
+                                  : l10n.connect,
+                            ),
+                          ),
+                          _buildMore(context, l10n, auth),
+                        ],
                       ),
                     ),
-                    if (auth.failure != null) ...[
-                      const SizedBox(height: 16),
-                      _PhoneConnectError(
-                        message: embyFailureMessage(l10n, auth.failure!),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      key: const Key('android-connect-submit'),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      onPressed: auth.isBusy ? null : _submit,
-                      child: Text(
-                        auth.isBusy
-                            ? l10n.connecting
-                            : auth.failure != null
-                            ? l10n.retry
-                            : l10n.connect,
-                      ),
-                    ),
-                    _buildMore(context, l10n, auth),
                   ],
                 ),
               ),

@@ -201,10 +201,11 @@ void *loopback_open(void *opaque, const char *url, int flags) {
 
 int loopback_read(void *, void *pointer, uint8_t *data, int size) {
   auto *handle = static_cast<LoopbackHandle *>(pointer);
-  if (!handle || !handle->io || size <= 0) return AVERROR(EINVAL);
+  if (!handle || size <= 0) return AVERROR(EINVAL);
   const uint64_t generation = handle->owner->media_generation.load();
   handle->read_generation = generation;
-  if (handle->media && handle->open_generation != generation) {
+  if (!handle->io ||
+      (handle->media && handle->open_generation != generation)) {
     const int reopened = loopback_open_at(handle, handle->position);
     if (reopened < 0) return reopened;
   }
@@ -224,16 +225,29 @@ int loopback_read(void *, void *pointer, uint8_t *data, int size) {
 
 int64_t loopback_seek(void *, void *pointer, int64_t offset, int whence) {
   auto *handle = static_cast<LoopbackHandle *>(pointer);
-  if (!handle || !handle->io) return AVERROR(EINVAL);
+  if (!handle) return AVERROR(EINVAL);
   const uint64_t generation = handle->owner->media_generation.load();
-  const bool interrupted = handle->open_generation != generation;
-  if (whence & AVSEEK_SIZE) return avio_size(handle->io);
+  const bool interrupted = !handle->io || handle->open_generation != generation;
   handle->read_generation = generation;
+  // A newer timeline can interrupt avio_open2 after the old socket is closed.
+  // That leaves the handle alive without an AVIO context. The next operation
+  // must reopen it instead of making every future read/seek fail with EINVAL.
+  if (whence & AVSEEK_SIZE) {
+    if (!handle->io) {
+      const int reopened = loopback_open_at(handle, handle->position);
+      if (reopened < 0) return reopened;
+    }
+    return avio_size(handle->io);
+  }
   // An interrupted HTTP read may leave FFmpeg's nested AVIO in an error
   // state. Seek on a fresh sealed route instead of reusing that connection.
   if (interrupted && (whence & ~AVSEEK_FORCE) == SEEK_SET && offset >= 0) {
     const int reopened = loopback_open_at(handle, offset);
     return reopened < 0 ? reopened : offset;
+  }
+  if (!handle->io) {
+    const int reopened = loopback_open_at(handle, handle->position);
+    if (reopened < 0) return reopened;
   }
   const int64_t result = avio_seek(handle->io, offset, whence & ~AVSEEK_FORCE);
   if (result >= 0) handle->position = result;

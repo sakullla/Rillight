@@ -856,19 +856,22 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     String label,
     FutureOr<void> Function()? onPressed, {
     FocusNode? focusNode,
+    bool showLabel = true,
   }) {
     return _TvPlaybackAction(
       key: Key(key),
       focusNode: focusNode,
       onPressed: onPressed,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon),
-          SizedBox(width: context.tvdp(6)),
-          Text(label),
-        ],
-      ),
+      child: showLabel
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon),
+                SizedBox(width: context.tvdp(6)),
+                Text(label),
+              ],
+            )
+          : Tooltip(message: label, child: Icon(icon)),
     );
   }
 
@@ -1108,13 +1111,6 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   ),
                 ),
                 SizedBox(height: 6 * s),
-                if (playerShowsByteCache(c.bufferSnapshot)) ...[
-                  BufferedByteCoverageBar(
-                    key: const Key('tv-player-byte-cache-track'),
-                    coverage: c.bufferSnapshot.byteCoverage,
-                  ),
-                  SizedBox(height: context.tvdp(6)),
-                ],
                 _timeline(c),
                 SizedBox(height: 10 * s),
                 LayoutBuilder(
@@ -1147,6 +1143,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     Icons.video_library_rounded,
                                     l.playerEpisodes,
                                     ready ? _openEpisodes : null,
+                                    showLabel: false,
                                   ),
                                 if (c.canSwitchAudioTrack ||
                                     c.canConfigureSubtitles)

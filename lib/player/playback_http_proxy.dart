@@ -64,6 +64,9 @@ class PlaybackHttpProxy {
   final HttpClient _client = HttpClient();
   Uint8List? _warmPrefix;
   String? _warmIdentity;
+  String? _warmEtag;
+  int? _warmTotal;
+  Future<void>? _warmImport;
   final Uri? origin;
   final Map<String, String> headers;
   final ResourceAuthorization authorization;
@@ -107,6 +110,12 @@ class PlaybackHttpProxy {
   DateTime? _lastSuccessfulTimelineAt;
   DateTime? _timelineRetryAfter;
   String? _mappingUnknownReason;
+  String? _timelineContainerKind;
+  String? _unsupportedTimelineIndex;
+  int _timelineIndexAttempts = 0;
+  int _timelineMetadataReads = 0;
+  int? _timelineMissingOffset;
+  int? _timelineMissingLength;
   int? _selectedVideoTrackId;
   int? _selectedAudioTrackId;
   int _trackSelectionVersion = 0;
@@ -290,6 +299,8 @@ class PlaybackHttpProxy {
     _lastIntegrityCheck = null;
     _timelineRetryAfter = null;
     _mappingUnknownReason = null;
+    _timelineMissingOffset = null;
+    _timelineMissingLength = null;
     _cachedTimeline = const [];
     _timelineSequence++;
   }
@@ -512,6 +523,14 @@ class PlaybackHttpProxy {
                   ? _cachedBytes
                   : const <CachedByteRange>[])
               .fold<int>(0, (sum, range) => sum + range.end - range.start),
+      'continuousTransfers': continuousTransfers,
+      'timelineMetadataReads': _timelineMetadataReads,
+      'timelineIndexAttempts': _timelineIndexAttempts,
+      'timelineContainerKind': _timelineContainerKind,
+      'timelineMp4IndexReady': _mp4TimelineIndex != null,
+      'timelineMissingOffsetBytes': _timelineMissingOffset,
+      'timelineMissingLengthBytes': _timelineMissingLength,
+      'timelineCachedRangeCount': _cachedTimeline.length,
       'timelineCuePoints': _timelineIndex?.points.length ?? 0,
       'timelineTrackSelectionVersion': _trackSelectionVersion,
       'timelineVideoTrackIdentified': _selectedVideoTrackId != null,
@@ -730,7 +749,9 @@ class PlaybackHttpProxy {
         _byteRevision == revision &&
         _lastByteIntegrityCheck != null &&
         DateTime.now().difference(_lastByteIntegrityCheck!) <
-            integrityRecheck) {
+            integrityRecheck &&
+        DateTime.now().difference(_lastByteIntegrityCheck!) <
+            verifiedSnapshotTtl) {
       return;
     }
     _refreshingBytes = true;
@@ -794,6 +815,30 @@ class PlaybackHttpProxy {
     }
     final identity = '$resource:${representation.generation}';
     final trackSelectionVersion = _trackSelectionVersion;
+    final indexIdentity = '$identity:$trackSelectionVersion';
+    if (_timelineIndex == null && _mp4TimelineIndex == null) {
+      // Immutable metadata cannot become supported as unrelated media arrives.
+      // A representation or track change gives the index a fresh identity.
+      if (_timelineIdentity == identity &&
+          _unsupportedTimelineIndex == indexIdentity) {
+        _mappingUnknownReason = 'containerTrackOrTimingUnknown';
+        return;
+      }
+      final missingOffset = _timelineMissingOffset;
+      final missingLength = _timelineMissingLength;
+      if (_timelineIdentity == identity &&
+          missingOffset != null &&
+          missingLength != null &&
+          cache!.firstMissingOffset(
+                resource: resource,
+                generation: representation.generation,
+                offset: missingOffset,
+                length: missingLength,
+              ) !=
+              null) {
+        return;
+      }
+    }
     final retryAfter = _timelineRetryAfter;
     if (_timelineIdentity == identity &&
         _timelineAttemptDuration == duration &&
@@ -907,8 +952,11 @@ class PlaybackHttpProxy {
         }
       }
 
+      _timelineMissingOffset = null;
+      _timelineMissingLength = null;
       var indexReads = 0;
       Future<Uint8List?> read(int offset, int length) async {
+        _timelineMetadataReads++;
         if (++indexReads % 16 == 0) {
           await Future<void>.delayed(Duration.zero);
         }
@@ -940,18 +988,39 @@ class PlaybackHttpProxy {
               countHit: false,
             );
           }
-          if (hit == null || hit.bytes.isEmpty) return null;
+          if (hit == null || hit.bytes.isEmpty) {
+            _timelineMissingOffset = position;
+            _timelineMissingLength = remaining;
+            return null;
+          }
           output.add(hit.bytes);
         }
-        return output.takeBytes();
+        final result = output.takeBytes();
+        if (offset == 0 && result.length >= 8) {
+          _timelineContainerKind =
+              result[0] == 0x1a &&
+                  result[1] == 0x45 &&
+                  result[2] == 0xdf &&
+                  result[3] == 0xa3
+              ? 'matroska'
+              : String.fromCharCodes(result.sublist(4, 8)) == 'ftyp'
+              ? 'mp4'
+              : 'other';
+        }
+        return result;
       }
 
+      if (_timelineIndex == null && _mp4TimelineIndex == null) {
+        _timelineIndexAttempts++;
+      }
       final index =
           _timelineIndex ??
-          await MatroskaCacheIndex.load(
-            total: representation.total,
-            read: read,
-          );
+          (_mp4TimelineIndex == null
+              ? await MatroskaCacheIndex.load(
+                  total: representation.total,
+                  read: read,
+                )
+              : null);
       if (!stillCurrent()) return;
       _timelineIndex = index;
       if (index != null) {
@@ -988,6 +1057,9 @@ class PlaybackHttpProxy {
         _mappingUnknownReason = mp4 == null
             ? 'containerTrackOrTimingUnknown'
             : null;
+        if (mp4 == null && _timelineMissingOffset == null) {
+          _unsupportedTimelineIndex = indexIdentity;
+        }
       }
       _lastSuccessfulTimelineAt = DateTime.now();
       _timelineRetryAfter = _mappingUnknownReason == null
@@ -1290,14 +1362,29 @@ class PlaybackHttpProxy {
     return output.takeBytes();
   }
 
-  /// Remembers [bytes] for [url] so a later range that stays inside them is
-  /// answered without another upstream request.
-  void installWarmPrefix(Uri url, Uint8List bytes) {
-    if (bytes.isEmpty || bytes.length > 32 * 1024 * 1024) return;
+  /// Imports only a revalidated prefix into the ordinary session cache. The
+  /// normal reader then owns download scheduling, accounting and cancellation.
+  void installWarmPrefix(
+    Uri url,
+    Uint8List bytes, {
+    String? etag,
+    int? totalBytes,
+  }) {
+    if (bytes.isEmpty ||
+        bytes.length > 32 * 1024 * 1024 ||
+        etag == null ||
+        !etag.startsWith('"') ||
+        !etag.endsWith('"') ||
+        totalBytes == null ||
+        totalBytes < bytes.length) {
+      return;
+    }
     final token = _routes.seal(url, PlaybackResourceRole.media.index, '');
     final identity = _routes.open(token)?.identity;
     if (identity == null) return;
     _warmIdentity = identity;
+    _warmEtag = etag;
+    _warmTotal = totalBytes;
     _warmPrefix = Uint8List.fromList(bytes);
   }
 
@@ -1307,175 +1394,99 @@ class PlaybackHttpProxy {
     Uri url,
     _ProxyRead read,
   ) async {
-    final warm = _warmPrefix;
-    if (warm == null || key != _warmIdentity || incoming.method != 'GET') {
+    if (key != _warmIdentity || incoming.method != 'GET') return false;
+    final pending = _warmImport;
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {
+        // Another reader may have cancelled the optional import.
+      }
+      read.check();
       return false;
     }
-    final header = incoming.headers.value(HttpHeaders.rangeHeader);
-    final match = header == null
-        ? null
-        : RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(header);
-    if (match == null) return false;
-    final start = int.parse(match.group(1)!);
-    final endText = match.group(2)!;
-    final requestedEnd = endText.isEmpty ? null : int.parse(endText);
-    if (start < 0 || start >= warm.length) return false;
-    if (requestedEnd != null && requestedEnd < start) return false;
-    final inside = requestedEnd != null && requestedEnd < warm.length;
-    final upstreamRange = requestedEnd == null
-        ? 'bytes=${warm.length}-'
-        : inside
-        ? 'bytes=${warm.length}-${warm.length}'
-        : 'bytes=${warm.length}-$requestedEnd';
-    HttpClientResponse upstream;
-    Uri effective;
-    try {
-      final fetched = await _fetch(
+    final warm = _warmPrefix;
+    if (warm == null) return false;
+    _warmPrefix = null;
+    final etag = _warmEtag;
+    final total = _warmTotal;
+    Future<void> import() async {
+      if (_cacheReady != null) await _cacheReady;
+      read.check();
+      if (cache == null || !sessionBuffering || dynamicSource) return;
+      final (response, effective) = await _fetch(
         incoming,
         url,
         allowRange: true,
         read: read,
-        overrides: {'range': upstreamRange},
+        overrides: {
+          'range': 'bytes=0-0',
+          'if-range': etag,
+          'if-none-match': null,
+          'if-modified-since': null,
+        },
       );
-      upstream = fetched.$1;
-      effective = fetched.$2;
-    } catch (_) {
-      return false;
-    }
-    if (_cacheReady != null) {
-      await Future.any([_cacheReady!, read.cancelledFuture]);
-      read.check();
-    }
-    final parsed = MediaContentRange.parse(
-      upstream.headers.value('content-range'),
-    );
-    if (upstream.statusCode != HttpStatus.partialContent ||
-        parsed == null ||
-        parsed.start != warm.length) {
-      await upstream.drain<void>();
-      return false;
-    }
-    if (!inside && requestedEnd != null && parsed.end > requestedEnd) {
-      await upstream.drain<void>();
-      return false;
-    }
-    final responseEnd = inside ? requestedEnd : parsed.end;
-    if (responseEnd < start || responseEnd >= parsed.total) {
-      await upstream.drain<void>();
-      return false;
-    }
-    await _classify(PlaybackCacheStream.stable);
-    // The prefetched bytes do not carry a current response validator.
-    // Only the newly validated suffix enters this episode's cache. Its requested
-    // range differs from the stitched response sent to the native decoder.
-    final representation = _beginRepresentation(
-      incoming,
-      key,
-      upstream,
-      effective,
-      requestedRange: upstreamRange,
-    );
-    final output = incoming.response;
-    output.statusCode = HttpStatus.partialContent;
-    output.headers.set('accept-ranges', 'bytes');
-    final type = upstream.headers.contentType;
-    if (type != null) output.headers.contentType = type;
-    final etag = upstream.headers.value('etag');
-    if (etag != null && etag.length <= 1024) output.headers.set('etag', etag);
-    output.headers.set(
-      'content-range',
-      'bytes $start-$responseEnd/${parsed.total}',
-    );
-    output.contentLength = responseEnd - start + 1;
-    final warmEnd = min(warm.length, responseEnd + 1);
-    final blockSize = min(1024 * 1024, parsed.end - parsed.start + 1);
-    final reserved =
-        representation != null && _reserveCacheWorkspace(blockSize);
-    Uint8List? assembly = reserved ? Uint8List(blockSize) : null;
-    var assembled = 0;
-    var blockStart = parsed.start;
-    var received = 0;
-    var complete = false;
-    if (reserved) _charge(blockSize);
-    void retain(Uint8List bytes) {
-      var cursor = 0;
-      while (cursor < bytes.length) {
-        final length = min(blockSize - assembled, bytes.length - cursor);
-        assembly!.setRange(assembled, assembled + length, bytes, cursor);
-        cursor += length;
-        assembled += length;
-        if (assembled == blockSize) {
-          _store(key, representation!, blockStart, assembly!);
-          blockStart += assembled;
-          assembled = 0;
-          assembly = Uint8List(blockSize);
-        }
+      final range = MediaContentRange.parse(
+        response.headers.value('content-range'),
+      );
+      final valid =
+          response.statusCode == HttpStatus.partialContent &&
+          range?.start == 0 &&
+          range?.end == 0 &&
+          range?.total == total &&
+          response.contentLength == 1 &&
+          response.compressionState !=
+              HttpClientResponseCompressionState.decompressed &&
+          MediaCachePolicy(response.headers).strongEtag == etag;
+      if (!valid) {
+        await _retireRejectedResponse(response, read);
+        return;
       }
-    }
-
-    Stream<List<int>> body() async* {
+      await _discard(response, read);
       read.check();
-      if (start < warmEnd) {
-        read.outputStarted = true;
-        yield Uint8List.sublistView(warm, start, warmEnd);
-      }
-      await for (final chunk in upstream) {
+      await _classify(PlaybackCacheStream.stable);
+      final rep = _beginRepresentation(
+        incoming,
+        key,
+        response,
+        effective,
+        requestedRange: 'bytes=0-0',
+      );
+      if (rep == null) return;
+      for (
+        var offset = 0;
+        offset < warm.length;
+        offset += SessionByteCache.maxBlockBytes
+      ) {
         read.check();
-        _received(chunk.length, media: !inside);
-        received += chunk.length;
-        if (received > parsed.end - parsed.start + 1) {
-          throw const HttpException('Invalid warm suffix length');
-        }
-        if (inside) continue;
-        for (var offset = 0; offset < chunk.length; offset += 64 * 1024) {
-          final piece = Uint8List.fromList(
-            chunk.sublist(offset, min(offset + 64 * 1024, chunk.length)),
-          );
-          _charge(piece.length * 2);
-          try {
-            if (assembly != null &&
-                _representations[key]?.generation ==
-                    representation!.generation) {
-              retain(piece);
-            }
-            read.outputStarted = true;
-            yield piece;
-          } finally {
-            _charge(-piece.length * 2);
-          }
-        }
+        if (_representations[key]?.generation != rep.generation) return;
+        await cache!.put(
+          resource: key,
+          generation: rep.generation,
+          offset: offset,
+          bytes: Uint8List.sublistView(
+            warm,
+            offset,
+            min(offset + SessionByteCache.maxBlockBytes, warm.length),
+          ),
+        );
       }
-      if (received != parsed.end - parsed.start + 1) {
-        throw const HttpException('Truncated warm suffix');
-      }
-      complete = true;
-      if (representation != null) representation.complete = true;
     }
 
+    final task = import();
+    _warmImport = task;
     try {
-      return await _sendBody(output, body());
+      await task;
+    } catch (_) {
+      read.check();
+      // Optional prefetch cannot block normal cold-start recovery.
     } finally {
-      if (reserved) {
-        if (!inside &&
-            assembled > 0 &&
-            (complete || representation.policy.strongEtag != null) &&
-            _representations[key]?.generation == representation.generation) {
-          _store(
-            key,
-            representation,
-            blockStart,
-            Uint8List.sublistView(assembly!, 0, assembled),
-          );
-        }
-        _charge(-blockSize);
-        _releaseCacheWorkspace(blockSize);
-      }
-      if (!complete &&
-          representation != null &&
-          representation.policy.strongEtag == null) {
-        _invalidate(key, representation);
-      }
+      if (identical(_warmImport, task)) _warmImport = null;
     }
+    // Continue through the same read-ahead/cache path as a cold open. Serving
+    // a separate stitched response here delayed downloads until the decoder
+    // consumed the entire prefix and hid those bytes from cache observations.
+    return false;
   }
 
   Uri register(

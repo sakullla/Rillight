@@ -72,18 +72,10 @@ class BufferedByteCoverage {
   }
 }
 
-/// Downloaded byte fraction until verified media-time ranges exist.
-/// A ready container index with an empty time map (resume or a distant seek)
-/// still has those bytes. The seek track must not paint them as time.
-bool playerShowsByteCache(BufferSnapshot snapshot) {
-  final coverage = snapshot.byteCoverage;
-  if (coverage == null || coverage.ranges.isEmpty) return false;
-  return !snapshot.isKnown || snapshot.ranges.isEmpty;
-}
-
 /// The one authoritative cache-timeline observation for a backend session.
 /// An empty [ranges] list with [unknownReason] means coverage cannot be
-/// established; it must not be replaced by a bitrate or byte-ratio estimate.
+/// established. The UI may use byte proportions as a visual fallback without
+/// turning them into verified time ranges or using them for playback decisions.
 class BufferSnapshot {
   BufferSnapshot({
     required this.sessionId,
@@ -125,16 +117,13 @@ class BufferSnapshot {
 
   bool get isKnown => unknownReason == null;
 
-  /// Byte islands are a file fraction. They stay off the seek track. A separate
-  /// download bar may show them until verified media-time ranges exist.
-  bool get hidesByteCoverage {
-    final reason = unknownReason;
-    return reason == 'indexUnavailable' ||
-        reason == 'mediaMappingUnavailable' ||
-        reason == 'preparing' ||
-        reason == 'notOpened' ||
-        (reason != null && reason.startsWith('hls'));
-  }
+  /// Display-only fallback when verified media-time coverage is unavailable.
+  /// Byte proportions never determine seek targets or playback readiness.
+  bool get usesByteEstimate =>
+      (!isKnown || ranges.isEmpty) &&
+      byteCoverage != null &&
+      byteCoverage!.totalBytes > 0 &&
+      byteCoverage!.ranges.isNotEmpty;
 
   /// Reject late cache updates after a media, representation, or track switch.
   /// A changed identity is accepted only after the controller establishes its

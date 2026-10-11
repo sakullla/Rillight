@@ -61,20 +61,25 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
-          final entry = find.byKey(
-            Key(switch (environment.presentation) {
-              AppPresentation.desktop => 'connect-provider-entry',
-              AppPresentation.androidPhone => 'android-provider-entry',
-              AppPresentation.androidTv => 'tv-provider-entry',
-            }),
+          expect(find.byType(AlertDialog), findsNothing);
+          final jellyfin = find.byKey(const Key('login-provider-jellyfin'));
+          await tester.ensureVisible(jellyfin);
+          await tester.tap(jellyfin);
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('provider-password-submit')),
+            findsOneWidget,
           );
-          await tester.ensureVisible(entry);
-          await tester.tap(entry);
+          expect(find.byType(AlertDialog), findsNothing);
+          final plex = find.byKey(const Key('login-provider-plex'));
+          await tester.ensureVisible(plex);
+          await tester.tap(plex);
           await tester.pumpAndSettle();
-          await tester.tap(find.byKey(const Key('provider-type')));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('Plex').last);
-          await tester.pumpAndSettle();
+          expect(
+            find.byKey(const Key('provider-password-submit')),
+            findsNothing,
+          );
+          expect(find.byType(AlertDialog), findsNothing);
           final input = find.byKey(const Key('provider-user-agent'));
           expect(input, findsOneWidget);
           final controller =

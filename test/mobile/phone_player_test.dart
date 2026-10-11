@@ -2130,13 +2130,11 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
-    final cacheBar = find.byKey(const Key('mobile-player-byte-cache-track'));
-    expect(cacheBar, findsOneWidget);
-    final cacheRect = tester.getRect(cacheBar);
-    expect(cacheRect.width, greaterThan(200));
-    expect(cacheRect.height, greaterThan(0));
-    expect(cacheRect.top, greaterThanOrEqualTo(0));
-    expect(cacheRect.bottom, lessThanOrEqualTo(360));
+    expect(
+      find.byKey(const Key('mobile-player-byte-cache-track')),
+      findsNothing,
+    );
+    expect(find.byType(BufferedRangesTrack), findsOneWidget);
     for (var i = 0; i < 30 && current.loading; i++) {
       await tester.pump(const Duration(milliseconds: 20));
     }

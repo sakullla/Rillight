@@ -134,23 +134,19 @@ extension ProviderCaptures on CaptureSession {
       final name = type.name;
       app.router.go('/connect?add=1');
       await advance(400);
-      await activate(
-        find.byKey(
-          Key(switch (platform) {
-            'desktop' => 'connect-provider-entry',
-            'phone' => 'android-provider-entry',
-            _ => 'tv-provider-entry',
-          }),
-        ),
-      );
-      await activate(find.byKey(const Key('provider-type')));
-      await activate(
-        find.text(switch (type) {
-          MediaServerType.emby => 'Emby',
-          MediaServerType.jellyfin => 'Jellyfin',
-          MediaServerType.plex => 'Plex',
-        }).last,
-      );
+      if (type == MediaServerType.emby) {
+        // The reusable authorization dialog remains available to management
+        // flows; the ordinary login page retains its dedicated Emby form.
+        unawaited(
+          showProviderConnect(
+            tester.element(find.byKey(const Key('login-provider-emby'))),
+            auth,
+          ),
+        );
+        await advance(400);
+      } else {
+        await tap(Key('login-provider-$name'));
+      }
       await _providerField('provider-user-agent', 'Rillight-Capture/1.0');
       await save('provider-$name-login');
       if (type == MediaServerType.plex) {
@@ -198,18 +194,8 @@ extension ProviderCaptures on CaptureSession {
           await activate(find.byKey(const Key('provider-authorize')));
           await _providerWait('provider-authorization-code');
           await save('provider-jellyfin-quick-connect');
-          await activate(find.byKey(const Key('provider-cancel')));
-          await activate(
-            find.byKey(
-              Key(switch (platform) {
-                'desktop' => 'connect-provider-entry',
-                'phone' => 'android-provider-entry',
-                _ => 'tv-provider-entry',
-              }),
-            ),
-          );
-          await activate(find.byKey(const Key('provider-type')));
-          await activate(find.text('Jellyfin').last);
+          await tap(const Key('login-provider-emby'));
+          await tap(const Key('login-provider-jellyfin'));
           await _providerField(
             'provider-address',
             CaptureProviders.jellyfin.url.toString(),

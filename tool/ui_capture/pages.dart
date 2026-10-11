@@ -724,6 +724,11 @@ extension PageCaptures on CaptureSession {
   Future<void> loginPages(RillightApp app, AuthController auth) async {
     await tester.runAsync(auth.logout);
     await route(app, '/connect', 'login-saved-servers');
+    for (final provider in ['jellyfin', 'plex']) {
+      await tap(Key('login-provider-$provider'));
+      await save('login-$provider');
+    }
+    await tap(const Key('login-provider-emby'));
     final address = Key(switch (platform) {
       'desktop' => 'connect-address',
       'phone' => 'android-connect-address',

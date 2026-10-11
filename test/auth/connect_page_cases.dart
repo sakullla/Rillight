@@ -117,6 +117,8 @@ void main() {
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
       await _settle(tester);
+      expect(find.byKey(const Key('server-manage-providers')), findsNothing);
+      expect(find.text('服务与范围管理'), findsNothing);
       await tester.tap(find.text('退出登录'));
       await _settle(tester);
 

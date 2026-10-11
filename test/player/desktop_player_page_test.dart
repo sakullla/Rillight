@@ -9,6 +9,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
+import 'package:rillight/player/buffered_ranges_track.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -123,7 +124,9 @@ void main() {
     return ready;
   }
 
-  testWidgets('desktop retry shows the download cache bar', (tester) async {
+  testWidgets('desktop retry keeps one combined playback and cache timeline', (
+    tester,
+  ) async {
     final backend = _RetryOpenBackend();
     late final PlayerController current;
     try {
@@ -161,16 +164,8 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
-      final cacheBar = find.byKey(const Key('player-byte-cache-track'));
-      expect(cacheBar, findsOneWidget);
-      expect(cacheBar.hitTestable(), findsOneWidget);
-      final cacheRect = tester.getRect(cacheBar);
-      final seekRect = tester.getRect(find.byKey(PlayerKeys.seekBar));
-      expect(cacheRect.width, greaterThan(200));
-      expect(cacheRect.height, greaterThan(0));
-      expect(cacheRect.top, greaterThanOrEqualTo(0));
-      expect(cacheRect.bottom, lessThanOrEqualTo(720));
-      expect(cacheRect.bottom, lessThanOrEqualTo(seekRect.top));
+      expect(find.byKey(const Key('player-byte-cache-track')), findsNothing);
+      expect(find.byType(BufferedRangesTrack), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
       clearDesktopOverrides();

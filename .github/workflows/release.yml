@@ -243,6 +243,20 @@ jobs:
 
           echo "RELEASE_ID=$(jq -r '.id' <<< "$release_json")" >> "$GITHUB_ENV"
 
+      - name: Verify uploaded package checksums
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          verify_root="$(mktemp -d)"
+          mkdir -p "$verify_root/dist"
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir "$verify_root/dist"
+          cd "$verify_root"
+          shasum -a 256 -c dist/SHA256SUMS
+
       - name: Set up Android build-tools
         uses: android-actions/setup-android@v4
         with:

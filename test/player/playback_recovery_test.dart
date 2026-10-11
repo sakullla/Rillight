@@ -284,6 +284,7 @@ void main() {
         await controller.playNextEpisode();
         expect(controller.loading, isFalse);
         expect(controller.isPlaying, isTrue);
+        expect(controller.skipPromptVisible, isTrue);
         if (paused) await controller.togglePlay();
         expect(controller.activeSkipSegment, isNotNull);
         final opened = backend.openCount;

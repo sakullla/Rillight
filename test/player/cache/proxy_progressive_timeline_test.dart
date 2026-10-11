@@ -10,6 +10,53 @@ import 'package:rillight/player/playback_http_proxy.dart';
 import 'mp4_fixture.dart';
 
 void main() {
+  test(
+    'unsupported immutable metadata is not reparsed as downloads grow',
+    () async {
+      final cache = await SessionByteCache.open();
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        request.response.headers.set('etag', '"unsupported-container"');
+        request.response.contentLength = 128 * 1024;
+        request.response.add(Uint8List(128 * 1024));
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+        integrityRecheck: Duration.zero,
+      );
+      final client = HttpClient();
+      try {
+        final route = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/video'),
+        );
+        await (await (await client.getUrl(route)).close()).drain<void>();
+        await proxy.refreshTimeline(const Duration(seconds: 60));
+        expect(proxy.diagnostics['timelineIndexAttempts'], 1);
+        expect(proxy.diagnostics['cachedByteRanges'], isNotEmpty);
+        for (var i = 0; i < 4; i++) {
+          await cache.put(
+            resource: 'other-download',
+            generation: 1,
+            offset: i * 16,
+            bytes: Uint8List(16),
+          );
+          await proxy.refreshTimeline(const Duration(seconds: 60));
+        }
+        expect(proxy.diagnostics['timelineIndexAttempts'], 1);
+        expect(proxy.diagnostics['cachedByteRanges'], isNotEmpty);
+        proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+        await proxy.refreshTimeline(const Duration(seconds: 60));
+        expect(proxy.diagnostics['timelineIndexAttempts'], 2);
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
   for (final tagged in [true, false]) {
     test(
       'writer timeout does not hide verified byte coverage tagged=$tagged',
@@ -912,6 +959,15 @@ void main() {
           expect(proxy.diagnostics['cachedTimeRanges'], [
             {'startMs': 0, 'endMs': complete ? 4000 : 2000},
           ]);
+          final metadataReads = proxy.diagnostics['timelineMetadataReads'];
+          await proxy.refreshTimeline(
+            const Duration(seconds: 4, milliseconds: 1),
+          );
+          expect(
+            proxy.diagnostics['timelineMetadataReads'],
+            metadataReads,
+            reason: 'An established MP4 index must not probe Matroska again',
+          );
           if (!complete) {
             // Downloading the second video group cannot bridge missing audio.
             await read('bytes=32-35');

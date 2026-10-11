@@ -1,5 +1,4 @@
 import '../auth/provider_connect_dialog.dart';
-import '../auth/source_management.dart';
 import '../media_server/capabilities.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -552,13 +551,6 @@ class _TvAccountCard extends StatelessWidget {
           icon: Icons.add_rounded,
           title: l.mobileAddServer,
           onPressed: () => context.push('${AppRoutes.connect}?add=1'),
-        ),
-        SizedBox(height: 6 * s),
-        TvNavTile(
-          actionKey: const Key('tv-provider-management'),
-          icon: Icons.manage_accounts_outlined,
-          title: l.sourceManagement,
-          onPressed: auth.isBusy ? null : () => showSourceManagement(context),
         ),
         SizedBox(height: 6 * s),
         if (auth.client.serviceType == MediaServerType.plex ||

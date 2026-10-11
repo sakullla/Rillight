@@ -5,6 +5,7 @@ import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_codec.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/models.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -31,6 +32,8 @@ class _StrmClient extends EmbyClient {
   int sourceBitrate = 20000000;
   int? transcodeBitrate = 8000000;
   bool readFails = false;
+  bool offersTranscode = true;
+  MediaServerException? pointerFailure;
   @override
   Future<MediaItem> getItem(
     String id, {
@@ -65,9 +68,10 @@ class _StrmClient extends EmbyClient {
         'SupportsDirectPlay': true,
         'SupportsTranscoding': true,
         'Bitrate': sourceBitrate,
-        'TranscodingUrl':
-            '/Videos/film/master.m3u8?session=strm'
-            '${transcodeBitrate == null ? '' : '&VideoBitrate=${transcodeBitrate! - 192000}&AudioBitrate=192000'}',
+        if (offersTranscode)
+          'TranscodingUrl':
+              '/Videos/film/master.m3u8?session=strm'
+              '${transcodeBitrate == null ? '' : '&VideoBitrate=${transcodeBitrate! - 192000}&AudioBitrate=192000'}',
         'MediaStreams': [
           {'Index': 1, 'Type': 'Audio', 'Codec': 'aac', 'IsDefault': true},
         ],
@@ -82,6 +86,7 @@ class _StrmClient extends EmbyClient {
     int? maxBytes,
     CancelToken? cancelToken,
   }) async {
+    if (pointerFailure != null) throw pointerFailure!;
     if (readFails) throw StateError('synthetic missing pointer');
     return utf8.encode('# pointer has no target');
   }
@@ -97,6 +102,39 @@ class _StrmClient extends EmbyClient {
 }
 
 void main() {
+  test(
+    'unavailable STRM preserves HTTP failure instead of reporting no stream',
+    () async {
+      final failure = const MediaServerException(
+        MediaServerFailureKind.unknown,
+        statusCode: 404,
+        detail: 'HTTP 404',
+      );
+      final client = _StrmClient()
+        ..offersTranscode = false
+        ..pointerFailure = failure;
+      final backend = FakeVideoBackend();
+      final player = PlayerController(
+        client: client,
+        itemId: 'film',
+        backend: backend,
+        window: PlayerWindow(),
+        autoResume: false,
+        settingsStore: MemoryPlayerSettingsStore(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      );
+      addTearDown(() async {
+        await player.disposeAsync();
+        player.dispose();
+      });
+      await player.start();
+      expect(player.error, PlayerErrorKind.load);
+      expect(player.loadFailure, same(failure));
+      expect(player.isPlaying, isFalse);
+      expect(backend.openedUrl, isNull);
+    },
+  );
+
   for (final readFails in [false, true]) {
     for (final sample in <(int, int?, int, bool)>[
       (20000000, 8000000, 8000000, true),

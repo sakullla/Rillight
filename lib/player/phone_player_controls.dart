@@ -576,13 +576,6 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ),
               ),
-            if (playerShowsByteCache(c.bufferSnapshot)) ...[
-              BufferedByteCoverageBar(
-                key: const Key('mobile-player-byte-cache-track'),
-                coverage: c.bufferSnapshot.byteCoverage,
-              ),
-              const SizedBox(height: 6),
-            ],
             if (_holdSeek)
               SizedBox(height: _seekSlotHeight(context))
             else
@@ -667,6 +660,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     Icons.video_library_rounded,
                     l.playerEpisodes,
                     _openEpisodes,
+                    showLabel: false,
                   ),
                 _shortcut(
                   'mobile-player-speed',
@@ -706,8 +700,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     String key,
     IconData icon,
     String label,
-    Future<void> Function() action,
-  ) {
+    Future<void> Function() action, {
+    bool showLabel = true,
+  }) {
     return Expanded(
       child: TextButton(
         key: Key(key),
@@ -718,19 +713,21 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: _controller.loading ? null : () => unawaited(action()),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 22),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, height: 1.1),
-            ),
-          ],
-        ),
+        child: showLabel
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 22),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, height: 1.1),
+                  ),
+                ],
+              )
+            : Tooltip(message: label, child: Icon(icon, size: 22)),
       ),
     );
   }

@@ -379,6 +379,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           ? repository.resumeEpisode(item.id).catchError((Object _) => null)
           : Future<MediaItem?>.value();
       var seasons = _seasons;
+      final knownSeason = item.isEpisode
+          ? _preferredSeasonId(item, const [])
+          : _requestedSeasonId() ?? (keep ? _seasonId : null);
       if (!(reuseCatalog && seasons.isNotEmpty) &&
           seriesId != null &&
           seriesId.isNotEmpty) {
@@ -398,22 +401,42 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             // Keep waiting for live seasons.
           }
         }());
-        seasons = await seasonTask;
-        liveSeasonsReady = true;
-        if (!current()) return;
-        setState(() => _seasons = seasons);
+        Future<List<MediaItem>> publishSeasons() async {
+          try {
+            final loaded = await seasonTask;
+            liveSeasonsReady = true;
+            if (current()) setState(() => _seasons = loaded);
+            return loaded;
+          } on MediaServerException {
+            // A known season can be browsed even if the optional picker fails.
+            if (knownSeason == null) rethrow;
+            return seasons;
+          }
+        }
+
+        final published = publishSeasons();
+        if (knownSeason == null) {
+          seasons = await published;
+          if (!current()) return;
+        } else {
+          unawaited(published);
+        }
       }
       final resume = await resumeTask;
       // A user can already select a cached/live season while these requests
       // finish. That selection owns the episode list from this point onward.
       if (!catalogCurrent()) return;
-      final seasonId = item.isEpisode
-          ? _preferredSeasonId(item, seasons)
-          : _requestedSeasonId() ??
-                (keep ? _seasonId : null) ??
-                (resume == null ? null : _preferredSeasonId(resume, seasons)) ??
-                seasons.where((s) => s.indexNumber != 0).firstOrNull?.id ??
-                seasons.firstOrNull?.id;
+      final seasonId =
+          knownSeason ??
+          (item.isEpisode
+              ? _preferredSeasonId(item, seasons)
+              : _requestedSeasonId() ??
+                    (keep ? _seasonId : null) ??
+                    (resume == null
+                        ? null
+                        : _preferredSeasonId(resume, seasons)) ??
+                    seasons.where((s) => s.indexNumber != 0).firstOrNull?.id ??
+                    seasons.firstOrNull?.id);
       final reuseEpisodes =
           reuseCatalog &&
           seasonId == _seasonId &&

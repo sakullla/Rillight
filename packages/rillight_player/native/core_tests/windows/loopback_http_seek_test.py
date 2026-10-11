@@ -54,7 +54,15 @@ def main():
     parser.add_argument("--drop-once", action="store_true")
     parser.add_argument("--subtitle", action="store_true")
     parser.add_argument("--switch-subtitles", action="store_true")
+    parser.add_argument("--switch-audio", action="store_true",
+                        help="Requires two audio streams at indices 1 and 2")
+    parser.add_argument("--chunk-delay-ms", type=float,
+                        help="Delay per 16 KiB chunk; defaults to 1 for audio switching, 10 otherwise")
     args = parser.parse_args()
+    if args.chunk_delay_ms is not None and args.chunk_delay_ms < 0:
+        parser.error("chunk delay must be nonnegative")
+    chunk_delay = (args.chunk_delay_ms / 1000 if args.chunk_delay_ms is not None
+                   else 0.001 if args.switch_audio else 0.01)
     core_path, media_path = args.core.resolve(), args.media.resolve()
     if not core_path.is_file() or not media_path.is_file():
         parser.error("core DLL and media must exist")
@@ -63,6 +71,9 @@ def main():
     gate_release = threading.Event()
     drop_armed = threading.Event()
     dropped = threading.Event()
+    header_armed = threading.Event()
+    header_entered = threading.Event()
+    header_release = threading.Event()
     requests = []
     input_ids = []
     size = media_path.stat().st_size
@@ -90,6 +101,10 @@ def main():
             end = min(int(match[2]), size - 1) if match and match[2] else size - 1
             requests.append((start, end))
             input_ids.append(self.headers.get("X-Rillight-Input-Id"))
+            if header_armed.is_set():
+                header_armed.clear()
+                header_entered.set()
+                header_release.wait(30)
             self.send_response(206 if match else 200)
             self.send_header("Content-Type", "video/mp4")
             self.send_header("Accept-Ranges", "bytes")
@@ -114,7 +129,7 @@ def main():
                         self.wfile.write(chunk)
                         self.wfile.flush()
                         start += len(chunk)
-                        time.sleep(0.01)
+                        time.sleep(chunk_delay)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
@@ -135,6 +150,8 @@ def main():
             library.rillight_core_add_external_subtitle.argtypes = [
                 ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64]
             library.rillight_core_select_subtitle.argtypes = [
+                ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64]
+            library.rillight_core_select_audio.argtypes = [
                 ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64]
             library.rillight_core_track_count.argtypes = [ctypes.c_void_p]
             library.rillight_core_snapshot.argtypes = [ctypes.c_void_p,
@@ -184,6 +201,41 @@ def main():
 
                 current = wait_for(lambda value: value.first_video_frame_ready,
                                    "initial video")
+                if args.switch_audio:
+                    # Interrupt a replacement HTTP open after the old socket
+                    # has closed. A cancelled avio_open2 leaves no inner AVIO;
+                    # the subsequent track seek must still recover that handle.
+                    header_armed.set()
+                    target = min(2_000_000, current.duration_us // 2)
+                    assert target > 1_000_000, "Audio fixture is too short"
+                    assert library.rillight_core_seek(core, target, 3) == 0
+                    if not header_entered.wait(5):
+                        raise AssertionError("Replacement HTTP open did not reach gate")
+                    assert library.rillight_core_select_audio(core, 2, 4) == 0
+                    current = wait_for(
+                        lambda v: v.audio_stream_index == 2 and v.state != 6
+                        and v.first_audio_frame_ready and v.first_video_frame_ready,
+                        "audio after interrupted HTTP open", timeout=10)
+                    header_release.set()
+                    for operation in range(5, 17):
+                        paused = operation % 2 == 1
+                        assert library.rillight_core_set_playing(
+                            core, 0 if paused else 1, operation * 2) == 0
+                        index = 1 if operation % 2 else 2
+                        previous = current.timeline_version
+                        assert library.rillight_core_select_audio(
+                            core, index, operation * 2 + 1) == 0
+                        current = wait_for(
+                            lambda v: v.audio_stream_index == index
+                            and v.timeline_version > previous and v.state != 6
+                            and v.first_audio_frame_ready and v.first_video_frame_ready,
+                            f"audio switch {operation}")
+                        assert current.state == (4 if paused else 3)
+                    start = current.position_us
+                    wait_for(lambda v: v.position_us > start + 200_000,
+                             "playback advances after audio switches")
+                    print("Interrupted HTTP open and 12 playing/paused audio switches survived")
+                    return
                 if args.switch_subtitles:
                     for index, operation in ((3, 3), (4, 4)):
                         completed = threading.Event()
@@ -290,6 +342,7 @@ def main():
                       f"timeline={current.timeline_version}, inputs={len(set(input_ids))}")
             finally:
                 gate_release.set()
+                header_release.set()
                 library.rillight_core_destroy_loopback(core)
     finally:
         server.shutdown()

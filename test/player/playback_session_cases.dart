@@ -770,7 +770,7 @@ void main() {
   });
 
   test(
-    'readiness notifies before parameter restoration or reporting',
+    'audible readiness waits for saved settings but not server reporting',
     () async {
       final gate = backend.rateGate = Completer<void>();
       client.playingGate = Completer<void>();
@@ -780,15 +780,18 @@ void main() {
       });
       final starting = controller.start();
       await _until(() => backend.rateStarted);
-      expect(notifiedReady, isTrue);
-      expect(controller.state.phase, PlaybackPhase.playing);
-      backend.emitBuffering(true);
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.state.phase, PlaybackPhase.buffering);
+      expect(notifiedReady, isFalse);
+      expect(backend.openedPaused, isFalse);
+      expect(backend.isPlaying, isFalse);
+      expect(client.reports, isEmpty);
       gate.complete();
+      await _until(() => client.reports.any((e) => e.$1 == 'Playing'));
+      expect(notifiedReady, isTrue);
+      expect(backend.isPlaying, isTrue);
+      expect(controller.state.phase, PlaybackPhase.playing);
+      expect(client.playingGate!.isCompleted, isFalse);
       client.playingGate!.complete();
       await starting;
-      expect(controller.state.phase, PlaybackPhase.buffering);
     },
   );
 
@@ -821,6 +824,7 @@ void main() {
         final pending = controller.start();
         await _untilElapsed(() => backend.subtitleWaiting);
         expect(controller.loading, isFalse);
+        expect(backend.isPlaying, isTrue);
         await controller.togglePlay().timeout(const Duration(seconds: 1));
         expect(backend.isPlaying, isFalse);
         await controller
@@ -868,12 +872,13 @@ void main() {
   );
 
   test(
-    'a native reply timeout remains fatal after readiness and can retry',
+    'a required startup setting timeout stays silent and can retry',
     () async {
       backend.rateGate = Completer<void>();
       final starting = controller.start();
       await _until(() => backend.rateStarted);
-      expect(controller.loading, isFalse);
+      expect(controller.loading, isTrue);
+      expect(backend.isPlaying, isFalse);
       backend.rateGate!.completeError(
         TimeoutException(
           'libmpv set:speed reply timed out',
@@ -1099,7 +1104,11 @@ void main() {
             }) async {
               fetches++;
               await releaseFetch.future;
-              return NextPrefixSlice(Uint8List.fromList(const [9, 8, 7, 6]));
+              return NextPrefixSlice(
+                Uint8List.fromList(const [9, 8, 7, 6]),
+                etag: '"next"',
+                totalBytes: 4,
+              );
             },
       );
       await controller.start();
@@ -1152,7 +1161,11 @@ void main() {
           }) async {
             fetches++;
             await releaseFetch.future;
-            return NextPrefixSlice(Uint8List.fromList(const [1, 2, 3, 4]));
+            return NextPrefixSlice(
+              Uint8List.fromList(const [1, 2, 3, 4]),
+              etag: '"next"',
+              totalBytes: 4,
+            );
           },
     );
     await controller.start();
@@ -1235,7 +1248,11 @@ void main() {
             required endInclusive,
           }) async {
             if (endInclusive > highestEnd) highestEnd = endInclusive;
-            return NextPrefixSlice(Uint8List(endInclusive - start + 1));
+            return NextPrefixSlice(
+              Uint8List(endInclusive - start + 1),
+              etag: '"next"',
+              totalBytes: NextEpisodePrefix.maxBytes,
+            );
           },
     );
     await prefix.start(
@@ -1264,7 +1281,11 @@ void main() {
             required start,
             required endInclusive,
           }) async {
-            return NextPrefixSlice(Uint8List.fromList(const [4, 5, 6, 7]));
+            return NextPrefixSlice(
+              Uint8List.fromList(const [4, 5, 6, 7]),
+              etag: '"next"',
+              totalBytes: 4,
+            );
           },
     );
     await controller.start();
@@ -1316,16 +1337,20 @@ class _ControlledBackend extends FakeVideoBackend {
     await openGate?.future;
     if (!_openCancelled) {
       await super.open(request);
-      if (deferNextPlaying) {
-        deferNextPlaying = false;
-        // Open readiness and the first playing event have separate delivery.
-        // The next item may be selected before that event reaches Flutter.
-        await super.pause();
-      }
       // Simulate a backend that lost its audio selection on reopen. A backend
       // already holding the requested track correctly skips redundant work.
       if (failInitialization == 'audio') audioIndex = null;
     }
+  }
+
+  @override
+  Future<void> play() async {
+    if (deferNextPlaying) {
+      deferNextPlaying = false;
+      // Delay the acknowledgement after the startup output hold is released.
+      return;
+    }
+    await super.play();
   }
 
   @override
@@ -1350,7 +1375,7 @@ class _ControlledBackend extends FakeVideoBackend {
 
   @override
   Future<void> setVolume(double volume) async {
-    if (isPlaying && failInitialization == 'volume') {
+    if (openStarted && failInitialization == 'volume') {
       throw StateError('volume failed');
     }
     await super.setVolume(volume);

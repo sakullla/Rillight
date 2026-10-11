@@ -596,6 +596,15 @@
     ]
   },
   {
+    "id": "player-cache-estimated",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
     "id": "player-cache-active",
     "feature": "player",
     "platforms": [
@@ -1711,21 +1720,55 @@
   {
     "id": "person-loading",
     "feature": "person",
-    "platforms": ["desktop", "phone", "tv"]
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
   },
   {
     "id": "person-works",
     "feature": "person",
-    "platforms": ["desktop", "phone", "tv"]
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
   },
   {
     "id": "person-empty",
     "feature": "person",
-    "platforms": ["desktop", "phone", "tv"]
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
   },
   {
     "id": "person-error",
     "feature": "person",
-    "platforms": ["desktop", "phone", "tv"]
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "login-jellyfin",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "login-plex",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
   }
 ]

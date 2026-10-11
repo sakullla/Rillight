@@ -149,6 +149,25 @@ class DetailController extends ChangeNotifier {
         : repository
               .item(episodeId)
               .then<MediaItem?>((item) => item, onError: (Object _) => null);
+    // A resume deep link already identifies its season. Fetch its episodes
+    // independently of the season picker, which may be a slower server call.
+    String? linkedSeason;
+    final linkedSelection = () async {
+      final episode = await initialEpisode;
+      if (_disposed ||
+          revision != _revision ||
+          identity != _identity ||
+          selectionRevision != _seasonRevision) {
+        return;
+      }
+      final selected = episode?.seasonId ?? episode?.parentId;
+      if (selected == null || selected.isEmpty) return;
+      linkedSeason = selected;
+      await selectSeason(
+        selected,
+        startAt: ((episode?.indexNumber ?? 1) - 1).clamp(0, 1 << 30),
+      );
+    }();
     if (seasons.isEmpty) {
       unawaited(() async {
         try {
@@ -178,6 +197,14 @@ class DetailController extends ChangeNotifier {
       seasons = loaded;
       seasonsLoading = false;
       notifyListeners();
+      await linkedSelection;
+      if (_disposed || revision != _revision || identity != _identity) return;
+      if (linkedSeason != null) return;
+      if (episodeId != null &&
+          episodeId.isNotEmpty &&
+          selectionRevision != _seasonRevision) {
+        return;
+      }
       if (seasons.isEmpty) {
         _resumeCancel?.cancel('seasons-removed');
         _seasonRevision++;
@@ -189,27 +216,6 @@ class DetailController extends ChangeNotifier {
         episodeError = null;
         notifyListeners();
         return;
-      }
-      if (episodeId != null &&
-          episodeId.isNotEmpty &&
-          selectionRevision == _seasonRevision) {
-        try {
-          final episode = await initialEpisode;
-          if (_disposed || revision != _revision || identity != _identity) {
-            return;
-          }
-          if (selectionRevision != _seasonRevision) return;
-          final selected = episode?.seasonId ?? episode?.parentId;
-          if (selected != null && selected.isNotEmpty) {
-            await selectSeason(
-              selected,
-              startAt: ((episode?.indexNumber ?? 1) - 1).clamp(0, 1 << 30),
-            );
-            return;
-          }
-        } catch (_) {
-          // Keep the normal season selection when the deep link is stale.
-        }
       }
       final selected = seasons.any((s) => s.id == seasonId)
           ? seasonId

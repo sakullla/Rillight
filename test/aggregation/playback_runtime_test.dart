@@ -63,9 +63,12 @@ class _Client extends EmbyClient {
   int playbackRequests = 0;
   bool failPublic = false;
   bool offerNext = false;
+  bool catalogVersions = false;
+  final itemRequests = <String>[];
   @override
   MediaServerClient withRequestGuard(void Function() guard) {
-    final probe = _Client(reports, trackChoices: trackChoices);
+    final probe = _Client(reports, trackChoices: trackChoices)
+      ..catalogVersions = catalogVersions;
     probe.attachSession(
       baseUrl: baseUrl!,
       accessToken: accessToken!,
@@ -96,30 +99,38 @@ class _Client extends EmbyClient {
     String id, {
     String? fields,
     CancelToken? cancelToken,
-  }) async => decodeEmbyMediaItem({
-    'Id': id,
-    'Name': id,
-    'Type': id == 'library'
-        ? 'CollectionFolder'
-        : id.startsWith('episode')
-        ? 'Episode'
-        : id == 'season'
-        ? 'Season'
-        : id == 'series'
-        ? 'Series'
-        : 'Movie',
-    if (id.startsWith('episode')) ...{
-      'SeriesId': 'series',
-      'SeasonId': 'season',
-      'ParentIndexNumber': 1,
-      'IndexNumber': id == 'episode1' ? 1 : 2,
-    },
-    if (id == 'season') 'SeriesId': 'series',
-    if (id != 'library' && id != 'season' && id != 'episode-no-parent')
-      'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
-    'RunTimeTicks': 120 * kLegacyTicksPerSecond,
-    'ProviderIds': {'Tmdb': '1'},
-  });
+  }) async {
+    itemRequests.add(id);
+    return decodeEmbyMediaItem({
+      'Id': id,
+      'Name': id,
+      'Type': id == 'library'
+          ? 'CollectionFolder'
+          : id.startsWith('episode')
+          ? 'Episode'
+          : id == 'season'
+          ? 'Season'
+          : id == 'series'
+          ? 'Series'
+          : 'Movie',
+      if (id.startsWith('episode')) ...{
+        'SeriesId': 'series',
+        'SeasonId': 'season',
+        'ParentIndexNumber': 1,
+        'IndexNumber': id == 'episode1' ? 1 : 2,
+      },
+      if (id == 'season') 'SeriesId': 'series',
+      if (id != 'library' && id != 'season' && id != 'episode-no-parent')
+        'ParentId': (id == 'foreign' || id == 'other') ? 'other' : 'library',
+      'RunTimeTicks': 120 * kLegacyTicksPerSecond,
+      'ProviderIds': {'Tmdb': '1'},
+      if (catalogVersions)
+        'MediaSources': [
+          {'Id': 'v', 'Name': 'v', 'Container': 'mp4'},
+        ],
+    });
+  }
+
   @override
   Future<PlaybackInfo> getPlaybackInfo({
     required String itemId,
@@ -1771,6 +1782,28 @@ void main() {
     await host.open(controller.openRequest!);
     return host;
   }
+
+  test(
+    'desktop launch reuses catalog versions without playback negotiation',
+    () async {
+      await setup();
+      final origin = await runtime.resolve(controller.openRequest!);
+      final client = origin.client as _Client;
+      client.catalogVersions = true;
+      final before = client.playbackRequests;
+      final itemsBefore = client.itemRequests
+          .where((id) => id == 'movie')
+          .length;
+      final ipc = _IpcControl();
+      await desktop(ipc);
+      expect(ipc.spawnedArguments, hasLength(1));
+      expect(client.playbackRequests, before);
+      expect(
+        client.itemRequests.where((id) => id == 'movie').length,
+        itemsBefore + 1,
+      );
+    },
+  );
 
   test('desktop crash reconciles current unlocked private snapshot', () async {
     await setup(private: true);

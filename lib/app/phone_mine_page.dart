@@ -1,5 +1,4 @@
 import '../auth/provider_connect_dialog.dart';
-import '../auth/source_management.dart';
 import '../media_server/capabilities.dart';
 import 'dart:async';
 
@@ -237,12 +236,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 title: Text(l10n.mobileAddServer),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => context.push('${AppRoutes.connect}?add=1'),
-              ),
-              ListTile(
-                key: const Key('phone-provider-management'),
-                leading: const Icon(Icons.manage_accounts_outlined),
-                title: Text(l10n.sourceManagement),
-                onTap: () => showSourceManagement(context),
               ),
               if (auth.client.serviceType == MediaServerType.plex ||
                   auth

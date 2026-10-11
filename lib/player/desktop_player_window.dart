@@ -26,6 +26,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/playback_metadata.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -360,13 +361,36 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         origin.permit.requireValid();
         if (_disposed || revision != _requestRevision) return;
         resolvedOrigin = origin;
-        final item = await origin.permit.dispatch(
-          (_) => origin.client.getItem(request.itemId),
-        );
-        final info = await origin.permit.dispatch(
-          (_) => origin.client.getPlaybackInfo(itemId: request.itemId),
-        );
-        final pref = runtime!.preference(origin, item, info.mediaSources);
+        final item = prepared == null && origin.resolvedItem != null
+            ? origin.resolvedItem!
+            : await origin.permit.dispatch(
+                (_) => origin.client.getItem(request.itemId),
+              );
+        final sourceClient = origin.client;
+        var versions = sourceClient is PlaybackMetadataProvider
+            ? await origin.permit.dispatch(
+                (_) => (sourceClient as PlaybackMetadataProvider)
+                    .getPlaybackSources(
+                      itemId: request.itemId,
+                      position:
+                          request.startPosition ??
+                          (request.autoResume
+                              ? item.resumePosition
+                              : Duration.zero),
+                    ),
+              )
+            : playbackSourcesFromItem(item);
+        // Emby/Jellyfin detail metadata already contains the versions. Only
+        // legacy responses without that metadata need discovery negotiation.
+        // The child owns the final negotiated session and selected tracks.
+        if (versions.isEmpty && sourceClient is! PlaybackMetadataProvider) {
+          final info = await origin.permit.dispatch(
+            (_) => sourceClient.getPlaybackInfo(itemId: request.itemId),
+          );
+          versions = info.mediaSources;
+          await info.resources?.release();
+        }
+        final pref = runtime!.preference(origin, item, versions);
         final usePreference =
             request.mediaSourceId == null && pref.failure == null;
         if (request.mediaSourceId == null &&
@@ -380,7 +404,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         final version =
             request.mediaSourceId ??
             (usePreference ? pref.selected?.source.mediaSourceId : null);
-        final sources = info.mediaSources.where((s) => s.id == version);
+        final sources = versions.where((s) => s.id == version);
         final media = sources.length == 1 ? sources.single : null;
         final lines = runtime!.registry
             .project(origin.source.account.region)

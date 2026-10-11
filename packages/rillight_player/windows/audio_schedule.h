@@ -9,6 +9,28 @@
 
 namespace rillight_windows {
 
+// Arbitrary resume/seek samples need not cross zero. Ease the first 5 ms of
+// decoded PCM from silence without adding samples or changing media timing.
+// This policy must never be applied to compressed passthrough packets.
+class PcmOnsetRamp {
+ public:
+  void Reset() { position_ = 0; }
+  void Apply(int16_t* pcm, int frames, int channels) {
+    const int count = std::min(frames, kFrames - position_);
+    for (int frame = 0; frame < count; ++frame, ++position_) {
+      for (int channel = 0; channel < channels; ++channel) {
+        const int index = frame * channels + channel;
+        pcm[index] = static_cast<int16_t>(
+            static_cast<int32_t>(pcm[index]) * position_ / (kFrames - 1));
+      }
+    }
+  }
+
+ private:
+  static constexpr int kFrames = 240;  // Output PCM is 48 kHz.
+  int position_ = 0;
+};
+
 inline bool WaitForFutureAudio(int64_t pts_us, int64_t position_us,
                                int64_t submitted_end_us) {
   if (pts_us < 0 || pts_us <= position_us + 50000) return false;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/resources.dart';
@@ -9,6 +10,36 @@ Uri _origin(HttpServer server) => Uri.parse('http://127.0.0.1:${server.port}');
 const _signed = 'path=a%20b&part=one&flag&part=two&signature=x%2By%3D';
 
 void main() {
+  for (final change in ['etag', 'total', 'missing validator']) {
+    test('next prefix rejects $change across slices', () async {
+      final prefix = NextEpisodePrefix(
+        fetch:
+            ({
+              required url,
+              required headers,
+              required start,
+              required endInclusive,
+            }) async => NextPrefixSlice(
+              Uint8List(endInclusive - start + 1),
+              etag: change == 'missing validator'
+                  ? null
+                  : start == 0 || change == 'total'
+                  ? '"first"'
+                  : '"changed"',
+              totalBytes: start > 0 && change == 'total'
+                  ? 16 * 1024 * 1024
+                  : 8 * 1024 * 1024,
+            ),
+      );
+      await prefix.start(
+        itemId: 'next',
+        url: Uri.parse('http://localhost/next'),
+        yieldToForeground: () => false,
+      );
+      expect(prefix.bytes, isNull);
+      expect(prefix.itemId, isNull);
+    });
+  }
   for (final tokenHeader in ['X-Plex-Token', 'X-Emby-Token', 'Authorization']) {
     test('next prefix reauthorizes $tokenHeader on every redirect', () async {
       final source = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -52,6 +83,7 @@ void main() {
         seen.add(('foreign', request));
         request.response.statusCode = 206;
         request.response.headers.set('content-range', 'bytes 0-3/4');
+        request.response.headers.set('etag', '"next"');
         request.response.add([1, 2, 3, 4]);
         await request.response.close();
       });

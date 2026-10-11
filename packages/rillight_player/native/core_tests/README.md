@@ -166,3 +166,20 @@ cmake -S packages/rillight_player/native -B build/core-ass-test \
 cmake --build build/core-ass-test --parallel 4
 ctest --test-dir build/core-ass-test --output-on-failure
 ```
+
+Windows loopback audio-switch regression (synthetic video with audio streams
+1 and 2, at least four seconds long):
+
+```powershell
+python packages/rillight_player/native/core_tests/windows/loopback_http_seek_test.py --core <verified-sdk>/bin/librillight_core.dll --media <fixture.mp4> --switch-audio
+```
+
+This interrupts a replacement HTTP open before response headers, switches
+tracks while the old connection is gone, then verifies twelve playing/paused
+switches and continued media-clock progress. Run with both MP4 and Matroska
+fixtures. This establishes core recovery, not physical audio or GUI rendering.
+
+The seek scenario defaults to a 10 ms delay per 16 KiB chunk (about 13 Mbps
+before overhead). For higher bitrate fixtures, use `--chunk-delay-ms 1` and
+record the selected rate; a source slower than the media is a separate
+bandwidth-starvation scenario, not a sustained-playback performance check.

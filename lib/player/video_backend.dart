@@ -19,7 +19,10 @@ class VideoOpenRequest {
     this.isInfiniteStream = false,
     this.mediaStreams = const [],
     this.startPaused = false,
+    this.holdPlaybackForSettings = false,
     this.warmedPrefix,
+    this.warmedPrefixEtag,
+    this.warmedPrefixTotalBytes,
   });
 
   final int sessionId;
@@ -34,9 +37,15 @@ class VideoOpenRequest {
   final List<MediaStreamInfo> mediaStreams;
   final bool startPaused;
 
-  /// Bytes already fetched for [url], served by the new transport when a
-  /// request stays inside them. Null leaves startup on the network.
+  /// Temporary output hold during desktop startup; unlike a user pause this
+  /// must keep read-ahead active. The caller releases it with [VideoBackend.play].
+  final bool holdPlaybackForSettings;
+
+  /// Bytes already fetched for [url], imported into the new session cache only
+  /// after the strong ETag and total length are revalidated.
   final Uint8List? warmedPrefix;
+  final String? warmedPrefixEtag;
+  final int? warmedPrefixTotalBytes;
   bool get dynamicSource =>
       isInfiniteStream || playMethod == PlayMethod.transcode;
 }
@@ -292,7 +301,7 @@ class FakeVideoBackend
     openedHeaders = request.headers;
     position = request.start;
     buffer = Duration.zero;
-    isPlaying = !request.startPaused;
+    isPlaying = !request.startPaused && !request.holdPlaybackForSettings;
     subtitleOff = false;
     subtitleUri = null;
     subtitleIndex = null;

@@ -8,12 +8,19 @@ import 'cache_limits.dart';
 
 /// One bounded response from the next episode's existing stream URL.
 class NextPrefixSlice {
-  const NextPrefixSlice(this.bytes, {this.rangeSupported = true});
+  const NextPrefixSlice(
+    this.bytes, {
+    this.rangeSupported = true,
+    this.etag,
+    this.totalBytes,
+  });
 
   final Uint8List bytes;
 
   /// False when the server ignored the range and the prefix must be dropped.
   final bool rangeSupported;
+  final String? etag;
+  final int? totalBytes;
 }
 
 typedef NextPrefixFetch =
@@ -39,6 +46,8 @@ class NextEpisodePrefix {
   final _chunks = <Uint8List>[];
   int storedBytes = 0;
   String? itemId;
+  String? etag;
+  int? totalBytes;
   Uint8List? _joined;
   int _ticket = 0;
 
@@ -110,15 +119,25 @@ class NextEpisodePrefix {
       if (ticket != _ticket) return;
       if (slice == null ||
           !slice.rangeSupported ||
+          slice.etag == null ||
+          !slice.etag!.startsWith('"') ||
+          !slice.etag!.endsWith('"') ||
+          slice.totalBytes == null ||
+          offset + slice.bytes.length > slice.totalBytes! ||
+          (etag != null &&
+              (etag != slice.etag || totalBytes != slice.totalBytes)) ||
           slice.bytes.isEmpty ||
           slice.bytes.length > requested) {
         _clear();
         return;
       }
+      etag = slice.etag;
+      totalBytes = slice.totalBytes;
       _chunks.add(slice.bytes);
       storedBytes += slice.bytes.length;
       _joined = null;
       offset += slice.bytes.length;
+      if (offset == totalBytes) return;
       if (slice.bytes.length < requested) return;
     }
   }
@@ -134,6 +153,8 @@ class NextEpisodePrefix {
 
   void _clear() {
     itemId = null;
+    etag = null;
+    totalBytes = null;
     storedBytes = 0;
     _chunks.clear();
     _joined = null;
@@ -221,14 +242,20 @@ Future<NextPrefixSlice?> fetchNextPrefixSlice({
         target = target.resolve(location);
         continue;
       }
-      final range = RegExp(r'^bytes (\d+)-(\d+)/(?:\d+|\*)$').firstMatch(
+      final range = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$').firstMatch(
         response.headers.value(HttpHeaders.contentRangeHeader) ?? '',
       );
       final rangeStart = range == null ? null : int.tryParse(range[1]!);
       final rangeEnd = range == null ? null : int.tryParse(range[2]!);
+      final total = range == null ? null : int.tryParse(range[3]!);
+      final etag = response.headers.value('etag');
       if (response.statusCode != HttpStatus.partialContent ||
           rangeStart != start ||
           rangeEnd == null ||
+          total == null ||
+          rangeEnd >= total ||
+          response.compressionState ==
+              HttpClientResponseCompressionState.decompressed ||
           rangeEnd < start ||
           rangeEnd > endInclusive) {
         await response.listen((_) {}).cancel();
@@ -247,7 +274,13 @@ Future<NextPrefixSlice?> fetchNextPrefixSlice({
       if (builder.length != expected) {
         return NextPrefixSlice(Uint8List(0), rangeSupported: false);
       }
-      return NextPrefixSlice(builder.takeBytes());
+      return NextPrefixSlice(
+        builder.takeBytes(),
+        etag: etag != null && etag.startsWith('"') && etag.endsWith('"')
+            ? etag
+            : null,
+        totalBytes: total,
+      );
     }
     throw StateError('Too many next-episode prefix redirects');
   } finally {

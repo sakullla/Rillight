@@ -1,3 +1,4 @@
+import 'package:rillight/auth/source_management.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -135,7 +136,11 @@ void main() {
       try {
         await tester.pumpWidget(app);
         await tester.pumpAndSettle();
-        final manage = find.byKey(const Key('phone-provider-management'));
+        expect(
+          find.byKey(const Key('phone-provider-management')),
+          findsNothing,
+        );
+        final manage = find.byType(Scaffold).first;
         final catalog = CatalogScope.of(tester.element(manage));
         await tester.runAsync(catalog.reload);
         expect(
@@ -173,8 +178,7 @@ void main() {
         );
         app.router.go(AppRoutes.mine);
         await tester.pumpAndSettle();
-        await tester.ensureVisible(manage);
-        await tester.tap(manage);
+        showSourceManagement(tester.element(manage));
         await tester.pumpAndSettle();
         final home = find.text('切换 Plex Home 用户');
         await tester.ensureVisible(home);
@@ -304,7 +308,13 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('provider-cancel')));
         await tester.pumpAndSettle();
-        expect(find.byType(ProviderConnectDialog), findsNothing);
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is ProviderConnectDialog && !w.inline,
+          ),
+          findsNothing,
+        );
+        expect(find.byType(AlertDialog), findsNothing);
         expect(auth.session, isNull);
         expect(
           app.router.routeInformationProvider.value.uri.path,
