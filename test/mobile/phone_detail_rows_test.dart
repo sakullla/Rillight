@@ -1,32 +1,44 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/emby/emby_models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_library_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/player/player_host_command.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+import '../helpers/synthetic_source_fixture.dart';
 
 const _device = EmbyDeviceInfo(
   clientName: 'test',
@@ -173,7 +185,13 @@ void main() {
     testWidgets('cast rows settle on whole cards at ${width.toInt()}dp', (
       tester,
     ) async {
-      await _pumpPeople(tester, width: width, height: 900);
+      const height = 1800.0;
+      await _pumpPeople(
+        tester,
+        width: width,
+        height: height,
+        environment: PresentationEnvironment.phone,
+      );
       expect(tester.takeException(), isNull);
 
       final actor0 = find.byKey(const ValueKey('episode-person-Actor-0'));
@@ -185,24 +203,51 @@ void main() {
 
       final first = tester.getRect(actor0);
       final second = tester.getRect(actor1);
-      _expectOnScreen(first, width, 900);
-      _expectOnScreen(second, width, 900);
-      expect(first.left, closeTo(24, 1));
+      _expectOnScreen(first, width, height);
+      _expectOnScreen(second, width, height);
+      expect(first.left, closeTo(16, 1));
       expect(second.left, greaterThanOrEqualTo(first.right - 0.5));
+      expect(second.left - first.right, closeTo(AppSpacing.xs, 1));
 
-      final avatar = tester.getRect(
-        find.descendant(of: actor1, matching: find.byType(CircleAvatar)),
+      final image = find.descendant(
+        of: actor1,
+        matching: find.byKey(EpisodePeopleSection.imageKey),
       );
-      _expectOnScreen(avatar, width, 900);
-      expect(avatar.width, closeTo(80, 1));
-      expect(avatar.height, closeTo(80, 1));
+      final poster = tester.getRect(image);
+      final cardWidth = phoneHomePosterCardWidth(width);
+      _expectOnScreen(poster, width, height);
+      expect(poster.width, closeTo(cardWidth, 0.5));
+      expect(poster.height, closeTo(cardWidth * 1.5, 0.5));
+      final decoration =
+          tester
+                  .widget<DecoratedBox>(
+                    find.descendant(
+                      of: image,
+                      matching: find.byType(DecoratedBox),
+                    ),
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(decoration.borderRadius, BorderRadius.circular(AppRadii.md));
+      expect(
+        decoration.color,
+        Theme.of(tester.element(image)).colorScheme.surfaceContainerLow,
+      );
+      expect(
+        find.descendant(of: image, matching: find.text('B')),
+        findsOneWidget,
+      );
+      expect(find.byType(CircleAvatar), findsNothing);
       final role = tester.getRect(
         find.descendant(of: actor1, matching: find.text('Friend')),
       );
       _expectInside(role, tester.getRect(actor1));
 
       final longName = tester.getRect(
-        find.descendant(of: actor0, matching: find.byType(Text)).first,
+        find.descendant(
+          of: actor0,
+          matching: find.textContaining('Alexandria'),
+        ),
       );
       expect(longName.left, greaterThanOrEqualTo(first.left - 0.5));
       expect(longName.right, lessThanOrEqualTo(first.right + 0.5));
@@ -223,9 +268,19 @@ void main() {
       final other = tester.getRect(
         find.byKey(const ValueKey('episode-person--0')),
       );
-      _expectOnScreen(other, width, 900);
-      expect(other.left, closeTo(24, 1));
-      expect(width - other.right, greaterThanOrEqualTo(23));
+      _expectOnScreen(other, width, height);
+      expect(other.left, closeTo(16, 1));
+      expect(width - other.right, greaterThanOrEqualTo(15));
+      expect(
+        find.descendant(
+          of: find.descendant(
+            of: find.byKey(const ValueKey('episode-person--1')),
+            matching: find.byKey(EpisodePeopleSection.imageKey),
+          ),
+          matching: find.text('?'),
+        ),
+        findsOneWidget,
+      );
 
       final strip = find.byType(PageView).first;
       for (var i = 0; i < 4; i++) {
@@ -241,7 +296,7 @@ void main() {
       final last = tester.getRect(
         find.byKey(const ValueKey('episode-person-Actor-4')),
       );
-      _expectOnScreen(last, width, 900);
+      _expectOnScreen(last, width, height);
       expect(last.right, closeTo(width - first.left, 1));
       expect(
         find.byKey(const ValueKey('episode-person-Actor-3')),
@@ -251,15 +306,451 @@ void main() {
     });
   }
 
-  testWidgets('wide cast still wraps instead of paging', (tester) async {
-    await _pumpPeople(tester, width: 900, height: 700);
-    expect(find.byType(PageView), findsNothing);
+  testWidgets('wide cast scrolls one row instead of wrapping', (tester) async {
+    const width = 1440.0;
+    const height = 1800.0;
+    await _pumpPeople(
+      tester,
+      width: width,
+      height: height,
+      environment: PresentationEnvironment.desktop,
+    );
+    final section = find.byKey(EpisodePeopleSection.sectionKey);
+    expect(
+      find.descendant(of: section, matching: find.byType(PageView)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: section, matching: find.byType(Wrap)),
+      findsNothing,
+    );
+    final tops = <double>[];
     for (var i = 0; i < 5; i++) {
       final rect = tester.getRect(
         find.byKey(ValueKey('episode-person-Actor-$i')),
       );
-      _expectOnScreen(rect, 900, 700);
+      _expectOnScreen(rect, width, height);
+      tops.add(rect.top);
     }
+    for (final top in tops) {
+      expect(top, closeTo(tops.first, 1));
+    }
+    final image = find.descendant(
+      of: find.byKey(const ValueKey('episode-person-Actor-0')),
+      matching: find.byKey(EpisodePeopleSection.imageKey),
+    );
+    final poster = tester.getRect(image);
+    final cardWidth = MediaShelf.posterWidthFor(width);
+    expect(poster.width, closeTo(cardWidth, 0.5));
+    expect(poster.height, closeTo(cardWidth * 1.5, 0.5));
+    final decoration =
+        tester
+                .widget<DecoratedBox>(
+                  find.descendant(
+                    of: image,
+                    matching: find.byType(DecoratedBox),
+                  ),
+                )
+                .decoration
+            as BoxDecoration;
+    expect(decoration.borderRadius, BorderRadius.circular(AppRadii.md));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('wide cast keeps one role on a single horizontal row', (
+    tester,
+  ) async {
+    const width = 1024.0;
+    const height = 900.0;
+    await _pumpPeople(
+      tester,
+      width: width,
+      height: height,
+      people: [
+        for (var i = 0; i < 12; i++)
+          ItemPerson(name: '演员$i', type: 'Actor', role: '角色$i'),
+      ],
+    );
+    final section = find.byKey(EpisodePeopleSection.sectionKey);
+    expect(
+      find.descendant(of: section, matching: find.byType(Wrap)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: section, matching: find.byType(PageView)),
+      findsNothing,
+    );
+    final first = tester.getRect(
+      find.byKey(const ValueKey('episode-person-Actor-0')),
+    );
+    final last = tester.getRect(
+      find.byKey(const ValueKey('episode-person-Actor-11')),
+    );
+    expect(last.top, closeTo(first.top, 1));
+    expect(last.left, greaterThan(width));
+    final poster = tester.getRect(
+      find.descendant(
+        of: find.byKey(const ValueKey('episode-person-Actor-0')),
+        matching: find.byKey(EpisodePeopleSection.imageKey),
+      ),
+    );
+    expect(poster.width, closeTo(MediaShelf.posterWidthFor(width), 0.5));
+    expect(poster.height / poster.width, closeTo(1.5, 0.02));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('narrow desktop pages whole poster cards', (tester) async {
+    const width = 360.0;
+    const height = 1800.0;
+    await _pumpPeople(tester, width: width, height: height);
+    expect(find.byType(PageView), findsWidgets);
+    expect(find.byKey(const ValueKey('episode-person-Actor-2')), findsNothing);
+    final first = tester.getRect(
+      find.byKey(const ValueKey('episode-person-Actor-0')),
+    );
+    expect(first.left, closeTo(24, 1));
+    final poster = tester.getRect(
+      find.descendant(
+        of: find.byKey(const ValueKey('episode-person-Actor-0')),
+        matching: find.byKey(EpisodePeopleSection.imageKey),
+      ),
+    );
+    expect(poster.width, closeTo(MediaShelf.posterWidthFor(width), 0.5));
+    expect(poster.height, closeTo(poster.width * 1.5, 0.5));
+    expect(find.byType(CircleAvatar), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tv cast is a focusable horizontal poster row', (tester) async {
+    const width = 960.0;
+    const height = 1600.0;
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await _pumpPeople(
+      tester,
+      width: width,
+      height: height,
+      environment: PresentationEnvironment.tv,
+      people: [
+        for (var i = 0; i < 10; i++)
+          ItemPerson(id: 'actor-$i', name: '演员$i', type: 'Actor', role: '角色$i'),
+        const ItemPerson(name: '无编号', type: 'Actor'),
+        const ItemPerson(id: 'director-1', name: '导演甲', type: 'Director'),
+        const ItemPerson(id: 'writer-1', name: '编剧甲', type: 'Writer'),
+        const ItemPerson(name: '制片', type: 'Producer'),
+      ],
+    );
+    final section = find.byKey(EpisodePeopleSection.sectionKey);
+    expect(
+      find.descendant(of: section, matching: find.byType(PageView)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: section, matching: find.byType(Wrap)),
+      findsNothing,
+    );
+    expect(
+      tester.getTopLeft(find.text('演员')).dy,
+      lessThan(tester.getTopLeft(find.text('导演')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('导演')).dy,
+      lessThan(tester.getTopLeft(find.text('编剧')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('编剧')).dy,
+      lessThan(tester.getTopLeft(find.text('其他')).dy),
+    );
+    final first = tester.getRect(
+      find.byKey(const ValueKey('episode-person-Actor-0')),
+    );
+    final offscreen = tester.getRect(
+      find.byKey(const ValueKey('episode-person-Actor-9')),
+    );
+    expect(offscreen.top, closeTo(first.top, 1));
+    expect(offscreen.left, greaterThan(width));
+    final unnamed = find.byKey(const ValueKey('episode-person-Actor-10'));
+    expect(unnamed, findsOneWidget);
+    expect(tester.getRect(unnamed).top, closeTo(first.top, 1));
+    expect(
+      find.descendant(
+        of: unnamed,
+        matching: find.byType(FocusableActionDetector),
+      ),
+      findsNothing,
+    );
+    final image = find.descendant(
+      of: find.byKey(const ValueKey('episode-person-Actor-0')),
+      matching: find.byKey(EpisodePeopleSection.imageKey),
+    );
+    final poster = tester.getRect(image);
+    final cardWidth =
+        TvDesign.posterWidth * TvDesign.scaleOf(tester.element(image));
+    expect(poster.width, closeTo(cardWidth, 0.5));
+    expect(poster.height, closeTo(cardWidth * 1.5, 0.5));
+    final decoration =
+        tester
+                .widget<DecoratedBox>(
+                  find.descendant(
+                    of: image,
+                    matching: find.byType(DecoratedBox),
+                  ),
+                )
+                .decoration
+            as BoxDecoration;
+    expect(
+      decoration.borderRadius,
+      BorderRadius.circular(
+        TvDesign.cardRadius * TvDesign.scaleOf(tester.element(image)),
+      ),
+    );
+
+    final detector = find.descendant(
+      of: find.byKey(const ValueKey('episode-person-Actor-0')),
+      matching: find.byType(FocusableActionDetector),
+    );
+    tester.widget<FocusableActionDetector>(detector).focusNode!.requestFocus();
+    await tester.pump();
+    for (var i = 0; i < 9; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+    }
+    final revealed = tester.getRect(
+      find.byKey(const ValueKey('episode-person-Actor-9')),
+    );
+    _expectOnScreen(revealed, width, height);
+    expect(
+      tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: find.byKey(const ValueKey('episode-person-Actor-9')),
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(
+      tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: find.byKey(const ValueKey('episode-person-Actor-9')),
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode!
+          .hasFocus,
+      isTrue,
+      reason: 'a card without an id stays out of the focus order',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    testWidgets(
+      '${environment.presentation.name} person cards open one path and stay without an id',
+      (tester) async {
+        final router = await _pumpCastRoute(tester, environment: environment);
+        addTearDown(router.dispose);
+        final actor = find.byKey(const ValueKey('episode-person-Actor-0'));
+        final unnamed = find.byKey(const ValueKey('episode-person-Actor-1'));
+        final director = find.byKey(
+          const ValueKey('episode-person-Director-0'),
+        );
+        expect(unnamed, findsOneWidget);
+        expect(
+          find.descendant(
+            of: unnamed,
+            matching: find.byWidgetPredicate(
+              (widget) => widget is InkWell || widget is TvAction,
+            ),
+          ),
+          findsNothing,
+        );
+
+        await _activatePerson(tester, actor, environment);
+        final actorLocation = router.state.uri.toString();
+        expect(router.state.uri.path, '/person/person-ada');
+        expect(router.state.uri.queryParameters['name'], '艾达');
+        expect(router.state.extra, isNull);
+        router.pop();
+        await tester.pumpAndSettle();
+        expect(router.state.uri.path, '/detail');
+        await _revealDetailOrigin(tester);
+        expect(find.text('原详情').hitTestable(), findsOneWidget);
+
+        await tester.ensureVisible(unnamed);
+        await tester.tap(unnamed);
+        await tester.pumpAndSettle();
+        expect(router.state.uri.path, '/detail');
+        expect(find.text('路人'), findsWidgets);
+
+        await _activatePerson(tester, director, environment);
+        expect(router.state.uri.toString(), actorLocation);
+        expect(router.state.extra, isNull);
+        router.pop();
+        await tester.pumpAndSettle();
+        await _revealDetailOrigin(tester);
+        expect(find.text('原详情').hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      '${environment.presentation.name} person cards carry the detail source',
+      (tester) async {
+        final server = FakeEmbyServer();
+        final auth = SyntheticSourceAuth(
+          adapter: FakeEmbyAdapter([server]),
+          device: _device,
+          libraryIds: const {'view-movies'},
+        );
+        addTearDown(auth.dispose);
+        final session = await tester.runAsync(() async {
+          await auth.sources.load();
+          final connected = await auth.connect(
+            address: server.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          );
+          if (!connected) throw StateError('signed-in fixture failed');
+          return auth.sources.authenticate(server.serverId);
+        });
+        final account = session!.account;
+        final permit = auth.sources.permit(account, libraryId: 'view-movies');
+        final origin = PlaybackOrigin(
+          source: SourceReference(account: account, itemId: 'movie-inception'),
+          work: SourceReference(account: account, itemId: 'movie-inception'),
+          libraryId: 'view-movies',
+          permit: permit,
+          client: session.client,
+        );
+        final policy = MediaImageSourcePolicy(origin);
+        addTearDown(policy.dispose);
+        final router = await _pumpCastRoute(
+          tester,
+          environment: environment,
+          origin: origin,
+          policy: policy,
+          cache: CatalogCache()..debugSetDiskStore(null),
+        );
+        addTearDown(router.dispose);
+
+        Future<void> expectSource(Finder card) async {
+          await _activatePerson(tester, card, environment);
+          expect(router.state.uri.path, '/person/person-ada');
+          expect(router.state.uri.queryParameters['name'], '艾达');
+          final extra = router.state.extra;
+          expect(extra, isA<PlayerHostOpenItemCommand>());
+          final command = extra! as PlayerHostOpenItemCommand;
+          expect(command.itemId, 'person-ada');
+          expect(command.libraryId, 'view-movies');
+          expect(
+            command.source?.account.configuredServerId,
+            account.configuredServerId,
+          );
+          router.pop();
+          await tester.pumpAndSettle();
+          expect(router.state.uri.path, '/detail');
+          await _revealDetailOrigin(tester);
+          expect(find.text('原详情').hitTestable(), findsOneWidget);
+        }
+
+        await expectSource(
+          find.byKey(const ValueKey('episode-person-Actor-0')),
+        );
+        await expectSource(
+          find.byKey(const ValueKey('episode-person-Director-0')),
+        );
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('episode-person-Actor-1')),
+        );
+        await tester.tap(find.byKey(const ValueKey('episode-person-Actor-1')));
+        await tester.pumpAndSettle();
+        expect(router.state.uri.path, '/detail');
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('missing and failed portraits stay inside the poster', (
+    tester,
+  ) async {
+    final server = FakeEmbyServer();
+    server.items.add(
+      FakeEmbyItem(
+        id: 'person-face',
+        name: '有图',
+        type: 'Person',
+        primaryImageTag: 'face',
+      ),
+    );
+    final dio = dioForFakeEmby(FakeEmbyAdapter([server]));
+    final auth = AuthController.memory(
+      client: EmbyClient(device: _device, dio: dio),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(
+      () => auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    await _pumpPeople(
+      tester,
+      width: 800,
+      height: 700,
+      auth: auth,
+      people: const [
+        ItemPerson(
+          id: 'person-face',
+          name: '有图',
+          type: 'Actor',
+          primaryImageTag: 'face',
+        ),
+        ItemPerson(
+          id: 'person-missing',
+          name: '无图',
+          type: 'Actor',
+          primaryImageTag: 'gone',
+        ),
+      ],
+    );
+    final face = find.byKey(const ValueKey('episode-person-Actor-0'));
+    final missing = find.byKey(const ValueKey('episode-person-Actor-1'));
+    expect(
+      find.descendant(of: face, matching: find.byType(RawImage)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.descendant(
+          of: face,
+          matching: find.byKey(EpisodePeopleSection.imageKey),
+        ),
+        matching: find.text('有'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.descendant(
+          of: missing,
+          matching: find.byKey(EpisodePeopleSection.imageKey),
+        ),
+        matching: find.text('无'),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -1065,42 +1556,166 @@ void _expectInside(Rect inner, Rect outer) {
   expect(inner.bottom, lessThanOrEqualTo(outer.bottom + 0.5));
 }
 
+const _samplePeople = [
+  ItemPerson(
+    name: 'Alexandria Montgomery-Washington the Third',
+    type: 'Actor',
+    role: 'Lead',
+  ),
+  ItemPerson(name: 'Bea', type: 'Actor', role: 'Friend'),
+  ItemPerson(name: 'Cid', type: 'Actor', role: 'Rival'),
+  ItemPerson(name: 'Dee', type: 'Actor', role: 'Neighbor'),
+  ItemPerson(name: 'Eve', type: 'Actor', role: 'Guest'),
+  ItemPerson(name: 'Director One', type: 'Director'),
+  ItemPerson(name: 'Writer One', type: 'Writer'),
+  ItemPerson(
+    name: 'Other Person With A Very Long Name That Must Ellipsize',
+    type: 'Producer',
+    role: 'A role name that is also far too long for one card',
+  ),
+  ItemPerson(name: '   ', type: 'Guest'),
+];
+
+const _routePeople = [
+  ItemPerson(id: 'person-ada', name: '艾达', type: 'Actor', role: '主角'),
+  ItemPerson(name: '路人', type: 'Actor', role: '客串'),
+  ItemPerson(id: 'person-ada', name: '艾达', type: 'Director'),
+  ItemPerson(id: 'person-bob', name: '鲍勃', type: 'Writer', role: '剧本'),
+];
+
 Future<void> _pumpPeople(
   WidgetTester tester, {
   required double width,
   required double height,
+  PresentationEnvironment? environment,
+  List<ItemPerson>? people,
+  AuthController? auth,
 }) async {
   _useSurface(tester, width, height);
+  final section = EpisodePeopleSection(people: people ?? _samplePeople);
+  Widget home = Scaffold(body: section);
+  if (environment != null) {
+    home = PresentationScope(environment: environment, child: home);
+  }
+  if (auth != null) {
+    home = AuthScope(controller: auth, child: home);
+  }
   await tester.pumpWidget(
     MaterialApp(
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       theme: AppTheme.dark(),
-      home: Scaffold(
-        body: EpisodePeopleSection(
-          people: const [
-            ItemPerson(
-              name: 'Alexandria Montgomery-Washington the Third',
-              type: 'Actor',
-              role: 'Lead',
-            ),
-            ItemPerson(name: 'Bea', type: 'Actor', role: 'Friend'),
-            ItemPerson(name: 'Cid', type: 'Actor', role: 'Rival'),
-            ItemPerson(name: 'Dee', type: 'Actor', role: 'Neighbor'),
-            ItemPerson(name: 'Eve', type: 'Actor', role: 'Guest'),
-            ItemPerson(name: 'Director One', type: 'Director'),
-            ItemPerson(name: 'Writer One', type: 'Writer'),
-            ItemPerson(
-              name: 'Other Person With A Very Long Name That Must Ellipsize',
-              type: 'Producer',
-              role: 'A role name that is also far too long for one card',
-            ),
-          ],
-        ),
-      ),
+      home: home,
     ),
   );
+  await tester.pumpAndSettle();
+}
+
+Future<GoRouter> _pumpCastRoute(
+  WidgetTester tester, {
+  required PresentationEnvironment environment,
+  PlaybackOrigin? origin,
+  MediaImageSourcePolicy? policy,
+  CatalogCache? cache,
+}) async {
+  final size = switch (environment.presentation) {
+    AppPresentation.androidPhone => const Size(412, 900),
+    AppPresentation.androidTv => const Size(960, 540),
+    AppPresentation.desktop => const Size(1440, 900),
+  };
+  _useSurface(tester, size.width, size.height);
+  tester.platformDispatcher.accessibilityFeaturesTestValue =
+      const FakeAccessibilityFeatures(disableAnimations: true);
+  addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+  final anchor = FocusNode(debugLabel: 'origin-detail');
+  addTearDown(anchor.dispose);
+  final router = GoRouter(
+    initialLocation: '/detail',
+    routes: [
+      GoRoute(
+        path: '/detail',
+        builder: (context, state) {
+          final page = Scaffold(
+            body: ListView(
+              children: [
+                Focus(focusNode: anchor, child: const Text('原详情')),
+                const EpisodePeopleSection(people: _routePeople),
+              ],
+            ),
+          );
+          final scoped = origin == null
+              ? page
+              : DetailSourceScope(
+                  origin: origin,
+                  cache: cache!,
+                  imagePolicy: policy!,
+                  child: page,
+                );
+          return PresentationScope(environment: environment, child: scoped);
+        },
+      ),
+      GoRoute(
+        path: '/person/:personId',
+        builder: (context, state) =>
+            Scaffold(body: Text('person ${state.pathParameters['personId']}')),
+      ),
+    ],
+  );
+  await tester.pumpWidget(
+    MaterialApp.router(
+      locale: const Locale('zh'),
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      theme: AppTheme.dark(),
+      routerConfig: router,
+    ),
+  );
+  await tester.pumpAndSettle();
+  return router;
+}
+
+/// `ensureVisible` aligns a card to the top of the detail list. Bring the
+/// original header back before asserting that pop returned to that detail.
+Future<void> _revealDetailOrigin(WidgetTester tester) async {
+  for (final state in tester.stateList<ScrollableState>(
+    find.byType(Scrollable),
+  )) {
+    final position = state.position;
+    if (position.axis == Axis.vertical && position.pixels != 0) {
+      position.jumpTo(0);
+    }
+  }
+  await tester.pumpAndSettle();
+}
+
+Future<void> _activatePerson(
+  WidgetTester tester,
+  Finder card,
+  PresentationEnvironment environment,
+) async {
+  await tester.ensureVisible(card);
+  await tester.pumpAndSettle();
+  if (environment.isTv) {
+    final detector = find.descendant(
+      of: card,
+      matching: find.byType(FocusableActionDetector),
+    );
+    expect(detector, findsOneWidget);
+    tester.widget<FocusableActionDetector>(detector).focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+  } else if (environment.presentation == AppPresentation.androidPhone) {
+    await tester.tap(card);
+  } else {
+    final center = tester.getCenter(card);
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: center);
+    await tester.pump();
+    await gesture.down(center);
+    await gesture.up();
+    await gesture.removePointer();
+  }
   await tester.pumpAndSettle();
 }
 

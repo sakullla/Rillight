@@ -2,11 +2,18 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_models.dart';
+import 'package:rillight/home/media_shelf.dart';
+import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -267,12 +274,17 @@ class _WholeCardStripState extends State<WholeCardStrip> {
   }
 }
 
-/// 演职员分区:按类型分组(演员/导演/编剧/其他),头像 + 名字 + 角色,
-/// 无图条目文字首字兜底。
+/// 演职员分区:演员、导演、编剧、其他各一条横行。
+///
+/// 图像是该端海报的 2:3 圆角矩形。手机和窄于 600 的非电视表面整卡分页；
+/// 电视每组一条可聚焦横行；其余宽表面横向滚动，同一职务不折行。
 class EpisodePeopleSection extends StatelessWidget {
   const EpisodePeopleSection({super.key, required this.people});
 
   static const sectionKey = Key('episode-people');
+
+  /// 2:3 图像区域。同一分区里每张卡都用这把钥匙，测试从卡片往下找。
+  static const imageKey = Key('episode-person-image');
 
   final List<ItemPerson> people;
 
@@ -305,193 +317,538 @@ class EpisodePeopleSection extends StatelessWidget {
         if (groups.containsKey(type)) type,
       if (groups.containsKey('')) '',
     ];
-    // 宽屏各组并排换行。手机宽度不够时改成每组一条横滑，避免三列把头像和名字挤断。
+    final rail = _personRail(context);
+    final metrics = _personMetrics(context);
     return _Section(
       title: l10n.detailCast,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final narrow = constraints.maxWidth < 600;
-          if (narrow) {
-            final textScale = MediaQuery.textScalerOf(context).scale(1);
-            final rowHeight =
-                _PersonAvatar.size + AppSpacing.xs + (22 + 18) * textScale;
-            return Column(
-              key: sectionKey,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final type in orderedTypes) ...[
-                  Text(
-                    _groupLabel(l10n, type.isEmpty ? null : type),
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  WholeCardStrip(
-                    height: rowHeight,
-                    itemCount: groups[type]!.length,
-                    cardWidth: 112,
-                    gap: AppSpacing.md,
-                    itemBuilder: (context, index) {
-                      final person = groups[type]![index];
-                      return _PersonChip(
-                        key: ValueKey('episode-person-$type-$index'),
-                        person: person,
-                        width: 112,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                ],
-              ],
-            );
-          }
-          return Wrap(
-            key: sectionKey,
-            spacing: AppSpacing.xxxl,
-            runSpacing: AppSpacing.lg,
-            crossAxisAlignment: WrapCrossAlignment.start,
-            children: [
-              for (final type in orderedTypes)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _groupLabel(l10n, type.isEmpty ? null : type),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.md,
-                      runSpacing: AppSpacing.md,
-                      children: [
-                        for (
-                          var index = 0;
-                          index < groups[type]!.length;
-                          index++
-                        )
-                          _PersonChip(
-                            key: ValueKey('episode-person-$type-$index'),
-                            person: groups[type]![index],
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _PersonChip extends StatelessWidget {
-  const _PersonChip({super.key, required this.person, this.width = 104});
-
-  final ItemPerson person;
-
-  /// 卡宽:头像 + 两行居中文字。手机横滑行用更宽的一档，避免英文名被切成半个词。
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final role = person.role?.trim();
-    return SizedBox(
-      width: width,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        key: sectionKey,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _PersonAvatar(person: person),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            person.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.labelLarge,
-          ),
-          if (role != null && role.isNotEmpty)
+          for (final type in orderedTypes) ...[
             Text(
-              role,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
+              _groupLabel(l10n, type.isEmpty ? null : type),
+              style: theme.textTheme.titleSmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: AppSpacing.sm),
+            _PeopleGroupRow(
+              typeKey: type,
+              people: groups[type]!,
+              rail: rail,
+              metrics: metrics,
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
         ],
       ),
     );
   }
 }
 
-/// 演职员头像:有 Id + PrimaryImageTag 时经 [MediaImageCache] 管道拉取,
-/// 失败或无图时以名字首字圆形兜底。
-class _PersonAvatar extends StatefulWidget {
-  const _PersonAvatar({required this.person});
+enum _PersonRail { whole, scroll, tv }
 
-  final ItemPerson person;
-
-  static const double size = 80;
-
-  @override
-  State<_PersonAvatar> createState() => _PersonAvatarState();
+/// 手机，以及屏幕窄于 600 且不是电视的表面，一次只露出完整卡片。
+_PersonRail _personRail(BuildContext context) {
+  if (PresentationScope.maybeOf(context)?.isTv == true) {
+    return _PersonRail.tv;
+  }
+  if (PresentationScope.isPhoneOf(context) ||
+      MediaQuery.sizeOf(context).width < 600) {
+    return _PersonRail.whole;
+  }
+  return _PersonRail.scroll;
 }
 
-class _PersonAvatarState extends State<_PersonAvatar> {
-  /// 头像请求宽:80 逻辑像素 × 2 倍屏留余量。
-  static const _avatarRequestWidth = 192;
+class _PersonMetrics {
+  const _PersonMetrics({
+    required this.width,
+    required this.cardGap,
+    required this.imageGap,
+    required this.radius,
+    required this.surface,
+    required this.titleStyle,
+    required this.roleStyle,
+    required this.titlePadding,
+    required this.imageMaxWidth,
+    required this.phone,
+    required this.tv,
+  });
 
+  final double width;
+  final double cardGap;
+  final double imageGap;
+  final double radius;
+  final Color surface;
+  final TextStyle? titleStyle;
+  final TextStyle? roleStyle;
+  final EdgeInsets titlePadding;
+  final int imageMaxWidth;
+  final bool phone;
+  final bool tv;
+
+  double imageHeight() => width * 3 / 2;
+}
+
+_PersonMetrics _personMetrics(BuildContext context) {
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  final screen = MediaQuery.sizeOf(context).width;
+  final tv = PresentationScope.maybeOf(context)?.isTv == true;
+  final phone = PresentationScope.isPhoneOf(context);
+  if (tv) {
+    final scale = TvDesign.scaleOf(context);
+    final width = TvDesign.posterWidth * scale;
+    return _PersonMetrics(
+      width: width,
+      cardGap: TvDesign.cardGap * scale,
+      imageGap: 8 * scale,
+      radius: TvDesign.cardRadius * scale,
+      surface: scheme.surfaceContainerHigh,
+      titleStyle: theme.textTheme.bodyMedium?.copyWith(
+        color: scheme.onSurface,
+        fontWeight: FontWeight.w500,
+      ),
+      roleStyle: theme.textTheme.labelMedium?.copyWith(
+        color: scheme.onSurfaceVariant.withValues(alpha: .8),
+      ),
+      titlePadding: EdgeInsets.zero,
+      imageMaxWidth: tvImageWidth(context, width, max: 720),
+      phone: false,
+      tv: true,
+    );
+  }
+  if (phone) {
+    final width = phoneHomePosterCardWidth(screen);
+    return _PersonMetrics(
+      width: width,
+      cardGap: AppSpacing.xs,
+      imageGap: 6,
+      radius: AppRadii.md,
+      surface: scheme.surfaceContainerLow,
+      titleStyle: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+        height: 1.2,
+      ),
+      roleStyle: theme.textTheme.labelSmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+        height: 1.2,
+      ),
+      titlePadding: const EdgeInsets.symmetric(horizontal: 10),
+      imageMaxWidth: catalogPosterMaxWidth(
+        width,
+        MediaQuery.devicePixelRatioOf(context),
+      ),
+      phone: true,
+      tv: false,
+    );
+  }
+  final width = MediaShelf.posterWidthFor(screen);
+  return _PersonMetrics(
+    width: width,
+    cardGap: MediaShelf.cardGap,
+    imageGap: AppSpacing.xs,
+    radius: AppRadii.md,
+    surface: scheme.surfaceContainerHigh,
+    titleStyle: theme.textTheme.titleSmall,
+    roleStyle: theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurface.withValues(alpha: 0.72),
+    ),
+    titlePadding: EdgeInsets.zero,
+    imageMaxWidth: catalogPosterMaxWidth(
+      width,
+      MediaQuery.devicePixelRatioOf(context),
+    ),
+    phone: false,
+    tv: false,
+  );
+}
+
+double _lineHeight(BuildContext context, TextStyle? style) {
+  final painter = TextPainter(
+    text: TextSpan(text: '海报Ag', style: style),
+    strutStyle: StrutStyle.fromTextStyle(
+      style ?? const TextStyle(),
+      forceStrutHeight: true,
+    ),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout();
+  final height = painter.height.ceilToDouble();
+  painter.dispose();
+  return height;
+}
+
+String _personId(ItemPerson person) => person.id?.trim() ?? '';
+
+String? _personRole(ItemPerson person) {
+  final role = person.role?.trim();
+  if (role == null || role.isEmpty) return null;
+  return role;
+}
+
+void _openPerson(BuildContext context, ItemPerson person) {
+  final id = _personId(person);
+  if (id.isEmpty) return;
+  final name = person.name.trim();
+  context.push(
+    AppRoutes.person(id, name: name.isEmpty ? null : name),
+    extra: DetailSourceScope.command(context, id),
+  );
+}
+
+class _PeopleGroupRow extends StatefulWidget {
+  const _PeopleGroupRow({
+    required this.typeKey,
+    required this.people,
+    required this.rail,
+    required this.metrics,
+  });
+
+  final String typeKey;
+  final List<ItemPerson> people;
+  final _PersonRail rail;
+  final _PersonMetrics metrics;
+
+  @override
+  State<_PeopleGroupRow> createState() => _PeopleGroupRowState();
+}
+
+class _PeopleGroupRowState extends State<_PeopleGroupRow> {
+  // 详情页的竖向 PageStorage 不能把这一行恢复到末尾。
+  final _scroll = ScrollController(keepScrollOffset: false);
+  final _nodes = <int, FocusNode>{};
+
+  FocusNode _nodeFor(int index) {
+    return _nodes.putIfAbsent(index, () {
+      final node = FocusNode(
+        debugLabel: 'episode-person-${widget.typeKey}-$index',
+      );
+      node.addListener(() {
+        if (node.hasFocus) _reveal(index);
+      });
+      return node;
+    });
+  }
+
+  int? _neighbor(int index, bool forward) {
+    var cursor = index;
+    while (true) {
+      cursor += forward ? 1 : -1;
+      if (cursor < 0 || cursor >= widget.people.length) return null;
+      if (_personId(widget.people[cursor]).isNotEmpty) return cursor;
+    }
+  }
+
+  int _focusedIndex() {
+    for (final entry in _nodes.entries) {
+      if (entry.value.hasFocus) return entry.key;
+    }
+    return -1;
+  }
+
+  void _reveal(int index) {
+    if (!mounted || !_scroll.hasClients || widget.metrics.width <= 0) return;
+    final position = _scroll.position;
+    if (!position.hasContentDimensions || !position.hasViewportDimension) {
+      return;
+    }
+    final start = index * (widget.metrics.width + widget.metrics.cardGap);
+    final end = start + widget.metrics.width;
+    final view = position.viewportDimension;
+    var target = position.pixels;
+    if (start < target) {
+      target = start;
+    } else if (end > target + view) {
+      target = end - view;
+    }
+    final clamped = target.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((clamped - position.pixels).abs() < 0.5) return;
+    position.jumpTo(clamped);
+  }
+
+  KeyEventResult _onKey(FocusNode _, KeyEvent event) {
+    if (widget.rail != _PersonRail.tv) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.arrowLeft &&
+        key != LogicalKeyboardKey.arrowRight) {
+      return KeyEventResult.ignored;
+    }
+    final forward =
+        (key == LogicalKeyboardKey.arrowRight) ==
+        (Directionality.of(context) == TextDirection.ltr);
+    final current = _focusedIndex();
+    if (current < 0) return KeyEventResult.ignored;
+    final next = _neighbor(current, forward);
+    if (next == null) return KeyEventResult.handled;
+    _reveal(next);
+    _nodes[next]?.requestFocus();
+    return KeyEventResult.handled;
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    for (final node in _nodes.values) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  double _rowHeight(BuildContext context) {
+    final metrics = widget.metrics;
+    final role = widget.people.any((person) => _personRole(person) != null)
+        ? _lineHeight(context, metrics.roleStyle)
+        : 0.0;
+    return metrics.imageHeight() +
+        metrics.imageGap +
+        _lineHeight(context, metrics.titleStyle) +
+        role;
+  }
+
+  Widget _card(BuildContext context, int index) {
+    final person = widget.people[index];
+    final identified = _personId(person).isNotEmpty;
+    return _PersonCard(
+      key: ValueKey('episode-person-${widget.typeKey}-$index'),
+      person: person,
+      metrics: widget.metrics,
+      focusNode: widget.rail == _PersonRail.tv && identified
+          ? _nodeFor(index)
+          : null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final height = _rowHeight(context);
+    final metrics = widget.metrics;
+    if (widget.rail == _PersonRail.whole) {
+      return WholeCardStrip(
+        height: height,
+        itemCount: widget.people.length,
+        cardWidth: metrics.width,
+        gap: metrics.cardGap,
+        itemBuilder: (context, index) {
+          return SizedBox(
+            height: height,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: _card(context, index),
+            ),
+          );
+        },
+      );
+    }
+    for (var index = 0; index < widget.people.length; index++) {
+      if (widget.rail == _PersonRail.tv &&
+          _personId(widget.people[index]).isNotEmpty) {
+        _nodeFor(index);
+      }
+    }
+    final row = SingleChildScrollView(
+      controller: _scroll,
+      scrollDirection: Axis.horizontal,
+      primary: false,
+      clipBehavior: widget.rail == _PersonRail.tv ? Clip.none : Clip.hardEdge,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var index = 0; index < widget.people.length; index++) ...[
+            if (index > 0) SizedBox(width: metrics.cardGap),
+            _card(context, index),
+          ],
+        ],
+      ),
+    );
+    final strip = SizedBox(width: double.infinity, height: height, child: row);
+    if (widget.rail != _PersonRail.tv) return strip;
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: _onKey,
+      child: strip,
+    );
+  }
+}
+
+class _PersonCard extends StatelessWidget {
+  const _PersonCard({
+    super.key,
+    required this.person,
+    required this.metrics,
+    this.focusNode,
+  });
+
+  final ItemPerson person;
+  final _PersonMetrics metrics;
+  final FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget card(bool focused) {
+      final role = _personRole(person);
+      final name = person.name.trim();
+      final titleStyle = metrics.tv
+          ? metrics.titleStyle?.copyWith(
+              fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
+            )
+          : metrics.titleStyle;
+      return SizedBox(
+        width: metrics.width,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _PersonPoster(person: person, metrics: metrics, focused: focused),
+            SizedBox(height: metrics.imageGap),
+            Padding(
+              padding: metrics.titlePadding,
+              child: Text(
+                name.isEmpty ? '?' : name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.start,
+                style: titleStyle,
+                strutStyle: StrutStyle.fromTextStyle(
+                  titleStyle ?? const TextStyle(),
+                  forceStrutHeight: true,
+                ),
+              ),
+            ),
+            if (role != null)
+              Padding(
+                padding: metrics.titlePadding,
+                child: Text(
+                  role,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.start,
+                  style: metrics.roleStyle,
+                  strutStyle: StrutStyle.fromTextStyle(
+                    metrics.roleStyle ?? const TextStyle(),
+                    forceStrutHeight: true,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    if (_personId(person).isEmpty) return card(false);
+    if (metrics.tv) {
+      return TvAction(
+        focusNode: focusNode,
+        variant: TvActionVariant.card,
+        onPressed: () => _openPerson(context, person),
+        child: Builder(builder: (context) => card(TvAction.focusedOf(context))),
+      );
+    }
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: () => _openPerson(context, person),
+        canRequestFocus: !metrics.phone,
+        child: card(false),
+      ),
+    );
+  }
+}
+
+/// 人物海报。有 Id 和 Primary 标签时走 [MediaImageCache] 与 `getItemImage`；
+/// 没有图或加载失败时，在同一矩形里显示姓名首字。
+class _PersonPoster extends StatefulWidget {
+  const _PersonPoster({
+    required this.person,
+    required this.metrics,
+    required this.focused,
+  });
+
+  final ItemPerson person;
+  final _PersonMetrics metrics;
+  final bool focused;
+
+  @override
+  State<_PersonPoster> createState() => _PersonPosterState();
+}
+
+class _PersonPosterState extends State<_PersonPoster> {
   Future<Uint8List?>? _future;
+  int? _loadedWidth;
 
   bool get _hasImage {
-    final id = widget.person.id;
+    final id = _personId(widget.person);
     final tag = widget.person.primaryImageTag;
-    return id != null && id.isNotEmpty && tag != null && tag.isNotEmpty;
+    return id.isNotEmpty && tag != null && tag.isNotEmpty;
   }
+
+  bool get _canLoad =>
+      AuthScope.maybeOf(context) != null ||
+      DetailSourceScope.maybeOf(context) != null;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_hasImage && AuthScope.maybeOf(context) != null) {
+    if (_hasImage && _canLoad) {
       _future ??= _load();
     }
   }
 
   @override
-  void didUpdateWidget(_PersonAvatar oldWidget) {
+  void didUpdateWidget(_PersonPoster oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.person.id == oldWidget.person.id &&
-        widget.person.primaryImageTag == oldWidget.person.primaryImageTag) {
-      return;
-    }
-    _future = _hasImage && AuthScope.maybeOf(context) != null ? _load() : null;
+    final samePerson =
+        widget.person.id == oldWidget.person.id &&
+        widget.person.primaryImageTag == oldWidget.person.primaryImageTag &&
+        widget.metrics.imageMaxWidth == _loadedWidth;
+    if (samePerson) return;
+    _future = _hasImage && _canLoad ? _load() : null;
   }
 
   Future<Uint8List?> _load() {
-    final auth = AuthScope.of(context);
+    final auth = AuthScope.maybeOf(context);
+    final origin = DetailSourceScope.maybeOf(context);
+    final policy = DetailSourceScope.imagePolicyOf(context);
+    final maxWidth = widget.metrics.imageMaxWidth;
+    _loadedWidth = maxWidth;
+    if (origin == null && auth == null) {
+      return Future<Uint8List?>.value(null);
+    }
+    final String serverId;
+    if (policy != null && policy.isValid) {
+      serverId = policy.scope;
+    } else if (origin == null) {
+      serverId = auth?.session?.server.id ?? '';
+    } else {
+      return Future<Uint8List?>.value(null);
+    }
+    final client = origin?.client ?? auth!.client;
+    final id = _personId(widget.person);
+    final tag = widget.person.primaryImageTag;
     return MediaImageCache.instance.load(
-      serverId: auth.session?.server.id ?? '',
-      itemId: widget.person.id!,
+      policy: policy != null && policy.isValid ? policy : null,
+      serverId: serverId,
+      itemId: id,
       type: 'Primary',
-      tag: widget.person.primaryImageTag,
-      maxWidth: _avatarRequestWidth,
+      tag: tag,
+      maxWidth: maxWidth,
       fetch: () async {
         try {
-          final data = await auth.client.getItemImage(
-            widget.person.id!,
-            tag: widget.person.primaryImageTag,
-            maxWidth: _avatarRequestWidth,
+          final data = await client.getItemImage(
+            id,
+            tag: tag,
+            maxWidth: maxWidth,
           );
-          if (data.isEmpty) {
-            return null;
-          }
+          if (data.isEmpty) return null;
           return Uint8List.fromList(data);
         } catch (_) {
           return null;
@@ -502,34 +859,60 @@ class _PersonAvatarState extends State<_PersonAvatar> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final metrics = widget.metrics;
+    final radius = BorderRadius.circular(metrics.radius);
+    final scheme = Theme.of(context).colorScheme;
+    final scale = metrics.tv ? TvDesign.scaleOf(context) : 1.0;
+    return SizedBox(
+      key: EpisodePeopleSection.imageKey,
+      width: metrics.width,
+      height: metrics.imageHeight(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: metrics.surface,
+          borderRadius: radius,
+          border: metrics.tv
+              ? Border.all(
+                  color: widget.focused ? scheme.onSurface : Colors.transparent,
+                  width: TvAction.focusRingWidth * scale,
+                  strokeAlign: BorderSide.strokeAlignOutside,
+                )
+              : null,
+        ),
+        child: ClipRRect(
+          borderRadius: radius,
+          clipBehavior: Clip.hardEdge,
+          child: _hasImage
+              ? FutureBuilder<Uint8List?>(
+                  future: _future,
+                  builder: (context, snapshot) {
+                    final bytes = snapshot.data;
+                    if (bytes == null || bytes.isEmpty) return _letter(context);
+                    return Image.memory(
+                      bytes,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      errorBuilder: (context, error, stackTrace) =>
+                          _letter(context),
+                    );
+                  },
+                )
+              : _letter(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _letter(BuildContext context) {
     final name = widget.person.name.trim();
-    final fallback = CircleAvatar(
-      radius: _PersonAvatar.size / 2,
-      backgroundColor: theme.colorScheme.surfaceContainerHigh,
+    final theme = Theme.of(context);
+    return Center(
       child: Text(
         name.isEmpty ? '?' : name.characters.first,
         style: theme.textTheme.titleMedium?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
-    );
-    if (!_hasImage) {
-      return fallback;
-    }
-    return FutureBuilder<Uint8List?>(
-      future: _future,
-      builder: (context, snapshot) {
-        final bytes = snapshot.data;
-        if (bytes == null || bytes.isEmpty) {
-          return fallback;
-        }
-        return CircleAvatar(
-          radius: _PersonAvatar.size / 2,
-          backgroundColor: theme.colorScheme.surfaceContainerHigh,
-          foregroundImage: MemoryImage(bytes),
-        );
-      },
     );
   }
 }
