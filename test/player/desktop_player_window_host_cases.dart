@@ -522,26 +522,34 @@ void main() {
       'a failed resend keeps the snapshot and emits progressSyncFailed',
       () async {
         final auth = await loggedInAuth();
-        final host = newHost(auth);
-        final notices = <PlayerHostNotice>[];
-        host.notices.listen(notices.add);
-        addTearDown(() {
-          host.dispose();
-          auth.dispose();
-        });
+        addTearDown(auth.dispose);
         server.stoppedStatus = 500;
+        // Exercise the HTTP failure without letting host CPU contention race
+        // the fixture's short reporting deadline. All IO here is synthetic.
+        fakeAsync((async) {
+          final host = newHost(auth);
+          addTearDown(host.dispose);
+          final notices = <PlayerHostNotice>[];
+          host.notices.listen(notices.add);
+          var completed = false;
+          Future<void> exercise() async {
+            await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+            final pid = control.lastPid;
+            await storeFor(pid).write(snapshotFor(auth));
+            await host.close();
+            expect(stoppedEvents(), hasLength(1));
+            expect(storeFor(pid).snapshot, isNotNull);
+            expect(storeFor(pid).deleteCount, 0);
+            completed = true;
+          }
 
-        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-        final pid = control.lastPid;
-        await storeFor(pid).write(snapshotFor(auth));
-        await host.close();
-        // 广播流异步投递,让出一个事件循环再断言。
-        await Future<void>.delayed(Duration.zero);
-
-        expect(stoppedEvents(), hasLength(1));
-        expect(storeFor(pid).snapshot, isNotNull);
-        expect(storeFor(pid).deleteCount, 0);
-        expect(notices, [PlayerHostNotice.progressSyncFailed]);
+          unawaited(exercise());
+          async.flushMicrotasks();
+          async.elapse(Duration.zero);
+          async.flushMicrotasks();
+          expect(completed, isTrue);
+          expect(notices, [PlayerHostNotice.progressSyncFailed]);
+        });
       },
     );
 
