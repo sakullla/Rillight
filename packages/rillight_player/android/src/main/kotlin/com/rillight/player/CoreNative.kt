@@ -44,6 +44,7 @@ internal object CoreNative {
         displayWidth: Double, displayHeight: Double, fontSize: Double,
         userScale: Double, originalAss: Boolean,
         safeHorizontal: Double, safeVertical: Double): Int
+    external fun selectSubtitleSlot(handle: Long, slot: Int, stream: Int, operation: Long): Int
     external fun selectSubtitle(handle: Long, stream: Int, operation: Long): Int
     external fun addSubtitle(handle: Long, url: String, operation: Long): Int
     external fun snapshot(handle: Long): LongArray?

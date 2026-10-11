@@ -454,6 +454,14 @@ Java_com_rillight_player_CoreNative_selectSubtitle(JNIEnv *, jobject, jlong hand
   return rillight_core_select_subtitle(owner->core, stream, operation);
 }
 JNIEXPORT jint JNICALL
+Java_com_rillight_player_CoreNative_selectSubtitleSlot(JNIEnv *, jobject, jlong handle,
+    jint slot, jint stream, jlong operation) {
+  if (!handle) return -1;
+  auto *owner = bridge(handle);
+  std::lock_guard lock(owner->presentation_mutex);
+  return rillight_core_select_subtitle_slot(owner->core, slot, stream, operation);
+}
+JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_addSubtitle(JNIEnv *env, jobject,
                                                 jlong handle, jstring address,
                                                 jlong operation) {
@@ -467,7 +475,7 @@ Java_com_rillight_player_CoreNative_addSubtitle(JNIEnv *env, jobject,
 
 // state, session, operation, timeline, error, video, audio, subtitle,
 // duration, position, firstVideo, firstAudio, EOF, queuedVideo, queuedAudio,
-// externalPending, speed * 1000, then the ABI 10 output fields in header order.
+// externalPending, speed * 1000, then the ABI 11 output fields; secondary subtitle at index 36.
 JNIEXPORT jlongArray JNICALL
 Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle) {
   if (!handle) return nullptr;
@@ -490,7 +498,8 @@ Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle)
       s.requested_super_resolution, s.effective_super_resolution,
       s.requested_denoise, s.effective_denoise,
       s.requested_sharpen, s.effective_sharpen,
-      s.dovi_reconstruction, s.dolby_vision_compatibility};
+      s.dovi_reconstruction, s.dolby_vision_compatibility,
+      s.secondary_subtitle_stream_index, s.subtitle_selection_pending};
   return numbers(env, values, sizeof(values) / sizeof(values[0]));
 }
 

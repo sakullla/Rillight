@@ -123,6 +123,8 @@ class _CoreSnapshot {
     this.externalSubtitlePending,
     this.timelineVersion,
     this.sessionId, {
+    this.subtitleSelectionPending = 0,
+    this.secondarySubtitleStreamIndex = -1,
     this.dolbyVisionProfile = -1,
     this.videoOutputKind = 0,
     this.audioDelivery = 0,
@@ -148,6 +150,8 @@ class _CoreSnapshot {
   final int videoStreamIndex;
   final int audioStreamIndex;
   final int subtitleStreamIndex;
+  final int secondarySubtitleStreamIndex;
+  final int subtitleSelectionPending;
   final int durationUs;
   final int positionUs;
   final int firstVideoFrameReady;
@@ -450,6 +454,7 @@ class AndroidCorePlayer implements CorePlayer, CoreNativeSeekCancellation {
 
   @override
   Future<Map<String, dynamic>> open(CorePlayerOpen request) async {
+    ++_commandGeneration;
     _session = request.session;
     final result = await _channel.invokeMapMethod<String, dynamic>('open', {
       'owner': owner,
@@ -464,11 +469,49 @@ class AndroidCorePlayer implements CorePlayer, CoreNativeSeekCancellation {
     return result ?? const {};
   }
 
+  int _commandGeneration = 0;
+  Future<void> _trackCommands = Future<void>.value();
+
   @override
   Future<Map<String, dynamic>> command(
     String method, [
     Map<String, Object?> args = const {},
-  ]) async {
+  ]) {
+    if (!const {
+      'subtitle',
+      'subtitleOff',
+      'subtitleUri',
+      'audio',
+      'seek',
+      'rate',
+    }.contains(method)) {
+      return _command(method, args);
+    }
+    final session = _session;
+    final generation = _commandGeneration;
+    final result = _trackCommands.then((_) {
+      if (_disposed ||
+          _session != session ||
+          generation != _commandGeneration) {
+        throw StateError('Superseded core command');
+      }
+      return _command(method, args).then((value) {
+        if (_disposed ||
+            _session != session ||
+            generation != _commandGeneration) {
+          throw StateError('Superseded core result');
+        }
+        return value;
+      });
+    });
+    _trackCommands = result.then<void>((_) {}, onError: (_, _) {});
+    return result;
+  }
+
+  Future<Map<String, dynamic>> _command(
+    String method,
+    Map<String, Object?> args,
+  ) async {
     final session = _session;
     final result = await _channel.invokeMapMethod<String, dynamic>(method, {
       'owner': owner,
@@ -485,6 +528,7 @@ class AndroidCorePlayer implements CorePlayer, CoreNativeSeekCancellation {
 
   @override
   Future<void> stop() async {
+    ++_commandGeneration;
     if (_disposed) return;
     await command('stop');
   }
@@ -636,6 +680,7 @@ class DesktopCorePlayer
   @override
   Future<Map<String, dynamic>> open(CorePlayerOpen request) async {
     if (_disposed) throw StateError('Core is disposed');
+    ++_commandGeneration;
     _session = request.session;
     _serverStreams = request.streams;
     _rejectedAudioStreams.clear();
@@ -856,6 +901,8 @@ class DesktopCorePlayer
         value.externalSubtitlePending,
         value.timelineVersion,
         value.sessionId,
+        subtitleSelectionPending: value.subtitleSelectionPending,
+        secondarySubtitleStreamIndex: value.secondarySubtitleStreamIndex,
         dolbyVisionProfile: value.dolbyVisionProfile,
         videoOutputKind: value.videoOutputKind,
         audioDelivery: value.audioDelivery,
@@ -973,6 +1020,14 @@ class DesktopCorePlayer
           .where((entry) => entry.value == snapshot.audioStreamIndex)
           .firstOrNull
           ?.key,
+      'secondarySubtitleIndex': mapped.entries
+          .where(
+            (entry) => entry.value == snapshot.secondarySubtitleStreamIndex,
+          )
+          .firstOrNull
+          ?.key,
+      'primarySubtitleNativeIndex': snapshot.subtitleStreamIndex,
+      'secondarySubtitleNativeIndex': snapshot.secondarySubtitleStreamIndex,
       'subtitleIndex': mapped.entries
           .where((entry) => entry.value == snapshot.subtitleStreamIndex)
           .firstOrNull
@@ -1031,15 +1086,58 @@ class DesktopCorePlayer
     return values.isEmpty ? null : String.fromCharCodes(values).toLowerCase();
   }
 
+  int _commandGeneration = 0;
+  Future<void> _trackCommands = Future<void>.value();
+
   @override
   Future<Map<String, dynamic>> command(
     String method, [
     Map<String, Object?> args = const {},
-  ]) async {
+  ]) {
+    if (!const {
+      'subtitle',
+      'subtitleOff',
+      'subtitleUri',
+      'audio',
+      'seek',
+      'rate',
+    }.contains(method)) {
+      return _command(method, args);
+    }
+    final session = _session;
+    final generation = _commandGeneration;
+    final result = _trackCommands.then((_) {
+      if (_disposed ||
+          _session != session ||
+          generation != _commandGeneration) {
+        throw StateError('Superseded core command');
+      }
+      return _command(method, args).then((value) {
+        if (_disposed ||
+            _session != session ||
+            generation != _commandGeneration) {
+          throw StateError('Superseded core result');
+        }
+        return value;
+      });
+    });
+    _trackCommands = result.then<void>((_) {}, onError: (_, _) {});
+    return result;
+  }
+
+  Future<Map<String, dynamic>> _command(
+    String method,
+    Map<String, Object?> args,
+  ) async {
     if (_disposed) throw StateError('Core is disposed');
     var result = 0;
+    final slot = (args['slot'] as num?)?.toInt() ?? 0;
+    if (slot < 0 || slot > 1) throw ArgumentError.value(slot, 'slot');
+    int subtitleIndex(_CoreSnapshot value) => slot == 1
+        ? value.secondarySubtitleStreamIndex
+        : value.subtitleStreamIndex;
     final selectedStream = method == 'audio' || method == 'subtitle'
-        ? _mapped(args['index'])
+        ? (args['nativeIndex'] as int? ?? _mapped(args['index']))
         : method == 'subtitleOff'
         ? -1
         : null;
@@ -1066,8 +1164,9 @@ class DesktopCorePlayer
       case 'audio':
         result = _bindings.selectAudio(_handle, selectedStream!, ++_operation);
       case 'subtitle':
-        result = _bindings.selectSubtitle(
+        result = _bindings.selectSubtitleSlot(
           _handle,
+          slot,
           selectedStream!,
           ++_operation,
         );
@@ -1094,7 +1193,7 @@ class DesktopCorePlayer
           calloc.free(presentation);
         }
       case 'subtitleOff':
-        result = _bindings.selectSubtitle(_handle, -1, ++_operation);
+        result = _bindings.selectSubtitleSlot(_handle, slot, -1, ++_operation);
       case 'subtitleUri':
         final url = (args['url'] as String).toNativeUtf8();
         try {
@@ -1145,22 +1244,29 @@ class DesktopCorePlayer
     } else if (method == 'subtitle' || method == 'subtitleOff') {
       snapshot = await _waitSnapshot(
         (value) =>
-            value.subtitleStreamIndex == selectedStream && value.state != 6,
+            subtitleIndex(value) == selectedStream &&
+            value.subtitleSelectionPending == 0 &&
+            value.state != 6,
       );
     } else if (method == 'subtitleUri') {
       await _waitSnapshot((value) => value.externalSubtitlePending == 0);
-      final external = _latestExternalSubtitle();
+      final external = _readSnapshot().ffmpegError == 0
+          ? _latestExternalSubtitle()
+          : null;
       if (external == null) {
         throw StateError(
           'External subtitle failed to load (${_readSnapshot().ffmpegError})',
         );
       }
       _check(
-        _bindings.selectSubtitle(_handle, external, ++_operation),
+        _bindings.selectSubtitleSlot(_handle, slot, external, ++_operation),
         'external subtitle selection',
       );
       snapshot = await _waitSnapshot(
-        (value) => value.subtitleStreamIndex == external && value.state != 6,
+        (value) =>
+            subtitleIndex(value) == external &&
+            value.subtitleSelectionPending == 0 &&
+            value.state != 6,
       );
     } else if (method == 'rate') {
       final speed = (args['value'] as num).toDouble();
@@ -1178,10 +1284,17 @@ class DesktopCorePlayer
     bool Function(_CoreSnapshot) accept, {
     String? trackSelection,
   }) async {
+    final session = _session;
+    final nativeSession = _readSnapshot().sessionId;
     final deadline = DateTime.now().add(const Duration(seconds: 8));
     while (DateTime.now().isBefore(deadline)) {
-      if (_disposed) throw StateError('Core was disposed during command');
+      if (_disposed || _session != session) {
+        throw StateError('Core session changed during command');
+      }
       final value = _readSnapshot();
+      if (value.sessionId != nativeSession) {
+        throw StateError('Superseded native session');
+      }
       if (value.state == 8) {
         throw StateError('Core command failed (${value.ffmpegError})');
       }
@@ -1237,6 +1350,7 @@ class DesktopCorePlayer
 
   @override
   Future<void> stop() async {
+    ++_commandGeneration;
     _poll?.cancel();
     _session = '';
     if (!_disposed) {

@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 10
+#define RILLIGHT_CORE_ABI_VERSION 11
 
 /* Non-FFmpeg failure: the Dolby Vision base layer cannot be displayed with
  * the currently implemented color pipeline. Reported in ffmpeg_error. */
@@ -239,6 +239,8 @@ typedef struct RillightCoreSnapshot {
   int video_stream_index;
   int audio_stream_index;
   int subtitle_stream_index;
+  int secondary_subtitle_stream_index;
+  int subtitle_selection_pending;
   int64_t duration_us;
   int64_t position_us;
   int first_video_frame_ready;
@@ -536,6 +538,10 @@ RILLIGHT_CORE_API int rillight_core_select_audio(RillightCore *core,
 RILLIGHT_CORE_API int rillight_core_select_subtitle(RillightCore *core,
                                                     int stream_index,
                                                     uint64_t operation_id);
+/* Slot 0 is primary, slot 1 secondary. A source cannot occupy both slots.
+ * Commands are serialized: a pending selection rejects another selection. */
+RILLIGHT_CORE_API int rillight_core_select_subtitle_slot(RillightCore *core,
+    int slot, int stream_index, uint64_t operation_id);
 /* Add an external ASS/SSA, SRT, or WebVTT subtitle using the same controlled
  * IO callbacks as media. SRT/WebVTT are parsed with FFmpeg and composed with
  * libass. Acceptance is asynchronous and does not change the selected track or

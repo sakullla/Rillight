@@ -23,6 +23,8 @@ class Snapshot(ctypes.Structure):
         ("timeline_version", ctypes.c_uint64), ("state", ctypes.c_int),
         ("ffmpeg_error", ctypes.c_int), ("video_stream_index", ctypes.c_int),
         ("audio_stream_index", ctypes.c_int), ("subtitle_stream_index", ctypes.c_int),
+        ("secondary_subtitle_stream_index", ctypes.c_int),
+        ("subtitle_selection_pending", ctypes.c_int),
         ("duration_us", ctypes.c_int64), ("position_us", ctypes.c_int64),
         ("first_video_frame_ready", ctypes.c_int),
         ("first_audio_frame_ready", ctypes.c_int), ("source_eof", ctypes.c_int),
@@ -30,7 +32,7 @@ class Snapshot(ctypes.Structure):
         ("playback_speed", ctypes.c_double), ("preferred_hardware", ctypes.c_uint32),
         ("allow_software_fallback", ctypes.c_int),
         ("external_subtitle_pending", ctypes.c_int),
-        # ABI 10 requires the complete output/enhancement snapshot size even
+        # ABI 11 requires the complete output/enhancement snapshot size even
         # though this probe only inspects timeline and first-frame fields.
         *[(name, ctypes.c_int) for name in (
             "dolby_vision_profile", "video_output_kind", "audio_delivery",
