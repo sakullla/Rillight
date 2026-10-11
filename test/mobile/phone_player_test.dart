@@ -624,6 +624,15 @@ void main() {
         await tester.pump(Duration.zero);
       }
       expect(find.text('10 秒后播放下一集'), findsOneWidget);
+      final nextCard = tester.getRect(find.byKey(PlayerKeys.nextEpisode));
+      expect(nextCard.top, greaterThanOrEqualTo(0));
+      expect(nextCard.bottom, lessThanOrEqualTo(360));
+      expect(nextCard.left, greaterThanOrEqualTo(0));
+      expect(nextCard.right, lessThanOrEqualTo(800));
+      expect(
+        find.byKey(PlayerKeys.nextEpisodePlay).hitTestable(),
+        findsOneWidget,
+      );
       await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodePlay));
       await tester.tap(find.byKey(PlayerKeys.nextEpisodePlay));
       for (var i = 0; i < 40; i++) {
@@ -632,6 +641,8 @@ void main() {
       }
       expect(next.itemId, 'episode-friends-s1e2');
       expect(playing.openCount, greaterThan(1));
+      expect(playing.openedPaused, isFalse);
+      expect(playing.isPlaying, isTrue);
       await closePlayer(tester);
 
       // 电影播完不出现下集倒计时。
@@ -2092,6 +2103,41 @@ void main() {
     await tester.tap(find.text('重试'));
     await tester.pump();
     expect(current.loading, isTrue);
+    final previousSession = current.bufferSnapshot.sessionId;
+    for (
+      var i = 0;
+      i < 30 && current.bufferSnapshot.sessionId == previousSession;
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    final session = current.bufferSnapshot.sessionId;
+    backend.emitEvent(
+      VideoEventKind.bufferSnapshot,
+      BufferSnapshot(
+        sessionId: session,
+        resourceId: current.bufferSnapshot.resourceId,
+        representationVersion: current.bufferSnapshot.representationVersion,
+        trackVersion: current.bufferSnapshot.trackVersion,
+        sequence: current.bufferSnapshot.sequence + 1,
+        ranges: const [],
+        unknownReason: 'preparing',
+        byteCoverage: BufferedByteCoverage(
+          totalBytes: 1000,
+          ranges: const [BufferedByteRange(0, 400)],
+        ),
+      ),
+      forSession: session,
+    );
+    await tester.pump();
+    await tester.pump();
+    final cacheBar = find.byKey(const Key('mobile-player-byte-cache-track'));
+    expect(cacheBar, findsOneWidget);
+    final cacheRect = tester.getRect(cacheBar);
+    expect(cacheRect.width, greaterThan(200));
+    expect(cacheRect.height, greaterThan(0));
+    expect(cacheRect.top, greaterThanOrEqualTo(0));
+    expect(cacheRect.bottom, lessThanOrEqualTo(360));
     for (var i = 0; i < 30 && current.loading; i++) {
       await tester.pump(const Duration(milliseconds: 20));
     }
@@ -2135,6 +2181,41 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.binding.handlePopRoute();
     await tester.pump(const Duration(milliseconds: 400));
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
+  testWidgets('phone series playback opens the episode list', (tester) async {
+    final backend = FakeVideoBackend();
+    final current = await showPlayer(
+      tester,
+      itemId: 'episode-friends-s1e2',
+      backend: backend,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    expect(find.byKey(const Key('mobile-player-episodes')), findsOneWidget);
+    expect(find.textContaining('S1E2'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('mobile-player-episodes')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('player-episodes-panel')), findsOneWidget);
+    const earlier = Key('player-episode-episode-friends-s1e1');
+    for (var i = 0; i < 30 && find.byKey(earlier).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(earlier), findsOneWidget);
+    await tester.tap(find.byKey(earlier));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+    for (
+      var i = 0;
+      i < 40 && (current.itemId != 'episode-friends-s1e1' || current.loading);
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(current.itemId, 'episode-friends-s1e1');
+    expect(tester.takeException(), isNull);
     await closePlayer(tester);
   }, tags: ['integration']);
 }

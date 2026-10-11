@@ -8,6 +8,8 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/player/playback_ended_panel.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/library/item_format.dart';
+import 'package:rillight/player/episode_browser.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -53,6 +55,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   bool _revocationExitScheduled = false;
   bool _focusedFailure = false;
   bool _focusedEnd = false;
+  String? _focusedNextId;
   double? _seek;
   bool _surfaceSeeking = false;
   int _scanRepeats = 0;
@@ -123,6 +126,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     if (_focusedEnd) {
       _focusedEnd = false;
       _requestFocus(c.nextEpisode == null ? _surfaceFocus : _nextPlayFocus);
+    }
+    final nextId = c.error == null ? c.nextEpisode?.item.id : null;
+    if (nextId == null) {
+      _focusedNextId = null;
+    } else if (nextId != _focusedNextId) {
+      _focusedNextId = nextId;
+      _requestFocus(_nextPlayFocus);
     }
     final cardFocused = _nextPlayFocus.hasFocus || _nextCancelFocus.hasFocus;
     if (!c.controlsVisible &&
@@ -327,6 +337,66 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       c.onUserActivity();
     }
     return KeyEventResult.ignored;
+  }
+
+  String _playbackTitle(PlayerController c, AppLocalizations l) {
+    final item = c.item;
+    if (item == null) return l.playerLoading;
+    final code = item.isEpisode ? seasonEpisodeCode(item) : null;
+    if (code == null) return item.displayName;
+    final series = item.seriesName?.trim();
+    final name = item.name.trim();
+    if (series != null && series.isNotEmpty) {
+      return '$series · $code $name';
+    }
+    return '$code $name';
+  }
+
+  Future<void> _openEpisodes() async {
+    final c = controller!;
+    if (!c.canBrowseEpisodes) return;
+    final origin = FocusManager.instance.primaryFocus;
+    c.setControlsPinned(true);
+    unawaited(c.loadEpisodeList());
+    final scheme = Theme.of(context).colorScheme;
+    final screen = MediaQuery.sizeOf(context);
+    final s = TvDesign.scaleOf(context);
+    final panelWidth = math.min(460 * s, math.max(360 * s, screen.width * .42));
+    await showDialog<void>(
+      context: context,
+      useRootNavigator: false,
+      barrierColor: scheme.scrim.withValues(alpha: AppScrim.playerBarrier),
+      builder: (context) => Dialog(
+        alignment: Alignment.centerRight,
+        insetPadding: EdgeInsets.zero,
+        backgroundColor: scheme.surfaceContainer,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.horizontal(
+            left: Radius.circular(AppRadii.xl),
+          ),
+        ),
+        child: SizedBox(
+          width: panelWidth,
+          height: double.infinity,
+          child: SafeArea(
+            child: ListenableBuilder(
+              listenable: c,
+              builder: (context, _) => PlayerEpisodeBrowser(
+                controller: c,
+                tv: true,
+                onClose: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    if (mounted && !_closing) {
+      c.setControlsPinned(false);
+      c.onUserActivity();
+      _requestFocus(origin?.canRequestFocus == true ? origin! : _playFocus);
+    }
   }
 
   Future<void> _panel(_TvPanel panel) async {
@@ -928,7 +998,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            c.item?.displayName ?? l.playerLoading,
+                            _playbackTitle(c, l),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.headlineSmall?.copyWith(
@@ -1038,6 +1108,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   ),
                 ),
                 SizedBox(height: 6 * s),
+                if (playerShowsByteCache(c.bufferSnapshot)) ...[
+                  BufferedByteCoverageBar(
+                    key: const Key('tv-player-byte-cache-track'),
+                    coverage: c.bufferSnapshot.byteCoverage,
+                  ),
+                  SizedBox(height: context.tvdp(6)),
+                ],
                 _timeline(c),
                 SizedBox(height: 10 * s),
                 LayoutBuilder(
@@ -1064,6 +1141,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               for (final control in <Widget>[
+                                if (c.canBrowseEpisodes)
+                                  _action(
+                                    'tv-player-episodes',
+                                    Icons.video_library_rounded,
+                                    l.playerEpisodes,
+                                    ready ? _openEpisodes : null,
+                                  ),
                                 if (c.canSwitchAudioTrack ||
                                     c.canConfigureSubtitles)
                                   _action(
@@ -1222,9 +1306,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   if (c.nextEpisode == null || c.error != null) {
                     return const SizedBox.shrink();
                   }
+                  final screen = MediaQuery.sizeOf(context);
                   return Positioned(
-                    left: tvSafeGutter(MediaQuery.sizeOf(context).width),
-                    bottom: context.tvdp(150),
+                    left: tvSafeGutter(screen.width),
+                    bottom: tvSafeVertical(screen.height) + context.tvdp(188),
                     child: NextEpisodeCard(
                       controller: c,
                       playFocus: _nextPlayFocus,

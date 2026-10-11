@@ -72,21 +72,13 @@ class BufferedByteCoverage {
   }
 }
 
-/// Drops byte coverage that would draw a second, non-time cache bar.
-BufferSnapshot withoutPrematureByteCoverage(BufferSnapshot snapshot) {
-  if (!snapshot.hidesByteCoverage || snapshot.byteCoverage == null) {
-    return snapshot;
-  }
-  return BufferSnapshot(
-    sessionId: snapshot.sessionId,
-    resourceId: snapshot.resourceId,
-    representationVersion: snapshot.representationVersion,
-    trackVersion: snapshot.trackVersion,
-    sequence: snapshot.sequence,
-    ranges: snapshot.ranges,
-    unknownReason: snapshot.unknownReason,
-    duration: null,
-  );
+/// Downloaded byte fraction until verified media-time ranges exist.
+/// A ready container index with an empty time map (resume or a distant seek)
+/// still has those bytes. The seek track must not paint them as time.
+bool playerShowsByteCache(BufferSnapshot snapshot) {
+  final coverage = snapshot.byteCoverage;
+  if (coverage == null || coverage.ranges.isEmpty) return false;
+  return !snapshot.isKnown || snapshot.ranges.isEmpty;
 }
 
 /// The one authoritative cache-timeline observation for a backend session.
@@ -133,9 +125,8 @@ class BufferSnapshot {
 
   bool get isKnown => unknownReason == null;
 
-  /// Byte islands are a file fraction. While a time index or an HLS playlist
-  /// is still being established, painting them on the seek bar makes a second
-  /// cache stripe that then jumps to the real time ranges.
+  /// Byte islands are a file fraction. They stay off the seek track. A separate
+  /// download bar may show them until verified media-time ranges exist.
   bool get hidesByteCoverage {
     final reason = unknownReason;
     return reason == 'indexUnavailable' ||

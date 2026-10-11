@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'buffer_snapshot.dart';
 
+export 'buffer_snapshot.dart' show playerShowsByteCache;
+
 /// Installs a seek track inside the Slider's painting pass, before its thumb.
 /// Slider still owns geometry, input, focus and accessibility.
 class BufferedRangesTrack extends StatelessWidget {
@@ -181,5 +183,74 @@ class _ProgressPainter extends CustomPainter {
       oldDelegate.snapshot != snapshot ||
       oldDelegate.duration != duration ||
       oldDelegate.value != value ||
+      oldDelegate.textDirection != textDirection;
+}
+
+class BufferedByteCoverageBar extends StatelessWidget {
+  const BufferedByteCoverageBar({super.key, required this.coverage});
+
+  final BufferedByteCoverage? coverage;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = coverage;
+    if (value == null || value.ranges.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 4,
+      width: double.infinity,
+      child: CustomPaint(
+        painter: _ByteCoveragePainter(
+          coverage: value,
+          textDirection: Directionality.of(context),
+        ),
+      ),
+    );
+  }
+}
+
+class _ByteCoveragePainter extends CustomPainter {
+  const _ByteCoveragePainter({
+    required this.coverage,
+    required this.textDirection,
+  });
+
+  final BufferedByteCoverage coverage;
+  final TextDirection textDirection;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0 || coverage.totalBytes <= 0) {
+      return;
+    }
+    final rect = Offset.zero & size;
+    final shape = RRect.fromRectAndRadius(
+      rect,
+      Radius.circular(size.height / 2),
+    );
+    canvas.drawRRect(shape, Paint()..color = const Color(0xff444b53));
+    canvas.save();
+    canvas.clipRRect(shape);
+    final total = coverage.totalBytes;
+    final rtl = textDirection == TextDirection.rtl;
+    for (final range in coverage.ranges) {
+      final start = (range.start / total).clamp(0.0, 1.0);
+      final end = (range.end / total).clamp(0.0, 1.0);
+      if (end <= start) continue;
+      canvas.drawRect(
+        Rect.fromLTRB(
+          size.width * (rtl ? 1 - end : start),
+          0,
+          size.width * (rtl ? 1 - start : end),
+          size.height,
+        ),
+        Paint()..color = const Color(0xff42cbd3),
+      );
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_ByteCoveragePainter oldDelegate) =>
+      oldDelegate.coverage != coverage ||
       oldDelegate.textDirection != textDirection;
 }

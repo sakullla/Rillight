@@ -533,15 +533,28 @@ void main() {
             await capture.save('player-ended');
             await openExtra('episode-friends-s1e2');
             await capture.save('player-episode');
-            if (config.$1 == 'desktop') {
-              await capture.tap(const Key('player-episodes'));
-              await capture.save('player-episode-list');
+            if (config.$1 == 'phone') {
+              await capture.revealPhoneControls();
+            }
+            final episodesKey = switch (config.$1) {
+              'phone' => const Key('mobile-player-episodes'),
+              'tv' => const Key('tv-player-episodes'),
+              _ => const Key('player-episodes'),
+            };
+            await capture.tap(episodesKey);
+            await capture.advance(500);
+            await capture.save('player-episode-list');
+            if (config.$1 == 'tv') {
+              await capture.tap(const Key('player-season-picker'));
+              await capture.advance(300);
+              await capture.save('player-season-picker');
+            } else {
               await capture.modal(
                 const Key('player-season-picker'),
                 'player-season-picker',
               );
-              await capture.tap(const Key('player-episodes-close'));
             }
+            await capture.tap(const Key('player-episodes-close'));
             await backend.seek(backend.duration - const Duration(seconds: 10));
             await capture.advance(500);
             expect(find.byKey(PlayerKeys.nextEpisode), findsOneWidget);

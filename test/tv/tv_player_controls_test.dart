@@ -522,6 +522,34 @@ void main() {
       final video = _DelayedBackend();
       final c = await start(tester, video);
       expect(c.loading, isTrue);
+      final session = c.bufferSnapshot.sessionId;
+      video.emitEvent(
+        VideoEventKind.bufferSnapshot,
+        BufferSnapshot(
+          sessionId: session,
+          resourceId: 'tv-retry',
+          representationVersion: 'v1',
+          trackVersion: c.bufferSnapshot.trackVersion,
+          sequence: c.bufferSnapshot.sequence + 1,
+          ranges: const [],
+          unknownReason: 'indexUnavailable',
+          byteCoverage: BufferedByteCoverage(
+            totalBytes: 800,
+            ranges: const [BufferedByteRange(0, 200)],
+          ),
+        ),
+        forSession: session,
+      );
+      await tester.pump();
+      await tester.pump();
+      final cacheBar = find.byKey(const Key('tv-player-byte-cache-track'));
+      expect(cacheBar, findsOneWidget);
+      final cacheRect = tester.getRect(cacheBar);
+      expect(cacheRect.width, greaterThan(200));
+      expect(cacheRect.height, greaterThan(0));
+      expect(cacheRect.top, greaterThanOrEqualTo(0));
+      expect(cacheRect.bottom, lessThanOrEqualTo(540));
+      expect(find.byType(BufferedRangesProgressIndicator), findsOneWidget);
       final view = tester.element(find.byKey(const Key('native-view')));
       video.openGate.complete();
       await tester.pumpAndSettle();
@@ -570,6 +598,17 @@ void main() {
       }
       expect(current.nextEpisode?.item.id, 'episode-friends-s1e2');
       expect(current.nextEpisode?.remaining, isNull);
+      await tester.pump();
+      final nextCard = tester.getRect(find.byKey(PlayerKeys.nextEpisode));
+      expect(nextCard.top, greaterThanOrEqualTo(0));
+      expect(nextCard.bottom, lessThanOrEqualTo(540));
+      expect(nextCard.left, greaterThanOrEqualTo(0));
+      expect(nextCard.right, lessThanOrEqualTo(960));
+      expect(
+        find.byKey(PlayerKeys.nextEpisodePlay).hitTestable(),
+        findsOneWidget,
+      );
+      expect(focused(tester, 'player-next-episode-play'), isTrue);
       await tester.ensureVisible(find.byKey(PlayerKeys.nextEpisodeCancel));
       await tester.tap(find.byKey(PlayerKeys.nextEpisodeCancel));
       await tester.pump();
@@ -604,6 +643,8 @@ void main() {
       }
       expect(current.itemId, 'episode-friends-s1e2');
       expect(backend.openCount, greaterThan(opens));
+      expect(backend.openedPaused, isFalse);
+      expect(backend.isPlaying, isTrue);
       expect(tester.takeException(), isNull);
       await finish(tester);
     },
@@ -684,6 +725,45 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('series playback opens a focusable episode list', (tester) async {
+    final backend = FakeVideoBackend();
+    final current = await start(
+      tester,
+      backend,
+      itemId: 'episode-friends-s1e2',
+    );
+    for (var i = 0; i < 40 && current.loading; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(current.loading, isFalse);
+    expect(find.byKey(const Key('tv-player-episodes')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tv-player-episodes')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('player-episodes-panel')), findsOneWidget);
+    const earlier = Key('player-episode-episode-friends-s1e1');
+    for (var i = 0; i < 30 && find.byKey(earlier).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.byKey(earlier), findsOneWidget);
+    await tester.tap(find.byKey(earlier));
+    await tester.pump();
+    for (
+      var i = 0;
+      i < 40 && (current.itemId != 'episode-friends-s1e1' || current.loading);
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(current.itemId, 'episode-friends-s1e1');
+    expect(find.byKey(const Key('player-episodes-panel')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('player-episodes-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
 }
 
 class _DelayedBackend extends FakeVideoBackend {

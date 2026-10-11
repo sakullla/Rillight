@@ -620,7 +620,9 @@
     "id": "player-episode-list",
     "feature": "player",
     "platforms": [
-      "desktop"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
@@ -748,7 +750,9 @@
     "id": "player-season-picker",
     "feature": "player",
     "platforms": [
-      "desktop"
+      "desktop",
+      "phone",
+      "tv"
     ]
   },
   {
