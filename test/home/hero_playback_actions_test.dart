@@ -252,4 +252,79 @@ void main() {
     expect(details, isTrue);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('light desktop play uses the accent and details stay ink', (
+    tester,
+  ) async {
+    final host = OverlayPlayerWindowHost();
+    addTearDown(host.dispose);
+    final item = EmbyItem.fromJson({
+      'Id': 'movie',
+      'Name': 'Movie',
+      'Type': 'Movie',
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: PlayerWindowScope(
+          host: host,
+          child: Scaffold(
+            body: Center(
+              child: HeroPlaybackActions(item: item, onDetails: () {}),
+            ),
+          ),
+        ),
+      ),
+    );
+    final play = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('hero-resume-movie')),
+    );
+    expect(
+      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      AppTheme.light().colorScheme.primary,
+    );
+    final details = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '详情'),
+    );
+    expect(
+      details.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      AppTheme.light().colorScheme.onSurface,
+    );
+  });
+
+  testWidgets('dark desktop play stays white on the scrim', (tester) async {
+    final host = OverlayPlayerWindowHost();
+    addTearDown(host.dispose);
+    final item = EmbyItem.fromJson({
+      'Id': 'movie',
+      'Name': 'Movie',
+      'Type': 'Movie',
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        locale: const Locale('zh'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: PlayerWindowScope(
+          host: host,
+          child: Scaffold(
+            body: Center(
+              child: HeroPlaybackActions(item: item, onDetails: () {}),
+            ),
+          ),
+        ),
+      ),
+    );
+    final play = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('hero-resume-movie')),
+    );
+    expect(
+      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      Colors.white,
+    );
+  });
 }

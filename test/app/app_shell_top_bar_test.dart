@@ -5,6 +5,7 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -150,8 +151,10 @@ void main() {
         .opacity;
     // 页内已有大标题,未滚动时顶栏不重复显示。
     expect(titleOpacity(), 0);
-    // 实心顶栏上的返回钮不再压深色圆底。
+    // 实心顶栏上的返回是胶囊,不再压深色圆底。
     expect(find.byType(ScrimIconButton), findsNothing);
+    expect(find.byType(DesktopBackButton), findsOneWidget);
+    expect(find.text('首页'), findsOneWidget);
     await tester.tap(find.byKey(const Key('scroll-under-bar')));
     await tester.pumpAndSettle();
     expect(titleOpacity(), 1);

@@ -19,9 +19,13 @@ const _movie = EmbyItem(
   runTimeTicks: 27000000000,
 );
 
-Widget _wrap({required OverlayPlayerWindowHost host, required Widget child}) {
+Widget _wrap({
+  required OverlayPlayerWindowHost host,
+  required Widget child,
+  ThemeData? theme,
+}) {
   return MaterialApp(
-    theme: AppTheme.dark(),
+    theme: theme ?? AppTheme.dark(),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     home: PlayerWindowScope(
@@ -119,6 +123,85 @@ void main() {
     expect(find.byTooltip('可播电影'), findsOneWidget);
     expect(taps, 0);
     expect(host.current, isNull);
+  });
+
+  testWidgets('light hover keeps the title and uses the accent play control', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        theme: AppTheme.light(),
+        child: PosterCard(item: _movie, onTap: () {}),
+      ),
+    );
+    await _hover(tester, find.byType(PosterCard));
+
+    final title = tester.getRect(find.text('可播电影'));
+    final card = tester.getRect(find.byType(PosterCard));
+    expect(title.bottom, lessThanOrEqualTo(card.bottom + 0.5));
+    expect(
+      find.descendant(
+        of: find.byType(AnimatedScale),
+        matching: find.text('可播电影'),
+      ),
+      findsNothing,
+    );
+    final play = tester.widget<IconButton>(
+      find.byKey(PosterCard.playButtonKey(_movie.id)),
+    );
+    expect(
+      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      AppTheme.light().colorScheme.primary,
+    );
+    expect(
+      play.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      AppTheme.light().colorScheme.onPrimary,
+    );
+  });
+
+  testWidgets('light hover remove control uses the paper chip', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        theme: AppTheme.light(),
+        child: PosterCard(
+          item: _movie,
+          onTap: () {},
+          onRemoveFromResume: (_) {},
+        ),
+      ),
+    );
+    await _hover(tester, find.byType(PosterCard));
+    final close = tester.widget<IconButton>(
+      find.byKey(CatalogKeys.removeFromResume(_movie.id)),
+    );
+    final scheme = AppTheme.light().colorScheme;
+    expect(
+      close.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      scheme.surfaceContainerLowest,
+    );
+    expect(
+      close.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      scheme.onSurface,
+    );
+  });
+
+  testWidgets('dark hover keeps the white play control', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        host: host,
+        child: PosterCard(item: _movie, onTap: () {}),
+      ),
+    );
+    await _hover(tester, find.byType(PosterCard));
+    final play = tester.widget<IconButton>(
+      find.byKey(PosterCard.playButtonKey(_movie.id)),
+    );
+    expect(
+      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      Colors.white,
+    );
   });
 
   testWidgets('play button opens the player and does not open detail', (

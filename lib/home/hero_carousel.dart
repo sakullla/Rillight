@@ -130,6 +130,7 @@ class HeroScrim extends StatelessWidget {
     this.top = false,
     this.leading = false,
     this.fadeTo,
+    this.gallery = false,
   });
 
   final bool top;
@@ -138,12 +139,55 @@ class HeroScrim extends StatelessWidget {
   /// 同时把底部压暗收窄到下半幅,高舞台不会整张发灰。
   final bool leading;
 
-  /// 底缘融进的页面底色(深色主题全出血舞台用),消掉图片与页面之间的硬边。
+  /// 底缘融进的页面底色,消掉图片与页面之间的硬边。
   final Color? fadeTo;
+
+  /// 浅色页面:说明文字改由纸色卡片承接,遮罩只把画面融进纸色,
+  /// 不再在底缘铺一条近乎不透明的黑带。
+  final bool gallery;
 
   @override
   Widget build(BuildContext context) {
     final fade = fadeTo;
+    if (gallery && fade != null) {
+      return IgnorePointer(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0.22, 0.48, 0.72],
+                  colors: [
+                    fade.withValues(alpha: 0),
+                    fade.withValues(alpha: 0.72),
+                    fade,
+                  ],
+                ),
+              ),
+            ),
+            if (top)
+              const Align(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  height: 96,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x59000000), Colors.transparent],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
     return IgnorePointer(
       child: Stack(
         fit: StackFit.expand,
@@ -211,7 +255,9 @@ class HeroScrim extends StatelessWidget {
 }
 
 /// 左下文字块:标题 → meta 行 + ★ → 简介(可选) → 按钮槽。
-/// 白字硬编码,配合 [HeroScrim] 使用,不随应用主题变化。
+///
+/// 压在深色遮罩上时白字硬编码。[onPaper] 为真时改用主题墨色,并放弃
+/// 浅色标题图(那些图按深底设计,放到纸色卡片上会消失)。
 class HeroTextBlock extends StatelessWidget {
   const HeroTextBlock({
     super.key,
@@ -222,6 +268,7 @@ class HeroTextBlock extends StatelessWidget {
     this.large = false,
     this.includeActions = true,
     this.logoMaxWidth,
+    this.onPaper = false,
   });
 
   final EmbyItem item;
@@ -238,6 +285,9 @@ class HeroTextBlock extends StatelessWidget {
   /// Width budget for the server's title logo; null keeps the text title.
   final double? logoMaxWidth;
 
+  /// 浅色说明卡:墨色文字,不用遮罩白。
+  final bool onPaper;
+
   /// Logo height cap paired with [logoMaxWidth].
   static double logoMaxHeightFor({required bool large}) => large ? 132 : 96;
 
@@ -252,13 +302,20 @@ class HeroTextBlock extends StatelessWidget {
         : large
         ? theme.textTheme.displayMedium
         : theme.textTheme.headlineMedium;
+    final ink = theme.colorScheme.onSurface;
+    final metaColor = onPaper
+        ? theme.colorScheme.onSurfaceVariant
+        : Colors.white70;
+    final overviewColor = onPaper
+        ? ink.withValues(alpha: .78)
+        : Colors.white.withValues(alpha: .78);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        HeroKicker(label: heroKicker(l10n, item)),
+        HeroKicker(label: heroKicker(l10n, item), onScrim: !onPaper),
         SizedBox(height: compact ? 6 : 10),
-        _title(titleStyle),
+        _title(titleStyle, ink: ink),
         if (meta.isNotEmpty || item.communityRating != null) ...[
           SizedBox(height: large ? 12 : 8),
           Row(
@@ -273,12 +330,15 @@ class HeroTextBlock extends StatelessWidget {
                         (large
                                 ? theme.textTheme.bodyLarge
                                 : theme.textTheme.bodyMedium)
-                            ?.copyWith(color: Colors.white70),
+                            ?.copyWith(color: metaColor),
                   ),
                 ),
               if (item.communityRating != null) ...[
                 const SizedBox(width: 10),
-                HeroRatingBadge(rating: item.communityRating),
+                HeroRatingBadge(
+                  rating: item.communityRating,
+                  onScrim: !onPaper,
+                ),
               ],
             ],
           ),
@@ -291,10 +351,7 @@ class HeroTextBlock extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style:
                 (large ? theme.textTheme.bodyLarge : theme.textTheme.bodyMedium)
-                    ?.copyWith(
-                      color: Colors.white.withValues(alpha: .78),
-                      height: 1.6,
-                    ),
+                    ?.copyWith(color: overviewColor, height: 1.6),
           ),
         ],
         if (includeActions) ...[
@@ -305,21 +362,23 @@ class HeroTextBlock extends StatelessWidget {
     );
   }
 
-  Widget _title(TextStyle? style) {
+  Widget _title(TextStyle? style, {required Color ink}) {
     final text = Text(
       heroTitle(item),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: style?.copyWith(
-        color: Colors.white,
+        color: onPaper ? ink : Colors.white,
         fontWeight: FontWeight.w700,
         height: 1.15,
         letterSpacing: large ? -.2 : null,
-        shadows: const [Shadow(blurRadius: 12, color: Colors.black54)],
+        shadows: onPaper
+            ? null
+            : const [Shadow(blurRadius: 12, color: Colors.black54)],
       ),
     );
     final logoWidth = logoMaxWidth;
-    if (logoWidth == null || !HeroLogo.available(item)) return text;
+    if (onPaper || logoWidth == null || !HeroLogo.available(item)) return text;
     return HeroLogo(
       key: ValueKey('hero-logo-${item.id}'),
       item: item,
@@ -343,6 +402,7 @@ class HeroDots extends StatelessWidget {
     required this.count,
     required this.onSelect,
     this.onScrim = true,
+    this.activeColor,
     this.cycle,
     this.interval = HeroAutoRotate.rotateInterval,
   });
@@ -351,6 +411,10 @@ class HeroDots extends StatelessWidget {
   final int count;
   final ValueChanged<int>? onSelect;
   final bool onScrim;
+
+  /// 选中长条的颜色。为空时遮罩上用白,页面上用 [ColorScheme.secondary]。
+  final Color? activeColor;
+
   final ValueListenable<int?>? cycle;
   final Duration interval;
 
@@ -361,7 +425,7 @@ class HeroDots extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final selected = onScrim ? Colors.white : scheme.secondary;
+    final selected = activeColor ?? (onScrim ? Colors.white : scheme.secondary);
     final resting = onScrim
         ? Colors.white.withValues(alpha: .38)
         : scheme.onSurface.withValues(alpha: .22);

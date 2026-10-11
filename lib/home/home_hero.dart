@@ -18,8 +18,9 @@ import 'package:rillight/media_image/media_image.dart';
 /// 桌面首页轮播。
 ///
 /// 在 [AppShell] 内([topOverlap] > 0)是贴满窗口宽度的全出血舞台:画面从窗口
-/// 上缘铺到下方货架,深色主题底缘渐隐融进页面底色;文字、按钮与货架标题对齐
-/// 同一条页边线,切换控件([‹] 圆点 [›])收在右下角,不压标题。
+/// 上缘铺到下方货架,底缘渐隐融进页面底色。深色主题的文字直接压在遮罩上;
+/// 浅色主题把说明收进纸色卡片,播放用强调色。文字与货架标题对齐同一条页边线,
+/// 切换控件([‹] 圆点 [›])收在右下角,不压标题。
 /// 独立嵌入(测试、无外壳)时退回带页边距的圆角卡片。
 ///
 /// 背景、遮罩、文字三层分开:遮罩常驻不随换页闪烁;新背景在旧背景之上淡入;
@@ -105,10 +106,10 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     setState(() => _layoutOverride[item.id] = actual);
   }
 
-  /// Dark full-bleed stage dissolves into the page; the fade itself is the gap
-  /// to the first shelf, so no extra bottom padding is added.
-  bool get _fadesIntoPage =>
-      _stage && Theme.of(context).brightness == Brightness.dark;
+  /// 全出血舞台的底缘渐隐就是和下一条货架的间距,不再另加底边距。
+  bool get _fadesIntoPage => _stage;
+
+  bool get _gallery => Theme.of(context).brightness == Brightness.light;
 
   EdgeInsets get _outerPadding => _stage
       ? EdgeInsets.only(bottom: _fadesIntoPage ? 0 : AppSpacing.md)
@@ -132,9 +133,11 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
           .roundToDouble();
     }
     // 文字块(两行标题 + 三行简介 + 按钮)加上下留白的最低需求。
+    // 浅色说明卡自带内边距,再留一截避免卡片顶被舞台裁切。
     // 取整到整像素:小数高度的最后一行会透出底色,在渐隐边缘留一条暗线。
     final textFloor = (HomeHero.largeFor(width) ? 364 : 338) * scale;
-    return math.max(base, widget.topOverlap + textFloor).roundToDouble();
+    final card = _gallery ? 28.0 : 0.0;
+    return math.max(base, widget.topOverlap + textFloor + card).roundToDouble();
   }
 
   @override
@@ -181,9 +184,12 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             final content = compact
                 ? _compactSlides(context, item, items, index, width)
                 : _stageLayers(context, item, items, index, width);
+            final theme = Theme.of(context);
             return Material(
               key: const Key('home-hero-card'),
-              color: Colors.black,
+              color: theme.brightness == Brightness.light
+                  ? theme.scaffoldBackgroundColor
+                  : Colors.black,
               shape: RoundedRectangleBorder(borderRadius: _radius),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
@@ -256,7 +262,9 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         width - inset * 2 - controlsWidth - AppSpacing.xl,
       ),
     );
-    final fade = _fadesIntoPage ? theme.scaffoldBackgroundColor : null;
+    final fade = _gallery || _fadesIntoPage
+        ? theme.scaffoldBackgroundColor
+        : null;
     final large = HomeHero.largeFor(width);
     final logoWidth = math.min(textWidth * .8, large ? 460.0 : 360.0);
 
@@ -322,42 +330,115 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             child: backdrop,
           ),
         ),
-        HeroScrim(top: _fadesIntoPage, leading: true, fadeTo: fade),
-        Positioned(
-          left: inset,
-          right: inset,
-          bottom: bottom,
-          child: Align(
-            alignment: Alignment.bottomLeft,
-            child: SizedBox(
-              width: textWidth,
-              child: AnimatedSwitcher(
-                duration: AppMotion.durationOf(context, heroSlideDuration),
-                switchInCurve: heroCaptionInCurve,
-                switchOutCurve: heroCaptionOutCurve,
-                transitionBuilder: heroCaptionTransition,
-                layoutBuilder: (current, previous) => Stack(
-                  alignment: Alignment.bottomLeft,
-                  children: [...previous, ?current],
-                ),
-                child: HeroTextBlock(
-                  key: ValueKey('home-hero-text-${item.id}'),
+        HeroScrim(
+          top: _fadesIntoPage && !_gallery,
+          leading: !_gallery,
+          fadeTo: fade,
+          gallery: _gallery,
+        ),
+        if (_gallery)
+          Positioned(
+            // 卡片内边距让出后,说明文字仍落在页边线上。
+            left: inset - AppSpacing.md,
+            right: inset - AppSpacing.md,
+            bottom: AppSpacing.lg,
+            child: _galleryCaption(
+              item: item,
+              textWidth: textWidth,
+              large: large,
+              logoWidth: logoWidth,
+              showOverview: HomeHero.showsOverview(width),
+              controls: multiple ? _controlCluster(index, items) : null,
+            ),
+          )
+        else ...[
+          Positioned(
+            left: inset,
+            right: inset,
+            bottom: bottom,
+            child: Align(
+              alignment: Alignment.bottomLeft,
+              child: SizedBox(
+                width: textWidth,
+                child: _captionSwitcher(
                   item: item,
                   large: large,
-                  logoMaxWidth: logoWidth,
+                  logoWidth: logoWidth,
                   showOverview: HomeHero.showsOverview(width),
-                  actions: _actions(context, item),
                 ),
               ),
             ),
           ),
-        ),
-        if (multiple)
-          Positioned(
-            right: inset - AppSpacing.xxs,
-            bottom: bottom + (48 - _controlExtent) / 2,
-            child: _controlCluster(index, items),
+          if (multiple)
+            Positioned(
+              right: inset - AppSpacing.xxs,
+              bottom: bottom + (48 - _controlExtent) / 2,
+              child: _controlCluster(index, items),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _captionSwitcher({
+    required EmbyItem item,
+    required bool large,
+    required double logoWidth,
+    required bool showOverview,
+    bool compact = false,
+  }) {
+    return AnimatedSwitcher(
+      duration: AppMotion.durationOf(context, heroSlideDuration),
+      switchInCurve: heroCaptionInCurve,
+      switchOutCurve: heroCaptionOutCurve,
+      transitionBuilder: heroCaptionTransition,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.bottomLeft,
+        children: [...previous, ?current],
+      ),
+      child: HeroTextBlock(
+        key: ValueKey('home-hero-text-${item.id}'),
+        item: item,
+        large: large,
+        compact: compact,
+        logoMaxWidth: logoWidth,
+        showOverview: showOverview,
+        onPaper: _gallery,
+        actions: _actions(context, item),
+      ),
+    );
+  }
+
+  /// 浅色说明:白卡片承接墨色文字,切换控件贴在卡片右侧、与按钮底对齐。
+  Widget _galleryCaption({
+    required EmbyItem item,
+    required double textWidth,
+    required bool large,
+    required double logoWidth,
+    required bool showOverview,
+    required Widget? controls,
+    bool compact = false,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Flexible(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: textWidth + AppSpacing.md * 2,
+            ),
+            child: _paperFrame(
+              _captionSwitcher(
+                item: item,
+                large: large,
+                logoWidth: logoWidth,
+                showOverview: showOverview,
+                compact: compact,
+              ),
+            ),
           ),
+        ),
+        if (controls != null) ...[const Spacer(), controls],
       ],
     );
   }
@@ -394,21 +475,18 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
           ),
         ),
         const SizedBox(width: AppSpacing.xxs),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: .32),
-            borderRadius: BorderRadius.circular(99),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: HeroDots(
-              index: index,
-              count: items.length,
-              // A continuous countdown keeps the whole desktop window waking
-              // at the display refresh rate even when no one is interacting.
-              // Keep the selected dot static; the rotation timer still works.
-              onSelect: (i) => _select(i, items.length),
-            ),
+        _dotPill(
+          HeroDots(
+            index: index,
+            count: items.length,
+            // A continuous countdown keeps the whole desktop window waking
+            // at the display refresh rate even when no one is interacting.
+            // Keep the selected dot static; the rotation timer still works.
+            onSelect: (i) => _select(i, items.length),
+            onScrim: !_gallery,
+            activeColor: _gallery
+                ? Theme.of(context).colorScheme.primary
+                : null,
           ),
         ),
         const SizedBox(width: AppSpacing.xxs),
@@ -441,10 +519,13 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     final layout = _layoutOverride[item.id] ?? heroLayoutFor(artwork);
     final requestWidth = _requestWidth(context, width);
     final actions = _actions(context, item);
+    final light = _gallery && layout == HeroLayout.fullBleed;
+    final fade = light ? Theme.of(context).scaffoldBackgroundColor : null;
     final text = HeroTextBlock(
       item: item,
       compact: true,
       includeActions: layout == HeroLayout.fullBleed,
+      onPaper: light,
       actions: actions,
     );
     final Widget visual = layout == HeroLayout.fullBleed
@@ -458,8 +539,13 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
                 compact: true,
                 onResolved: (data) => _onArtworkResolved(item, artwork, data),
               ),
-              HeroScrim(top: _stage),
-              Positioned(left: 20, right: 20, bottom: 20, child: text),
+              HeroScrim(top: _stage && !light, fadeTo: fade, gallery: light),
+              Positioned(
+                left: light ? 4 : 20,
+                right: light ? 4 : 20,
+                bottom: light ? 12 : 20,
+                child: light ? _paperFrame(text) : text,
+              ),
             ],
           )
         : HeroPosterSpotlight(
@@ -527,18 +613,15 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
       Positioned(
         right: 20,
         bottom: 16,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: .32),
-            borderRadius: BorderRadius.circular(99),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: HeroDots(
-              index: index,
-              count: items.length,
-              onSelect: (i) => _select(i, items.length),
-            ),
+        child: _dotPill(
+          HeroDots(
+            index: index,
+            count: items.length,
+            onSelect: (i) => _select(i, items.length),
+            onScrim: !_gallery,
+            activeColor: _gallery
+                ? Theme.of(context).colorScheme.primary
+                : null,
           ),
         ),
       ),
@@ -552,6 +635,8 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     required VoidCallback onPressed,
     double extent = 48,
   }) {
+    final scheme = Theme.of(context).colorScheme;
+    final light = _gallery;
     return IconButton(
       key: key,
       tooltip: tooltip,
@@ -561,12 +646,60 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         minimumSize: Size.square(extent),
         fixedSize: Size.square(extent),
         padding: EdgeInsets.zero,
-        backgroundColor: Colors.black.withValues(alpha: .42),
-        foregroundColor: Colors.white,
-        hoverColor: Colors.white.withValues(alpha: .14),
-        side: BorderSide(color: Colors.white.withValues(alpha: .16)),
+        backgroundColor: light
+            ? scheme.surfaceContainerLowest
+            : Colors.black.withValues(alpha: .42),
+        foregroundColor: light ? scheme.onSurface : Colors.white,
+        hoverColor: light
+            ? scheme.onSurface.withValues(alpha: .06)
+            : Colors.white.withValues(alpha: .14),
+        side: BorderSide(
+          color: light
+              ? scheme.outlineVariant
+              : Colors.white.withValues(alpha: .16),
+        ),
       ),
       icon: Icon(icon),
+    );
+  }
+
+  Widget _paperFrame(Widget child) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: 0.12),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _dotPill(Widget dots) {
+    final scheme = Theme.of(context).colorScheme;
+    final light = _gallery;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: light
+            ? scheme.surfaceContainerLowest
+            : Colors.black.withValues(alpha: .32),
+        borderRadius: BorderRadius.circular(99),
+        border: light ? Border.all(color: scheme.outlineVariant) : null,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: dots,
+      ),
     );
   }
 }

@@ -2978,9 +2978,9 @@ class _DetailActions extends StatelessWidget {
     final sourceMenuMax = AppViewport.fit(420, viewport.width - 48, viewport);
     final sourceMenuMin = AppViewport.dp(280, viewport);
     final tools = <Widget>[
-      ScrimIconButton(
+      _detailToolButton(
+        context,
         key: CatalogKeys.playedToggle,
-        size: ScrimIconButtonSize.large,
         tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
         icon: Icon(
           played
@@ -3074,7 +3074,51 @@ class _DetailActions extends StatelessWidget {
   }
 }
 
-/// 海报上的圆形菜单钮:[ScrimIconButton] 外观,点击在按钮下方弹出选项。
+/// 详情操作圆钮。浅色详情头已经是纸面，用纸色圆钮；深色头图仍用黑色 scrim，
+/// 白图标在任意剧照上都读得清。
+Widget _detailToolButton(
+  BuildContext context, {
+  Key? key,
+  required String tooltip,
+  required Widget icon,
+  required VoidCallback? onPressed,
+}) {
+  final scheme = Theme.of(context).colorScheme;
+  if (scheme.brightness != Brightness.light) {
+    return ScrimIconButton(
+      key: key,
+      size: ScrimIconButtonSize.large,
+      tooltip: tooltip,
+      icon: icon,
+      onPressed: onPressed,
+    );
+  }
+  return IconButton(
+    key: key,
+    tooltip: tooltip,
+    onPressed: onPressed,
+    icon: icon,
+    iconSize: ScrimIconButtonSize.large.iconSize,
+    padding: EdgeInsets.zero,
+    constraints: BoxConstraints.tightFor(
+      width: ScrimIconButtonSize.large.dimension,
+      height: ScrimIconButtonSize.large.dimension,
+    ),
+    style: IconButton.styleFrom(
+      backgroundColor: scheme.surfaceContainerLowest,
+      foregroundColor: scheme.onSurface,
+      disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
+      side: BorderSide(color: scheme.outlineVariant),
+      shape: const CircleBorder(),
+      fixedSize: Size.square(ScrimIconButtonSize.large.dimension),
+      minimumSize: Size.square(ScrimIconButtonSize.large.dimension),
+      maximumSize: Size.square(ScrimIconButtonSize.large.dimension),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+  );
+}
+
+/// 海报上的圆形菜单钮。浅色纸面用 [_detailToolButton]，深色头图保持 scrim。
 class _DetailMenuButton<T> extends StatelessWidget {
   const _DetailMenuButton({
     required this.tooltip,
@@ -3122,9 +3166,9 @@ class _DetailMenuButton<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ScrimIconButton(
+    return _detailToolButton(
+      context,
       key: menuKey,
-      size: ScrimIconButtonSize.large,
       tooltip: tooltip,
       icon: Icon(icon),
       onPressed: () => unawaited(_open(context)),

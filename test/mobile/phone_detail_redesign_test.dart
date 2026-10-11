@@ -11,12 +11,12 @@ import 'package:rillight/media_image/media_image.dart';
 
 const _minute = 60 * 10000000;
 
-Widget _phone(Widget child, {double width = 412}) {
+Widget _phone(Widget child, {double width = 412, ThemeData? theme}) {
   return MaterialApp(
     locale: const Locale('zh'),
     supportedLocales: AppLocalizations.supportedLocales,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
-    theme: AppTheme.phoneDark(),
+    theme: theme ?? AppTheme.phoneDark(),
     home: PresentationScope(
       environment: PresentationEnvironment.phone,
       child: MediaQuery(
@@ -174,6 +174,35 @@ void main() {
       expect(find.byKey(const Key('phone-episode-current')), findsOneWidget);
       expect(find.byKey(PhoneGenreChips.rowKey), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('light current episode uses the accent play disc', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _phone(
+          _slivers(
+            _series(
+              seasons: [
+                const EmbyItem(
+                  id: 'season-1',
+                  name: '第 1 季',
+                  type: 'Season',
+                  childCount: 2,
+                ),
+              ],
+              episodes: [_episode(1, played: true), _episode(2)],
+              episodeTotal: 2,
+            ),
+          ),
+          theme: AppTheme.phoneLight(),
+        ),
+      );
+      await tester.pump();
+      final icon = tester.widget<Icon>(
+        find.byKey(const Key('phone-episode-current')),
+      );
+      expect(icon.color, AppTheme.phoneLight().colorScheme.onPrimary);
     });
 
     testWidgets('several seasons use tabs and do not repeat the name', (

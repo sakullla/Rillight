@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -70,13 +71,18 @@ void main() {
   );
   const channel = MethodChannel('plugins.flutter.io/file_selector');
 
-  Future<void> pumpAlbum(WidgetTester tester, _AlbumClient client) async {
+  Future<void> pumpAlbum(
+    WidgetTester tester,
+    _AlbumClient client, {
+    ThemeData? theme,
+  }) async {
     final auth = AuthController.memory(client: client);
     addTearDown(auth.dispose);
     await tester.pumpWidget(
       AuthScope(
         controller: auth,
         child: MaterialApp(
+          theme: theme,
           locale: const Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -250,6 +256,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('light viewer uses the paper dialog and dark stays black', (
+    tester,
+  ) async {
+    await pumpAlbum(tester, _AlbumClient(), theme: AppTheme.light());
+    expect(tester.widget<Dialog>(find.byType(Dialog)).backgroundColor, isNull);
+    expect(find.text('1 / 2'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    await pumpAlbum(tester, _AlbumClient(), theme: AppTheme.dark());
+    expect(
+      tester.widget<Dialog>(find.byType(Dialog)).backgroundColor,
+      Colors.black,
+    );
   });
 
   testWidgets(

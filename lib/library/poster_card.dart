@@ -50,9 +50,12 @@ class PosterCard extends StatelessWidget {
       child: _HoverHighlight(
         inkKey: CatalogKeys.item(item.id),
         onTap: onTap,
-        hoverScale: wide ? 1 : hoverScale,
+        // 行高会裁切放大溢出。只放大封面,标题留在原位,避免悬停时被裁掉。
+        hoverScale: 1,
         borderRadius: BorderRadius.circular(AppRadii.md),
         builder: (context, highlighted) {
+          final zoom =
+              highlighted && !wide && !MediaQuery.disableAnimationsOf(context);
           return Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -67,14 +70,22 @@ class PosterCard extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       RepaintBoundary(
-                        child: MediaImage(
-                          key: ValueKey(item.id),
-                          item: item,
-                          width: width,
-                          height: height,
-                          preferBackdrop: preferBackdrop ?? wide,
-                          maxWidth: wide ? 360 : 280,
-                          fit: BoxFit.cover,
+                        child: AnimatedScale(
+                          scale: zoom ? hoverScale : 1,
+                          duration: AppMotion.durationOf(
+                            context,
+                            AppMotion.fast,
+                          ),
+                          curve: AppMotion.standard,
+                          child: MediaImage(
+                            key: ValueKey(item.id),
+                            item: item,
+                            width: width,
+                            height: height,
+                            preferBackdrop: preferBackdrop ?? wide,
+                            maxWidth: wide ? 360 : 280,
+                            fit: BoxFit.cover,
+                          ),
                         ),
                       ),
                       _PosterRevealOverlay(
@@ -455,6 +466,8 @@ class _PosterRevealOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final light = scheme.brightness == Brightness.light;
     final meta = <String>[
       ?seasonEpisodeCode(item),
       if (item.productionYear != null && item.productionYear! > 0)
@@ -471,18 +484,20 @@ class _PosterRevealOverlay extends StatelessWidget {
         curve: AppMotion.standard,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              stops: const [0, 0.6, 1],
-              colors: [
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.08),
-                Colors.black.withValues(
-                  alpha: showMeta && meta.isNotEmpty ? 0.62 : 0,
-                ),
-              ],
-            ),
+            gradient: light
+                ? null
+                : LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: const [0, 0.6, 1],
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.08),
+                      Colors.black.withValues(
+                        alpha: showMeta && meta.isNotEmpty ? 0.62 : 0,
+                      ),
+                    ],
+                  ),
           ),
           child: revealed
               ? Stack(
@@ -497,10 +512,15 @@ class _PosterRevealOverlay extends StatelessWidget {
                             tooltip: l10n.removeFromResume,
                             onPressed: () => onRemoveFromResume!(item),
                             style: IconButton.styleFrom(
-                              backgroundColor: Colors.black.withValues(
-                                alpha: 0.55,
-                              ),
-                              foregroundColor: Colors.white,
+                              backgroundColor: light
+                                  ? scheme.surfaceContainerLowest
+                                  : Colors.black.withValues(alpha: 0.55),
+                              foregroundColor: light
+                                  ? scheme.onSurface
+                                  : Colors.white,
+                              side: light
+                                  ? BorderSide(color: scheme.outlineVariant)
+                                  : null,
                               minimumSize: const Size(32, 32),
                               padding: const EdgeInsets.all(AppSpacing.xxs),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -532,11 +552,15 @@ class _PosterRevealOverlay extends StatelessWidget {
                             }
                           },
                           style: IconButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black,
+                            backgroundColor: light
+                                ? scheme.primary
+                                : Colors.white,
+                            foregroundColor: light
+                                ? scheme.onPrimary
+                                : Colors.black,
                             padding: const EdgeInsets.all(AppSpacing.sm),
                             minimumSize: const Size(52, 52),
-                            elevation: 4,
+                            elevation: light ? 2 : 4,
                           ),
                           icon: const Icon(Icons.play_arrow_rounded, size: 32),
                         ),
@@ -545,21 +569,45 @@ class _PosterRevealOverlay extends StatelessWidget {
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.sm,
+                          padding: EdgeInsets.fromLTRB(
+                            light ? 10 : AppSpacing.sm,
                             0,
-                            AppSpacing.sm,
-                            AppSpacing.sm,
+                            light ? 10 : AppSpacing.sm,
+                            light ? 14 : AppSpacing.sm,
                           ),
-                          child: Text(
-                            meta.join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.92),
-                            ),
-                          ),
+                          child: light
+                              ? DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: scheme.surfaceContainerLowest
+                                        .withValues(alpha: 0.94),
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.xs,
+                                      vertical: 2,
+                                    ),
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        meta.join(' · '),
+                                        maxLines: 1,
+                                        softWrap: false,
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(color: scheme.onSurface),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Text(
+                                  meta.join(' · '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                  ),
+                                ),
                         ),
                       ),
                   ],

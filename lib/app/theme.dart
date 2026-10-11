@@ -4,13 +4,14 @@ import 'theme/tokens.dart';
 
 export 'theme/tokens.dart';
 
-/// 应用唯一视觉权威:冷蓝灰表面 + 清晰文字,克制高光仅用于播放/焦点/进度。
+/// 应用唯一视觉权威。深色是冷蓝灰;浅色是日光画廊:中性纸色页面、
+/// 白卡片、墨色文字,蓝紫只用于播放、焦点和主操作。
 ///
 /// 所有页面与组件应从 [AppTheme.dark] / [AppTheme.light] 与 token 类
 /// ([AppSpacing] / [AppRadii] / [AppMotion] / [AppBreakpoints]) 取视觉值,
 /// 不得散落硬编码颜色。
 abstract final class AppTheme {
-  /// 一套主题的全部取色。浅色/深色共用同一套组件样式,只换色调。
+  /// 一套主题的全部取色。深色组件保持平面;浅色另加细边、白底输入和浮层阴影。
   @visibleForTesting
   static const Tones darkTones = Tones._(
     base: Color(0xFF151A28),
@@ -46,39 +47,39 @@ abstract final class AppTheme {
     scrim: Colors.black,
   );
 
-  /// 浅色调:清透分层表面 + 深蓝灰文字;正文/控件对比度不低于 4.5:1。
+  /// 浅色调:纸色页面、白色卡片、墨色文字。分层拉开,正文对比度不低于 4.5:1。
   @visibleForTesting
   static const Tones lightTones = Tones._(
-    base: Color(0xFFF6F7FC),
+    base: Color(0xFFF2F4F7),
     surfaceLowest: Color(0xFFFFFFFF),
     surfaceLow: Color(0xFFFFFFFF),
-    surface: Color(0xFFEEF0F8),
-    surfaceHigh: Color(0xFFE7EAF5),
-    surfaceHighest: Color(0xFFDDE2F0),
-    surfaceBright: Color(0xFFD6DDED),
-    onSurface: Color(0xFF22283C),
-    onSurfaceVariant: Color(0xFF566079),
-    outline: Color(0xFF788299),
-    outlineVariant: Color(0xFFD6DCEC),
-    accent: Color(0xFF5757A8),
+    surface: Color(0xFFE7EBF1),
+    surfaceHigh: Color(0xFFDDE2EA),
+    surfaceHighest: Color(0xFFD2D8E2),
+    surfaceBright: Color(0xFFC5CCD8),
+    onSurface: Color(0xFF171C27),
+    onSurfaceVariant: Color(0xFF3E4758),
+    outline: Color(0xFF5E6878),
+    outlineVariant: Color(0xFFD3D8E2),
+    accent: Color(0xFF3A42B0),
     onAccent: Color(0xFFFFFFFF),
-    accentContainer: Color(0xFFE3E1FF),
-    onAccentContainer: Color(0xFF343264),
-    secondary: Color(0xFF8E4E6D),
+    accentContainer: Color(0xFFE4E6F8),
+    onAccentContainer: Color(0xFF1E2468),
+    secondary: Color(0xFF8A4564),
     onSecondary: Color(0xFFFFFFFF),
-    secondaryContainer: Color(0xFFF9DEEA),
-    onSecondaryContainer: Color(0xFF63334B),
-    tertiary: Color(0xFF306D69),
+    secondaryContainer: Color(0xFFF8E4EC),
+    onSecondaryContainer: Color(0xFF5C2C42),
+    tertiary: Color(0xFF1F6A64),
     onTertiary: Color(0xFFFFFFFF),
-    tertiaryContainer: Color(0xFFD2EFEA),
-    onTertiaryContainer: Color(0xFF214D49),
-    error: Color(0xFFB03A32),
+    tertiaryContainer: Color(0xFFD7F1ED),
+    onTertiaryContainer: Color(0xFF0E3E3A),
+    error: Color(0xFFB42318),
     onError: Color(0xFFFFFFFF),
-    errorContainer: Color(0xFFF5D4D0),
-    onErrorContainer: Color(0xFF4A120E),
-    inverseSurface: Color(0xFF2B354A),
-    onInverseSurface: Color(0xFFF3F5FF),
-    inversePrimary: Color(0xFFB8B8FF),
+    errorContainer: Color(0xFFF8D7D4),
+    onErrorContainer: Color(0xFF5C1612),
+    inverseSurface: Color(0xFF1C2433),
+    onInverseSurface: Color(0xFFF4F6FA),
+    inversePrimary: Color(0xFFC4C6FF),
     scrim: Colors.black,
   );
 
@@ -119,39 +120,39 @@ abstract final class AppTheme {
     scrim: Colors.black,
   );
 
-  /// 电视浅色调:暖灰白底,与深色调同一分层与反相焦点。
+  /// 电视浅色调:与桌面同一套纸色和蓝紫,表面再拉开一档,焦点仍是深底浅字。
   @visibleForTesting
   static const Tones tvLightTones = Tones._(
-    base: Color(0xFFF3F4F6),
+    base: Color(0xFFF4F5F7),
     surfaceLowest: Color(0xFFFFFFFF),
     surfaceLow: Color(0xFFFFFFFF),
-    surface: Color(0xFFEBEDF0),
-    surfaceHigh: Color(0xFFE3E5E9),
-    surfaceHighest: Color(0xFFD9DCE1),
-    surfaceBright: Color(0xFFD0D4DA),
-    onSurface: Color(0xFF1A1C20),
-    onSurfaceVariant: Color(0xFF555B66),
-    outline: Color(0xFF7A808B),
+    surface: Color(0xFFE8EAEE),
+    surfaceHigh: Color(0xFFDEE1E6),
+    surfaceHighest: Color(0xFFD3D7DE),
+    surfaceBright: Color(0xFFC6CBD4),
+    onSurface: Color(0xFF14171C),
+    onSurfaceVariant: Color(0xFF3C424C),
+    outline: Color(0xFF5C636E),
     outlineVariant: Color(0xFFD5D8DE),
-    accent: Color(0xFF5757A8),
+    accent: Color(0xFF3A42B0),
     onAccent: Color(0xFFFFFFFF),
-    accentContainer: Color(0xFFE3E1FF),
-    onAccentContainer: Color(0xFF343264),
-    secondary: Color(0xFF8E4E6D),
+    accentContainer: Color(0xFFE4E6F8),
+    onAccentContainer: Color(0xFF1E2468),
+    secondary: Color(0xFF8A4564),
     onSecondary: Color(0xFFFFFFFF),
-    secondaryContainer: Color(0xFFF9DEEA),
-    onSecondaryContainer: Color(0xFF63334B),
-    tertiary: Color(0xFF306D69),
+    secondaryContainer: Color(0xFFF8E4EC),
+    onSecondaryContainer: Color(0xFF5C2C42),
+    tertiary: Color(0xFF1F6A64),
     onTertiary: Color(0xFFFFFFFF),
-    tertiaryContainer: Color(0xFFD2EFEA),
-    onTertiaryContainer: Color(0xFF214D49),
-    error: Color(0xFFB03A32),
+    tertiaryContainer: Color(0xFFD7F1ED),
+    onTertiaryContainer: Color(0xFF0E3E3A),
+    error: Color(0xFFB42318),
     onError: Color(0xFFFFFFFF),
-    errorContainer: Color(0xFFF5D4D0),
-    onErrorContainer: Color(0xFF4A120E),
-    inverseSurface: Color(0xFF1A1C20),
+    errorContainer: Color(0xFFF8D7D4),
+    onErrorContainer: Color(0xFF5C1612),
+    inverseSurface: Color(0xFF14171C),
     onInverseSurface: Color(0xFFF7F8FA),
-    inversePrimary: Color(0xFFB8B8FF),
+    inversePrimary: Color(0xFFC4C6FF),
     scrim: Colors.black,
   );
 
@@ -169,8 +170,14 @@ abstract final class AppTheme {
 
   static ThemeData dark() => _dark;
 
-  /// 浅色主题:同一分层结构,只换浅色调。
+  /// 浅色主题:纸色页面,白卡片带细边,主操作使用蓝紫。
   static ThemeData light() => _light;
+
+  /// 桌面窗口边框用页面色,标题符号用正文色。
+  static (Color page, Color symbol) windowChromeColors(Brightness brightness) {
+    final tones = brightness == Brightness.dark ? darkTones : lightTones;
+    return (tones.base, tones.onSurface);
+  }
 
   /// Phone reading sizes and touch targets, with the same cool surface palette.
   static ThemeData phoneLight() => _phoneLight;
@@ -353,6 +360,8 @@ abstract final class AppTheme {
         'Noto Sans CJK SC',
       ],
     );
+    final light = t.brightness == Brightness.light;
+    final hairline = BorderSide(color: t.outlineVariant);
 
     return ThemeData(
       useMaterial3: true,
@@ -373,12 +382,13 @@ abstract final class AppTheme {
         centerTitle: false,
       ),
       cardTheme: CardThemeData(
-        color: t.surfaceLow,
+        color: light ? t.surfaceLowest : t.surfaceLow,
         elevation: 0,
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.lg),
+          side: light ? hairline : BorderSide.none,
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -435,7 +445,7 @@ abstract final class AppTheme {
       ),
       inputDecorationTheme: InputDecorationThemeData(
         filled: true,
-        fillColor: t.surface,
+        fillColor: light ? t.surfaceLowest : t.surface,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,
@@ -473,12 +483,13 @@ abstract final class AppTheme {
         showValueIndicator: ShowValueIndicator.never,
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: t.surfaceLow,
+        backgroundColor: light ? t.surfaceLowest : t.surfaceLow,
         surfaceTintColor: Colors.transparent,
-        elevation: 0,
+        elevation: light ? 16 : 0,
+        shadowColor: light ? Colors.black.withValues(alpha: 0.14) : null,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.xl),
-          side: BorderSide(color: t.outlineVariant),
+          side: hairline,
         ),
         titleTextStyle: textTheme.titleLarge,
         contentTextStyle: textTheme.bodyMedium?.copyWith(
@@ -486,19 +497,22 @@ abstract final class AppTheme {
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: t.surfaceHighest,
-        contentTextStyle: textTheme.bodyMedium,
-        actionTextColor: t.onSurface,
+        backgroundColor: light ? t.inverseSurface : t.surfaceHighest,
+        contentTextStyle: light
+            ? textTheme.bodyMedium?.copyWith(color: t.onInverseSurface)
+            : textTheme.bodyMedium,
+        actionTextColor: light ? t.inversePrimary : t.onSurface,
         behavior: SnackBarBehavior.floating,
-        elevation: 0,
+        elevation: light ? 2 : 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
         ),
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
-          color: t.surfaceHighest,
+          color: light ? t.surfaceLowest : t.surfaceHighest,
           borderRadius: BorderRadius.circular(AppRadii.sm),
+          border: light ? Border.all(color: t.outlineVariant) : null,
         ),
         // 桌面默认 minHeight 24 + 竖向 4 点内边距会裁切雅黑体;顶栏靠右
         // 时「取消置顶」最后一个字看起来缺笔。
@@ -517,20 +531,42 @@ abstract final class AppTheme {
         style: IconButton.styleFrom(
           foregroundColor: t.onSurface,
           disabledForegroundColor: t.onSurfaceVariant,
+          hoverColor: light ? t.onSurface.withValues(alpha: 0.06) : null,
         ),
       ),
       // 弹出菜单的唯一样式来源;页面内 PopupMenuButton 不再覆盖
-      // color/shape/surfaceTintColor。
+      // color/shape/surfaceTintColor。浅色用白底细边和轻阴影,深色保持抬高表面。
       popupMenuTheme: PopupMenuThemeData(
-        color: t.surfaceHigh,
+        color: light ? t.surfaceLowest : t.surfaceHigh,
         surfaceTintColor: Colors.transparent,
-        elevation: 6,
-        shadowColor: Colors.black.withValues(alpha: 0.36),
+        elevation: light ? 12 : 6,
+        shadowColor: Colors.black.withValues(alpha: light ? 0.12 : 0.36),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.sm),
+          side: light ? hairline : BorderSide.none,
         ),
         labelTextStyle: WidgetStatePropertyAll(textTheme.bodyMedium),
       ),
+      menuTheme: light
+          ? MenuThemeData(
+              style: MenuStyle(
+                backgroundColor: WidgetStatePropertyAll(t.surfaceLowest),
+                surfaceTintColor: const WidgetStatePropertyAll(
+                  Colors.transparent,
+                ),
+                elevation: const WidgetStatePropertyAll(12),
+                shadowColor: WidgetStatePropertyAll(
+                  Colors.black.withValues(alpha: 0.12),
+                ),
+                shape: WidgetStatePropertyAll(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
+                    side: hairline,
+                  ),
+                ),
+              ),
+            )
+          : null,
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: t.base,
         indicatorColor: t.accentContainer,
@@ -574,8 +610,8 @@ abstract final class AppTheme {
 
 /// [AppTheme] 的一套完整取色(表面分层/文字/高光/出错)。
 ///
-/// 组件样式统一在 [AppTheme._theme] 中按色调生成;浅色与深色的正文
-/// 与控件对比度都不低于 WCAG AA(4.5:1)。
+/// 组件样式在 [AppTheme._theme] 中按色调生成。浅色额外使用白底、细边和
+/// 浮层阴影;正文与控件对比度都不低于 WCAG AA(4.5:1)。
 @visibleForTesting
 class Tones {
   const Tones._({

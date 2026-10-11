@@ -295,8 +295,8 @@ class _TvLibraryLatest extends StatelessWidget {
 }
 
 /// featured 沉浸舞台:全宽出血宣传图 + 遮罩 + Logo/大标题 + 主操作,手动左右
-/// 切换,无自动轮换。舞台铺满视口宽并伸到顶部导航栏下,文字恒白压遮罩,
-/// 底缘溶进页面底色。
+/// 切换,无自动轮换。舞台铺满视口宽并伸到顶部导航栏下。深色主题文字压在
+/// 遮罩上,底缘溶进页面;浅色主题画面溶进纸色页面,标题和操作放在纸卡片上。
 ///
 /// 背景与文字分层过渡:新图在旧图之上淡入,旧文字先淡出、新文字再上移淡入。
 /// 「播放 / 详情」与切换控件不在过渡层里,连按切换时焦点节点始终不变。
@@ -376,6 +376,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final artwork = _sources(item);
     final multiple = items.length > 1;
     final page = theme.scaffoldBackgroundColor;
+    final light = theme.brightness == Brightness.light;
     final neighbours = <EmbyItem>{
       if (multiple) items[(index + 1) % items.length],
       if (items.length > 2) items[(index - 1 + items.length) % items.length],
@@ -385,7 +386,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
       width: viewSize.width,
       height: height,
       child: ColoredBox(
-        color: Colors.black,
+        color: light ? page : Colors.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -433,27 +434,26 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         ),
                 ),
               ),
-            const Positioned.fill(child: TvHeroScrim(bottom: false)),
-            // 深色主题底缘溶进页面底色,首行标题和舞台之间没有硬边;
-            // 浅色主题舞台保持深色,底部压暗托住白字与按钮,和页面直接分界。
+            Positioned.fill(child: TvHeroScrim(bottom: false, leading: !light)),
+            // 底缘溶进页面底色。浅色不再用黑带托白字,白字改放在下面的纸卡片上。
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
-              height: height * .34,
+              height: height * (light ? .46 : .34),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: theme.brightness == Brightness.dark
-                        ? [page.withValues(alpha: 0), page]
-                        : [
-                            Colors.black.withValues(alpha: 0),
-                            Colors.black.withValues(
-                              alpha: AppScrim.of(context, .6),
-                            ),
-                          ],
+                    colors: light
+                        ? [
+                            page.withValues(alpha: 0),
+                            page.withValues(alpha: .72),
+                            page,
+                          ]
+                        : [page.withValues(alpha: 0), page],
+                    stops: light ? const [0, .48, 1] : null,
                   ),
                 ),
               ),
@@ -462,7 +462,8 @@ class _TvFeaturedState extends State<_TvFeatured> {
               left: gutter,
               bottom: bottom,
               width: textWidth,
-              child: TvDarkStage(
+              child: _TvFeaturedCopy(
+                light: light,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -484,6 +485,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         item: item,
                         logoWidth: logoWidth,
                         logoHeight: logoHeight,
+                        onPaper: light,
                       ),
                     ),
                     SizedBox(height: 16 * s),
@@ -517,7 +519,9 @@ class _TvFeaturedState extends State<_TvFeatured> {
               Positioned(
                 right: gutter,
                 bottom: bottom,
-                child: TvDarkStage(
+                child: _TvFeaturedCopy(
+                  light: light,
+                  pill: true,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -533,7 +537,9 @@ class _TvFeaturedState extends State<_TvFeatured> {
                       Text(
                         '${index + 1} / ${items.length}',
                         style: theme.textTheme.labelMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: .75),
+                          color: light
+                              ? theme.colorScheme.onSurfaceVariant
+                              : Colors.white.withValues(alpha: .75),
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -562,6 +568,8 @@ class _TvPagerDots extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = TvDesign.scaleOf(context);
+    final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
     final duration = AppMotion.durationOf(context, AppMotion.normal);
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -574,11 +582,56 @@ class _TvPagerDots extends StatelessWidget {
             width: (i == index ? 18 : 6) * s,
             height: 6 * s,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: i == index ? .95 : .4),
+              color: light
+                  ? (i == index
+                        ? scheme.primary
+                        : scheme.outline.withValues(alpha: .55))
+                  : Colors.white.withValues(alpha: i == index ? .95 : .4),
               borderRadius: BorderRadius.circular(3 * s),
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 浅色把标题和翻页放在纸卡片上；深色继续用压暗舞台，白字不变。
+class _TvFeaturedCopy extends StatelessWidget {
+  const _TvFeaturedCopy({
+    required this.light,
+    required this.child,
+    this.pill = false,
+  });
+
+  final bool light;
+  final bool pill;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!light) return TvDarkStage(child: child);
+    final scheme = Theme.of(context).colorScheme;
+    final s = TvDesign.scaleOf(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(pill ? 999 : AppRadii.lg * s),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: 0.12),
+            blurRadius: 24 * s,
+            offset: Offset(0, 10 * s),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: (pill ? 8 : 16) * s,
+          vertical: (pill ? 4 : 16) * s,
+        ),
+        child: child,
+      ),
     );
   }
 }
@@ -591,27 +644,36 @@ class _TvFeaturedCaption extends StatelessWidget {
     required this.item,
     required this.logoWidth,
     required this.logoHeight,
+    this.onPaper = false,
   });
 
   final EmbyItem item;
   final double logoWidth;
   final double logoHeight;
 
+  /// 浅色纸卡片上用墨色文字，并跳过为深底设计的 Logo。
+  final bool onPaper;
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final meta = heroMetaLabels(l, item);
     final overview = plainOverview(item.overview);
+    final ink = onPaper ? scheme.onSurface : Colors.white;
+    final muted = onPaper
+        ? scheme.onSurfaceVariant
+        : Colors.white.withValues(alpha: .82);
     const shadow = [Shadow(blurRadius: 12, color: Colors.black54)];
     final title = Text(
       heroTitle(item),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.displaySmall?.copyWith(
-        color: Colors.white,
-        shadows: shadow,
+        color: ink,
+        shadows: onPaper ? null : shadow,
       ),
     );
     return Column(
@@ -633,7 +695,9 @@ class _TvFeaturedCaption extends StatelessWidget {
             Text(
               heroKicker(l, item),
               style: theme.textTheme.labelMedium?.copyWith(
-                color: Colors.white.withValues(alpha: .85),
+                color: onPaper
+                    ? scheme.onSurface
+                    : Colors.white.withValues(alpha: .85),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -642,7 +706,7 @@ class _TvFeaturedCaption extends StatelessWidget {
         SizedBox(height: 10 * s),
         KeyedSubtree(
           key: TvHomeKeys.featuredTitle,
-          child: HeroLogo.available(item)
+          child: !onPaper && HeroLogo.available(item)
               ? HeroLogo(
                   item: item,
                   fallback: title,
@@ -664,9 +728,7 @@ class _TvFeaturedCaption extends StatelessWidget {
                 SizedBox(width: 3 * s),
                 Text(
                   rating.toStringAsFixed(1),
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: Colors.white,
-                  ),
+                  style: theme.textTheme.labelLarge?.copyWith(color: ink),
                 ),
                 SizedBox(width: 10 * s),
               ],
@@ -676,9 +738,7 @@ class _TvFeaturedCaption extends StatelessWidget {
                     meta.join('  ·  '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: .82),
-                    ),
+                    style: theme.textTheme.bodyMedium?.copyWith(color: muted),
                   ),
                 ),
             ],
@@ -691,7 +751,9 @@ class _TvFeaturedCaption extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: Colors.white.withValues(alpha: .75),
+              color: onPaper
+                  ? scheme.onSurface.withValues(alpha: .78)
+                  : Colors.white.withValues(alpha: .75),
             ),
           ),
         ],

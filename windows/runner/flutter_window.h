@@ -8,6 +8,12 @@
 
 #include "win32_window.h"
 
+namespace flutter {
+template <typename T>
+class MethodChannel;
+class EncodableValue;
+}  // namespace flutter
+
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
@@ -36,9 +42,21 @@ class FlutterWindow : public Win32Window {
   // WM_NCHITTEST can fall through to the top-level window (HTMAXBUTTON).
   HWND flutter_view_hwnd_ = nullptr;
 
+  // Drop the Windows 11 caption-button plate, then keep symbol and border
+  // colors aligned with the app theme. The player process skips this.
+  void SuppressCaptionPlate() noexcept;
+  void ApplyCaptionChrome() noexcept;
+
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      caption_channel_;
+
   bool native_caption_buttons_ = true;
   bool first_frame_ready_ = false;
   bool show_requested_ = false;
+  bool caption_colors_set_ = false;
+  bool caption_dark_ = false;
+  COLORREF caption_border_ = 0;
+  COLORREF caption_symbol_ = 0;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

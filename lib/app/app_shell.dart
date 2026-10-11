@@ -8,9 +8,8 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/scrim_icon_button.dart';
+import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/window_chrome.dart';
-import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -370,7 +369,9 @@ class _TopBar extends StatelessWidget {
               });
     final scheme = Theme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
-    final scrim = light ? scheme.surface : scheme.scrim;
+    final scrim = light
+        ? Theme.of(context).scaffoldBackgroundColor
+        : scheme.scrim;
     final overlayHeight = height + AppShell.topFadeHeight;
     final item = AppRoutes.isItem(location);
     // 片库与货架页自带大标题:未滚动时顶栏不重复,滚过标题后再收进顶栏。
@@ -450,11 +451,13 @@ class _TopBar extends StatelessWidget {
               height: 1,
               child: IgnorePointer(
                 child: AnimatedOpacity(
-                  opacity: scrolled ? 1 : 0,
+                  opacity: light || scrolled ? 1 : 0,
                   duration: AppMotion.durationOf(context, AppMotion.fast),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: scheme.outlineVariant.withValues(alpha: 0.35),
+                      color: light
+                          ? scheme.outlineVariant
+                          : scheme.outlineVariant.withValues(alpha: 0.35),
                     ),
                   ),
                 ),
@@ -477,7 +480,7 @@ class _TopBar extends StatelessWidget {
                           !AppRoutes.showsBrowseNav(location)))
                     Padding(
                       padding: const EdgeInsets.only(right: AppSpacing.xs),
-                      child: _BackButton(
+                      child: DesktopBackButton(
                         overArtwork: !opaque,
                         tooltip: !canPop
                             ? l10n.home
@@ -485,11 +488,10 @@ class _TopBar extends StatelessWidget {
                                 context,
                               ).backButtonTooltip,
                         onPressed: onBack,
-                        icon: Icon(
-                          canPop
-                              ? Icons.arrow_back_rounded
-                              : Icons.home_outlined,
-                        ),
+                        icon: canPop
+                            ? Icons.chevron_left_rounded
+                            : Icons.home_outlined,
+                        label: canPop ? l10n.mobileBack : l10n.home,
                       ),
                     ),
                   if (AppRoutes.showsBrowseNav(location)) ...[
@@ -560,43 +562,6 @@ bool _pageHasHeading(String location) =>
     location.startsWith('/server/') ||
     AppRoutes.isPerson(location);
 
-/// 顶栏返回钮:叠在作品画面上时用带底衬的圆钮保证对比度;
-/// 实心顶栏上改用安静的普通图标钮,不在浅色条上压一块深色圆片。
-class _BackButton extends StatelessWidget {
-  const _BackButton({
-    required this.overArtwork,
-    required this.tooltip,
-    required this.onPressed,
-    required this.icon,
-  });
-
-  final bool overArtwork;
-  final String tooltip;
-  final VoidCallback onPressed;
-  final Widget icon;
-
-  @override
-  Widget build(BuildContext context) {
-    if (overArtwork) {
-      return ScrimIconButton(
-        key: CatalogKeys.back,
-        tooltip: tooltip,
-        onPressed: onPressed,
-        icon: icon,
-      );
-    }
-    return IconButton(
-      key: CatalogKeys.back,
-      tooltip: tooltip,
-      onPressed: onPressed,
-      iconSize: 20,
-      constraints: const BoxConstraints.tightFor(width: 40, height: 40),
-      padding: EdgeInsets.zero,
-      icon: icon,
-    );
-  }
-}
-
 class _HomeNav extends StatelessWidget {
   const _HomeNav({required this.selected});
 
@@ -659,7 +624,11 @@ class _NavTextButton extends StatelessWidget {
             height: 2,
             width: selected ? 18 : 0,
             decoration: BoxDecoration(
-              color: selected ? colorScheme.onSurface : Colors.transparent,
+              color: selected
+                  ? (colorScheme.brightness == Brightness.light
+                        ? colorScheme.primary
+                        : colorScheme.onSurface)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(1),
             ),
           ),

@@ -1008,82 +1008,96 @@ class _AlbumViewerState extends State<_AlbumViewer> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
     if (!widget.source.valid) return const SizedBox.shrink();
-    return Theme(
-      data: ThemeData.dark(useMaterial3: true),
-      child: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
-            if (_index > 0) {
-              _pages.previousPage(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-              );
-            }
-          },
-          const SingleActivator(LogicalKeyboardKey.arrowRight): () {
-            if (_index + 1 < widget.tags.length) {
-              _pages.nextPage(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-              );
-            }
-          },
+    final light = Theme.of(context).brightness == Brightness.light;
+    final frame = _frame(context, light: light);
+    if (light) return frame;
+    return Theme(data: ThemeData.dark(useMaterial3: true), child: frame);
+  }
+
+  Widget _frame(BuildContext context, {required bool light}) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final size = MediaQuery.sizeOf(context);
+    final phone = PresentationScope.isPhoneOf(context);
+    final inset = light
+        ? EdgeInsets.fromLTRB(
+            phone ? 12 : 24,
+            phone ? 12 : 56,
+            phone ? 12 : 24,
+            phone ? 12 : 0,
+          )
+        : const EdgeInsets.all(16);
+    final ink = light ? scheme.onSurface : Colors.white;
+    final headerInk = light ? scheme.onSurface : Colors.white70;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+          if (_index > 0) {
+            _pages.previousPage(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }
         },
-        child: Focus(
-          autofocus: true,
-          child: Dialog(
-            backgroundColor: Colors.black,
-            insetPadding: const EdgeInsets.all(16),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              width: AppViewport.fit(
-                1200,
-                MediaQuery.sizeOf(context).width - 32,
-                MediaQuery.sizeOf(context),
-              ),
-              height: MediaQuery.sizeOf(context).height * .85,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${_index + 1} / ${widget.tags.length}',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+          if (_index + 1 < widget.tags.length) {
+            _pages.nextPage(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Dialog(
+          backgroundColor: light ? null : Colors.black,
+          insetPadding: inset,
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: AppViewport.fit(1200, size.width - inset.horizontal, size),
+            height: light ? size.height - inset.vertical : size.height * .85,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${_index + 1} / ${widget.tags.length}',
+                          style: TextStyle(color: headerInk),
                         ),
-                        TextButton.icon(
-                          onPressed: _saving ? null : _download,
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: _saving
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.download_rounded),
-                          label: Text(l10n.albumDownload),
-                        ),
-                        IconButton(
-                          color: Colors.white,
-                          tooltip: MaterialLocalizations.of(
-                            context,
-                          ).closeButtonTooltip,
-                          onPressed: () => Navigator.pop(context),
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                      ],
-                    ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _saving ? null : _download,
+                        style: TextButton.styleFrom(foregroundColor: ink),
+                        icon: _saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.download_rounded),
+                        label: Text(l10n.albumDownload),
+                      ),
+                      IconButton(
+                        color: ink,
+                        tooltip: MaterialLocalizations.of(
+                          context,
+                        ).closeButtonTooltip,
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
                   ),
-                  Expanded(
+                ),
+                Expanded(
+                  child: ColoredBox(
+                    color: light ? scheme.surfaceContainerHigh : Colors.black,
                     child: Stack(
                       children: [
                         PageView.builder(
@@ -1108,36 +1122,70 @@ class _AlbumViewerState extends State<_AlbumViewer> {
                         if (_index > 0)
                           Align(
                             alignment: Alignment.centerLeft,
-                            child: IconButton.filledTonal(
-                              tooltip: l10n.albumPrevious,
-                              onPressed: () => _pages.previousPage(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOut,
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: _turnPage(
+                                light: light,
+                                tooltip: l10n.albumPrevious,
+                                icon: Icons.chevron_left_rounded,
+                                onPressed: () => _pages.previousPage(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOut,
+                                ),
                               ),
-                              icon: const Icon(Icons.chevron_left_rounded),
                             ),
                           ),
                         if (_index + 1 < widget.tags.length)
                           Align(
                             alignment: Alignment.centerRight,
-                            child: IconButton.filledTonal(
-                              tooltip: l10n.albumNext,
-                              onPressed: () => _pages.nextPage(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOut,
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: _turnPage(
+                                light: light,
+                                tooltip: l10n.albumNext,
+                                icon: Icons.chevron_right_rounded,
+                                onPressed: () => _pages.nextPage(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOut,
+                                ),
                               ),
-                              icon: const Icon(Icons.chevron_right_rounded),
                             ),
                           ),
                       ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _turnPage({
+    required bool light,
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    if (!light) {
+      return IconButton.filledTonal(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon),
+      );
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        backgroundColor: scheme.surfaceContainerLowest,
+        foregroundColor: scheme.onSurface,
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      icon: Icon(icon),
     );
   }
 }

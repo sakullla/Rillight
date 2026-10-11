@@ -503,6 +503,8 @@ class _WideCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final light = scheme.brightness == Brightness.light;
     final progress = item.playbackProgress;
     final title = _resumeTitle(item);
     final meta = _resumeMeta(item, title);
@@ -554,8 +556,12 @@ class _WideCard extends StatelessWidget {
                                   padding: EdgeInsets.zero,
                                   tapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
-                                  backgroundColor: Colors.white,
-                                  foregroundColor: Colors.black,
+                                  backgroundColor: light
+                                      ? scheme.primary
+                                      : Colors.white,
+                                  foregroundColor: light
+                                      ? scheme.onPrimary
+                                      : Colors.black,
                                   shape: const CircleBorder(),
                                 ),
                                 onPressed: () => context.push<void>(
@@ -584,13 +590,15 @@ class _WideCard extends StatelessWidget {
                                 key: CatalogKeys.resumeProgress,
                                 height: 4,
                                 child: ColoredBox(
-                                  color: Colors.black.withValues(alpha: 0.45),
+                                  color: light
+                                      ? scheme.inverseSurface.withValues(
+                                          alpha: 0.28,
+                                        )
+                                      : Colors.black.withValues(alpha: 0.45),
                                   child: FractionallySizedBox(
                                     alignment: Alignment.centerLeft,
                                     widthFactor: progress.clamp(0.0, 1.0),
-                                    child: ColoredBox(
-                                      color: theme.colorScheme.primary,
-                                    ),
+                                    child: ColoredBox(color: scheme.primary),
                                   ),
                                 ),
                               ),
@@ -606,14 +614,21 @@ class _WideCard extends StatelessWidget {
                                 key: CatalogKeys.removeFromResume(item.id),
                                 behavior: HitTestBehavior.opaque,
                                 onTap: onRemove,
-                                child: const SizedBox(
+                                child: SizedBox(
                                   width: 48,
                                   height: 48,
                                   child: Center(
                                     child: DecoratedBox(
                                       decoration: BoxDecoration(
-                                        color: Color(0x8C000000),
+                                        color: light
+                                            ? scheme.surfaceContainerLowest
+                                            : const Color(0x8C000000),
                                         shape: BoxShape.circle,
+                                        border: light
+                                            ? Border.all(
+                                                color: scheme.outlineVariant,
+                                              )
+                                            : null,
                                       ),
                                       child: SizedBox(
                                         width: 28,
@@ -621,7 +636,9 @@ class _WideCard extends StatelessWidget {
                                         child: Icon(
                                           Icons.close_rounded,
                                           size: 16,
-                                          color: Colors.white,
+                                          color: light
+                                              ? scheme.onSurface
+                                              : Colors.white,
                                         ),
                                       ),
                                     ),

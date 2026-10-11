@@ -16,7 +16,10 @@ class OptionPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final foreground = scheme.onSurface;
+    final light = scheme.brightness == Brightness.light;
+    final foreground = selected && light
+        ? scheme.onPrimaryContainer
+        : scheme.onSurface;
     return Opacity(
       opacity: onPressed == null ? .45 : 1,
       child: Semantics(
@@ -25,11 +28,13 @@ class OptionPill extends StatelessWidget {
         enabled: onPressed != null,
         child: Material(
           color: selected
-              ? scheme.surfaceBright
+              ? (light ? scheme.primaryContainer : scheme.surfaceBright)
               : scheme.surfaceContainerHighest,
           shape: StadiumBorder(
             side: BorderSide(
-              color: selected ? scheme.onSurface : scheme.outlineVariant,
+              color: selected
+                  ? (light ? scheme.primary : scheme.onSurface)
+                  : scheme.outlineVariant,
               width: selected ? 1.5 : 1,
             ),
           ),
