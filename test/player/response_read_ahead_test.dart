@@ -191,6 +191,11 @@ void main() {
         );
         fixture.proxy.cancelPendingReads();
         await reader.cancel();
+        // Published bytes include RAM admitted before the asynchronous disk
+        // write completes. discardBefore correctly protects those writes.
+        await fixture.waitFor(
+          () => fixture.proxy.cache!.diagnostics['pendingPublications'] == 0,
+        );
         await fixture.waitForCoverage(start: start);
         final diagnostics = fixture.proxy.diagnostics;
         expect(diagnostics['cachedByteTotal'], fixture.length);

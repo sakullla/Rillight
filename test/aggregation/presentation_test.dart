@@ -248,6 +248,18 @@ class _BlockingCatalogAdapter extends FakeEmbyAdapter {
   }
 }
 
+class _PresentationClient extends EmbyClient {
+  _PresentationClient({required super.device, required super.dio});
+
+  // The synthetic HTTP adapter does not intercept WebSocket connections.
+  // Presentation tests must not resolve fake server hosts on the real network.
+  @override
+  CatalogNotifications? watchCatalog({
+    required Future<void> Function() onUserDataChanged,
+    required Future<void> Function() onLibraryChanged,
+  }) => null;
+}
+
 class _Fixture {
   final a = FakeEmbyServer(
     serverId: 'a',
@@ -274,7 +286,7 @@ class _Fixture {
     adapter = sourceAdapter ?? FakeEmbyAdapter([a, b]);
     final credentials = MemoryCredentialStore();
     final servers = MemoryServerListStore();
-    MediaServerClient client() => EmbyClient(
+    MediaServerClient client() => _PresentationClient(
       device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'test',
