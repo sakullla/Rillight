@@ -8,6 +8,7 @@ class PlayerOpenRequest {
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
+    this.secondarySubtitleStreamIndex,
     this.startTimeTicks,
     this.source,
     this.work,
@@ -23,6 +24,10 @@ class PlayerOpenRequest {
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
+
+  /// 次字幕(槽位 1)的显式预选;缺省 null 表示次字幕关闭。
+  /// 会话导入文件不跨进程传递,只有服务器流索引可表达。
+  final int? secondarySubtitleStreamIndex;
   final int? startTimeTicks;
   final SourceReference? source;
   final SourceReference? work;

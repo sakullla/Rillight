@@ -25,6 +25,7 @@ import 'package:rillight/player/playback_skip_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:rillight/player/playback_models.dart';
+import 'package:rillight/player/session_subtitle_files.dart';
 import 'package:rillight/player/track_picker.dart';
 
 /// 轨道选项的辅助行(内嵌/外挂、编码、默认),复用桌面同款描述。
@@ -40,6 +41,29 @@ Widget? _phoneTrackMeta(BuildContext context, MediaStreamInfo track) {
       color: theme.colorScheme.onSurface.withValues(alpha: .68),
     ),
   );
+}
+
+/// 字幕导入/槽位限制的提示文案;无提示时返回 null。
+String? _phoneSubtitleImportNotice(AppLocalizations l, PlayerController c) {
+  final refusal = c.subtitleSelectionNotice;
+  if (refusal == 'occupied') return l.subtitleSlotOccupied;
+  if (refusal == 'burn-in') return l.subtitleBurnInSecondary;
+  switch (c.subtitleImportNotice) {
+    case SubtitleImportOutcome.duplicate:
+      return l.subtitleImportDuplicate;
+    case SubtitleImportOutcome.invalidFormat:
+      return l.subtitleImportInvalid;
+    case SubtitleImportOutcome.tooLarge:
+      return l.subtitleImportTooLarge;
+    case SubtitleImportOutcome.sessionLimit:
+      return l.subtitleImportSessionLimit;
+    case SubtitleImportOutcome.unreadable:
+      return l.subtitleImportUnreadable;
+    case SubtitleImportOutcome.pickerUnavailable:
+      return l.subtitleImportPickerUnavailable;
+    default:
+      return null;
+  }
 }
 
 /// Phone controls with a title bar, central transport and a full-width timeline.
@@ -899,8 +923,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                           ),
                           for (final entry in <String, (IconData, String)>{
                             'speed': (Icons.speed, l.playbackRate),
+                            // 无自带字幕的媒体也保留轨道入口:本地导入在那里。
                             if (c.canSwitchAudioTrack ||
-                                c.canConfigureSubtitles)
+                                c.canConfigureSubtitles ||
+                                c.canImportSubtitleFiles)
                               'tracks': (
                                 Icons.subtitles_outlined,
                                 c.canSwitchAudioTrack
@@ -1141,11 +1167,12 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 title: Text(track.label),
                                 onTap: () => c.setAudio(track.index),
                               ),
-                          if (c.canConfigureSubtitles) ...[
+                          if (c.canConfigureSubtitles ||
+                              c.canImportSubtitleFiles) ...[
                             Padding(
                               padding: const EdgeInsets.only(top: 8, bottom: 8),
                               child: Text(
-                                l.subtitleTrack,
+                                l.subtitleTrackPrimary,
                                 style: theme.textTheme.titleSmall,
                               ),
                             ),
@@ -1155,10 +1182,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               shrinkWrap: true,
                               options: [
                                 TrackPickerOption(
-                                  selected: c.subtitleStreamIndex == null,
+                                  selected:
+                                      c.subtitleStreamIndex == null &&
+                                      c.primarySubtitleFileId == null,
                                   reveal: !c.canSwitchAudioTrack,
                                   leading: Icon(
-                                    c.subtitleStreamIndex == null
+                                    c.subtitleStreamIndex == null &&
+                                            c.primarySubtitleFileId == null
                                         ? Icons.check_circle
                                         : Icons.radio_button_unchecked,
                                   ),
@@ -1169,20 +1199,86 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 for (final track in c.selectableSubtitleTracks)
                                   TrackPickerOption(
                                     selected:
-                                        c.subtitleStreamIndex == track.index,
+                                        c.subtitleStreamIndex == track.index &&
+                                        c.primarySubtitleFileId == null,
                                     reveal: false,
                                     leading: Icon(
-                                      c.subtitleStreamIndex == track.index
+                                      c.subtitleStreamIndex == track.index &&
+                                              c.primarySubtitleFileId == null
                                           ? Icons.check_circle
                                           : Icons.radio_button_unchecked,
                                     ),
                                     title: Text(track.label),
                                     subtitle: _phoneTrackMeta(context, track),
+                                    trailing:
+                                        c.subtitleStreamOccupiesOtherSlot(
+                                          0,
+                                          track.index,
+                                        )
+                                        ? Text(
+                                            l.subtitleSlotOccupied,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.end,
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color:
+                                                      scheme.onSurfaceVariant,
+                                                ),
+                                          )
+                                        : null,
                                     searchText:
                                         '${track.label} ${track.language ?? ''} '
                                         '${track.codec ?? ''} '
                                         '${track.displayTitle ?? ''}',
-                                    onTap: () => c.setSubtitle(track.index),
+                                    onTap:
+                                        c.subtitleStreamOccupiesOtherSlot(
+                                          0,
+                                          track.index,
+                                        )
+                                        ? null
+                                        : () => c.setSubtitle(track.index),
+                                  ),
+                                for (final file in c.sessionSubtitleFiles)
+                                  TrackPickerOption(
+                                    key: ValueKey(
+                                      'mobile-subtitle-file-${file.id}',
+                                    ),
+                                    selected:
+                                        c.primarySubtitleFileId == file.id,
+                                    reveal: false,
+                                    leading: Icon(
+                                      c.primarySubtitleFileId == file.id
+                                          ? Icons.check_circle
+                                          : Icons.radio_button_unchecked,
+                                    ),
+                                    title: Text(file.label),
+                                    subtitle: Text(l.subtitleMetaImported),
+                                    trailing:
+                                        c.subtitleFileOccupiesOtherSlot(
+                                          0,
+                                          file.id,
+                                        )
+                                        ? Text(
+                                            l.subtitleSlotOccupied,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.end,
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color:
+                                                      scheme.onSurfaceVariant,
+                                                ),
+                                          )
+                                        : null,
+                                    searchText: file.label,
+                                    onTap:
+                                        c.subtitleFileOccupiesOtherSlot(
+                                          0,
+                                          file.id,
+                                        )
+                                        ? null
+                                        : () => c.setSubtitleFromFile(file.id),
                                   ),
                               ],
                               tileBuilder: (context, option) => optionTile(
@@ -1192,9 +1288,167 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 leading: option.leading,
                                 title: option.title,
                                 subtitle: option.subtitle,
+                                trailing: option.trailing,
                                 onTap: option.onTap,
                               ),
                             ),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8, bottom: 8),
+                              child: Text(
+                                l.subtitleTrackSecondary,
+                                style: theme.textTheme.titleSmall,
+                              ),
+                            ),
+                            TrackPickerList(
+                              shrinkWrap: true,
+                              searchThreshold: 12,
+                              options: [
+                                TrackPickerOption(
+                                  selected: !c.hasSecondarySubtitle,
+                                  reveal: false,
+                                  leading: Icon(
+                                    c.hasSecondarySubtitle
+                                        ? Icons.radio_button_unchecked
+                                        : Icons.check_circle,
+                                  ),
+                                  title: Text(l.subtitleOff),
+                                  searchText: l.subtitleOff,
+                                  onTap: () => c.setSecondarySubtitle(null),
+                                ),
+                                for (final track in c.selectableSubtitleTracks)
+                                  if (!c.streamIsBurnedIn(track.index))
+                                    TrackPickerOption(
+                                      selected:
+                                          c.secondarySubtitleStreamIndex ==
+                                          track.index,
+                                      reveal: false,
+                                      leading: Icon(
+                                        c.secondarySubtitleStreamIndex ==
+                                                track.index
+                                            ? Icons.check_circle
+                                            : Icons.radio_button_unchecked,
+                                      ),
+                                      title: Text(track.label),
+                                      subtitle: _phoneTrackMeta(context, track),
+                                      trailing:
+                                          c.subtitleStreamOccupiesOtherSlot(
+                                            1,
+                                            track.index,
+                                          )
+                                          ? Text(
+                                              l.subtitleSlotOccupied,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.end,
+                                              style: theme.textTheme.labelSmall
+                                                  ?.copyWith(
+                                                    color:
+                                                        scheme.onSurfaceVariant,
+                                                  ),
+                                            )
+                                          : null,
+                                      searchText:
+                                          '${track.label} ${track.language ?? ''} '
+                                          '${track.codec ?? ''} '
+                                          '${track.displayTitle ?? ''}',
+                                      onTap:
+                                          c.subtitleStreamOccupiesOtherSlot(
+                                            1,
+                                            track.index,
+                                          )
+                                          ? null
+                                          : () => c.setSecondarySubtitle(
+                                              track.index,
+                                            ),
+                                    ),
+                                for (final file in c.sessionSubtitleFiles)
+                                  TrackPickerOption(
+                                    key: ValueKey(
+                                      'mobile-subtitle-secondary-${file.id}',
+                                    ),
+                                    selected:
+                                        c.secondarySubtitleFileId == file.id,
+                                    reveal: false,
+                                    leading: Icon(
+                                      c.secondarySubtitleFileId == file.id
+                                          ? Icons.check_circle
+                                          : Icons.radio_button_unchecked,
+                                    ),
+                                    title: Text(file.label),
+                                    subtitle: Text(l.subtitleMetaImported),
+                                    trailing:
+                                        c.subtitleFileOccupiesOtherSlot(
+                                          1,
+                                          file.id,
+                                        )
+                                        ? Text(
+                                            l.subtitleSlotOccupied,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.end,
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(
+                                                  color:
+                                                      scheme.onSurfaceVariant,
+                                                ),
+                                          )
+                                        : null,
+                                    searchText: file.label,
+                                    onTap:
+                                        c.subtitleFileOccupiesOtherSlot(
+                                          1,
+                                          file.id,
+                                        )
+                                        ? null
+                                        : () => c.setSecondarySubtitleFromFile(
+                                            file.id,
+                                          ),
+                                  ),
+                              ],
+                              tileBuilder: (context, option) => optionTile(
+                                key: option.key,
+                                selected: option.selected,
+                                reveal: option.reveal,
+                                leading: option.leading,
+                                title: option.title,
+                                subtitle: option.subtitle,
+                                trailing: option.trailing,
+                                onTap: option.onTap,
+                              ),
+                            ),
+                            if (c.canImportSubtitleFiles) ...[
+                              TextButton.icon(
+                                key: const Key('mobile-subtitle-import'),
+                                style: TextButton.styleFrom(
+                                  alignment: Alignment.centerLeft,
+                                  minimumSize: const Size.fromHeight(48),
+                                  backgroundColor:
+                                      scheme.surfaceContainerHighest,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadii.md,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: () =>
+                                    c.importSubtitleFile().then((_) {}),
+                                icon: const Icon(Icons.upload_file_outlined),
+                                label: Text(l.subtitleImportLocal),
+                              ),
+                              if (_phoneSubtitleImportNotice(l, c) != null)
+                                Padding(
+                                  key: const Key(
+                                    'mobile-subtitle-import-notice',
+                                  ),
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    _phoneSubtitleImportNotice(l, c)!,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ],
                           if (c.trackFailure != null)
                             Text(l.mobileTrackUnavailable),

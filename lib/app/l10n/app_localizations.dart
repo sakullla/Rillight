@@ -1648,6 +1648,84 @@ abstract class AppLocalizations {
   /// **'关闭字幕'**
   String get subtitleOff;
 
+  /// Primary subtitle slot label.
+  ///
+  /// In zh, this message translates to:
+  /// **'主字幕'**
+  String get subtitleTrackPrimary;
+
+  /// Secondary subtitle slot label.
+  ///
+  /// In zh, this message translates to:
+  /// **'次字幕'**
+  String get subtitleTrackSecondary;
+
+  /// Entry for importing a session-local subtitle file.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入本地字幕…'**
+  String get subtitleImportLocal;
+
+  /// Progress note while a subtitle import is running.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在导入字幕…'**
+  String get subtitleImportRunning;
+
+  /// Import finished as a duplicate of an existing candidate.
+  ///
+  /// In zh, this message translates to:
+  /// **'相同内容的字幕已在候选列表中'**
+  String get subtitleImportDuplicate;
+
+  /// Import rejected because content validation failed.
+  ///
+  /// In zh, this message translates to:
+  /// **'不是有效的 SRT/ASS/SSA/VTT UTF-8 字幕文件'**
+  String get subtitleImportInvalid;
+
+  /// Import rejected because the file exceeds the single-file limit.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕文件超过单文件大小限制'**
+  String get subtitleImportTooLarge;
+
+  /// Import rejected because the session total size limit is reached.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话内字幕文件总大小已达上限'**
+  String get subtitleImportSessionLimit;
+
+  /// Import failed while reading or copying the file.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕文件无法读取'**
+  String get subtitleImportUnreadable;
+
+  /// No documents provider is available, common on Android TV.
+  ///
+  /// In zh, this message translates to:
+  /// **'此设备没有可用的文件选择器'**
+  String get subtitleImportPickerUnavailable;
+
+  /// A source cannot occupy both subtitle slots at once.
+  ///
+  /// In zh, this message translates to:
+  /// **'该来源已在另一字幕槽位使用'**
+  String get subtitleSlotOccupied;
+
+  /// Burned-in transcode subtitles cannot fill the secondary slot.
+  ///
+  /// In zh, this message translates to:
+  /// **'烧录字幕无法作为可独立关闭的次字幕'**
+  String get subtitleBurnInSecondary;
+
+  /// Badge marking a session-imported local subtitle file.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地导入'**
+  String get subtitleMetaImported;
+
   /// Badge marking an external sidecar subtitle file.
   ///
   /// In zh, this message translates to:

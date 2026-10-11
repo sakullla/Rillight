@@ -274,6 +274,71 @@ void main() {
     await finish(tester);
   }, tags: ['integration']);
 
+  testWidgets('TV tracks panel selects an independent secondary subtitle', (
+    tester,
+  ) async {
+    final video = FakeVideoBackend();
+    final c = await start(tester, video);
+    c.subtitleStreamIndex = 1;
+    c.resolved = ResolvedPlayback(
+      playMethod: PlayMethod.directPlay,
+      streamUrl: Uri.parse('https://example.test/media'),
+      playSessionId: 'session',
+      mediaSource: const PlaybackMediaSource(
+        id: 'only',
+        mediaStreams: [
+          MediaStreamInfo(
+            index: 1,
+            type: 'Subtitle',
+            isTextSubtitleStream: true,
+            displayTitle: 'Chinese',
+          ),
+          MediaStreamInfo(
+            index: 2,
+            type: 'Subtitle',
+            isTextSubtitleStream: true,
+            displayTitle: 'English',
+          ),
+        ],
+      ),
+      itemId: c.itemId,
+    );
+    c.onUserActivity();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('tv-player-tracks')));
+    await tester.pumpAndSettle();
+    expect(find.text('主字幕'), findsOneWidget);
+    expect(find.text('次字幕'), findsOneWidget);
+    expect(find.byKey(const Key('tv-subtitle-import')), findsOneWidget);
+
+    final panelScroll = find
+        .descendant(
+          of: find.byType(TvPlayerPage),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    final secondary = find.byKey(const ValueKey('tv-subtitle-secondary-2'));
+    await tester.scrollUntilVisible(secondary, 240, scrollable: panelScroll);
+    await tester.pumpAndSettle();
+    await tester.tap(secondary);
+    await tester.pumpAndSettle();
+    expect(c.secondarySubtitleStreamIndex, 2);
+    expect(video.secondarySubtitleIndex, 2);
+    expect(c.subtitleStreamIndex, 1, reason: '另一槽位不受影响');
+
+    // 同一来源不可重复占用两槽:选择次槽已占用轨时给出提示且不改变现状。
+    final occupied = find.byKey(const ValueKey('subtitle-2'));
+    await tester.scrollUntilVisible(occupied, -240, scrollable: panelScroll);
+    await tester.pumpAndSettle();
+    await tester.tap(occupied);
+    await tester.pumpAndSettle();
+    expect(c.subtitleStreamIndex, 1);
+    expect(c.secondarySubtitleStreamIndex, 2);
+    expect(find.byKey(const Key('tv-subtitle-import-notice')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
+
   testWidgets(
     'surface remote seek and scan preserve playing and paused intent',
     (tester) async {

@@ -863,6 +863,58 @@
   "@subtitleOff": {
     "description": "Disable subtitles."
   },
+  "subtitleTrackPrimary": "主字幕",
+  "@subtitleTrackPrimary": {
+    "description": "Primary subtitle slot label."
+  },
+  "subtitleTrackSecondary": "次字幕",
+  "@subtitleTrackSecondary": {
+    "description": "Secondary subtitle slot label."
+  },
+  "subtitleImportLocal": "导入本地字幕…",
+  "@subtitleImportLocal": {
+    "description": "Entry for importing a session-local subtitle file."
+  },
+  "subtitleImportRunning": "正在导入字幕…",
+  "@subtitleImportRunning": {
+    "description": "Progress note while a subtitle import is running."
+  },
+  "subtitleImportDuplicate": "相同内容的字幕已在候选列表中",
+  "@subtitleImportDuplicate": {
+    "description": "Import finished as a duplicate of an existing candidate."
+  },
+  "subtitleImportInvalid": "不是有效的 SRT/ASS/SSA/VTT UTF-8 字幕文件",
+  "@subtitleImportInvalid": {
+    "description": "Import rejected because content validation failed."
+  },
+  "subtitleImportTooLarge": "字幕文件超过单文件大小限制",
+  "@subtitleImportTooLarge": {
+    "description": "Import rejected because the file exceeds the single-file limit."
+  },
+  "subtitleImportSessionLimit": "会话内字幕文件总大小已达上限",
+  "@subtitleImportSessionLimit": {
+    "description": "Import rejected because the session total size limit is reached."
+  },
+  "subtitleImportUnreadable": "字幕文件无法读取",
+  "@subtitleImportUnreadable": {
+    "description": "Import failed while reading or copying the file."
+  },
+  "subtitleImportPickerUnavailable": "此设备没有可用的文件选择器",
+  "@subtitleImportPickerUnavailable": {
+    "description": "No documents provider is available, common on Android TV."
+  },
+  "subtitleSlotOccupied": "该来源已在另一字幕槽位使用",
+  "@subtitleSlotOccupied": {
+    "description": "A source cannot occupy both subtitle slots at once."
+  },
+  "subtitleBurnInSecondary": "烧录字幕无法作为可独立关闭的次字幕",
+  "@subtitleBurnInSecondary": {
+    "description": "Burned-in transcode subtitles cannot fill the secondary slot."
+  },
+  "subtitleMetaImported": "本地导入",
+  "@subtitleMetaImported": {
+    "description": "Badge marking a session-imported local subtitle file."
+  },
   "subtitleMetaExternal": "外挂",
   "@subtitleMetaExternal": {
     "description": "Badge marking an external sidecar subtitle file."

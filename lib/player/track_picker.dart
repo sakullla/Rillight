@@ -9,6 +9,7 @@ import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/player/playback_models.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/player/session_subtitle_files.dart';
 
 /// 轨道/片源选项超过该数量时,选择器顶部显示搜索框。
 /// 低于阈值保持原有平铺,不为少数选项引入额外输入负担。
@@ -314,6 +315,10 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
   final FocusNode _buttonFocus = FocusNode();
   final FocusScopeNode _panelFocus = FocusScopeNode();
 
+  /// 当前编辑的槽位:0 主字幕,1 次字幕。
+  int _slot = 0;
+  bool _importing = false;
+
   @override
   void didUpdateWidget(SubtitleTrackMenu oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -336,9 +341,35 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
   }
 
   void _select(int? index) {
-    widget.controller.setSubtitle(index);
+    final c = widget.controller;
+    if (_slot == 1) {
+      c.setSecondarySubtitle(index);
+    } else {
+      c.setSubtitle(index);
+    }
     _menu.close();
     _buttonFocus.requestFocus();
+  }
+
+  void _selectFile(String? fileId) {
+    final c = widget.controller;
+    if (_slot == 1) {
+      c.setSecondarySubtitleFromFile(fileId);
+    } else {
+      c.setSubtitleFromFile(fileId);
+    }
+    _menu.close();
+    _buttonFocus.requestFocus();
+  }
+
+  Future<void> _import() async {
+    if (_importing) return;
+    setState(() => _importing = true);
+    try {
+      await widget.controller.importSubtitleFile();
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
   }
 
   @override
@@ -379,7 +410,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
           tooltip: l.subtitleTrack,
           color: scheme.onSurface,
           icon: Icon(
-            c.subtitleStreamIndex == null
+            c.subtitleStreamIndex == null && !c.hasSecondarySubtitle
                 ? Icons.closed_caption_off_rounded
                 : Icons.closed_caption_rounded,
           ),
@@ -415,7 +446,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                 },
                 child: Material(
                   type: MaterialType.transparency,
-                  child: _panel(context, c.selectableSubtitleTracks),
+                  child: _panel(context),
                 ),
               ),
             );
@@ -425,12 +456,20 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
     );
   }
 
-  Widget _panel(BuildContext context, List<MediaStreamInfo> tracks) {
+  Widget _panel(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final c = widget.controller;
     final enabled = !c.loading;
+    final slot = _slot;
+    final tracks = [
+      for (final track in c.selectableSubtitleTracks)
+        // 烧录字幕没有独立开关,只能作为主字幕的服务器行为保留。
+        if (slot == 0 || !c.streamIsBurnedIn(track.index)) track,
+    ];
+    final files = c.sessionSubtitleFiles;
+    final notice = _noticeText(l, c);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -450,7 +489,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                 Padding(
                   padding: const EdgeInsets.only(right: 4),
                   child: Text(
-                    l.trackPickerCount(tracks.length),
+                    l.trackPickerCount(tracks.length + files.length),
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -461,6 +500,37 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                 onPressed: _menu.close,
                 tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
                 icon: const Icon(Icons.close_rounded, size: 20),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: SegmentedButton<int>(
+                  key: Key(
+                    slot == 0
+                        ? 'player-subtitle-slot-primary'
+                        : 'player-subtitle-slot-secondary',
+                  ),
+                  segments: [
+                    ButtonSegment(
+                      value: 0,
+                      label: Text(l.subtitleTrackPrimary),
+                    ),
+                    ButtonSegment(
+                      value: 1,
+                      label: Text(l.subtitleTrackSecondary),
+                    ),
+                  ],
+                  selected: {slot},
+                  onSelectionChanged: enabled
+                      ? (value) => setState(() => _slot = value.first)
+                      : null,
+                  showSelectedIcon: false,
+                ),
               ),
             ],
           ),
@@ -478,7 +548,10 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   searchText: l.subtitleOff,
-                  selected: c.subtitleStreamIndex == null,
+                  selected: slot == 0
+                      ? (c.subtitleStreamIndex == null &&
+                            c.primarySubtitleFileId == null)
+                      : !c.hasSecondarySubtitle,
                   onTap: enabled ? () => _select(null) : null,
                 ),
                 for (final track in tracks)
@@ -492,15 +565,127 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                     searchText:
                         '${track.label} ${track.language ?? ''} '
                         '${track.codec ?? ''} ${track.displayTitle ?? ''}',
-                    selected: track.index == c.subtitleStreamIndex,
-                    onTap: enabled ? () => _select(track.index) : null,
+                    selected: slot == 0
+                        ? (track.index == c.subtitleStreamIndex &&
+                              c.primarySubtitleFileId == null)
+                        : track.index == c.secondarySubtitleStreamIndex,
+                    trailing:
+                        c.subtitleStreamOccupiesOtherSlot(slot, track.index)
+                        ? Text(
+                            l.subtitleSlotOccupied,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.end,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          )
+                        : null,
+                    onTap:
+                        enabled &&
+                            !c.subtitleStreamOccupiesOtherSlot(
+                              slot,
+                              track.index,
+                            ) &&
+                            !(slot == 1 && c.streamIsBurnedIn(track.index))
+                        ? () => _select(track.index)
+                        : null,
+                  ),
+                for (final file in files)
+                  TrackPickerOption(
+                    key: ValueKey('subtitle-file-${file.id}'),
+                    title: Text(
+                      file.label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      l.subtitleMetaImported,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: .68),
+                      ),
+                    ),
+                    searchText: '${file.label} ${file.format.extension}',
+                    selected: slot == 0
+                        ? c.primarySubtitleFileId == file.id
+                        : c.secondarySubtitleFileId == file.id,
+                    trailing: c.subtitleFileOccupiesOtherSlot(slot, file.id)
+                        ? Text(
+                            l.subtitleSlotOccupied,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.end,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          )
+                        : null,
+                    onTap:
+                        enabled &&
+                            !c.subtitleFileOccupiesOtherSlot(slot, file.id)
+                        ? () => _selectFile(file.id)
+                        : null,
                   ),
               ],
             ),
           ),
         ),
+        if (notice != null)
+          Padding(
+            key: const Key('player-subtitle-import-notice'),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: Text(
+              notice,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: OutlinedButton.icon(
+            key: const Key('player-subtitle-import'),
+            onPressed: enabled && !_importing ? _import : null,
+            icon: _importing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.upload_file_outlined, size: 18),
+            label: Text(
+              _importing ? l.subtitleImportRunning : l.subtitleImportLocal,
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  String? _noticeText(AppLocalizations l, PlayerController c) {
+    final refusal = c.subtitleSelectionNotice;
+    if (refusal == 'occupied') return l.subtitleSlotOccupied;
+    if (refusal == 'burn-in') return l.subtitleBurnInSecondary;
+    switch (c.subtitleImportNotice) {
+      case SubtitleImportOutcome.duplicate:
+        return l.subtitleImportDuplicate;
+      case SubtitleImportOutcome.invalidFormat:
+        return l.subtitleImportInvalid;
+      case SubtitleImportOutcome.tooLarge:
+        return l.subtitleImportTooLarge;
+      case SubtitleImportOutcome.sessionLimit:
+        return l.subtitleImportSessionLimit;
+      case SubtitleImportOutcome.unreadable:
+        return l.subtitleImportUnreadable;
+      case SubtitleImportOutcome.pickerUnavailable:
+        return l.subtitleImportPickerUnavailable;
+      default:
+        return null;
+    }
   }
 
   Widget? _meta(ThemeData theme, MediaStreamInfo track) {

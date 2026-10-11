@@ -54,6 +54,8 @@ const caseModules = <String>[
   'player/player_settings_cases.dart',
   'player/player_window_cases.dart',
   'player/player_window_launch_cases.dart',
+  'player/subtitle_menu_cases.dart',
+  'player/subtitle_slots_cases.dart',
   'settings_page_cases.dart',
   'widgets/app_empty_view_cases.dart',
   'widgets/app_hover_card_cases.dart',

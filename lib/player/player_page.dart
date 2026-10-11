@@ -93,6 +93,7 @@ class PlayerPage extends StatefulWidget {
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
+    this.secondarySubtitleStreamIndex,
     this.startTimeTicks,
     this.sourceRequest,
     this.onClosed,
@@ -107,6 +108,9 @@ class PlayerPage extends StatefulWidget {
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
+
+  /// 次字幕显式预选;null 表示次字幕保持关闭。
+  final int? secondarySubtitleStreamIndex;
   final int? startTimeTicks;
   final PlayerOpenRequest? sourceRequest;
   final VoidCallback? onClosed;
@@ -191,6 +195,8 @@ class PlayerPageState extends State<PlayerPage> {
       preferredMediaSourceId: widget.mediaSourceId,
       preferredAudioStreamIndex: widget.audioStreamIndex,
       preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
+      preferredSecondarySubtitleStreamIndex:
+          widget.secondarySubtitleStreamIndex,
       startTimeTicks: widget.startTimeTicks,
       progressInterval: bindings.progressInterval,
       controlsHideAfter: bindings.controlsHideAfter,
@@ -2356,7 +2362,9 @@ class _ControlsRow extends StatelessWidget {
             danmaku: danmakuController,
             onPressed: onDanmakuSearch,
           ),
-        if (controller.canConfigureSubtitles)
+        // 无自带字幕的媒体也保留字幕入口:本地导入在菜单内。
+        if (controller.canConfigureSubtitles ||
+            controller.canImportSubtitleFiles)
           SubtitleTrackMenu(controller: controller),
         if (controller.canBrowseEpisodes)
           _PlayerIconButton(

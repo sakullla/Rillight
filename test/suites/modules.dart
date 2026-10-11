@@ -53,15 +53,17 @@ import '../player/player_runtime_options_cases.dart' as case50;
 import '../player/player_settings_cases.dart' as case51;
 import '../player/player_window_cases.dart' as case52;
 import '../player/player_window_launch_cases.dart' as case53;
-import '../settings_page_cases.dart' as case54;
-import '../widgets/app_empty_view_cases.dart' as case55;
-import '../widgets/app_hover_card_cases.dart' as case56;
-import '../widgets/backdrop_scrim_cases.dart' as case57;
-import '../widgets/liquid_glass_cases.dart' as case58;
-import '../widgets/media_image_cases.dart' as case59;
-import '../widgets/poster_card_cases.dart' as case60;
-import '../widgets/scrim_icon_button_cases.dart' as case61;
-import '../widgets/skeleton_cases.dart' as case62;
+import '../player/subtitle_menu_cases.dart' as case54;
+import '../player/subtitle_slots_cases.dart' as case55;
+import '../settings_page_cases.dart' as case56;
+import '../widgets/app_empty_view_cases.dart' as case57;
+import '../widgets/app_hover_card_cases.dart' as case58;
+import '../widgets/backdrop_scrim_cases.dart' as case59;
+import '../widgets/liquid_glass_cases.dart' as case60;
+import '../widgets/media_image_cases.dart' as case61;
+import '../widgets/poster_card_cases.dart' as case62;
+import '../widgets/scrim_icon_button_cases.dart' as case63;
+import '../widgets/skeleton_cases.dart' as case64;
 
 // Import every module once; registering one group calls only its main().
 // Importing widget modules alone does not install Flutter's HTTP mock.
@@ -120,13 +122,15 @@ const caseEntrypoints = <String, void Function()>{
   'player/player_settings_cases.dart': case51.main,
   'player/player_window_cases.dart': case52.main,
   'player/player_window_launch_cases.dart': case53.main,
-  'settings_page_cases.dart': case54.main,
-  'widgets/app_empty_view_cases.dart': case55.main,
-  'widgets/app_hover_card_cases.dart': case56.main,
-  'widgets/backdrop_scrim_cases.dart': case57.main,
-  'widgets/liquid_glass_cases.dart': case58.main,
-  'widgets/media_image_cases.dart': case59.main,
-  'widgets/poster_card_cases.dart': case60.main,
-  'widgets/scrim_icon_button_cases.dart': case61.main,
-  'widgets/skeleton_cases.dart': case62.main,
+  'player/subtitle_menu_cases.dart': case54.main,
+  'player/subtitle_slots_cases.dart': case55.main,
+  'settings_page_cases.dart': case56.main,
+  'widgets/app_empty_view_cases.dart': case57.main,
+  'widgets/app_hover_card_cases.dart': case58.main,
+  'widgets/backdrop_scrim_cases.dart': case59.main,
+  'widgets/liquid_glass_cases.dart': case60.main,
+  'widgets/media_image_cases.dart': case61.main,
+  'widgets/poster_card_cases.dart': case62.main,
+  'widgets/scrim_icon_button_cases.dart': case63.main,
+  'widgets/skeleton_cases.dart': case64.main,
 };

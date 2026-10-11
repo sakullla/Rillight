@@ -824,6 +824,45 @@ class AppLocalizationsZh extends AppLocalizations {
   String get subtitleOff => '关闭字幕';
 
   @override
+  String get subtitleTrackPrimary => '主字幕';
+
+  @override
+  String get subtitleTrackSecondary => '次字幕';
+
+  @override
+  String get subtitleImportLocal => '导入本地字幕…';
+
+  @override
+  String get subtitleImportRunning => '正在导入字幕…';
+
+  @override
+  String get subtitleImportDuplicate => '相同内容的字幕已在候选列表中';
+
+  @override
+  String get subtitleImportInvalid => '不是有效的 SRT/ASS/SSA/VTT UTF-8 字幕文件';
+
+  @override
+  String get subtitleImportTooLarge => '字幕文件超过单文件大小限制';
+
+  @override
+  String get subtitleImportSessionLimit => '会话内字幕文件总大小已达上限';
+
+  @override
+  String get subtitleImportUnreadable => '字幕文件无法读取';
+
+  @override
+  String get subtitleImportPickerUnavailable => '此设备没有可用的文件选择器';
+
+  @override
+  String get subtitleSlotOccupied => '该来源已在另一字幕槽位使用';
+
+  @override
+  String get subtitleBurnInSecondary => '烧录字幕无法作为可独立关闭的次字幕';
+
+  @override
+  String get subtitleMetaImported => '本地导入';
+
+  @override
   String get subtitleMetaExternal => '外挂';
 
   @override

@@ -39,7 +39,11 @@ float4 ps(Vertex v) : SV_Target {
     if (all(uv >= 0) && all(uv <= 1)) {
       float4 overlay = subtitles.Sample(sampling, uv);
       if (overlay.a > 0) {
-        float3 foreground = linearRgb(saturate(overlay.rgb / overlay.a)) * outputInfo.y;
+        float3 encoded = saturate(overlay.rgb / overlay.a);
+        // The overlay carries sRGB-encoded premultiplied color. HDR output
+        // linearizes like the video; SDR output stays in encoded space.
+        float3 foreground = outputInfo.x > 0
+            ? linearRgb(encoded) * outputInfo.y : encoded;
         pixel.rgb = lerp(pixel.rgb, foreground, overlay.a);
       }
     }
@@ -80,7 +84,8 @@ GpuPresenter::GpuPresenter(IDXGIAdapter* adapter) {
 }
 
 std::shared_ptr<GpuPixelFrame> GpuPresenter::Present(const RillightCoreFrame& source,
-    void* native_texture, int width, int height) {
+    void* native_texture, int width, int height,
+    const RillightCoreSubtitleOverlay* overlay) {
   auto frame = std::make_shared<GpuPixelFrame>();
   frame->width = std::clamp(width, 1, 4096);
   frame->height = std::clamp(height, 1, 2304);
@@ -93,7 +98,7 @@ std::shared_ptr<GpuPixelFrame> GpuPresenter::Present(const RillightCoreFrame& so
   Check(device_->CreateTexture2D(&desc, nullptr, &frame->texture));
   ComPtr<IDXGIResource> resource; Check(frame->texture.As(&resource));
   Check(resource->GetSharedHandle(&frame->handle));
-  Draw(source, native_texture, frame->texture.Get(), frame->width, frame->height, 203, nullptr);
+  Draw(source, native_texture, frame->texture.Get(), frame->width, frame->height, 203, overlay);
   return frame;
 }
 
@@ -143,7 +148,9 @@ void GpuPresenter::Draw(const RillightCoreFrame& source, void* native_texture,
   if (linear_input && !hdr) throw std::runtime_error("HDR frame cannot enter an SDR Flutter texture");
   ComPtr<ID3D11Texture2D> subtitle_texture;
   ComPtr<ID3D11ShaderResourceView> subtitle_view;
-  if (hdr && overlay && overlay->data && overlay->width > 0 && overlay->height > 0 &&
+  // SDR presentation composites the same core overlay as the HDR host; text
+  // subtitles must stay visible on ordinary displays, not only HDR output.
+  if (overlay && overlay->data && overlay->width > 0 && overlay->height > 0 &&
       overlay->width <= source.width && overlay->height <= source.height && overlay->stride >= overlay->width * 4) {
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = overlay->width; desc.Height = overlay->height;

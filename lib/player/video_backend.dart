@@ -176,6 +176,10 @@ abstract class VideoBackend {
   int? get selectedAudioIndex;
   int? get selectedSubtitleIndex;
 
+  /// 次字幕槽(槽位 1)当前选中的服务器流索引;不表示双槽的后端为 null。
+  /// 会话文件等外挂来源由调用方自行跟踪,不进入该快照字段。
+  int? get selectedSecondarySubtitleIndex => null;
+
   Future<void> open(VideoOpenRequest request);
   Future<void> play();
   Future<void> pause();
@@ -187,12 +191,18 @@ abstract class VideoBackend {
 
   /// 选中 [uri] 对应的外挂字幕后返回 true。
   /// 更新的字幕操作抢先完成时返回 false,不表示加载失败。
-  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index});
+  /// [slot] 0 为主字幕,1 为次字幕;旧调用缺省主字幕。
+  Future<bool> setSubtitleUri(
+    Uri uri, {
+    String? title,
+    int? index,
+    int slot = 0,
+  });
 
   /// 选择容器内嵌字幕轨道(按 MediaStream 索引,如直连时的 PGS 位图轨)。
-  Future<void> setSubtitleIndex(int index);
+  Future<void> setSubtitleIndex(int index, {int slot = 0});
 
-  Future<void> setSubtitleOff();
+  Future<void> setSubtitleOff({int slot = 0});
   Future<void> dispose();
 
   Widget buildView({Key? key}) {
@@ -234,11 +244,16 @@ class FakeVideoBackend
   int? audioIndex;
   Uri? subtitleUri;
   int? subtitleIndex;
+  Uri? secondarySubtitleUri;
+  int? secondarySubtitleIndex;
   @override
   int? get selectedAudioIndex => audioIndex;
   @override
   int? get selectedSubtitleIndex => subtitleIndex;
+  @override
+  int? get selectedSecondarySubtitleIndex => secondarySubtitleIndex;
   bool subtitleOff = false;
+  bool secondarySubtitleSelected = false;
   double volume = 100;
   double rate = 1.0;
 
@@ -293,6 +308,9 @@ class FakeVideoBackend
     subtitleOff = false;
     subtitleUri = null;
     subtitleIndex = null;
+    secondarySubtitleSelected = false;
+    secondarySubtitleUri = null;
+    secondarySubtitleIndex = null;
     _duration.add(duration);
     emitEvent(VideoEventKind.duration, duration);
     _position.add(position);
@@ -360,7 +378,18 @@ class FakeVideoBackend
   }
 
   @override
-  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index}) async {
+  Future<bool> setSubtitleUri(
+    Uri uri, {
+    String? title,
+    int? index,
+    int slot = 0,
+  }) async {
+    if (slot == 1) {
+      secondarySubtitleUri = uri;
+      secondarySubtitleIndex = index;
+      secondarySubtitleSelected = true;
+      return true;
+    }
     subtitleUri = uri;
     subtitleIndex = index;
     subtitleOff = false;
@@ -368,14 +397,26 @@ class FakeVideoBackend
   }
 
   @override
-  Future<void> setSubtitleIndex(int index) async {
+  Future<void> setSubtitleIndex(int index, {int slot = 0}) async {
+    if (slot == 1) {
+      secondarySubtitleIndex = index;
+      secondarySubtitleUri = null;
+      secondarySubtitleSelected = true;
+      return;
+    }
     subtitleIndex = index;
     subtitleUri = null;
     subtitleOff = false;
   }
 
   @override
-  Future<void> setSubtitleOff() async {
+  Future<void> setSubtitleOff({int slot = 0}) async {
+    if (slot == 1) {
+      secondarySubtitleSelected = false;
+      secondarySubtitleUri = null;
+      secondarySubtitleIndex = null;
+      return;
+    }
     subtitleOff = true;
     subtitleUri = null;
   }

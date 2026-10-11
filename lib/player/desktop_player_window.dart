@@ -128,6 +128,10 @@ class PlayerWindowLaunch {
         subtitleStreamIndex: json['subtitleStreamIndex'] is int
             ? json['subtitleStreamIndex'] as int
             : int.tryParse('${json['subtitleStreamIndex'] ?? ''}'),
+        secondarySubtitleStreamIndex:
+            json['secondarySubtitleStreamIndex'] is int
+            ? json['secondarySubtitleStreamIndex'] as int
+            : int.tryParse('${json['secondarySubtitleStreamIndex'] ?? ''}'),
         startTimeTicks: json['startTimeTicks'] is int
             ? json['startTimeTicks'] as int
             : int.tryParse('${json['startTimeTicks'] ?? ''}'),
@@ -175,6 +179,8 @@ class PlayerWindowLaunch {
         'audioStreamIndex': request.audioStreamIndex,
       if (request.subtitleStreamIndex != null)
         'subtitleStreamIndex': request.subtitleStreamIndex,
+      if (request.secondarySubtitleStreamIndex != null)
+        'secondarySubtitleStreamIndex': request.secondarySubtitleStreamIndex,
       if (request.startTimeTicks != null)
         'startTimeTicks': request.startTimeTicks,
       'baseUrl': baseUrl,
@@ -402,6 +408,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                       )),
             startTimeTicks: request.startTimeTicks,
             startPaused: request.startPaused,
+            secondarySubtitleStreamIndex: request.secondarySubtitleStreamIndex,
             subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
             maxStreamingBitrate:
                 request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
@@ -1828,6 +1835,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             mediaSourceId: request.mediaSourceId,
             audioStreamIndex: request.audioStreamIndex,
             subtitleStreamIndex: request.subtitleStreamIndex,
+            secondarySubtitleStreamIndex: request.secondarySubtitleStreamIndex,
             startTimeTicks: request.startTimeTicks,
             onClosed: () {
               unawaited(_closeWindow());

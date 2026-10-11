@@ -176,6 +176,8 @@ GoRouter createAppRouter({
                       autoResume: request?.autoResume ?? true,
                       audioStreamIndex: request?.audioStreamIndex,
                       subtitleStreamIndex: request?.subtitleStreamIndex,
+                      secondarySubtitleStreamIndex:
+                          request?.secondarySubtitleStreamIndex,
                     ),
                   ),
                 );

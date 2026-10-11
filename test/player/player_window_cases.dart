@@ -237,10 +237,8 @@ void main() {
         );
         controller.onUserActivity();
         await tester.pump();
-        expect(
-          find.byKey(PlayerKeys.subtitle),
-          subtitles ? findsOneWidget : findsNothing,
-        );
+        // 无自带字幕的媒体也保留字幕入口:本地导入在菜单内。
+        expect(find.byKey(PlayerKeys.subtitle), findsOneWidget);
       }
       controller.resolved = original;
       controller.subtitleStreamIndex = originalSubtitle;

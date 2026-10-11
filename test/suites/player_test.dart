@@ -18,4 +18,8 @@ void main() {
     'player/player_window_test.dart',
     caseEntrypoints['player/player_window_cases.dart']!,
   );
+  group(
+    'player/subtitle_menu_test.dart',
+    caseEntrypoints['player/subtitle_menu_cases.dart']!,
+  );
 }

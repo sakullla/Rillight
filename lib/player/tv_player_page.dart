@@ -21,6 +21,7 @@ import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/playback_output_panel.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/session_subtitle_files.dart';
 import 'player_window_host.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -449,11 +450,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                             c.audioStreamIndex == track.index,
                                       ),
                                     ),
-                                if (c.canConfigureSubtitles) ...[
+                                if (c.canConfigureSubtitles ||
+                                    c.canImportSubtitleFiles) ...[
                                   const SizedBox(height: 16),
-                                  _panelLabel(l.subtitleTrack),
+                                  _panelLabel(l.subtitleTrackPrimary),
                                   TvAction(
                                     variant: TvActionVariant.tile,
+                                    key: const Key('tv-subtitle-off'),
                                     autofocus:
                                         !c.canSwitchAudioTrack &&
                                         (c.subtitleStreamIndex == null ||
@@ -462,12 +465,16 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                                   t.index ==
                                                   c.subtitleStreamIndex,
                                             )),
-                                    selected: c.subtitleStreamIndex == null,
+                                    selected:
+                                        c.subtitleStreamIndex == null &&
+                                        c.primarySubtitleFileId == null,
                                     onPressed: () =>
                                         apply(() => c.setSubtitle(null)),
                                     child: _choiceLabel(
                                       l.subtitleOff,
-                                      selected: c.subtitleStreamIndex == null,
+                                      selected:
+                                          c.subtitleStreamIndex == null &&
+                                          c.primarySubtitleFileId == null,
                                     ),
                                   ),
                                   for (final track
@@ -485,9 +492,146 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                       ),
                                       child: _choiceLabel(
                                         track.label,
+                                        detail:
+                                            c.subtitleStreamOccupiesOtherSlot(
+                                              0,
+                                              track.index,
+                                            )
+                                            ? l.subtitleSlotOccupied
+                                            : null,
                                         selected:
                                             c.subtitleStreamIndex ==
                                             track.index,
+                                      ),
+                                    ),
+                                  for (final file in c.sessionSubtitleFiles)
+                                    TvAction(
+                                      variant: TvActionVariant.tile,
+                                      key: ValueKey(
+                                        'tv-subtitle-file-${file.id}',
+                                      ),
+                                      autofocus: false,
+                                      selected:
+                                          c.primarySubtitleFileId == file.id,
+                                      onPressed: () => apply(
+                                        () => c.setSubtitleFromFile(file.id),
+                                      ),
+                                      child: _choiceLabel(
+                                        file.label,
+                                        detail:
+                                            c.subtitleFileOccupiesOtherSlot(
+                                              0,
+                                              file.id,
+                                            )
+                                            ? l.subtitleSlotOccupied
+                                            : null,
+                                        selected:
+                                            c.primarySubtitleFileId == file.id,
+                                      ),
+                                    ),
+                                  const SizedBox(height: 16),
+                                  _panelLabel(l.subtitleTrackSecondary),
+                                  TvAction(
+                                    variant: TvActionVariant.tile,
+                                    key: const Key('tv-subtitle-secondary-off'),
+                                    autofocus: false,
+                                    selected: !c.hasSecondarySubtitle,
+                                    onPressed: () => apply(
+                                      () => c.setSecondarySubtitle(null),
+                                    ),
+                                    child: _choiceLabel(
+                                      l.subtitleOff,
+                                      selected: !c.hasSecondarySubtitle,
+                                    ),
+                                  ),
+                                  for (final track
+                                      in c.selectableSubtitleTracks)
+                                    if (!c.streamIsBurnedIn(track.index))
+                                      TvAction(
+                                        variant: TvActionVariant.tile,
+                                        key: ValueKey(
+                                          'tv-subtitle-secondary-${track.index}',
+                                        ),
+                                        autofocus: false,
+                                        selected:
+                                            c.secondarySubtitleStreamIndex ==
+                                            track.index,
+                                        onPressed: () => apply(
+                                          () => c.setSecondarySubtitle(
+                                            track.index,
+                                          ),
+                                        ),
+                                        child: _choiceLabel(
+                                          track.label,
+                                          detail:
+                                              c.subtitleStreamOccupiesOtherSlot(
+                                                1,
+                                                track.index,
+                                              )
+                                              ? l.subtitleSlotOccupied
+                                              : null,
+                                          selected:
+                                              c.secondarySubtitleStreamIndex ==
+                                              track.index,
+                                        ),
+                                      ),
+                                  for (final file in c.sessionSubtitleFiles)
+                                    TvAction(
+                                      variant: TvActionVariant.tile,
+                                      key: ValueKey(
+                                        'tv-subtitle-secondary-file-${file.id}',
+                                      ),
+                                      autofocus: false,
+                                      selected:
+                                          c.secondarySubtitleFileId == file.id,
+                                      onPressed: () => apply(
+                                        () => c.setSecondarySubtitleFromFile(
+                                          file.id,
+                                        ),
+                                      ),
+                                      child: _choiceLabel(
+                                        file.label,
+                                        detail:
+                                            c.subtitleFileOccupiesOtherSlot(
+                                              1,
+                                              file.id,
+                                            )
+                                            ? l.subtitleSlotOccupied
+                                            : null,
+                                        selected:
+                                            c.secondarySubtitleFileId ==
+                                            file.id,
+                                      ),
+                                    ),
+                                  if (c.canImportSubtitleFiles)
+                                    TvAction(
+                                      variant: TvActionVariant.tile,
+                                      key: const Key('tv-subtitle-import'),
+                                      autofocus: false,
+                                      selected: false,
+                                      onPressed: () =>
+                                          apply(() => c.importSubtitleFile()),
+                                      child: _choiceLabel(
+                                        l.subtitleImportLocal,
+                                        selected: false,
+                                      ),
+                                    ),
+                                  if (_tvSubtitleNotice(l, c) != null)
+                                    Padding(
+                                      key: const Key(
+                                        'tv-subtitle-import-notice',
+                                      ),
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        _tvSubtitleNotice(l, c)!,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            ),
                                       ),
                                     ),
                                   if (c.canAdjustSubtitleSize) ...[
@@ -757,6 +901,29 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         ],
       ],
     );
+  }
+
+  /// 字幕导入/槽位限制的提示文案;无提示时返回 null。
+  String? _tvSubtitleNotice(AppLocalizations l, PlayerController c) {
+    final refusal = c.subtitleSelectionNotice;
+    if (refusal == 'occupied') return l.subtitleSlotOccupied;
+    if (refusal == 'burn-in') return l.subtitleBurnInSecondary;
+    switch (c.subtitleImportNotice) {
+      case SubtitleImportOutcome.duplicate:
+        return l.subtitleImportDuplicate;
+      case SubtitleImportOutcome.invalidFormat:
+        return l.subtitleImportInvalid;
+      case SubtitleImportOutcome.tooLarge:
+        return l.subtitleImportTooLarge;
+      case SubtitleImportOutcome.sessionLimit:
+        return l.subtitleImportSessionLimit;
+      case SubtitleImportOutcome.unreadable:
+        return l.subtitleImportUnreadable;
+      case SubtitleImportOutcome.pickerUnavailable:
+        return l.subtitleImportPickerUnavailable;
+      default:
+        return null;
+    }
   }
 
   Widget _panelLabel(String text) => Padding(
@@ -1065,7 +1232,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                             children: [
                               for (final control in <Widget>[
                                 if (c.canSwitchAudioTrack ||
-                                    c.canConfigureSubtitles)
+                                    c.canConfigureSubtitles ||
+                                    c.canImportSubtitleFiles)
                                   _action(
                                     'tv-player-tracks',
                                     Icons.subtitles_outlined,

@@ -873,6 +873,20 @@
     ]
   },
   {
+    "id": "player-subtitles-secondary",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-subtitles-imported",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
     "id": "poster-hover",
     "feature": "home",
     "platforms": [

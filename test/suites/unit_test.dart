@@ -138,4 +138,8 @@ void main() {
     'player/player_window_launch_test.dart',
     caseEntrypoints['player/player_window_launch_cases.dart']!,
   );
+  group(
+    'player/subtitle_slots_test.dart',
+    caseEntrypoints['player/subtitle_slots_cases.dart']!,
+  );
 }

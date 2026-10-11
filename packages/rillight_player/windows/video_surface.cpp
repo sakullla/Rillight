@@ -214,9 +214,14 @@ bool VideoSurface::Publish(const RillightCoreFrame& source, int width,
   }
   auto frame = std::make_shared<Frame>();
   if (gpu_presenter_) {
+    // GPU frames carry text subtitles as a separate overlay; hand it to the
+    // presenter so SDR windows composite it like the HDR host does.
+    RillightCoreSubtitleOverlay overlay{};
+    overlay.struct_size = sizeof(overlay);
+    api_->frame_subtitle_overlay(&source, &overlay);
     try {
       frame->gpu = gpu_presenter_->Present(source,
-          api_->frame_d3d11_texture(&source), width, height);
+          api_->frame_d3d11_texture(&source), width, height, &overlay);
     } catch (const rillight_windows::GpuImportUnavailable&) {
       // Hybrid-GPU systems may decode and draw on different adapters. Keep
       // the BGRA sink, but obtain CPU frames from the decoder for later uploads.

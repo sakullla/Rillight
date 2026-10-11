@@ -2166,9 +2166,9 @@ class _PhoneTrackBackend extends FakeVideoBackend
   }
 
   @override
-  Future<void> setSubtitleIndex(int index) async {
+  Future<void> setSubtitleIndex(int index, {int slot = 0}) async {
     subtitleCalls.add(index);
-    await super.setSubtitleIndex(index);
+    await super.setSubtitleIndex(index, slot: slot);
   }
 }
 
