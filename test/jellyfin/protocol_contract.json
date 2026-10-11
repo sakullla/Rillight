@@ -1,0 +1,826 @@
+{
+  "source": "https://api.jellyfin.org/openapi/jellyfin-openapi-stable.json",
+  "captured": "2026-10-11",
+  "sha256": "bd31bb194443d1c57616fa0a8521e099b17d096b92794e471c0e0725c50949c8",
+  "info": {
+    "title": "Jellyfin API",
+    "version": "12.2.0",
+    "x-jellyfin-version": "12.2.0"
+  },
+  "paths": {
+    "/Items/Filters2": {
+      "get": {
+        "parameters": [
+          "userId",
+          "parentId",
+          "includeItemTypes",
+          "isAiring",
+          "isMovie",
+          "isSports",
+          "isKids",
+          "isNews",
+          "isSeries",
+          "recursive"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Items": {
+      "get": {
+        "parameters": [
+          "userId",
+          "maxOfficialRating",
+          "hasThemeSong",
+          "hasThemeVideo",
+          "hasSubtitles",
+          "hasSpecialFeature",
+          "hasTrailer",
+          "adjacentTo",
+          "indexNumber",
+          "parentIndexNumber",
+          "hasParentalRating",
+          "isHd",
+          "is4K",
+          "locationTypes",
+          "excludeLocationTypes",
+          "isMissing",
+          "isUnaired",
+          "minCommunityRating",
+          "minCriticRating",
+          "minPremiereDate",
+          "minDateLastSaved",
+          "minDateLastSavedForUser",
+          "maxPremiereDate",
+          "hasOverview",
+          "hasImdbId",
+          "hasTmdbId",
+          "hasTvdbId",
+          "isMovie",
+          "isSeries",
+          "isNews",
+          "isKids",
+          "isSports",
+          "excludeItemIds",
+          "startIndex",
+          "limit",
+          "recursive",
+          "searchTerm",
+          "sortOrder",
+          "parentId",
+          "fields",
+          "excludeItemTypes",
+          "includeItemTypes",
+          "filters",
+          "isFavorite",
+          "mediaTypes",
+          "imageTypes",
+          "sortBy",
+          "isPlayed",
+          "genres",
+          "officialRatings",
+          "tags",
+          "years",
+          "enableUserData",
+          "imageTypeLimit",
+          "enableImageTypes",
+          "person",
+          "personIds",
+          "personTypes",
+          "studios",
+          "artists",
+          "excludeArtistIds",
+          "artistIds",
+          "albumArtistIds",
+          "contributingArtistIds",
+          "albums",
+          "albumIds",
+          "ids",
+          "videoTypes",
+          "minOfficialRating",
+          "isLocked",
+          "isPlaceHolder",
+          "hasOfficialRating",
+          "collapseBoxSetItems",
+          "minWidth",
+          "minHeight",
+          "maxWidth",
+          "maxHeight",
+          "is3D",
+          "seriesStatus",
+          "nameStartsWithOrGreater",
+          "nameStartsWith",
+          "nameLessThan",
+          "studioIds",
+          "genreIds",
+          "audioLanguages",
+          "subtitleLanguages",
+          "enableTotalRecordCount",
+          "enableImages"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      },
+      "delete": {
+        "parameters": [
+          "ids"
+        ],
+        "responses": [
+          "204",
+          "401",
+          "404",
+          "503",
+          "403"
+        ]
+      }
+    },
+    "/UserItems/{itemId}/UserData": {
+      "get": {
+        "parameters": [
+          "userId",
+          "itemId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      },
+      "post": {
+        "parameters": [
+          "userId",
+          "itemId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ],
+        "bodyProperties": [
+          "Rating",
+          "PlayedPercentage",
+          "UnplayedItemCount",
+          "PlaybackPositionTicks",
+          "PlayCount",
+          "IsFavorite",
+          "Likes",
+          "LastPlayedDate",
+          "Played",
+          "Key",
+          "ItemId"
+        ]
+      }
+    },
+    "/UserItems/Resume": {
+      "get": {
+        "parameters": [
+          "userId",
+          "startIndex",
+          "limit",
+          "searchTerm",
+          "parentId",
+          "fields",
+          "mediaTypes",
+          "enableUserData",
+          "imageTypeLimit",
+          "enableImageTypes",
+          "excludeItemTypes",
+          "includeItemTypes",
+          "enableTotalRecordCount",
+          "enableImages",
+          "excludeActiveSessions"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Items/{itemId}": {
+      "post": {
+        "parameters": [
+          "itemId"
+        ],
+        "responses": [
+          "204",
+          "404",
+          "503",
+          "401",
+          "403"
+        ],
+        "bodyProperties": [
+          "Name",
+          "OriginalTitle",
+          "ServerId",
+          "Id",
+          "Etag",
+          "SourceType",
+          "PlaylistItemId",
+          "DateCreated",
+          "DateLastMediaAdded",
+          "ExtraType",
+          "AirsBeforeSeasonNumber",
+          "AirsAfterSeasonNumber",
+          "AirsBeforeEpisodeNumber",
+          "CanDelete",
+          "CanDownload",
+          "HasLyrics",
+          "HasSubtitles",
+          "PreferredMetadataLanguage",
+          "PreferredMetadataCountryCode",
+          "Container",
+          "SortName",
+          "ForcedSortName",
+          "Video3DFormat",
+          "PremiereDate",
+          "ExternalUrls",
+          "MediaSources",
+          "CriticRating",
+          "ProductionLocations",
+          "Path",
+          "EnableMediaSourceDisplay",
+          "OfficialRating",
+          "CustomRating",
+          "ChannelId",
+          "ChannelName",
+          "Overview",
+          "Taglines",
+          "Genres",
+          "CommunityRating",
+          "CumulativeRunTimeTicks",
+          "RunTimeTicks",
+          "PlayAccess",
+          "AspectRatio",
+          "ProductionYear",
+          "IsPlaceHolder",
+          "Number",
+          "ChannelNumber",
+          "IndexNumber",
+          "IndexNumberEnd",
+          "ParentIndexNumber",
+          "RemoteTrailers",
+          "ProviderIds",
+          "IsHD",
+          "IsFolder",
+          "ParentId",
+          "Type",
+          "People",
+          "Studios",
+          "GenreItems",
+          "ParentLogoItemId",
+          "ParentBackdropItemId",
+          "ParentBackdropImageTags",
+          "LocalTrailerCount",
+          "UserData",
+          "RecursiveItemCount",
+          "ChildCount",
+          "SeriesName",
+          "SeriesId",
+          "SeasonId",
+          "SpecialFeatureCount",
+          "DisplayPreferencesId",
+          "Status",
+          "AirTime",
+          "AirDays",
+          "Tags",
+          "PrimaryImageAspectRatio",
+          "Artists",
+          "ArtistItems",
+          "Album",
+          "CollectionType",
+          "DisplayOrder",
+          "AlbumId",
+          "AlbumPrimaryImageTag",
+          "SeriesPrimaryImageTag",
+          "AlbumArtist",
+          "AlbumArtists",
+          "SeasonName",
+          "MediaStreams",
+          "VideoType",
+          "PartCount",
+          "MediaSourceCount",
+          "ImageTags",
+          "BackdropImageTags",
+          "ScreenshotImageTags",
+          "ParentLogoImageTag",
+          "ParentArtItemId",
+          "ParentArtImageTag",
+          "SeriesThumbImageTag",
+          "ImageBlurHashes",
+          "SeriesStudio",
+          "ParentThumbItemId",
+          "ParentThumbImageTag",
+          "ParentPrimaryImageItemId",
+          "ParentPrimaryImageTag",
+          "Chapters",
+          "Trickplay",
+          "LocationType",
+          "IsoType",
+          "MediaType",
+          "EndDate",
+          "LockedFields",
+          "TrailerCount",
+          "MovieCount",
+          "SeriesCount",
+          "ProgramCount",
+          "EpisodeCount",
+          "SongCount",
+          "AlbumCount",
+          "ArtistCount",
+          "MusicVideoCount",
+          "LockData",
+          "Width",
+          "Height",
+          "CameraMake",
+          "CameraModel",
+          "Software",
+          "ExposureTime",
+          "FocalLength",
+          "ImageOrientation",
+          "Aperture",
+          "ShutterSpeed",
+          "Latitude",
+          "Longitude",
+          "Altitude",
+          "IsoSpeedRating",
+          "SeriesTimerId",
+          "ProgramId",
+          "ChannelPrimaryImageTag",
+          "StartDate",
+          "CompletionPercentage",
+          "IsRepeat",
+          "EpisodeTitle",
+          "ChannelType",
+          "Audio",
+          "IsMovie",
+          "IsSports",
+          "IsSeries",
+          "IsLive",
+          "IsNews",
+          "IsKids",
+          "IsPremiere",
+          "TimerId",
+          "NormalizationGain",
+          "AlbumNormalizationGain",
+          "CurrentProgram",
+          "OriginalLanguage"
+        ]
+      },
+      "delete": {
+        "parameters": [
+          "itemId"
+        ],
+        "responses": [
+          "204",
+          "401",
+          "404",
+          "503",
+          "403"
+        ]
+      },
+      "get": {
+        "parameters": [
+          "userId",
+          "itemId"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Items/{itemId}/Similar": {
+      "get": {
+        "parameters": [
+          "itemId",
+          "excludeArtistIds",
+          "userId",
+          "limit",
+          "fields"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Items/Counts": {
+      "get": {
+        "parameters": [
+          "userId",
+          "isFavorite"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Items/{itemId}/PlaybackInfo": {
+      "get": {
+        "parameters": [
+          "itemId",
+          "userId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      },
+      "post": {
+        "parameters": [
+          "itemId",
+          "userId",
+          "maxStreamingBitrate",
+          "startTimeTicks",
+          "audioStreamIndex",
+          "subtitleStreamIndex",
+          "maxAudioChannels",
+          "mediaSourceId",
+          "liveStreamId",
+          "autoOpenLiveStream",
+          "enableDirectPlay",
+          "enableDirectStream",
+          "enableTranscoding",
+          "allowVideoStreamCopy",
+          "allowAudioStreamCopy"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ],
+        "bodyProperties": [
+          "UserId",
+          "MaxStreamingBitrate",
+          "StartTimeTicks",
+          "AudioStreamIndex",
+          "SubtitleStreamIndex",
+          "MaxAudioChannels",
+          "MediaSourceId",
+          "LiveStreamId",
+          "DeviceProfile",
+          "EnableDirectPlay",
+          "EnableDirectStream",
+          "EnableTranscoding",
+          "AllowVideoStreamCopy",
+          "AllowAudioStreamCopy",
+          "AutoOpenLiveStream",
+          "AlwaysBurnInSubtitleWhenTranscoding"
+        ]
+      }
+    },
+    "/MediaSegments/{itemId}": {
+      "get": {
+        "parameters": [
+          "itemId",
+          "includeSegmentTypes"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Sessions/Playing": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "204",
+          "503",
+          "401",
+          "403"
+        ],
+        "bodyProperties": [
+          "CanSeek",
+          "Item",
+          "ItemId",
+          "SessionId",
+          "MediaSourceId",
+          "AudioStreamIndex",
+          "SubtitleStreamIndex",
+          "IsPaused",
+          "IsMuted",
+          "PositionTicks",
+          "PlaybackStartTimeTicks",
+          "VolumeLevel",
+          "Brightness",
+          "AspectRatio",
+          "PlayMethod",
+          "LiveStreamId",
+          "PlaySessionId",
+          "RepeatMode",
+          "PlaybackOrder",
+          "NowPlayingQueue",
+          "PlaylistItemId"
+        ]
+      }
+    },
+    "/Sessions/Playing/Progress": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "204",
+          "503",
+          "401",
+          "403"
+        ],
+        "bodyProperties": [
+          "CanSeek",
+          "Item",
+          "ItemId",
+          "SessionId",
+          "MediaSourceId",
+          "AudioStreamIndex",
+          "SubtitleStreamIndex",
+          "IsPaused",
+          "IsMuted",
+          "PositionTicks",
+          "PlaybackStartTimeTicks",
+          "VolumeLevel",
+          "Brightness",
+          "AspectRatio",
+          "PlayMethod",
+          "LiveStreamId",
+          "PlaySessionId",
+          "RepeatMode",
+          "PlaybackOrder",
+          "NowPlayingQueue",
+          "PlaylistItemId"
+        ]
+      }
+    },
+    "/Sessions/Playing/Stopped": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "204",
+          "503",
+          "401",
+          "403"
+        ],
+        "bodyProperties": [
+          "Item",
+          "ItemId",
+          "SessionId",
+          "MediaSourceId",
+          "PositionTicks",
+          "LiveStreamId",
+          "PlaySessionId",
+          "Failed",
+          "NextMediaType",
+          "PlaylistItemId",
+          "NowPlayingQueue"
+        ]
+      }
+    },
+    "/UserPlayedItems/{itemId}": {
+      "post": {
+        "parameters": [
+          "userId",
+          "itemId",
+          "datePlayed"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      },
+      "delete": {
+        "parameters": [
+          "userId",
+          "itemId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/QuickConnect/Connect": {
+      "get": {
+        "parameters": [
+          "secret"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503"
+        ]
+      }
+    },
+    "/QuickConnect/Enabled": {
+      "get": {
+        "parameters": [],
+        "responses": [
+          "200",
+          "503"
+        ]
+      }
+    },
+    "/QuickConnect/Initiate": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "200",
+          "401",
+          "503"
+        ]
+      }
+    },
+    "/Sessions/Logout": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "204",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/System/Info/Public": {
+      "get": {
+        "parameters": [],
+        "responses": [
+          "200",
+          "503"
+        ]
+      }
+    },
+    "/Videos/{itemId}/Trickplay/{width}/{index}.jpg": {
+      "get": {
+        "parameters": [
+          "itemId",
+          "width",
+          "index",
+          "mediaSourceId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Shows/NextUp": {
+      "get": {
+        "parameters": [
+          "userId",
+          "startIndex",
+          "limit",
+          "fields",
+          "seriesId",
+          "parentId",
+          "enableImages",
+          "imageTypeLimit",
+          "enableImageTypes",
+          "enableUserData",
+          "nextUpDateCutoff",
+          "enableTotalRecordCount",
+          "enableResumable",
+          "enableRewatching"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Users/AuthenticateByName": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "200",
+          "503"
+        ],
+        "bodyProperties": [
+          "Username",
+          "Pw"
+        ]
+      }
+    },
+    "/Users/AuthenticateWithQuickConnect": {
+      "post": {
+        "parameters": [],
+        "responses": [
+          "200",
+          "400",
+          "503"
+        ],
+        "bodyProperties": [
+          "Secret"
+        ]
+      }
+    },
+    "/Users/Me": {
+      "get": {
+        "parameters": [],
+        "responses": [
+          "200",
+          "400",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/Users/Password": {
+      "post": {
+        "parameters": [
+          "userId"
+        ],
+        "responses": [
+          "204",
+          "403",
+          "404",
+          "503",
+          "401"
+        ],
+        "bodyProperties": [
+          "CurrentPassword",
+          "CurrentPw",
+          "NewPw",
+          "ResetPassword"
+        ]
+      }
+    },
+    "/Items/Latest": {
+      "get": {
+        "parameters": [
+          "userId",
+          "parentId",
+          "fields",
+          "includeItemTypes",
+          "isPlayed",
+          "enableImages",
+          "imageTypeLimit",
+          "enableImageTypes",
+          "enableUserData",
+          "limit",
+          "groupItems"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    },
+    "/UserViews": {
+      "get": {
+        "parameters": [
+          "userId",
+          "includeExternalContent",
+          "presetViews",
+          "includeHidden"
+        ],
+        "responses": [
+          "200",
+          "503",
+          "401",
+          "403"
+        ]
+      }
+    }
+  }
+}
