@@ -1,5 +1,6 @@
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'plex_http.dart';
 
 Duration? plexDuration(Object? value) =>
@@ -179,3 +180,118 @@ MediaStreamInfo plexPlaybackStream(Map<String, dynamic> row) => MediaStreamInfo(
       ? null
       : plexInt(row['bitrate'])! * 1000,
 );
+
+/// [index] is the source Plex Stream ID used for server selection. A decision
+/// can produce a different stream index in the actual playback container.
+class PlexNegotiatedStream extends MediaStreamInfo {
+  const PlexNegotiatedStream({
+    required super.index,
+    required super.type,
+    super.codec,
+    super.language,
+    super.displayTitle,
+    super.isDefault,
+    super.isExternal,
+    super.deliveryUrl,
+    super.deliveryMethod,
+    super.channels,
+    super.width,
+    super.height,
+    super.bitRate,
+    required this.playbackIndex,
+    required this.decision,
+    required this.location,
+  });
+  final int? playbackIndex;
+  final String decision, location;
+}
+
+List<MediaStreamInfo> plexNegotiatedStreams(
+  List<Map<String, dynamic>> original,
+  List<Map<String, dynamic>> negotiated, {
+  required int? audioId,
+  required int? subtitleId,
+  required String Function(String) resolveUrl,
+  required String sidecarUrl,
+}) {
+  return original.map((source) {
+    final id = plexInt(source['id']);
+    final type = plexInt(source['streamType']);
+    final selected =
+        type == 1 ||
+        type == 2 && id == audioId ||
+        type == 3 && id == subtitleId;
+    final matches = negotiated
+        .where(
+          (stream) =>
+              plexInt(stream['id']) == id &&
+              plexInt(stream['streamType']) == type,
+        )
+        .toList();
+    // Missing IDs cannot safely associate one of several source tracks.
+    final output = matches.length == 1 ? matches.single : null;
+    if (selected && output == null) {
+      throw const MediaServerException(
+        MediaServerFailureKind.invalidResponse,
+        detail: '协商结果缺少所选轨道',
+      );
+    }
+    if (output == null) return plexPlaybackStream(source);
+    final decision = plexString(output['decision']);
+    final location = plexString(output['location']);
+    final unavailable = ['unavailable', 'ignore', 'none'].contains(decision);
+    if (selected && unavailable) {
+      throw const MediaServerException(
+        MediaServerFailureKind.forbidden,
+        detail: '服务器无法交付所选轨道',
+      );
+    }
+    final delivery = unavailable
+        ? 'Unavailable'
+        : decision == 'burn'
+        ? 'Encode'
+        : switch (location) {
+            'sidecar' || 'sidecar-subs' => 'External',
+            'segments-subs' => 'Hls',
+            'embedded' => 'Embed',
+            'direct' =>
+              output['key'] != null || source['key'] != null
+                  ? 'External'
+                  : 'Embed',
+            _ => null,
+          };
+    if (selected && type == 3 && delivery == null) {
+      throw const MediaServerException(
+        MediaServerFailureKind.invalidResponse,
+        detail: '字幕协商缺少交付方式',
+      );
+    }
+    String? key;
+    if (delivery == 'External') {
+      key = output['key'] is String
+          ? resolveUrl(output['key'] as String)
+          : location == 'direct' && source['key'] is String
+          ? resolveUrl(source['key'] as String)
+          : sidecarUrl;
+    } else if (delivery == 'Hls' && output['key'] is String) {
+      key = resolveUrl(output['key'] as String);
+    }
+    return PlexNegotiatedStream(
+      index: id!,
+      type: plexStreamType(type),
+      codec: (output['codec'] ?? source['codec']) as String?,
+      language: source['languageCode'] as String?,
+      displayTitle: (source['displayTitle'] ?? source['title']) as String?,
+      isDefault: selected,
+      isExternal: delivery == 'External',
+      deliveryMethod: delivery,
+      deliveryUrl: key,
+      channels: plexInt(output['channels'] ?? source['channels']),
+      width: plexInt(output['width'] ?? source['width']),
+      height: plexInt(output['height'] ?? source['height']),
+      playbackIndex: plexInt(output['index']),
+      decision: decision,
+      location: location,
+    );
+  }).toList();
+}

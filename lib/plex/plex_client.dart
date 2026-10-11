@@ -32,6 +32,8 @@ class PlexClient extends MediaServerClient {
   int _generation = 0;
   int _sessionCounter = 0;
   final Map<String, Map<String, dynamic>> _metadata = {};
+  final Map<String, Map<String, Set<String>>> _genres = {};
+  PlexVerifiedResourceIdentity? _verifiedIdentity;
   final Map<String, _Playback> _playbacks = {};
   final Set<String> _releasedSessions = {};
   void _released(String session) {
@@ -143,6 +145,7 @@ class PlexClient extends MediaServerClient {
       _guard?.call();
       guard();
     };
+    client._verifiedIdentity = _verifiedIdentity;
     return client;
   }
 
@@ -158,6 +161,8 @@ class PlexClient extends MediaServerClient {
   }) {
     _generation++;
     _metadata.clear();
+    _genres.clear();
+    _verifiedIdentity = null;
     this.baseUrl = baseUrl;
     this.accessToken = accessToken;
     this.userId = userId;
@@ -171,6 +176,8 @@ class PlexClient extends MediaServerClient {
     accessToken = null;
     userId = null;
     _metadata.clear();
+    _genres.clear();
+    _verifiedIdentity = null;
   }
 
   Uri _uri(String path, [Map<String, Object?> query = const {}]) {
@@ -281,8 +288,32 @@ class PlexClient extends MediaServerClient {
 
   @override
   Future<MediaUser> getUser({CancelToken? cancelToken}) async {
-    await _get('/', cancelToken: cancelToken);
-    return MediaUser(id: userId!, name: userId!);
+    final identity = _verifiedIdentity;
+    if (identity == null || !identity.matches(baseUrl, accessToken, userId)) {
+      throw const MediaServerException(
+        MediaServerFailureKind.forbidden,
+        detail: 'Plex 资源身份尚未核验',
+      );
+    }
+    final root = await _get('/', cancelToken: cancelToken);
+    if (!identical(identity, _verifiedIdentity) ||
+        plexString(root['machineIdentifier']) != identity.serverId) {
+      throw const MediaServerException(
+        MediaServerFailureKind.forbidden,
+        detail: 'Plex 服务器身份不匹配',
+      );
+    }
+    return identity.user;
+  }
+
+  /// Called by the source authority only after PlexAuthentication verifies the
+  /// live account/Home -> resources chain. attachSession invalidates this proof.
+  void bindVerifiedIdentity(PlexVerifiedResourceIdentity identity) {
+    _guard?.call();
+    if (!identity.matches(baseUrl, accessToken, userId)) {
+      throw const MediaServerException(MediaServerFailureKind.forbidden);
+    }
+    _verifiedIdentity = identity;
   }
 
   @override
@@ -392,15 +423,19 @@ class PlexClient extends MediaServerClient {
     String imageTypes = MediaServerClient.imageTypes,
   }) async {
     final section = parentId?.startsWith('section:') == true;
-    final path = searchTerm != null && parentId == null
-        ? '/hubs/search'
-        : parentId == null
+    // Hub search is a recommendation preview (three hits per hub by default),
+    // not the paginated, filterable media query used by the search screen.
+    final path = parentId == null
         ? '/library/all'
         : section
         ? '/library/sections/${Uri.encodeComponent(parentId.substring(8))}/all'
         : '/library/metadata/${Uri.encodeComponent(parentId)}/${recursive ? 'allLeaves' : 'children'}';
     final types = <String>[];
-    for (final type in includeItemTypes?.split(',') ?? <String>[]) {
+    for (final type
+        in includeItemTypes?.split(',') ??
+            (searchTerm != null
+                ? ['Movie', 'Series', 'Episode']
+                : <String>[])) {
       final code = {
         'Movie': '1',
         'Series': '2',
@@ -408,6 +443,20 @@ class PlexClient extends MediaServerClient {
         'Episode': '4',
       }[type];
       if (code != null) types.add(code);
+    }
+    final genreKeys = genres?.isNotEmpty == true
+        ? await _genreKeys(parentId, genres!)
+        : null;
+    if (genreKeys != null && genreKeys.isEmpty) {
+      return MediaItemPage(
+        items: const [],
+        totalRecordCount: 0,
+        offset: startIndex ?? 0,
+        pagination: const CapabilityStatus(
+          CapabilityAvailability.available,
+          reason: '所选分类在此媒体库没有对应标签',
+        ),
+      );
     }
     final filterQuery = <String, Object?>{};
     for (final filter in filters ?? <String>[]) {
@@ -431,9 +480,9 @@ class PlexClient extends MediaServerClient {
       startIndex: startIndex,
       query: {
         if (types.isNotEmpty) 'type': types.join(','),
-        (parentId == null ? 'query' : 'title'): ?searchTerm,
+        'title': ?searchTerm,
         'sort': _sort(sortBy, sortOrder),
-        if (genres?.isNotEmpty == true) 'genre': genres!.join(','),
+        if (genreKeys != null) 'genre': genreKeys.join(','),
         if (years?.isNotEmpty == true) 'year': years!.join(','),
         ...filterQuery,
       },
@@ -547,9 +596,48 @@ class PlexClient extends MediaServerClient {
     final root = await _get(
       '/library/sections/${Uri.encodeComponent(parentId.replaceFirst('section:', ''))}/genre',
     );
-    return plexList(
-      root['Directory'],
-    ).map((r) => plexString(r['title'])).toList();
+    final mapping = <String, Set<String>>{};
+    for (final row in plexList(root['Directory'])) {
+      final title = plexString(row['title']);
+      final key = plexString(row['key']);
+      final value = Uri.tryParse(key)?.queryParameters['genre'] ?? key;
+      if (title.isEmpty || !RegExp(r'^\d+$').hasMatch(value)) {
+        throw const MediaServerException(
+          MediaServerFailureKind.invalidResponse,
+          detail: 'Plex 分类缺少有效标签标识',
+        );
+      }
+      mapping.putIfAbsent(title, () => {}).add(value);
+    }
+    _genres[parentId] = mapping;
+    return mapping.keys.toList()..sort();
+  }
+
+  Future<Set<String>> _genreKeys(String? parentId, List<String> titles) async {
+    final sections = <String>[];
+    if (parentId == null) {
+      sections.addAll((await getViews()).map((v) => v.id));
+    } else if (parentId.startsWith('section:')) {
+      sections.add(parentId);
+    } else {
+      if (!_metadata.containsKey(parentId)) await getItem(parentId);
+      final section = _metadata[parentId]?['librarySectionID'];
+      if (section == null) {
+        throw const MediaServerException(
+          MediaServerFailureKind.invalidResponse,
+        );
+      }
+      sections.add('section:$section');
+    }
+    final result = <String>{};
+    for (final section in sections) {
+      // Resolve against each section's actual tag IDs, never against its label.
+      await getLibraryGenres(section);
+      for (final title in titles) {
+        result.addAll(_genres[section]?[title] ?? {});
+      }
+    }
+    return result;
   }
 
   @override
@@ -892,6 +980,17 @@ class PlexClient extends MediaServerClient {
     final session =
         '${device.deviceId}-${DateTime.now().microsecondsSinceEpoch}-${_sessionCounter++}';
     final streams = plexList(parts[location.index]['Stream']);
+    final effectiveAudio = _selectedStream(streams, 2, audioStreamIndex);
+    final effectiveSubtitle = _selectedStream(streams, 3, subtitleStreamIndex);
+    final audioId = plexInt(effectiveAudio?['id']);
+    final subtitleId = subtitleStreamIndex != null && subtitleStreamIndex < 0
+        ? -1
+        : plexInt(effectiveSubtitle?['id']);
+    final videoNeedsTranscode = _videoNeedsTranscode(streams, capabilities);
+    final audioNeedsTranscode = _audioNeedsTranscode(
+      effectiveAudio,
+      capabilities,
+    );
     final burnSubtitle = _subtitleRequiresTranscode(
       streams,
       subtitleStreamIndex,
@@ -900,7 +999,8 @@ class PlexClient extends MediaServerClient {
     final transcode =
         forceTranscode ||
         burnSubtitle ||
-        _requiresTranscode(media, capabilities) ||
+        videoNeedsTranscode ||
+        audioNeedsTranscode ||
         (maxStreamingBitrate != null &&
             (plexInt(media['bitrate']) ?? 0) * 1000 > maxStreamingBitrate);
     for (final entry in [(audioStreamIndex, 2), (subtitleStreamIndex, 3)]) {
@@ -943,7 +1043,8 @@ class PlexClient extends MediaServerClient {
       'X-Plex-Client-Profile-Name': 'Generic',
       'protocol': 'hls',
       'directPlay': transcode ? 0 : 1,
-      'directStream': 1,
+      'directStream': videoNeedsTranscode ? 0 : 1,
+      'directStreamAudio': audioNeedsTranscode ? 0 : 1,
       'offset': location.local.inMilliseconds / 1000,
       if (maxStreamingBitrate != null)
         'videoBitrate': maxStreamingBitrate ~/ 1000,
@@ -978,6 +1079,7 @@ class PlexClient extends MediaServerClient {
     );
     PlayMethod method = PlayMethod.directPlay;
     Uri url = Uri.parse(timeline.parts[location.index].resource.url);
+    var playbackStreams = streams.map(plexPlaybackStream).toList();
     if (transcode) {
       try {
         final decision = await _get(
@@ -1000,8 +1102,11 @@ class PlexClient extends MediaServerClient {
         final decidedMedia = decided.isEmpty
             ? <Map<String, dynamic>>[]
             : plexList(decided.first['Media']);
-        final selected = decidedMedia.firstOrNull;
-        final bitrate = plexInt(selected?['bitrate']);
+        final selected = _selectedResponse(
+          decidedMedia,
+          plexString(media['id']),
+        );
+        final bitrate = plexInt(selected['bitrate']);
         if (maxStreamingBitrate != null &&
             bitrate != null &&
             bitrate * 1000 < maxStreamingBitrate &&
@@ -1011,13 +1116,34 @@ class PlexClient extends MediaServerClient {
             detail: '服务器返回低于所选画质的转码',
           );
         }
-        final decidedStreams = selected == null
-            ? <Map<String, dynamic>>[]
-            : plexStreams(selected);
+        final decidedPart = _selectedResponse(
+          plexList(selected['Part']),
+          plexString(parts[location.index]['id']),
+        );
+        final decidedStreams = plexList(decidedPart['Stream']);
+        if (decidedPart['decision'] == 'none') {
+          throw const MediaServerException(MediaServerFailureKind.forbidden);
+        }
+        playbackStreams = plexNegotiatedStreams(
+          streams,
+          decidedStreams,
+          audioId: audioId,
+          subtitleId: subtitleId,
+          resolveUrl: (key) => resolveResource(key).toString(),
+          sidecarUrl: _uri('/video/:/transcode/universal/subtitles', {
+            ...query,
+            'protocol': 'http',
+            'subtitles': 'sidecar',
+          }).toString(),
+        );
         method =
-            decidedStreams.any((stream) => stream['decision'] == 'transcode')
+            decidedStreams.any(
+              (stream) =>
+                  stream['decision'] == 'transcode' ||
+                  stream['decision'] == 'burn',
+            )
             ? PlayMethod.transcode
-            : selected?['videoDecision'] == 'copy'
+            : selected['videoDecision'] == 'copy'
             ? PlayMethod.directStream
             : PlayMethod.transcode;
         url = _uri('/video/:/transcode/universal/start.m3u8', query);
@@ -1048,9 +1174,9 @@ class PlexClient extends MediaServerClient {
       bitrate: plexInt(media['bitrate']) == null
           ? null
           : plexInt(media['bitrate'])! * 1000,
-      defaultAudioStreamIndex: audioStreamIndex,
-      defaultSubtitleStreamIndex: subtitleStreamIndex,
-      mediaStreams: streams.map(plexPlaybackStream).toList(),
+      defaultAudioStreamIndex: audioId,
+      defaultSubtitleStreamIndex: subtitleId,
+      mediaStreams: playbackStreams,
     );
     final effectiveLease = transcode
         ? lease
@@ -1235,27 +1361,63 @@ bool _subtitleRequiresTranscode(
   };
 }
 
-bool _requiresTranscode(
-  Map<String, dynamic> media,
+Map<String, dynamic>? _selectedStream(
+  List<Map<String, dynamic>> streams,
+  int type,
+  int? id,
+) {
+  if (id != null && id < 0) return null;
+  final candidates = streams
+      .where((s) => plexInt(s['streamType']) == type)
+      .toList();
+  if (id != null) {
+    return candidates.where((s) => plexInt(s['id']) == id).firstOrNull;
+  }
+  return candidates
+          .where((s) => s['selected'] == true || s['selected'] == 1)
+          .firstOrNull ??
+      (type == 3 ? null : candidates.firstOrNull);
+}
+
+Map<String, dynamic> _selectedResponse(
+  List<Map<String, dynamic>> values,
+  String id,
+) {
+  final exact = values.where((row) => plexString(row['id']) == id).toList();
+  if (exact.length == 1) return exact.single;
+  final marked = values
+      .where((row) => row['selected'] == true || row['selected'] == 1)
+      .toList();
+  if (marked.length == 1) return marked.single;
+  if (values.length == 1) return values.single;
+  throw const MediaServerException(
+    MediaServerFailureKind.invalidResponse,
+    detail: '播放协商未唯一指定媒体分段',
+  );
+}
+
+bool _videoNeedsTranscode(
+  List<Map<String, dynamic>> streams,
   PlaybackCapabilities? caps,
 ) {
   if (caps == null) return false;
-  for (final stream in plexStreams(media)) {
-    final codec = stream['codec'];
-    if (stream['streamType'] == 1 &&
-        ((codec == 'h264' && !caps.h264) || (codec == 'hevc' && !caps.hevc))) {
-      return true;
-    }
-    if (stream['streamType'] == 2 &&
-        ((codec == 'aac' && !caps.aac) ||
-            (codec == 'ac3' && !caps.ac3) ||
-            (codec == 'eac3' && !caps.eac3) ||
-            (codec == 'dca' && !caps.dts) ||
-            (codec == 'truehd' && !caps.truehd))) {
-      return true;
-    }
-  }
-  return false;
+  final codec = _selectedStream(streams, 1, null)?['codec'];
+  return (codec == 'h264' && !caps.h264) || (codec == 'hevc' && !caps.hevc);
+}
+
+bool _audioNeedsTranscode(
+  Map<String, dynamic>? selected,
+  PlaybackCapabilities? caps,
+) {
+  if (caps == null) return false;
+  return switch (selected?['codec']) {
+    'aac' => !caps.aac,
+    'ac3' => !caps.ac3,
+    'eac3' => !caps.eac3,
+    'dca' || 'dts' => !caps.dts,
+    'truehd' => !caps.truehd,
+    _ => false,
+  };
 }
 
 class _IndexPreview implements MediaPreview {

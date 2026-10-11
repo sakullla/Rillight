@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 
 /// Independent synthetic account + PMS fixture. Protocol baseline: official PMS
-/// OpenAPI 1.2.3, JWK/PIN/JWT documentation retrieved 2026-10-11; fixture v1.
+/// OpenAPI 1.2.3, JWK/PIN/JWT documentation retrieved 2026-10-11; fixture v2.
 /// This does not assert an actual PMS version or real upstream compatibility.
 class FakePlex {
   late HttpServer server;
@@ -28,6 +28,14 @@ class FakePlex {
   String pinToken = cloudToken;
   bool expireCloud = false;
   bool failStops = false;
+  bool expireHome = false;
+  String secondAudioCodec = 'aac';
+  bool additionalUnsupportedAudio = false;
+  String subtitleCodec = 'srt';
+  String? subtitleDecision;
+  String? subtitleLocation;
+  List<Map<String, dynamic>>? catalog;
+  final Map<String, Map<String, int>> selectedStreams = {};
   final sessions = <String>{};
   static const cloudToken = 'eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiIxIn0.synthetic';
   static const refreshedToken =
@@ -72,6 +80,9 @@ class FakePlex {
       return _json(r, {}, status: 406);
     }
     if (expireCloud && token == cloudToken) return _json(r, {}, status: 498);
+    if (expireHome && token == 'home-scoped-token') {
+      return _json(r, {}, status: 498);
+    }
     if (path == '/api/v2/pins' && r.method == 'POST') {
       final body =
           jsonDecode(await utf8.decoder.bind(r).join()) as Map<String, dynamic>;
@@ -107,6 +118,9 @@ class FakePlex {
       return _json(r, {'auth_token': refreshedToken});
     }
     if (path == '/api/v2/user') {
+      if (token == 'home-scoped-token') {
+        return _json(r, {'id': 2, 'username': 'Child'});
+      }
       if (![cloudToken, refreshedToken].contains(token)) {
         return _json(r, {}, status: 401);
       }
@@ -184,7 +198,8 @@ class FakePlex {
         'MediaContainer': {
           'Directory': [
             {'key': '1', 'title': 'Movies', 'type': 'movie'},
-            {'key': '2', 'title': 'TV', 'type': 'show'},
+            if (token != 'child-resource')
+              {'key': '2', 'title': 'TV', 'type': 'show'},
             {'key': '3', 'title': 'Music', 'type': 'artist'},
           ],
         },
@@ -198,18 +213,84 @@ class FakePlex {
         },
       });
     }
+    if (path == '/hubs/search') {
+      final matches = _catalog
+          .where(
+            (row) => '${row['title']}'.toLowerCase().contains(
+              (q['query'] ?? '').toLowerCase(),
+            ),
+          )
+          .toList();
+      final count = int.tryParse(q['limit'] ?? '3') ?? 3;
+      return _json(r, {
+        'MediaContainer': {
+          'Hub': [
+            {
+              'type': 'movie',
+              'more': matches.length > count,
+              'totalSize': matches.length,
+              'key':
+                  '/library/all?type=1&title=${Uri.encodeQueryComponent(q['query'] ?? '')}',
+              'Metadata': matches.take(count).toList(),
+            },
+          ],
+        },
+      });
+    }
     if (path == '/library/metadata/42/similar' ||
-        path == '/library/sections/1/all' ||
+        RegExp(r'^/library/sections/\d+/all$').hasMatch(path) ||
         path == '/library/all' ||
-        path == '/hubs/search' ||
         path == '/library/onDeck') {
       final start = int.tryParse(q['X-Plex-Container-Start'] ?? '0') ?? 0;
       final size = int.tryParse(q['X-Plex-Container-Size'] ?? '20') ?? 20;
+      final section = RegExp(
+        r'^/library/sections/(\d+)/all$',
+      ).firstMatch(path)?.group(1);
+      final rows = _catalog.where((row) {
+        if (token == 'child-resource' && row['librarySectionID'] != 1) {
+          return false;
+        }
+        if (section != null && '${row['librarySectionID']}' != section) {
+          return false;
+        }
+        if (q['title'] != null &&
+            !'${row['title']}'.toLowerCase().contains(
+              q['title']!.toLowerCase(),
+            )) {
+          return false;
+        }
+        final type = {
+          'movie': '1',
+          'show': '2',
+          'season': '3',
+          'episode': '4',
+        }[row['type']];
+        if (q['type'] != null && !q['type']!.split(',').contains(type)) {
+          return false;
+        }
+        if (q['unwatched'] == '1' && (row['viewCount'] as int? ?? 0) > 0) {
+          return false;
+        }
+        if (q['unwatched'] == '0' && (row['viewCount'] as int? ?? 0) == 0) {
+          return false;
+        }
+        if (q['year'] != null &&
+            !q['year']!.split(',').contains('${row['year']}')) {
+          return false;
+        }
+        if (q['genre'] != null &&
+            !(row['Genre'] as List).any(
+              (genre) => q['genre']!.split(',').contains('${genre['id']}'),
+            )) {
+          return false;
+        }
+        return true;
+      }).toList();
       return _json(r, {
         'MediaContainer': {
           'offset': start,
-          'totalSize': 2,
-          'Metadata': size == 0 || start >= 2 ? [] : [movie],
+          'totalSize': rows.length,
+          'Metadata': rows.skip(start).take(size).toList(),
         },
       });
     }
@@ -225,11 +306,13 @@ class FakePlex {
         },
       });
     }
-    if (path == '/library/sections/1/genre') {
+    if (path == '/library/sections/1/genre' ||
+        path == '/library/sections/2/genre') {
       return _json(r, {
         'MediaContainer': {
           'Directory': [
-            {'title': 'Drama'},
+            {'key': path.contains('/1/') ? '17' : '27', 'title': 'Drama'},
+            if (path.contains('/2/')) {'key': '28', 'title': 'Comedy'},
           ],
         },
       });
@@ -249,6 +332,57 @@ class FakePlex {
         return _json(r, {}, status: 400);
       }
       sessions.add(q['session']!);
+      final partIndex = int.parse(q['partIndex']!);
+      final parts = ((movie['Media'] as List).first as Map)['Part'] as List;
+      final part = parts[partIndex] as Map;
+      final selection = selectedStreams['${part['id']}'] ?? {};
+      final chosenAudio =
+          selection['audioStreamID'] ?? (partIndex == 0 ? 12 : 22);
+      final chosenSubtitle = q['subtitles'] == 'none'
+          ? 0
+          : selection['subtitleStreamID'] ?? 0;
+      final output = <Map<String, dynamic>>[];
+      for (final source
+          in (part['Stream'] as List).cast<Map<String, dynamic>>()) {
+        final type = source['streamType'];
+        final id = source['id'];
+        if (type == 1) {
+          output.add({
+            ...source,
+            'index': 0,
+            'codec': 'h264',
+            'decision': 'transcode',
+            'location': 'segments-video',
+          });
+        }
+        if (type == 2 && id == chosenAudio) {
+          output.add({
+            ...source,
+            'index': 1,
+            'codec': q['directStreamAudio'] == '0' ? 'aac' : source['codec'],
+            'decision': q['directStreamAudio'] == '0' ? 'transcode' : 'copy',
+            'location': 'segments-audio',
+          });
+        }
+        if (type == 3 && id == chosenSubtitle) {
+          output.add({
+            ...source,
+            'index': 2,
+            'codec':
+                subtitleLocation == 'sidecar-subs' ||
+                    subtitleLocation == 'segments-subs'
+                ? 'webvtt'
+                : source['codec'],
+            'decision':
+                subtitleDecision ??
+                (q['subtitles'] == 'burn' ? 'burn' : 'copy'),
+            'location':
+                subtitleLocation ??
+                (q['subtitles'] == 'burn' ? 'embedded' : 'sidecar-subs'),
+            'key': '/transcoded/subtitle.vtt',
+          });
+        }
+      }
       return _json(r, {
         'MediaContainer': {
           'generalDecisionCode': transcodeDenied ? 2000 : 1000,
@@ -257,12 +391,14 @@ class FakePlex {
               'Media': [
                 {
                   'bitrate': 8000,
-                  'videoDecision': 'transcode',
+                  'id': 7,
+                  'selected': true,
                   'Part': [
                     {
-                      'Stream': [
-                        {'decision': 'transcode', 'streamType': 1},
-                      ],
+                      'id': part['id'],
+                      'selected': true,
+                      'decision': 'transcode',
+                      'Stream': output,
                     },
                   ],
                 },
@@ -273,10 +409,23 @@ class FakePlex {
       });
     }
     if (path.startsWith('/library/parts/') && r.method == 'PUT') {
-      final expected = path.endsWith('/101') ? '12' : '22';
-      if (q['audioStreamID'] != null && q['audioStreamID'] != expected) {
+      final partId = path.split('/').last;
+      final part = (((movie['Media'] as List).first as Map)['Part'] as List)
+          .cast<Map>()
+          .firstWhere((part) => '${part['id']}' == partId);
+      final streams = (part['Stream'] as List).cast<Map>();
+      if (q['audioStreamID'] != null &&
+          !streams.any(
+            (s) => s['streamType'] == 2 && '${s['id']}' == q['audioStreamID'],
+          )) {
         return _json(r, {}, status: 400);
       }
+      selectedStreams[partId] = {
+        ...?selectedStreams[partId],
+        for (final entry in q.entries)
+          if (['audioStreamID', 'subtitleStreamID'].contains(entry.key))
+            entry.key: int.parse(entry.value),
+      };
       return _json(r, {});
     }
     if (path == '/video/:/transcode/universal/stop') {
@@ -352,7 +501,7 @@ class FakePlex {
       {'id': 'imdb://tt100'},
     ],
     'Genre': [
-      {'tag': 'Drama'},
+      {'id': 17, 'tag': 'Drama'},
     ],
     'Marker': [
       {'type': 'intro', 'startTimeOffset': 1000, 'endTimeOffset': 4000},
@@ -377,11 +526,19 @@ class FakePlex {
                 'streamType': 2,
                 'codec': 'aac',
                 'languageCode': 'eng',
+                'selected': true,
               },
+              if (additionalUnsupportedAudio)
+                {
+                  'id': 14,
+                  'streamType': 2,
+                  'codec': 'dts',
+                  'languageCode': 'jpn',
+                },
               {
                 'id': 13,
                 'streamType': 3,
-                'codec': 'srt',
+                'codec': subtitleCodec,
                 'key': '/library/streams/13',
               },
             ],
@@ -396,8 +553,9 @@ class FakePlex {
               {
                 'id': 22,
                 'streamType': 2,
-                'codec': 'aac',
+                'codec': secondAudioCodec,
                 'languageCode': 'eng',
+                'selected': true,
               },
             ],
           },
@@ -405,4 +563,11 @@ class FakePlex {
       },
     ],
   };
+
+  List<Map<String, dynamic>> get _catalog =>
+      catalog ??
+      [
+        movie,
+        {...movie, 'ratingKey': '43', 'title': 'Other film'},
+      ];
 }

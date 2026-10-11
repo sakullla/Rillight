@@ -14,6 +14,39 @@ typedef PlexCredentialWriter =
     Future<void> Function(String ref, Map<String, dynamic> value);
 typedef PlexCredentialDeleter = Future<void> Function(String ref);
 
+/// Only live verification below can construct this proof. PMS '/' identifies
+/// the machine, not the effective account; a caller-supplied userId is no proof.
+class PlexVerifiedResourceIdentity {
+  const PlexVerifiedResourceIdentity._(
+    this.user,
+    this.serverId,
+    this.cloudAccountId,
+    this.homeUserId,
+    this.connection,
+    this._token,
+  );
+  final MediaUser user;
+  final String serverId, cloudAccountId;
+  final String? homeUserId;
+  final Uri connection;
+  final String _token;
+  bool matches(Uri? url, String? token, String? userId) =>
+      url != null &&
+      _sameConnection(url, connection) &&
+      token == _token &&
+      userId == user.id;
+}
+
+bool _sameConnection(Uri a, Uri b) =>
+    a.scheme == b.scheme &&
+    a.host == b.host &&
+    a.port == b.port &&
+    a.path.replaceFirst(RegExp(r'/+$'), '') ==
+        b.path.replaceFirst(RegExp(r'/+$'), '') &&
+    a.query == b.query &&
+    a.userInfo.isEmpty &&
+    b.userInfo.isEmpty;
+
 /// Controller-owned authentication. Storage is injected by the source authority;
 /// neither this object nor a server client is a global logged-in account.
 class PlexAuthentication
@@ -346,6 +379,7 @@ class PlexAuthentication
     String token,
     MediaUser user, {
     String? homeUserId,
+    String? homeCredentialRef,
   }) async {
     final rows = plexList(
       await _request(
@@ -390,8 +424,10 @@ class PlexAuthentication
       _check();
       await writeCredential(ref, {
         'kind': 'resource',
+        'cloudCredentialRef': account.credentialRef,
         'accountId': account.id,
         'homeUserId': homeUserId,
+        'homeCredentialRef': homeCredentialRef,
         'serverId': id,
         'userId': user.id,
         'accessToken': resourceToken,
@@ -471,6 +507,21 @@ class PlexAuthentication
     if (token.isEmpty) {
       throw const MediaServerException(MediaServerFailureKind.invalidResponse);
     }
+    // The account endpoint can identify the Home-scoped token; PMS cannot.
+    final verifiedUser = plexMap(await _request('/api/v2/user', token: token));
+    if (plexString(verifiedUser['id']) != user.id) {
+      throw const MediaServerException(MediaServerFailureKind.forbidden);
+    }
+    final homeRef = '${account.credentialRef}:home:${user.id}';
+    _check();
+    await writeCredential(homeRef, {
+      'kind': 'home',
+      'cloudCredentialRef': account.credentialRef,
+      'accountId': account.id,
+      'userId': user.id,
+      'accessToken': token,
+    });
+    _check();
     // Home's explicit returned token is a scoped exchange, never a retry of the
     // legacy PIN flow. Always rediscover resources under the selected identity.
     return _resources(
@@ -478,7 +529,96 @@ class PlexAuthentication
       token,
       MediaUser(id: user.id, name: user.name),
       homeUserId: user.id,
+      homeCredentialRef: homeRef,
     );
+  }
+
+  /// Used by SourceSessionRegistry.sessionIdentityVerifier on both commit and
+  /// restore. The resource record is an index, never accepted as identity proof:
+  /// account /user and /resources are fetched live and all claims are compared.
+  Future<PlexVerifiedResourceIdentity> verifyResourceIdentity({
+    required String cloudCredentialRef,
+    required String resourceCredentialRef,
+    required String cloudAccountId,
+    required String serverId,
+    required String userId,
+    required String resourceToken,
+    required Uri connection,
+    String? homeUserId,
+  }) async {
+    final account = await restoreAccount(cloudCredentialRef);
+    if (account.id != cloudAccountId ||
+        (homeUserId != null ? homeUserId != userId : userId != account.id)) {
+      throw const MediaServerException(MediaServerFailureKind.forbidden);
+    }
+    final stored = await _read(resourceCredentialRef);
+    if (stored['kind'] != 'resource' ||
+        stored['cloudCredentialRef'] != cloudCredentialRef ||
+        stored['accountId'] != account.id ||
+        stored['serverId'] != serverId ||
+        stored['userId'] != userId ||
+        stored['homeUserId'] != homeUserId ||
+        stored['accessToken'] != resourceToken) {
+      throw const MediaServerException(MediaServerFailureKind.forbidden);
+    }
+    Future<PlexVerifiedResourceIdentity> verify(String token) async {
+      final response = plexMap(await _request('/api/v2/user', token: token));
+      if (plexString(response['id']) != userId) {
+        throw const MediaServerException(MediaServerFailureKind.forbidden);
+      }
+      final rows = plexList(
+        await _request(
+          '/api/v2/resources',
+          token: token,
+          query: {'includeHttps': 1, 'includeRelay': 1, 'includeIPv6': 1},
+        ),
+      );
+      final resources = rows
+          .where(
+            (row) =>
+                plexString(row['clientIdentifier']) == serverId &&
+                plexString(row['provides']).split(',').contains('server'),
+          )
+          .toList();
+      if (resources.length != 1 ||
+          plexString(resources.single['accessToken']) != resourceToken ||
+          !plexList(resources.single['connections']).any((row) {
+            final uri = Uri.tryParse(plexString(row['uri']));
+            return uri != null && _sameConnection(uri, connection);
+          })) {
+        throw const MediaServerException(MediaServerFailureKind.forbidden);
+      }
+      _check();
+      return PlexVerifiedResourceIdentity._(
+        MediaUser(
+          id: userId,
+          name: plexString(response['title'] ?? response['username']),
+        ),
+        serverId,
+        account.id,
+        homeUserId,
+        connection,
+        resourceToken,
+      );
+    }
+
+    if (homeUserId == null) return _withAccount(account, verify);
+    final homeRef = stored['homeCredentialRef'];
+    if (homeRef is! String) {
+      throw const MediaServerException(
+        MediaServerFailureKind.authorizationExpired,
+      );
+    }
+    final home = await _read(homeRef);
+    if (home['kind'] != 'home' ||
+        home['cloudCredentialRef'] != cloudCredentialRef ||
+        home['accountId'] != account.id ||
+        home['userId'] != homeUserId) {
+      throw const MediaServerException(MediaServerFailureKind.forbidden);
+    }
+    // Never refresh an expired Home token using the owner's device grant.
+    // Re-enter Home/PIN authorization instead of silently escalating to owner.
+    return verify(home['accessToken'] as String);
   }
 
   @override

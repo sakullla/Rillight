@@ -224,6 +224,12 @@ class ManualCheckResult {
 }
 
 typedef SourceClientFactory = MediaServerClient Function();
+typedef SessionIdentityVerifier =
+    Future<void> Function(
+      SavedServer server,
+      StoredCredentials credentials,
+      MediaServerClient client,
+    );
 typedef MembershipCleanup =
     Future<void> Function(SourceAccount? account, String serverId);
 
@@ -236,6 +242,7 @@ class SourceSessionRegistry {
     required this.credentials,
     required this.createClient,
     this.createProviderClient,
+    this.sessionIdentityVerifier,
   }) {
     access.addRevocationHook(_revokePrivate);
     access.addCleanupHook(_clearPrivate);
@@ -245,6 +252,7 @@ class SourceSessionRegistry {
   final ServerListStore store;
   final CredentialStore credentials;
   final SourceClientFactory createClient;
+  final SessionIdentityVerifier? sessionIdentityVerifier;
   final MediaServerClient Function(MediaServerType)? createProviderClient;
   MediaServerClient _clientFor(MediaServerType type) {
     final client = createProviderClient?.call(type) ?? createClient();
@@ -492,6 +500,8 @@ class SourceSessionRegistry {
         userId: value.userId,
         userAgent: server.userAgent,
       );
+      await sessionIdentityVerifier?.call(server, value, client);
+      guard();
       final user = await client.getUser();
       guard();
       if (user.id != value.userId) {
@@ -726,7 +736,7 @@ class SourceSessionRegistry {
         _guardCredentials(writing);
         _servers = next;
       }
-    } catch (_) {
+    } catch (error) {
       if (savedConfig) {
         await store.save(
           ServerListSnapshot(
@@ -735,10 +745,14 @@ class SourceSessionRegistry {
           ),
         );
       }
-      if (previous == null) {
-        await credentials.delete(commit.id);
-      } else {
-        await credentials.write(commit.id, previous);
+      // Failed cleanup after logout must never write the former credential
+      // back and clear its durable revocation marker.
+      if (value != null || error is! CredentialRevocationException) {
+        if (previous == null) {
+          await credentials.delete(commit.id);
+        } else {
+          await credentials.write(commit.id, previous);
+        }
       }
       rethrow;
     } finally {
@@ -1144,6 +1158,15 @@ class SourceSessionRegistry {
         userId: stored.userId,
         userAgent: server.userAgent,
       );
+      await sessionIdentityVerifier?.call(server, stored, client);
+      _requireCurrent(server, scope, generation);
+      if (server.serviceType == MediaServerType.plex) {
+        final user = await client.getUser();
+        _requireCurrent(server, scope, generation);
+        if (user.id != stored.userId) {
+          throw StateError('Account identity mismatch');
+        }
+      }
       if ((_scopes[server.id] ?? 0) != scope ||
           _allowed(server.id).region != server.region ||
           (server.region == AccessRegion.private &&
@@ -1180,6 +1203,35 @@ class SourceSessionRegistry {
     }
   }
 
+  /// Verify a selected-source client without registering a second authority.
+  /// Call before publishing its AuthSession; registry revisions still own it.
+  Future<void> verifyAttachedSession(
+    String id,
+    StoredCredentials value,
+    MediaServerClient client,
+  ) async {
+    final server = _allowed(id);
+    final scope = _scopes[id] ?? 0;
+    final generation = access.generation;
+    _requireCurrent(server, scope, generation);
+    final stored = await credentials.read(id);
+    _requireCurrent(server, scope, generation);
+    if (stored == null ||
+        !_credentialsMatch(server, value) ||
+        stored.accessToken != value.accessToken ||
+        stored.userId != value.userId ||
+        client.serviceType != server.serviceType ||
+        client.accessToken != value.accessToken ||
+        client.userId != value.userId) {
+      throw StateError('Source credential identity mismatch');
+    }
+    await sessionIdentityVerifier?.call(server, value, client);
+    _requireCurrent(server, scope, generation);
+    final user = await client.getUser();
+    _requireCurrent(server, scope, generation);
+    if (user.id != value.userId) throw StateError('Account identity mismatch');
+  }
+
   Future<SourceSession> authenticate(String id) async {
     final server = _allowed(id);
     final scope = _scopes[id] ?? 0;
@@ -1208,6 +1260,8 @@ class SourceSessionRegistry {
         userId: stored.userId,
         userAgent: server.userAgent,
       );
+      await sessionIdentityVerifier?.call(server, stored, client);
+      _requireCurrent(server, scope, generation);
       final user = await client.getUser();
       if (user.id != stored.userId) {
         throw StateError('Account identity mismatch');
@@ -1365,7 +1419,10 @@ class SourceSessionRegistry {
           userId: stored.userId,
           userAgent: server.userAgent,
         );
+        await sessionIdentityVerifier?.call(server, stored, client);
+        guard();
         final user = await client.getUser();
+        guard();
         return user.id == stored.userId
             ? ManualCheckStatus.available
             : ManualCheckStatus.needsLogin;

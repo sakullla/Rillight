@@ -259,7 +259,7 @@ void main() {
       expect(page.totalRecordCount, 2);
       expect(page.pagination.isAvailable, true);
       final query = fake.requests.last.query;
-      expect(query['genre'], 'Drama');
+      expect(query['genre'], '17');
       expect(query['unwatched'], '1');
       expect(query['sort'], 'addedAt:desc');
       final item = await client.getItem('42');
