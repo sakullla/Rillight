@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
@@ -34,114 +36,322 @@ class PhoneMetaEntry {
   final VoidCallback? onTap;
 }
 
-/// 头图、标题、元数据与播放操作各占一层，窄屏和大字体均可自然增高。
+/// 详情头部：整宽背景画面出血到状态栏，电影/剧集的竖版海报以卡片
+/// 压在背景下缘，标题与元数据排在海报右侧；主操作在头部下方通栏。
 ///
-/// 头图形状与横幅不符时（从竖版海报点进来、条目只有海报）用同一张图的
-/// 模糊放大铺底，海报完整居中，不再是一条窄图夹在两块色块之间。
+/// 背景一律取横版画面（背景图、剧照、单集剧照）。条目确实没有横版画面时，
+/// 才用海报大半径模糊做氛围底，海报本身完整地留在卡片里，不再出现
+/// 「一条窄海报夹在两块模糊色块之间」。
+///
+/// 从海报点进来时，共享图过渡落在海报卡上；从横版卡片点进来时落在背景上。
+/// 两种情况都只由落点那一张图取色，加载完成后不换图。
 class PhoneItemBanner extends StatelessWidget {
   const PhoneItemBanner({
     super.key,
     required this.item,
     required this.title,
+    this.titleWidget,
     this.meta = const [],
+    this.pendingMeta,
     this.actions,
     this.onTitleTap,
     this.titleHint,
     this.preferBackdrop = true,
     this.maxWidth = PhoneMotion.pageRequestWidth,
-    this.showCaption = true,
-    this.maxImageHeight,
+    this.posterItem,
   });
 
   static const bannerKey = Key('phone-detail-banner');
   static const metaKey = Key('phone-detail-meta');
+  static const posterKey = Key('phone-detail-poster');
+  static const backdropKey = Key('phone-detail-backdrop');
+
+  /// 承接共享图过渡的那一张（海报卡或背景），参数与来源卡片一致。
+  static const handoffImageKey = Key('phone-detail-handoff-image');
 
   final EmbyItem item;
+
+  /// 海报卡显示的条目。剧集切季时背景跟着季走，海报卡仍是剧集本身，
+  /// 失效或缺失的季海报不会被请求。缺省为 [item]。
+  final EmbyItem? posterItem;
   final String title;
+
+  /// 加载中的标题占位；非空时替代 [title]。
+  final Widget? titleWidget;
   final List<PhoneMetaEntry> meta;
+  final Widget? pendingMeta;
   final Widget? actions;
 
   /// 单集标题进所属剧集。非空时标题上方带剧集名和箭头。
   final VoidCallback? onTitleTap;
   final String? titleHint;
+
+  /// 来源卡片是横版（true）还是海报（false）。
   final bool preferBackdrop;
   final int maxWidth;
 
-  /// 为 false 时只画头图。加载中的标题和主操作由调用方放在头图下面。
-  final bool showCaption;
-
-  /// 剧集把季列表和分集当作主体时，压低背图，避免先滑过一大块画面。
-  final double? maxImageHeight;
-
-  /// 背图高度：16:9 全宽，横屏/矮窗封顶半屏，保证标题与主操作首屏可达。
-  static double imageHeightOf(BuildContext context, {double? cap}) {
+  /// 背景高度：16:9 加状态栏，横屏/矮窗封顶半屏，标题与主操作首屏可达。
+  static double imageHeightOf(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final byWidth = size.width * 9 / 16;
-    final heightCap = size.height * 0.5;
-    var height = byWidth < heightCap ? byWidth : heightCap;
-    if (cap != null && height > cap) height = cap;
-    return height;
+    // viewPadding 只含状态栏；padding 在透明顶栏下还加了顶栏高度。
+    final top = MediaQuery.viewPaddingOf(context).top;
+    final byWidth = size.width * 9 / 16 + top;
+    final cap = size.height * 0.5;
+    // 取整：半像素的画面下缘会和页面底色叠出一条细线。
+    return (byWidth < cap ? byWidth : cap).floorToDouble();
   }
+
+  /// 海报卡宽：窄屏收一档，给标题留出两行半汉字的宽度。
+  static double posterWidthOf(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < 380 ? 100 : 112;
+
+  /// 单集默认不画海报卡（背景就是本集剧照）；从海报点进来的单集仍保留，
+  /// 共享图才有落点。
+  bool get _showPoster => !item.isEpisode || !preferBackdrop;
+
+  /// 是否有可铺满横幅的横版画面。单集的主图本身就是 16:9 剧照。
+  static bool hasLandscapeArt(EmbyItem item) =>
+      item.isEpisode ||
+      (item.backdropImageTag?.isNotEmpty ?? false) ||
+      (item.parentBackdropImageTag?.isNotEmpty ?? false) ||
+      (item.thumbImageTag?.isNotEmpty ?? false);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final imageHeight = imageHeightOf(context, cap: maxImageHeight);
+    final scheme = theme.colorScheme;
+    final imageHeight = imageHeightOf(context);
+    final showPoster = _showPoster;
+    final posterWidth = posterWidthOf(context);
+    final posterHeight = posterWidth * 1.5;
+    // 海报卡上半截压在画面上，标题块与海报底边对齐。
+    final rise = showPoster ? posterHeight * .68 : AppSpacing.xl;
+    final landscape = hasLandscapeArt(item);
+
+    Widget backdrop = MediaImage(
+      key: preferBackdrop ? handoffImageKey : backdropKey,
+      item: item,
+      contributesToTheme: preferBackdrop,
+      preferBackdrop: true,
+      smartCrop: landscape,
+      fit: BoxFit.cover,
+      maxWidth: preferBackdrop ? maxWidth : PhoneMotion.pageRequestWidth,
+    );
+    if (preferBackdrop) {
+      backdrop = PhoneMotion.sharedImage(
+        itemId: item.id,
+        preferBackdrop: true,
+        child: backdrop,
+      );
+    }
+    if (!landscape) {
+      // 只有海报：大半径模糊成氛围底，再压一层暗色，海报卡才是主体。
+      backdrop = Stack(
+        fit: StackFit.expand,
+        children: [
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: 36,
+              sigmaY: 36,
+              tileMode: TileMode.clamp,
+            ),
+            child: backdrop,
+          ),
+          ColoredBox(color: Colors.black.withValues(alpha: .18)),
+        ],
+      );
+    }
+
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        titleWidget ??
+            _BannerTitle(
+              title: title,
+              hint: onTitleTap == null ? null : titleHint,
+              onTap: onTitleTap,
+              compact: showPoster,
+            ),
+        if (meta.isNotEmpty || pendingMeta != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          pendingMeta ?? _MetaLine(entries: meta),
+        ],
+      ],
+    );
+
     return Column(
       key: bannerKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          height: imageHeight,
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              height: imageHeight,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(color: scheme.surfaceContainerHigh),
+                  RepaintBoundary(child: ClipRect(child: backdrop)),
+                  // 顶带:保护透明顶栏与返回钮,向下溶到透明。
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0, .38],
+                        colors: [
+                          Colors.black.withValues(
+                            alpha: AppScrim.of(context, AppScrim.top),
+                          ),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 底带:画面下缘溶进页面底色，海报卡与标题压在上面也读得清。
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [.4, .78, .97],
+                        colors: [
+                          scheme.surface.withValues(alpha: 0),
+                          scheme.surface.withValues(alpha: .72),
+                          scheme.surface,
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (showPoster) ...[
+              // 海报行以底边定位：标题或元数据换行变高时向上长进画面下缘，
+              // 主操作的位置不随标题长短浮动。
+              SizedBox(height: imageHeight - rise + posterHeight),
+              Positioned(
+                left: AppSpacing.md,
+                right: AppSpacing.md,
+                bottom: 0,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _PosterCard(
+                      item: posterItem ?? item,
+                      width: posterWidth,
+                      handoff: !preferBackdrop,
+                      maxWidth: preferBackdrop
+                          ? PhoneMotion.posterRequestWidth
+                          : maxWidth,
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: titleBlock,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  imageHeight - rise,
+                  AppSpacing.md,
+                  0,
+                ),
+                child: titleBlock,
+              ),
+          ],
+        ),
+        if (actions != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.xs,
+            ),
+            child: actions,
+          ),
+      ],
+    );
+  }
+}
+
+/// 头部海报卡：圆角、细描边与投影，从海报点进来时承接共享图。
+class _PosterCard extends StatelessWidget {
+  const _PosterCard({
+    required this.item,
+    required this.width,
+    required this.handoff,
+    required this.maxWidth,
+  });
+
+  final EmbyItem item;
+  final double width;
+  final bool handoff;
+  final int maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    final height = width * 1.5;
+    Widget image = MediaImage(
+      key: handoff ? PhoneItemBanner.handoffImageKey : null,
+      item: item,
+      contributesToTheme: handoff,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      maxWidth: maxWidth,
+    );
+    if (handoff) {
+      image = PhoneMotion.sharedImage(
+        itemId: item.id,
+        preferBackdrop: false,
+        child: image,
+      );
+    }
+    return DecoratedBox(
+      key: PhoneItemBanner.posterKey,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: light ? .16 : .35),
+            blurRadius: light ? 14 : 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: SizedBox(
+          width: width,
+          height: height,
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ColoredBox(color: theme.colorScheme.surfaceContainerHigh),
-              RepaintBoundary(
-                child: PhoneMotion.sharedImage(
-                  itemId: item.id,
-                  preferBackdrop: preferBackdrop,
-                  child: MediaImage(
-                    item: item,
-                    contributesToTheme: true,
-                    preferBackdrop: preferBackdrop,
-                    maxWidth: maxWidth,
-                    blurFill: true,
-                  ),
-                ),
-              ),
-              // 顶带:保护透明顶栏与返回钮,向下溶到透明。
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0, .42],
-                    colors: [
-                      Colors.black.withValues(
-                        alpha: AppScrim.of(context, AppScrim.top),
-                      ),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: imageHeight * 0.42,
+              ColoredBox(color: scheme.surfaceContainerHigh),
+              image,
+              IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        theme.colorScheme.surface.withValues(alpha: 0),
-                        theme.colorScheme.surface.withValues(alpha: 0.66),
-                        theme.colorScheme.surface,
-                      ],
-                      stops: const [0, 0.6, 1],
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                    border: Border.all(
+                      color: light
+                          ? Colors.black.withValues(alpha: .08)
+                          : Colors.white.withValues(alpha: .12),
                     ),
                   ),
                 ),
@@ -149,78 +359,20 @@ class PhoneItemBanner extends StatelessWidget {
             ],
           ),
         ),
-        if (showCaption)
-          PhoneDetailCaption(
-            title: _BannerTitle(
-              title: title,
-              hint: onTitleTap == null ? null : titleHint,
-              onTap: onTitleTap,
-            ),
-            meta: meta,
-            actions: actions,
-          ),
-      ],
-    );
-  }
-}
-
-/// Shared geometry for a loaded detail header and its loading placeholder.
-class PhoneDetailCaption extends StatelessWidget {
-  const PhoneDetailCaption({
-    super.key,
-    required this.title,
-    this.meta = const [],
-    this.actions,
-    this.pendingMetadata,
-  });
-  final Widget title;
-  final List<PhoneMetaEntry> meta;
-  final Widget? actions, pendingMetadata;
-
-  /// 标题字阶：比全局 headlineLarge 收一档，两行长标题也不压住主操作。
-  static TextStyle? titleStyle(ThemeData theme) =>
-      theme.textTheme.headlineLarge?.copyWith(
-        color: theme.colorScheme.onSurface,
-        fontSize: 26,
-        fontWeight: FontWeight.w700,
-        height: 1.22,
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Transform.translate(
-      offset: const Offset(0, -20),
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        // 左右与分集、分区标题同取手机页面边距，整页内容落在同一条竖线上。
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.lg,
-          AppSpacing.md,
-          AppSpacing.xxs,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            title,
-            if (meta.isNotEmpty || pendingMetadata != null) ...[
-              const SizedBox(height: AppSpacing.xs),
-              pendingMetadata ?? _MetaLine(entries: meta),
-            ],
-            if (actions != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              actions!,
-            ],
-          ],
-        ),
       ),
     );
   }
 }
+
+/// 头部标题字阶：比全局 headlineLarge 收一档；海报右侧再收一档，
+/// 两行长标题也不把海报卡顶高。
+TextStyle? phoneDetailTitleStyle(ThemeData theme, {bool compact = false}) =>
+    theme.textTheme.headlineLarge?.copyWith(
+      color: theme.colorScheme.onSurface,
+      fontSize: compact ? 22 : 26,
+      fontWeight: FontWeight.w700,
+      height: 1.22,
+    );
 
 class _MetaLine extends StatelessWidget {
   const _MetaLine({required this.entries});
@@ -256,20 +408,26 @@ class _MetaLine extends StatelessWidget {
 }
 
 class _BannerTitle extends StatelessWidget {
-  const _BannerTitle({required this.title, this.hint, this.onTap});
+  const _BannerTitle({
+    required this.title,
+    this.hint,
+    this.onTap,
+    this.compact = false,
+  });
 
   final String title;
   final String? hint;
   final VoidCallback? onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final heading = Text(
       title,
-      maxLines: 2,
+      maxLines: compact ? 3 : 2,
       overflow: TextOverflow.ellipsis,
-      style: PhoneDetailCaption.titleStyle(theme),
+      style: phoneDetailTitleStyle(theme, compact: compact),
     );
     final hint = this.hint;
     if (hint == null || hint.isEmpty) {
@@ -603,6 +761,12 @@ class MobileSeriesPage extends StatelessWidget {
         : null;
     final showHeader =
         seasons.isNotEmpty || episodes.isNotEmpty || episodesLoading;
+    // 本季概况只剩一行小字跟在分区标题下：集数与整季载入后的已看进度。
+    final summary = <String>[
+      if (total != null && total > 0) l.episodeCount(total),
+      if (watched != null && total != null && total > 0)
+        l.seasonWatchedCount(watched, total),
+    ];
     return [
       if (plainOverview(item.overview) != null)
         EpisodeOverviewSection(
@@ -622,11 +786,28 @@ class MobileSeriesPage extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  l.detailEpisodesHeader,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Column(
+                  key: seasonSummaryKey,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      l.detailEpisodesHeader,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (summary.isNotEmpty)
+                      Text(
+                        summary.join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                  ],
                 ),
               ),
               if (onPickEpisode != null && (total ?? episodes.length) > 1)
@@ -665,15 +846,6 @@ class MobileSeriesPage extends StatelessWidget {
               },
             ),
           ),
-        ),
-      if (selected != null)
-        _SeasonSummary(
-          key: seasonSummaryKey,
-          season: selected,
-          // 多季时名字已在标签上，概况里不再重复。
-          showName: !showSeasons,
-          episodeTotal: total,
-          watched: watched,
         ),
       if (episodesLoading && episodes.isEmpty)
         LayoutBuilder(
@@ -750,144 +922,6 @@ class MobileSeriesPage extends StatelessWidget {
         ),
       const SizedBox(height: AppSpacing.lg),
     ];
-  }
-}
-
-/// 本季概况（季详情）：季海报、名称、年份与集数、已看计数和本季简介。
-class _SeasonSummary extends StatefulWidget {
-  const _SeasonSummary({
-    super.key,
-    required this.season,
-    required this.showName,
-    required this.episodeTotal,
-    required this.watched,
-  });
-
-  final EmbyItem season;
-  final bool showName;
-  final int? episodeTotal;
-  final int? watched;
-
-  @override
-  State<_SeasonSummary> createState() => _SeasonSummaryState();
-}
-
-class _SeasonSummaryState extends State<_SeasonSummary> {
-  bool _expanded = false;
-
-  @override
-  void didUpdateWidget(covariant _SeasonSummary oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.season.id != widget.season.id) _expanded = false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final season = widget.season;
-    final year = season.productionYear ?? season.premiereDate?.toLocal().year;
-    final total = widget.episodeTotal;
-    final watched = widget.watched;
-    final overview = plainOverview(season.overview);
-    final facts = <String>[
-      if (year != null) '$year',
-      if (total != null && total > 0) l.episodeCount(total),
-    ];
-    if (!widget.showName && facts.isEmpty && overview == null) {
-      return const SizedBox.shrink();
-    }
-    final muted = theme.textTheme.labelLarge?.copyWith(
-      color: scheme.onSurfaceVariant,
-      fontWeight: FontWeight.w500,
-    );
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.sm,
-        AppSpacing.md,
-        0,
-      ),
-      child: Material(
-        color: scheme.surfaceContainerHigh.withValues(alpha: .55),
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: overview == null
-              ? null
-              : () => setState(() => _expanded = !_expanded),
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: SizedBox(
-                    width: 56,
-                    height: 84,
-                    child: MediaImage(
-                      item: season,
-                      width: 56,
-                      height: 84,
-                      fit: BoxFit.cover,
-                      maxWidth: 200,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (widget.showName)
-                        Text(
-                          season.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      if (facts.isNotEmpty)
-                        Text(facts.join(' · '), style: muted),
-                      if (watched != null && total != null && total > 0) ...[
-                        if (facts.isNotEmpty)
-                          const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          l.seasonWatchedCount(watched, total),
-                          style: muted,
-                        ),
-                      ],
-                      if (overview != null) ...[
-                        const SizedBox(height: AppSpacing.xs),
-                        AnimatedSize(
-                          duration: AppMotion.durationOf(context),
-                          curve: AppMotion.standard,
-                          alignment: Alignment.topCenter,
-                          child: Text(
-                            overview,
-                            maxLines: _expanded ? null : 3,
-                            overflow: _expanded
-                                ? TextOverflow.visible
-                                : TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              height: 1.45,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 

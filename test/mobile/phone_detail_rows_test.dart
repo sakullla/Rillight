@@ -408,7 +408,14 @@ void main() {
     final placeholder = tester.getRect(find.byKey(_episodePlaceholder));
     expect(placeholder.left, greaterThanOrEqualTo(-0.5));
     expect(placeholder.right, lessThanOrEqualTo(360.5));
-    final card = tester.getRect(find.byType(SkeletonBlock).first);
+    final card = tester.getRect(
+      find
+          .descendant(
+            of: find.byKey(_episodePlaceholder),
+            matching: find.byType(SkeletonBlock),
+          )
+          .first,
+    );
     _expectOnScreen(card, 360, 900);
     expect(tester.takeException(), isNull);
     gate.complete();
@@ -465,7 +472,7 @@ void main() {
       final headerImages = tester.widgetList<MediaImage>(
         find.descendant(
           of: find.byKey(_pendingHeader),
-          matching: find.byType(MediaImage),
+          matching: find.byKey(PhoneItemBanner.handoffImageKey),
           skipOffstage: false,
         ),
       );
@@ -494,7 +501,7 @@ void main() {
       final settled = tester.widget<MediaImage>(
         find.descendant(
           of: find.byKey(PhoneItemBanner.bannerKey),
-          matching: find.byType(MediaImage),
+          matching: find.byKey(PhoneItemBanner.handoffImageKey),
         ),
       );
       expect(settled.preferBackdrop, posterImage.preferBackdrop);
@@ -594,7 +601,7 @@ void main() {
       final headerImages = tester.widgetList<MediaImage>(
         find.descendant(
           of: find.byKey(_pendingHeader),
-          matching: find.byType(MediaImage),
+          matching: find.byKey(PhoneItemBanner.handoffImageKey),
           skipOffstage: false,
         ),
       );
@@ -631,8 +638,10 @@ void main() {
       final action = tester.getRect(find.byKey(_pendingAction));
       final body = tester.getRect(find.byKey(_pendingBody));
       expect(tester.widget<Text>(find.byKey(_pendingTitle)).data, 'Inception');
-      expect(title.top, greaterThanOrEqualTo(header.bottom - 1));
-      expect(action.top, greaterThanOrEqualTo(header.bottom - 1));
+      // 有交接图时标题与主操作就画在同一个头部里，载入前后版式不跳。
+      expect(title.top, greaterThanOrEqualTo(header.top));
+      expect(action.top, greaterThanOrEqualTo(title.bottom - 1));
+      expect(action.bottom, lessThanOrEqualTo(header.bottom + 1));
       expect(action.width, greaterThanOrEqualTo(48));
       expect(action.height, greaterThanOrEqualTo(48));
       expect(body.top, greaterThanOrEqualTo(action.bottom - 1));
@@ -688,12 +697,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
     expect(route.animation!.value, 1);
     expect(tester.getTopLeft(find.byKey(_pendingHeader)), before);
-    expect(
-      tester.getRect(find.byKey(_pendingTitle)).top,
-      greaterThanOrEqualTo(
-        tester.getRect(find.byKey(_pendingHeader)).bottom - 1,
-      ),
-    );
+    final pendingHeader = tester.getRect(find.byKey(_pendingHeader));
+    final pendingTitle = tester.getRect(find.byKey(_pendingTitle));
+    expect(pendingTitle.top, greaterThanOrEqualTo(pendingHeader.top));
+    expect(pendingTitle.bottom, lessThanOrEqualTo(pendingHeader.bottom + 1));
     expect(find.byKey(_pendingAction), findsOneWidget);
     expect(find.byKey(_pendingBody), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -843,7 +850,8 @@ void main() {
       );
       expect(tester.takeException(), isNull);
 
-      await pump(const Size(900, 800));
+      // 桌面最窄窗口：分类名在左列，字幕仍是四等列。
+      await pump(const Size(1024, 800));
       expect(chip(1).width, chip(5).width);
       expect(
         tester.getTopLeft(find.byKey(const ValueKey('media-stream-1'))).dy,

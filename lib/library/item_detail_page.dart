@@ -1233,6 +1233,20 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final backdrop = item.isEpisode
         ? (heroArtworkSources(shared).themeItem ?? shared)
         : artwork;
+    // 分集区标题旁的一行小字：本季集数，整季载入后再加已看进度。
+    final seasonTotal = _episodeTotal > 0 ? _episodeTotal : season?.childCount;
+    final seasonWatched =
+        seasonTotal != null &&
+            _episodeWindowEnd >= seasonTotal &&
+            _episodes.length >= seasonTotal
+        ? _episodes.where((episode) => episode.userData.played).length
+        : null;
+    final episodeSummary = <String>[
+      if (seasonTotal != null && seasonTotal > 0)
+        l10n.episodeCount(seasonTotal),
+      if (seasonWatched != null && seasonTotal != null && seasonTotal > 0)
+        l10n.seasonWatchedCount(seasonWatched, seasonTotal),
+    ].join(' · ');
     final content = <Widget>[
       RepaintBoundary(
         child: _DetailHeader(
@@ -1265,6 +1279,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                   _showItem(next.id);
                 },
           busyPlayed: _busyPlayed,
+          genres: genres,
           mediaSourceId: _mediaSourceId,
           audioStreamIndex: _audioStreamIndex,
           subtitleStreamIndex: _subtitleStreamIndex,
@@ -1341,23 +1356,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               );
             },
           ),
-        if (item.chapters.isNotEmpty)
-          _ChapterStrip(
-            itemId: item.id,
-            chapters: item.chapters,
-            onSelect: (chapter) {
-              final playId = item.isPlayable ? item.id : playTarget?.id;
-              if (playId == null) {
-                return;
-              }
-              _openPlayer(playId, startTimeTicks: chapter.startPositionTicks);
-            },
-          ),
-        EpisodePeopleSection(people: people),
-        EpisodeMediaStreamsSection(source: _sourceById(item, _mediaSourceId)),
       ],
-      // 章节对所有类型可用(电影同样支持章节跳转)。
-      if (!item.isEpisode && item.chapters.isNotEmpty)
+      if (item.chapters.isNotEmpty)
         _ChapterStrip(
           itemId: item.id,
           chapters: item.chapters,
@@ -1384,6 +1384,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           loadMoreError: _episodeLoadMoreError,
           onRetryLoadMore: _retryEpisodeContinuation,
           onLoadMore: () => unawaited(_loadMoreEpisodes()),
+          summary: episodeSummary,
           headerAction: _EpisodeShelfActions(
             seasons: _seasons,
             seasonId: _seasonId,
@@ -1408,6 +1409,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 ),
         ),
       ],
+      // 演职员、相册、媒体信息与外链对三种条目同序排列。
+      EpisodePeopleSection(people: people),
       Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.page,
@@ -1416,7 +1419,6 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DetailGenreRow(item: item, genres: genres),
             DetailAlbumStrip(
               item: item,
               album: album,
@@ -1425,9 +1427,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 360.0,
               ),
             ),
-            DetailExternalLinks(links: item.externalUrls, title: item.name),
           ],
         ),
+      ),
+      if (!item.isSeries)
+        EpisodeMediaStreamsSection(source: _sourceById(item, _mediaSourceId)),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+        child: DetailExternalLinks(links: item.externalUrls, title: item.name),
       ),
       if (showSimilar)
         MediaShelf(
@@ -1723,7 +1730,7 @@ class _ChapterTile extends StatelessWidget {
     final scheme = theme.colorScheme;
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
     final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
-    // 16:9 章节图卡:左下角时间码角标,图下一行章节名;无图以底色 + 图标兜底。
+    // 16:9 章节图卡:左下角时间码角标,图下一行章节名;无图画主色渐变与序号。
     return SizedBox(
       width: width,
       child: Material(
@@ -1751,14 +1758,7 @@ class _ChapterTile extends StatelessWidget {
                           tag: chapter.imageTag,
                         )
                       else
-                        ColoredBox(
-                          color: scheme.surfaceContainerHigh,
-                          child: Icon(
-                            Icons.play_arrow_rounded,
-                            size: 28,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
+                        ChapterFallbackArt(index: index),
                       Positioned(
                         left: AppSpacing.xs,
                         bottom: AppSpacing.xs,
@@ -1841,14 +1841,7 @@ class _ChapterThumbState extends State<_ChapterThumb> {
 
   @override
   Widget build(BuildContext context) {
-    final fallback = ColoredBox(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Icon(
-        Icons.bookmark_outline_rounded,
-        size: 18,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-    );
+    final fallback = ChapterFallbackArt(index: widget.index);
     if (widget.tag == null || widget.tag!.isEmpty) {
       return fallback;
     }
@@ -2297,9 +2290,11 @@ class _DetailHeader extends StatelessWidget {
     this.onLocateEpisode,
     this.overview,
     this.overviewWidget,
+    this.genres = const [],
   });
 
   final EmbyItem item;
+  final List<String> genres;
   final EmbyItem? artworkItem;
   final EmbyItem? backdropItem;
   final String? runtime;
@@ -2353,8 +2348,9 @@ class _DetailHeader extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final viewportHeight = MediaQuery.sizeOf(context).height;
-        final billboard = !item.isSeries;
         final light = Theme.of(context).brightness == Brightness.light;
+        // 浅色头部不铺背景图，没有画面可看就不留半屏空白。
+        final billboard = !item.isSeries && !light;
         final minHeight =
             heightFor(
               width,
@@ -2436,6 +2432,8 @@ class _DetailHeader extends StatelessWidget {
                           seriesId: seriesId,
                           overview: overview,
                           overviewWidget: overviewWidget,
+                          genres: genres,
+                          mediaSource: _headerSource(item, mediaSourceId),
                           playEpisode: item.isSeries ? nextEpisode : null,
                           onLocateEpisode: onLocateEpisode,
                           actions: _DetailActions(
@@ -2569,9 +2567,13 @@ class _DetailInfo extends StatelessWidget {
     this.overview,
     this.overviewWidget,
     this.playEpisode,
+    this.genres = const [],
+    this.mediaSource,
   });
 
   final EmbyItem item;
+  final List<String> genres;
+  final ItemMediaSource? mediaSource;
   final String? runtime;
   final bool compact;
   final int seasonCount;
@@ -2622,7 +2624,12 @@ class _DetailInfo extends StatelessWidget {
           seasonCount: seasonCount,
           playEpisode: playEpisode,
           onLocateEpisode: onLocateEpisode,
+          badges: item.isSeries ? const [] : mediaTechBadges(mediaSource),
         ),
+        if (genres.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          DetailGenreRow(item: item, genres: genres, dense: true),
+        ],
         if (overviewWidget != null) ...[
           SizedBox(height: item.isSeries ? AppSpacing.sm : AppSpacing.md),
           ConstrainedBox(
@@ -2660,6 +2667,7 @@ class _MetaRow extends StatelessWidget {
     required this.seasonCount,
     this.playEpisode,
     this.onLocateEpisode,
+    this.badges = const [],
   });
 
   final EmbyItem item;
@@ -2667,6 +2675,9 @@ class _MetaRow extends StatelessWidget {
   final int seasonCount;
   final EmbyItem? playEpisode;
   final VoidCallback? onLocateEpisode;
+
+  /// 画质/声道/字幕描边标签，跟在事实与评分后面。
+  final List<String> badges;
 
   @override
   Widget build(BuildContext context) {
@@ -2723,8 +2734,6 @@ class _MetaRow extends StatelessWidget {
       ?runtime,
       if (item.isEpisode && item.premiereDate != null)
         l10n.premiereDate(formatDateYmd(item.premiereDate!)),
-      if (item.isEpisode && item.dateCreated != null)
-        l10n.dateAddedOn(formatDateYmd(item.dateCreated!)),
       if (item.isSeries && seasonCount > 0) l10n.seasonCount(seasonCount),
       if (item.childCount != null && item.isSeries)
         l10n.episodeCount(item.childCount!),
@@ -2744,55 +2753,92 @@ class _MetaRow extends StatelessWidget {
           key: CatalogKeys.playTarget,
         ),
     ];
-    final factStyle = theme.textTheme.bodySmall?.copyWith(
-      color: scheme.onSurfaceVariant,
+    final factStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: scheme.onSurface.withValues(alpha: .78),
       height: 1.45,
     );
+    Widget badge(String text) => DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: scheme.onSurface.withValues(alpha: .45)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        child: Text(
+          text,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: scheme.onSurface.withValues(alpha: .85),
+            fontWeight: FontWeight.w700,
+            letterSpacing: .3,
+          ),
+        ),
+      ),
+    );
+    final remaining = item.canResume ? remainingLabel(l10n, item) : null;
+    // 集标、事实、评分与画质标签排在同一行，换行时按块折行。
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (actions.isNotEmpty)
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
-            children: actions,
-          ),
-        if (facts.isNotEmpty || rating != null) ...[
-          if (actions.isNotEmpty) const SizedBox(height: AppSpacing.xs),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xxs,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (facts.isNotEmpty) Text(facts.join(' · '), style: factStyle),
-              if (rating != null)
-                HeroRatingBadge(rating: rating, onScrim: false),
-            ],
-          ),
-        ],
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            ...actions,
+            if (facts.isNotEmpty) Text(facts.join(' · '), style: factStyle),
+            if (rating != null) HeroRatingBadge(rating: rating, onScrim: false),
+            for (final label in badges) badge(label),
+          ],
+        ),
         if (item.canResume) ...[
-          const SizedBox(height: AppSpacing.xs),
-          Semantics(
-            container: true,
-            label: l10n.playbackProgress((item.playbackProgress * 100).round()),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              child: SizedBox(
-                key: CatalogKeys.resumeProgress,
-                width: 168,
-                child: LinearProgressIndicator(
-                  value: item.playbackProgress.clamp(0, 1),
-                  minHeight: 4,
-                  color: scheme.primary,
-                  backgroundColor: scheme.onSurface.withValues(alpha: .16),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                container: true,
+                label: l10n.playbackProgress(
+                  (item.playbackProgress * 100).round(),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: SizedBox(
+                    key: CatalogKeys.resumeProgress,
+                    width: 200,
+                    child: LinearProgressIndicator(
+                      value: item.playbackProgress.clamp(0, 1),
+                      minHeight: 4,
+                      color: scheme.primary,
+                      backgroundColor: scheme.onSurface.withValues(alpha: .16),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              if (remaining != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                ExcludeSemantics(
+                  child: Text(
+                    remaining,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ],
     );
   }
+}
+
+ItemMediaSource? _headerSource(EmbyItem item, String? id) {
+  for (final source in item.mediaSources) {
+    if (source.id == id) return source;
+  }
+  return item.mediaSources.firstOrNull;
 }
 
 /// PopupMenuButton 把 null 当成取消,字幕关闭用哨兵值再映回 null。

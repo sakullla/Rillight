@@ -118,3 +118,54 @@ String? plainOverview(String? raw) {
       .trim();
   return stripped.isEmpty ? null : stripped;
 }
+
+/// 详情头部的画质/声道/字幕标签：4K、HDR/杜比视界、5.1/7.1、全景声、字幕。
+/// 三端头部共用，只描述当前片源，不代表最终输出。
+List<String> mediaTechBadges(ItemMediaSource? source) {
+  if (source == null) return const [];
+  final video = source.streams.where((s) => s.isVideo).firstOrNull;
+  final audios = source.streams.where((s) => s.isAudio).toList();
+  final audio =
+      audios.where((s) => s.isDefault == true).firstOrNull ??
+      audios.firstOrNull;
+  final badges = <String>[];
+  final height = video?.height ?? source.height;
+  if (height != null && height > 0) {
+    badges.add(
+      height >= 2000
+          ? '4K'
+          : height >= 1000
+          ? '1080P'
+          : height >= 700
+          ? '720P'
+          : 'SD',
+    );
+  }
+  final rangeType = (video?.videoRangeType ?? '').toUpperCase();
+  final range = (video?.videoRange ?? '').toUpperCase();
+  if (rangeType.contains('DOVI') || rangeType.contains('DOLBY')) {
+    badges.add('DOLBY VISION');
+  } else if (rangeType.contains('HDR10+') || rangeType.contains('HDR10PLUS')) {
+    badges.add('HDR10+');
+  } else if (range == 'HDR' ||
+      rangeType.contains('HDR') ||
+      rangeType == 'HLG') {
+    badges.add(rangeType == 'HLG' ? 'HLG' : 'HDR');
+  }
+  final audioText = [
+    audio?.profile,
+    audio?.label,
+    audio?.codec,
+  ].whereType<String>().join(' ').toUpperCase();
+  if (audioText.contains('ATMOS')) {
+    badges.add('ATMOS');
+  }
+  final channels = audio?.channels;
+  if (channels != null && channels >= 6) {
+    badges.add(channels >= 8 ? '7.1' : '5.1');
+  }
+  if (source.streams.any((s) => s.isSubtitle)) {
+    badges.add('CC');
+  }
+  return badges;
+}

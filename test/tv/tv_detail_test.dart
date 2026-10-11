@@ -362,8 +362,8 @@ void main() {
         reason: 'Offscreen episodes must not mount every image in the season',
       );
 
-      // 续播集是主操作,自动聚焦在播放上。
-      expect(focusedLabel(tester), '继续播放');
+      // 续播集是主操作,自动聚焦在播放上;按钮写明要续播哪一集。
+      expect(focusedLabel(tester), '继续播放 S1E2');
 
       // 当前集(续播目标)有可识别标识,行内带进度条;已看集有已看标记。
       final currentTile = find.byKey(const ValueKey('episode-friends-s1e2'));
@@ -457,8 +457,8 @@ void main() {
       await login(tester, server);
       await openItem(tester, app, 'series-friends');
 
-      // 焦点从播放出发,纯方向键下移到分集行。
-      expect(focusedLabel(tester), '播放');
+      // 焦点从播放出发,纯方向键下移到分集行。按钮写明要播哪一集。
+      expect(focusedLabel(tester), '播放 S1E2');
       for (
         var i = 0;
         i < 15 && !focusedLabel(tester).contains('The Pilot');

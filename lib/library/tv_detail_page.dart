@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -41,6 +42,10 @@ class _TvDetailPageState extends State<TvDetailPage> {
   final _focus = TvReturnFocus();
   final _scrolled = ValueNotifier<double>(0);
   bool _playBusy = false;
+
+  /// 单集的前后集：条目载入后各取一次，供头部「上一集/下一集」。
+  String? _neighborsFor;
+  EmbyItem? _previous, _next;
 
   @override
   void initState() {
@@ -129,6 +134,30 @@ class _TvDetailPageState extends State<TvDetailPage> {
     );
   }
 
+  void _loadNeighbors(EmbyItem item) {
+    if (!item.isEpisode || _neighborsFor == item.id) return;
+    _neighborsFor = item.id;
+    _previous = _next = null;
+    final client = DetailSourceScope.clientOf(context);
+    Future.wait<EmbyItem?>([
+      client.getPreviousEpisode(item).catchError((Object _) => null),
+      client.getNextEpisode(item).catchError((Object _) => null),
+    ]).then((neighbors) {
+      if (!mounted || _neighborsFor != item.id) return;
+      setState(() {
+        _previous = neighbors[0];
+        _next = neighbors[1];
+      });
+    });
+  }
+
+  void _openEpisode(EmbyItem episode) {
+    context.push(
+      DetailSourceScope.itemLocation(context, episode.id),
+      extra: DetailSourceScope.command(context, episode.id),
+    );
+  }
+
   bool _onScroll(ScrollNotification notification) {
     if (notification.depth == 0 && notification.metrics.axis == Axis.vertical) {
       _scrolled.value = notification.metrics.pixels;
@@ -147,6 +176,11 @@ class _TvDetailPageState extends State<TvDetailPage> {
           for (final episode in c.episodes) 'episode:${episode.id}',
         ]);
         final item = c.item, target = c.playTarget;
+        if (item != null && item.isEpisode && _neighborsFor != item.id) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _loadNeighbors(item);
+          });
+        }
         final season = c.seasons.where((s) => s.id == c.seasonId).firstOrNull;
         final artwork = item?.isSeries == true && season != null
             ? seasonArtworkItem(season, item!)
@@ -206,6 +240,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
                       if (item != null) ...[
                         _TvDetailHeader(
                           item: item,
+                          source: source,
+                          resume: target?.canResume == true ? target : null,
                           actions: _actions(context, item, target),
                         ),
                         if (c.seasonError != null)
@@ -238,9 +274,16 @@ class _TvDetailPageState extends State<TvDetailPage> {
                             ),
                           ),
                         if (item.isSeries) ..._episodes(context, c, target),
-                        // 剧照条自己在没有图时收起。
+                        // 演职员分区自带标题与页面边距，这里补齐到电视安全区。
                         Padding(
-                          padding: EdgeInsets.only(top: 10 * s),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: math.max(0, gutter - AppSpacing.page),
+                          ),
+                          child: EpisodePeopleSection(people: item.people),
+                        ),
+                        // 剧照条自己在没有图时收起；标题与横条对齐安全区。
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(gutter, 10 * s, 0, 0),
                           child: DetailAlbumStrip(item: item),
                         ),
                         if (item.genres.isNotEmpty)
@@ -305,13 +348,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
             !_playBusy && target != null && (target.isMovie || target.isEpisode)
             ? _play
             : null,
-        child: Text(
-          target == null
-              ? l.noPlayableStream
-              : target.canResume
-              ? l.resumePlay
-              : l.play,
-        ),
+        child: Text(_playLabel(l, item, target)),
       ),
       if (target?.canResume == true)
         TvAction(
@@ -319,6 +356,22 @@ class _TvDetailPageState extends State<TvDetailPage> {
           leading: const Icon(Icons.replay_rounded),
           onPressed: _playBusy ? null : () => _play(fromStart: true),
           child: Text(l.playFromStart),
+        ),
+      if (item.isEpisode && _previous != null)
+        TvAction(
+          key: CatalogKeys.previousEpisode,
+          pill: true,
+          leading: const Icon(Icons.skip_previous_rounded),
+          onPressed: () => _openEpisode(_previous!),
+          child: Text(l.previousEpisode),
+        ),
+      if (item.isEpisode && _next != null)
+        TvAction(
+          key: CatalogKeys.nextEpisode,
+          pill: true,
+          leading: const Icon(Icons.skip_next_rounded),
+          onPressed: () => _openEpisode(_next!),
+          child: Text(l.nextEpisode),
         ),
       if (!item.isSeries)
         TvAction(
@@ -333,6 +386,16 @@ class _TvDetailPageState extends State<TvDetailPage> {
           child: Text(item.userData.played ? l.markUnplayed : l.markPlayed),
         ),
     ];
+  }
+
+  /// 剧集页的主操作写明要播哪一集，进页面就知道按下去会发生什么。
+  String _playLabel(AppLocalizations l, EmbyItem item, EmbyItem? target) {
+    if (target == null) return l.noPlayableStream;
+    if (item.isSeries && target.isEpisode) {
+      final code = seasonEpisodeCode(target) ?? episodeLabel(target);
+      return target.canResume ? l.resumePlayEpisode(code) : l.playEpisode(code);
+    }
+    return target.canResume ? l.resumePlay : l.play;
   }
 
   List<Widget> _episodes(
@@ -702,10 +765,21 @@ class _TvDetailBackdrop extends StatelessWidget {
 /// 头部信息块:与背景同屏,底部左对齐;操作按钮在最下面,
 /// 首屏同时露出分集行的标题,提示还能往下看。
 class _TvDetailHeader extends StatelessWidget {
-  const _TvDetailHeader({required this.item, required this.actions});
+  const _TvDetailHeader({
+    required this.item,
+    required this.actions,
+    this.source,
+    this.resume,
+  });
 
   final EmbyItem item;
   final List<Widget> actions;
+
+  /// 当前片源：头部画质/声道标签只描述它。
+  final ItemMediaSource? source;
+
+  /// 有续播进度的播放目标（电影/单集本身，或剧集的续播集）。
+  final EmbyItem? resume;
 
   @override
   Widget build(BuildContext context) {
@@ -723,6 +797,7 @@ class _TvDetailHeader extends StatelessWidget {
       if (item.isSeries && item.childCount != null && item.childCount! > 0)
         '${item.childCount} ${l.seasons}',
     ];
+    final badges = item.isSeries ? const <String>[] : mediaTechBadges(source);
     const shadow = [Shadow(blurRadius: 12, color: Colors.black54)];
     final titleText = Text(
       item.name,
@@ -810,6 +885,10 @@ class _TvDetailHeader extends StatelessWidget {
                         ),
                       ),
                     ),
+                    for (final badge in badges) ...[
+                      SizedBox(width: 8 * s),
+                      _TvBadge(label: badge),
+                    ],
                   ],
                 ),
               ],
@@ -827,12 +906,88 @@ class _TvDetailHeader extends StatelessWidget {
                   ),
                 ),
               ],
+              if (resume != null) ...[
+                SizedBox(height: 14 * s),
+                _TvResumeBar(item: resume!),
+              ],
               SizedBox(height: 18 * s),
               Wrap(spacing: 10 * s, runSpacing: 10 * s, children: actions),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 头部画质/声道描边小标签，压在背景图上始终是白字。
+class _TvBadge extends StatelessWidget {
+  const _TvBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = TvDesign.scaleOf(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(3 * s),
+        border: Border.all(color: Colors.white.withValues(alpha: .6)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 5 * s, vertical: 1 * s),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Colors.white.withValues(alpha: .9),
+            fontWeight: FontWeight.w700,
+            letterSpacing: .3,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 续播进度：一条细进度和「剩余 N 分钟」，与主操作的「继续播放」呼应。
+class _TvResumeBar extends StatelessWidget {
+  const _TvResumeBar({required this.item});
+
+  final EmbyItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final s = TvDesign.scaleOf(context);
+    final remaining = remainingLabel(l, item);
+    final code = item.isEpisode ? seasonEpisodeCode(item) : null;
+    return Row(
+      key: const Key('tv-detail-resume'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2 * s),
+          child: SizedBox(
+            width: 180 * s,
+            child: LinearProgressIndicator(
+              value: item.playbackProgress.clamp(0, 1),
+              minHeight: 3 * s,
+              color: theme.colorScheme.primary,
+              backgroundColor: Colors.white.withValues(alpha: .22),
+            ),
+          ),
+        ),
+        if (remaining != null) ...[
+          SizedBox(width: 10 * s),
+          Text(
+            [?code, remaining].join(' · '),
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: Colors.white.withValues(alpha: .82),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
