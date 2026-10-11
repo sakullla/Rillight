@@ -25,9 +25,11 @@ class SyntheticSourceAuth extends AuthController {
     required FakeEmbyAdapter adapter,
     required ClientDeviceInfo device,
     required Set<String> libraryIds,
+    MemoryCredentialStore? credentials,
+    MemoryServerListStore? store,
   }) {
-    final credentials = MemoryCredentialStore();
-    final store = MemoryServerListStore();
+    credentials ??= MemoryCredentialStore();
+    store ??= MemoryServerListStore();
     MediaServerClient client() =>
         EmbyClient(device: device, dio: dioForFakeEmby(adapter));
     final sources = SourceSessionRegistry(

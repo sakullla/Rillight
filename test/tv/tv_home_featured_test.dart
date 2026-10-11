@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
+import 'package:rillight/auth/credential_store.dart';
+import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/app/tv_top_nav.dart';
@@ -38,6 +40,8 @@ void main() {
     WidgetTester tester,
     FakeEmbyServer server, {
     Size size = const Size(960, 540),
+    MemoryServerListStore? servers,
+    MemoryCredentialStore? credentials,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -45,6 +49,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final auth = SyntheticSourceAuth(
       adapter: FakeEmbyAdapter([server]),
+      store: servers,
+      credentials: credentials,
       device: const ClientDeviceInfo(
         clientName: 'test',
         deviceName: 'tv',
@@ -61,6 +67,7 @@ void main() {
       },
     );
     final runtime = (await tester.runAsync(auth.runtime))!;
+    if (servers != null) await tester.runAsync(auth.restore);
     final app = RillightApp(
       auth: auth,
       environment: PresentationEnvironment.tv,
@@ -595,13 +602,19 @@ void main() {
       final server = FakeEmbyServer();
       _showContinueAndNext(server);
       final phone = PhoneHomeSectionController.app();
-      await tester.runAsync(() => phone.load('server-id-1'));
-      final (_, stop) = await start(
+      final servers = MemoryServerListStore();
+      final credentials = MemoryCredentialStore();
+      final (firstApp, stop) = await start(
         tester,
         server,
         size: const Size(960, 1600),
+        servers: servers,
+        credentials: credentials,
       );
       await login(tester, server);
+      final configuredId = firstApp.auth.session!.server.id;
+      expect(configuredId, isNot(server.serverId));
+      await tester.runAsync(() => phone.load(configuredId));
       expect(
         tester.getTopLeft(find.byKey(const ValueKey('tv-row-继续观看'))).dy,
         lessThan(
@@ -665,10 +678,15 @@ void main() {
 
       await stop();
       TvSectionController.debugResetApp();
-      final restarted = FakeEmbyServer();
-      _showContinueAndNext(restarted);
-      await start(tester, restarted, size: const Size(960, 1600));
-      await login(tester, restarted);
+      final (restartedApp, _) = await start(
+        tester,
+        server,
+        size: const Size(960, 1600),
+        servers: servers,
+        credentials: credentials,
+      );
+      expect(restartedApp.auth.session!.server.id, configuredId);
+      expect(find.byType(TvShell), findsOneWidget);
       expect(find.byKey(TvHomeKeys.featured), findsNothing);
       expect(
         tester.getTopLeft(find.byKey(const ValueKey('tv-row-即将播放'))).dy,

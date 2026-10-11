@@ -2157,7 +2157,10 @@ void main() {
 
         await _pump(tester, auth: auth, catalog: catalog);
         expect(find.text('alice'), findsOneWidget);
-        expect(find.text('家庭影院'), findsOneWidget);
+        expect(
+          tester.widget<Text>(find.byKey(PhoneMinePage.serverKey)).data,
+          'emby · 家庭影院',
+        );
         expect(find.text('line-b.test:8096'), findsOneWidget);
         expect(find.text('账户与服务器'), findsOneWidget);
         expect(find.byKey(PhoneMinePage.settingsKey), findsOneWidget);

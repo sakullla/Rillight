@@ -15,6 +15,7 @@ import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/media_image/media_image.dart';
 
 import '../helpers/image_cache_fixture.dart';
+import '../emby/fake_emby_server.dart';
 
 void main() {
   const fallback = Text('Text title', key: Key('fallback'));
@@ -41,15 +42,49 @@ void main() {
     );
   });
 
-  test('only carousel feeds ask the server for logos', () {
+  test('only carousel feeds ask the server for logos', () async {
     final plain = catalogItemsRequest(userId: 'u');
     final featured = catalogItemsRequest(
       userId: 'u',
       imageTypes: MediaServerClient.featuredImageTypes,
     );
-    expect(plain.query!['EnableImageTypes'], MediaServerClient.imageTypes);
-    expect(plain.query!['EnableImageTypes'], isNot(contains('Logo')));
-    expect(featured.query!['EnableImageTypes'], contains('Logo'));
+    expect(plain.query!['enableImageTypes'], MediaServerClient.imageTypes);
+    expect(
+      featured.query!['enableImageTypes'],
+      MediaServerClient.featuredImageTypes,
+    );
+
+    final server = FakeEmbyServer();
+    final client = EmbyClient(
+      device: const ClientDeviceInfo(
+        clientName: 'test',
+        deviceName: 'test',
+        deviceId: 'logo-projection',
+        version: '1',
+      ),
+      dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+    );
+    final session = await client.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: server.serverId,
+    );
+    client.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: session.accessToken,
+      userId: session.user.id,
+    );
+    addTearDown(client.clearSession);
+    for (final request in [plain, featured]) {
+      await executeCatalogRequest(client, request);
+      final query = Uri.parse(
+        server.requests.last.split(' ').last,
+      ).queryParameters;
+      final imageTypes = query['EnableImageTypes']!.split(',');
+      expect(imageTypes, containsAll(['Primary', 'Backdrop', 'Thumb']));
+      expect(imageTypes.contains('Logo'), identical(request, featured));
+    }
   });
 
   testWidgets('without a session or a logo tag the text title shows', (

@@ -443,22 +443,10 @@ void main() {
         isEmpty,
         reason: 'private posters and chapters must never write disk',
       );
-      final scope = jsonEncode([
-        b.region.name,
-        b.configuredServerId,
-        b.verifiedServerId,
-        b.userId,
-        'library',
-        permit.regionGeneration,
-        permit.sessionRevision,
-        permit.scopeRevision,
-        tester
-            .widget<DetailSourceScope>(find.byType(DetailSourceScope))
-            .origin
-            .client
-            .baseUrl
-            .toString(),
-      ]);
+      final scope = tester
+          .widget<DetailSourceScope>(find.byType(DetailSourceScope))
+          .imagePolicy
+          .scope;
       expect(
         cache.peek(
           serverId: scope,

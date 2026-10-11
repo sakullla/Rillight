@@ -89,7 +89,7 @@ void main() {
           },
         ],
       });
-      expect(source.runtime, 900);
+      expect(source.runtime, const Duration(microseconds: 90));
       expect(source.streams.first.profile, 'Main 10');
       expect(source.streams.first.averageFrameRate, 23.976);
       expect(source.audioStreams.single.language, 'zho');
@@ -165,9 +165,11 @@ void main() {
           MediaServerClient.gridFields,
           MediaServerClient.homePosterFields,
         ]) {
-          expect(fields, contains('ProviderIds'));
-          expect(fields, contains('UserData'));
-          expect(fields, isNot(contains('MediaSources')));
+          await client.queryItems(fields: fields);
+          final wireFields = queries.last['Fields']!.split(',');
+          expect(wireFields, contains('ProviderIds'));
+          expect(wireFields, contains('UserData'));
+          expect(wireFields, isNot(contains('MediaSources')));
         }
       } finally {
         client.clearSession();

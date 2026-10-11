@@ -55,11 +55,15 @@ class _PreviewClient implements MediaServerClient {
   }
 
   @override
-  bool get hasSession => true;
+  bool hasSession = true;
   @override
-  Uri get baseUrl => Uri.parse('https://preview.invalid');
+  MediaServerType get serviceType => MediaServerType.emby;
   @override
-  String get userId => 'synthetic';
+  void clearSession() => hasSession = false;
+  @override
+  Uri? get baseUrl => hasSession ? Uri.parse('https://preview.invalid') : null;
+  @override
+  String? get userId => hasSession ? 'synthetic' : null;
   @override
   MediaServerClient createDetached() => this;
   @override
@@ -94,6 +98,9 @@ void main() {
   tearDown(() {
     controller.dispose();
     auth.dispose();
+    expect(client.hasSession, isFalse);
+    expect(client.userId, isNull);
+    expect(client.baseUrl, isNull);
     MediaImage.debugClearCache();
     MediaImage.debugResetCacheConfiguration();
   });
@@ -186,6 +193,35 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(client.chapterRequests, [('first', 4)]);
     expect(find.byType(Image), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('cleared session cannot authorize chapter fallback', (
+    tester,
+  ) async {
+    final preview = await showFrame(tester);
+    controller.item = const MediaItem(
+      id: 'first',
+      name: 'Film',
+      type: 'Movie',
+      chapters: [
+        ItemChapter(
+          name: 'Chapter',
+          startPosition: Duration.zero,
+          imageTag: 'chapter-tag',
+          imageIndex: 4,
+        ),
+      ],
+    );
+    final pending = Completer<PreviewFrame?>();
+    preview.read = (_) => pending.future;
+    await moveTo(tester, .5);
+    client.clearSession();
+    pending.completeError(StateError('Session ended'));
+    await tester.pumpAndSettle();
+    expect(client.chapterRequests, isEmpty);
+    expect(find.byType(Image), findsNothing);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
