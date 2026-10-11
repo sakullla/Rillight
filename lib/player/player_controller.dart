@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/playback_metadata.dart';
 import 'package:rillight/media_server/resources.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -2803,7 +2804,7 @@ class PlayerController extends ChangeNotifier {
       itemId: playback.itemId,
       authorization: playback.authorization,
       canRenewUrlInPlace: playback.canRenewUrlInPlace,
-      outputBitrate: playback.outputBitrate,
+      outputBitrate: playback.mediaSource.transcodingOutputBitrate,
       timeline: playback.timeline,
       filmTimeline: playback.filmTimeline,
       partIndex: playback.partIndex,
@@ -4172,53 +4173,65 @@ class PlayerController extends ChangeNotifier {
 
     try {
       onStage?.call('metadata');
-      // 不带 MediaSourceId 请求:部分服务端(含 Emby)收到该参数时只返回
-      // 这一个源,播放器就再也列不出其它版本;全部源在本地用
-      // [preferredPlaybackSourceId] 按 id/发行组标签挑选。
       final requestClient = client;
-      final profile = backend is VideoBackendCapabilities
-          ? await (backend as VideoBackendCapabilities).playbackCapabilities(
-              requestedBitrate ?? maxStreamingBitrate,
-            )
-          : null;
+      PlaybackInfo? info = preparedInfo;
+      preparing = info?.resources;
+      // Discover versions before selecting the saved intent. This path cannot
+      // allocate a transcode, select a server track, or fail on the default
+      // version's playback capability before the chosen version is known.
+      var sources =
+          info?.mediaSources ??
+          (requestClient is PlaybackMetadataProvider
+              ? await _sourceRequest<List<PlaybackMediaSource>>(
+                  () => (requestClient as PlaybackMetadataProvider)
+                      .getPlaybackSources(
+                        itemId: itemId,
+                        position: durationFromTicks(startTicks),
+                      ),
+                )
+              : playbackSourcesFromItem(item!));
       if (!_accepts(operation)) return;
-      var renegotiateForPreference = false;
-      var info =
-          preparedInfo ??
-          await _sourceRequest<PlaybackInfo>(
-            () => requestClient.getPlaybackInfo(
-              itemId: itemId,
-              mediaSourceId: requestClient is PartPlaybackProvider
-                  ? requestedSourceId ??
-                        activeMediaSourceId ??
-                        preferredMediaSourceId ??
-                        _rememberedPreference?.mediaSourceId
-                  : null,
-              maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
-              startPosition: startTicks > 0
-                  ? durationFromTicks(startTicks)
-                  : null,
-              audioStreamIndex:
-                  audio ?? (strictTracks ? null : preferredAudioStreamIndex),
-              subtitleStreamIndex: subtitleOff
-                  ? -1
-                  : (subtitle ??
-                        (strictTracks ? null : preferredSubtitleStreamIndex)),
-              capabilities: profile,
-              forceTranscode: forceTranscode,
-            ),
-          );
-      preparing = info.resources;
-      if (!_accepts(operation)) return;
-      await _writePreparationSnapshot(operation, info, startTicks: startTicks);
-
-      mediaSources = info.mediaSources;
-      if (runtime != null && origin != null) {
-        preferenceResolution = runtime!.preference(
-          origin!,
-          item!,
-          info.mediaSources,
+      var legacyDiscovery = false;
+      if (sources.isEmpty && requestClient is! PlaybackMetadataProvider) {
+        // Older adapters may omit sources from catalog metadata. Preserve their
+        // PlaybackInfo discovery contract; metadata request failures never get
+        // here, and providers with explicit metadata support never use it.
+        legacyDiscovery = true;
+        final legacyProfile = backend is VideoBackendCapabilities
+            ? await (backend as VideoBackendCapabilities).playbackCapabilities(
+                requestedBitrate ?? maxStreamingBitrate,
+              )
+            : null;
+        if (!_accepts(operation)) return;
+        info = await _sourceRequest<PlaybackInfo>(
+          () => requestClient.getPlaybackInfo(
+            itemId: itemId,
+            mediaSourceId:
+                requestedSourceId ??
+                activeMediaSourceId ??
+                preferredMediaSourceId,
+            maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
+            startPosition: durationFromTicks(startTicks),
+            audioStreamIndex: audio ?? preferredAudioStreamIndex,
+            subtitleStreamIndex: subtitleOff
+                ? -1
+                : subtitle ?? preferredSubtitleStreamIndex,
+            capabilities: legacyProfile,
+            forceTranscode: forceTranscode,
+          ),
         );
+        preparing = info.resources;
+        if (!_accepts(operation)) return;
+        await _writePreparationSnapshot(
+          operation,
+          info,
+          startTicks: startTicks,
+        );
+        sources = info.mediaSources;
+      }
+      mediaSources = sources;
+      if (runtime != null && origin != null) {
+        preferenceResolution = runtime!.preference(origin!, item!, sources);
       }
       final preference = preferenceResolution;
       final explicitVersion = requestedSourceId ?? preferredMediaSourceId;
@@ -4234,6 +4247,7 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
+      final previousBitrate = maxStreamingBitrate;
       if (!strictTracks &&
           preference?.failure == null &&
           preference?.selected != null &&
@@ -4241,8 +4255,6 @@ class PlayerController extends ChangeNotifier {
               explicitVersion == preference!.selected!.source.mediaSourceId)) {
         final settings = preference!.preference!.settings;
         final line = preference.preference!.lineId;
-        // A temporary playback address is not the saved line. Later episodes
-        // in this playback stay on that address; the saved line stays put.
         if (line != null && line != activeLineId && !_ephemeralPlaybackLine) {
           await _failOpen(
             operation,
@@ -4251,21 +4263,19 @@ class PlayerController extends ChangeNotifier {
           return;
         }
         _rememberedPreference = settings;
-        if (requestedBitrate == null &&
-            settings.maxStreamingBitrate != null &&
-            settings.maxStreamingBitrate != maxStreamingBitrate) {
+        if (requestedBitrate == null && settings.maxStreamingBitrate != null) {
           maxStreamingBitrate = settings.maxStreamingBitrate!;
-          renegotiateForPreference = true;
         }
       }
+      final requestedVersion =
+          requestedSourceId ??
+          activeMediaSourceId ??
+          preferredMediaSourceId ??
+          _rememberedPreference?.mediaSourceId ??
+          preference?.selected?.source.mediaSourceId;
       final chosenId = preferredPlaybackSourceId(
-        sources: info.mediaSources,
-        requestedId:
-            requestedSourceId ??
-            activeMediaSourceId ??
-            preferredMediaSourceId ??
-            _rememberedPreference?.mediaSourceId ??
-            preference?.selected?.source.mediaSourceId,
+        sources: sources,
+        requestedId: requestedVersion,
         requestedName: _preferredSourceName,
       );
       if (requestedSourceId != null && chosenId != requestedSourceId) {
@@ -4275,72 +4285,106 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      final preferredSettings = strictTracks ? null : _rememberedPreference;
-      final targetSource = info.sourceById(chosenId ?? '');
-      final effectiveAudio =
-          audio ??
-          (strictTracks ? null : preferredAudioStreamIndex) ??
-          (targetSource == null
-              ? null
-              : matchPreferredStreamIndex(
-                  streams: targetSource.audioStreams,
-                  preferredIndex: preferredSettings?.audioStreamIndex,
-                  language: preferredSettings?.audioLanguage,
-                  title: preferredSettings?.audioTitle,
-                ));
-      final effectiveSubtitle =
-          subtitleOff ||
-              (subtitle == null &&
-                  preferredSubtitleStreamIndex == null &&
-                  preferredSettings?.subtitleOff == true)
-          ? -1
-          : subtitle ??
-                (strictTracks ? null : preferredSubtitleStreamIndex) ??
-                (targetSource == null
-                    ? null
-                    : matchPreferredStreamIndex(
-                        streams: targetSource.subtitleStreams,
-                        preferredIndex: preferredSettings?.subtitleStreamIndex,
-                        language: preferredSettings?.subtitleLanguage,
-                        title: preferredSettings?.subtitleTitle,
-                      ));
-      if (renegotiateForPreference ||
-          (requestClient is PartPlaybackProvider &&
-              chosenId != info.primarySource?.id) ||
-          (preferredSettings != null &&
-              (preferredSettings.audioStreamIndex != null ||
-                  preferredSettings.audioLanguage != null ||
-                  preferredSettings.subtitleStreamIndex != null ||
-                  preferredSettings.subtitleLanguage != null ||
-                  preferredSettings.subtitleOff))) {
-        await _releasePrepared(preparing);
-        preparing = null;
-        final selectedProfile = backend is VideoBackendCapabilities
-            ? await (backend as VideoBackendCapabilities).playbackCapabilities(
-                requestedBitrate ?? maxStreamingBitrate,
+      final memory = strictTracks ? null : _rememberedPreference;
+      final targetSource = sources
+          .where((source) => source.id == chosenId)
+          .firstOrNull;
+      if (targetSource == null) {
+        await _failOpen(
+          operation,
+          detail: 'No playback source metadata is available',
+        );
+        return;
+      }
+      final exactSavedSource =
+          memory?.mediaSourceId != null &&
+          memory!.mediaSourceId == targetSource.id;
+      final defaultAudio = targetSource.defaultAudioStreamIndex;
+      final selectedAudio =
+          matchPreferredStreamIndex(
+            streams: targetSource.audioStreams,
+            exactIndex:
+                strictTracks ||
+                exactSavedSource ||
+                preferredAudioStreamIndex != null,
+            preferredIndex:
+                audio ??
+                (strictTracks ? null : preferredAudioStreamIndex) ??
+                memory?.audioStreamIndex,
+            language: preferredAudioStreamIndex == null
+                ? memory?.audioLanguage
+                : null,
+            title: preferredAudioStreamIndex == null
+                ? memory?.audioTitle
+                : null,
+          ) ??
+          (targetSource.audioStreams.any(
+                (stream) => stream.index == defaultAudio,
               )
-            : profile;
-        if (!_accepts(operation)) return;
+              ? defaultAudio
+              : targetSource.audioStreams.firstOrNull?.index);
+      final selectedSubtitle =
+          subtitleOff ||
+              (!strictTracks &&
+                  subtitle == null &&
+                  preferredSubtitleStreamIndex == null &&
+                  memory?.subtitleOff == true)
+          ? null
+          : matchPreferredStreamIndex(
+                  streams: targetSource.subtitleStreams,
+                  exactIndex:
+                      strictTracks ||
+                      exactSavedSource ||
+                      preferredSubtitleStreamIndex != null,
+                  preferredIndex:
+                      subtitle ??
+                      (strictTracks ? null : preferredSubtitleStreamIndex) ??
+                      memory?.subtitleStreamIndex,
+                  language: preferredSubtitleStreamIndex == null
+                      ? memory?.subtitleLanguage
+                      : null,
+                  title: preferredSubtitleStreamIndex == null
+                      ? memory?.subtitleTitle
+                      : null,
+                ) ??
+                fallbackSubtitleStreamIndex(targetSource);
+      // Resolve once. These exact IDs drive negotiation, native open, UI and
+      // reports; a second language/title match after transcode can pick a
+      // different track with the same label.
+      final bitrate = requestedBitrate ?? maxStreamingBitrate;
+      final profile = backend is VideoBackendCapabilities
+          ? await (backend as VideoBackendCapabilities).playbackCapabilities(
+              bitrate,
+            )
+          : null;
+      if (!_accepts(operation)) return;
+      if (info == null ||
+          (legacyDiscovery && (memory != null || previousBitrate != bitrate))) {
+        if (info != null) {
+          await _releasePrepared(preparing);
+          preparing = null;
+        }
         info = await _sourceRequest<PlaybackInfo>(
           () => requestClient.getPlaybackInfo(
             itemId: itemId,
             mediaSourceId: chosenId,
-            maxStreamingBitrate: requestedBitrate ?? maxStreamingBitrate,
+            maxStreamingBitrate: bitrate,
             startPosition: durationFromTicks(startTicks),
-            audioStreamIndex: effectiveAudio,
-            subtitleStreamIndex: effectiveSubtitle,
-            capabilities: selectedProfile,
+            audioStreamIndex: selectedAudio,
+            subtitleStreamIndex: selectedSubtitle ?? -1,
+            capabilities: profile,
             forceTranscode: forceTranscode,
           ),
         );
         preparing = info.resources;
-        if (!_accepts(operation)) return;
-        await _writePreparationSnapshot(
-          operation,
-          info,
-          startTicks: startTicks,
-        );
       }
+      if (!_accepts(operation)) return;
+      await _writePreparationSnapshot(operation, info, startTicks: startTicks);
+      mediaSources = [
+        for (final source in sources) info.sourceById(source.id) ?? source,
+        for (final source in info.mediaSources)
+          if (!sources.any((metadata) => metadata.id == source.id)) source,
+      ];
       final resolvedNext = client.resolvePlayback(
         info: info,
         itemId: itemId,
@@ -4399,56 +4443,19 @@ class PlayerController extends ChangeNotifier {
         );
         return;
       }
-      final memory = strictTracks ? null : _rememberedPreference;
-      final sourceAudioTracks = next.mediaSource.audioStreams;
-      final defaultAudio = next.mediaSource.defaultAudioStreamIndex;
-      final compatibleDefaultAudio =
-          sourceAudioTracks.any((stream) => stream.index == defaultAudio)
-          ? defaultAudio
-          : sourceAudioTracks.isEmpty
-          ? null
-          : sourceAudioTracks.first.index;
-      final selectedAudio =
-          matchPreferredStreamIndex(
-            streams: next.mediaSource.audioStreams,
-            exactIndex:
-                memory?.mediaSourceId != null &&
-                memory!.mediaSourceId == next.mediaSource.id,
-            preferredIndex:
-                audio ??
-                (strictTracks ? null : preferredAudioStreamIndex) ??
-                memory?.audioStreamIndex,
-            language: preferredAudioStreamIndex == null
-                ? memory?.audioLanguage
-                : null,
-            title: preferredAudioStreamIndex == null
-                ? memory?.audioTitle
-                : null,
-          ) ??
-          compatibleDefaultAudio;
-      final int? selectedSubtitle;
-      if (subtitleOff ||
-          (!strictTracks &&
-              subtitle == null &&
-              preferredSubtitleStreamIndex == null &&
-              memory?.subtitleOff == true)) {
-        selectedSubtitle = null;
-      } else {
-        selectedSubtitle =
-            matchPreferredStreamIndex(
-              streams: next.mediaSource.subtitleStreams,
-              preferredIndex:
-                  subtitle ??
-                  (strictTracks ? null : preferredSubtitleStreamIndex) ??
-                  memory?.subtitleStreamIndex,
-              language: preferredSubtitleStreamIndex == null
-                  ? memory?.subtitleLanguage
-                  : null,
-              title: preferredSubtitleStreamIndex == null
-                  ? memory?.subtitleTitle
-                  : null,
-            ) ??
-            fallbackSubtitleStreamIndex(next.mediaSource);
+      if ((selectedAudio != null &&
+              !next.mediaSource.audioStreams.any(
+                (stream) => stream.index == selectedAudio,
+              )) ||
+          (selectedSubtitle != null &&
+              !next.mediaSource.subtitleStreams.any(
+                (stream) => stream.index == selectedSubtitle,
+              ))) {
+        await _failOpen(
+          operation,
+          detail: 'Negotiated playback omitted the selected track',
+        );
+        return;
       }
 
       if (selectedSubtitle != null) {

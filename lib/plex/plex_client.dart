@@ -6,12 +6,14 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/playback.dart';
+import 'package:rillight/media_server/playback_metadata.dart';
 import 'package:rillight/media_server/resources.dart';
 import 'plex_authentication.dart';
 import 'plex_codec.dart';
 import 'plex_http.dart';
 
-class PlexClient extends MediaServerClient implements PartPlaybackProvider {
+class PlexClient extends MediaServerClient
+    implements PartPlaybackProvider, PlaybackMetadataProvider {
   PlexClient({
     required this.device,
     Dio? dio,
@@ -928,6 +930,75 @@ class PlexClient extends MediaServerClient implements PartPlaybackProvider {
     }
     final frames = item.chapters.where((v) => v.imageTag != null).toList();
     return frames.isEmpty ? null : _ChapterPreview(this, itemId, frames);
+  }
+
+  @override
+  Future<List<PlaybackMediaSource>> getPlaybackSources({
+    required String itemId,
+    Duration position = Duration.zero,
+  }) async {
+    // Catalog discovery must not depend on a default version being playable or
+    // on any previous playback negotiation.
+    final root = await _get('/library/metadata/${Uri.encodeComponent(itemId)}');
+    final rows = plexList(root['Metadata']);
+    if (rows.length != 1 || plexString(rows.single['ratingKey']) != itemId) {
+      throw const MediaServerException(MediaServerFailureKind.invalidResponse);
+    }
+    final row = rows.single;
+    return [
+      for (final media in plexList(row['Media']))
+        _playbackSourceMetadata(media, row, position),
+    ];
+  }
+
+  PlaybackMediaSource _playbackSourceMetadata(
+    Map<String, dynamic> media,
+    Map<String, dynamic> row,
+    Duration position,
+  ) {
+    final parts = plexList(media['Part']);
+    // Use the actual playback locator. Empty resources here deliberately cannot
+    // be opened and allocate no server-side lease.
+    final timeline = MediaTimeline([
+      for (final part in parts)
+        MediaPart(
+          id: plexString(part['id']),
+          resource: AuthorizedMediaResource(
+            url: '',
+            authorization: ResourceAuthorization(headersByOrigin: const {}),
+          ),
+          duration: plexDuration(part['duration']),
+        ),
+    ]);
+    final location = timeline.locate(position);
+    final streams = location == null
+        ? <MediaStreamInfo>[]
+        : plexList(
+            parts[location.index]['Stream'],
+          ).map(plexPlaybackStream).toList();
+    return PlaybackMediaSource(
+      id: plexString(media['id']),
+      name: plexString(media['videoResolution']),
+      container: media['container'] as String?,
+      runtime: plexDuration(media['duration'] ?? row['duration']),
+      bitrate: plexInt(media['bitrate']) == null
+          ? null
+          : plexInt(media['bitrate'])! * 1000,
+      width: plexInt(media['width']),
+      height: plexInt(media['height']),
+      size: parts.isEmpty || parts.any((part) => plexInt(part['size']) == null)
+          ? null
+          : parts.fold<int>(0, (sum, part) => sum + plexInt(part['size'])!),
+      mediaStreams: streams,
+      defaultAudioStreamIndex: streams
+          .where((stream) => stream.isAudio && stream.isDefault)
+          .firstOrNull
+          ?.index,
+      defaultSubtitleStreamIndex: streams
+          .where((stream) => stream.isSubtitle && stream.isDefault)
+          .firstOrNull
+          ?.index,
+    );
   }
 
   @override

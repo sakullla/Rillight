@@ -360,6 +360,19 @@ class FakeEmbyItem {
               for (final stream in mediaStreams) stream.toJson(),
             ],
           },
+          for (final extra in extraSources)
+            {
+              'Id': extra.id,
+              'Name': extra.name,
+              'Container': extra.container,
+              'MediaStreams': [
+                for (final stream
+                    in extra.mediaStreams.isNotEmpty
+                        ? extra.mediaStreams
+                        : mediaStreams)
+                  stream.toJson(),
+              ],
+            },
         ],
       if (chapters.isNotEmpty)
         'Chapters': [for (final chapter in chapters) chapter.toJson()],
