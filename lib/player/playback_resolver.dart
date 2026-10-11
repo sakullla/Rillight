@@ -176,9 +176,12 @@ ResolvedPlayback? resolvePlayback({
     final remoteMedia = _remoteMediaUrl(source);
     // The owned core can open the URL inside a strm even when the device
     // profile has no strm container and the server therefore clears
-    // SupportsDirectPlay.
+    // SupportsDirectPlay. A probed strm keeps IsRemote after Container
+    // becomes mkv/mp4 and DirectStreamUrl stops ending in .strm.
     if (remoteMedia != null &&
-        (source.supportsDirectPlay || _isStrmSource(source))) {
+        (source.supportsDirectPlay ||
+            source.isRemote ||
+            _isStrmSource(source))) {
       return _direct(
         source,
         info.playSessionId,
@@ -233,6 +236,18 @@ ResolvedPlayback? resolvePlayback({
         _staticStreamPath(itemId, source, info.playSessionId),
         accessToken,
       ),
+    );
+  }
+  // SupportsDirectPlay and SupportsDirectStream are both false for an
+  // unprobed strm. Read the pointer anyway; transcoding that text file
+  // does not play the target.
+  if (!forceTranscode && _isStrmSource(source)) {
+    return _direct(
+      source,
+      info.playSessionId,
+      itemId,
+      _strmPointerUri(source, baseUrl, accessToken, itemId, info.playSessionId),
+      expandStrm: true,
     );
   }
 

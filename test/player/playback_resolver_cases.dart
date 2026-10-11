@@ -454,6 +454,92 @@ https://cdn.example.com/movie.mkv
     );
   });
 
+  test('probed remote strm plays the original URL when direct play is off', () {
+    final resolved = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-strm-probed',
+        'MediaSources': [
+          {
+            'Id': 'src-probed',
+            'Protocol': 'Http',
+            'IsRemote': true,
+            'Path': 'https://cdn.example.com/episode-01.mkv',
+            'Container': 'mkv',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': true,
+            'DirectStreamUrl':
+                '/Videos/episode-strm/stream.mkv?static=true&MediaSourceId=src-probed',
+            'TranscodingUrl': '/videos/episode-strm/master.m3u8',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'episode-strm',
+    );
+    expect(resolved, isNotNull);
+    expect(resolved!.isTranscode, isFalse);
+    expect(resolved.requiresStrmExpansion, isFalse);
+    expect(
+      resolved.streamUrl.toString(),
+      'https://cdn.example.com/episode-01.mkv',
+    );
+    expect(resolved.streamUrl.queryParameters.containsKey('api_key'), isFalse);
+  });
+
+  test('unprobed strm expands the pointer before transcoding', () {
+    final resolved = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-strm-blocked',
+        'MediaSources': [
+          {
+            'Id': 'src-blocked',
+            'Protocol': 'File',
+            'Path': '/media/movies/feature.strm',
+            'Container': 'strm',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': false,
+            'TranscodingUrl': '/videos/movie/master.m3u8',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'movie',
+    );
+    expect(resolved, isNotNull);
+    expect(resolved!.isTranscode, isFalse);
+    expect(resolved.requiresStrmExpansion, isTrue);
+    expect(resolved.streamUrl.path, '/emby/Videos/movie/stream.strm');
+    expect(resolved.streamUrl.queryParameters['api_key'], token);
+  });
+
+  test('remote http that is not strm still transcodes', () {
+    final resolved = resolvePlayback(
+      info: PlaybackInfo.fromJson({
+        'PlaySessionId': 'play-remote-transcode',
+        'MediaSources': [
+          {
+            'Id': 'src-remote',
+            'Protocol': 'Http',
+            'IsRemote': false,
+            'Path': 'https://cdn.example.com/episode-01.avi',
+            'Container': 'avi',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': false,
+            'TranscodingUrl': '/videos/movie/master.m3u8',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'movie',
+    );
+    expect(resolved, isNotNull);
+    expect(resolved!.isTranscode, isTrue);
+    expect(resolved.streamUrl.path, contains('master.m3u8'));
+  });
+
   test('strm remote path direct plays the original URL without token', () {
     final resolved = resolvePlayback(
       info: PlaybackInfo.fromJson({

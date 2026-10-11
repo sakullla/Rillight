@@ -170,6 +170,7 @@ class PlaybackMediaSource {
     this.supportsDirectPlay = false,
     this.supportsDirectStream = false,
     this.supportsTranscoding = false,
+    this.isRemote = false,
     this.isInfiniteStream = false,
     this.directStreamUrl,
     this.transcodingUrl,
@@ -195,6 +196,9 @@ class PlaybackMediaSource {
   final bool supportsDirectPlay;
   final bool supportsDirectStream;
   final bool supportsTranscoding;
+
+  /// Emby 探测 strm 后常把 Container 改成真实封装,但仍把媒体标成远端。
+  final bool isRemote;
   final bool isInfiniteStream;
   final String? directStreamUrl;
   final String? transcodingUrl;
@@ -284,6 +288,7 @@ class PlaybackMediaSource {
       supportsDirectPlay: json['SupportsDirectPlay'] == true,
       supportsDirectStream: json['SupportsDirectStream'] == true,
       supportsTranscoding: json['SupportsTranscoding'] == true,
+      isRemote: json['IsRemote'] == true,
       isInfiniteStream: json['IsInfiniteStream'] == true,
       directStreamUrl: json['DirectStreamUrl']?.toString(),
       transcodingUrl: json['TranscodingUrl']?.toString(),
