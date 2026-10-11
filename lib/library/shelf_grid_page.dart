@@ -303,7 +303,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
 
   CatalogSort get _defaultSort => widget.includeItemTypes == 'Episode'
       ? CatalogSort.indexNumber
-      : CatalogSort.initial;
+      : CatalogSort.initialFor(_activeClient().capabilities);
 
   bool get _episodes => widget.includeItemTypes == 'Episode';
   bool get _wideGrid =>
@@ -583,22 +583,23 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
     int limit,
   ) {
     final userId = client.userId ?? '';
+    final sortable = client.supportsShelfSorting(widget.source);
     switch (widget.source) {
       case 'resume':
         return catalogResumeRequest(
           userId: userId,
           limit: limit,
           startIndex: startIndex,
-          sortBy: _sort.sortBy,
-          sortOrder: _sort.sortOrder,
+          sortBy: sortable ? _sort.sortBy : null,
+          sortOrder: sortable ? _sort.sortOrder : null,
         );
       case 'nextup':
         return catalogNextUpRequest(
           userId: userId,
           limit: limit,
           startIndex: startIndex,
-          sortBy: _sort.sortBy,
-          sortOrder: _sort.sortOrder,
+          sortBy: sortable ? _sort.sortBy : null,
+          sortOrder: sortable ? _sort.sortOrder : null,
         );
       case 'latest-movies':
         return catalogItemsRequest(
@@ -607,8 +608,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           recursive: true,
           limit: limit,
           startIndex: startIndex,
-          sortBy: _sort.sortBy,
-          sortOrder: _sort.sortOrder,
+          sortBy: sortable ? _sort.sortBy : null,
+          sortOrder: sortable ? _sort.sortOrder : null,
         );
       case 'latest-series':
         return catalogItemsRequest(
@@ -617,16 +618,16 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           recursive: true,
           limit: limit,
           startIndex: startIndex,
-          sortBy: _sort.sortBy,
-          sortOrder: _sort.sortOrder,
+          sortBy: sortable ? _sort.sortBy : null,
+          sortOrder: sortable ? _sort.sortOrder : null,
         );
       case 'similar':
         return catalogSimilarRequest(
           userId: userId,
           itemId: widget.itemId ?? '',
           limit: limit,
-          sortBy: _sort.sortBy,
-          sortOrder: _sort.sortOrder,
+          sortBy: sortable ? _sort.sortBy : null,
+          sortOrder: sortable ? _sort.sortOrder : null,
         );
       default:
         return catalogItemsRequest(
@@ -636,8 +637,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
           recursive: widget.recursive,
           limit: limit,
           startIndex: startIndex,
-          sortBy: _sort.sortBy,
-          sortOrder: _sort.sortOrder,
+          sortBy: sortable ? _sort.sortBy : null,
+          sortOrder: sortable ? _sort.sortOrder : null,
           filters: _filters.watch.param == null
               ? null
               : [_filters.watch.param!],
@@ -747,7 +748,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
             titleOverride: widget.titleOverride,
             showTitle: widget.showTitle,
             sort: _sort,
-            options: CatalogSort.optionsFor(_items),
+            options: CatalogSort.optionsFor(
+              _items,
+              capabilities: _activeClient().capabilities,
+            ),
             onSort: _selectSort,
             showSort: false,
             onRefresh: _manualRefresh,
@@ -768,7 +772,10 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
       );
     }
 
-    final options = CatalogSort.optionsFor(_items);
+    final options = CatalogSort.optionsFor(
+      _items,
+      capabilities: _activeClient().capabilities,
+    );
     return Shortcuts(
       shortcuts: catalogGridArrowShortcuts,
       child: FocusTraversalGroup(
@@ -818,7 +825,12 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                         sort: _sort,
                         options: options,
                         onSort: _selectSort,
-                        showSort: _items.isNotEmpty,
+                        showSort:
+                            _items.isNotEmpty &&
+                            _activeClient().supportsShelfSorting(widget.source),
+                        serverOrder: !_activeClient().supportsShelfSorting(
+                          widget.source,
+                        ),
                         onRefresh: _manualRefresh,
                         refreshing: _refreshing,
                         loadedCount: _knownCount,
@@ -1011,6 +1023,7 @@ class _Header extends StatelessWidget {
     this.yearOptions = const [],
     this.genreOptions = const [],
     this.onFiltersChanged,
+    this.serverOrder = false,
   });
 
   final String title;
@@ -1020,6 +1033,7 @@ class _Header extends StatelessWidget {
   final List<CatalogSort> options;
   final ValueChanged<CatalogSort> onSort;
   final bool showSort;
+  final bool serverOrder;
 
   /// 手动刷新入口:绕过缓存立即重拉。null 时不显示刷新按钮。
   final VoidCallback? onRefresh;
@@ -1114,6 +1128,7 @@ class _Header extends StatelessWidget {
                   genreOptions: genreOptions,
                   onChanged: onFiltersChanged!,
                 ),
+              if (serverOrder) Text(l10n.providerServerOrder),
               if (showSort) ...[
                 PopupMenuButton<CatalogSort>(
                   key: CatalogKeys.sortBy,

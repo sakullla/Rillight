@@ -6,6 +6,7 @@ import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/library/shelf_sort.dart';
+import 'package:rillight/media_server/capabilities.dart';
 
 /// A staged filter editor. Categories and actions stay visible while options
 /// scroll; the host commits exactly once on Apply and cancellation is harmless.
@@ -17,6 +18,7 @@ class LibraryFilterPanel extends StatefulWidget {
     this.years = const [],
     this.genres = const [],
     this.sort,
+    this.capabilities = const ServiceCapabilities({}),
     this.typeFilterable = true,
     this.television = false,
     this.keyPrefix = 'catalog-grid-filter',
@@ -26,6 +28,7 @@ class LibraryFilterPanel extends StatefulWidget {
   final List<int> years;
   final List<String> genres;
   final CatalogSort? sort;
+  final ServiceCapabilities capabilities;
   final bool typeFilterable, television;
   final String keyPrefix;
   final void Function(ShelfFilters, CatalogSort?) onApply;
@@ -310,7 +313,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   void _reset() => setState(() {
     _draft = const ShelfFilters();
-    if (_sort != null) _sort = CatalogSort.initial;
+    if (_sort != null) _sort = CatalogSort.initialFor(widget.capabilities);
     _search.clear();
   });
   void _apply() {
@@ -404,6 +407,9 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
         }
       case 'watch':
         for (final value in CatalogWatchFilter.values) {
+          if (widget.capabilities.unsupportedFilters.contains(value.param)) {
+            continue;
+          }
           option(
             value.param ?? 'all',
             _watchLabel(l, value),
@@ -446,7 +452,10 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
           });
         }
       case 'sort':
-        for (final sort in CatalogSort.optionsFor(const [])) {
+        for (final sort in CatalogSort.optionsFor(
+          const [],
+          capabilities: widget.capabilities,
+        )) {
           option(sort.sortBy, sort.label(l), _sort == sort, () => _sort = sort);
         }
     }

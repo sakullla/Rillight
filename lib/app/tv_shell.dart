@@ -1,3 +1,6 @@
+import '../auth/provider_connect_dialog.dart';
+import '../auth/source_management.dart';
+import '../media_server/capabilities.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -552,16 +555,33 @@ class _TvAccountCard extends StatelessWidget {
         ),
         SizedBox(height: 6 * s),
         TvNavTile(
-          actionKey: _TvSession.changePasswordKey,
-          icon: Icons.password_rounded,
-          title: l.changePassword,
-          onPressed: auth.isBusy
-              ? null
-              : () => showDialog<void>(
-                  context: context,
-                  builder: (dialogContext) => ChangePasswordDialog(auth: auth),
-                ),
+          actionKey: const Key('tv-provider-management'),
+          icon: Icons.manage_accounts_outlined,
+          title: l.sourceManagement,
+          onPressed: auth.isBusy ? null : () => showSourceManagement(context),
         ),
+        SizedBox(height: 6 * s),
+        if (auth.client.serviceType == MediaServerType.plex ||
+            auth
+                .client
+                .capabilities[ServiceCapability.changePassword]
+                .isAvailable)
+          TvNavTile(
+            actionKey: _TvSession.changePasswordKey,
+            icon: Icons.password_rounded,
+            title: auth.client.serviceType == MediaServerType.plex
+                ? l.providerAccountManage
+                : l.changePassword,
+            onPressed: auth.isBusy
+                ? null
+                : auth.client.serviceType == MediaServerType.plex
+                ? () => showProviderAccountSettings(context)
+                : () => showDialog<void>(
+                    context: context,
+                    builder: (dialogContext) =>
+                        ChangePasswordDialog(auth: auth),
+                  ),
+          ),
         SizedBox(height: 6 * s),
         TvNavTile(
           icon: Icons.logout_rounded,
@@ -608,7 +628,7 @@ class _TvServerCard extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        '${server.name} · ${server.username}',
+                        '${server.serviceType.name} · ${server.name} · ${server.username}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium,
@@ -643,6 +663,29 @@ class _TvServerCard extends StatelessWidget {
               ),
             ],
           ),
+          SizedBox(height: 6 * s),
+          TvAction(
+            key: Key('tv-provider-login-${server.id}'),
+            onPressed: auth.isBusy
+                ? null
+                : () => showProviderConnect(context, auth, existing: server),
+            child: Text(l.sourceIndependentLogin),
+          ),
+          if (server.serviceType == MediaServerType.plex) ...[
+            SizedBox(height: 6 * s),
+            TvAction(
+              key: Key('tv-provider-home-${server.id}'),
+              onPressed: auth.isBusy
+                  ? null
+                  : () => showProviderConnect(
+                      context,
+                      auth,
+                      existing: server,
+                      home: true,
+                    ),
+              child: Text(l.providerHomeManage),
+            ),
+          ],
           SizedBox(height: 10 * s),
           for (final line in server.lines) ...[
             Row(

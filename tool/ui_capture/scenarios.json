@@ -1,15 +1,94 @@
 [
-  {"id":"aggregation-ready","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-segment-favorites","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-segment-libraries","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-management","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-pin-setup","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-pin-error","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-single-source","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-empty-scope","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-comparison","feature":"aggregation","platforms":["desktop","phone"]},
-  {"id":"aggregation-search-single","feature":"aggregation","platforms":["desktop","phone","tv"]},
-  {"id":"aggregation-partial-failure","feature":"aggregation","platforms":["desktop","phone"]},
+  {
+    "id": "aggregation-ready",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "aggregation-segment-favorites",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-segment-libraries",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-management",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-pin-setup",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-pin-error",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-single-source",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-empty-scope",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-comparison",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "aggregation-search-single",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "aggregation-partial-failure",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
   {
     "id": "account",
     "feature": "servers",
@@ -463,17 +542,26 @@
   {
     "id": "detail-genres-red",
     "feature": "detail",
-    "platforms": ["desktop", "phone"]
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
   },
   {
     "id": "detail-genres-blue",
     "feature": "detail",
-    "platforms": ["desktop", "phone"]
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
   },
   {
     "id": "detail-genres-green",
     "feature": "detail",
-    "platforms": ["desktop", "phone"]
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
   },
   {
     "id": "movie-detail",
@@ -1422,7 +1510,198 @@
       "tv"
     ]
   },
-{"id": "player-settings-output", "feature": "player", "platforms": ["desktop", "phone", "tv"]},
-{"id": "player-settings-output-focus", "feature": "player", "platforms": ["tv"]},
-{"id": "player-landscape-settings-output", "feature": "player", "platforms": ["phone"]}
+  {
+    "id": "player-settings-output",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "player-settings-output-focus",
+    "feature": "player",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "player-landscape-settings-output",
+    "feature": "player",
+    "platforms": [
+      "phone"
+    ]
+  },
+  {
+    "id": "provider-emby-login",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-emby-error",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-emby-libraries",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-emby-player-loading",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-emby-player",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-jellyfin-login",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-jellyfin-error",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-jellyfin-libraries",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-jellyfin-player-loading",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-jellyfin-player",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-login",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-error",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-libraries",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-player-loading",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-player",
+    "feature": "player",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-jellyfin-quick-connect",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-authorization",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-discovery",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "provider-plex-home-pin",
+    "feature": "login",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  }
 ]

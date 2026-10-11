@@ -181,7 +181,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
 
   CatalogRequest _request(MediaServerClient client, int startIndex, int limit) {
     final userId = client.userId ?? '';
-    final sort = CatalogSort.initial;
+    final sortable = client.supportsShelfSorting(widget.source);
+    final sort = CatalogSort.initialFor(client.capabilities);
     final filters = _filters;
     switch (widget.source) {
       case 'resume':
@@ -189,16 +190,16 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
           userId: userId,
           limit: limit,
           startIndex: startIndex,
-          sortBy: sort.sortBy,
-          sortOrder: sort.sortOrder,
+          sortBy: sortable ? sort.sortBy : null,
+          sortOrder: sortable ? sort.sortOrder : null,
         );
       case 'nextup':
         return catalogNextUpRequest(
           userId: userId,
           limit: limit,
           startIndex: startIndex,
-          sortBy: sort.sortBy,
-          sortOrder: sort.sortOrder,
+          sortBy: sortable ? sort.sortBy : null,
+          sortOrder: sortable ? sort.sortOrder : null,
         );
       case 'latest-movies':
         return catalogItemsRequest(
@@ -207,8 +208,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
           recursive: true,
           limit: limit,
           startIndex: startIndex,
-          sortBy: sort.sortBy,
-          sortOrder: sort.sortOrder,
+          sortBy: sortable ? sort.sortBy : null,
+          sortOrder: sortable ? sort.sortOrder : null,
           filters: filters,
         );
       case 'latest-series':
@@ -218,8 +219,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
           recursive: true,
           limit: limit,
           startIndex: startIndex,
-          sortBy: sort.sortBy,
-          sortOrder: sort.sortOrder,
+          sortBy: sortable ? sort.sortBy : null,
+          sortOrder: sortable ? sort.sortOrder : null,
           filters: filters,
         );
       case 'similar':
@@ -227,8 +228,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
           userId: userId,
           itemId: widget.itemId?.trim() ?? '',
           limit: limit,
-          sortBy: sort.sortBy,
-          sortOrder: sort.sortOrder,
+          sortBy: sortable ? sort.sortBy : null,
+          sortOrder: sortable ? sort.sortOrder : null,
         );
       default:
         return catalogItemsRequest(
@@ -238,8 +239,8 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
           recursive: widget.recursive,
           limit: limit,
           startIndex: startIndex,
-          sortBy: sort.sortBy,
-          sortOrder: sort.sortOrder,
+          sortBy: sortable ? sort.sortBy : null,
+          sortOrder: sortable ? sort.sortOrder : null,
           filters: filters,
           genres: widget.genre == null ? null : [widget.genre!],
         );

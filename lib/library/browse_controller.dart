@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
+import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
-import 'package:rillight/library/shelf_sort.dart';
 
 class BrowseController extends ChangeNotifier {
   BrowseController({
@@ -14,6 +14,7 @@ class BrowseController extends ChangeNotifier {
     required this.parentId,
     this.includeItemTypes = 'Movie,Series',
   }) {
+    sortBy = defaultSort.sortBy;
     _identity = _currentIdentity;
     auth.addListener(_onAuth);
   }
@@ -32,7 +33,9 @@ class BrowseController extends ChangeNotifier {
   int? year;
   List<int> years = const [];
   List<String> genres = const [];
-  String sortBy = CatalogSort.initial.sortBy;
+  late String sortBy;
+  CatalogSort get defaultSort =>
+      CatalogSort.initialFor(auth.client.capabilities);
   MediaServerException? error;
   int _revision = 0, _offset = 0;
   bool _disposed = false;
@@ -42,6 +45,7 @@ class BrowseController extends ChangeNotifier {
   void _onAuth() {
     if (_identity == _currentIdentity) return;
     _identity = _currentIdentity;
+    sortBy = defaultSort.sortBy;
     _revision++;
     items = const [];
     _offset = 0;

@@ -22,6 +22,7 @@ abstract class MediaServerClient
   ClientDeviceInfo get device;
   MediaServerType get serviceType;
   ServiceCapabilities get capabilities;
+
   Uri? get baseUrl;
   String? get accessToken;
   String? get userId;
@@ -55,6 +56,10 @@ abstract class MediaServerClient
 }
 
 extension MediaServerPlaybackStop on MediaServerClient {
+  /// Some server endpoints impose their own whole-list order.
+  bool supportsShelfSorting(String source) =>
+      !capabilities.serverOrderedShelves.contains(source);
+
   /// Inspect metadata without retaining a provider's preflight resources.
   Future<PlaybackInfo> inspectPlaybackInfo({
     required String itemId,

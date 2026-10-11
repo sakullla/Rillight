@@ -33,7 +33,17 @@ class CapabilityStatus {
 }
 
 class ServiceCapabilities {
-  const ServiceCapabilities(this.values);
+  const ServiceCapabilities(
+    this.values, {
+    this.serverOrderedShelves = const {},
+    this.defaultRecentSort = 'DateLastContentAdded',
+    this.unsupportedSorts = const {},
+    this.unsupportedFilters = const {},
+  });
+  final Set<String> serverOrderedShelves;
+  final String defaultRecentSort;
+  final Set<String> unsupportedSorts;
+  final Set<String> unsupportedFilters;
   final Map<ServiceCapability, CapabilityStatus> values;
   CapabilityStatus operator [](ServiceCapability capability) =>
       values[capability] ??

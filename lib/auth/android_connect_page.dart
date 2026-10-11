@@ -1,3 +1,6 @@
+import '../media_server/capabilities.dart';
+import 'provider_connect_dialog.dart';
+import '../app/routes.dart';
 import 'package:rillight/media_server/server_address.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -170,6 +173,16 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     if (auth.isBusy) {
       return;
     }
+    final selected = _selectedServer(auth);
+    if (selected != null && selected.serviceType != MediaServerType.emby) {
+      final connected = await showProviderConnect(
+        context,
+        auth,
+        existing: selected,
+      );
+      if (connected == true && mounted) context.go(AppRoutes.home);
+      return;
+    }
     FocusScope.of(context).unfocus();
     await auth.connect(
       address: _composedAddress(),
@@ -296,6 +309,22 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _PhoneBrandHeader(l10n: l10n),
+                    OutlinedButton.icon(
+                      key: const Key('android-provider-entry'),
+                      icon: const Icon(Icons.dns_outlined),
+                      label: Text(l10n.providerConnectEntry),
+                      onPressed: auth.isBusy
+                          ? null
+                          : () async {
+                              final connected = await showProviderConnect(
+                                context,
+                                auth,
+                              );
+                              if (connected == true && context.mounted) {
+                                context.go(AppRoutes.home);
+                              }
+                            },
+                    ),
                     const SizedBox(height: 32),
                     if (auth.savedServers.isNotEmpty) ...[
                       Row(

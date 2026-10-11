@@ -1,3 +1,4 @@
+import '../media_server/server_address.dart';
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
@@ -477,7 +478,8 @@ class SourceSessionRegistry {
 
   SavedServer _allowed(String id) {
     final server = _servers.where((s) => s.id == id).firstOrNull;
-    if (server == null ||
+    if (_disposed ||
+        server == null ||
         !access.allows(server.region) ||
         _transitioning.contains(id)) {
       throw StateError('Source unavailable');
@@ -882,7 +884,31 @@ class SourceSessionRegistry {
     return _servers.map((s) => s.id == id ? next : s).toList();
   });
 
-  void _invalidate(String id) {
+  final Map<String, int> _selectedRevisions = {};
+
+  /// A selected single-source session is independent of aggregation library
+  /// scope, but is revoked by authentication, logout, membership and locking.
+  void Function() selectedSessionGuard(String id) {
+    final server = _allowed(id);
+    final revision = _selectedRevisions[id] ?? 0;
+    final generation = access.generation;
+    return () {
+      final current = _allowed(id);
+      if ((_selectedRevisions[id] ?? 0) != revision ||
+          current.serviceType != server.serviceType ||
+          current.region != server.region ||
+          _cloudDisconnects.contains(current.cloudCredentialRef) ||
+          (server.region == AccessRegion.private &&
+              generation != access.generation)) {
+        throw StateError('Selected source revoked');
+      }
+    };
+  }
+
+  void _invalidate(String id, {bool revokeSelected = true}) {
+    if (revokeSelected) {
+      _selectedRevisions[id] = (_selectedRevisions[id] ?? 0) + 1;
+    }
     _scopes[id] = (_scopes[id] ?? 0) + 1;
     _notifySourceChange(id);
   }
@@ -904,7 +930,7 @@ class SourceSessionRegistry {
   }) async {
     _allowed(id);
     final selected = libraryIds.toList()..sort();
-    _invalidate(id);
+    _invalidate(id, revokeSelected: false);
     _transitioning.add(id);
     try {
       await _update(
@@ -967,6 +993,129 @@ class SourceSessionRegistry {
           .map((s) => s.region == region ? ordered[order[index++]]! : s)
           .toList();
     });
+  }
+
+  /// Region-aware management of addresses. A line is never admitted as another
+  /// server, and Plex must also prove that this exact resource connection is
+  /// present in the effective user's live discovery response.
+  Future<void> setLineAddress(
+    String id,
+    String address, {
+    String? lineId,
+  }) async {
+    final server = _allowed(id);
+    final scope = _scopes[id] ?? 0;
+    final generation = access.generation;
+    final uri = normalizeServerAddress(address);
+    final target = lineId == null
+        ? null
+        : server.lines.where((line) => line.id == lineId).firstOrNull;
+    if (lineId != null && target == null) throw StateError('Unknown line');
+    if (server.lines.any(
+      (line) => line.address == uri.toString() && line.id != lineId,
+    )) {
+      throw StateError('Duplicate line');
+    }
+    if (target?.address == uri.toString()) return;
+    final probe = _clientFor(server.serviceType);
+    try {
+      probe.setUserAgent(server.userAgent);
+      final info = await probe.getPublicInfo(uri);
+      _requireCurrent(server, scope, generation);
+      if (info.id != (server.verifiedServerId ?? server.id)) {
+        throw const MediaServerException(
+          MediaServerFailureKind.forbidden,
+          detail: '线路返回的服务器身份与当前服务器不一致',
+        );
+      }
+      if (server.serviceType == MediaServerType.plex) {
+        final value = await credentials.read(id);
+        _requireCurrent(server, scope, generation);
+        if (value == null || !_credentialsMatch(server, value)) {
+          throw const MediaServerException(
+            MediaServerFailureKind.sessionExpired,
+          );
+        }
+        probe.attachSession(
+          baseUrl: uri,
+          accessToken: value.accessToken,
+          userId: value.userId,
+          userAgent: server.userAgent,
+        );
+        await sessionIdentityVerifier?.call(server, value, probe);
+        await probe.getUser();
+        _requireCurrent(server, scope, generation);
+      }
+    } finally {
+      probe.clearSession();
+    }
+    final active = target?.id == server.activeLine?.id;
+    if (active) {
+      _sessions.remove(id)?.client.clearSession();
+      _invalidate(id);
+    }
+    final nextScope = _scopes[id] ?? 0;
+    await _update(id, (current) {
+      _requireCurrent(server, nextScope, generation);
+      if (target != null &&
+          !current.lines.any(
+            (line) => line.id == target.id && line.address == target.address,
+          )) {
+        throw StateError('Line changed');
+      }
+      return current.copyWith(
+        lines: [
+          for (final line in current.lines)
+            line.id == lineId
+                ? line.copyWith(
+                    address: uri.toString(),
+                    checkStatus: 'unknown',
+                    checkedAt: null,
+                  )
+                : line,
+          if (lineId == null)
+            ServerLine(id: generateLineId(), address: uri.toString()),
+        ],
+      );
+    });
+    _notifySourceChange(id);
+  }
+
+  Future<void> removeLine(String id, String lineId) async {
+    final server = _allowed(id);
+    final target = server.lines.where((line) => line.id == lineId).firstOrNull;
+    if (target == null) throw StateError('Unknown line');
+    if (server.lines.length <= 1) throw StateError('Cannot remove last line');
+    final active = server.activeLine?.id == lineId;
+    if (active) {
+      final remaining = server.lines.firstWhere((line) => line.id != lineId);
+      final result = await check(id, lineId: remaining.id);
+      if (result.status != ManualCheckStatus.available &&
+          result.status != ManualCheckStatus.needsLogin) {
+        throw const MediaServerException(
+          MediaServerFailureKind.forbidden,
+          detail: '无法核验剩余线路',
+        );
+      }
+    }
+    if (active) {
+      _sessions.remove(id)?.client.clearSession();
+      _invalidate(id);
+    }
+    final scope = _scopes[id] ?? 0;
+    final generation = access.generation;
+    await _update(id, (current) {
+      _requireCurrent(server, scope, generation);
+      final remaining = current.lines
+          .where((line) => line.id != lineId)
+          .toList();
+      if (remaining.isEmpty) throw StateError('Cannot remove last line');
+      return current.copyWith(
+        lines: remaining,
+        activeLineId: active ? remaining.first.id : current.activeLineId,
+      );
+    });
+    _notifySourceChange(id);
   }
 
   Future<void> reorderLines(String id, List<String> ids) async {
@@ -1750,7 +1899,10 @@ class SourceSessionRegistry {
     return result.values.toList();
   }
 
+  bool _disposed = false;
+
   void dispose() {
+    _disposed = true;
     for (final authorization in _pendingAuthorizations.values.toList()) {
       authorization.cancel();
     }

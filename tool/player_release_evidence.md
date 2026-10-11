@@ -6,6 +6,59 @@ Keep raw logs, screenshots, audio observations, SDK markers, package hashes and
 failure samples under ignored `build/` or another immutable evidence directory.
 Use an exact candidate Git commit and package bytes for every report.
 
+## Three-provider synthetic acceptance
+
+Run `python tool/provider_acceptance.py --verify` from the repository root with
+the project Flutter SDK and dependencies installed. This command executes fresh
+Flutter tests, serially, against the existing independent Emby, Jellyfin and Plex
+protocol fixtures. It does not need a personal account, native SDK, or device.
+Keep the working tree stable and do not run another Flutter process concurrently
+on Windows. `python tool/provider_acceptance_test.py` tests the checker itself;
+its result does not establish that any provider scenario ran.
+
+Each invocation writes a unique ignored `build/provider-acceptance/run-*/`
+directory containing `result.json`, raw machine test logs and the Flutter SDK
+version output. The manifest binds Git HEAD, staged modes, tracked file bytes,
+deletions and nonignored untracked file bytes before and after execution. A
+changed candidate, failing/skipped test, missing provider scenario or incomplete
+runner output fails the command. The candidate's fixture hashes and simulated
+protocol baselines are recorded; `actual_service_version` remains null. Emby
+uses the existing 4.8.0.0-labeled route fixture, Jellyfin its separately frozen
+OpenAPI oracle, and Plex its independent account/PMS fixture. These labels are
+not versions observed on real servers.
+
+The seven mandatory provider scenarios in
+`test/provider_acceptance/provider_acceptance_test.dart` call production clients
+over loopback HTTP, read server-side progress back after reconnecting, verify
+cleanup and reject credentials/cancelled authorization, Home PIN, shared access
+and transcode failures. Discovery includes both owned and shared resources;
+selecting the owned server verifies its separate identity, while Home remains
+restricted to the shared resource. Protocol adapter suites add Quick Connect, PIN/JWK/JWT,
+expiry, ownership and resource lifecycle cases. Separate boundary tests execute
+source identity, private revocation, history, switching and process authorization.
+The checker records the actual successful test names and counts from runner
+events. It neither greps source declarations for success nor trusts a JSON
+`passed` field. Playback reports in these tests are synthetic observations; no
+decoder, displayed texture or physical sound is exercised.
+
+An unsigned local log and its hashes cannot prove authorship. Therefore existing
+evidence supplied with `--evidence` is always rejected, even when it looks valid;
+rerun `--verify` to obtain evidence for the current candidate. This rejects stale,
+missing, incomplete, mismatched or fabricated imports without pretending a local
+checksum is an attestation. Generated reports are useful for reviewing that run,
+not a reusable authorization to skip execution.
+
+The result includes all 15 combinations of Emby/Jellyfin/Plex and
+Windows/macOS/Linux/Android phone/Android TV. Every combination retains separate
+**unverified** statuses for real service compatibility, real transcode cleanup,
+native install/launch, displayed frames, physical audio and hardware stability.
+No per-platform sample or evidence path is invented. A synthetic pass does not
+upgrade these fields. Capture UI, static analysis and the full test suite are
+separate Delivery checks; this command does not claim to have run them. Actual
+Plex Home/shared/subscription interoperability, Jellyfin deployment compatibility
+and real encoder termination also need real service evidence. Existing historical
+native runs below remain tied to their original candidates.
+
 ## Aggregation/private-region development evidence (T7 working tree)
 
 - `flutter test test/aggregation/presentation_test.dart --plain-name 'desktop actual UI opens isolated'` executed the real desktop aggregation/comparison/detail play action, `DesktopPlayerWindowHost.open`, an OS-isolated Flutter test helper running `PlayerWindowApp.testing`/`PlayerController` with `FakeVideoBackend`, the production per-process file mailboxes, and the main application's sole `HistoryWriter`. It observed ordered B-source 7s then 11s events and revoked the helper and ordinary history on membership migration. This is simulated playback/control/IPC evidence, not a native independent-window rendering pass.

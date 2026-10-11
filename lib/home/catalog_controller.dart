@@ -108,7 +108,13 @@ class CatalogController extends ChangeNotifier {
           session != _sessionKey) {
         return const <MediaItem>[];
       }
-      return parseCatalogPage(await cache.fetch(source, request)).items;
+      final result = parseCatalogPage(await cache.fetch(source, request)).items;
+      if (_disposed ||
+          generation != libraryPreviewRevision ||
+          session != _sessionKey) {
+        return const <MediaItem>[];
+      }
+      return result;
     });
     _libraryPreviews[key] = (storedAt: DateTime.now(), items: future);
     unawaited(
@@ -197,9 +203,21 @@ class CatalogController extends ChangeNotifier {
 
   void _onAuthChanged() {
     if (!auth.isLoggedIn) {
+      _loadGen++;
+      libraryPreviewRevision++;
+      for (final timer in _retryTimers.values) {
+        timer.cancel();
+      }
+      _retryTimers.clear();
+      _retryCounts.clear();
+      resume = nextUp = latestMovies = latestSeries = const CatalogRowState();
+      libraries = const [];
+      librariesError = librariesNotice = null;
+      librariesLoading = false;
       _libraryPreviews.clear();
       _sessionKey = null;
       _syncCacheSession();
+      _notify();
       return;
     }
     final key = _currentSessionKey;
@@ -366,7 +384,7 @@ class CatalogController extends ChangeNotifier {
       includeItemTypes: 'Movie',
       recursive: true,
       limit: 24,
-      sortBy: 'DateLastContentAdded',
+      sortBy: client.capabilities.defaultRecentSort,
       sortOrder: 'Descending',
       fields: MediaServerClient.gridFields,
       imageTypes: MediaServerClient.featuredImageTypes,
@@ -418,7 +436,7 @@ class CatalogController extends ChangeNotifier {
       includeItemTypes: 'Series',
       recursive: true,
       limit: 24,
-      sortBy: 'DateLastContentAdded',
+      sortBy: client.capabilities.defaultRecentSort,
       sortOrder: 'Descending',
       fields: MediaServerClient.gridFields,
       imageTypes: MediaServerClient.featuredImageTypes,

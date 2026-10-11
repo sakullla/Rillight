@@ -140,21 +140,22 @@ class _TvShelfPageState extends State<TvShelfPage> {
 
   CatalogRequest _request(MediaServerClient client, int startIndex) {
     final userId = client.userId ?? '';
-    final sort = CatalogSort.initial;
+    final sortable = client.supportsShelfSorting(widget.source);
+    final sort = CatalogSort.initialFor(client.capabilities);
     return switch (widget.source) {
       'resume' => catalogResumeRequest(
         userId: userId,
         limit: _pageSize,
         startIndex: startIndex,
-        sortBy: sort.sortBy,
-        sortOrder: sort.sortOrder,
+        sortBy: sortable ? sort.sortBy : null,
+        sortOrder: sortable ? sort.sortOrder : null,
       ),
       'nextup' => catalogNextUpRequest(
         userId: userId,
         limit: _pageSize,
         startIndex: startIndex,
-        sortBy: sort.sortBy,
-        sortOrder: sort.sortOrder,
+        sortBy: sortable ? sort.sortBy : null,
+        sortOrder: sortable ? sort.sortOrder : null,
       ),
       'items' => catalogItemsRequest(
         userId: userId,
@@ -163,8 +164,8 @@ class _TvShelfPageState extends State<TvShelfPage> {
         recursive: true,
         limit: _pageSize,
         startIndex: startIndex,
-        sortBy: sort.sortBy,
-        sortOrder: sort.sortOrder,
+        sortBy: sortable ? sort.sortBy : null,
+        sortOrder: sortable ? sort.sortOrder : null,
       ),
       'latest-series' => catalogItemsRequest(
         userId: userId,
@@ -172,8 +173,8 @@ class _TvShelfPageState extends State<TvShelfPage> {
         recursive: true,
         limit: _pageSize,
         startIndex: startIndex,
-        sortBy: sort.sortBy,
-        sortOrder: sort.sortOrder,
+        sortBy: sortable ? sort.sortBy : null,
+        sortOrder: sortable ? sort.sortOrder : null,
       ),
       _ => catalogItemsRequest(
         userId: userId,
@@ -181,8 +182,8 @@ class _TvShelfPageState extends State<TvShelfPage> {
         recursive: true,
         limit: _pageSize,
         startIndex: startIndex,
-        sortBy: sort.sortBy,
-        sortOrder: sort.sortOrder,
+        sortBy: sortable ? sort.sortBy : null,
+        sortOrder: sortable ? sort.sortOrder : null,
       ),
     };
   }

@@ -5,6 +5,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/playback_runtime.dart';
@@ -52,6 +53,7 @@ class SyntheticSourceAuth extends AuthController {
     String? userAgent,
     String? lineId,
     bool preserveSessionOnFailure = false,
+    MediaServerType serviceType = MediaServerType.emby,
   }) async {
     final result = await super.connect(
       address: address,
@@ -60,6 +62,7 @@ class SyntheticSourceAuth extends AuthController {
       userAgent: userAgent,
       lineId: lineId,
       preserveSessionOnFailure: preserveSessionOnFailure,
+      serviceType: serviceType,
     );
     if (result && session != null) {
       final server = sources

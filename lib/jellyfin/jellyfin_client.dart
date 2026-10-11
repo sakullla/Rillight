@@ -69,36 +69,39 @@ class JellyfinClient extends MediaServerClient
   @override
   Map<String, String> get sessionHeaders => _headers(accessToken);
   @override
-  ServiceCapabilities get capabilities => ServiceCapabilities({
-    for (final c in [
-      ServiceCapability.passwordLogin,
-      ServiceCapability.changePassword,
-      ServiceCapability.resume,
-      ServiceCapability.nextUp,
-      ServiceCapability.latest,
-      ServiceCapability.search,
-      ServiceCapability.filters,
-      ServiceCapability.pagination,
-      ServiceCapability.watchedState,
-      ServiceCapability.directPlay,
-      ServiceCapability.directStream,
-      ServiceCapability.transcode,
-      ServiceCapability.chapters,
-    ])
-      c: _available,
-    ServiceCapability.quickConnect: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '需查询服务器 Quick Connect 开关',
-    ),
-    ServiceCapability.preview: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '取决于条目的 trickplay 或章节图片',
-    ),
-    ServiceCapability.notifications: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '通过页面刷新取得最新状态',
-    ),
-  });
+  ServiceCapabilities get capabilities => ServiceCapabilities(
+    {
+      for (final c in [
+        ServiceCapability.passwordLogin,
+        ServiceCapability.changePassword,
+        ServiceCapability.resume,
+        ServiceCapability.nextUp,
+        ServiceCapability.latest,
+        ServiceCapability.search,
+        ServiceCapability.filters,
+        ServiceCapability.pagination,
+        ServiceCapability.watchedState,
+        ServiceCapability.directPlay,
+        ServiceCapability.directStream,
+        ServiceCapability.transcode,
+        ServiceCapability.chapters,
+      ])
+        c: _available,
+      ServiceCapability.quickConnect: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '需查询服务器 Quick Connect 开关',
+      ),
+      ServiceCapability.preview: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '取决于条目的 trickplay 或章节图片',
+      ),
+      ServiceCapability.notifications: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '通过页面刷新取得最新状态',
+      ),
+    },
+    serverOrderedShelves: const {'resume', 'nextup', 'similar'},
+  );
   @override
   JellyfinClient createDetached() =>
       JellyfinClient(device: device, clock: _clock)

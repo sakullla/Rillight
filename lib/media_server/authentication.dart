@@ -46,7 +46,9 @@ class AuthorizedServerResource {
     required this.connections,
     this.cloudAccountId,
     this.homeUserId,
+    this.owned,
   });
+  final bool? owned;
   final MediaServerType serviceType;
   final PublicServerInfo server;
   final MediaUser user;

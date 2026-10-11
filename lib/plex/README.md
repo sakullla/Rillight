@@ -12,7 +12,7 @@ schema preserves `kind` (`device`, `cloud`, `home`, `resource`), `deviceId`, `si
 resource `serverId`/`userId`/`homeUserId`. Signing material never enters playback.
 The provider does not import resources into the source registry by itself.
 
-T6 must inject `SourceSessionRegistry.sessionIdentityVerifier`. For Plex it calls
+The application bootstrap injects `SourceSessionRegistry.sessionIdentityVerifier`. For Plex it calls
 `PlexAuthentication.verifyResourceIdentity` with the saved cloud/resource refs,
 cloud account ID, effective user/Home ID, verified machine ID, resource token and
 selected connection; then calls `PlexClient.bindVerifiedIdentity` with the returned

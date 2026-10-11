@@ -1,3 +1,6 @@
+import '../media_server/capabilities.dart';
+import '../app/routes.dart';
+import 'provider_connect_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -87,6 +90,18 @@ class _TvConnectPageState extends State<TvConnectPage> {
   Future<void> _submit() async {
     final auth = AuthScope.of(context);
     if (auth.isBusy) return;
+    final selected = auth.savedServers
+        .where((s) => s.id == _draft?.selectedServerId)
+        .firstOrNull;
+    if (selected != null && selected.serviceType != MediaServerType.emby) {
+      final connected = await showProviderConnect(
+        context,
+        auth,
+        existing: selected,
+      );
+      if (connected == true && mounted) context.go(AppRoutes.home);
+      return;
+    }
     FocusScope.of(context).unfocus();
     await auth.connect(
       address: _address.text.trim(),
@@ -279,6 +294,20 @@ class _TvConnectPageState extends State<TvConnectPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          TvAction(
+            key: const Key('tv-provider-entry'),
+            expand: true,
+            onPressed: auth.isBusy
+                ? null
+                : () async {
+                    final connected = await showProviderConnect(context, auth);
+                    if (connected == true && context.mounted) {
+                      context.go(AppRoutes.home);
+                    }
+                  },
+            child: Text(l10n.providerConnectEntry),
+          ),
+          SizedBox(height: 8 * s),
           TvInput(
             key: const Key('tv-connect-address'),
             label: l10n.serverAddress,

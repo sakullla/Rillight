@@ -43,6 +43,8 @@ import '../../test/emby/fake_emby_server.dart';
 import '../../test/helpers/image_cache_fixture.dart';
 import 'fixtures.dart';
 import 'pages.dart';
+import 'providers.dart';
+import 'package:rillight/auth/provider_identity.dart';
 import 'danmaku.dart';
 
 void main() {
@@ -116,11 +118,37 @@ void main() {
         );
         final adapter = CaptureAdapter([server, mirror]);
         final credentials = MemoryCredentialStore();
+        await tester.runAsync(() async {
+          CaptureProviders.reset();
+          CaptureProviders.jellyfin.imageBytes = await drawArtwork(
+            'jellyfin',
+            wide: false,
+          );
+          CaptureProviders.plex.imageBytes = await drawArtwork(
+            'plex',
+            wide: false,
+          );
+          await CaptureProviders.jellyfin.start();
+          await CaptureProviders.plex.start();
+        });
+        addTearDown(() async {
+          await CaptureProviders.jellyfin.close();
+          await CaptureProviders.plex.close();
+        });
+        final providers = CaptureProviders(adapter, credentials);
         final servers = MemoryServerListStore();
         final sources = SourceSessionRegistry(
           access: RegionAccessController(),
           store: servers,
           credentials: credentials,
+          createProviderClient: providers.create,
+          sessionIdentityVerifier: (server, value, client) =>
+              verifyProviderIdentity(
+                providers.plexAuthentication,
+                server,
+                value,
+                client,
+              ),
           createClient: () => EmbyClient(
             device: const ClientDeviceInfo(
               clientName: '灯川原型',
@@ -155,6 +183,8 @@ void main() {
           credentials: credentials,
           servers: servers,
           sources: sources,
+          providerClientFactory: providers.create,
+          plexAuthentication: providers.plexAuthentication,
         );
         await tester.runAsync(() async {
           await auth.connect(
@@ -655,12 +685,21 @@ void main() {
             }
           }
         }
+        if (capture.wants('login') || capture.wants('player')) {
+          await capture.providerPages(
+            app,
+            auth,
+            server,
+            () => backend = CaptureBackend(),
+          );
+        }
         await tester.pumpWidget(const SizedBox.shrink());
         await capture.advance(500);
         await history.close();
         app.router.dispose();
         auth.dispose();
         appearance.dispose();
+        CaptureProviders.closeClients();
       }, tags: ['integration']);
     }
   }
@@ -841,6 +880,7 @@ class CaptureSession {
         'profileWidth': size.width.toInt(),
         'renderedTheme':
             state.startsWith('player') ||
+                (state.startsWith('provider-') && state.contains('-player')) ||
                 state.startsWith('danmaku') ||
                 state.startsWith('detail-gallery') ||
                 state == 'tv-lan-phone'

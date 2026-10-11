@@ -51,9 +51,13 @@ class _TrackingAuth extends AuthController {
   }
 
   @override
-  Future<void> switchTo(String serverId, {String? lineId}) {
+  Future<void> switchTo(
+    String serverId, {
+    String? lineId,
+    void Function()? guard,
+  }) {
     calls.add('switchTo:$serverId');
-    return super.switchTo(serverId, lineId: lineId);
+    return super.switchTo(serverId, lineId: lineId, guard: guard);
   }
 }
 

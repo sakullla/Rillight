@@ -7,6 +7,7 @@ import 'package:cryptography/cryptography.dart';
 /// OpenAPI 1.2.3, JWK/PIN/JWT documentation retrieved 2026-10-11; fixture v2.
 /// This does not assert an actual PMS version or real upstream compatibility.
 class FakePlex {
+  List<int> imageBytes = const [1, 2, 3];
   late HttpServer server;
   Uri get url =>
       Uri.parse('http://${server.address.address}:${server.port}/prefix');
@@ -29,6 +30,7 @@ class FakePlex {
   bool expireCloud = false;
   bool failStops = false;
   bool expireHome = false;
+  bool includeOwnedResource = false;
   String secondAudioCodec = 'aac';
   String secondAudioLanguage = 'eng';
   bool additionalUnsupportedAudio = false;
@@ -41,6 +43,8 @@ class FakePlex {
   List<Map<String, dynamic>>? catalog;
   final Map<String, Map<String, int>> selectedStreams = {};
   final sessions = <String>{};
+  // State belongs to the effective resource token, never the root cloud user.
+  final playbackOffsets = <String, Map<String, int>>{};
   static const cloudToken = 'eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiIxIn0.synthetic';
   static const refreshedToken =
       'eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiIxIn0.refreshed';
@@ -66,9 +70,18 @@ class FakePlex {
   }
 
   Future<void> _handle(HttpRequest r) async {
-    final path = r.uri.path.replaceFirst('/prefix', '');
+    final rawPath = r.uri.path.replaceFirst('/prefix', '');
+    final ownedServer = rawPath.startsWith('/owned/');
+    final path = ownedServer ? rawPath.substring('/owned'.length) : rawPath;
     final q = r.uri.queryParameters;
     final token = r.headers.value('x-plex-token');
+    Map<String, dynamic> withState(Map<String, dynamic> row) => {
+      ...row,
+      if (playbackOffsets[token]?[row['ratingKey']] case final int offset)
+        'viewOffset': offset,
+    };
+    final movie = withState(this.movie);
+    final catalogRows = _catalog.map(withState);
     requests.add((
       path: path,
       method: r.method,
@@ -171,6 +184,18 @@ class FakePlex {
             {'uri': 'https://relay.invalid', 'local': false, 'relay': true},
           ],
         },
+        if (includeOwnedResource && token != 'home-scoped-token')
+          {
+            'name': 'Owned films',
+            'clientIdentifier': 'server-b',
+            'provides': 'server',
+            'owned': true,
+            'productVersion': 'synthetic-fixture-v1',
+            'accessToken': 'owned-resource',
+            'connections': [
+              {'uri': '${url.toString()}/owned', 'local': true, 'relay': false},
+            ],
+          },
       ]);
     }
     if (path == '/api/v2/users/signout' && r.method == 'DELETE') {
@@ -179,17 +204,22 @@ class FakePlex {
     if (path == '/identity') {
       return _json(r, {
         'MediaContainer': {
-          'machineIdentifier': 'server-a',
+          'machineIdentifier': ownedServer ? 'server-b' : 'server-a',
           'version': 'synthetic-fixture-v1',
         },
       });
     }
-    if (!['owner-resource', 'child-resource'].contains(token)) {
+    if (!(ownedServer
+            ? ['owned-resource']
+            : ['owner-resource', 'child-resource'])
+        .contains(token)) {
       return _json(r, {}, status: 401);
     }
     if (path == '/') {
       return _json(r, {
-        'MediaContainer': {'machineIdentifier': 'server-a'},
+        'MediaContainer': {
+          'machineIdentifier': ownedServer ? 'server-b' : 'server-a',
+        },
       });
     }
     if (path == '/redirect' && redirectTo != null) {
@@ -218,7 +248,7 @@ class FakePlex {
       });
     }
     if (path == '/hubs/search') {
-      final matches = _catalog
+      final matches = catalogRows
           .where(
             (row) => '${row['title']}'.toLowerCase().contains(
               (q['query'] ?? '').toLowerCase(),
@@ -250,7 +280,7 @@ class FakePlex {
       final section = RegExp(
         r'^/library/sections/(\d+)/all$',
       ).firstMatch(path)?.group(1);
-      final rows = _catalog.where((row) {
+      final rows = catalogRows.where((row) {
         if (token == 'child-resource' && row['librarySectionID'] != 1) {
           return false;
         }
@@ -326,7 +356,9 @@ class FakePlex {
       '/library/parts/102/indexes/sd/2000',
       '/library/streams/13',
     ].contains(path)) {
-      r.response.add([1, 2, 3]);
+      r.response.add(
+        path == '/library/streams/13' ? const [1, 2, 3] : imageBytes,
+      );
       return r.response.close();
     }
     if (path == '/video/:/transcode/universal/decision') {
@@ -458,8 +490,18 @@ class FakePlex {
       );
       return r.response.close();
     }
+    if (path == '/:/timeline') {
+      final offset = int.tryParse(q['time'] ?? '');
+      if (q['ratingKey'] != '42' ||
+          offset == null ||
+          offset < 0 ||
+          !['playing', 'paused', 'stopped'].contains(q['state'])) {
+        return _json(r, {}, status: 400);
+      }
+      playbackOffsets.putIfAbsent(token!, () => {})[q['ratingKey']!] = offset;
+      return _json(r, {});
+    }
     if ([
-      '/:/timeline',
       '/:/scrobble',
       '/:/unscrobble',
       '/actions/removeFromContinueWatching',

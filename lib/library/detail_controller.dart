@@ -18,13 +18,15 @@ class DetailController extends ChangeNotifier {
     this.initialEpisodeId,
   }) : _sourceClient = client,
        _hasExplicitSeason = seasonId != null,
+       _cache = cache,
        repository = DetailRepository(client ?? auth.client, cache) {
     _identity = _currentIdentity;
     auth.addListener(_onAuth);
   }
   final AuthController auth;
   final MediaServerClient? _sourceClient;
-  final DetailRepository repository;
+  final CatalogCache _cache;
+  DetailRepository repository;
   final String itemId;
   final String? initialEpisodeId;
   final bool _hasExplicitSeason;
@@ -65,6 +67,9 @@ class DetailController extends ChangeNotifier {
     if (_identity == _currentIdentity) return;
     _resumeCancel?.cancel('detail-identity-changed');
     _identity = _currentIdentity;
+    if (_sourceClient == null) {
+      repository = DetailRepository(auth.client, _cache);
+    }
     _revision++;
     _seasonRevision++;
     item = null;

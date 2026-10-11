@@ -436,6 +436,7 @@ class PlexAuthentication
       result.add(
         AuthorizedServerResource(
           serviceType: MediaServerType.plex,
+          owned: row['owned'] is bool ? row['owned'] as bool : null,
           server: PublicServerInfo(
             id: id,
             serverName: plexString(row['name']),

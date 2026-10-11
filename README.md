@@ -1,10 +1,12 @@
 # 灯川 Rillight
 
-灯川是连接已有 Emby 服务器的 Flutter 影视客户端，支持 Windows、macOS、Linux、Android 手机和 Android TV，界面默认使用简体中文。Android 最低为 API 24；不包含 iOS。
+灯川是连接已有 Emby、Jellyfin 或 Plex 服务器的 Flutter 影视客户端，面向 Windows、macOS、Linux、Android 手机和 Android TV，界面默认使用简体中文。Android 最低为 API 24；不包含 iOS。三类服务的真实服务器兼容性与各端实机验收状态须按[证据边界](tool/player_release_evidence.md#three-provider-synthetic-acceptance)分别核实。
 
 五端共用仓内 [`packages/rillight_player`](packages/rillight_player/README.md) 的自主 FFmpeg 播放核心。应用层管理会话下载、预读、断线恢复、缓存、手动画质和播放状态；底层可调用各系统硬件解码与输出接口。带宽不足时保持所选画质并提示用户，不自动降画质。缓存进度条只显示能由媒体时间索引和完整、可读缓存块证实的区间；不确定的格式或缺失数据保持未知。
 
-手机和 TV 共用数据控制器，但有各自的交互树。手机使用触控和底部导航，TV 使用方向键、确认、返回与媒体键。普通后台会暂停并释放播放资源，返回时保持暂停。Android 手机 API 26+ 在系统允许时支持手动画中画，播放中回桌面自动进入系统小窗；暂停回桌面不会自动进入。小窗保留同一播放会话及字幕，可用系统按钮播放／暂停；关闭小窗或锁屏会暂停并释放资源。TV、API 24/25 不启用画中画。手机文字字幕支持小／标准／大／特大及原始 ASS 样式，设置与播放面板共用偏好，图片字幕不可调整字号。设置和播放内容仍依赖你的 Emby 服务器；服务器无法提供请求的转码时会给出错误。
+手机和 TV 共用数据控制器，但有各自的交互树。手机使用触控和底部导航，TV 使用方向键、确认、返回与媒体键。普通后台会暂停并释放播放资源，返回时保持暂停。Android 手机 API 26+ 在系统允许时支持手动画中画，播放中回桌面自动进入系统小窗；暂停回桌面不会自动进入。小窗保留同一播放会话及字幕，可用系统按钮播放／暂停；关闭小窗或锁屏会暂停并释放资源。TV、API 24/25 不启用画中画。手机文字字幕支持小／标准／大／特大及原始 ASS 样式，设置与播放面板共用偏好，图片字幕不可调整字号。播放内容及可用转码依赖所选服务器、账号权限与订阅条件；服务器无法提供请求的转码时会给出错误。
+
+添加服务时选择服务类型：Emby 使用地址及账号密码；Jellyfin 支持地址及账号密码和服务器允许的 Quick Connect；Plex 使用浏览器账号授权，再选择有权限的服务器与家庭用户。Plex 家庭用户 PIN 与灯川私密区域 PIN 各自独立。发现服务器或媒体库不会自动选入聚合；取消授权、错误 PIN、撤销共享或连接失败不会建立成功会话。旧 Emby 配置继续读取，损坏配置会报错并保留原件。
 
 ## 多服务聚合与私密区域
 
@@ -24,11 +26,15 @@ flutter analyze
 flutter test
 flutter test --tags integration
 flutter test packages/rillight_player/test
+python tool/provider_acceptance_test.py
+python tool/provider_acceptance.py --verify
 ```
 
 Android APK 在设置 `RILLIGHT_CORE_SDK_ROOT` 后使用 `flutter build apk --debug` 构建；SDK 必须含 arm64-v8a、armeabi-v7a 和 x86_64。Android Studio 手机与 TV 模拟器用隔离的 `.validation` 应用和合成凭据验证，操作与证据边界见 [Android 验证说明](integration_test/android/README.md)。桌面使用 `flutter run -d windows`、`linux` 或 `macos`，分别在对应宿主构建。
 
 新增或重命名 `test/*_cases.dart` 后运行 `python tool/test_execution/generate_suites.py`。完整页面用例标记 `integration`；默认 `flutter test` 仍包含这些用例。播放代理、缓存和 UI 用例不能代替实际画面、声音及硬件稳定性测试。
+
+三服务核验入口会实际运行独立协议 fake 的登录、目录、播放协商、进度写入、停止清理、退出/恢复与拒绝路径，再运行认证、隔离、历史和切换回归。它绑定当前 Git HEAD 及工作区内容，结果与原始日志写入忽略目录 `build/provider-acceptance/`；执行时请暂停编辑，并避免与另一 Flutter 测试进程并行。该入口不接受现成报告替代执行，不要求个人服务器账号。所有真实“服务 × 平台”组合仍单列为未验证，详见[集成验证说明](integration_test/README.md#three-provider-synthetic-protocol-run)。
 
 Windows 播放窗口预热、实际画面起播计时及合成慢响应对照见 [起播验证说明](tool/player_startup_validation.md)。保持默认 Impeller 渲染器，预热仅提前初始化一个隐藏引擎；点击播放后才请求影片信息和视频。
 

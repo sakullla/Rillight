@@ -89,6 +89,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
         clipBehavior: Clip.antiAlias,
         child: LibraryFilterPanel(
           television: true,
+          capabilities: c.auth.client.capabilities,
           typeFilterable: c.includeItemTypes == 'Movie,Series',
           keyPrefix: 'tv-library',
           initial: ShelfFilters(
@@ -105,7 +106,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
           ),
           sort: CatalogSort.values.firstWhere(
             (s) => s.sortBy == c.sortBy,
-            orElse: () => CatalogSort.initial,
+            orElse: () => c.defaultSort,
           ),
           years: c.items
               .map((item) => item.productionYear)
@@ -120,7 +121,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
             watch: filters.watch.param,
             years: filters.years,
             genres: filters.genres,
-            sortBy: (sort ?? CatalogSort.initial).sortBy,
+            sortBy: (sort ?? c.defaultSort).sortBy,
           ),
         ),
       ),
@@ -285,7 +286,7 @@ bool _hasActiveFilters(BrowseController c) =>
     c.genre != null ||
     c.years.isNotEmpty ||
     c.genres.isNotEmpty ||
-    c.sortBy != CatalogSort.initial.sortBy;
+    c.sortBy != c.defaultSort.sortBy;
 
 String _filterSummary(BrowseController c) {
   final watch = CatalogWatchFilter.values.firstWhere(

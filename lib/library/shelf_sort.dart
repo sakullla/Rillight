@@ -1,4 +1,5 @@
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/models.dart';
 
 /// 片库排序,字段与 Emby/Jellyfin 中文客户端对齐;默认 [dateUpdated]。
@@ -22,6 +23,12 @@ enum CatalogSort {
   final String sortOrder;
 
   static const CatalogSort initial = CatalogSort.dateUpdated;
+
+  static CatalogSort initialFor(ServiceCapabilities capabilities) => values
+      .firstWhere((sort) => sort.sortBy == capabilities.defaultRecentSort);
+
+  bool supportedBy(ServiceCapabilities capabilities) =>
+      !capabilities.unsupportedSorts.contains(sortBy);
 
   String label(AppLocalizations l10n) {
     switch (this) {
@@ -52,24 +59,29 @@ enum CatalogSort {
     }
   }
 
-  static List<CatalogSort> optionsFor(List<MediaItem> items) {
+  static List<CatalogSort> optionsFor(
+    List<MediaItem> items, {
+    ServiceCapabilities? capabilities,
+  }) {
     final episodes = items.isNotEmpty && items.every((item) => item.isEpisode);
-    if (episodes) {
-      return [
-        CatalogSort.indexNumber,
-        CatalogSort.dateUpdated,
-        CatalogSort.dateCreated,
-        CatalogSort.name,
-      ];
-    }
-    return const [
-      CatalogSort.dateUpdated,
-      CatalogSort.dateCreated,
-      CatalogSort.name,
-      CatalogSort.productionYear,
-      CatalogSort.communityRating,
-      CatalogSort.random,
-    ];
+    final options = episodes
+        ? const [
+            CatalogSort.indexNumber,
+            CatalogSort.dateUpdated,
+            CatalogSort.dateCreated,
+            CatalogSort.name,
+          ]
+        : const [
+            CatalogSort.dateUpdated,
+            CatalogSort.dateCreated,
+            CatalogSort.name,
+            CatalogSort.productionYear,
+            CatalogSort.communityRating,
+            CatalogSort.random,
+          ];
+    return capabilities == null
+        ? options
+        : options.where((sort) => sort.supportedBy(capabilities)).toList();
   }
 }
 

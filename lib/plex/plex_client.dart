@@ -81,51 +81,61 @@ class PlexClient extends MediaServerClient
     'X-Plex-Token': ?accessToken,
   };
   @override
-  ServiceCapabilities get capabilities => ServiceCapabilities({
-    for (final c in [
-      ServiceCapability.browserAuthorization,
-      ServiceCapability.accountResources,
-      ServiceCapability.homeUsers,
-      ServiceCapability.resume,
-      ServiceCapability.nextUp,
-      ServiceCapability.latest,
-      ServiceCapability.search,
-      ServiceCapability.filters,
-      ServiceCapability.pagination,
-      ServiceCapability.watchedState,
-      ServiceCapability.directPlay,
-      ServiceCapability.directStream,
-    ])
-      c: const CapabilityStatus(
-        CapabilityAvailability.available,
-        reason: 'Plex 影视协议',
+  ServiceCapabilities get capabilities => ServiceCapabilities(
+    {
+      for (final c in [
+        ServiceCapability.browserAuthorization,
+        ServiceCapability.accountResources,
+        ServiceCapability.homeUsers,
+        ServiceCapability.resume,
+        ServiceCapability.nextUp,
+        ServiceCapability.latest,
+        ServiceCapability.search,
+        ServiceCapability.filters,
+        ServiceCapability.pagination,
+        ServiceCapability.watchedState,
+        ServiceCapability.directPlay,
+        ServiceCapability.directStream,
+      ])
+        c: const CapabilityStatus(
+          CapabilityAvailability.available,
+          reason: 'Plex 影视协议',
+        ),
+      ServiceCapability.transcode: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '由服务器协商及当前用户权限决定',
       ),
-    ServiceCapability.transcode: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '由服务器协商及当前用户权限决定',
-    ),
-    ServiceCapability.preview: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '由媒体实际生成的预览决定',
-    ),
-    ServiceCapability.chapters: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '由实际章节元数据决定',
-    ),
-    for (final c in [
-      ServiceCapability.passwordLogin,
-      ServiceCapability.quickConnect,
-      ServiceCapability.changePassword,
-    ])
-      c: const CapabilityStatus(
-        CapabilityAvailability.unsupported,
-        reason: 'Plex 账号通过官方网页管理',
+      ServiceCapability.preview: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '由媒体实际生成的预览决定',
       ),
-    ServiceCapability.notifications: const CapabilityStatus(
-      CapabilityAvailability.unknown,
-      reason: '通过显式刷新获取目录状态',
-    ),
-  });
+      ServiceCapability.chapters: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '由实际章节元数据决定',
+      ),
+      for (final c in [
+        ServiceCapability.passwordLogin,
+        ServiceCapability.quickConnect,
+        ServiceCapability.changePassword,
+      ])
+        c: const CapabilityStatus(
+          CapabilityAvailability.unsupported,
+          reason: 'Plex 账号通过官方网页管理',
+        ),
+      ServiceCapability.notifications: const CapabilityStatus(
+        CapabilityAvailability.unknown,
+        reason: '通过显式刷新获取目录状态',
+      ),
+    },
+    defaultRecentSort: 'DateCreated',
+    unsupportedFilters: const {'IsFavorite'},
+    unsupportedSorts: const {
+      'DateLastContentAdded',
+      'CriticRating',
+      'OfficialRating',
+      'Runtime',
+    },
+  );
   @override
   MediaServerClient createDetached() => PlexClient(device: device);
   @override

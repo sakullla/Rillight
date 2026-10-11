@@ -1,3 +1,7 @@
+import '../media_server/provider_registry.dart';
+import '../plex/plex_authentication.dart';
+import 'cloud_credentials.dart';
+import 'provider_identity.dart';
 import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
 import 'package:rillight/media_server/server_address.dart';
@@ -37,12 +41,20 @@ class LineSwitchFailure {
 
 class AuthController extends ChangeNotifier {
   AuthController({
-    required this.client,
+    required MediaServerClient client,
     required this.credentials,
     required ServerListStore servers,
     SourceSessionRegistry? sources,
     this.persistPin,
-  }) {
+    MediaServerClient Function(MediaServerType)? providerClientFactory,
+    PlexAuthentication? plexAuthentication,
+  }) : _client = client {
+    _providerClientFactory =
+        providerClientFactory ??
+        (type) => type == client.serviceType
+            ? client.createDetached()
+            : MediaServerProviders.create(type, client.device);
+    _plexAuthentication = plexAuthentication;
     this.sources =
         sources ??
         SourceSessionRegistry(
@@ -50,9 +62,21 @@ class AuthController extends ChangeNotifier {
           store: servers,
           credentials: credentials,
           createClient: client.createDetached,
+          createProviderClient: createProviderClient,
+          sessionIdentityVerifier: (server, value, attached) async {
+            if (server.serviceType == MediaServerType.plex) {
+              await verifyProviderIdentity(
+                this.plexAuthentication,
+                server,
+                value,
+                attached,
+              );
+            }
+          },
         );
     this.servers = this.sources.ordinaryStore;
     this.sources.addMembershipCleanup(_clearSourceContribution);
+    this.sources.addSourceRevocation(_sourceChanged);
     client.onSessionExpired = _onSessionExpired;
     client.onRefreshSession = _refreshSession;
   }
@@ -74,7 +98,64 @@ class AuthController extends ChangeNotifier {
     );
   }
 
-  final MediaServerClient client;
+  MediaServerClient _client;
+  MediaServerClient? _guardedClient;
+  MediaServerClient get client => _guardedClient ?? _client;
+  late final MediaServerClient Function(MediaServerType) _providerClientFactory;
+  PlexAuthentication? _plexAuthentication;
+  PlexAuthentication get plexAuthentication {
+    final cloud = CloudCredentialStore(credentials);
+    return _plexAuthentication ??= PlexAuthentication(
+      device: _client.device,
+      readCredential: cloud.readCredential,
+      writeCredential: cloud.writeCredential,
+      deleteCredential: cloud.deleteCredential,
+    );
+  }
+
+  MediaServerClient createProviderClient(MediaServerType type) =>
+      _providerClientFactory(type);
+  void Function()? _selectionGuard;
+  int _activationGeneration = 0;
+  String? _revokedSelectionId;
+  bool _refreshingSelection = false;
+
+  Future<void> refreshServers() async {
+    final snapshot = await servers.load();
+    if (_disposed) return;
+    _savedServers = snapshot.servers;
+    final selected = _session;
+    if (selected != null) {
+      final current = _serverById(selected.server.id);
+      if (current != null) {
+        _session = AuthSession(
+          server: current,
+          userId: selected.userId,
+          username: selected.username,
+          accessToken: selected.accessToken,
+        );
+      }
+    }
+    notifyListeners();
+  }
+
+  void _sourceChanged(String id) {
+    if (_session?.server.id != id || _busy || _refreshingSelection) return;
+    try {
+      _selectionGuard?.call();
+    } on StateError {
+      _activationGeneration++;
+      _revokedSelectionId = id;
+      _prefill = _session?.server;
+      _session = null;
+      _client.clearSession();
+      _guardedClient?.clearSession();
+      _guardedClient = null;
+      _resetLibraryCounts();
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   final CredentialStore credentials;
   late final ServerListStore servers;
   late final SourceSessionRegistry sources;
@@ -87,6 +168,7 @@ class AuthController extends ChangeNotifier {
     SourceAccount? account,
     String id,
   ) async {
+    if (_revokedSelectionId == id) _revokedSelectionId = null;
     _savedServers = _savedServers.where((s) => s.id != id).toList();
     if (_session?.server.id == id) {
       _session = null;
@@ -121,6 +203,22 @@ class AuthController extends ChangeNotifier {
   LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
   bool get isLoggedIn => _session != null;
+
+  int _authorizationPresentations = 0;
+  bool get presentingAuthorization => _authorizationPresentations > 0;
+
+  /// Keep the modal's hosting route alive while its old identity is revoked.
+  /// This does not grant a session or retain any source permission.
+  VoidCallback retainAuthorizationPresentation() {
+    _authorizationPresentations++;
+    var released = false;
+    return () {
+      if (released) return;
+      released = true;
+      _authorizationPresentations--;
+      if (!_disposed) notifyListeners();
+    };
+  }
 
   /// 当前服务器的库规模;加载中为 null,界面不得把加载态显示成 0。
   LibraryCounts? get libraryCounts => _libraryCounts;
@@ -215,7 +313,15 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    await _activate(last, stored);
+    try {
+      await _activate(last, stored);
+    } catch (error) {
+      _session = null;
+      _prefill = last;
+      _failure = error is MediaServerException
+          ? error
+          : const MediaServerException(MediaServerFailureKind.sessionExpired);
+    }
     notifyListeners();
   }
 
@@ -226,6 +332,7 @@ class AuthController extends ChangeNotifier {
     String? userAgent,
     String? lineId,
     bool preserveSessionOnFailure = false,
+    MediaServerType serviceType = MediaServerType.emby,
   }) async {
     if (_busy) {
       return false;
@@ -236,6 +343,14 @@ class AuthController extends ChangeNotifier {
     _failure = null;
     notifyListeners();
     try {
+      _guardedClient?.clearSession();
+      _guardedClient = null;
+      if (_client.serviceType != serviceType) {
+        _client.clearSession();
+        _client = createProviderClient(serviceType);
+        _client.onSessionExpired = _onSessionExpired;
+        _client.onRefreshSession = _refreshSession;
+      }
       client.setUserAgent(userAgent);
       final baseUrl = normalizeServerAddress(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
@@ -347,13 +462,11 @@ class AuthController extends ChangeNotifier {
     }
     _busy = true;
     notifyListeners();
-    final current = _session;
+    final currentId = _session?.server.id ?? _revokedSelectionId;
     CredentialCommit? credentialCommit;
     try {
-      if (current != null) {
-        credentialCommit = await sources.beginOrdinaryCredentials(
-          current.server.id,
-        );
+      if (currentId != null) {
+        credentialCommit = await sources.beginOrdinaryCredentials(currentId);
       }
       await client.logout();
     } on MediaServerException {
@@ -384,7 +497,12 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<void> switchTo(String serverId, {String? lineId}) async {
+  Future<void> switchTo(
+    String serverId, {
+    String? lineId,
+    void Function()? guard,
+  }) async {
+    guard?.call();
     final found = _serverById(serverId);
     if (found == null) {
       return;
@@ -410,6 +528,7 @@ class AuthController extends ChangeNotifier {
         ? found.copyWith(activeLineId: requestedLineId)
         : found;
     final stored = await credentials.read(serverId);
+    guard?.call();
     final sameServer = _session?.server.id == serverId;
     final changingLine = sameServer && requestedLineId != currentLineId;
     if (stored != null && stored.accessToken.isNotEmpty) {
@@ -431,6 +550,10 @@ class AuthController extends ChangeNotifier {
         } catch (error) {
           detail = error.toString();
         }
+        if (detail.isEmpty && server.serviceType == MediaServerType.plex) {
+          detail = await _targetLineFailure(server, stored) ?? '';
+        }
+        guard?.call();
         if (detail.isNotEmpty) {
           _lineSwitchFailure = LineSwitchFailure(
             address: server.baseUrl,
@@ -442,8 +565,21 @@ class AuthController extends ChangeNotifier {
       }
       _lineSwitchFailure = null;
       _failure = null;
-      await _upsertServer(server);
-      await _activate(server, stored);
+      guard?.call();
+      try {
+        await _upsertServer(server);
+        guard?.call();
+        await _activate(server, stored, guard: guard);
+      } catch (error) {
+        guard?.call();
+        _session = null;
+        _revokedSelectionId = null;
+        client.clearSession();
+        _prefill = server;
+        _failure = error is MediaServerException
+            ? error
+            : const MediaServerException(MediaServerFailureKind.sessionExpired);
+      }
       connectDraft = null;
       notifyListeners();
       return;
@@ -592,10 +728,63 @@ class AuthController extends ChangeNotifier {
   /// 线路增删改后的共同落盘路径:走与登录一致的 server_list_store 保存,
   /// 并同步 prefill 与当前会话引用;[remountSession] 为真时按已存凭据把
   /// 客户端挂到(可能已变化的)新地址,用户名与服务器 UA 保持不变。
+  Future<String?> _targetLineFailure(
+    SavedServer server,
+    StoredCredentials stored,
+  ) async {
+    final useSelected =
+        server.serviceType != MediaServerType.plex &&
+        _client.serviceType == server.serviceType;
+    final probe = useSelected
+        ? _client
+        : _client.serviceType == server.serviceType
+        ? _client.withRequestGuard(() {})
+        : createProviderClient(server.serviceType);
+    try {
+      if (!useSelected) probe.setUserAgent(server.userAgent);
+      final info = await probe.getPublicInfo(Uri.parse(server.baseUrl));
+      if (info.id != (server.verifiedServerId ?? server.id)) {
+        return '线路返回的服务器身份与当前服务器不一致';
+      }
+      if (server.serviceType == MediaServerType.plex) {
+        probe.attachSession(
+          baseUrl: Uri.parse(server.baseUrl),
+          accessToken: stored.accessToken,
+          userId: stored.userId,
+          userAgent: server.userAgent,
+        );
+        await verifyProviderIdentity(plexAuthentication, server, stored, probe);
+        await probe.getUser();
+      }
+      return null;
+    } catch (_) {
+      return '无法核验线路，请检查地址和授权';
+    } finally {
+      if (!useSelected) probe.clearSession();
+    }
+  }
+
   Future<void> _persistLineEdit(
     SavedServer next, {
     required bool remountSession,
   }) async {
+    if (remountSession) {
+      final stored = await credentials.read(next.id);
+      if (stored != null) {
+        final failure = await _targetLineFailure(next, stored);
+        if (failure != null) {
+          _lineSwitchFailure = LineSwitchFailure(
+            address: next.baseUrl,
+            detail: failure,
+          );
+          notifyListeners();
+          throw MediaServerException(
+            MediaServerFailureKind.invalidResponse,
+            detail: failure,
+          );
+        }
+      }
+    }
     await _upsertServer(next, remember: false);
     if (_prefill?.id == next.id) {
       _prefill = next;
@@ -635,6 +824,20 @@ class AuthController extends ChangeNotifier {
     final activeChanged = server.activeLineId == lineId;
     final nextActive = activeChanged ? nextLines.first.id : server.activeLineId;
     final next = server.copyWith(lines: nextLines, activeLineId: nextActive);
+    if (activeChanged && _session?.server.id == serverId) {
+      final stored = await credentials.read(serverId);
+      if (stored != null) {
+        final failure = await _targetLineFailure(next, stored);
+        if (failure != null) {
+          _lineSwitchFailure = LineSwitchFailure(
+            address: next.baseUrl,
+            detail: failure,
+          );
+          notifyListeners();
+          return;
+        }
+      }
+    }
     await _upsertServer(next, remember: false);
     if (_prefill?.id == serverId) {
       _prefill = next;
@@ -685,7 +888,8 @@ class AuthController extends ChangeNotifier {
       // The durable credential is already revoked even when old-key cleanup
       // failed. Do not leave the selected client authenticated or restore it.
       // Check the live selection: another source may have been selected during IO.
-      if (_session?.server.id == serverId) {
+      if (_session?.server.id == serverId ||
+          (_session == null && current == serverId)) {
         _session = null;
         client.clearSession();
         _failure = MediaServerException(
@@ -902,35 +1106,66 @@ class AuthController extends ChangeNotifier {
     );
   }
 
-  Future<void> _activate(SavedServer server, StoredCredentials stored) async {
-    if (server.serviceType != client.serviceType ||
-        stored.serviceType != server.serviceType ||
+  Future<void> _activate(
+    SavedServer server,
+    StoredCredentials stored, {
+    void Function()? guard,
+  }) async {
+    guard?.call();
+    final generation = ++_activationGeneration;
+    if (stored.serviceType != server.serviceType ||
         server.homeUserId != stored.homeUserId ||
         server.cloudAccountId != stored.cloudAccountId) {
       throw StateError('Source credential identity mismatch');
     }
-    client.attachSession(
+    if (_client.serviceType != server.serviceType) {
+      _client.clearSession();
+      _client = createProviderClient(server.serviceType);
+    }
+    _guardedClient?.clearSession();
+    _guardedClient = null;
+    final attached = _client;
+    attached.onSessionExpired = _onSessionExpired;
+    attached.onRefreshSession = _refreshSession;
+    attached.attachSession(
       baseUrl: Uri.parse(server.baseUrl),
       accessToken: stored.accessToken,
       userId: stored.userId,
       userAgent: server.normalizedUserAgent,
     );
-    if (server.serviceType == MediaServerType.plex) {
+    final sourceGuard = sources.selectedSessionGuard(server.id);
+    if (server.serviceType != MediaServerType.emby) {
       _session = null;
       try {
-        await sources.verifyAttachedSession(server.id, stored, client);
+        final info = await attached.getPublicInfo(Uri.parse(server.baseUrl));
+        sourceGuard();
+        guard?.call();
+        if (info.id != (server.verifiedServerId ?? server.id)) {
+          throw const MediaServerException(MediaServerFailureKind.forbidden);
+        }
+        await sources.verifyAttachedSession(server.id, stored, attached);
+        sourceGuard();
+        guard?.call();
+        if (_disposed || generation != _activationGeneration) {
+          throw StateError('Selection superseded');
+        }
+        _guardedClient = attached.withRequestGuard(sourceGuard);
+        _guardedClient!.onSessionExpired = _onSessionExpired;
+        _guardedClient!.onRefreshSession = _refreshSession;
       } catch (_) {
-        client.clearSession();
+        attached.clearSession();
         rethrow;
       }
     }
+    guard?.call();
+    _selectionGuard = sourceGuard;
+    _revokedSelectionId = null;
     _session = AuthSession(
       server: server,
       userId: stored.userId,
       username: stored.username,
       accessToken: stored.accessToken,
     );
-    // 会话指向(或换到)一台服务器后刷新库规模;后台进行,不阻塞登录/切换。
     unawaited(loadLibraryCounts());
   }
 
@@ -994,9 +1229,14 @@ class AuthController extends ChangeNotifier {
       if (!_isSameSession(session)) {
         return false;
       }
-      await sources.commitOrdinaryCredentials(credentialCommit, next);
-      if (!_isSameSession(session)) return false;
-      await _activate(session.server, next);
+      _refreshingSelection = true;
+      try {
+        await sources.commitOrdinaryCredentials(credentialCommit, next);
+        if (!_isSameSession(session)) return false;
+        await _activate(session.server, next);
+      } finally {
+        _refreshingSelection = false;
+      }
       _failure = null;
       notifyListeners();
       return true;
@@ -1033,9 +1273,13 @@ class AuthController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _activationGeneration++;
+    _client.clearSession();
+    _guardedClient?.clearSession();
     _resetLibraryCounts();
     connectDraft = null;
     sources.removeMembershipCleanup(_clearSourceContribution);
+    sources.removeSourceRevocation(_sourceChanged);
     sources.dispose();
     super.dispose();
   }

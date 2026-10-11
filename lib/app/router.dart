@@ -105,7 +105,10 @@ GoRouter createAppRouter({
           // Invalid account/scope is not an alternate authentication fallback.
         }
       }
-      if (!loggedIn && !onConnect && !authorizedPlayer) {
+      if (!loggedIn &&
+          !onConnect &&
+          !authorizedPlayer &&
+          !auth.presentingAuthorization) {
         return AppRoutes.connect;
       }
       if (playerState.uri.path.startsWith('/play/') &&

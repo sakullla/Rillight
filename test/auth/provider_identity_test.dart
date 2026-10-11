@@ -865,7 +865,8 @@ void main() {
         sources: registry,
       );
       addTearDown(auth.dispose);
-      await expectLater(auth.restore(), throwsStateError);
+      await auth.restore();
+      expect(auth.failure, isNotNull);
       expect(auth.isLoggedIn, isFalse);
       expect(client.hasSession, isFalse);
     },

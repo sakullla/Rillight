@@ -2671,7 +2671,7 @@ abstract class AppLocalizations {
   /// No description provided for @mobileConnectionHint.
   ///
   /// In zh, this message translates to:
-  /// **'登录你的 Emby 服务器，开始观看。'**
+  /// **'登录你的媒体服务器，开始观看。'**
   String get mobileConnectionHint;
 
   /// No description provided for @mobileBackgroundPaused.
@@ -2761,7 +2761,7 @@ abstract class AppLocalizations {
   /// 电视登录页左侧的一句说明
   ///
   /// In zh, this message translates to:
-  /// **'输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。'**
+  /// **'连接你的媒体服务器，开始观看。Emby 账号也可以用手机扫码填写。'**
   String get tvConnectHint;
 
   /// 电视登录表单与手机辅助连接之间的分隔
@@ -3609,6 +3609,234 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已看'**
   String get watchedAction;
+
+  /// No description provided for @providerConnectTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接媒体服务'**
+  String get providerConnectTitle;
+
+  /// No description provided for @providerServiceType.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务类型'**
+  String get providerServiceType;
+
+  /// No description provided for @providerConnectEntry.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加 Emby / Jellyfin / Plex'**
+  String get providerConnectEntry;
+
+  /// No description provided for @providerPlexAuthorize.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用 Plex 账号授权'**
+  String get providerPlexAuthorize;
+
+  /// No description provided for @providerQuickConnect.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用 Quick Connect'**
+  String get providerQuickConnect;
+
+  /// No description provided for @providerPlexInstructions.
+  ///
+  /// In zh, this message translates to:
+  /// **'请在浏览器中登录 Plex 并完成授权。也可用手机打开下方地址。'**
+  String get providerPlexInstructions;
+
+  /// No description provided for @providerQuickInstructions.
+  ///
+  /// In zh, this message translates to:
+  /// **'在已登录的 Jellyfin 应用中打开 Quick Connect，输入下方代码。'**
+  String get providerQuickInstructions;
+
+  /// No description provided for @providerOpenBrowser.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开浏览器'**
+  String get providerOpenBrowser;
+
+  /// No description provided for @providerWaitingAuthorization.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待授权…'**
+  String get providerWaitingAuthorization;
+
+  /// No description provided for @providerDiscovering.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在发现服务器…'**
+  String get providerDiscovering;
+
+  /// No description provided for @providerRestart.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新授权'**
+  String get providerRestart;
+
+  /// No description provided for @providerChooseHome.
+  ///
+  /// In zh, this message translates to:
+  /// **'Plex Home 用户'**
+  String get providerChooseHome;
+
+  /// No description provided for @providerHomePin.
+  ///
+  /// In zh, this message translates to:
+  /// **'Plex Home PIN'**
+  String get providerHomePin;
+
+  /// No description provided for @providerHomePinHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入 Plex Home 用户的 PIN，不是灯川私密 PIN。'**
+  String get providerHomePinHint;
+
+  /// No description provided for @providerSwitchHome.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换用户并重新发现服务器'**
+  String get providerSwitchHome;
+
+  /// No description provided for @providerChooseResource.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择服务器与连接线路'**
+  String get providerChooseResource;
+
+  /// No description provided for @providerNoResources.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前用户没有可用服务器，请选择 Home 用户或重新授权。'**
+  String get providerNoResources;
+
+  /// No description provided for @providerLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地'**
+  String get providerLocal;
+
+  /// No description provided for @providerRemote.
+  ///
+  /// In zh, this message translates to:
+  /// **'远程'**
+  String get providerRemote;
+
+  /// No description provided for @providerRelay.
+  ///
+  /// In zh, this message translates to:
+  /// **'中继（带宽受限）'**
+  String get providerRelay;
+
+  /// No description provided for @providerChooseLibraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接。勾选参与聚合的影视库；不勾选仍可单独浏览此服务。'**
+  String get providerChooseLibraries;
+
+  /// No description provided for @providerNoLibraries.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有发现可访问的影视库。可重试或保留空范围。'**
+  String get providerNoLibraries;
+
+  /// No description provided for @providerFinish.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存并完成'**
+  String get providerFinish;
+
+  /// No description provided for @providerCredentialsRejected.
+  ///
+  /// In zh, this message translates to:
+  /// **'账号、密码或 Home PIN 不正确，请重试。'**
+  String get providerCredentialsRejected;
+
+  /// No description provided for @providerPermissionDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前账号无权访问，请检查共享权限或重新授权。'**
+  String get providerPermissionDenied;
+
+  /// No description provided for @providerRateLimited.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务暂时限制请求，请稍后重试。'**
+  String get providerRateLimited;
+
+  /// No description provided for @providerAuthorizationExpired.
+  ///
+  /// In zh, this message translates to:
+  /// **'授权已过期、被拒绝或取消，请重新授权。'**
+  String get providerAuthorizationExpired;
+
+  /// No description provided for @providerSignatureFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'授权签名或设备时间校验失败，请校准系统时间后重试。'**
+  String get providerSignatureFailure;
+
+  /// No description provided for @providerQuickUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器未开放 Quick Connect，请使用密码登录。'**
+  String get providerQuickUnavailable;
+
+  /// No description provided for @providerCertificateFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器证书校验失败，请检查服务器配置。'**
+  String get providerCertificateFailure;
+
+  /// No description provided for @providerConnectionFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接未完成，请检查地址和网络后重试。'**
+  String get providerConnectionFailure;
+
+  /// No description provided for @providerBrowserFailure.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法打开浏览器，请在其它设备打开授权地址。'**
+  String get providerBrowserFailure;
+
+  /// No description provided for @providerHomeManage.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换 Plex Home 用户'**
+  String get providerHomeManage;
+
+  /// No description provided for @providerServerOrder.
+  ///
+  /// In zh, this message translates to:
+  /// **'此列表按服务器提供的顺序显示'**
+  String get providerServerOrder;
+
+  /// No description provided for @providerOwned.
+  ///
+  /// In zh, this message translates to:
+  /// **'自有服务器'**
+  String get providerOwned;
+
+  /// No description provided for @providerShared.
+  ///
+  /// In zh, this message translates to:
+  /// **'共享服务器'**
+  String get providerShared;
+
+  /// No description provided for @providerAccountManage.
+  ///
+  /// In zh, this message translates to:
+  /// **'Plex 账号设置'**
+  String get providerAccountManage;
+
+  /// No description provided for @providerAccountInstructions.
+  ///
+  /// In zh, this message translates to:
+  /// **'Plex 账号与密码在官方网页中管理。请打开浏览器，或在手机上访问下方地址。'**
+  String get providerAccountInstructions;
 }
 
 class _AppLocalizationsDelegate

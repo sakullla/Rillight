@@ -1361,7 +1361,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mobileAllLoaded => '已显示全部内容';
 
   @override
-  String get mobileConnectionHint => '登录你的 Emby 服务器，开始观看。';
+  String get mobileConnectionHint => '登录你的媒体服务器，开始观看。';
 
   @override
   String get mobileBackgroundPaused => '已暂停，点击播放继续';
@@ -1406,7 +1406,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get tvViewAll => '查看全部';
 
   @override
-  String get tvConnectHint => '输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。';
+  String get tvConnectHint => '连接你的媒体服务器，开始观看。Emby 账号也可以用手机扫码填写。';
 
   @override
   String get tvConnectOr => '或';
@@ -1851,4 +1851,120 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get watchedAction => '已看';
+
+  @override
+  String get providerConnectTitle => '连接媒体服务';
+
+  @override
+  String get providerServiceType => '服务类型';
+
+  @override
+  String get providerConnectEntry => '添加 Emby / Jellyfin / Plex';
+
+  @override
+  String get providerPlexAuthorize => '使用 Plex 账号授权';
+
+  @override
+  String get providerQuickConnect => '使用 Quick Connect';
+
+  @override
+  String get providerPlexInstructions => '请在浏览器中登录 Plex 并完成授权。也可用手机打开下方地址。';
+
+  @override
+  String get providerQuickInstructions =>
+      '在已登录的 Jellyfin 应用中打开 Quick Connect，输入下方代码。';
+
+  @override
+  String get providerOpenBrowser => '打开浏览器';
+
+  @override
+  String get providerWaitingAuthorization => '等待授权…';
+
+  @override
+  String get providerDiscovering => '正在发现服务器…';
+
+  @override
+  String get providerRestart => '重新授权';
+
+  @override
+  String get providerChooseHome => 'Plex Home 用户';
+
+  @override
+  String get providerHomePin => 'Plex Home PIN';
+
+  @override
+  String get providerHomePinHint => '请输入 Plex Home 用户的 PIN，不是灯川私密 PIN。';
+
+  @override
+  String get providerSwitchHome => '切换用户并重新发现服务器';
+
+  @override
+  String get providerChooseResource => '选择服务器与连接线路';
+
+  @override
+  String get providerNoResources => '当前用户没有可用服务器，请选择 Home 用户或重新授权。';
+
+  @override
+  String get providerLocal => '本地';
+
+  @override
+  String get providerRemote => '远程';
+
+  @override
+  String get providerRelay => '中继（带宽受限）';
+
+  @override
+  String get providerChooseLibraries => '已连接。勾选参与聚合的影视库；不勾选仍可单独浏览此服务。';
+
+  @override
+  String get providerNoLibraries => '没有发现可访问的影视库。可重试或保留空范围。';
+
+  @override
+  String get providerFinish => '保存并完成';
+
+  @override
+  String get providerCredentialsRejected => '账号、密码或 Home PIN 不正确，请重试。';
+
+  @override
+  String get providerPermissionDenied => '当前账号无权访问，请检查共享权限或重新授权。';
+
+  @override
+  String get providerRateLimited => '服务暂时限制请求，请稍后重试。';
+
+  @override
+  String get providerAuthorizationExpired => '授权已过期、被拒绝或取消，请重新授权。';
+
+  @override
+  String get providerSignatureFailure => '授权签名或设备时间校验失败，请校准系统时间后重试。';
+
+  @override
+  String get providerQuickUnavailable => '服务器未开放 Quick Connect，请使用密码登录。';
+
+  @override
+  String get providerCertificateFailure => '服务器证书校验失败，请检查服务器配置。';
+
+  @override
+  String get providerConnectionFailure => '连接未完成，请检查地址和网络后重试。';
+
+  @override
+  String get providerBrowserFailure => '无法打开浏览器，请在其它设备打开授权地址。';
+
+  @override
+  String get providerHomeManage => '切换 Plex Home 用户';
+
+  @override
+  String get providerServerOrder => '此列表按服务器提供的顺序显示';
+
+  @override
+  String get providerOwned => '自有服务器';
+
+  @override
+  String get providerShared => '共享服务器';
+
+  @override
+  String get providerAccountManage => 'Plex 账号设置';
+
+  @override
+  String get providerAccountInstructions =>
+      'Plex 账号与密码在官方网页中管理。请打开浏览器，或在手机上访问下方地址。';
 }

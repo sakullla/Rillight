@@ -1,3 +1,6 @@
+import '../auth/provider_connect_dialog.dart';
+import '../auth/source_management.dart';
+import '../media_server/capabilities.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -172,7 +175,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                       ),
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
-                        session?.server.displayName ?? '',
+                        session == null
+                            ? ''
+                            : '${session.server.serviceType.name} · ${session.server.displayName}',
                         key: PhoneMinePage.serverKey,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
@@ -234,16 +239,34 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                 onTap: () => context.push('${AppRoutes.connect}?add=1'),
               ),
               ListTile(
-                key: PhoneMinePage.changePasswordKey,
-                minTileHeight: AppSpacing.huge,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.password_outlined),
-                title: Text(l10n.changePassword),
-                onTap: () => showDialog<void>(
-                  context: context,
-                  builder: (dialogContext) => ChangePasswordDialog(auth: auth),
-                ),
+                key: const Key('phone-provider-management'),
+                leading: const Icon(Icons.manage_accounts_outlined),
+                title: Text(l10n.sourceManagement),
+                onTap: () => showSourceManagement(context),
               ),
+              if (auth.client.serviceType == MediaServerType.plex ||
+                  auth
+                      .client
+                      .capabilities[ServiceCapability.changePassword]
+                      .isAvailable)
+                ListTile(
+                  key: PhoneMinePage.changePasswordKey,
+                  minTileHeight: AppSpacing.huge,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.password_outlined),
+                  title: Text(
+                    auth.client.serviceType == MediaServerType.plex
+                        ? l10n.providerAccountManage
+                        : l10n.changePassword,
+                  ),
+                  onTap: auth.client.serviceType == MediaServerType.plex
+                      ? () => showProviderAccountSettings(context)
+                      : () => showDialog<void>(
+                          context: context,
+                          builder: (dialogContext) =>
+                              ChangePasswordDialog(auth: auth),
+                        ),
+                ),
               ListTile(
                 key: PhoneMinePage.privateKey,
                 minTileHeight: AppSpacing.huge,

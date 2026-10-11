@@ -1,3 +1,5 @@
+import 'provider_connect_dialog.dart';
+import '../media_server/capabilities.dart';
 import 'dart:async';
 import 'source_management.dart';
 
@@ -86,6 +88,16 @@ class SessionActions extends StatelessWidget {
                   _switchTo(context, auth, playerHost, serverId, lineId),
                 );
               },
+              canChangePassword: auth
+                  .client
+                  .capabilities[ServiceCapability.changePassword]
+                  .isAvailable,
+              externalAccountManagement:
+                  auth.client.serviceType == MediaServerType.plex,
+              onManage: () {
+                Navigator.of(dialogContext).pop();
+                unawaited(showSourceManagement(context));
+              },
               onAddServer: () {
                 Navigator.of(dialogContext).pop();
                 GoRouter.of(context).push('${AppRoutes.connect}?add=1');
@@ -124,6 +136,10 @@ class SessionActions extends StatelessWidget {
               },
               onChangePassword: () {
                 Navigator.of(dialogContext).pop();
+                if (auth.client.serviceType == MediaServerType.plex) {
+                  unawaited(showProviderAccountSettings(context));
+                  return;
+                }
                 unawaited(
                   showDialog<void>(
                     context: context,

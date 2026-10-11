@@ -223,15 +223,23 @@ class EmbyClient implements MediaServerClient {
 
   /// Independent request/receipt gate for a consumer's frozen source lease.
   /// Shares the transport, not mutable session credentials or interceptors.
+  void Function()? _requestGuard;
+
   @override
   MediaServerClient withRequestGuard(void Function() guard) {
+    final previous = _requestGuard;
+    void check() {
+      previous?.call();
+      guard();
+    }
+
     final dio = Dio(_dio.options.copyWith());
     dio.httpClientAdapter = _dio.httpClientAdapter;
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
           try {
-            guard();
+            check();
             handler.next(options);
           } catch (error) {
             handler.reject(DioException(requestOptions: options, error: error));
@@ -239,7 +247,7 @@ class EmbyClient implements MediaServerClient {
         },
         onResponse: (response, handler) {
           try {
-            guard();
+            check();
             handler.next(response);
           } catch (error) {
             handler.reject(
@@ -252,12 +260,18 @@ class EmbyClient implements MediaServerClient {
         },
       ),
     );
-    return EmbyClient(device: device, dio: dio)..attachSession(
-      baseUrl: baseUrl!,
-      accessToken: accessToken!,
-      userId: userId!,
-      userAgent: userAgent,
-    );
+    final guarded = EmbyClient(device: device, dio: dio)
+      .._requestGuard = check
+      ..setUserAgent(customUserAgent);
+    if (hasSession) {
+      guarded.attachSession(
+        baseUrl: baseUrl!,
+        accessToken: accessToken!,
+        userId: userId!,
+        userAgent: customUserAgent,
+      );
+    }
+    return guarded;
   }
 
   @override

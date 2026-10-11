@@ -1491,7 +1491,7 @@
   "mobileEmpty": "暂无内容",
   "mobileLoadMore": "加载更多",
   "mobileAllLoaded": "已显示全部内容",
-  "mobileConnectionHint": "登录你的 Emby 服务器，开始观看。",
+  "mobileConnectionHint": "登录你的媒体服务器，开始观看。",
   "mobileBackgroundPaused": "已暂停，点击播放继续",
   "mobilePreviousSession": "上次播放已中断，可从详情页继续观看。",
   "mobileRecoveryFailed": "上次播放进度同步失败，请重试。",
@@ -1515,7 +1515,7 @@
   "@tvViewAll": {
     "description": "电视首页行尾进入完整列表的卡片"
   },
-  "tvConnectHint": "输入 Emby 服务器地址与账号即可开始观看。也可以用手机扫码,在手机上填写。",
+  "tvConnectHint": "连接你的媒体服务器，开始观看。Emby 账号也可以用手机扫码填写。",
   "@tvConnectHint": {
     "description": "电视登录页左侧的一句说明"
   },
@@ -1922,5 +1922,43 @@
   "watchedAction": "已看",
   "@watchedAction": {
     "description": "Phone detail labelled action showing the item is watched; tap to mark unwatched."
-  }
+  },
+  "providerConnectTitle": "连接媒体服务",
+  "providerServiceType": "服务类型",
+  "providerConnectEntry": "添加 Emby / Jellyfin / Plex",
+  "providerPlexAuthorize": "使用 Plex 账号授权",
+  "providerQuickConnect": "使用 Quick Connect",
+  "providerPlexInstructions": "请在浏览器中登录 Plex 并完成授权。也可用手机打开下方地址。",
+  "providerQuickInstructions": "在已登录的 Jellyfin 应用中打开 Quick Connect，输入下方代码。",
+  "providerOpenBrowser": "打开浏览器",
+  "providerWaitingAuthorization": "等待授权…",
+  "providerDiscovering": "正在发现服务器…",
+  "providerRestart": "重新授权",
+  "providerChooseHome": "Plex Home 用户",
+  "providerHomePin": "Plex Home PIN",
+  "providerHomePinHint": "请输入 Plex Home 用户的 PIN，不是灯川私密 PIN。",
+  "providerSwitchHome": "切换用户并重新发现服务器",
+  "providerChooseResource": "选择服务器与连接线路",
+  "providerNoResources": "当前用户没有可用服务器，请选择 Home 用户或重新授权。",
+  "providerLocal": "本地",
+  "providerRemote": "远程",
+  "providerRelay": "中继（带宽受限）",
+  "providerChooseLibraries": "已连接。勾选参与聚合的影视库；不勾选仍可单独浏览此服务。",
+  "providerNoLibraries": "没有发现可访问的影视库。可重试或保留空范围。",
+  "providerFinish": "保存并完成",
+  "providerCredentialsRejected": "账号、密码或 Home PIN 不正确，请重试。",
+  "providerPermissionDenied": "当前账号无权访问，请检查共享权限或重新授权。",
+  "providerRateLimited": "服务暂时限制请求，请稍后重试。",
+  "providerAuthorizationExpired": "授权已过期、被拒绝或取消，请重新授权。",
+  "providerSignatureFailure": "授权签名或设备时间校验失败，请校准系统时间后重试。",
+  "providerQuickUnavailable": "服务器未开放 Quick Connect，请使用密码登录。",
+  "providerCertificateFailure": "服务器证书校验失败，请检查服务器配置。",
+  "providerConnectionFailure": "连接未完成，请检查地址和网络后重试。",
+  "providerBrowserFailure": "无法打开浏览器，请在其它设备打开授权地址。",
+  "providerHomeManage": "切换 Plex Home 用户",
+  "providerServerOrder": "此列表按服务器提供的顺序显示",
+  "providerOwned": "自有服务器",
+  "providerShared": "共享服务器",
+  "providerAccountManage": "Plex 账号设置",
+  "providerAccountInstructions": "Plex 账号与密码在官方网页中管理。请打开浏览器，或在手机上访问下方地址。"
 }

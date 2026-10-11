@@ -32,7 +32,7 @@ bool _hasCriteria(BrowseController controller) {
       controller.watch != null ||
       controller.year != null ||
       controller.genre != null ||
-      controller.sortBy != CatalogSort.initial.sortBy;
+      controller.sortBy != controller.defaultSort.sortBy;
 }
 
 class MobileLibraryPage extends StatefulWidget {
@@ -167,7 +167,10 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
   }
 
   void _clearFilters() {
-    _controller?.filter(sortBy: CatalogSort.initial.sortBy);
+    final controller = _controller;
+    if (controller != null) {
+      controller.filter(sortBy: controller.defaultSort.sortBy);
+    }
   }
 
   Future<void> _openFilters() async {
@@ -183,6 +186,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
       useSafeArea: true,
       builder: (context) => LibraryFilterPanel(
         keyPrefix: 'phone-library',
+        capabilities: controller.auth.client.capabilities,
         typeFilterable: controller.includeItemTypes == 'Movie,Series',
         initial: ShelfFilters(
           type: CatalogTypeFilter.values.firstWhere(
@@ -198,7 +202,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
         ),
         sort: CatalogSort.values.firstWhere(
           (value) => value.sortBy == controller.sortBy,
-          orElse: () => CatalogSort.initial,
+          orElse: () => controller.defaultSort,
         ),
         years: years,
         genres: genres,
@@ -208,7 +212,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
           watch: filters.watch.param,
           years: filters.years,
           genres: filters.genres,
-          sortBy: (sort ?? CatalogSort.initial).sortBy,
+          sortBy: (sort ?? controller.defaultSort).sortBy,
         ),
       ),
     );
@@ -383,7 +387,7 @@ class _ActiveFilters extends StatelessWidget {
         runSpacing: AppSpacing.xs,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          if (controller.sortBy != CatalogSort.initial.sortBy)
+          if (controller.sortBy != controller.defaultSort.sortBy)
             Chip(
               key: const Key('phone-library-active-sort'),
               label: Text(_sortLabel(l10n, controller.sortBy)),

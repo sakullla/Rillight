@@ -1,3 +1,7 @@
+import 'provider_connect_dialog.dart';
+import '../media_server/capabilities.dart';
+import '../app/presentation_environment.dart';
+import '../app/tv_widgets.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -99,9 +103,16 @@ class _SourceManagementState extends State<SourceManagement> {
         region: widget.region,
         registry: registry,
         sourceId: sourceId,
+        onRevoked: controller.clear,
         child: AlertDialog(
           title: Text(title),
-          content: TextField(controller: controller, autofocus: true),
+          content: PresentationScope.maybeOf(context)?.isTv == true
+              ? TvInput(label: title, controller: controller, autofocus: true)
+              : TextField(
+                  key: const Key('source-text-value'),
+                  controller: controller,
+                  autofocus: true,
+                ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialog),
@@ -119,51 +130,108 @@ class _SourceManagementState extends State<SourceManagement> {
     return result;
   }
 
-  Future<void> _login(String id) async {
-    final name = TextEditingController(), password = TextEditingController();
-    final l = AppLocalizations.of(context);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => _RegionDialogBoundary(
-        access: widget.auth.regionAccess,
-        region: widget.region,
-        registry: registry,
-        sourceId: id,
-        child: AlertDialog(
-          title: Text(l.sourceIndependentLogin),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                autofocus: true,
-                decoration: InputDecoration(labelText: l.username),
-              ),
-              TextField(
-                controller: password,
-                obscureText: true,
-                decoration: InputDecoration(labelText: l.password),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialog),
-              child: Text(l.cancelAction),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialog, true),
-              child: Text(l.sourceIndependentLogin),
-            ),
-          ],
-        ),
-      ),
+  Future<void> _login(String id, {bool home = false}) async {
+    final server = registry
+        .project(widget.region)
+        .firstWhere((s) => s.id == id);
+    await showProviderConnect(
+      context,
+      widget.auth,
+      existing: server,
+      region: widget.region,
+      home: home,
     );
-    if (confirmed == true && mounted) {
-      await _act(() => registry.login(id, name.text, password.text));
+    if (mounted) setState(() {});
+  }
+
+  Future<bool> _confirm(
+    SavedServer server,
+    String title,
+    String message,
+  ) async {
+    final l = AppLocalizations.of(context);
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialog) => _RegionDialogBoundary(
+            access: widget.auth.regionAccess,
+            region: widget.region,
+            registry: registry,
+            sourceId: server.id,
+            child: AlertDialog(
+              title: Text(title),
+              content: Text(message),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  child: Text(l.cancelAction),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialog, true),
+                  child: Text(title),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _logout(SavedServer server, {bool remove = false}) async {
+    final l = AppLocalizations.of(context);
+    if (!await _confirm(
+      server,
+      remove ? l.deleteServer : l.logout,
+      remove
+          ? l.deleteServerConfirmMessage(server.displayName)
+          : '${l.logout} · ${server.displayName}',
+    )) {
+      return;
     }
-    name.dispose();
-    password.dispose();
+    if (!mounted) return;
+    await _act(() async {
+      await registry.logoutSource(server.id, remove: remove);
+      await widget.auth.refreshServers();
+    });
+  }
+
+  Future<void> _editAddress(SavedServer server, [ServerLine? line]) async {
+    final l = AppLocalizations.of(context);
+    final value = await _text(
+      line == null ? l.addLine : l.editLine,
+      line?.address ?? '',
+      server.id,
+    );
+    if (value == null || !mounted) return;
+    final wasActive =
+        widget.region == AccessRegion.ordinary &&
+        widget.auth.session?.server.id == server.id &&
+        widget.auth.session?.server.activeLineId == line?.id;
+    await _act(() async {
+      await registry.setLineAddress(server.id, value, lineId: line?.id);
+      await widget.auth.refreshServers();
+      if (wasActive) await widget.auth.switchTo(server.id, lineId: line!.id);
+    });
+  }
+
+  Future<void> _removeLine(SavedServer server, ServerLine line) async {
+    final l = AppLocalizations.of(context);
+    if (!await _confirm(
+      server,
+      l.deleteLine,
+      line.nickname ?? line.hostLabel,
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    final wasActive =
+        widget.region == AccessRegion.ordinary &&
+        widget.auth.session?.server.id == server.id &&
+        widget.auth.session?.server.activeLineId == line.id;
+    await _act(() async {
+      await registry.removeLine(server.id, line.id);
+      await widget.auth.refreshServers();
+      if (wasActive) await widget.auth.switchTo(server.id);
+    });
   }
 
   Future<void> _move(SavedServer server) async {
@@ -214,6 +282,21 @@ class _SourceManagementState extends State<SourceManagement> {
           height: MediaQuery.sizeOf(context).height * .65,
           child: ListView(
             children: [
+              OutlinedButton.icon(
+                key: const Key('source-add-provider'),
+                icon: const Icon(Icons.add),
+                label: Text(l.providerConnectEntry),
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        await showProviderConnect(
+                          context,
+                          widget.auth,
+                          region: widget.region,
+                        );
+                        if (mounted) setState(() {});
+                      },
+              ),
               if (_busy) const LinearProgressIndicator(),
               if (_error != null)
                 Text(_error!, key: const Key('source-management-error')),
@@ -232,7 +315,7 @@ class _SourceManagementState extends State<SourceManagement> {
                 ListTile(
                   title: Text(servers[index].displayName),
                   subtitle: Text(
-                    '${servers[index].checkStatus} · ${servers[index].checkedAt?.toLocal().toString() ?? '—'}',
+                    '${servers[index].serviceType.name} · ${servers[index].username} · ${servers[index].checkStatus} · ${servers[index].checkedAt?.toLocal().toString() ?? '—'}',
                   ),
                   trailing: IconButton(
                     icon: const Icon(Icons.arrow_upward),
@@ -265,6 +348,25 @@ class _SourceManagementState extends State<SourceManagement> {
                   spacing: 8,
                   children: [
                     TextButton(
+                      key: Key('source-add-line-${servers[index].id}'),
+                      onPressed: _busy
+                          ? null
+                          : () => _editAddress(servers[index]),
+                      child: Text(l.addLine),
+                    ),
+                    TextButton(
+                      key: Key('source-logout-${servers[index].id}'),
+                      onPressed: _busy ? null : () => _logout(servers[index]),
+                      child: Text(l.logout),
+                    ),
+                    TextButton(
+                      key: Key('source-delete-${servers[index].id}'),
+                      onPressed: _busy
+                          ? null
+                          : () => _logout(servers[index], remove: true),
+                      child: Text(l.deleteServer),
+                    ),
+                    TextButton(
                       onPressed: _busy
                           ? null
                           : () => _act(() async {
@@ -277,6 +379,13 @@ class _SourceManagementState extends State<SourceManagement> {
                             }),
                       child: Text(l.sourceDiscoverLibraries),
                     ),
+                    if (servers[index].serviceType == MediaServerType.plex)
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _login(servers[index].id, home: true),
+                        child: Text(l.providerHomeManage),
+                      ),
                     TextButton(
                       onPressed: _busy ? null : () => _login(servers[index].id),
                       child: Text(l.sourceIndependentLogin),
@@ -408,6 +517,34 @@ class _SourceManagementState extends State<SourceManagement> {
                       ],
                     ),
                   ),
+                for (final line in servers[index].lines)
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton.icon(
+                        key: Key(
+                          'source-edit-line-${servers[index].id}-${line.id}',
+                        ),
+                        icon: const Icon(Icons.edit_outlined),
+                        onPressed: _busy
+                            ? null
+                            : () => _editAddress(servers[index], line),
+                        label: Text(
+                          '${l.editLine} · ${line.nickname ?? line.hostLabel}',
+                        ),
+                      ),
+                      TextButton.icon(
+                        key: Key(
+                          'source-delete-line-${servers[index].id}-${line.id}',
+                        ),
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: _busy || servers[index].lines.length < 2
+                            ? null
+                            : () => _removeLine(servers[index], line),
+                        label: Text(l.deleteLine),
+                      ),
+                    ],
+                  ),
                 const Divider(),
               ],
             ],
@@ -432,9 +569,11 @@ class _RegionDialogBoundary extends StatefulWidget {
     required this.child,
     required this.registry,
     required this.sourceId,
+    this.onRevoked,
   });
   final SourceSessionRegistry registry;
   final String sourceId;
+  final VoidCallback? onRevoked;
   final RegionAccessController access;
   final AccessRegion region;
   final Widget child;
@@ -461,10 +600,13 @@ class _RegionDialogBoundaryState extends State<_RegionDialogBoundary> {
     if (!mounted) return;
     setState(() {});
     if (_revoked || !widget.access.allows(widget.region)) {
+      widget.onRevoked?.call();
       final route = ModalRoute.of(context);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && route?.isActive == true) {
-          Navigator.of(context).removeRoute(route!);
+          final navigator = Navigator.of(context);
+          navigator.popUntil((candidate) => identical(candidate, route));
+          navigator.pop();
         }
       });
     }

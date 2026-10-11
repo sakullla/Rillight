@@ -14,6 +14,7 @@ node tool/capture-ui.mjs --feature 弹幕 --platform phone --size 360
 node tool/capture-ui.mjs --only 'poster-hover*,player-settings-*' --platform desktop
 node tool/capture-ui.mjs --only server-delete-confirm --theme light
 node tool/capture-ui.mjs --only '*loading*' --list
+node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
 ```
 
 支持 `--platform all|desktop|phone|tv`、`--theme all|dark|light`，默认全部平台和两种主题。`--size` 为配置宽度，可指定 `360,412,1024,1440,1920,3840`。TV 两档都按实机渲染：`1920` 是 1080p 面板（DPR 2），`3840` 是 4K 面板（DPR 4），逻辑画布都是 960×540，截图按物理像素输出，可直接对照实机截图与 4K 下的图片清晰度。`--feature` 支持下表功能名及对应中文别名。`--only` 支持一个或多个状态 ID、`*`/`?` 通配符，逗号分隔；与功能、平台、主题和尺寸筛选取交集。`--list` 列出当前筛选匹配的状态，不启动 Flutter；空结果会报错。
@@ -38,6 +39,8 @@ node tool/capture-ui.mjs --only '*loading*' --list
 通过真实点击、悬浮或按键打开交互状态；页面路由可直接定位以减少串联依赖。捕获保留指针和焦点。状态缺失、点击未命中、Flutter 异常和布局溢出均导致失败。新增状态同时维护 `scenarios.json` 与对应场景；截图文件名稳定，输出目录隔离。
 
 所有账号、偏好、图片缓存与播放器均为内存夹具。插画由捕获工具绘制，不依赖外网图片。捕获脚本位于 `tool/`，不会加入默认测试收集。PNG 与索引是原型呈现证据，不证明平台原生能力、实际视频、声音或硬件性能。
+
+`provider-*` 从三端真实服务入口捕获 Emby、Jellyfin、Plex 登录、错误、库选择和播放器加载/完成。Jellyfin Quick Connect、Plex 授权码、自有/共享服务器发现及 Home PIN 使用独立协议 fake 的本机 HTTP 服务；Emby 使用注入协议适配器。TV 文本输入使用实际遥控编辑器。播放器仍使用合成后端，这些截图不证明解码或真实服务兼容性。
 
 ## 参考与实现取舍
 

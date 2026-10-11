@@ -26,6 +26,7 @@ class JellyfinFakeServer {
     'PlaybackPositionTicks': 123456780,
   };
   bool quickEnabled = true, quickAuthorized = false;
+  List<int> imageBytes = const [255, 216, 255, 217];
   String serverId = 'server-jellyfin';
   String transcodeOutputQuery = '';
   int? nextStatus;
@@ -311,7 +312,7 @@ class JellyfinFakeServer {
         request.response.statusCode = 204;
       default:
         if (path.contains('/Trickplay/') || path.contains('/Images/')) {
-          request.response.add([255, 216, 255, 217]);
+          request.response.add(imageBytes);
           await request.response.close();
           return;
         }

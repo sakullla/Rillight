@@ -1,4 +1,8 @@
 import 'dart:io';
+import 'cloud_credentials.dart';
+import 'provider_identity.dart';
+import '../media_server/provider_registry.dart';
+import '../plex/plex_authentication.dart';
 
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/product.dart';
@@ -41,11 +45,22 @@ Future<AuthController> createProductionAuth() async {
   final servers = FileServerListStore(File('${dir.path}/servers.json'));
   final pinStore = FilePinStore(File('${dir.path}/private_pin.json'));
   final access = RegionAccessController(verifier: await pinStore.load());
+  final cloud = CloudCredentialStore(credentials);
+  final plex = PlexAuthentication(
+    device: client.device,
+    readCredential: cloud.readCredential,
+    writeCredential: cloud.writeCredential,
+    deleteCredential: cloud.deleteCredential,
+  );
   final sources = SourceSessionRegistry(
     access: access,
     store: servers,
     credentials: credentials,
     createClient: client.createDetached,
+    createProviderClient: (type) =>
+        MediaServerProviders.create(type, client.device),
+    sessionIdentityVerifier: (server, value, attached) =>
+        verifyProviderIdentity(plex, server, value, attached),
   );
   await sources.load();
   final controller = AuthController(
@@ -53,6 +68,9 @@ Future<AuthController> createProductionAuth() async {
     credentials: credentials,
     servers: servers,
     sources: sources,
+    plexAuthentication: plex,
+    providerClientFactory: (type) =>
+        MediaServerProviders.create(type, client.device),
     persistPin: pinStore.save,
   );
   await controller.restore();

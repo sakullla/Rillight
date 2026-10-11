@@ -95,15 +95,16 @@ class _LibraryLatestDataState extends State<LibraryLatestData> {
     bool owns() =>
         mounted && generation == _generation && identity == _identity;
     final catalog = CatalogScope.of(context);
+    final sort = CatalogSort.initialFor(catalog.client.capabilities);
     final request = catalogItemsRequest(
       userId: catalog.client.userId ?? '',
       parentId: widget.library.id,
       includeItemTypes: _latestTypes(widget.library),
       recursive: true,
       limit: libraryLatestPreview,
-      // 与片库页默认「更新日期」相同，首页预览才是点进去后的前几项。
-      sortBy: CatalogSort.initial.sortBy,
-      sortOrder: CatalogSort.initial.sortOrder,
+      // 与当前服务片库页的默认排序一致，预览对应进入后的前几项。
+      sortBy: sort.sortBy,
+      sortOrder: sort.sortOrder,
       fields: MediaServerClient.homePosterFields,
     );
     final network = catalog.loadLibraryPreview(request);

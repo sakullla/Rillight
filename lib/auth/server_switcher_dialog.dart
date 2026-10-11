@@ -20,8 +20,14 @@ class ServerSwitcherDialog extends StatefulWidget {
     required this.onAddLine,
     required this.onEditLine,
     required this.onDeleteLine,
+    this.onManage,
+    this.canChangePassword = true,
+    this.externalAccountManagement = false,
   });
 
+  final bool canChangePassword;
+  final bool externalAccountManagement;
+  final VoidCallback? onManage;
   final List<SavedServer> servers;
   final String? activeServerId;
   final String? activeLineId;
@@ -209,12 +215,23 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                   label: l10n.addServer,
                   onTap: widget.onAddServer,
                 ),
-                _ActionTile(
-                  key: ServerSwitcherDialog.changePasswordKey,
-                  icon: Icons.password_outlined,
-                  label: l10n.changePassword,
-                  onTap: widget.onChangePassword,
-                ),
+                if (widget.onManage != null)
+                  _ActionTile(
+                    key: const Key('server-manage-providers'),
+                    icon: Icons.manage_accounts_outlined,
+                    label: l10n.sourceManagement,
+                    onTap: widget.onManage!,
+                  ),
+                if (widget.canChangePassword ||
+                    widget.externalAccountManagement)
+                  _ActionTile(
+                    key: ServerSwitcherDialog.changePasswordKey,
+                    icon: Icons.password_outlined,
+                    label: widget.externalAccountManagement
+                        ? l10n.providerAccountManage
+                        : l10n.changePassword,
+                    onTap: widget.onChangePassword,
+                  ),
                 _ActionTile(
                   icon: Icons.logout_rounded,
                   label: l10n.logout,
