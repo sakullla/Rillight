@@ -30,6 +30,9 @@ import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
 
 String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
+  origin.source.account.serviceType.name,
+  origin.source.account.cloudAccountId,
+  origin.source.account.homeUserId,
   origin.source.account.region.name,
   origin.source.account.configuredServerId,
   origin.source.account.verifiedServerId,
@@ -242,7 +245,7 @@ class _LoadedImage {
 // The independent player attaches a client session without restoring the
 // account controller. Use the actual authenticated endpoint and user in both
 // processes; a missing session must never resolve to a shared anonymous key.
-final _accountScopes = Expando<(Uri, String, String)>();
+final _accountScopes = Expando<(String, String)>();
 
 String? mediaImageAccountScope(AuthController? auth) {
   final client = auth?.client;
@@ -253,29 +256,31 @@ String? mediaImageAccountScope(AuthController? auth) {
   }
   final base = client.baseUrl!;
   final userId = client.userId!;
-  final cached = _accountScopes[auth!];
-  if (cached != null && cached.$1 == base && cached.$2 == userId) {
-    return cached.$3;
-  }
   final endpoint = Uri(
     scheme: base.scheme,
     host: base.host,
     port: base.port,
     path: base.path,
   );
+  final server = auth!.session?.server;
+  final identity = jsonEncode([
+    client.serviceType.name,
+    server?.id,
+    server?.verifiedServerId,
+    server?.region.name,
+    server?.cloudAccountId,
+    server?.homeUserId,
+    endpoint.toString().replaceFirst(RegExp(r'/+$'), ''),
+    userId,
+  ]);
+  final cached = _accountScopes[auth];
+  if (cached != null && cached.$1 == identity) return cached.$2;
   final scope = const DartSha256()
-      .hashSync(
-        utf8.encode(
-          jsonEncode([
-            endpoint.toString().replaceFirst(RegExp(r'/+$'), ''),
-            client.userId,
-          ]),
-        ),
-      )
+      .hashSync(utf8.encode(identity))
       .bytes
       .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
       .join();
-  _accountScopes[auth] = (base, userId, scope);
+  _accountScopes[auth] = (identity, scope);
   return scope;
 }
 
@@ -1299,7 +1304,7 @@ class MediaImageCache {
     String variant = '',
     required int maxWidth,
   }) {
-    return '$serverId|$itemId|$type|${tag ?? ''}|$variant|$maxWidth';
+    return jsonEncode([serverId, itemId, type, tag, variant, maxWidth]);
   }
 
   /// 测试注入磁盘存储;传入 null 恢复为默认(惰性创建文件实现)。

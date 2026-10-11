@@ -1,3 +1,4 @@
+import '../auth/server_list_store.dart';
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/serialization.dart';
 import 'package:rillight/emby/emby_codec.dart';
@@ -417,6 +418,8 @@ class CatalogCache {
   DateTime Function() clock = DateTime.now;
 
   String? _serverId;
+  MediaServerType _serviceType = MediaServerType.emby;
+  String _sourceIdentity = '';
   String? _userId;
   final LinkedHashMap<String, _CatalogMemoryEntry> _memory = LinkedHashMap();
   final Map<String, Future<CatalogCacheHit?>> _diskReads = {};
@@ -473,10 +476,31 @@ class CatalogCache {
   Object get identityToken => (_serverId, _userId, _writeGeneration);
 
   /// 绑定会话(key 前缀)。会话切换时清内存层;磁盘层按 key 隔离,无需清。
-  void attachSession({required String serverId, required String userId}) {
-    if (_serverId == serverId && _userId == userId) {
+  void attachSession({
+    required String serverId,
+    required String userId,
+    MediaServerType serviceType = MediaServerType.emby,
+    AccessRegion region = AccessRegion.ordinary,
+    String? verifiedServerId,
+    String? cloudAccountId,
+    String? homeUserId,
+  }) {
+    final identity = jsonEncode([
+      serviceType.name,
+      region.name,
+      serverId,
+      verifiedServerId,
+      userId,
+      cloudAccountId,
+      homeUserId,
+    ]);
+    if (_sourceIdentity == identity &&
+        _serverId == serverId &&
+        _userId == userId) {
       return;
     }
+    _sourceIdentity = identity;
+    _serviceType = serviceType;
     _serverId = serverId;
     _userId = userId;
     _memory.clear();
@@ -495,7 +519,7 @@ class CatalogCache {
   }
 
   String _key(CatalogRequest request) {
-    final scope = hasSession ? '$_serverId|$_userId' : 'anon';
+    final scope = hasSession ? _sourceIdentity : 'anon';
     final query = request.query;
     final normalized = query == null || query.isEmpty
         ? ''
@@ -599,6 +623,10 @@ class CatalogCache {
     CatalogRequest request, {
     CancelToken? cancelToken,
   }) async {
+    if (hasSession &&
+        (_serviceType != client.serviceType || _userId != client.userId)) {
+      throw StateError('Catalog cache account mismatch');
+    }
     final generation = _writeGeneration;
     if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
     final json = await executeCatalogRequest(client, request);

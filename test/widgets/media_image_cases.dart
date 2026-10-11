@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
 import 'dart:typed_data';
 
@@ -1571,18 +1570,7 @@ void main() {
     'viewport disk hits paint while scrolling and offscreen disk stays deferred',
     (tester) async {
       final auth = await connect(tester);
-      final serverId = const DartSha256()
-          .hashSync(
-            utf8.encode(
-              jsonEncode([
-                auth.client.baseUrl.toString().replaceFirst(RegExp(r'/+$'), ''),
-                auth.client.userId,
-              ]),
-            ),
-          )
-          .bytes
-          .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-          .join();
+      final serverId = mediaImageAccountScope(auth)!;
       final disk = _FakeDiskStore();
       MediaImageCache.instance.debugSetDiskStore(disk);
       for (final index in [0, 1]) {
@@ -1820,7 +1808,7 @@ class _SlowPosterReadStore implements MediaImageDiskStore {
 
   @override
   Future<Uint8List?> read(String key) async {
-    if (key.contains('|poster-0|')) {
+    if ((jsonDecode(key) as List)[1] == 'poster-0') {
       blocked = true;
       await wait.future;
     }

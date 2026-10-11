@@ -532,9 +532,8 @@ void main() {
       expect(b.account.userId, 'replacement');
       final libraries = await sources.discoverLibraries('b');
       expect(libraries.keys, containsAll(['movies', 'new-library']));
-      expect(sources.project(AccessRegion.ordinary).last.libraryIds, [
-        'movies',
-      ]);
+      // Replacing the effective user invalidates that user's former selection.
+      expect(sources.project(AccessRegion.ordinary).last.libraryIds, isEmpty);
       expect(permit.isValid, isTrue);
     },
   );
@@ -882,7 +881,9 @@ void main() {
       true,
     );
     expect(original.isValid, false);
-    final replacement = r.permit((await r.authenticate('a')).account);
+    final account = (await r.authenticate('a')).account;
+    expect(() => r.permit(account), throwsStateError);
+    final replacement = r.permit(account, sessionOnly: true);
     await auth.logout();
     expect(replacement.isValid, false);
     expect(await r.credentials.read('a'), isNull);
@@ -1157,7 +1158,8 @@ void main() {
       await rejected;
       final current = await r.authenticate('a');
       expect(current.account.userId, 'new');
-      expect(r.permit(current.account).isValid, true);
+      expect(() => r.permit(current.account), throwsStateError);
+      expect(r.permit(current.account, sessionOnly: true).isValid, true);
     },
   );
 

@@ -1,3 +1,4 @@
+import 'configured_source.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -51,11 +52,14 @@ void main() {
     );
 
     expect(auth.isLoggedIn, isTrue);
-    expect(auth.session?.server.id, server.serverId);
+    expect(auth.session?.server.id, startsWith('source-'));
+    expect(auth.session?.server.verifiedServerId, server.serverId);
     expect(auth.session?.username, 'alice');
     expect(auth.failure, isNull);
     expect(auth.savedServers, hasLength(1));
-    final stored = await auth.credentials.read(server.serverId);
+    final stored = await auth.credentials.read(
+      configuredSourceId(auth, server.serverId),
+    );
     expect(stored?.accessToken, isNotEmpty);
   });
 
@@ -106,7 +110,13 @@ void main() {
       username: 'alice',
       password: 'correct-horse',
     );
-    expect(await auth.addLine(server.serverId, 'https://例子.example'), isTrue);
+    expect(
+      await auth.addLine(
+        configuredSourceId(auth, server.serverId),
+        'https://例子.example',
+      ),
+      isTrue,
+    );
     await auth.appendLines([
       'https://xn--fsqu00a.example',
       'https://例子.example/',
@@ -116,7 +126,7 @@ void main() {
     expect(line.address, 'https://xn--fsqu00a.example');
     expect(
       await auth.updateLineAddress(
-        server.serverId,
+        configuredSourceId(auth, server.serverId),
         line.id,
         'https://BÜCHER.example',
       ),
@@ -138,7 +148,10 @@ void main() {
 
     expect(auth.isLoggedIn, isFalse);
     expect(auth.failure?.kind, MediaServerFailureKind.invalidCredentials);
-    expect(await auth.credentials.read(server.serverId), isNull);
+    expect(
+      await auth.credentials.read(configuredSourceId(auth, server.serverId)),
+      isNull,
+    );
   });
 
   test('certificate errors stay signed out with a reason', () async {
@@ -181,7 +194,12 @@ void main() {
           auth.failure.toString(),
           isNot(contains('unpersisted-password')),
         );
-        expect(await auth.credentials.read(server.serverId), isNull);
+        expect(
+          await auth.credentials.read(
+            configuredSourceId(auth, server.serverId),
+          ),
+          isNull,
+        );
         expect((await auth.servers.load()).servers, isEmpty);
         auth.dispose();
       },
@@ -216,11 +234,14 @@ void main() {
 
       expect(auth.isLoggedIn, isFalse);
       expect(auth.savedServers.single.baseUrl, server.baseUrl.toString());
-      expect(await credentials.read(server.serverId), isNull);
+      expect(
+        await credentials.read(configuredSourceId(auth, server.serverId)),
+        isNull,
+      );
       expect(server.loggedOutTokens, contains(token));
 
-      await auth.selectSavedServer(server.serverId);
-      expect(auth.prefill?.id, server.serverId);
+      await auth.selectSavedServer(configuredSourceId(auth, server.serverId));
+      expect(auth.prefill?.id, configuredSourceId(auth, server.serverId));
       expect(auth.prefill?.username, 'alice');
       expect(auth.isLoggedIn, isFalse);
     },
@@ -242,7 +263,9 @@ void main() {
     expect(auth.isLoggedIn, isTrue);
     expect(auth.session!.accessToken, isNot(expired));
     expect(
-      (await credentials.read(server.serverId))?.accessToken,
+      (await credentials.read(
+        configuredSourceId(auth, server.serverId),
+      ))?.accessToken,
       auth.session!.accessToken,
     );
     expect(auth.failure, isNull);
@@ -256,9 +279,11 @@ void main() {
       username: 'alice',
       password: 'correct-horse',
     );
-    final stored = await credentials.read(server.serverId);
+    final stored = await credentials.read(
+      configuredSourceId(auth, server.serverId),
+    );
     await credentials.write(
-      server.serverId,
+      configuredSourceId(auth, server.serverId),
       StoredCredentials(
         accessToken: stored!.accessToken,
         userId: stored.userId,
@@ -281,8 +306,13 @@ void main() {
 
     expect(auth.isLoggedIn, isFalse);
     expect(auth.failure?.kind, MediaServerFailureKind.sessionExpired);
-    expect(auth.prefill?.id, server.serverId);
-    expect((await credentials.read(server.serverId))?.username, 'alice');
+    expect(auth.prefill?.id, configuredSourceId(auth, server.serverId));
+    expect(
+      (await credentials.read(
+        configuredSourceId(auth, server.serverId),
+      ))?.username,
+      'alice',
+    );
   });
 
   test('tokens stay bound to server id when switching', () async {
@@ -310,13 +340,18 @@ void main() {
       password: 'correct-horse',
     );
     final secondToken = auth.session!.accessToken;
-    expect(auth.session?.server.id, 'server-id-2');
+    expect(auth.session?.server.verifiedServerId, 'server-id-2');
     expect(secondToken, isNot(firstToken));
-    expect((await credentials.read('server-id-1'))?.accessToken, firstToken);
+    expect(
+      (await credentials.read(
+        configuredSourceId(auth, 'server-id-1'),
+      ))?.accessToken,
+      firstToken,
+    );
 
-    await auth.switchTo('server-id-1');
+    await auth.switchTo(configuredSourceId(auth, 'server-id-1'));
     expect(auth.isLoggedIn, isTrue);
-    expect(auth.session?.server.id, 'server-id-1');
+    expect(auth.session?.server.verifiedServerId, 'server-id-1');
     expect(auth.session?.accessToken, firstToken);
     expect(auth.client.accessToken, firstToken);
     expect(auth.client.baseUrl, server.baseUrl);
@@ -345,7 +380,12 @@ void main() {
       );
 
       expect(auth.isLoggedIn, isTrue);
-      expect((await fallback.read(server.serverId))?.accessToken, isNotEmpty);
+      expect(
+        (await fallback.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.accessToken,
+        isNotEmpty,
+      );
     },
   );
 
@@ -458,7 +498,10 @@ void main() {
       server.publicInfoStatus = 500;
       server.publicInfoRawBody = 'upstream timeout';
 
-      await auth.switchTo(server.serverId, lineId: lanLine.id);
+      await auth.switchTo(
+        configuredSourceId(auth, server.serverId),
+        lineId: lanLine.id,
+      );
 
       expect(auth.isLoggedIn, isTrue);
       expect(auth.session?.accessToken, token);
@@ -494,7 +537,10 @@ void main() {
       );
       final token = auth.session!.accessToken;
 
-      await auth.switchTo(server.serverId, lineId: impostorLine.id);
+      await auth.switchTo(
+        configuredSourceId(auth, server.serverId),
+        lineId: impostorLine.id,
+      );
 
       expect(auth.isLoggedIn, isTrue);
       expect(auth.session?.accessToken, token);
@@ -533,11 +579,17 @@ void main() {
         (line) => line.address == server.baseUrl.toString(),
       );
       server.publicInfoStatus = 500;
-      await auth.switchTo(server.serverId, lineId: lanLine.id);
+      await auth.switchTo(
+        configuredSourceId(auth, server.serverId),
+        lineId: lanLine.id,
+      );
       expect(auth.lineSwitchFailure, isNotNull);
       server.publicInfoStatus = null;
 
-      await auth.switchTo(server.serverId, lineId: lanLine.id);
+      await auth.switchTo(
+        configuredSourceId(auth, server.serverId),
+        lineId: lanLine.id,
+      );
 
       expect(auth.isLoggedIn, isTrue);
       expect(auth.client.baseUrl, server.baseUrl);
@@ -574,7 +626,10 @@ void main() {
       final lanLine = auth.savedServers.single.lines.firstWhere(
         (line) => line.address == server.baseUrl.toString(),
       );
-      await auth.switchTo(server.serverId, lineId: lanLine.id);
+      await auth.switchTo(
+        configuredSourceId(auth, server.serverId),
+        lineId: lanLine.id,
+      );
 
       expect(auth.isLoggedIn, isTrue);
       expect(auth.client.baseUrl, server.baseUrl);
@@ -613,7 +668,10 @@ void main() {
         (line) => line.address == wan.baseUrl.toString(),
       );
 
-      await auth.deleteLine(server.serverId, wanLine.id);
+      await auth.deleteLine(
+        configuredSourceId(auth, server.serverId),
+        wanLine.id,
+      );
 
       expect(auth.isLoggedIn, isTrue);
       expect(auth.savedServers.single.lines, hasLength(1));
@@ -647,12 +705,15 @@ void main() {
       (line) => line.address == server.baseUrl.toString(),
     );
 
-    await auth.deleteLine(server.serverId, lanLine.id);
+    await auth.deleteLine(
+      configuredSourceId(auth, server.serverId),
+      lanLine.id,
+    );
 
     expect(auth.savedServers.single.lines, hasLength(1));
     expect(auth.savedServers.single.baseUrl, wan.baseUrl.toString());
     await auth.deleteLine(
-      server.serverId,
+      configuredSourceId(auth, server.serverId),
       auth.savedServers.single.lines.single.id,
     );
     expect(auth.savedServers.single.lines, hasLength(1));
@@ -675,7 +736,7 @@ void main() {
     gated.holdWrite!.complete();
     expect(await refresh, isFalse);
     expect(auth.isLoggedIn, isFalse);
-    expect(await gated.read(server.serverId), isNull);
+    expect(await gated.read(configuredSourceId(auth, server.serverId)), isNull);
   });
 }
 

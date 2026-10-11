@@ -214,7 +214,15 @@ class CatalogController extends ChangeNotifier {
       cache.detachSession();
       return;
     }
-    cache.attachSession(serverId: session.server.id, userId: session.userId);
+    cache.attachSession(
+      serverId: session.server.id,
+      userId: session.userId,
+      serviceType: session.server.serviceType,
+      region: session.server.region,
+      verifiedServerId: session.server.verifiedServerId,
+      cloudAccountId: session.server.cloudAccountId,
+      homeUserId: session.server.homeUserId,
+    );
   }
 
   String get _currentSessionKey {

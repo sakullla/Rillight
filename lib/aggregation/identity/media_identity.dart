@@ -21,6 +21,9 @@ class SourceReference {
   final String? mediaSourceId;
   SourceReference get item => SourceReference(account: account, itemId: itemId);
   String get key => jsonEncode([
+    account.serviceType.name,
+    account.cloudAccountId,
+    account.homeUserId,
     account.region.name,
     account.configuredServerId,
     account.verifiedServerId,

@@ -1,3 +1,4 @@
+import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -534,7 +535,9 @@ class HistoryWriter implements Listenable {
     if (!inventoryComplete) return PreferenceFailure.ambiguousLegacy;
     final unique = {
       for (final c in candidates)
-        if (c.source.itemId == seriesId) c.source.key: c,
+        if (c.source.itemId == seriesId &&
+            c.source.account.serviceType == MediaServerType.emby)
+          c.source.key: c,
     };
     if (unique.length != 1) return PreferenceFailure.ambiguousLegacy;
     if (_legacyConsumed.contains(seriesId)) {

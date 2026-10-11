@@ -1,3 +1,4 @@
+import 'configured_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,7 +76,10 @@ void main() {
       );
       final activeBefore = auth.savedServers.single.activeLineId;
 
-      final ok = await auth.addLine(lan.serverId, wan3.baseUrl.toString());
+      final ok = await auth.addLine(
+        configuredSourceId(auth, lan.serverId),
+        wan3.baseUrl.toString(),
+      );
 
       expect(ok, isTrue);
       final saved = auth.savedServers.single;
@@ -125,9 +129,24 @@ void main() {
       password: 'correct-horse',
     );
 
-    expect(await auth.addLine(lan.serverId, 'ftp://nope.test'), isFalse);
-    expect(await auth.addLine(lan.serverId, '  '), isFalse);
-    expect(await auth.addLine(lan.serverId, lan.baseUrl.toString()), isFalse);
+    expect(
+      await auth.addLine(
+        configuredSourceId(auth, lan.serverId),
+        'ftp://nope.test',
+      ),
+      isFalse,
+    );
+    expect(
+      await auth.addLine(configuredSourceId(auth, lan.serverId), '  '),
+      isFalse,
+    );
+    expect(
+      await auth.addLine(
+        configuredSourceId(auth, lan.serverId),
+        lan.baseUrl.toString(),
+      ),
+      isFalse,
+    );
     expect(await auth.addLine('missing', wan.baseUrl.toString()), isFalse);
     expect(auth.savedServers.single.lines, hasLength(2));
   });
@@ -168,7 +187,7 @@ void main() {
       );
 
       final ok = await auth.updateLineAddress(
-        lan.serverId,
+        configuredSourceId(auth, lan.serverId),
         lanLine.id,
         wan3.baseUrl.toString(),
       );
@@ -225,7 +244,7 @@ void main() {
       );
 
       final ok = await auth.updateLineAddress(
-        lan.serverId,
+        configuredSourceId(auth, lan.serverId),
         wanLine.id,
         wan3.baseUrl.toString(),
       );
@@ -270,7 +289,7 @@ void main() {
 
     expect(
       await auth.updateLineAddress(
-        lan.serverId,
+        configuredSourceId(auth, lan.serverId),
         'missing-line',
         wan.baseUrl.toString(),
       ),
@@ -278,7 +297,7 @@ void main() {
     );
     expect(
       await auth.updateLineAddress(
-        lan.serverId,
+        configuredSourceId(auth, lan.serverId),
         lanLine.id,
         lan.baseUrl.toString(),
       ),
@@ -293,7 +312,11 @@ void main() {
       isFalse,
     );
     expect(
-      await auth.updateLineAddress(lan.serverId, lanLine.id, 'ftp://x'),
+      await auth.updateLineAddress(
+        configuredSourceId(auth, lan.serverId),
+        lanLine.id,
+        'ftp://x',
+      ),
       isFalse,
     );
     expect(
@@ -333,12 +356,12 @@ void main() {
       (l) => l.address == lan.baseUrl.toString(),
     );
 
-    await auth.deleteLine(lan.serverId, lanLine.id);
+    await auth.deleteLine(configuredSourceId(auth, lan.serverId), lanLine.id);
     expect(auth.savedServers.single.lines, hasLength(1));
 
     // 只剩一条时删除不执行。
     await auth.deleteLine(
-      lan.serverId,
+      configuredSourceId(auth, lan.serverId),
       auth.savedServers.single.lines.single.id,
     );
     expect(auth.savedServers.single.lines, hasLength(1));

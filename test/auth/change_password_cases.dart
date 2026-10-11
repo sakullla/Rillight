@@ -1,3 +1,4 @@
+import 'configured_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -81,7 +82,9 @@ void main() {
       expect(body.containsKey('CurrentPw'), isFalse);
       expect(body['NewPw'], 'new-horse');
       // 成功后本机凭据为新密码,会话保持。
-      final stored = await auth.credentials.read(server.serverId);
+      final stored = await auth.credentials.read(
+        configuredSourceId(auth, server.serverId),
+      );
       expect(stored?.password, 'new-horse');
       expect(stored?.accessToken, auth.session?.accessToken);
       expect(auth.isLoggedIn, isTrue);
@@ -109,7 +112,9 @@ void main() {
       expect(auth.passwordChangeFailure?.detail, 'HTTP 400: 密码策略不满足');
       // 本机仍保存旧密码,服务器端密码未变。
       expect(
-        (await auth.credentials.read(server.serverId))?.password,
+        (await auth.credentials.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.password,
         'correct-horse',
       );
       expect(server.effectivePassword('user-alice'), 'correct-horse');
@@ -134,7 +139,9 @@ void main() {
       expect(auth.passwordChangeFailure?.statusCode, 400);
       expect(auth.passwordChangeFailure?.detail, 'HTTP 400: 旧密码不正确');
       expect(
-        (await auth.credentials.read(server.serverId))?.password,
+        (await auth.credentials.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.password,
         'correct-horse',
       );
     },
@@ -154,11 +161,13 @@ void main() {
       // 改密本身成功;服务器吊销了当前会话,回到登录页并预选当前服务器。
       expect(changed, isTrue);
       expect(auth.isLoggedIn, isFalse);
-      expect(auth.prefill?.id, server.serverId);
+      expect(auth.prefill?.id, configuredSourceId(auth, server.serverId));
       expect(auth.failure?.kind, MediaServerFailureKind.sessionExpired);
       // 本机已保存新密码。
       expect(
-        (await auth.credentials.read(server.serverId))?.password,
+        (await auth.credentials.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.password,
         'new-horse',
       );
 
@@ -179,7 +188,9 @@ void main() {
       );
       expect(auth.isLoggedIn, isTrue);
       expect(
-        (await auth.credentials.read(server.serverId))?.password,
+        (await auth.credentials.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.password,
         'new-horse',
       );
     },
@@ -218,7 +229,9 @@ void main() {
         isFalse,
       );
       expect(
-        (await auth.credentials.read(server.serverId))?.password,
+        (await auth.credentials.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.password,
         'new-horse',
       );
       expect(tester.takeException(), isNull);
@@ -254,7 +267,9 @@ void main() {
     expect(find.byType(AlertDialog), findsOneWidget);
     expect(find.textContaining('密码策略不满足'), findsOneWidget);
     expect(
-      (await auth.credentials.read(server.serverId))?.password,
+      (await auth.credentials.read(
+        configuredSourceId(auth, server.serverId),
+      ))?.password,
       'correct-horse',
     );
     expect(auth.isLoggedIn, isTrue);
@@ -477,7 +492,9 @@ void main() {
         isFalse,
       );
       expect(
-        (await auth.credentials.read(server.serverId))?.password,
+        (await auth.credentials.read(
+          configuredSourceId(auth, server.serverId),
+        ))?.password,
         'new-horse',
       );
       expect(tester.takeException(), isNull);

@@ -1,8 +1,11 @@
+import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
 import 'credential_store.dart';
+import '../media_server/authentication.dart';
+import 'cloud_credentials.dart';
 import 'region_access.dart';
 import 'server_list_store.dart';
 import '../media_server/errors.dart';
@@ -15,7 +18,13 @@ class SourceAccount {
     required this.configuredServerId,
     required this.verifiedServerId,
     required this.userId,
+    this.serviceType = MediaServerType.emby,
+    this.cloudAccountId,
+    this.homeUserId,
   });
+  final MediaServerType serviceType;
+  final String? cloudAccountId;
+  final String? homeUserId;
   final AccessRegion region;
   final String configuredServerId;
   final String verifiedServerId;
@@ -23,13 +32,23 @@ class SourceAccount {
   @override
   bool operator ==(Object other) =>
       other is SourceAccount &&
+      serviceType == other.serviceType &&
+      cloudAccountId == other.cloudAccountId &&
+      homeUserId == other.homeUserId &&
       region == other.region &&
       configuredServerId == other.configuredServerId &&
       verifiedServerId == other.verifiedServerId &&
       userId == other.userId;
   @override
-  int get hashCode =>
-      Object.hash(region, configuredServerId, verifiedServerId, userId);
+  int get hashCode => Object.hash(
+    serviceType,
+    region,
+    configuredServerId,
+    verifiedServerId,
+    userId,
+    cloudAccountId,
+    homeUserId,
+  );
 }
 
 /// Captured before any asynchronous login/logout/restore work.
@@ -38,6 +57,55 @@ class CredentialCommit {
   final SourceSessionRegistry owner;
   final String id;
   final int scope;
+}
+
+/// An authorization transaction is captured before password/Quick Connect/PIN
+/// or Home switching starts. Polling can continue only while this is current.
+class SourceAuthorization {
+  SourceAuthorization._(
+    this._owner,
+    this.id,
+    this.serviceType,
+    this.region,
+    this._scope,
+    this._generation,
+    this._attempt,
+    this._cloudRevision,
+  );
+  final SourceSessionRegistry _owner;
+  final String id;
+  final MediaServerType serviceType;
+  final AccessRegion region;
+  final int _scope;
+  final int _generation;
+  final int _attempt;
+  final int _cloudRevision;
+  bool _finished = false;
+  bool get isValid => _owner._acceptsAuthorization(this);
+  void requireValid() {
+    if (!isValid) throw StateError('Authorization revoked');
+  }
+
+  Future<AuthorizationStatus> poll(AuthorizationAttempt attempt) async {
+    requireValid();
+    final result = await attempt.poll();
+    requireValid();
+    return result;
+  }
+
+  Future<AuthorizationGrant> exchange(AuthorizationAttempt attempt) async {
+    requireValid();
+    final result = await attempt.exchange();
+    requireValid();
+    return result;
+  }
+
+  void cancel() {
+    _finished = true;
+    if (identical(_owner._pendingAuthorizations[id], this)) {
+      _owner._pendingAuthorizations.remove(id);
+    }
+  }
 }
 
 class SourceSession {
@@ -167,6 +235,7 @@ class SourceSessionRegistry {
     required this.store,
     required this.credentials,
     required this.createClient,
+    this.createProviderClient,
   }) {
     access.addRevocationHook(_revokePrivate);
     access.addCleanupHook(_clearPrivate);
@@ -176,12 +245,30 @@ class SourceSessionRegistry {
   final ServerListStore store;
   final CredentialStore credentials;
   final SourceClientFactory createClient;
+  final MediaServerClient Function(MediaServerType)? createProviderClient;
+  MediaServerClient _clientFor(MediaServerType type) {
+    final client = createProviderClient?.call(type) ?? createClient();
+    if (client.serviceType != type) {
+      throw StateError('Client factory does not support the requested service');
+    }
+    return client;
+  }
+
+  bool _credentialsMatch(SavedServer server, StoredCredentials value) =>
+      value.serviceType == server.serviceType &&
+      value.cloudAccountId == server.cloudAccountId &&
+      value.homeUserId == server.homeUserId &&
+      value.cloudCredentialRef == server.cloudCredentialRef &&
+      value.resourceCredentialRef == server.resourceCredentialRef;
+
   List<SavedServer> _servers = [];
   String? _lastServerId;
   final Map<String, SourceSession> _sessions = {};
   final Map<String, int> _scopes = {};
   final Set<String> _transitioning = {};
   final Set<String> _credentialChanges = {};
+  final Set<String> _cloudDisconnects = {};
+  int _cloudRevision = 0;
   final Set<MembershipCleanup> _migrationHooks = {};
   final Set<void Function(String)> _sourceRevocations = {};
   void addSourceRevocation(void Function(String) hook) =>
@@ -206,12 +293,13 @@ class SourceSessionRegistry {
     }
     final registered = _sessions[permit.account.configuredServerId]!.client;
     final source = actualClient ?? registered;
-    if (source.userId != permit.account.userId ||
+    if (source.serviceType != permit.account.serviceType ||
+        source.userId != permit.account.userId ||
         source.accessToken != registered.accessToken ||
         source.baseUrl == null) {
       throw StateError('Stop credentials do not belong to permitted source');
     }
-    final client = createClient();
+    final client = _clientFor(permit.account.serviceType);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Stop client must be independent');
     }
@@ -241,13 +329,17 @@ class SourceSessionRegistry {
 
   int _revision = 0;
   final Map<String, int> _authAttempts = {};
+  final Map<String, SourceAuthorization> _pendingAuthorizations = {};
   final Map<String, Future<SourceSession>> _sessionAcquisitions = {};
   final Map<String, int> _checkAttempts = {};
 
   void _requireCurrent(SavedServer server, int scope, int generation) {
-    if (_credentialChanges.contains(server.id) ||
+    if (_cloudDisconnects.contains(server.cloudCredentialRef) ||
+        _pendingAuthorizations.containsKey(server.id) ||
+        _credentialChanges.contains(server.id) ||
         (_scopes[server.id] ?? 0) != scope ||
         _allowed(server.id).region != server.region ||
+        _allowed(server.id).serviceType != server.serviceType ||
         (server.region == AccessRegion.private &&
             generation != access.generation)) {
       throw StateError('Access revoked');
@@ -286,6 +378,21 @@ class SourceSessionRegistry {
     }
   }
 
+  Future<void> requireOrdinaryIdentity(
+    MediaServerType type,
+    String remoteId,
+  ) async {
+    if (!_loaded) await load();
+    if (_servers.any(
+      (s) =>
+          s.serviceType == type &&
+          (s.verifiedServerId ?? s.id) == remoteId &&
+          (s.region != AccessRegion.ordinary || _transitioning.contains(s.id)),
+    )) {
+      throw StateError('Source unavailable in ordinary context');
+    }
+  }
+
   SavedServer _allowed(String id) {
     final server = _servers.where((s) => s.id == id).firstOrNull;
     if (server == null ||
@@ -294,6 +401,265 @@ class SourceSessionRegistry {
       throw StateError('Source unavailable');
     }
     return server;
+  }
+
+  Future<SourceAuthorization> beginAuthorization({
+    required MediaServerType serviceType,
+    required AccessRegion region,
+    String? configuredServerId,
+  }) async {
+    if (!_loaded) await load();
+    if (!access.allows(region)) throw StateError('Region locked');
+    final id = configuredServerId ?? 'source-${generateDeviceId()}';
+    final existing = _servers.where((s) => s.id == id).firstOrNull;
+    if (configuredServerId != null &&
+        (existing == null ||
+            existing.region != region ||
+            existing.serviceType != serviceType)) {
+      throw StateError('Source identity mismatch');
+    }
+    if (_cloudDisconnects.contains(existing?.cloudCredentialRef) ||
+        _transitioning.contains(id) ||
+        _credentialChanges.contains(id)) {
+      throw StateError('Source changing');
+    }
+    // A Home switch/relogin revokes the old user immediately, before PIN IO.
+    _sessions.remove(id)?.client.clearSession();
+    _invalidate(id);
+    final attempt = (_authAttempts[id] ?? 0) + 1;
+    _authAttempts[id] = attempt;
+    final authorization = SourceAuthorization._(
+      this,
+      id,
+      serviceType,
+      region,
+      _scopes[id]!,
+      access.generation,
+      attempt,
+      _cloudRevision,
+    );
+    _pendingAuthorizations[id] = authorization;
+    return authorization;
+  }
+
+  bool _acceptsAuthorization(SourceAuthorization authorization) =>
+      identical(authorization._owner, this) &&
+      !authorization._finished &&
+      (authorization.serviceType != MediaServerType.plex ||
+          authorization._cloudRevision == _cloudRevision) &&
+      access.allows(authorization.region) &&
+      (authorization.region != AccessRegion.private ||
+          authorization._generation == access.generation) &&
+      _scopes[authorization.id] == authorization._scope &&
+      _authAttempts[authorization.id] == authorization._attempt &&
+      !_transitioning.contains(authorization.id);
+
+  /// Verify resource/server/effective-user correspondence before committing.
+  /// Discovery alone never imports or selects a library.
+  Future<SourceSession> commitAuthorization(
+    SourceAuthorization authorization, {
+    required SavedServer server,
+    required StoredCredentials value,
+  }) async {
+    void guard() {
+      authorization.requireValid();
+      if (_cloudDisconnects.contains(server.cloudCredentialRef)) {
+        throw StateError('Cloud authorization revoked');
+      }
+    }
+
+    guard();
+    if (server.id != authorization.id ||
+        server.region != authorization.region ||
+        server.serviceType != authorization.serviceType ||
+        !_credentialsMatch(server, value) ||
+        value.accessToken.isEmpty ||
+        value.userId.isEmpty ||
+        server.verifiedServerId == null) {
+      throw StateError('Authorization identity mismatch');
+    }
+    final client = _clientFor(server.serviceType);
+    try {
+      client.setUserAgent(server.userAgent);
+      final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
+      guard();
+      if (info.id != server.verifiedServerId) {
+        throw StateError('Server identity mismatch');
+      }
+      client.attachSession(
+        baseUrl: Uri.parse(server.baseUrl),
+        accessToken: value.accessToken,
+        userId: value.userId,
+        userAgent: server.userAgent,
+      );
+      final user = await client.getUser();
+      guard();
+      if (user.id != value.userId) {
+        throw StateError('Account identity mismatch');
+      }
+      await _enqueue(() async {
+        guard();
+        final previous = await credentials.read(server.id);
+        guard();
+        final previousServers = List<SavedServer>.of(_servers);
+        final old = _servers.where((s) => s.id == server.id).firstOrNull;
+        if (old != null &&
+            (old.serviceType != server.serviceType ||
+                (old.verifiedServerId ?? old.id) != server.verifiedServerId ||
+                old.region != server.region)) {
+          throw StateError('Source identity changed');
+        }
+        final preserveScope =
+            old != null &&
+            previous != null &&
+            previous.userId == value.userId &&
+            previous.homeUserId == value.homeUserId &&
+            previous.cloudAccountId == value.cloudAccountId;
+        final saved = server.copyWith(
+          libraryIds: preserveScope ? old.libraryIds : const [],
+          scopeKnown: preserveScope ? old.scopeKnown : false,
+          participates: old?.participates ?? server.participates,
+        );
+        var savedConfig = false;
+        _credentialChanges.add(server.id);
+        try {
+          await credentials.write(server.id, value);
+          guard();
+          final next = [
+            for (final s in _servers)
+              if (s.id != server.id) s,
+            saved,
+          ];
+          await store.save(
+            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+          );
+          savedConfig = true;
+          guard();
+          _servers = next;
+        } catch (_) {
+          if (savedConfig) {
+            await store.save(
+              ServerListSnapshot(
+                servers: previousServers,
+                lastServerId: _lastServerId,
+              ),
+            );
+          }
+          if (previous == null) {
+            await credentials.delete(server.id);
+          } else {
+            await credentials.write(server.id, previous);
+          }
+          rethrow;
+        } finally {
+          _credentialChanges.remove(server.id);
+        }
+      });
+      guard();
+      authorization.cancel();
+      final session = SourceSession._(
+        SourceAccount(
+          serviceType: server.serviceType,
+          region: server.region,
+          configuredServerId: server.id,
+          verifiedServerId: server.verifiedServerId!,
+          userId: value.userId,
+          cloudAccountId: value.cloudAccountId,
+          homeUserId: value.homeUserId,
+        ),
+        client,
+        ++_revision,
+      );
+      _sessions.remove(server.id)?.client.clearSession();
+      _sessions[server.id] = session;
+      client.onSessionExpired = () {
+        if (identical(_sessions[server.id], session)) {
+          _sessions.remove(server.id);
+          _invalidate(server.id);
+        }
+        client.clearSession();
+      };
+      _notifySourceChange(server.id);
+      return session;
+    } catch (_) {
+      authorization.cancel();
+      client.clearSession();
+      rethrow;
+    }
+  }
+
+  /// Source logout never deletes a cloud grant shared with another source.
+  Future<void> logoutSource(String id, {bool remove = false}) async {
+    final server = _allowed(id);
+    _pendingAuthorizations.remove(id)?.cancel();
+    _invalidate(id);
+    _authAttempts[id] = (_authAttempts[id] ?? 0) + 1;
+    final session = _sessions.remove(id);
+    _transitioning.add(id);
+    try {
+      await Future.wait(
+        _migrationHooks.map((hook) => hook(session?.account, id)),
+      );
+      await _enqueue(() async {
+        await credentials.delete(id);
+        if (remove) {
+          final next = _servers.where((s) => s.id != id).toList();
+          await store.save(
+            ServerListSnapshot(
+              servers: next,
+              lastServerId: _lastServerId == id ? null : _lastServerId,
+            ),
+          );
+          _servers = next;
+          if (_lastServerId == id) _lastServerId = null;
+        }
+      });
+      // Deliberately retain cloud/device material. Explicit account disconnect
+      // is the only operation that may remove it.
+      if (server.serviceType != MediaServerType.plex) {
+        await session?.client.logout();
+      }
+    } finally {
+      session?.client.clearSession();
+      _transitioning.remove(id);
+      _notifySourceChange(id);
+    }
+  }
+
+  /// Caller presents these visible references before requesting a whole-account
+  /// disconnect. Hidden/private bindings must first be unlocked.
+  List<String> cloudBindings(String credentialRef) {
+    final bindings = _servers
+        .where((s) => s.cloudCredentialRef == credentialRef)
+        .toList();
+    if (bindings.any((s) => !access.allows(s.region))) {
+      throw StateError('Region locked');
+    }
+    return List.unmodifiable(bindings.map((s) => s.id));
+  }
+
+  Future<void> disconnectCloudAccount(
+    String credentialRef,
+    CloudCredentialStore cloud,
+  ) async {
+    final ids = cloudBindings(credentialRef);
+    if (!_cloudDisconnects.add(credentialRef)) {
+      throw StateError('Account disconnect pending');
+    }
+    _cloudRevision++;
+    try {
+      // Block reacquisition for every binding before the first asynchronous IO.
+      for (final id in ids) {
+        _invalidate(id);
+        _authAttempts[id] = (_authAttempts[id] ?? 0) + 1;
+      }
+      for (final id in ids) {
+        await logoutSource(id);
+      }
+      await cloud.deleteCredential(credentialRef);
+    } finally {
+      _cloudDisconnects.remove(credentialRef);
+    }
   }
 
   Future<CredentialCommit> beginOrdinaryCredentials(String id) async {
@@ -306,7 +672,10 @@ class SourceSessionRegistry {
         (_scopes[commit.id] ?? 0) != commit.scope ||
         _transitioning.contains(commit.id) ||
         _servers.any(
-          (s) => s.id == commit.id && s.region != AccessRegion.ordinary,
+          (s) =>
+              s.id == commit.id &&
+              (s.region != AccessRegion.ordinary ||
+                  _cloudDisconnects.contains(s.cloudCredentialRef)),
         )) {
       throw StateError('Credential operation revoked');
     }
@@ -319,6 +688,14 @@ class SourceSessionRegistry {
     StoredCredentials? value,
   ) => _enqueue(() async {
     _guardCredentials(commit);
+    final configured = _servers.where((s) => s.id == commit.id).firstOrNull;
+    if (value != null &&
+        configured != null &&
+        !_credentialsMatch(configured, value)) {
+      throw StateError('Source credential identity mismatch');
+    }
+    final previousServers = List<SavedServer>.of(_servers);
+    var savedConfig = false;
     final previous = await credentials.read(commit.id);
     _guardCredentials(commit);
     _sessions.remove(commit.id)?.client.clearSession();
@@ -332,7 +709,32 @@ class SourceSessionRegistry {
         await credentials.write(commit.id, value);
       }
       _guardCredentials(writing);
+      if (value != null &&
+          configured != null &&
+          previous?.userId != value.userId) {
+        final next = _servers
+            .map(
+              (s) => s.id == commit.id
+                  ? s.copyWith(libraryIds: const [], scopeKnown: false)
+                  : s,
+            )
+            .toList();
+        await store.save(
+          ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+        );
+        savedConfig = true;
+        _guardCredentials(writing);
+        _servers = next;
+      }
     } catch (_) {
+      if (savedConfig) {
+        await store.save(
+          ServerListSnapshot(
+            servers: previousServers,
+            lastServerId: _lastServerId,
+          ),
+        );
+      }
       if (previous == null) {
         await credentials.delete(commit.id);
       } else {
@@ -607,24 +1009,16 @@ class SourceSessionRegistry {
   /// Deliberate management login; never changes the legacy active account.
   Future<void> login(String id, String username, String password) async {
     final server = _allowed(id);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
-    _requireCurrent(server, scope, generation);
-    final client = createClient();
-    client.setUserAgent(server.userAgent);
-    if (_sessions.values.any((s) => identical(s.client, client))) {
-      throw StateError('Login client must be independent');
-    }
-    final attempt = (_authAttempts[id] ?? 0) + 1;
-    _authAttempts[id] = attempt;
-    void guard() {
-      _requireCurrent(server, scope, generation);
-      if (_authAttempts[id] != attempt) throw StateError('Login superseded');
-    }
-
+    final client = _clientFor(server.serviceType);
+    final authorization = await beginAuthorization(
+      serviceType: server.serviceType,
+      region: server.region,
+      configuredServerId: id,
+    );
     try {
+      client.setUserAgent(server.userAgent);
       final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
-      guard();
+      authorization.requireValid();
       if (info.id != (server.verifiedServerId ?? id)) {
         throw StateError('Server identity mismatch');
       }
@@ -634,44 +1028,28 @@ class SourceSessionRegistry {
         password: password,
         serverId: info.id,
       );
-      guard();
-      // Credential IO and rollback share the ordinary/configuration writer.
-      await _enqueue(() async {
-        guard();
-        final previous = await credentials.read(id);
-        guard();
-        _credentialChanges.add(id);
-        _invalidate(id);
-        _sessions.remove(id)?.client.clearSession();
-        try {
-          await credentials.write(
-            id,
-            StoredCredentials(
-              accessToken: result.accessToken,
-              userId: result.user.id,
-              username: username,
-            ),
-          );
-          if ((_scopes[id] ?? 0) != scope + 1 ||
-              _allowed(id).region != server.region ||
-              _authAttempts[id] != attempt ||
-              !access.allows(server.region) ||
-              (server.region == AccessRegion.private &&
-                  generation != access.generation)) {
-            throw StateError('Login revoked');
-          }
-        } catch (_) {
-          if (previous == null) {
-            await credentials.delete(id);
-          } else {
-            await credentials.write(id, previous);
-          }
-          rethrow;
-        } finally {
-          _credentialChanges.remove(id);
-        }
-      });
+      authorization.requireValid();
+      await commitAuthorization(
+        authorization,
+        server: server.copyWith(
+          username: username,
+          verifiedServerId: info.id,
+          authorizationMethod: AuthorizationMethod.password,
+        ),
+        value: StoredCredentials(
+          serviceType: server.serviceType,
+          accessToken: result.accessToken,
+          userId: result.user.id,
+          username: username,
+          password: password.isEmpty ? null : password,
+          cloudCredentialRef: server.cloudCredentialRef,
+          cloudAccountId: server.cloudAccountId,
+          homeUserId: server.homeUserId,
+          resourceCredentialRef: server.resourceCredentialRef,
+        ),
+      );
     } finally {
+      authorization.cancel();
       client.clearSession();
     }
   }
@@ -720,12 +1098,14 @@ class SourceSessionRegistry {
     final session = _sessions[server.id];
     if (session == null ||
         session.account.region != server.region ||
+        session.account.serviceType != server.serviceType ||
         !session.client.hasSession) {
       return null;
     }
     final stored = await credentials.read(server.id);
     _requireCurrent(server, scope, generation);
     if (stored == null ||
+        !_credentialsMatch(server, stored) ||
         session.client.accessToken != stored.accessToken ||
         session.client.userId != stored.userId ||
         session.account.userId != stored.userId) {
@@ -742,7 +1122,7 @@ class SourceSessionRegistry {
     int scope,
     int generation,
   ) async {
-    final client = createClient();
+    final client = _clientFor(server.serviceType);
     client.setUserAgent(server.userAgent);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Client factory must be independent');
@@ -755,7 +1135,9 @@ class SourceSessionRegistry {
         client.clearSession();
         return reused;
       }
-      if (stored == null) throw StateError('Login required');
+      if (stored == null || !_credentialsMatch(server, stored)) {
+        throw StateError('Login required');
+      }
       client.attachSession(
         baseUrl: Uri.parse(server.baseUrl),
         accessToken: stored.accessToken,
@@ -771,6 +1153,9 @@ class SourceSessionRegistry {
       final session = SourceSession._(
         SourceAccount(
           region: server.region,
+          serviceType: server.serviceType,
+          cloudAccountId: stored.cloudAccountId,
+          homeUserId: stored.homeUserId,
           configuredServerId: server.id,
           verifiedServerId: server.verifiedServerId ?? server.id,
           userId: stored.userId,
@@ -802,7 +1187,7 @@ class SourceSessionRegistry {
     _requireCurrent(server, scope, generation);
     final attempt = (_authAttempts[id] ?? 0) + 1;
     _authAttempts[id] = attempt;
-    final client = createClient();
+    final client = _clientFor(server.serviceType);
     client.setUserAgent(server.userAgent);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Client factory must be independent');
@@ -814,7 +1199,9 @@ class SourceSessionRegistry {
       if (info.id != expected) throw StateError('Server identity mismatch');
       final stored = await credentials.read(id);
       _requireCurrent(server, scope, generation);
-      if (stored == null) throw StateError('Login required');
+      if (stored == null || !_credentialsMatch(server, stored)) {
+        throw StateError('Login required');
+      }
       client.attachSession(
         baseUrl: Uri.parse(server.baseUrl),
         accessToken: stored.accessToken,
@@ -837,6 +1224,9 @@ class SourceSessionRegistry {
       final session = SourceSession._(
         SourceAccount(
           region: server.region,
+          serviceType: server.serviceType,
+          cloudAccountId: stored.cloudAccountId,
+          homeUserId: stored.homeUserId,
           configuredServerId: id,
           verifiedServerId: info.id,
           userId: user.id,
@@ -881,7 +1271,8 @@ class SourceSessionRegistry {
             !server.scopeKnown ||
             server.libraryIds.isEmpty ||
             (libraryId != null && !server.libraryIds.contains(libraryId)));
-    if (_credentialChanges.contains(server.id) ||
+    if (_cloudDisconnects.contains(server.cloudCredentialRef) ||
+        _credentialChanges.contains(server.id) ||
         session?.account != account ||
         blockedByScope) {
       throw StateError('Source outside allowed scope');
@@ -909,8 +1300,10 @@ class SourceSessionRegistry {
               server.libraryIds.isNotEmpty &&
               (permit.libraryId == null ||
                   server.libraryIds.contains(permit.libraryId)));
-      return !_credentialChanges.contains(server.id) &&
+      return !_cloudDisconnects.contains(server.cloudCredentialRef) &&
+          !_credentialChanges.contains(server.id) &&
           server.region == permit.account.region &&
+          server.serviceType == permit.account.serviceType &&
           libraryOk &&
           session?.account == permit.account &&
           session?.client.hasSession == true &&
@@ -938,7 +1331,7 @@ class SourceSessionRegistry {
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
-    final client = createClient();
+    final client = _clientFor(server.serviceType);
     client.setUserAgent(server.userAgent);
     if (_sessions.values.any((s) => identical(s.client, client))) {
       throw StateError('Check client must be independent');
@@ -963,7 +1356,9 @@ class SourceSessionRegistry {
         }
         final stored = await credentials.read(id);
         guard();
-        if (stored == null) return ManualCheckStatus.needsLogin;
+        if (stored == null || !_credentialsMatch(server, stored)) {
+          return ManualCheckStatus.needsLogin;
+        }
         client.attachSession(
           baseUrl: Uri.parse(line.address),
           accessToken: stored.accessToken,
@@ -1113,6 +1508,12 @@ class SourceSessionRegistry {
             );
             // Region, participation, verification and checks remain registry-owned.
             for (final key in [
+              'serviceType',
+              'authorizationMethod',
+              'cloudCredentialRef',
+              'cloudAccountId',
+              'homeUserId',
+              'resourceCredentialRef',
               'region',
               'participates',
               'libraryIds',
@@ -1219,6 +1620,9 @@ class SourceSessionRegistry {
   }
 
   void dispose() {
+    for (final authorization in _pendingAuthorizations.values.toList()) {
+      authorization.cancel();
+    }
     access.removeRevocationHook(_revokePrivate);
     access.removeCleanupHook(_clearPrivate);
     access.removeTerminationHook(_terminateStops);

@@ -1,3 +1,4 @@
+import 'configured_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -80,11 +81,14 @@ void main() {
       );
       final token = auth.session!.accessToken;
 
-      await auth.deleteServer(server.serverId);
+      await auth.deleteServer(configuredSourceId(auth, server.serverId));
 
       // 当前会话与播放(仍挂载的 client 线路)不变。
       expect(auth.isLoggedIn, isTrue);
-      expect(auth.session?.server.id, second.serverId);
+      expect(
+        auth.session?.server.id,
+        configuredSourceId(auth, second.serverId),
+      );
       expect(auth.session?.accessToken, token);
       expect(auth.client.baseUrl, second.baseUrl);
       expect(
@@ -92,12 +96,25 @@ void main() {
         containsPair('ServerName', '第二台'),
       );
       // 列表只余当前服务器,被删服务器与本机凭据一并移除。
-      expect(auth.savedServers.map((item) => item.id), [second.serverId]);
-      expect(await credentials.read(server.serverId), isNull);
-      expect((await credentials.read(second.serverId))?.accessToken, token);
+      expect(auth.savedServers.map((item) => item.id), [
+        configuredSourceId(auth, second.serverId),
+      ]);
+      expect(
+        await credentials.read(configuredSourceId(auth, server.serverId)),
+        isNull,
+      );
+      expect(
+        (await credentials.read(
+          configuredSourceId(auth, second.serverId),
+        ))?.accessToken,
+        token,
+      );
       final snapshot = await servers.load();
-      expect(snapshot.servers.single.id, second.serverId);
-      expect(snapshot.lastServerId, second.serverId);
+      expect(
+        snapshot.servers.single.id,
+        configuredSourceId(auth, second.serverId),
+      );
+      expect(snapshot.lastServerId, configuredSourceId(auth, second.serverId));
       auth.dispose();
     },
   );
@@ -120,7 +137,7 @@ void main() {
       );
       final token = auth.session!.accessToken;
 
-      await auth.deleteServer(second.serverId);
+      await auth.deleteServer(configuredSourceId(auth, second.serverId));
 
       // 会话结束、client 卸载:播放页面随之回到登录页。
       expect(auth.isLoggedIn, isFalse);
@@ -129,8 +146,13 @@ void main() {
       expect(auth.client.baseUrl, isNull);
       expect(auth.client.accessToken, isNull);
       // 已存凭据被清除,不能凭其直接进入。
-      expect(await credentials.read(second.serverId), isNull);
-      expect(auth.savedServers.map((item) => item.id), [server.serverId]);
+      expect(
+        await credentials.read(configuredSourceId(auth, second.serverId)),
+        isNull,
+      );
+      expect(auth.savedServers.map((item) => item.id), [
+        configuredSourceId(auth, server.serverId),
+      ]);
       final snapshot = await servers.load();
       expect(snapshot.lastServerId, isNull);
 
@@ -147,7 +169,7 @@ void main() {
         password: 'correct-horse',
       );
       expect(revived.isLoggedIn, isTrue);
-      expect(revived.session?.server.id, second.serverId);
+      expect(revived.session?.server.verifiedServerId, second.serverId);
       expect(revived.session?.accessToken, isNot(token));
       auth.dispose();
       revived.dispose();

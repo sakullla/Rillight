@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import '../media_server/capabilities.dart';
+import '../media_server/authentication.dart';
+
 enum AccessRegion { ordinary, private }
 
 class ServerLine {
@@ -87,10 +90,22 @@ class SavedServer {
     this.libraryIds = const [],
     this.scopeKnown = false,
     this.verifiedServerId,
+    this.serviceType = MediaServerType.emby,
+    this.authorizationMethod = AuthorizationMethod.password,
+    this.cloudCredentialRef,
+    this.cloudAccountId,
+    this.homeUserId,
+    this.resourceCredentialRef,
     this.checkedAt,
     this.checkStatus = 'unknown',
   });
 
+  final MediaServerType serviceType;
+  final AuthorizationMethod authorizationMethod;
+  final String? cloudCredentialRef;
+  final String? cloudAccountId;
+  final String? homeUserId;
+  final String? resourceCredentialRef;
   final AccessRegion region;
   final bool participates;
 
@@ -142,6 +157,12 @@ class SavedServer {
     'name': name,
     if (nickname?.trim().isNotEmpty == true) 'nickname': nickname!.trim(),
     'username': username,
+    'serviceType': serviceType.name,
+    'authorizationMethod': authorizationMethod.name,
+    'cloudCredentialRef': cloudCredentialRef,
+    'cloudAccountId': cloudAccountId,
+    'homeUserId': homeUserId,
+    'resourceCredentialRef': resourceCredentialRef,
     'region': region.name,
     'participates': participates,
     'libraryIds': libraryIds,
@@ -183,6 +204,16 @@ class SavedServer {
       name: json['name']?.toString() ?? '',
       nickname: json['nickname']?.toString(),
       username: json['username']?.toString() ?? '',
+      serviceType: MediaServerType.values.byName(
+        json['serviceType'] as String? ?? 'emby',
+      ),
+      authorizationMethod: AuthorizationMethod.values.byName(
+        json['authorizationMethod'] as String? ?? 'password',
+      ),
+      cloudCredentialRef: json['cloudCredentialRef'] as String?,
+      cloudAccountId: json['cloudAccountId'] as String?,
+      homeUserId: json['homeUserId'] as String?,
+      resourceCredentialRef: json['resourceCredentialRef'] as String?,
       lines: List<ServerLine>.unmodifiable(lines),
       activeLineId: resolvedActiveLineId,
       userAgent: _resolveUserAgent(json, resolvedActiveLineId),
@@ -249,6 +280,12 @@ class SavedServer {
     List<String>? libraryIds,
     bool? scopeKnown,
     String? verifiedServerId,
+    MediaServerType? serviceType,
+    AuthorizationMethod? authorizationMethod,
+    String? cloudCredentialRef,
+    String? cloudAccountId,
+    String? homeUserId,
+    String? resourceCredentialRef,
     DateTime? checkedAt,
     String? checkStatus,
   }) {
@@ -265,6 +302,13 @@ class SavedServer {
       libraryIds: List<String>.unmodifiable(libraryIds ?? this.libraryIds),
       scopeKnown: scopeKnown ?? this.scopeKnown,
       verifiedServerId: verifiedServerId ?? this.verifiedServerId,
+      serviceType: serviceType ?? this.serviceType,
+      authorizationMethod: authorizationMethod ?? this.authorizationMethod,
+      cloudCredentialRef: cloudCredentialRef ?? this.cloudCredentialRef,
+      cloudAccountId: cloudAccountId ?? this.cloudAccountId,
+      homeUserId: homeUserId ?? this.homeUserId,
+      resourceCredentialRef:
+          resourceCredentialRef ?? this.resourceCredentialRef,
       checkedAt: checkedAt ?? this.checkedAt,
       checkStatus: checkStatus ?? this.checkStatus,
     );
@@ -311,39 +355,43 @@ class FileServerListStore implements ServerListStore {
     }
     try {
       final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map) {
-        return const ServerListSnapshot(servers: []);
+      if (decoded is! Map ||
+          decoded['servers'] is! List ||
+          (decoded['version'] != null &&
+              !const [1, 2, 3].contains(decoded['version']))) {
+        throw const FormatException('Invalid server configuration');
       }
-      final map = Map<String, dynamic>.from(decoded);
-      final rawServers = map['servers'];
       final servers = <SavedServer>[];
-      if (rawServers is List) {
-        for (final item in rawServers) {
-          if (item is Map) {
-            final server = SavedServer.fromJson(
-              Map<String, dynamic>.from(item),
-            );
-            if (server.id.isNotEmpty &&
-                server.lines.any((line) => line.address.isNotEmpty)) {
-              servers.add(server);
-            }
-          }
+      final ids = <String>{};
+      for (final item in decoded['servers'] as List) {
+        if (item is! Map) throw const FormatException('Invalid server record');
+        final server = SavedServer.fromJson(Map<String, dynamic>.from(item));
+        if (server.id.isEmpty || server.lines.isEmpty || !ids.add(server.id)) {
+          throw const FormatException('Invalid or duplicate source identity');
         }
+        servers.add(server);
       }
       return ServerListSnapshot(
         servers: servers,
-        lastServerId: map['lastServerId']?.toString(),
+        lastServerId: decoded['lastServerId'] as String?,
       );
     } on FormatException {
-      return const ServerListSnapshot(servers: []);
+      throw const FormatException(
+        'Invalid server configuration; original retained',
+      );
+    } on Object {
+      // Do not include raw JSON (possibly private names) in the error.
+      throw const FormatException('Unable to read server configuration');
     }
   }
 
   @override
   Future<void> save(ServerListSnapshot snapshot) async {
+    // Validate the existing document before replacing it; corruption is never empty.
+    if (await file.exists()) await load();
     await file.parent.create(recursive: true);
     final payload = <String, dynamic>{
-      'version': 2,
+      'version': 3,
       'lastServerId': snapshot.lastServerId,
       'servers': snapshot.servers.map((server) => server.toJson()).toList(),
     };
@@ -351,9 +399,6 @@ class FileServerListStore implements ServerListStore {
     await tmp.writeAsString(
       const JsonEncoder.withIndent('  ').convert(payload),
     );
-    if (await file.exists()) {
-      await file.delete();
-    }
     await tmp.rename(file.path);
   }
 }

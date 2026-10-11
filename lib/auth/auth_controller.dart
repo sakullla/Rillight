@@ -1,3 +1,4 @@
+import '../media_server/authentication.dart';
 import 'package:rillight/media_server/server_address.dart';
 import 'dart:async';
 
@@ -237,9 +238,19 @@ class AuthController extends ChangeNotifier {
       client.setUserAgent(userAgent);
       final baseUrl = normalizeServerAddress(address);
       final publicInfo = await client.getPublicInfo(baseUrl);
-      // Ordinary legacy login cannot replace credentials of a private member.
+      // Preserve legacy configuration IDs. New entries have a local identity
+      // independent from remote IDs and other service protocols.
+      await sources.requireOrdinaryIdentity(client.serviceType, publicInfo.id);
+      final existing = _savedServers
+          .where(
+            (s) =>
+                s.serviceType == client.serviceType &&
+                (s.verifiedServerId ?? s.id) == publicInfo.id,
+          )
+          .firstOrNull;
+      final configuredId = existing?.id ?? 'source-${generateDeviceId()}';
       final credentialCommit = await sources.beginOrdinaryCredentials(
-        publicInfo.id,
+        configuredId,
       );
       final auth = await client.authenticateByName(
         baseUrl: baseUrl,
@@ -248,8 +259,9 @@ class AuthController extends ChangeNotifier {
         serverId: publicInfo.id,
       );
       final server = _serverWithLine(
-        existing: _serverById(publicInfo.id),
-        serverId: publicInfo.id,
+        existing: existing,
+        serverId: configuredId,
+        verifiedServerId: publicInfo.id,
         name: publicInfo.serverName,
         username: username,
         address: baseUrl.toString(),
@@ -257,6 +269,7 @@ class AuthController extends ChangeNotifier {
         lineId: lineId,
       );
       final stored = StoredCredentials(
+        serviceType: client.serviceType,
         accessToken: auth.accessToken,
         userId: auth.user.id,
         username: username,
@@ -389,7 +402,7 @@ class AuthController extends ChangeNotifier {
         String detail;
         try {
           final info = await client.getPublicInfo(Uri.parse(server.baseUrl));
-          if (info.id != server.id) {
+          if (info.id != (server.verifiedServerId ?? server.id)) {
             detail = '线路返回的服务器身份与当前服务器不一致';
           } else {
             detail = '';
@@ -737,6 +750,13 @@ class AuthController extends ChangeNotifier {
           userId: stored?.userId ?? session.userId,
           username: stored?.username ?? session.username,
           password: newPassword,
+          serviceType: session.server.serviceType,
+          authorizationMethod: session.server.authorizationMethod,
+          cloudCredentialRef: stored?.cloudCredentialRef,
+          cloudAccountId: stored?.cloudAccountId,
+          homeUserId: stored?.homeUserId,
+          resourceCredentialRef: stored?.resourceCredentialRef,
+          authMaterial: stored?.authMaterial ?? const {},
         ),
       );
       await _verifySessionAfterPasswordChange();
@@ -783,6 +803,7 @@ class AuthController extends ChangeNotifier {
   SavedServer _serverWithLine({
     required SavedServer? existing,
     required String serverId,
+    String? verifiedServerId,
     required String name,
     required String username,
     required String address,
@@ -816,6 +837,13 @@ class AuthController extends ChangeNotifier {
     }
     return SavedServer(
       id: serverId,
+      serviceType: existing?.serviceType ?? client.serviceType,
+      authorizationMethod:
+          existing?.authorizationMethod ?? AuthorizationMethod.password,
+      cloudCredentialRef: existing?.cloudCredentialRef,
+      cloudAccountId: existing?.cloudAccountId,
+      homeUserId: existing?.homeUserId,
+      resourceCredentialRef: existing?.resourceCredentialRef,
       name: name,
       nickname: existing?.nickname,
       username: username,
@@ -826,13 +854,20 @@ class AuthController extends ChangeNotifier {
       participates: existing?.participates ?? true,
       libraryIds: existing?.libraryIds ?? const [],
       scopeKnown: existing?.scopeKnown ?? false,
-      verifiedServerId: existing?.verifiedServerId ?? serverId,
+      verifiedServerId:
+          verifiedServerId ?? existing?.verifiedServerId ?? serverId,
       checkedAt: existing?.checkedAt,
       checkStatus: existing?.checkStatus ?? 'unknown',
     );
   }
 
   void _activate(SavedServer server, StoredCredentials stored) {
+    if (server.serviceType != client.serviceType ||
+        stored.serviceType != server.serviceType ||
+        server.homeUserId != stored.homeUserId ||
+        server.cloudAccountId != stored.cloudAccountId) {
+      throw StateError('Source credential identity mismatch');
+    }
     _session = AuthSession(
       server: server,
       userId: stored.userId,
@@ -891,9 +926,16 @@ class AuthController extends ChangeNotifier {
         baseUrl: Uri.parse(session.server.baseUrl),
         username: stored.username,
         password: password,
-        serverId: session.server.id,
+        serverId: session.server.verifiedServerId ?? session.server.id,
       );
       final next = StoredCredentials(
+        serviceType: stored.serviceType,
+        authorizationMethod: stored.authorizationMethod,
+        cloudCredentialRef: stored.cloudCredentialRef,
+        cloudAccountId: stored.cloudAccountId,
+        homeUserId: stored.homeUserId,
+        resourceCredentialRef: stored.resourceCredentialRef,
+        authMaterial: stored.authMaterial,
         accessToken: auth.accessToken,
         userId: auth.user.id,
         username: stored.username,

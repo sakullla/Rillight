@@ -1,3 +1,4 @@
+import 'configured_source.dart';
 import '../helpers/image_cache_fixture.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -125,7 +126,9 @@ void main() {
       await tester.enterText(find.byKey(ConnectFormKeys.address), '');
       await _tapVisible(
         tester,
-        find.byKey(Key('saved-server-${server.serverId}')),
+        find.byKey(
+          Key('saved-server-${configuredSourceId(auth, server.serverId)}'),
+        ),
       );
       await _settle(tester);
 
@@ -163,7 +166,7 @@ void main() {
         password: 'correct-horse',
       );
       await auth.logout();
-      await auth.selectSavedServer(server.serverId);
+      await auth.selectSavedServer(configuredSourceId(auth, server.serverId));
     });
     expect(auth.savedServers.single.lines, hasLength(2));
 
@@ -254,7 +257,9 @@ void main() {
     await tester.enterText(find.byKey(ConnectFormKeys.address), '');
     await _tapVisible(
       tester,
-      find.byKey(Key('saved-server-${server.serverId}')),
+      find.byKey(
+        Key('saved-server-${configuredSourceId(auth, server.serverId)}'),
+      ),
     );
     await _settle(tester);
     await _tapVisible(tester, find.byKey(ConnectFormKeys.more));

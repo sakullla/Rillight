@@ -1,3 +1,4 @@
+import 'configured_source.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -86,7 +87,10 @@ void main() {
         counts.others.map((entry) => (entry.type, entry.count)),
         equals(const [('Book', 0), ('Photo', 3)]),
       );
-      expect(auth.libraryCountsServerId, server.serverId);
+      expect(
+        auth.libraryCountsServerId,
+        configuredSourceId(auth, server.serverId),
+      );
       expect(auth.libraryCountsFailure, isNull);
       expect(auth.libraryCountsLoading, isFalse);
     },
@@ -106,12 +110,18 @@ void main() {
     final auth = authController([one, two]);
 
     await connect(auth, one);
-    await until(() => auth.libraryCountsServerId == one.serverId);
+    await until(
+      () =>
+          auth.libraryCountsServerId == configuredSourceId(auth, one.serverId),
+    );
     expect(auth.libraryCounts!.movie, 7);
     expect(auth.libraryCounts!.episode, 2);
 
     await connect(auth, two);
-    await until(() => auth.libraryCountsServerId == two.serverId);
+    await until(
+      () =>
+          auth.libraryCountsServerId == configuredSourceId(auth, two.serverId),
+    );
     expect(auth.libraryCounts!.movie, 1);
     expect(auth.libraryCounts!.series, 0);
     expect(auth.libraryCounts!.episode, 0);
@@ -121,10 +131,11 @@ void main() {
     );
 
     // 切回第一台:数量随会话变回旧服务器。
-    await auth.switchTo(one.serverId);
+    await auth.switchTo(configuredSourceId(auth, one.serverId));
     await until(
       () =>
-          auth.libraryCountsServerId == one.serverId &&
+          auth.libraryCountsServerId ==
+              configuredSourceId(auth, one.serverId) &&
           auth.libraryCounts?.movie == 7,
     );
     expect(auth.libraryCounts!.episode, 2);

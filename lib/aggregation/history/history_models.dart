@@ -1,7 +1,11 @@
+import '../../media_server/capabilities.dart';
 import '../../player/player_settings.dart';
 import '../identity/media_identity.dart';
 
 Map<String, dynamic> encodeSource(SourceReference source) => {
+  'serviceType': source.account.serviceType.name,
+  'cloudAccountId': source.account.cloudAccountId,
+  'homeUserId': source.account.homeUserId,
   'region': source.account.region.name,
   'server': source.account.configuredServerId,
   'verifiedServer': source.account.verifiedServerId,
@@ -12,6 +16,11 @@ Map<String, dynamic> encodeSource(SourceReference source) => {
 
 SourceReference decodeSource(Map<String, dynamic> json) => SourceReference(
   account: SourceAccount(
+    serviceType: MediaServerType.values.byName(
+      json['serviceType'] as String? ?? 'emby',
+    ),
+    cloudAccountId: json['cloudAccountId'] as String?,
+    homeUserId: json['homeUserId'] as String?,
     region: AccessRegion.values.byName(json['region'] as String),
     configuredServerId: json['server'] as String,
     verifiedServerId: json['verifiedServer'] as String,

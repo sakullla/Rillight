@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import '../media_server/capabilities.dart';
+import '../media_server/authentication.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -9,14 +11,38 @@ class StoredCredentials {
     required this.userId,
     required this.username,
     this.password,
+    this.serviceType = MediaServerType.emby,
+    this.authorizationMethod = AuthorizationMethod.password,
+    this.cloudCredentialRef,
+    this.cloudAccountId,
+    this.homeUserId,
+    this.resourceCredentialRef,
+    this.authMaterial = const {},
   });
 
+  final MediaServerType serviceType;
+  final AuthorizationMethod authorizationMethod;
+  final String? cloudCredentialRef;
+  final String? cloudAccountId;
+  final String? homeUserId;
+  final String? resourceCredentialRef;
+
+  /// Provider-owned secrets, never passed to media processes or log output.
+  final Map<String, String> authMaterial;
   final String accessToken;
   final String userId;
   final String username;
   final String? password;
 
   Map<String, dynamic> toJson() => {
+    'version': 2,
+    'serviceType': serviceType.name,
+    'authorizationMethod': authorizationMethod.name,
+    'cloudCredentialRef': cloudCredentialRef,
+    'cloudAccountId': cloudAccountId,
+    'homeUserId': homeUserId,
+    'resourceCredentialRef': resourceCredentialRef,
+    'authMaterial': authMaterial,
     'accessToken': accessToken,
     'userId': userId,
     'username': username,
@@ -24,7 +50,26 @@ class StoredCredentials {
   };
 
   factory StoredCredentials.fromJson(Map<String, dynamic> json) {
+    if ((json['version'] != null && json['version'] != 2) ||
+        json['accessToken'] is! String ||
+        json['userId'] is! String ||
+        json['username'] is! String) {
+      throw const FormatException('Invalid credential record');
+    }
     return StoredCredentials(
+      serviceType: MediaServerType.values.byName(
+        json['serviceType'] as String? ?? 'emby',
+      ),
+      authorizationMethod: AuthorizationMethod.values.byName(
+        json['authorizationMethod'] as String? ?? 'password',
+      ),
+      cloudCredentialRef: json['cloudCredentialRef'] as String?,
+      cloudAccountId: json['cloudAccountId'] as String?,
+      homeUserId: json['homeUserId'] as String?,
+      resourceCredentialRef: json['resourceCredentialRef'] as String?,
+      authMaterial: Map<String, String>.from(
+        json['authMaterial'] as Map? ?? {},
+      ),
       accessToken: json['accessToken']?.toString() ?? '',
       userId: json['userId']?.toString() ?? '',
       username: json['username']?.toString() ?? '',
@@ -65,30 +110,34 @@ class FileCredentialStore implements CredentialStore {
   FileCredentialStore(this.file);
 
   final File file;
+  Future<void> _tail = Future.value();
+  Future<void> _enqueue(Future<void> Function() action) {
+    final next = _tail.then((_) => action());
+    _tail = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return next;
+  }
 
   @override
-  Future<void> write(String serverId, StoredCredentials credentials) async {
-    final all = await _readAll();
-    all[serverId] = credentials.toJson();
-    await _writeAll(all);
-  }
+  Future<void> write(String serverId, StoredCredentials credentials) =>
+      _enqueue(() async {
+        final all = await _readAll();
+        all[serverId] = credentials.toJson();
+        await _writeAll(all);
+      });
 
   @override
   Future<StoredCredentials?> read(String serverId) async {
     final json = (await _readAll())[serverId];
-    if (json is! Map) {
-      return null;
-    }
+    if (json == null) return null;
+    if (json is! Map) throw const FormatException('Invalid credential record');
     return StoredCredentials.fromJson(Map<String, dynamic>.from(json));
   }
 
   @override
-  Future<void> delete(String serverId) async {
+  Future<void> delete(String serverId) => _enqueue(() async {
     final all = await _readAll();
-    if (all.remove(serverId) != null) {
-      await _writeAll(all);
-    }
-  }
+    if (all.remove(serverId) != null) await _writeAll(all);
+  });
 
   Future<Map<String, dynamic>> _readAll() async {
     if (!await file.exists()) {
@@ -96,25 +145,28 @@ class FileCredentialStore implements CredentialStore {
     }
     try {
       final decoded = jsonDecode(await file.readAsString());
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('Invalid credential document');
       }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
+      // A malformed sibling must not be silently overwritten during an update.
+      for (final value in decoded.values) {
+        if (value is! Map) {
+          throw const FormatException('Invalid credential record');
+        }
+        StoredCredentials.fromJson(Map<String, dynamic>.from(value));
       }
-    } on FormatException {
-      return <String, dynamic>{};
+      return decoded;
+    } on Object {
+      throw const FormatException(
+        'Invalid credential document; original retained',
+      );
     }
-    return <String, dynamic>{};
   }
 
   Future<void> _writeAll(Map<String, dynamic> values) async {
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');
     await tmp.writeAsString(const JsonEncoder.withIndent('  ').convert(values));
-    if (await file.exists()) {
-      await file.delete();
-    }
     await tmp.rename(file.path);
   }
 }
@@ -134,7 +186,8 @@ class SecureCredentialStore implements CredentialStore {
   final Future<void> Function(String key)? _deleteSecure;
   final CredentialStore fallback;
 
-  static const _keyPrefix = 'rillight.emby.v1.';
+  static const _keyPrefix = 'rillight.media.v2.';
+  String _legacyKey(String id) => 'rillight.emby.v1.$id';
 
   String _key(String serverId) => '$_keyPrefix$serverId';
 
@@ -149,7 +202,7 @@ class SecureCredentialStore implements CredentialStore {
       await writeSecure(_key(serverId), payload);
     } catch (error) {
       debugPrint(
-        'Rillight: keychain write failed, using local credential file: $error',
+        'Rillight: keychain write failed, using local credential file',
       );
       await fallback.write(serverId, credentials);
     }
@@ -160,20 +213,33 @@ class SecureCredentialStore implements CredentialStore {
     try {
       final readSecure = _readSecure;
       if (readSecure != null) {
-        final raw = await readSecure(_key(serverId));
+        var raw = await readSecure(_key(serverId));
+        final legacy = raw == null;
+        raw ??= await readSecure(_legacyKey(serverId));
         if (raw != null && raw.isNotEmpty) {
           final decoded = jsonDecode(raw);
           if (decoded is Map) {
-            return StoredCredentials.fromJson(
+            final value = StoredCredentials.fromJson(
               Map<String, dynamic>.from(decoded),
             );
+            if (legacy) {
+              // Copy before removal; retaining the legacy key makes migration
+              // failure harmless and supports rollback to the previous app.
+              await write(serverId, value);
+            }
+            return value;
           }
+          throw const FormatException('Invalid secure credential record');
         }
       }
+    } on FormatException {
+      throw const FormatException('Invalid secure credential record');
+    } on TypeError {
+      throw const FormatException('Invalid secure credential record');
+    } on ArgumentError {
+      throw const FormatException('Invalid secure credential record');
     } catch (error) {
-      debugPrint(
-        'Rillight: keychain read failed, using local credential file: $error',
-      );
+      debugPrint('Rillight: keychain read failed, using local credential file');
     }
     return fallback.read(serverId);
   }
@@ -184,9 +250,10 @@ class SecureCredentialStore implements CredentialStore {
       final deleteSecure = _deleteSecure;
       if (deleteSecure != null) {
         await deleteSecure(_key(serverId));
+        await deleteSecure(_legacyKey(serverId));
       }
     } catch (error) {
-      debugPrint('Rillight: keychain delete failed: $error');
+      debugPrint('Rillight: keychain delete failed');
     }
     await fallback.delete(serverId);
   }
