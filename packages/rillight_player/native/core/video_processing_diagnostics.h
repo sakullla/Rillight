@@ -14,6 +14,15 @@ struct VideoProcessingDiagnostics {
   int64_t elapsed_us = 0;
   std::string summary;
 
+  // Surface submission has no measured CPU color conversion. Do not display
+  // the AVFrame wrapping time as a zero-cost decoder/GPU processing sample.
+  void NativeSurface() {
+    if (path == "mediacodec-surface") return;
+    *this = {};
+    path = "mediacodec-surface";
+    summary = "color=" + path;
+  }
+
   void Record(const char* route, bool downloaded, int64_t microseconds,
               const char* stage = "convert") {
     const std::string next = std::string(downloaded ? "download+" : "") + route;

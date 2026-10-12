@@ -196,6 +196,17 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   if (source.color_primaries == AVCOL_PRI_UNSPECIFIED)
     source.color_primaries = stream->codecpar->color_primaries;
   const bool use_rpu = dovi_decision.use_rpu != 0;
+#if defined(_WIN32)
+  // Ordinary SDR decoder textures can stay on the GPU too. Keep this output
+  // encoded RGBA8 even on an HDR desktop; the presenter owns SDR white policy.
+  if (gpu_video && source.format == AV_PIX_FMT_D3D11 && !use_rpu &&
+      transfer != AVCOL_TRC_SMPTE2084 && transfer != AVCOL_TRC_ARIB_STD_B67) {
+    output->gpu_texture = scale->color_pipeline.RenderOwnedTexture(
+        &source, width, height, false);
+    converted = output->gpu_texture != nullptr;
+    if (converted) output->color_path = "gpu-sdr";
+  }
+#endif
   if (use_rpu || transfer == AVCOL_TRC_SMPTE2084 ||
       transfer == AVCOL_TRC_ARIB_STD_B67) {
     const auto render_color = [&](bool use_dovi) {
@@ -316,6 +327,13 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     if (convert_error) *convert_error = RILLIGHT_CORE_ERROR_UNSUPPORTED_DOVI;
     return nullptr;
   }
+  // swscale cannot read a D3D11 texture. Let the common hardware-download
+  // fallback retry CPU planes, preserving metadata and decoder ownership.
+  if (!converted && source.format == AV_PIX_FMT_D3D11) {
+    if (output->data) output->buffers->Recycle(output->data, bytes);
+    delete output;
+    return nullptr;
+  }
   if (!converted) {
     if (!output->data) output->data = output->buffers->Acquire(bytes);
     if (!output->data) { delete output; return nullptr; }
@@ -357,10 +375,10 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   output->pts_us = pts;
   output->width = width;
   output->height = height;
-  output->stride = linear_half ? width * 8 :
-      output->gpu_texture && hdr_video ? stride * 2 : stride;
-  output->data_size = linear_half ? width * height * 8 :
-      output->gpu_texture && hdr_video ? bytes * 2 : bytes;
+  const bool gpu_half = output->gpu_texture && hdr_video &&
+      (use_rpu || transfer == AVCOL_TRC_SMPTE2084 || transfer == AVCOL_TRC_ARIB_STD_B67);
+  output->stride = linear_half ? width * 8 : gpu_half ? stride * 2 : stride;
+  output->data_size = linear_half ? width * height * 8 : gpu_half ? bytes * 2 : bytes;
   output->sar_num = sar.num;
   output->sar_den = sar.den;
   output->source_color_range = source_range;
@@ -513,7 +531,7 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   const auto* video_stream = format->streams[stream_index];
   const int transfer = decoded->color_trc == AVCOL_TRC_UNSPECIFIED
       ? video_stream->codecpar->color_trc : decoded->color_trc;
-  const bool gpu_color = transfer == AVCOL_TRC_SMPTE2084 ||
+  const bool gpu_color = gpu_video || transfer == AVCOL_TRC_SMPTE2084 ||
       transfer == AVCOL_TRC_ARIB_STD_B67 ||
       av_frame_get_side_data(decoded, AV_FRAME_DATA_DOVI_METADATA) != nullptr;
   if (gpu_color && !scale->hardware_color_failed && decoded->format == AV_PIX_FMT_D3D11 &&
@@ -597,7 +615,9 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
       const auto* color_path = static_cast<VideoOutputFrame*>(output)->color_path;
       const std::string mapped_path = mapped_frame.frame
           ? std::string("mapped+") + color_path : std::string{};
-      if (output->type != RILLIGHT_CORE_VIDEO_ANDROID_P010)
+      if (output->type == RILLIGHT_CORE_VIDEO_MEDIACODEC)
+        core->video_processing.NativeSurface();
+      else if (output->type != RILLIGHT_CORE_VIDEO_ANDROID_P010)
         core->video_processing.Record(
           mapped_frame.frame ? mapped_path.c_str() : color_path, downloaded_for_color,
           std::chrono::duration_cast<std::chrono::microseconds>(

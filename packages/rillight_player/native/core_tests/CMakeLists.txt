@@ -159,7 +159,7 @@ if(WIN32)
   target_compile_definitions(rillight_decoder_diagnostics_test PRIVATE RILLIGHT_HAVE_LIBASS=0)
   target_link_libraries(rillight_decoder_diagnostics_test PRIVATE
     ${avformat_library} ${avcodec_library} ${avfilter_library} ${avutil_library}
-    ${swscale_library} ${swresample_library} Threads::Threads d3d11 d3dcompiler dxgi)
+    ${swscale_library} ${swresample_library} Threads::Threads d3d11 d3dcompiler dxgi psapi)
   if(MSVC)
     target_compile_options(rillight_decoder_diagnostics_test PRIVATE /UNDEBUG)
   else()

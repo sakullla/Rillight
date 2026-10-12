@@ -101,7 +101,7 @@ void update_decode_diagnostics(RillightCoreImpl *core, Decoder &decoder,
   if (decoder.hardware != RILLIGHT_CORE_HW_NONE) {
     decoder.diagnostics = active != RILLIGHT_CORE_HW_NONE
         ? decoder.hardware_diagnostics
-        : "software threads=" + std::to_string(decoder.context->thread_count) +
+        : "software ffmpeg_threads=" + std::to_string(decoder.context->thread_count) +
           "; hardware format unavailable (" + decoder.hardware_diagnostics + ")";
   }
   std::lock_guard lock(core->mutex);
@@ -170,8 +170,10 @@ int enqueue(RillightCoreImpl *core, RillightCoreFrame *frame,
   } else {
     const auto *video_frame = static_cast<const VideoOutputFrame *>(frame);
     core->dovi_reconstruction = video_frame->dovi_reconstruction;
+    const bool gpu_linear = frame->type == RILLIGHT_CORE_VIDEO_D3D11 &&
+        frame->stride == frame->width * 8;
     core->video_output_kind = dovi_present_output_kind(
-        frame->type, core->hdr_video ? 1 : 0, core->macos_edr ? 1 : 0,
+        frame->type, gpu_linear ? 1 : 0, core->macos_edr ? 1 : 0,
         core->android_native_dolby ? 1 : 0);
   }
   if ((video_index >= 0 && core->first_video) ||

@@ -5,6 +5,8 @@
 #include <cassert>
 #include <initguid.h>
 #include <dxva.h>
+#include <wrl/client.h>
+#include "sdr_video_route_test.h"
 
 void CheckProfile5SubtitleRoute() {
   RillightCoreImpl core(RillightCoreIo{});
@@ -154,6 +156,21 @@ void CheckHardwareColorRoute(bool dovi, bool hdr, bool download = false,
 }
 
 int main(int argc, char** argv) {
+  VideoProcessingDiagnostics processing;
+  processing.Record("swscale", true, 1000);
+  processing.NativeSurface();
+  assert(processing.summary == "color=mediacodec-surface");
+  assert(processing.frames == 0 && processing.elapsed_us == 0);
+  processing.Record("swscale", false, 2000);
+  assert(processing.summary == "color=swscale convert=2.0ms");
+  if (argc == 2 && (std::strcmp(argv[1], "--benchmark-sdr-cpu") == 0 ||
+                   std::strcmp(argv[1], "--benchmark-sdr-gpu") == 0)) {
+    const bool gpu = std::strcmp(argv[1], "--benchmark-sdr-gpu") == 0;
+    for (int width : {1920, 3840})
+      CheckHardwareSdrRoute(AV_PIX_FMT_NV12, AVCOL_SPC_BT709, AVCOL_RANGE_MPEG,
+          gpu, width, width * 9 / 16, true);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--benchmark-hdr") == 0) {
     CheckHardwareColorRoute(false, true, false, 3840, 2160, true);
     for (int order : {0, 1, 3})
@@ -203,7 +220,7 @@ int main(int argc, char** argv) {
   assert(frame->format == AV_PIX_FMT_YUV420P);
   update_decode_diagnostics(&core, decoder, frame);
   assert(core.tracks[0].actual_hardware == RILLIGHT_CORE_HW_NONE);
-  assert(core.decode_diagnostics.find("software threads=4;") == 0);
+  assert(core.decode_diagnostics.find("software ffmpeg_threads=4;") == 0);
   assert(core.decode_diagnostics.find("hardware format unavailable") != std::string::npos);
   decoder.hw_format->allow_software_fallback = false;
   assert(choose_hardware_format(decoder.context, software) == AV_PIX_FMT_NONE);
@@ -233,6 +250,14 @@ int main(int argc, char** argv) {
     av_buffer_unref(&device);
     std::puts("D3D11 recursive locking passed");
     CheckProfile5SubtitleRoute();
+    for (auto pixel_format : {AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE})
+      for (auto matrix : {AVCOL_SPC_BT709, AVCOL_SPC_SMPTE170M, AVCOL_SPC_BT470BG})
+        for (auto range : {AVCOL_RANGE_MPEG, AVCOL_RANGE_JPEG}) {
+          CheckHardwareSdrRoute(pixel_format, matrix, range, true);
+          CheckHardwareSdrRoute(pixel_format, matrix, range, true, 64, 48, false, false, true);
+          CheckHardwareSdrRoute(pixel_format, matrix, range, false);
+          CheckHardwareSdrRoute(pixel_format, matrix, range, true, 64, 48, false, true);
+        }
     for (bool dovi : {false, true})
       for (bool hdr : {false, true})
         for (bool download : {false, true})

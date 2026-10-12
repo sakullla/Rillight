@@ -2787,10 +2787,10 @@ class PlaybackHttpProxy {
         rep == null ||
         _stream != PlaybackCacheStream.stable ||
         dynamicSource ||
-        ![
-          PlaybackResourceRole.media,
-          PlaybackResourceRole.segment,
-        ].contains(_roles[key]) ||
+        // This scheduler owns one progressive representation. HLS already
+        // has a segment prefetch scheduler; sharing this slot between the
+        // current segment and its successor closes a live foreground stream.
+        _roles[key] != PlaybackResourceRole.media ||
         !_cacheableRequest(incoming, key) ||
         _readAheadBypass.contains(key) ||
         (_readAhead?.resource == key && _readAhead!.failed) ||

@@ -28,9 +28,11 @@ android {
 
     defaultConfig {
         applicationId = "com.rillight.rillight"
+        manifestPlaceholders["rillightAppLabel"] = "灯川 Rillight"
         // Opt-in validation builds have private accounts, settings and snapshots.
         if (providers.gradleProperty("rillightValidation").orNull == "true") {
             applicationIdSuffix = ".validation"
+            manifestPlaceholders["rillightAppLabel"] = "灯川 Rillight 测试"
         }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.

@@ -73,8 +73,15 @@ class PlaybackRuntime {
       _mountedPlayers[request]?.call();
 
   static Future<PlaybackRuntime> production(AuthController auth) async {
+    final validation =
+        Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'] ??
+        Platform.environment['RILLIGHT_VALIDATION_DATA_DIR'];
+    if (validation != null &&
+        (validation.isEmpty || !Directory(validation).isAbsolute)) {
+      throw ArgumentError('Validation directory must be absolute');
+    }
     final root =
-        Platform.environment['RILLIGHT_VALIDATION_DATA_DIR'] ??
+        validation ??
         '${(await getApplicationSupportDirectory()).path}/rillight';
     final store = await FileHistoryStore.open(File('$root/watch-history.json'));
     return PlaybackRuntime(

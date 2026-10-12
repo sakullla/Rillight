@@ -3,7 +3,7 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <application
-        android:label="灯川 Rillight"
+        android:label="${rillightAppLabel}"
         android:banner="@drawable/tv_banner"
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"

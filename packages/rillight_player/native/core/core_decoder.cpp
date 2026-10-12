@@ -548,9 +548,11 @@ Decoder make_decoder(AVFormatContext *format, int index,
   if (parameters->codec_type == AVMEDIA_TYPE_VIDEO) {
     result.diagnostics =
         (result.hardware != RILLIGHT_CORE_HW_NONE
-             ? (hw_note.empty() ? "hardware" : hw_note)
+             ? (hw_note.empty() ?
+                 (result.hardware == RILLIGHT_CORE_HW_MEDIACODEC ? "mediacodec" :
+                  result.hardware == RILLIGHT_CORE_HW_VIDEOTOOLBOX ? "videotoolbox" : "hardware") : hw_note)
              : "software") +
-        " threads=" + std::to_string(context->thread_count);
+        " ffmpeg_threads=" + std::to_string(context->thread_count);
     result.hardware_diagnostics = result.diagnostics;
   }
   result.android_color_buffers = export_dovi;

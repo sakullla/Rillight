@@ -1159,6 +1159,104 @@ void main() {
     },
   );
 
+  test('large HLS prefetch preserves the active segment response', () async {
+    const length = 2 * 1024 * 1024;
+    const prefixLength = 64 * 1024;
+    final root = await Directory.systemTemp.createTemp('rillight-hls-overlap-');
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final cache = await SessionByteCache.open(root: root);
+    final proxy = await PlaybackHttpProxy.create(
+      cache: cache,
+      sessionBuffering: true,
+      readAheadBytes: 4 * 1024 * 1024,
+    );
+    final client = HttpClient();
+    final firstReceived = Completer<void>();
+    final secondStarted = Completer<void>();
+    final releaseFirst = Completer<void>();
+    upstream.listen((request) async {
+      final output = request.response;
+      try {
+        if (request.uri.path == '/index.m3u8') {
+          output.write(
+            '#EXTM3U\n#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts\n#EXT-X-ENDLIST\n',
+          );
+        } else {
+          final first = request.uri.path == '/a.ts';
+          if (!first) {
+            await firstReceived.future;
+            if (!secondStarted.isCompleted) secondStarted.complete();
+          }
+          output.statusCode = 206;
+          output.headers.set('etag', first ? '"a"' : '"b"');
+          output.headers.set('cache-control', 'max-age=120');
+          output.headers.set('content-range', 'bytes 0-${length - 1}/$length');
+          output.contentLength = length;
+          output.add(
+            Uint8List(prefixLength)..fillRange(0, prefixLength, first ? 1 : 2),
+          );
+          await output.flush();
+          if (first) await releaseFirst.future;
+          output.add(
+            Uint8List(length - prefixLength)
+              ..fillRange(0, length - prefixLength, first ? 1 : 2),
+          );
+        }
+        await output.close();
+      } on HttpException {
+        // The regression cancels the still-active first origin response.
+      } on SocketException {
+        // Same cancellation while flushing to the proxy.
+      }
+    });
+    try {
+      final manifest = await (await (await client.getUrl(
+        proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/index.m3u8'),
+        ),
+      )).close()).transform(utf8.decoder).join();
+      final segments = manifest
+          .split('\n')
+          .where((line) => line.startsWith('http://'))
+          .map(Uri.parse)
+          .toList();
+      final request = await client.getUrl(segments.first);
+      request.headers.set('range', 'bytes=0-');
+      final response = await request.close();
+      final received = <int>[];
+      final complete = response.forEach((bytes) {
+        received.addAll(bytes);
+        if (!firstReceived.isCompleted) firstReceived.complete();
+      });
+      complete.ignore();
+      await secondStarted.future.timeout(const Duration(seconds: 5));
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (proxy.diagnostics['segmentPrefetchActive'] == true &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(proxy.diagnostics['segmentPrefetchActive'], false);
+      releaseFirst.complete();
+      await complete;
+      expect(received, hasLength(length));
+      expect(received.every((byte) => byte == 1), true);
+      final next = await (await client.getUrl(segments.last)).close();
+      final nextBytes = await next.fold<List<int>>(
+        [],
+        (all, bytes) => all..addAll(bytes),
+      );
+      expect(nextBytes, hasLength(length));
+      expect(nextBytes.every((byte) => byte == 2), true);
+    } finally {
+      if (!firstReceived.isCompleted) firstReceived.complete();
+      if (!releaseFirst.isCompleted) releaseFirst.complete();
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+      await root.delete(recursive: true);
+    }
+  });
+
   test('extensionless HLS children keep a multimedia suffix', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final proxy = await PlaybackHttpProxy.create();
