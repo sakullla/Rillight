@@ -12,12 +12,12 @@
 
 ## macOS
 
-- VideoToolbox 帧先尝试只读直接映射现有 CVPixelBuffer 平面，转换结束后释放映射，避免 `av_hwframe_transfer_data` 内部的全帧复制。映射不可用时保留原下载回退。固定 FFmpeg 的 `vt_map_from` 会保留帧属性/RPU。
-- 已是目标尺寸、无显示矩阵、SAR 为 1 且没有字幕的 FP16 帧，直接交给 Metal 上传，省掉 `_linear` 中间复制；其他几何/字幕情况仍使用既有转换。保留行间距，不再仅为紧密排布而复制；像素着色器维持不透明输出。
-- 诊断区分 `mapped+metal-linear` 与 `mapped+portable-linear`，Metal 成功和 CPU 回退不再共用一个标签。
+- 协商 GPU 输出后，VideoToolbox NV12/P010 的 CVPixelBuffer 平面通过 `CVMetalTextureCache` 直接导入 Metal；颜色转换写入有界池中的 IOSurface 输出。支持 SDR、PQ/HLG 和可用的 Dolby Vision RPU polynomial/MMR，保留 Profile 5 缺失 RPU 时的失败边界。
+- GPU 输出帧独立持有 CVPixelBuffer，`data` 为空；字幕重绘共享不可变视频纹理。缩放、SAR、四方向旋转、黑边和字幕混合在 Metal 上完成。libass 的裁剪字幕平面仍由 CPU 生成并上传，不下载视频像素。
+- SDR IOSurface 交给 Flutter 纹理，扩展线性输出由 Metal 层直接采样。颜色转换完成后再发布跨队列资源；异步呈现额外持有 CoreVideo 缓冲和纹理包装器，直到命令完成，避免关闭/重开与池复用时提前释放。
+- 直连诊断为 `cvmetal-direct-sdr` / `cvmetal-direct-linear`。硬件平面不支持、导入或转换失败时，继续只读映射及既有下载/portable 回退；呈现失败可读回已完成的输出并禁用后续直连，单独记录 `gpuPresentationFallbacks`。软件解码和 FEL CPU 重建不称为 GPU 直连。
 
-
-macOS 仍是 CPU 映射/转换与 Metal 呈现的混合管线。完整 CVMetalTextureCache 输出需要独立实现与平台验证。
+支持的 VideoToolbox 路径不再执行视频像素的 CPU 映射、颜色转换或上传；回退路径仍存在。纹理直连、实际硬解、窗口画面、物理 HDR/音频效果与性能收益必须分别验证。
 
 ## Android
 

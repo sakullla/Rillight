@@ -102,6 +102,16 @@ emulator evidence, distinct from a physical phone or TV.
 
 ### macOS
 
+The negotiated VideoToolbox NV12/P010 route imports decoder planes through
+CVMetalTextureCache, performs color conversion and video fitting on Metal, and
+presents retained IOSurface output without CPU video-pixel readback or upload.
+SDR, HDR10/HLG and supported Dolby RPU frames share this route; cropped subtitle
+planes remain CPU-rasterized and GPU-composited. Unsupported GPU resources keep
+the mapped/portable fallback. Software decode and FEL reconstruction remain
+separate paths. Native tests and diagnostics distinguish direct textures from
+fallbacks; physical HDR/audio and measured performance require target evidence.
+
+
 The audio sink probes the default Core Audio device's advertised digital
 physical formats. AC-3, E-AC-3 (including JOC), DTS, DTS-HD and TrueHD can use
 IEC 61937 output when the device exposes a matching integer carrier format.

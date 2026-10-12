@@ -486,12 +486,18 @@ int rillight_core_configure_gpu_video(RillightCore *pointer, int enabled) {
   if (!enabled) { core->gpu_video = false; core->hdr_video = false; return 0; }
   if (core->state != RILLIGHT_CORE_IDLE && core->state != RILLIGHT_CORE_ENDED &&
       core->state != RILLIGHT_CORE_FAILED) return -1;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(RILLIGHT_HAVE_MACOS_COLOR)
   core->gpu_video = enabled != 0;
   return 0;
 #else
   return enabled ? -1 : 0;
 #endif
+}
+
+void* rillight_core_frame_macos_buffer(const RillightCoreFrame* frame) {
+  if (!frame || (frame->type != RILLIGHT_CORE_VIDEO_MACOS_BUFFER &&
+                 frame->type != RILLIGHT_CORE_VIDEO_MACOS_LINEAR)) return nullptr;
+  return static_cast<const VideoOutputFrame*>(frame)->gpu_texture.get();
 }
 
 void* rillight_core_frame_d3d11_texture(const RillightCoreFrame* frame) {
@@ -530,6 +536,8 @@ int rillight_core_frame_subtitle_overlay(const RillightCoreFrame* frame,
       (frame->type != RILLIGHT_CORE_VIDEO_D3D11 &&
        frame->type != RILLIGHT_CORE_VIDEO_MEDIACODEC &&
        frame->type != RILLIGHT_CORE_VIDEO_ANDROID_P010 &&
+       frame->type != RILLIGHT_CORE_VIDEO_MACOS_BUFFER &&
+       frame->type != RILLIGHT_CORE_VIDEO_MACOS_LINEAR &&
        frame->type != RILLIGHT_CORE_VIDEO_RGBA16F)) return -1;
   *overlay = static_cast<const VideoOutputFrame*>(frame)->subtitle_overlay;
   overlay->struct_size = sizeof(*overlay);
@@ -1174,7 +1182,9 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
     auto *redraw = core->subtitle_preview;
     if (type == RILLIGHT_CORE_VIDEO_RGBA && redraw &&
         redraw->type != RILLIGHT_CORE_VIDEO_RGBA &&
-        redraw->type != RILLIGHT_CORE_VIDEO_RGBA16F) return nullptr;
+        redraw->type != RILLIGHT_CORE_VIDEO_MACOS_BUFFER &&
+       redraw->type != RILLIGHT_CORE_VIDEO_MACOS_LINEAR &&
+       redraw->type != RILLIGHT_CORE_VIDEO_RGBA16F) return nullptr;
     core->subtitle_preview = nullptr;
     core->subtitle_redraw = false;
     return redraw;
@@ -1218,6 +1228,8 @@ RillightCoreFrame *rillight_core_take_frame(RillightCore *pointer, int type) {
   }
   if (type == RILLIGHT_CORE_VIDEO_RGBA &&
       queue.front()->type != RILLIGHT_CORE_VIDEO_RGBA &&
+      queue.front()->type != RILLIGHT_CORE_VIDEO_MACOS_BUFFER &&
+      queue.front()->type != RILLIGHT_CORE_VIDEO_MACOS_LINEAR &&
       queue.front()->type != RILLIGHT_CORE_VIDEO_RGBA16F) return nullptr;
   auto *frame = queue.front();
   queue.pop_front();

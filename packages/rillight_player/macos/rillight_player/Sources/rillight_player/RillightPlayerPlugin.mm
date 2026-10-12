@@ -8,6 +8,7 @@
 #include "FrameOutput.h"
 #include "FrameTiming.h"
 #include "MetalEdrOutput.h"
+#include "MetalFrameOutput.h"
 #include "PixelBufferOutput.h"
 
 #include <algorithm>
@@ -39,6 +40,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
   std::atomic<int> height;
   std::atomic<bool> notificationPending;
   int64_t frames;
+  int64_t gpuPresentationFallbacks;
+  int64_t videoClockOffsetUs;
   int64_t copiedFrames;
   int64_t lateFrames;
   int64_t conversionUs;
@@ -91,6 +94,7 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
   Clock::time_point _firstAudioWriteSince;
   rillight_macos::EdrSurface _edr;
   std::vector<uint16_t> _linear;
+  rillight_macos::MetalFrameOutput _metalVideo;
   bool _lastHalf;
   bool _usingEdr;
   bool _havePresent;
@@ -160,6 +164,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
       });
       return;
     }
+    if (self->_metalVideo.Ready())
+      rillight_core_configure_gpu_video(self->core, 1);
     RillightCoreAudioSink sink{};
     sink.struct_size = sizeof(sink);
     sink.max_pcm_channels = rillight_macos::DefaultOutputChannelTarget();
@@ -292,6 +298,53 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
         newFrame:(BOOL)newFrame
         session:(uint64_t)session timeline:(uint64_t)timeline {
   if (stopped.load()) return NO;
+  const bool gpuFrame = frame.type == RILLIGHT_CORE_VIDEO_MACOS_BUFFER ||
+      frame.type == RILLIGHT_CORE_VIDEO_MACOS_LINEAR;
+  if (gpuFrame) {
+    const auto started = Clock::now();
+    auto input = static_cast<CVPixelBufferRef>(rillight_core_frame_macos_buffer(&frame));
+    RillightCoreSubtitleOverlay overlay{};
+    overlay.struct_size = sizeof(overlay);
+    rillight_core_frame_subtitle_overlay(&frame, &overlay);
+    CVPixelBufferRef buffer = _metalVideo.Render(input, frame, outputWidth, outputHeight, &overlay);
+    if (!buffer) {
+      // Future decoded frames use the established CPU presentation route.
+      // Do not claim publication of a failed GPU image.
+      rillight_core_configure_gpu_video(core, 0);
+      buffer = rillight_macos::CpuFallbackBuffer(input, frame, outputWidth, outputHeight, &overlay);
+      [lock lock]; ++gpuPresentationFallbacks; [lock unlock];
+      if (!buffer) {
+        [self setFailure:@"Metal and CPU video presentation failed"];
+        return NO;
+      }
+    }
+    RillightCoreSnapshot current{};
+    current.struct_size = sizeof(current);
+    if (stopped.load() || rillight_core_snapshot(core, &current) != 0 ||
+        current.session_id != session || current.timeline_version != timeline) {
+      CVPixelBufferRelease(buffer);
+      return NO;
+    }
+    BOOL published = NO;
+    const bool linear = frame.type == RILLIGHT_CORE_VIDEO_MACOS_LINEAR;
+    if (linear && _edr.ready) {
+      published = rillight_macos::PresentEdrBuffer(&_edr, buffer);
+      if (published) [self notePresent:YES elapsed:std::chrono::duration_cast<std::chrono::microseconds>(
+          Clock::now() - started).count() newFrame:newFrame];
+    } else if (!linear) {
+      [lock lock];
+      CVPixelBufferRef old = latest;
+      latest = CVPixelBufferRetain(buffer);
+      [lock unlock];
+      if (old) CVPixelBufferRelease(old);
+      [self notePresent:NO elapsed:std::chrono::duration_cast<std::chrono::microseconds>(
+          Clock::now() - started).count() newFrame:newFrame];
+      [self notifyTexture];
+      published = YES;
+    }
+    CVPixelBufferRelease(buffer);
+    return published;
+  }
   if (_edr.ready &&
       (_usingEdr || frame.type == RILLIGHT_CORE_VIDEO_RGBA16F)) {
     return [self publishLinear:frame width:outputWidth height:outputHeight
@@ -381,7 +434,9 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
       _audioDevice = device;
       _audioAccept = rillight_macos::DigitalAcceptedFormats(device) & ~_rejectedAudioFormats;
       _pcmChannels = channels;
-      RillightCoreAudioSink sink{};
+      if (self->_metalVideo.Ready())
+      rillight_core_configure_gpu_video(self->core, 1);
+    RillightCoreAudioSink sink{};
       sink.struct_size = sizeof(sink);
       sink.max_pcm_channels = channels;
       sink.accepted_passthrough = _audioAccept;
@@ -411,6 +466,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
     // before a new PCM AudioQueue can open the same device.
     _audio.reset();
     [self releaseAudio];
+    if (self->_metalVideo.Ready())
+      rillight_core_configure_gpu_video(self->core, 1);
     RillightCoreAudioSink sink{};
     sink.struct_size = sizeof(sink);
     sink.max_pcm_channels = _pcmChannels;
@@ -617,9 +674,11 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
   if (_pendingVideo) {
     const bool current = _pendingVideo->session_id == snapshot.session_id &&
                          _pendingVideo->timeline_version == snapshot.timeline_version;
-    const bool acceptable = _edr.ready
-        ? rillight_macos::ValidLinearSource(*_pendingVideo)
-        : rillight_macos::ValidSource(*_pendingVideo);
+    const bool gpuFrame = _pendingVideo->type == RILLIGHT_CORE_VIDEO_MACOS_BUFFER ||
+        (_edr.ready && _pendingVideo->type == RILLIGHT_CORE_VIDEO_MACOS_LINEAR);
+    const bool acceptable = gpuFrame ? rillight_core_frame_macos_buffer(_pendingVideo) != nullptr :
+        (_edr.ready ? rillight_macos::ValidLinearSource(*_pendingVideo)
+                   : rillight_macos::ValidSource(*_pendingVideo));
     if (!current || !acceptable) {
       if (current) [self setFailure:@"Core returned an invalid video frame"];
       rillight_core_release_frame(_pendingVideo);
@@ -647,6 +706,16 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
     if ([self publish:*_lastVideo width:outputWidth height:outputHeight
               newFrame:_newFramePending
               session:snapshot.session_id timeline:snapshot.timeline_version]) {
+      RillightCoreSnapshot published{};
+      published.struct_size = sizeof(published);
+      if (rillight_core_snapshot(core, &published) == 0 &&
+          published.session_id == snapshot.session_id &&
+          published.timeline_version == snapshot.timeline_version) {
+        [lock lock];
+        // Software presentation-to-media-clock offset, not physical lip-sync.
+        videoClockOffsetUs = _lastVideo->pts_us - published.position_us;
+        [lock unlock];
+      }
       _renderedWidth = outputWidth; _renderedHeight = outputHeight;
       _needsPublication = _newFramePending = false;
     }
@@ -847,6 +916,8 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
         surface->actualHardware == RILLIGHT_CORE_HW_VIDEOTOOLBOX ?
         @"videotoolbox" : @"software";
     NSDictionary* status = @{@"frames": @(surface->frames),
+                             @"gpuPresentationFallbacks": @(surface->gpuPresentationFallbacks),
+                             @"videoClockOffsetUs": @(surface->videoClockOffsetUs),
                              @"presentedFrames": @(presented.frames),
                              @"firstPresentedUs": @(presented.first_presented_us),
                              @"lastPresentedUs": @(presented.last_presented_us),

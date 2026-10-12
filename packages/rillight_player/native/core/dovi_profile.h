@@ -108,9 +108,11 @@ inline int dovi_present_output_kind(int frame_type, int windows_scrgb,
     return RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;
   if (frame_type == RILLIGHT_CORE_VIDEO_D3D11 && windows_scrgb)
     return RILLIGHT_CORE_VIDEO_OUT_HDR;
-  if (frame_type == RILLIGHT_CORE_VIDEO_RGBA16F)
+  if (frame_type == RILLIGHT_CORE_VIDEO_RGBA16F ||
+      frame_type == RILLIGHT_CORE_VIDEO_MACOS_LINEAR)
     return RILLIGHT_CORE_VIDEO_OUT_HDR;
-  if (frame_type == RILLIGHT_CORE_VIDEO_RGBA ||
+  if (frame_type == RILLIGHT_CORE_VIDEO_MACOS_BUFFER ||
+      frame_type == RILLIGHT_CORE_VIDEO_RGBA ||
       frame_type == RILLIGHT_CORE_VIDEO_D3D11)
     return RILLIGHT_CORE_VIDEO_OUT_SDR;
   return RILLIGHT_CORE_VIDEO_OUT_UNKNOWN;

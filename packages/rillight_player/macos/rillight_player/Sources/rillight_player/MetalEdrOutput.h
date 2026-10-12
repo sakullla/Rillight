@@ -3,6 +3,7 @@
 #include "FrameOutput.h"
 
 #import <AppKit/AppKit.h>
+#import <CoreVideo/CoreVideo.h>
 
 namespace rillight_macos {
 
@@ -30,6 +31,7 @@ void DestroyEdrSurface(EdrSurface* surface);
 void ActivateEdrSurface(EdrSurface* surface, NSView* flutter_view);
 // Presents one fitted linear frame. Returns false without replacing the last
 // successful drawable when the layer cannot provide one.
+bool PresentEdrBuffer(EdrSurface* surface, CVPixelBufferRef buffer);
 bool PresentEdrSurface(EdrSurface* surface, const uint16_t* pixels, int width,
                        int height, size_t stride);
 

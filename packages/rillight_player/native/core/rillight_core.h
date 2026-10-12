@@ -58,7 +58,11 @@ typedef enum RillightCoreFrameType {
    * configured sink accepts that format and playback speed is 1. */
   RILLIGHT_CORE_AUDIO_PASSTHROUGH = 7,
   /* Presentation receipt only: pixels are already displayed by the tunnel. */
-  RILLIGHT_CORE_VIDEO_ANDROID_TUNNEL = 8
+  RILLIGHT_CORE_VIDEO_ANDROID_TUNNEL = 8,
+  /* Owned GPU-rendered IOSurface. No CPU data; borrow via frame_macos_buffer.
+   * Emitted only after configure_gpu_video succeeds on macOS. */
+  RILLIGHT_CORE_VIDEO_MACOS_BUFFER = 9,
+  RILLIGHT_CORE_VIDEO_MACOS_LINEAR = 10
 } RillightCoreFrameType;
 
 typedef enum RillightCoreChannelLayout {
@@ -505,16 +509,21 @@ RILLIGHT_CORE_API int rillight_enhancement_process_rgba(
     uint8_t *midpoint, int midpoint_capacity, int *midpoint_bytes);
 /* Removed models. Always returns 0 for every kind. */
 RILLIGHT_CORE_API int rillight_enhancement_model_ready(int kind);
-/* Optional Windows GPU sink, enabled while idle; disabling it is allowed
+/* Optional Windows/macOS GPU sink, enabled while idle; disabling is allowed
  * during playback to recover from unavailable cross-adapter sharing.
  * VIDEO_D3D11 requests
  * consume the video queue and may also return CPU RGBA fallback frames.
  * GPU frames have NULL data, with data_size accounting for GPU allocation.
  * frame_d3d11_texture returns a borrowed immutable ID3D11Texture2D valid until
  * release_frame. All frames retain session/timeline/display metadata.
+ * On macOS, VIDEO_RGBA requests also return MACOS_BUFFER/MACOS_LINEAR
+ * IOSurfaces, borrowed through frame_macos_buffer. With EDR enabled the
+ * negotiated GPU sink receives extended-linear SDR white as well as HDR.
  * Existing CPU sinks keep the default RGBA output contract. */
 RILLIGHT_CORE_API int rillight_core_configure_gpu_video(RillightCore *core,
                                                        int enabled);
+/* Borrowed CVPixelBufferRef, valid until release_frame. Retain before async use. */
+RILLIGHT_CORE_API void* rillight_core_frame_macos_buffer(const RillightCoreFrame* frame);
 RILLIGHT_CORE_API void *rillight_core_frame_d3d11_texture(
     const RillightCoreFrame *frame);
 /* Opt-in native Windows scRGB output, enabled while idle after GPU video.
@@ -525,7 +534,8 @@ RILLIGHT_CORE_API int rillight_core_configure_hdr_video(RillightCore *core,
                                                        int enabled);
 /* Opt-in macOS extended-range output, configured while idle, ended, or failed.
  * PQ, HLG and supported Dolby Vision frames are then emitted as RGBA16F instead
- * of 8-bit sRGB. SDR frames stay VIDEO_RGBA. Disabling is allowed in those same
+ * of 8-bit sRGB. Without GPU negotiation SDR frames stay VIDEO_RGBA.
+ * The negotiated GPU sink uses MACOS_LINEAR. Disabling is allowed in those same
  * states. This is not the Windows scRGB contract and does not certify Dolby. */
 RILLIGHT_CORE_API int rillight_core_configure_macos_edr(RillightCore *core,
                                                        int enabled);

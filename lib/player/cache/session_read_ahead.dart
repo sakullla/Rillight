@@ -129,6 +129,13 @@ class SessionReadAhead {
     }
     return () {
       _foregroundAcquisitions--;
+      if (_concurrencyFallback != null) {
+        // The server may retain its logical lease briefly after the body ends.
+        // Apply the same grace in both foreground/background directions.
+        _serialRestartAfter = DateTime.now().add(
+          const Duration(milliseconds: 250),
+        );
+      }
       _schedule();
     };
   }

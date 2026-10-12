@@ -1977,6 +1977,13 @@ class PlaybackHttpProxy {
           url = next;
           continue;
         }
+        if (_serialUpstream && resumeReadAhead != null) {
+          final resume = resumeReadAhead;
+          resumeReadAhead = null;
+          final owned = _ForegroundResponse(response, resume);
+          read.response = owned;
+          return (owned, url);
+        }
         return (response, url);
       }
       throw StateError('Too many media redirects');
@@ -5197,6 +5204,10 @@ class _ReadAheadSeed {
     this.prefix,
     _ProxyRead read,
   ) : owner = _ProxyRead() {
+    // The producer inherits this already-open response; keeping its foreground
+    // reservation would prevent that same producer from ever consuming it.
+    final transferred = response;
+    if (transferred is _ForegroundResponse) transferred.releaseReadAhead();
     owner.requests.addAll(read.requests);
     read.requests.clear();
     owner.iterators.add(chunks);
@@ -5379,4 +5390,96 @@ class _HlsResource {
 
 class _UnsafeForegroundResume implements Exception {
   const _UnsafeForegroundResume();
+}
+
+// Keep a learned single-stream origin reserved through body consumption or
+// cancellation, rather than releasing the read-ahead producer at headers.
+class _ForegroundResponse extends StreamView<List<int>>
+    implements HttpClientResponse {
+  factory _ForegroundResponse(
+    HttpClientResponse response,
+    void Function() callback,
+  ) {
+    var released = false;
+    void release() {
+      if (released) return;
+      released = true;
+      callback();
+    }
+
+    return _ForegroundResponse._(response, release);
+  }
+  _ForegroundResponse._(this.response, this.releaseReadAhead)
+    : super(_body(response, releaseReadAhead));
+  final HttpClientResponse response;
+  final void Function() releaseReadAhead;
+  static Stream<List<int>> _body(
+    HttpClientResponse response,
+    void Function() release,
+  ) {
+    StreamSubscription<List<int>>? subscription;
+    var released = false;
+    void finish() {
+      if (released) return;
+      released = true;
+      release();
+    }
+
+    late StreamController<List<int>> controller;
+    controller = StreamController<List<int>>(
+      sync: true,
+      onListen: () {
+        subscription = response.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: () {
+            finish();
+            unawaited(controller.close());
+          },
+        );
+      },
+      onPause: () => subscription?.pause(),
+      onResume: () => subscription?.resume(),
+      onCancel: () async {
+        try {
+          await subscription?.cancel();
+        } finally {
+          finish();
+        }
+      },
+    );
+    return controller.stream;
+  }
+
+  @override
+  int get statusCode => response.statusCode;
+  @override
+  String get reasonPhrase => response.reasonPhrase;
+  @override
+  int get contentLength => response.contentLength;
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      response.compressionState;
+  @override
+  bool get persistentConnection => response.persistentConnection;
+  @override
+  bool get isRedirect => response.isRedirect;
+  @override
+  List<RedirectInfo> get redirects => response.redirects;
+  @override
+  HttpHeaders get headers => response.headers;
+  @override
+  List<Cookie> get cookies => response.cookies;
+  @override
+  X509Certificate? get certificate => response.certificate;
+  @override
+  HttpConnectionInfo? get connectionInfo => response.connectionInfo;
+  @override
+  Future<Socket> detachSocket() => response.detachSocket();
+  @override
+  Future<HttpClientResponse> redirect([
+    String? method,
+    Uri? url,
+    bool? followLoops,
+  ]) => response.redirect(method, url, followLoops);
 }

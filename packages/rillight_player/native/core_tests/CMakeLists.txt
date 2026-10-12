@@ -110,15 +110,29 @@ if(ANDROID AND RILLIGHT_CORE_GPU_TESTS)
   # Run manually with the generated fixture; do not require a private clip in CI.
 endif()
 if(APPLE AND RILLIGHT_CORE_GPU_TESTS)
+  add_executable(rillight_macos_texture_pipeline_test
+    macos/texture_pipeline_test.mm ../core/macos_texture_pipeline.mm ../core/portable_color_pipeline.cpp
+    ../../macos/rillight_player/Sources/rillight_player/MetalFrameOutput.mm)
+  target_include_directories(rillight_macos_texture_pipeline_test PRIVATE
+    "${RILLIGHT_CORE_PREFIX}/include" "${CMAKE_CURRENT_SOURCE_DIR}/../core")
+  target_compile_options(rillight_macos_texture_pipeline_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  set_source_files_properties(macos/texture_pipeline_test.mm
+    ../../macos/rillight_player/Sources/rillight_player/MetalFrameOutput.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  target_link_libraries(rillight_macos_texture_pipeline_test PRIVATE ${avutil_library} ${swscale_library}
+    Threads::Threads "-framework Metal" "-framework CoreVideo" "-framework Foundation" "-framework IOSurface")
+  add_test(NAME rillight_macos_texture_pipeline COMMAND rillight_macos_texture_pipeline_test)
+  set_tests_properties(rillight_macos_texture_pipeline PROPERTIES TIMEOUT 30
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
   add_executable(rillight_macos_hardware_video_route_test
-    macos/hardware_video_route_test.cpp ../core/portable_color_pipeline.cpp
+    macos/hardware_video_route_test.cpp ../core/macos_texture_pipeline.mm ../core/macos_color_pipeline.mm ../core/portable_color_pipeline.cpp
     ../core/decoder_probe.cpp ../core/enhancement_compat.cpp)
   target_include_directories(rillight_macos_hardware_video_route_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
-  target_compile_definitions(rillight_macos_hardware_video_route_test PRIVATE RILLIGHT_HAVE_LIBASS=0)
+  target_compile_definitions(rillight_macos_hardware_video_route_test PRIVATE RILLIGHT_HAVE_LIBASS=0 RILLIGHT_HAVE_MACOS_COLOR=1)
   target_compile_options(rillight_macos_hardware_video_route_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
   target_link_libraries(rillight_macos_hardware_video_route_test PRIVATE
     ${avformat_library} ${avcodec_library} ${avfilter_library} ${avutil_library}
-    ${swscale_library} ${swresample_library} Threads::Threads)
+    ${swscale_library} ${swresample_library} Threads::Threads
+    "-framework Metal" "-framework Foundation" "-framework CoreVideo" "-framework IOSurface")
   set_target_properties(rillight_macos_hardware_video_route_test PROPERTIES BUILD_RPATH "${core_lib_dir}")
   add_test(NAME rillight_macos_hardware_video_route COMMAND rillight_macos_hardware_video_route_test)
   set_tests_properties(rillight_macos_hardware_video_route PROPERTIES TIMEOUT 30

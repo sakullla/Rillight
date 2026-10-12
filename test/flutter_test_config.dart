@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -23,5 +24,20 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
           );
         });
   });
+  // macOS exposes its temporary directory through /var -> /private/var.
+  // Cache security intentionally rejects linked roots and their ancestors.
+  // Use the real system temp directory for fixtures, keeping explicit symlink
+  // rejection tests and the production cache policy intact.
+  final temporary = Directory(Directory.systemTemp.resolveSymbolicLinksSync());
+  IOOverrides.global = _CanonicalTemporaryDirectory(temporary);
   await testMain();
+}
+
+final class _CanonicalTemporaryDirectory extends IOOverrides {
+  _CanonicalTemporaryDirectory(this.temporary);
+
+  final Directory temporary;
+
+  @override
+  Directory getSystemTempDirectory() => temporary;
 }

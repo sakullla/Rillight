@@ -1,20 +1,30 @@
 # macOS aggregation/private-region handoff
 
-## Conversion-copy optimization validation
+## GPU texture presentation validation
 
-The current candidate tries read-only VideoToolbox frame mapping before copying
-hardware planes. Failed mapping retains the prior transfer fallback. Matching
-FP16 frames without subtitles/geometry changes bypass the intermediate CPU fit
-copy, and Metal/portable diagnostics now identify the selected implementation.
-This does not establish an end-to-end GPU texture path.
+The candidate imports VideoToolbox NV12/P010 planes with CVMetalTextureCache,
+converts SDR/PQ/HLG or Dolby RPU on Metal, and retains an IOSurface-backed output
+through GPU fitting, rotation/SAR and subtitle composition. Flutter SDR textures
+and the extended-linear Metal presenter consume the completed GPU output without
+video-pixel readback. Cropped subtitle rasterization/upload remains CPU work.
+Unsupported imports/conversion retain the mapped/downloaded portable fallback;
+presentation fallback is counted separately. Software decoding and FEL CPU
+reconstruction are not reported as a direct GPU route.
 
-Host-portable frame/buffer and header/bundle tests do not establish native
-macOS execution or performance. On the target Mac, enable `RILLIGHT_CORE_GPU_TESTS=ON` and run
-`rillight_macos_hardware_video_route` and `rillight_macos_color_pipeline`, then
-check SDR/EDR playback, subtitles, padded rows, rotation/SAR, seek and close/reopen.
-Record actual decoder, `mapped+metal-linear` versus CPU fallback, displayed
-frames, physical audio and candidate hashes separately. See
-`../native/PLATFORM_OPTIMIZATION.md` for the cross-platform evidence.
+Enable `RILLIGHT_CORE_GPU_TESTS=ON` and run
+`rillight_macos_hardware_video_route`, `rillight_macos_color_pipeline` and
+`rillight_macos_texture_pipeline`. Check retained output across converter/window
+teardown, immutable paused subtitle redraw, padded rows, rotation/SAR, source
+size changes, seek and reopen. Compare pixels against the portable reference;
+readback inside a pixel test is not part of production GPU presentation.
+
+On the target system, record `cvmetal-direct-linear` / `cvmetal-direct-sdr`,
+`mapped+metal-linear` / `mapped+portable-linear`, presenter fallback counts,
+actual decoder, changing window frames and physical output separately. Keep
+machine information, paths, hashes and raw evidence under ignored `build/`.
+Do not infer physical HDR, audio or a performance improvement from the native
+contracts or a submitted Metal command. Use identical media, window dimensions
+and build mode when collecting comparative measurements.
 
 ## v0.1.55 digital audio output
 

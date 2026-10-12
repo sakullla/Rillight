@@ -1,6 +1,7 @@
 #import "MetalEdrOutput.h"
 
 #import <Metal/Metal.h>
+#import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/CAMetalLayer.h>
 
 #include <cstring>
@@ -47,6 +48,8 @@ struct Presenter {
   id<MTLCommandQueue> queue = nil;
   id<MTLRenderPipelineState> pipeline = nil;
   std::array<ImageSlot, 3> images;
+  CVMetalTextureCacheRef cache = nullptr;
+  ~Presenter() { if (cache) CFRelease(cache); }
   std::shared_ptr<PresentationCounters> counters =
       std::make_shared<PresentationCounters>();
 
@@ -67,7 +70,8 @@ struct Presenter {
     descriptor.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
     pipeline = [device newRenderPipelineStateWithDescriptor:descriptor
                                                        error:&error];
-    return pipeline != nil && queue != nil;
+    return pipeline != nil && queue != nil &&
+        CVMetalTextureCacheCreate(nullptr, nullptr, device, nullptr, &cache) == kCVReturnSuccess;
   }
 
   bool Draw(const uint16_t* pixels, int width, int height, size_t stride) {
@@ -109,6 +113,29 @@ struct Presenter {
               mipmapLevel:0
                 withBytes:rows
               bytesPerRow:row_bytes];
+    return DrawTexture(image, width, height, slot, nullptr, nullptr);
+    }
+  }
+
+  bool DrawBuffer(CVPixelBufferRef buffer) {
+    @autoreleasepool {
+      if (!buffer || !cache || CVPixelBufferGetPixelFormatType(buffer) != kCVPixelFormatType_64RGBAHalf)
+        return false;
+      CVMetalTextureRef ref = nullptr;
+      const int width = static_cast<int>(CVPixelBufferGetWidth(buffer));
+      const int height = static_cast<int>(CVPixelBufferGetHeight(buffer));
+      if (CVMetalTextureCacheCreateTextureFromImage(nullptr, cache, buffer, nullptr,
+          MTLPixelFormatRGBA16Float, width, height, 0, &ref)) return false;
+      bool result = DrawTexture(CVMetalTextureGetTexture(ref), width, height, nullptr, buffer, ref);
+      CFRelease(ref);
+      return result;
+    }
+  }
+
+  bool DrawTexture(id<MTLTexture> image, int width, int height, ImageSlot* slot,
+                   CVPixelBufferRef buffer, CVMetalTextureRef reference) {
+    @autoreleasepool {
+    if (!image || !layer || !pipeline) return false;
     const CGFloat scale = layer.contentsScale > 0 ? layer.contentsScale : 1;
     const NSSize view_pixels = layer.bounds.size;
     if (view_pixels.width >= 1 && view_pixels.height >= 1)
@@ -159,6 +186,16 @@ struct Presenter {
         busy->store(false, std::memory_order_release);
       }];
     }
+    if (buffer) {
+      // Metal's texture retain is not a CoreVideo pool lease. Keep both the
+      // IOSurface owner and cache wrapper alive until the GPU has finished.
+      CVPixelBufferRetain(buffer);
+      CFRetain(reference);
+      [commands addCompletedHandler:^(id<MTLCommandBuffer>) {
+        CFRelease(reference);
+        CVPixelBufferRelease(buffer);
+      }];
+    }
     [commands commit];
     return true;
     }
@@ -175,7 +212,7 @@ void RunOnMain(void (^block)()) {
 void ConfigureEdrLayer(CAMetalLayer* layer, NSScreen* screen) {
   layer.pixelFormat = MTLPixelFormatRGBA16Float;
   CGColorSpaceRef space =
-      CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
+      CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB);
   layer.colorspace = space;
   CGColorSpaceRelease(space);
   layer.wantsExtendedDynamicRangeContent = YES;
@@ -287,6 +324,11 @@ bool PresentEdrSurface(EdrSurface* surface, const uint16_t* pixels, int width,
   if (!surface || !surface->ready || !surface->presenter) return false;
   return static_cast<Presenter*>(surface->presenter)->Draw(
       pixels, width, height, stride);
+}
+
+bool PresentEdrBuffer(EdrSurface* surface, CVPixelBufferRef buffer) {
+  if (!surface || !surface->ready || !surface->presenter) return false;
+  return static_cast<Presenter*>(surface->presenter)->DrawBuffer(buffer);
 }
 
 EdrPresentationStats ReadEdrPresentationStats(const EdrSurface* surface) {

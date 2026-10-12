@@ -207,8 +207,21 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     if (converted) output->color_path = "gpu-sdr";
   }
 #endif
-  if (use_rpu || transfer == AVCOL_TRC_SMPTE2084 ||
-      transfer == AVCOL_TRC_ARIB_STD_B67) {
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+  if (gpu_video && !fel_source && source.format == AV_PIX_FMT_VIDEOTOOLBOX) {
+    output->gpu_texture = scale->macos_texture_pipeline.Render(
+        &source, width, height, use_rpu, macos_edr);
+    if (!output->gpu_texture) {
+      delete output;
+      return nullptr;
+    }
+    converted = true;
+    linear_half = macos_edr;
+    output->color_path = macos_edr ? "cvmetal-direct-linear" : "cvmetal-direct-sdr";
+  }
+#endif
+  if (!converted && (use_rpu || transfer == AVCOL_TRC_SMPTE2084 ||
+      transfer == AVCOL_TRC_ARIB_STD_B67)) {
     const auto render_color = [&](bool use_dovi) {
       const AVFrame *fel = use_dovi && fel_source ? fel_source : nullptr;
 #if defined(_WIN32)
@@ -368,7 +381,12 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   output->color_path = "swscale";
   }
   output->struct_size = sizeof(RillightCoreFrame);
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+  output->type = output->gpu_texture
+      ? (linear_half ? RILLIGHT_CORE_VIDEO_MACOS_LINEAR : RILLIGHT_CORE_VIDEO_MACOS_BUFFER) :
+#else
   output->type = output->gpu_texture ? RILLIGHT_CORE_VIDEO_D3D11 :
+#endif
       linear_half ? RILLIGHT_CORE_VIDEO_RGBA16F : RILLIGHT_CORE_VIDEO_RGBA;
   output->session_id = session;
   output->timeline_version = timeline;
@@ -553,6 +571,17 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
   if (hardware == RILLIGHT_CORE_HW_MEDIACODEC && av_dict_get(
       decoded->metadata, "rillight.mediacodec.name", nullptr, 0))
     decoded_with_hardware = true;
+#endif
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+  if (gpu_video && !scale->hardware_color_failed &&
+      decoded->format == AV_PIX_FMT_VIDEOTOOLBOX && decoded->hw_frames_ctx) {
+    int error = 0;
+    output = convert_video(decoded, pts, session, timeline,
+        format->streams[stream_index], scale, output_width, output_height,
+        gpu_video, hdr_video, macos_edr, enhancement_frame.frame, &error);
+    if (!output) scale->hardware_color_failed = true;
+    decoded_with_hardware = output != nullptr;
+  }
 #endif
 #if defined(__APPLE__)
   if (!output && decoded->format == AV_PIX_FMT_VIDEOTOOLBOX && decoded->hw_frames_ctx) {

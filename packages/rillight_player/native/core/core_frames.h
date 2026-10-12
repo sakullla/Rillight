@@ -2,12 +2,19 @@
 
 #include "core_decoder.h"
 
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+#include "macos_texture_pipeline.h"
+#endif
+
 namespace rillight::core {
 struct VideoScale {
   // A rejected hardware texture mapping retries through downloaded planes for
   // this open. Do not repeatedly hit a known-incompatible interop path.
   bool hardware_color_failed = false;
   PortableColorPipeline portable_color_pipeline;
+#if defined(RILLIGHT_HAVE_MACOS_COLOR)
+  MacosTexturePipeline macos_texture_pipeline;
+#endif
   EnhancementDecoder enhancement;
 #if defined(_WIN32)
   WindowsColorPipeline color_pipeline;
