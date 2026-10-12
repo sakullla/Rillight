@@ -308,11 +308,35 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     );
   }
 
+  /// A decorated box hit-tests its entire rectangle, including empty padding
+  /// and spacers. Paint the scrim in a separate, pointer-transparent layer so
+  /// dock gaps reach PhonePlayerGestures underneath without involving button
+  /// taps in the surface's double-tap recognizer.
+  Widget _scrimBehindControls(
+    BuildContext context, {
+    required Key key,
+    required bool top,
+    required Widget child,
+  }) => Stack(
+    children: [
+      Positioned.fill(
+        child: IgnorePointer(
+          child: DecoratedBox(
+            key: key,
+            decoration: _scrim(context, top: top),
+          ),
+        ),
+      ),
+      child,
+    ],
+  );
+
   Widget _buildTopBar(BuildContext context, EdgeInsets insets) {
     final l = AppLocalizations.of(context);
-    return DecoratedBox(
+    return _scrimBehindControls(
+      context,
       key: const Key('mobile-player-top-scrim'),
-      decoration: _scrim(context, top: true),
+      top: true,
       child: Padding(
         padding: EdgeInsets.only(
           left: insets.left,
@@ -483,9 +507,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       if (c.backgroundReleased) l.mobileBackgroundPaused,
       if (c.playbackEnded) l.playbackEnded,
     ];
-    return DecoratedBox(
+    return _scrimBehindControls(
+      context,
       key: const Key('mobile-player-bottom-scrim'),
-      decoration: _scrim(context, top: false),
+      top: false,
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           insets.left + 12,

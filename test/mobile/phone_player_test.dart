@@ -513,8 +513,88 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('decoded portrait geometry wins over landscape server metadata', (
+    tester,
+  ) async {
+    final backend = _PhonePresentationBackend();
+    final orientation = PhoneOrientation(request: (_) async {});
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      orientation: orientation,
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+      prepare: (server) => _setVideoSize(server, 'movie-inception', 1920, 1080),
+    );
+    await orientation.settled;
+    expect(orientation.calls, [PhoneOrientation.landscape]);
+    backend.phonePresentation.value = {
+      'supported': true,
+      'foreground': true,
+      'geometry': {
+        'contentWidth': 1080,
+        'contentHeight': 1920,
+        'width': 360,
+        'height': 640,
+        'density': 1,
+      },
+    };
+    await tester.pump();
+    await orientation.settled;
+    expect(orientation.calls.last, PhoneOrientation.portrait);
+    // A subsequent playback notification used to reapply the stale metadata.
+    current.toggleControls();
+    await tester.pump();
+    await orientation.settled;
+    expect(orientation.calls, [
+      PhoneOrientation.landscape,
+      PhoneOrientation.portrait,
+    ]);
+    current.onUserActivity();
+    await tester.pump(const Duration(milliseconds: 300));
+    await closePlayer(tester);
+    expect(orientation.calls.last, PhoneOrientation.unlocked);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('phone blank control dock taps hide and reveal the timeline', (
+    tester,
+  ) async {
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      size: const Size(800, 360),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    final timeline = find.byKey(const Key('mobile-player-seek'));
+    final toggle = find.byKey(const Key('mobile-player-toggle'));
+    final gap = Offset(400, tester.getCenter(toggle).dy);
+    expect(current.controlsVisible, isTrue);
+    await tester.tapAt(gap);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(current.controlsVisible, isFalse);
+    expect(timeline.hitTestable(), findsNothing);
+    await tester.tapAt(gap);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(current.controlsVisible, isTrue);
+    expect(timeline.hitTestable(), findsOneWidget);
+    // A button consumes its own tap; it must not also hide the controls.
+    await tester.tap(toggle);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(current.controlsVisible, isTrue);
+    // The center of the picture also toggles chrome while paused.
+    await tester.tapAt(const Offset(400, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(current.controlsVisible, isFalse);
+    await tester.tapAt(const Offset(400, 150));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(current.controlsVisible, isTrue);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets(
-    'portrait playback stays usable and exit does not force portrait',
+    'unknown picture starts fullscreen landscape and exit releases orientation',
     (tester) async {
       final orientation = PhoneOrientation(request: (_) async {});
       final player = await showPlayer(
@@ -525,7 +605,7 @@ void main() {
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
       await orientation.settled;
-      expect(orientation.calls, isEmpty);
+      expect(orientation.calls, [PhoneOrientation.landscape]);
       expect(player.error, isNull);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
       expect(find.byTooltip('关闭'), findsOneWidget);
@@ -533,7 +613,10 @@ void main() {
       await closePlayer(tester);
       await tester.pump();
       await orientation.settled;
-      expect(orientation.calls, [PhoneOrientation.unlocked]);
+      expect(orientation.calls, [
+        PhoneOrientation.landscape,
+        PhoneOrientation.unlocked,
+      ]);
     },
     tags: ['integration'],
   );
@@ -1563,7 +1646,7 @@ void main() {
   }, tags: ['integration']);
 
   testWidgets(
-    'playback hides system bars, waits for the picture, and drops the rotate button',
+    'playback hides system bars, defaults landscape, and reasserts on resume',
     (tester) async {
       final channelCalls = <MethodCall>[];
       _mockAndroidPlayerChannel(channelCalls);
@@ -1579,7 +1662,8 @@ void main() {
       await bars.settled;
       expect(bars.calls, [true]);
       expect(_systemBarHidden(channelCalls), [true]);
-      expect(orientation.calls, isEmpty);
+      await orientation.settled;
+      expect(orientation.calls, [PhoneOrientation.landscape]);
       expect(find.byIcon(Icons.screen_rotation), findsNothing);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-more')), findsOneWidget);
@@ -1591,14 +1675,21 @@ void main() {
       expect(bars.calls, [true, true]);
       expect(_systemBarHidden(channelCalls), [true, true]);
       await orientation.settled;
-      expect(orientation.calls, isEmpty);
+      expect(orientation.calls, [
+        PhoneOrientation.landscape,
+        PhoneOrientation.landscape,
+      ]);
 
       await closePlayer(tester);
       await bars.settled;
       await orientation.settled;
       expect(bars.calls, [true, true, false]);
       expect(_systemBarHidden(channelCalls), [true, true, false]);
-      expect(orientation.calls, [PhoneOrientation.unlocked]);
+      expect(orientation.calls, [
+        PhoneOrientation.landscape,
+        PhoneOrientation.landscape,
+        PhoneOrientation.unlocked,
+      ]);
       expect(find.byType(MobilePlayerPage), findsNothing);
     },
     tags: ['integration'],

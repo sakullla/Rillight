@@ -57,8 +57,9 @@ class MobilePlayerPage extends StatefulWidget {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
 
-  /// Replaceable picture orientation. Null follows the video's own size and
-  /// does not force portrait while the player is still visible.
+  /// Replaceable picture orientation. The default follows decoded geometry,
+  /// then server metadata, and uses landscape when dimensions are unknown.
+  /// Leaving playback never forces portrait while the player is still visible.
   final PhoneOrientation? orientation;
 
   /// Replaceable status and navigation bar hide. Null uses
@@ -235,13 +236,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
           (raw['density'] as num?)?.toDouble() ?? media.devicePixelRatio;
       final width = (raw['width'] as num?)?.toDouble();
       final height = (raw['height'] as num?)?.toDouble();
-      final picture = videoPictureIsLandscape(
-        (raw['contentWidth'] as num?)?.round(),
-        (raw['contentHeight'] as num?)?.round(),
-      );
-      if (picture != null && !_closing) {
-        unawaited(_orientation?.applyPicture(landscape: picture));
-      }
+      final current = controller;
+      if (current != null) _applyVideoPicture(current);
       if (width == null || height == null || density <= 0) return;
       final landscape = media.size.width > media.size.height;
       final base = landscape ? 24.0 : 20.0;
@@ -363,20 +359,34 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   bool _revocationExitScheduled = false;
 
   void _applyVideoPicture(PlayerController current) {
+    if (_closing || current.loading || current.error != null) return;
+    // Decoded presentation geometry includes SAR and rotation and is more
+    // authoritative than server metadata. Playback ticks must not overwrite it.
+    final raw = _presentation?.phonePresentation.value['geometry'];
+    final decoded = raw is Map
+        ? videoPictureIsLandscape(
+            (raw['contentWidth'] as num?)?.round(),
+            (raw['contentHeight'] as num?)?.round(),
+          )
+        : null;
     final source = current.resolved?.mediaSource;
-    if (source == null) return;
     MediaStreamInfo? video;
-    for (final stream in source.mediaStreams) {
+    for (final stream in source?.mediaStreams ?? <MediaStreamInfo>[]) {
       if (stream.isVideo) {
         video = stream;
         break;
       }
     }
-    final landscape = videoPictureIsLandscape(
-      source.width ?? video?.width,
-      source.height ?? video?.height,
-    );
-    if (landscape == null) return;
+    // Missing dimensions are common on media servers. Enter landscape instead
+    // of leaving the player in browsing portrait; a later decoded portrait or
+    // square picture corrects the direction without a manual fullscreen tap.
+    final landscape =
+        decoded ??
+        videoPictureIsLandscape(
+          source?.width ?? video?.width,
+          source?.height ?? video?.height,
+        ) ??
+        true;
     unawaited(_orientation?.applyPicture(landscape: landscape));
   }
 
