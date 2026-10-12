@@ -16,6 +16,11 @@ speaker played sound. Backend diagnostics report `coreActualHardware` from the
 selected video track (0 means software or no video); the requested decoder
 preference is not used as proof of actual hardware decoding.
 
+The core is split into private decoder, media I/O, audio, video, subtitle,
+state and session modules. Platform adapters use only `rillight_core.h`.
+See [core architecture and Profile 5 validation](native/CORE_ARCHITECTURE.md)
+for module ownership, GPU synchronization, fallback rules and measured scope.
+
 ## Pinned media SDK
 
 [`native/core_dependencies.json`](native/core_dependencies.json) pins FFmpeg

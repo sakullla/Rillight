@@ -194,9 +194,9 @@ void VideoSurface::Initialize() {
 bool VideoSurface::Publish(const RillightCoreFrame& source, int width,
                            int height, uint64_t session, uint64_t timeline,
                            bool decoded) {
+  RillightCoreSubtitleOverlay overlay{}; overlay.struct_size = sizeof(overlay);
+  api_->frame_subtitle_overlay(&source, &overlay);
   if (hdr_host_) {
-    RillightCoreSubtitleOverlay overlay{}; overlay.struct_size = sizeof(overlay);
-    api_->frame_subtitle_overlay(&source, &overlay);
     try {
       hdr_host_->Draw(source, api_->frame_d3d11_texture(&source), &overlay, width, height);
     } catch (const rillight_windows::GpuImportUnavailable&) {
@@ -216,7 +216,7 @@ bool VideoSurface::Publish(const RillightCoreFrame& source, int width,
   if (gpu_presenter_) {
     try {
       frame->gpu = gpu_presenter_->Present(source,
-          api_->frame_d3d11_texture(&source), width, height);
+          api_->frame_d3d11_texture(&source), width, height, &overlay);
     } catch (const rillight_windows::GpuImportUnavailable&) {
       // Hybrid-GPU systems may decode and draw on different adapters. Keep
       // the BGRA sink, but obtain CPU frames from the decoder for later uploads.

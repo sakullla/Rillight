@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -156,6 +157,74 @@ class _FailingCoreDriver extends _CoreDriver {
   Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
     request = value;
     throw failure;
+  }
+}
+
+class _DiagnosticCoreDriver extends _CoreDriver {
+  _DiagnosticCoreDriver(
+    this.source, {
+    this.failOpen = false,
+    this.failSnapshot = false,
+  });
+
+  final String source;
+  final bool failOpen;
+  final bool failSnapshot;
+  final snapshotRead = Completer<void>();
+  Completer<Map<String, dynamic>>? snapshotGate;
+  Map<String, dynamic> get diagnostics => {
+    'decodeDiagnostics': 'software $source',
+    'sourceDiagnostics':
+        'format=matroska url=$source${failOpen ? " err=-5" : ""}',
+  };
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
+    final result = await super.open(value);
+    if (failOpen) throw StateError('Core media open failed (-5)');
+    return {...result, ...diagnostics};
+  }
+
+  @override
+  Future<Map<String, dynamic>> command(
+    String method, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    if (method != 'outputStatus') return super.command(method, args);
+    expect(disposed, isFalse, reason: 'Failure snapshot must precede teardown');
+    if (!snapshotRead.isCompleted) snapshotRead.complete();
+    if (failSnapshot) throw StateError('Snapshot unavailable');
+    return snapshotGate == null ? diagnostics : await snapshotGate!.future;
+  }
+}
+
+class _ExpiredHlsCoreDriver extends _CoreDriver {
+  _ExpiredHlsCoreDriver({this.failImmediately = false});
+  final bool failImmediately;
+  final expired = Completer<void>();
+  final releaseOpen = Completer<void>();
+
+  @override
+  Future<Map<String, dynamic>> open(CorePlayerOpen value) async {
+    request = value;
+    final client = HttpClient();
+    try {
+      final manifest = await (await (await client.getUrl(
+        value.url,
+      )).close()).transform(utf8.decoder).join();
+      final segment = Uri.parse(
+        manifest.split('\n').firstWhere((line) => line.startsWith('http')),
+      );
+      final response = await (await client.getUrl(segment)).close();
+      await response.drain<void>();
+      expect(response.statusCode, anyOf(404, 410));
+      expired.complete();
+      if (failImmediately) throw StateError('Expired first segment');
+      await releaseOpen.future;
+      return await super.open(value);
+    } finally {
+      client.close(force: true);
+    }
   }
 }
 
@@ -475,6 +544,88 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 40)),
   );
+
+  for (final failImmediately in [false, true]) {
+    test(
+      'expired HLS segments renew each initial transcode open immediateFailure=$failImmediately',
+      () async {
+        final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        var status = 404;
+        var segmentRequests = 0;
+        upstream.listen((request) async {
+          if (request.uri.path == '/index.m3u8') {
+            request.response.headers.contentType = ContentType(
+              'application',
+              'vnd.apple.mpegurl',
+            );
+            request.response.write(
+              '#EXTM3U\n#EXTINF:2,\na.ts\n#EXT-X-ENDLIST\n',
+            );
+          } else {
+            segmentRequests++;
+            request.response.statusCode = status;
+          }
+          await request.response.close();
+        });
+        final drivers = <_ExpiredHlsCoreDriver>[];
+        final backend = RillightVideoBackend(
+          diskCacheDirectory: isolatedCache,
+          settingsStore: MemoryPlayerSettingsStore(),
+          createPlayer: () async {
+            final driver = _ExpiredHlsCoreDriver(
+              failImmediately: failImmediately,
+            );
+            drivers.add(driver);
+            return driver;
+          },
+        );
+        final renewals = <VideoBackendEvent>[];
+        final subscription = backend.events.listen((event) {
+          if (event.kind == VideoEventKind.sourceRefreshRequired) {
+            renewals.add(event);
+          }
+        });
+        try {
+          for (final session in [1, 2]) {
+            status = session == 1 ? 404 : 410;
+            final opening = backend.open(
+              VideoOpenRequest(
+                sessionId: session,
+                url: Uri.parse('http://127.0.0.1:${upstream.port}/index.m3u8'),
+                playMethod: PlayMethod.transcode,
+              ),
+            );
+            final opened = expectLater(
+              opening,
+              failImmediately ? throwsStateError : completes,
+            );
+            try {
+              final deadline = DateTime.now().add(const Duration(seconds: 10));
+              while (renewals.length < session &&
+                  DateTime.now().isBefore(deadline)) {
+                await Future<void>.delayed(const Duration(milliseconds: 20));
+              }
+              expect(drivers.last.expired.isCompleted, isTrue);
+              expect(renewals, hasLength(session));
+              expect(renewals.last.sessionId, session);
+              expect(renewals.last.value, 404);
+              expect((await backend.diagnostics())['openPhase'], 'openingCore');
+              await Future<void>.delayed(const Duration(milliseconds: 300));
+              expect(renewals, hasLength(session));
+            } finally {
+              drivers.last.releaseOpen.complete();
+              await opened;
+            }
+          }
+          expect(segmentRequests, 12);
+        } finally {
+          await subscription.cancel();
+          await backend.dispose();
+          await upstream.close(force: true);
+        }
+      },
+    );
+  }
   test(
     'stalled initial open renews its source before the core is ready',
     () async {
@@ -908,6 +1059,98 @@ void main() {
     );
     expect(await cleared, 0.0);
   });
+
+  for (final previousSource in [false, true]) {
+    for (final snapshotAvailable in [false, true]) {
+      test(
+        'failed open retains only current diagnostics previous=$previousSource snapshot=$snapshotAvailable',
+        () async {
+          final first = _DiagnosticCoreDriver('source-a');
+          final failed = _DiagnosticCoreDriver(
+            'source-b',
+            failOpen: true,
+            failSnapshot: !snapshotAvailable,
+          );
+          final players = [if (previousSource) first, failed];
+          final backend = RillightVideoBackend(
+            diskCacheDirectory: isolatedCache,
+            settingsStore: MemoryPlayerSettingsStore(),
+            createPlayer: () async => players.removeAt(0),
+          );
+          addTearDown(backend.dispose);
+          if (previousSource) {
+            await backend.open(
+              VideoOpenRequest(
+                sessionId: 1,
+                url: Uri.parse('http://127.0.0.1:8765/a.mkv'),
+              ),
+            );
+            expect(await backend.failureContext(), contains('source-a'));
+          }
+          await expectLater(
+            backend.open(
+              VideoOpenRequest(
+                sessionId: 2,
+                url: Uri.parse('http://127.0.0.1:8765/b.mkv'),
+              ),
+            ),
+            throwsStateError,
+          );
+          expect(failed.snapshotRead.isCompleted, isTrue);
+          expect(failed.disposed, isTrue);
+          final context = await backend.failureContext();
+          expect(
+            context,
+            snapshotAvailable ? contains('source-b err=-5') : isNull,
+          );
+          expect(
+            (await backend.diagnostics())['coreDecodeDiagnostics'],
+            snapshotAvailable ? 'software source-b' : '',
+          );
+        },
+      );
+    }
+  }
+
+  test(
+    'late failure snapshot cannot overwrite or stop the next open',
+    () async {
+      final failed = _DiagnosticCoreDriver('source-a', failOpen: true)
+        ..snapshotGate = Completer<Map<String, dynamic>>();
+      final next = _DiagnosticCoreDriver('source-b');
+      final players = [failed, next];
+      final backend = RillightVideoBackend(
+        diskCacheDirectory: isolatedCache,
+        settingsStore: MemoryPlayerSettingsStore(),
+        createPlayer: () async => players.removeAt(0),
+      );
+      addTearDown(backend.dispose);
+      final opening = expectLater(
+        backend.open(
+          VideoOpenRequest(
+            sessionId: 1,
+            url: Uri.parse('http://127.0.0.1:8765/a.mkv'),
+          ),
+        ),
+        throwsStateError,
+      );
+      await failed.snapshotRead.future;
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 2,
+          url: Uri.parse('http://127.0.0.1:8765/b.mkv'),
+        ),
+      );
+      failed.snapshotGate!.complete(failed.diagnostics);
+      await opening;
+      expect(next.disposed, isFalse);
+      expect(await backend.failureContext(), contains('source-b'));
+      expect(
+        (await backend.diagnostics())['coreDecodeDiagnostics'],
+        'software source-b',
+      );
+    },
+  );
 
   test('probe diagnostics expose only a numeric core failure', () async {
     final core = _FailingCoreDriver(
@@ -1352,6 +1595,7 @@ void main() {
       final position = backend.position;
       driver.emit('outputStatus', {
         'dolbyVisionProfile': 5,
+        'decodeDiagnostics': 'd3d11 threads=4',
         'videoOutputKind': 3,
         'audioDelivery': 4,
         'audioChannels': 8,
@@ -1365,10 +1609,12 @@ void main() {
       });
       await Future<void>.delayed(Duration.zero);
       expect(backend.outputStatus.videoOutputKind, 3);
+      expect(backend.outputStatus.decodePath, 'd3d11 threads=4');
       expect(backend.outputStatus.outputColorSpace, 'scRGB');
       expect(backend.outputStatus.hdrDisplayActive, isTrue);
       driver.emit('outputStatus', {
         'dolbyVisionProfile': 5,
+        'decodeDiagnostics': 'software threads=4',
         'videoOutputKind': 1,
         'audioDelivery': 2,
         'audioChannels': 2,
@@ -1379,6 +1625,11 @@ void main() {
       });
       await Future<void>.delayed(Duration.zero);
       expect(backend.outputStatus.videoOutputKind, 1);
+      expect(backend.outputStatus.decodePath, 'software threads=4');
+      expect(
+        (await backend.diagnostics())['coreDecodeDiagnostics'],
+        'software threads=4',
+      );
       expect(backend.outputStatus.audioDelivery, 2);
       expect(backend.outputStatus.effectiveInterpolation, 0);
       expect(backend.outputStatus.reasonInterpolation, 4);

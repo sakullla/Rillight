@@ -22,6 +22,10 @@ class WindowsColorPipeline {
   // Never pass this texture to Flutter's RGBA8888/BGRA8888 sink.
   void* RenderScRgbTexture(const AVFrame* frame, int width, int height,
                           bool dolby_vision, float sdr_white_nits = 203.0f);
+  // Core-owned frame lease. Recycles only after the last frame/renderer owner
+  // releases it; the texture pointer is borrowed for that lifetime.
+  std::shared_ptr<void> RenderOwnedTexture(const AVFrame* frame, int width,
+      int height, bool dolby_vision, float sc_rgb_white = 0);
   // Extended-linear RGBA16F uses 1.0 as 203 nits. The returned texture is
   // shared immutable FP16 scRGB (1.0 = 80 nits) for the HDR host. Alpha is
   // not scaled. The copy is finished before return; legacy shared textures

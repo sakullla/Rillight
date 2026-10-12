@@ -150,7 +150,8 @@ def main():
                 now = time.monotonic()
                 s = Snapshot()
                 s.struct_size = ctypes.sizeof(s)
-                lib.rillight_core_snapshot(core, ctypes.byref(s))
+                if lib.rillight_core_snapshot(core, ctypes.byref(s)) != 0:
+                    raise RuntimeError("Core snapshot failed")
                 assert s.state != 8, s.ffmpeg_error
                 if (s.session_id, s.timeline_version) != identity:
                     if pending:

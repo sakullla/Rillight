@@ -61,10 +61,15 @@ class _Client extends EmbyClient {
   bool failProgress = false;
   bool failStopped = false;
   int playbackRequests = 0;
+  Future<void>? playbackGate;
   bool failPublic = false;
   bool offerNext = false;
   bool catalogVersions = false;
   final itemRequests = <String>[];
+
+  /// Every item read across all guarded client copies, for cross-instance
+  /// call counting.
+  static final allItemRequests = <String>[];
   @override
   MediaServerClient withRequestGuard(void Function() guard) {
     final probe = _Client(reports, trackChoices: trackChoices)
@@ -101,6 +106,7 @@ class _Client extends EmbyClient {
     CancelToken? cancelToken,
   }) async {
     itemRequests.add(id);
+    allItemRequests.add(id);
     return decodeEmbyMediaItem({
       'Id': id,
       'Name': id,
@@ -143,6 +149,7 @@ class _Client extends EmbyClient {
     bool forceTranscode = false,
   }) async {
     playbackRequests++;
+    await playbackGate;
     return decodeEmbyPlaybackInfo({
       'PlaySessionId': 'play-${baseUrl!.host}-$itemId',
       'MediaSources': [
@@ -333,8 +340,17 @@ class _IpcControl extends FakePlayerProcessControl
     int pid,
     Map<String, dynamic> value,
   ) async {
-    receipt = value;
+    if (value['pending'] == true) {
+      pendingReceipt = value;
+    } else {
+      receipt = value;
+    }
   }
+
+  Map<String, dynamic>? pendingReceipt;
+  int heartbeats = 0;
+  @override
+  Future<void> heartbeat(int pid) async => heartbeats++;
 
   @override
   Future<void> revoke(
@@ -385,6 +401,7 @@ void main() {
   }) async {
     reports = [];
     cleanupFails = false;
+    _Client.allItemRequests.clear();
     final access = RegionAccessController();
     if (private) {
       await access.setPin('1234', '1234', (_) async {});
@@ -914,6 +931,24 @@ void main() {
       expect(session.permit.sessionOnly, isTrue);
     },
   );
+
+  test('membership proof is cached across repeated resolves', () async {
+    await setup();
+    final request = PlayerOpenRequest(
+      itemId: 'movie',
+      libraryId: 'library',
+      source: SourceReference(account: account, itemId: 'movie'),
+    );
+    await runtime.resolve(request);
+    expect(_Client.allItemRequests, contains('library'));
+    final countAfterFirst = _Client.allItemRequests.length;
+    final second = await runtime.resolve(request);
+    expect(second.libraryId, 'library');
+    // The item is re-read for freshness, but the ancestor membership walk
+    // must not repeat while the proof is fresh.
+    expect(_Client.allItemRequests.length, countAfterFirst + 1);
+    expect(_Client.allItemRequests.last, 'movie');
+  });
 
   test(
     'foreign library and forged work cannot authorize an explicit source',
@@ -1527,120 +1562,201 @@ void main() {
     },
   );
 
-  testWidgets(
-    'real helper close drains final IPC and waits for ack before exit',
-    (tester) async {
-      const account = SourceAccount(
-        region: AccessRegion.ordinary,
-        configuredServerId: 'a',
-        verifiedServerId: 'a',
-        userId: 'user',
-      );
-      final endpoint = await tester.runAsync(
-        () => PlayerProcessProtocol.create(),
-      );
-      final protocol = endpoint!;
-      var exited = false;
-      final helperBackend = _Backend();
-      final helperClient = _Client([]);
-      await tester.pumpWidget(
-        PlayerWindowApp.testing(
-          launch: PlayerWindowLaunch(
-            request: PlayerOpenRequest(
-              itemId: 'movie',
-              source: SourceReference(account: account, itemId: 'movie'),
-              libraryId: 'library',
-            ),
-            baseUrl: 'https://a',
-            accessToken: 'token',
-            userId: 'user',
-            device: helperClient.device,
-            protocol: protocol,
-            regionGeneration: 0,
-          ),
-          client: helperClient,
-          bindings: PlayerBindings(
-            createBackend: () => helperBackend,
-            window: PlayerWindow(),
-            settingsStore: MemoryPlayerSettingsStore(),
-            progressInterval: const Duration(hours: 1),
-          ),
-          onExit: () => exited = true,
-        ),
-      );
-      final helper = tester
-          .state<PlayerPageState>(find.byType(PlayerPage))
-          .controller!;
-      try {
-        await tester.runAsync(() async {
-          await _eventually(() => helper.resolved != null && !helper.loading);
-        });
-        await tester.pump();
-        expect(helper.error, isNull);
-        expect(helper.isPlaying, isTrue);
-        helperBackend.emitEvent(
-          VideoEventKind.position,
-          const Duration(seconds: 10),
+  for (final acceptNext in [true, false]) {
+    testWidgets(
+      'real helper next episode waits for verification ($acceptNext) and drains close',
+      (tester) async {
+        const account = SourceAccount(
+          region: AccessRegion.ordinary,
+          configuredServerId: 'a',
+          verifiedServerId: 'a',
+          userId: 'user',
         );
-        await tester.pump();
-        Future<Map<String, dynamic>?> readEvent() async {
+        final endpoint = await tester.runAsync(
+          () => PlayerProcessProtocol.create(),
+        );
+        final protocol = endpoint!;
+        var exited = false;
+        final helperBackend = _Backend();
+        final helperClient = _Client([]);
+        await tester.pumpWidget(
+          PlayerWindowApp.testing(
+            launch: PlayerWindowLaunch(
+              request: PlayerOpenRequest(
+                itemId: 'movie',
+                source: SourceReference(account: account, itemId: 'movie'),
+                libraryId: 'library',
+              ),
+              baseUrl: 'https://a',
+              accessToken: 'token',
+              userId: 'user',
+              device: helperClient.device,
+              protocol: protocol,
+              regionGeneration: 0,
+            ),
+            client: helperClient,
+            bindings: PlayerBindings(
+              createBackend: () => helperBackend,
+              window: PlayerWindow(),
+              settingsStore: MemoryPlayerSettingsStore(),
+              progressInterval: const Duration(hours: 1),
+            ),
+            onExit: () => exited = true,
+          ),
+        );
+        final helper = tester
+            .state<PlayerPageState>(find.byType(PlayerPage))
+            .controller!;
+        try {
+          await tester.runAsync(() async {
+            await _eventually(() => helper.resolved != null && !helper.loading);
+          });
+          await tester.pump();
+          expect(helper.error, isNull);
+          expect(helper.isPlaying, isTrue);
+          helperBackend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 10),
+          );
+          await tester.pump();
+          Future<Map<String, dynamic>?> readEvent([
+            String kind = 'watch-event',
+          ]) async {
+            for (var i = 0; i < 100; i++) {
+              await tester.pump(const Duration(milliseconds: 20));
+              final event = await tester.runAsync(() async {
+                await Future<void>.delayed(const Duration(milliseconds: 5));
+                return protocol.read(kind);
+              });
+              if (event != null) return event;
+            }
+            return null;
+          }
+
+          final first = await readEvent();
+          expect(first?['position'], 10 * kLegacyTicksPerSecond);
+          await tester.runAsync(
+            () => protocol.write('watch-ack', {
+              'sequence': first!['sequence'],
+              'accepted': true,
+            }),
+          );
+          for (var i = 0; i < 5; i++) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          late Future<void> switching;
+          await tester.runAsync(() async {
+            switching = helper.playEpisode(
+              await helperClient.getItem('episode2'),
+            );
+          });
+          final authorization = await readEvent('switch-request');
+          expect(authorization?['action'], 'authorizeItem');
+          await tester.runAsync(
+            () => protocol.write('switch-reply', {
+              'sequence': authorization!['sequence'],
+              'accepted': true,
+            }),
+          );
+          for (var i = 0; i < 200; i++) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+            if (helper.itemId == 'episode2' && !helper.loading) break;
+            // The retiring episode still needs its final durable observation.
+            final retiring = await tester.runAsync(
+              () => protocol.read('watch-event'),
+            );
+            if (retiring != null) {
+              expect(retiring['item'], 'movie');
+              await tester.runAsync(
+                () => protocol.write('watch-ack', {
+                  'sequence': retiring['sequence'],
+                  'accepted': true,
+                }),
+              );
+            }
+          }
+          await tester.runAsync(() => switching);
+          expect(helper.itemId, 'episode2');
+          expect(helper.isPlaying, isTrue);
+          helperBackend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 1),
+          );
+          await tester.pump();
+          final next = await readEvent();
+          expect(next?['item'], 'episode2');
+          await tester.runAsync(
+            () => protocol.write('watch-pending', {
+              'sequence': next!['sequence'],
+            }),
+          );
+          // Deliberately cross the short mailbox timeout while the authority is
+          // verifying the new episode. This is latency under test, not settling.
+          for (var i = 0; i < 45; i++) {
+            await tester.pump(const Duration(milliseconds: 100));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 100)),
+            );
+          }
+          expect(helper.progressSyncFailed, isFalse);
+          await tester.runAsync(
+            () => protocol.write('watch-ack', {
+              'sequence': next!['sequence'],
+              'accepted': acceptNext,
+            }),
+          );
           for (var i = 0; i < 100; i++) {
             await tester.pump(const Duration(milliseconds: 20));
-            final event = await tester.runAsync(() async {
-              await Future<void>.delayed(const Duration(milliseconds: 5));
-              return protocol.read('watch-event');
-            });
-            if (event != null) return event;
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+            if (acceptNext
+                ? helper.activeMediaSourceId != null
+                : helper.progressSyncFailed) {
+              break;
+            }
           }
-          return null;
-        }
-
-        final first = await readEvent();
-        expect(first?['position'], 10 * kLegacyTicksPerSecond);
-        await tester.runAsync(
-          () => protocol.write('watch-ack', {
-            'sequence': first!['sequence'],
-            'accepted': true,
-          }),
-        );
-        for (var i = 0; i < 5; i++) {
-          await tester.pump(const Duration(milliseconds: 20));
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          expect(helper.progressSyncFailed, !acceptNext);
+          if (acceptNext) expect(helper.activeMediaSourceId, isNotNull);
+          helperBackend.emitEvent(
+            VideoEventKind.position,
+            const Duration(seconds: 18),
           );
-        }
-        helperBackend.emitEvent(
-          VideoEventKind.position,
-          const Duration(seconds: 18),
-        );
-        await tester.pump();
-        await tester.runAsync(() => protocol.write('close'));
-        await tester.pump(const Duration(milliseconds: 100));
-        final finalEvent = await readEvent();
-        expect(finalEvent?['position'], 18 * kLegacyTicksPerSecond);
-        expect(exited, isFalse);
-        await tester.runAsync(
-          () => protocol.write('watch-ack', {
-            'sequence': finalEvent!['sequence'],
-            'accepted': true,
-          }),
-        );
-        for (var i = 0; i < 100 && !exited; i++) {
-          await tester.pump(const Duration(milliseconds: 20));
+          await tester.pump();
+          await tester.runAsync(() => protocol.write('close'));
+          await tester.pump(const Duration(milliseconds: 100));
+          final finalEvent = await readEvent();
+          expect(finalEvent?['position'], 18 * kLegacyTicksPerSecond);
+          expect(exited, isFalse);
           await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            () => protocol.write('watch-ack', {
+              'sequence': finalEvent!['sequence'],
+              'accepted': true,
+            }),
           );
+          for (var i = 0; i < 100 && !exited; i++) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          expect(exited, isTrue);
+        } finally {
+          unawaited(helper.revokeFromHost(reportStopped: false));
+          await tester.pump(const Duration(seconds: 10));
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.runAsync(protocol.dispose);
         }
-        expect(exited, isTrue);
-      } finally {
-        unawaited(helper.revokeFromHost(reportStopped: false));
-        await tester.pump(const Duration(seconds: 10));
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.runAsync(protocol.dispose);
-      }
-    },
-    tags: ['integration'],
-  );
+      },
+      tags: ['integration'],
+    );
+  }
 
   Future<SourceComparison> candidate() async {
     final b = await runtime.registry.acquireAccount(
@@ -2096,6 +2212,96 @@ void main() {
       await _eventually(() => ipc.receipt != null);
       expect(ipc.receipt!['accepted'], isTrue);
       expect(runtime.history.records(account.region).single.played, isTrue);
+    },
+  );
+
+  test(
+    'desktop slow observation verification acknowledges pending and keeps heartbeat alive',
+    () async {
+      await setup();
+      final ipc = _IpcControl();
+      await desktop(ipc);
+      final owner =
+          (await runtime.resolve(controller.openRequest!)).client as _Client;
+      final gate = Completer<void>();
+      owner.playbackGate = gate.future;
+      try {
+        ipc.event = event(ipc, 1);
+        await _eventually(() => ipc.pendingReceipt != null);
+        expect(ipc.pendingReceipt!['sequence'], 1);
+        expect(ipc.receipt, isNull);
+        final before = ipc.heartbeats;
+        await _eventually(() => ipc.heartbeats > before);
+        expect(ipc.receipt, isNull);
+        gate.complete();
+        await _eventually(() => ipc.receipt != null);
+        expect(ipc.receipt!['accepted'], isTrue);
+        expect(runtime.history.records(account.region), hasLength(1));
+      } finally {
+        if (!gate.isCompleted) gate.complete();
+        owner.playbackGate = null;
+      }
+    },
+  );
+
+  test(
+    'desktop account replacement drains the retiring child context',
+    () async {
+      await setup();
+      await controller.start();
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 14));
+      await _eventually(() => snapshots.snapshot?.position.inSeconds == 14);
+      final saved = (await snapshots.read())!;
+      final store = MemoryPlaybackSessionSnapshotStore(saved);
+      final ipc = _IpcControl();
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        runtime: runtime,
+        processControl: ipc,
+        snapshotStoreForPid: (_) => store,
+        watchInterval: const Duration(milliseconds: 5),
+        closeTimeout: const Duration(seconds: 5),
+      );
+      addTearDown(() async {
+        ipc.requestCloseHold = null;
+        await host.close();
+        host.dispose();
+      });
+      await host.open(controller.openRequest!);
+      final retiringPid = ipc.lastPid;
+      ipc.event = event(ipc, 1);
+      await _eventually(() => ipc.receipt != null);
+      expect(ipc.receipt!['accepted'], isTrue);
+
+      final b = (await runtime.registry.authenticate('b')).account;
+      final closeGate = ipc.requestCloseHold = Completer<void>();
+      final before = reports.length;
+      final opening = host.open(
+        PlayerOpenRequest(
+          itemId: 'movie-b',
+          libraryId: 'library',
+          source: SourceReference(account: b, itemId: 'movie-b'),
+        ),
+      );
+      try {
+        await _eventually(
+          () => ipc.calls.contains('requestClose:$retiringPid'),
+        );
+        ipc.receipt = null;
+        ipc.event = event(ipc, 2);
+        await _eventually(() => ipc.receipt != null);
+        expect(ipc.receipt!['accepted'], isTrue);
+        expect(ipc.spawnedArguments, hasLength(1));
+      } finally {
+        closeGate.complete();
+        await opening;
+      }
+      expect(reports, hasLength(before + 1));
+      expect(reports.last.playSessionId, saved.playSessionId);
+      expect(reports.last.position, saved.position);
+      expect(await store.read(), isNull);
+      expect(host.current?.source?.account, b);
+      expect(ipc.spawnedArguments, hasLength(2));
     },
   );
 

@@ -249,18 +249,25 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
                height:(int)outputHeight newFrame:(BOOL)newFrame
               session:(uint64_t)session timeline:(uint64_t)timeline {
   const auto started = Clock::now();
-  const size_t stride = static_cast<size_t>(outputWidth) * 8;
-  _linear.resize(static_cast<size_t>(outputWidth) * outputHeight * 4);
+  size_t stride = static_cast<size_t>(outputWidth) * 8;
   RillightCoreSubtitleOverlay overlay{};
   overlay.struct_size = sizeof(overlay);
   const RillightCoreSubtitleOverlay* subtitles = nullptr;
   if (rillight_core_frame_subtitle_overlay(&frame, &overlay) == 0)
     subtitles = &overlay;
-  if (!rillight_macos::WriteLinearHalf(
+  const uint16_t* pixels = nullptr;
+  if (rillight_macos::CanPresentLinearUnchanged(frame, outputWidth, outputHeight, subtitles)) {
+    pixels = reinterpret_cast<const uint16_t*>(frame.data);
+    stride = static_cast<size_t>(frame.stride);
+  } else {
+    _linear.resize(static_cast<size_t>(outputWidth) * outputHeight * 4);
+    if (!rillight_macos::WriteLinearHalf(
           frame, outputWidth, outputHeight, _linear.data(), stride,
           _linear.size() * sizeof(uint16_t), subtitles)) {
-    [self setFailure:@"Extended-range frame fit failed"];
-    return NO;
+      [self setFailure:@"Extended-range frame fit failed"];
+      return NO;
+    }
+    pixels = _linear.data();
   }
   RillightCoreSnapshot current{};
   current.struct_size = sizeof(current);
@@ -268,7 +275,7 @@ static OSStatus RillightDefaultOutputChanged(AudioObjectID, UInt32,
       current.session_id != session || current.timeline_version != timeline) {
     return NO;
   }
-  if (!rillight_macos::PresentEdrSurface(&_edr, _linear.data(), outputWidth,
+  if (!rillight_macos::PresentEdrSurface(&_edr, pixels, outputWidth,
                                          outputHeight, stride)) {
     [self setFailure:@"Extended-range drawable was not presented"];
     return NO;

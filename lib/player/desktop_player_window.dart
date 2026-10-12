@@ -61,6 +61,7 @@ class PlayerWindowLaunch {
     this.preparedStartup = false,
     this.lines = const [],
     this.verifiedServerId,
+    this.startupHandoff,
   });
 
   final PlayerOpenRequest request;
@@ -75,6 +76,11 @@ class PlayerWindowLaunch {
   final bool preparedStartup;
   final List<ServerLine> lines;
   final String? verifiedServerId;
+
+  /// Negotiated metadata the parent already holds (item, user, versions).
+  /// Embedded in the launch document so the child skips its serial discovery
+  /// without waiting on the startup mailbox.
+  final Map<String, dynamic>? startupHandoff;
 
   factory PlayerWindowLaunch.fromAuth({
     required AuthController auth,
@@ -164,6 +170,9 @@ class PlayerWindowLaunch {
       protocol: json['processSessionId'] == null
           ? null
           : PlayerProcessProtocol.fromJson(json),
+      startupHandoff: json['startupHandoff'] is Map
+          ? Map<String, dynamic>.from(json['startupHandoff'] as Map)
+          : null,
       device: ClientDeviceInfo(
         clientName: json['clientName'] as String? ?? kHttpClientName,
         deviceName: json['deviceName'] as String? ?? 'desktop',
@@ -206,6 +215,7 @@ class PlayerWindowLaunch {
       'baseUrl': baseUrl,
       'accessToken': accessToken,
       'userId': userId,
+      if (startupHandoff != null) 'startupHandoff': startupHandoff,
       if (verifiedServerId != null) 'verifiedServerId': verifiedServerId,
       if (lines.isNotEmpty) 'lines': [for (final line in lines) line.toJson()],
       if (userAgent != null) 'userAgent': userAgent,
@@ -306,6 +316,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   var _requestRevision = 0;
   int _activeRevision = 0;
   bool _watchBusy = false;
+  bool _heartbeatBusy = false;
   bool _urgentLockBusy = false;
   String? _authIdentity;
   PlayerStartupPreparation? _startupPreparation;
@@ -356,11 +367,17 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed || revision != _requestRevision) return;
       late PlayerWindowLaunch launch;
       PlaybackOrigin? resolvedOrigin;
+      Map<String, dynamic>? handoff;
       if (runtime != null && request.source != null) {
         final origin = prepared ?? await runtime!.resolve(request);
         origin.permit.requireValid();
         if (_disposed || revision != _requestRevision) return;
         resolvedOrigin = origin;
+        // The child needs the user record for stream preferences; overlap it
+        // with version negotiation instead of the child re-fetching serially.
+        final userFuture = origin.permit
+            .dispatch((_) => origin.client.getUser())
+            .then<MediaUser?>((value) => value, onError: (Object _) => null);
         final item = prepared == null && origin.resolvedItem != null
             ? origin.resolvedItem!
             : await origin.permit.dispatch(
@@ -390,6 +407,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           versions = info.mediaSources;
           await info.resources?.release();
         }
+        // Hand the negotiated metadata to the child: it skips its own serial
+        // item/user/source discovery and only runs PlaybackInfo for tracks.
+        MediaUser? handoffUser;
+        try {
+          handoffUser = await userFuture;
+        } catch (_) {}
+        if (_disposed || revision != _requestRevision) return;
+        handoff = await PlayerStartupPreparation.handoff(
+          userId: origin.source.account.userId,
+          itemId: request.itemId,
+          item: item,
+          user: handoffUser,
+          versions: versions,
+        ).payload;
         final pref = runtime!.preference(origin, item, versions);
         final usePreference =
             request.mediaSourceId == null && pref.failure == null;
@@ -465,6 +496,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           regionGeneration: origin.permit.regionGeneration,
           lines: lines,
           verifiedServerId: origin.source.account.verifiedServerId,
+          startupHandoff: handoff,
         );
       } else {
         launch = PlayerWindowLaunch.fromAuth(
@@ -474,21 +506,31 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         );
       }
       if (_disposed || revision != _requestRevision) return;
-      await _stopProcess();
-      if (_disposed || revision != _requestRevision) return;
-      resolvedOrigin?.permit.requireValid();
-      _origin = resolvedOrigin;
-      _watchSession = null;
-      _lastIpcEvent = -1;
-      _lastSwitchCommand = -1;
-      _lastObservationSequence = null;
-      _privateRevoked = false;
+      // Begin closing the previous child now; its exit wait overlaps the
+      // startup preparation's network round trips instead of serializing
+      // before them.
+      final stopping = _stopProcess();
       // Scoped sources keep permission-checked metadata dispatch in the
       // existing runtime path. Do not prefetch them through auth.client.
+      // Scoped launches embed their handoff in the launch document instead.
       final preparation = _startupPreparation = resolvedOrigin == null
           ? PlayerStartupPreparation(auth.client, request.itemId)
           : null;
       try {
+        await stopping;
+        if (_disposed || revision != _requestRevision) {
+          preparation?.cancel();
+          return;
+        }
+        // Final observations and snapshot recovery belong to the retiring
+        // child until shutdown has completed.
+        resolvedOrigin?.permit.requireValid();
+        _origin = resolvedOrigin;
+        _watchSession = null;
+        _lastIpcEvent = -1;
+        _lastSwitchCommand = -1;
+        _lastObservationSequence = null;
+        _privateRevoked = false;
         final pid = await _control.spawn(
           executable: Platform.resolvedExecutable,
           arguments: launch.toArguments(),
@@ -607,11 +649,24 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed) return;
       // This mailbox bypasses a potentially stalled catalogue/preflight watch.
       if (!_urgentLockBusy) unawaited(_consumeUrgentLock(pid));
+      // Server verification may outlast the child's heartbeat deadline. Keep
+      // liveness independent of the serialized observation/command queue.
+      if (!_heartbeatBusy) {
+        _heartbeatBusy = true;
+        unawaited(() async {
+          try {
+            await _control.heartbeat(pid);
+          } catch (_) {
+            // Close may remove the endpoint while this write is in flight.
+          } finally {
+            _heartbeatBusy = false;
+          }
+        }());
+      }
       if (_watchBusy) return;
       _watchBusy = true;
       unawaited(() async {
         try {
-          await _control.heartbeat(pid);
           await _consumeObservation(pid);
           await _consumeReportOutcome(pid);
           await _consumeSwitchCommand(pid);
@@ -833,6 +888,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       final version = event['version'] as String;
       if (_watchSession?.source.mediaSourceId != version ||
           _watchSession?.source.itemId != event['item']) {
+        // A new episode/version needs authoritative server reads. Receiving
+        // the event is not acceptance, but lets the child wait for that work.
+        await historyControl.acknowledgeWatchEvent(pid, {
+          'sequence': sequence,
+          'pending': true,
+        });
         final actual = await runtime!.resolve(
           PlayerOpenRequest(
             itemId: event['item'] as String,
@@ -1582,7 +1643,17 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     super.initState();
     _launch = widget.launch;
     _auth = _authFor(_launch);
-    if (_launch.preparedStartup && _launch.protocol != null) {
+    if (_launch.startupHandoff != null) {
+      // Scoped launches embed the parent's negotiated metadata; decoding is
+      // synchronous, so startup never waits on a mailbox.
+      _startup = Future.value(
+        PlayerStartupData.decode(
+          _launch.startupHandoff!,
+          itemId: _launch.request.itemId,
+          userId: _launch.userId,
+        ),
+      );
+    } else if (_launch.preparedStartup && _launch.protocol != null) {
       // Start polling before window configuration; both proceed independently.
       _startup = PlayerStartupData.receive(
         _launch.protocol!,
@@ -1791,11 +1862,17 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       'savePreference': controller?.scopedPreferencePending == true,
       'settings': settings.toJson(),
     });
-    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    final started = DateTime.now();
+    var deadline = started.add(const Duration(seconds: 3));
+    final verificationDeadline = started.add(const Duration(seconds: 30));
     // Graceful close drains final observations and their acknowledgements.
     // Revocation alone cancels this channel, including while draining close.
     while (DateTime.now().isBefore(deadline) &&
         _playerKey.currentState?.controller?.permissionRevoked != true) {
+      final pending = await endpoint.read('watch-pending');
+      if (pending?['sequence'] == sequence) {
+        deadline = verificationDeadline;
+      }
       final receipt = await endpoint.read('watch-ack');
       if (receipt?['sequence'] == sequence) {
         final accepted = receipt?['accepted'] == true;

@@ -5,11 +5,13 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
 #include <chrono>
 #include <thread>
+#include <mutex>
 #include <vector>
 
 extern "C" {
@@ -112,24 +114,28 @@ float reshape(int c, float3 sig) {
   int piece = 0;
   [unroll] for (int i = 1; i < 8; ++i)
     if (i < count - 1 && x >= pivot(c, i)) piece = i;
-  Piece p = curves[c].pieces[piece];
+  float4 polynomial = curves[c].pieces[piece].polynomial;
   float value;
-  if (p.polynomial.w == 0) {
-    value = (p.polynomial.z * x + p.polynomial.y) * x + p.polynomial.x;
+#if POLYNOMIAL_ONLY
+  value = (polynomial.z * x + polynomial.y) * x + polynomial.x;
+#else
+  if (polynomial.w == 0) {
+    value = (polynomial.z * x + polynomial.y) * x + polynomial.x;
   } else {
-    value = p.polynomial.x;
+    value = polynomial.x;
     float4 crossTerms = float4(sig.x * sig.y, sig.x * sig.z,
                                sig.y * sig.z, sig.x * sig.y * sig.z);
     float3 power = sig;
     float4 crossPower = crossTerms;
     [unroll] for (int order = 0; order < 3; ++order) {
-      if (order < (int)p.polynomial.w)
-        value += dot(p.mmr[2 * order].xyz, power) +
-                 dot(p.mmr[2 * order + 1], crossPower);
+      if (order < (int)polynomial.w)
+        value += dot(curves[c].pieces[piece].mmr[2 * order].xyz, power) +
+                 dot(curves[c].pieces[piece].mmr[2 * order + 1], crossPower);
       power *= sig;
       crossPower *= crossTerms;
     }
   }
+#endif
   return clamp(value, curves[c].bounds.y, curves[c].bounds.z);
 }
 float3 pq(float3 code) {
@@ -177,23 +183,25 @@ void main(uint3 id : SV_DispatchThreadID) {
                    (exp((rgb.b - .55991073) / .17883277) + .28466892) / 12) * 1000;
     }
   }
-  if (offset.w > 0 && outputInfo.w == 2) {
+#if SCRGB_OUTPUT
+  if (outputInfo.w == 2) {
     // HLG inverse OETF gives scene light. Apply the BT.2100 reference OOTF.
     float3 weights = visible.z > 0 ? float3(.2627,.6780,.0593) : float3(.2126,.7152,.0722);
     rgb *= pow(max(dot(weights, rgb / 1000.0), 0.0), .2);
   }
+#endif
   if (outputInfo.w != 0) {
     if (visible.z > 0) {
       rgb = float3(dot(float3(1.660491, -.587641, -.072850), rgb),
                    dot(float3(-.124550, 1.132900, -.008349), rgb),
                    dot(float3(-.018151, -.100579, 1.118730), rgb));
     }
-    if (offset.w > 0) {
+#if SCRGB_OUTPUT
       // scRGB has an absolute 80-nit unit. Retain highlights and the signed
       // gamut instead of tone mapping or applying the sRGB output transfer.
       destination[id.xy] = float4(clamp(rgb / 80.0, -65504.0, 65504.0), 1.0);
       return;
-    }
+#else
     // Luminance-based compression preserves chromatic ratios. The RPU source
     // peak controls the shoulder for DV; HDR10 uses its mastering metadata.
     float luminance = max(dot(float3(.2126, .7152, .0722), rgb), 0.0);
@@ -207,27 +215,52 @@ void main(uint3 id : SV_DispatchThreadID) {
     if (low < 0) amount = min(amount, mapped / max(mapped - low, 1e-6));
     if (high > 1) amount = min(amount, (1.0 - saturate(mapped)) / max(high - mapped, 1e-6));
     rgb = srgb(lerp(saturate(mapped).xxx, rgb, saturate(amount)));
+#endif
   }
-  if (offset.w > 0) {
+#if SCRGB_OUTPUT
     rgb = saturate(rgb);
     float3 low = rgb / 12.92;
     float3 high = pow((rgb + .055) / 1.055, 2.4);
     rgb = float3(rgb.r <= .04045 ? low.r : high.r,
                  rgb.g <= .04045 ? low.g : high.g,
                  rgb.b <= .04045 ? low.b : high.b) * (offset.w / 80.0);
-  }
-  destination[id.xy] = float4(offset.w > 0 ? rgb : saturate(rgb), 1.0);
+  destination[id.xy] = float4(rgb, 1.0);
+#else
+  destination[id.xy] = float4(saturate(rgb), 1.0);
+#endif
 }
 )hlsl";
+
+// Compile only the selected variant, once per process. Polynomial RPU does not
+// need the large dynamically indexed MMR branch; scRGB never tone-maps to SDR.
+// Constants retain one layout so consecutive frames can change mapping modes.
+ID3DBlob* ColorShaderBinary(int variant) {
+  static std::array<std::once_flag, 4> ready;
+  static std::array<ComPtr<ID3DBlob>, 4> binaries;
+  std::call_once(ready[variant], [variant] {
+    const D3D_SHADER_MACRO macros[] = {
+        {"POLYNOMIAL_ONLY", (variant & 1) ? "1" : "0"},
+        {"SCRGB_OUTPUT", (variant & 2) ? "1" : "0"}, {nullptr, nullptr}};
+    ComPtr<ID3DBlob> error;
+    Check(D3DCompile(kShader, sizeof(kShader) - 1, "rillight-color", macros,
+        nullptr, "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0,
+        &binaries[variant], &error));
+  });
+  return binaries[variant].Get();
+}
 
 class DeviceLock {
  public:
   explicit DeviceLock(AVD3D11VADeviceContext* device) : device_(device) {
     if (device_ && device_->lock) device_->lock(device_->lock_ctx);
   }
-  ~DeviceLock() {
+  ~DeviceLock() { Unlock(); }
+  void Unlock() {
     if (device_ && device_->unlock) device_->unlock(device_->lock_ctx);
+    device_ = nullptr;
   }
+  DeviceLock(const DeviceLock&) = delete;
+  DeviceLock& operator=(const DeviceLock&) = delete;
  private:
   AVD3D11VADeviceContext* device_;
 };
@@ -236,9 +269,19 @@ class DeviceLock {
 }  // namespace
 
 struct WindowsColorPipeline::Impl {
+  struct OutputImage {
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11UnorderedAccessView> view;
+  };
+  struct OutputPool {
+    std::mutex mutex;
+    std::vector<std::unique_ptr<OutputImage>> available;
+    OutputPool() { available.reserve(3); }
+  };
+  std::shared_ptr<OutputPool> output_pool = std::make_shared<OutputPool>();
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
-  ComPtr<ID3D11ComputeShader> shader;
+  std::array<ComPtr<ID3D11ComputeShader>, 4> shaders;
   ComPtr<ID3D11SamplerState> sampler;
   ComPtr<ID3D11Buffer> parameters;
   ComPtr<ID3D11Texture2D> input, luma_texture, chroma_texture, output, staging;
@@ -251,14 +294,19 @@ struct WindowsColorPipeline::Impl {
   DXGI_FORMAT input_format = DXGI_FORMAT_UNKNOWN;
   int output_width = 0, output_height = 0;
   std::vector<uint16_t> interleaved;
+  bool shared_device = false;
 
   void Initialize(ID3D11Device* selected, ID3D11DeviceContext* selected_context) {
-    if (shader && (!selected || selected == device.Get())) return;
+    if (parameters && (selected ? selected == device.Get() : !shared_device)) return;
+    // Outstanding leases retain the old pool/device and cannot enter this one.
+    output_pool = std::make_shared<OutputPool>();
     input.Reset(); luma_texture.Reset(); chroma_texture.Reset(); luma.Reset(); chroma.Reset();
     output.Reset(); staging.Reset(); target.Reset(); gpu_complete.Reset();
-    shader.Reset(); sampler.Reset(); parameters.Reset();
+    for (auto& shader : shaders) shader.Reset();
+    sampler.Reset(); parameters.Reset();
     transfer_view.Reset(); transfer_lut.Reset();
     input_width = input_height = output_width = output_height = 0;
+    shared_device = selected != nullptr;
     if (selected) { device = selected; context = selected_context; }
     else {
       device.Reset(); context.Reset();
@@ -267,11 +315,6 @@ struct WindowsColorPipeline::Impl {
       Check(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
           levels, 1, D3D11_SDK_VERSION, &device, &level, &context));
     }
-    ComPtr<ID3DBlob> binary, error;
-    const HRESULT compiled = D3DCompile(kShader, sizeof(kShader) - 1, "rillight-color", nullptr, nullptr,
-                     "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &binary, &error);
-    Check(compiled);
-    Check(device->CreateComputeShader(binary->GetBufferPointer(), binary->GetBufferSize(), nullptr, &shader));
     D3D11_SAMPLER_DESC sampling{};
     sampling.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     sampling.AddressU = sampling.AddressV = sampling.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -344,19 +387,58 @@ struct WindowsColorPipeline::Impl {
     Check(device->CreateUnorderedAccessView(image.Get(), nullptr, &view));
   }
 
+  std::shared_ptr<OutputImage> AcquireOutput(int width, int height, DXGI_FORMAT format) {
+    std::unique_ptr<OutputImage> image;
+    {
+      std::lock_guard lock(output_pool->mutex);
+      while (!output_pool->available.empty()) {
+        auto candidate = std::move(output_pool->available.back());
+        output_pool->available.pop_back();
+        D3D11_TEXTURE2D_DESC desc{};
+        candidate->texture->GetDesc(&desc);
+        if (desc.Width == static_cast<UINT>(width) &&
+            desc.Height == static_cast<UINT>(height) && desc.Format == format) {
+          image = std::move(candidate);
+          break;
+        }
+      }
+    }
+    if (!image) {
+      image = std::make_unique<OutputImage>();
+      AllocateOutput(width, height, image->texture, image->view, format);
+    }
+    return std::shared_ptr<OutputImage>(image.release(),
+        [pool = output_pool](OutputImage* released) {
+          std::unique_ptr<OutputImage> owned(released);
+          std::lock_guard lock(pool->mutex);
+          // Bound idle VRAM; active/queued frames remain governed by the core.
+          if (pool->available.size() < 3) pool->available.push_back(std::move(owned));
+        });
+  }
+
   // Legacy MISC_SHARED has no keyed mutex. The HDR host samples the texture
   // on another device, so the copy must finish on this context first.
-  bool WaitForGpu() {
+  void SubmitGpuCompletion() {
     if (!gpu_complete) {
       D3D11_QUERY_DESC query_desc{D3D11_QUERY_EVENT, 0};
       Check(device->CreateQuery(&query_desc, &gpu_complete));
     }
     context->End(gpu_complete.Get());
     context->Flush();
+  }
+
+  // Submit under the device lock, then release it before waiting. FFmpeg can
+  // feed the next picture while this pipeline's event is still outstanding.
+  bool WaitForGpu(AVD3D11VADeviceContext* shared = nullptr) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    HRESULT result;
-    while ((result = context->GetData(gpu_complete.Get(), nullptr, 0,
-                                       D3D11_ASYNC_GETDATA_DONOTFLUSH)) == S_FALSE) {
+    HRESULT result = S_FALSE;
+    while (result == S_FALSE) {
+      {
+        DeviceLock lock(shared);
+        result = context->GetData(gpu_complete.Get(), nullptr, 0,
+                                  D3D11_ASYNC_GETDATA_DONOTFLUSH);
+      }
+      if (result != S_FALSE) break;
       if (std::chrono::steady_clock::now() >= deadline) return false;
       std::this_thread::yield();
     }
@@ -373,7 +455,8 @@ struct WindowsColorPipeline::Impl {
   }
 
   bool Render(const AVFrame* frame, int width, int height, bool dovi, uint8_t* rgba, int stride,
-              void** gpu = nullptr, float sc_rgb_white = 0) {
+              void** gpu = nullptr, float sc_rgb_white = 0,
+              std::shared_ptr<void>* owned_texture = nullptr) {
     const bool hardware = frame->format == AV_PIX_FMT_D3D11;
     const auto format = static_cast<AVPixelFormat>(frame->format);
     const bool packed = format == AV_PIX_FMT_P010LE || format == AV_PIX_FMT_P012LE ||
@@ -428,8 +511,39 @@ struct WindowsColorPipeline::Impl {
       auto* frames = reinterpret_cast<AVHWFramesContext*>(frame->hw_frames_ctx->data);
       shared = reinterpret_cast<AVD3D11VADeviceContext*>(frames->device_ctx->hwctx);
     }
-    DeviceLock lock(shared);
+    // Shader compilation and device resource creation use the thread-safe
+    // device interface and must not monopolize the decoder's context lock.
     Initialize(shared ? shared->device : nullptr, shared ? shared->device_context : nullptr);
+    bool polynomial_only = true;
+    if (dovi) {
+      for (const auto& curve : constants.curves)
+        for (int piece = 0; piece < static_cast<int>(curve.bounds.x) - 1; ++piece)
+          if (curve.pieces[piece].polynomial.w != 0) polynomial_only = false;
+    }
+    const int variant = (polynomial_only ? 1 : 0) | (sc_rgb_white > 0 ? 2 : 0);
+    auto& shader = shaders[variant];
+    if (!shader) {
+      auto* binary = ColorShaderBinary(variant);
+      Check(device->CreateComputeShader(binary->GetBufferPointer(),
+          binary->GetBufferSize(), nullptr, &shader));
+    }
+    ComPtr<ID3D11Texture2D> gpu_output;
+    ComPtr<ID3D11UnorderedAccessView> gpu_target;
+    std::shared_ptr<OutputImage> output_lease;
+    if (gpu) {
+      // Allocate through the thread-safe device before taking the decoder's
+      // immediate-context lock. Each returned frame still owns its texture.
+      const auto format = sc_rgb_white > 0 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+      if (owned_texture) {
+        output_lease = AcquireOutput(width, height, format);
+        gpu_output = output_lease->texture; gpu_target = output_lease->view;
+      } else {
+        AllocateOutput(width, height, gpu_output, gpu_target, format);
+      }
+    } else {
+      CreateOutput(width, height);
+    }
+    DeviceLock lock(shared);
     if (hardware) {
       auto* texture = reinterpret_cast<ID3D11Texture2D*>(frame->data[0]);
       D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
@@ -465,17 +579,6 @@ struct WindowsColorPipeline::Impl {
         constants.output.z = 65535.0f / maximum;
       }
     }
-    ComPtr<ID3D11Texture2D> gpu_output;
-    ComPtr<ID3D11UnorderedAccessView> gpu_target;
-    if (gpu) {
-      // Render directly into the allocation the sink will own. A separate
-      // scratch image and full-frame CopyResource are unnecessary here.
-      // Never write into an allocation retained by a previously returned frame.
-      AllocateOutput(width, height, gpu_output, gpu_target,
-          sc_rgb_white > 0 ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
-    } else {
-      CreateOutput(width, height);
-    }
     context->UpdateSubresource(parameters.Get(), 0, nullptr, &constants, 0, 0);
     ID3D11ShaderResourceView* views[] = {luma.Get(), chroma.Get(), transfer_view.Get()};
     ID3D11Buffer* buffer = parameters.Get();
@@ -497,8 +600,13 @@ struct WindowsColorPipeline::Impl {
     context->CSSetSamplers(0, 1, &empty_sampler);
     context->CSSetShader(nullptr, nullptr, 0);
     if (gpu) {
-      if (!WaitForGpu()) return false;
-      *gpu = gpu_output.Detach();
+      SubmitGpuCompletion();
+      lock.Unlock();
+      if (!WaitForGpu(shared)) return false;
+      if (owned_texture)
+        *owned_texture = std::shared_ptr<void>(output_lease, gpu_output.Get());
+      else
+        *gpu = gpu_output.Detach();
       return true;
     }
     if (!staging) {
@@ -508,12 +616,22 @@ struct WindowsColorPipeline::Impl {
       Check(device->CreateTexture2D(&desc, nullptr, &staging));
     }
     context->CopyResource(staging.Get(), output.Get());
+    SubmitGpuCompletion();
+    lock.Unlock();
+    if (!WaitForGpu(shared)) return false;
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    Check(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped));
+    {
+      DeviceLock map_lock(shared);
+      Check(context->Map(staging.Get(), 0, D3D11_MAP_READ,
+                          D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped));
+    }
     for (int y = 0; y < height; ++y)
       std::memcpy(rgba + y * stride, static_cast<uint8_t*>(mapped.pData) + y * mapped.RowPitch,
                    static_cast<size_t>(width) * 4);
-    context->Unmap(staging.Get(), 0);
+    {
+      DeviceLock map_lock(shared);
+      context->Unmap(staging.Get(), 0);
+    }
     return true;
   }
 };
@@ -546,6 +664,18 @@ void* WindowsColorPipeline::RenderScRgbTexture(const AVFrame* frame, int width, 
   return texture;
 }
 
+std::shared_ptr<void> WindowsColorPipeline::RenderOwnedTexture(const AVFrame* frame,
+    int width, int height, bool dovi, float sc_rgb_white) {
+  if (!frame || width <= 0 || height <= 0 || !std::isfinite(sc_rgb_white) ||
+      (sc_rgb_white != 0 && (sc_rgb_white < 48 || sc_rgb_white > 1000))) return {};
+  std::shared_ptr<void> texture;
+  void* unused = nullptr;
+  try { impl_->Render(frame, width, height, dovi, nullptr, 0, &unused,
+                      sc_rgb_white, &texture); }
+  catch (const std::exception&) { return {}; }
+  return texture;
+}
+
 void* WindowsColorPipeline::UploadScRgbHalf(const uint16_t* rgba, int width, int height,
                                            int stride) {
   if (!rgba || width <= 0 || height <= 0 || stride < width * 8) return nullptr;
@@ -569,6 +699,7 @@ void* WindowsColorPipeline::UploadScRgbHalf(const uint16_t* rgba, int width, int
     impl_->AllocateOutput(width, height, image, view, DXGI_FORMAT_R16G16B16A16_FLOAT);
     impl_->context->UpdateSubresource(image.Get(), 0, nullptr, scrgb.data(),
                                       static_cast<UINT>(width * 8), 0);
+    impl_->SubmitGpuCompletion();
     if (!impl_->WaitForGpu()) return nullptr;
     return image.Detach();
   } catch (const std::exception&) {

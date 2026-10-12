@@ -32,7 +32,7 @@ class Snapshot(ctypes.Structure):
         ("playback_speed", ctypes.c_double), ("preferred_hardware", ctypes.c_uint32),
         ("allow_software_fallback", ctypes.c_int),
         ("external_subtitle_pending", ctypes.c_int),
-        # ABI 11 requires the complete output/enhancement snapshot size even
+        # ABI 12 requires the complete output/enhancement snapshot size even
         # though this probe only inspects timeline and first-frame fields.
         *[(name, ctypes.c_int) for name in (
             "dolby_vision_profile", "video_output_kind", "audio_delivery",
@@ -44,6 +44,8 @@ class Snapshot(ctypes.Structure):
             "requested_sharpen", "effective_sharpen", "dovi_reconstruction",
             "dolby_vision_compatibility",
         )],
+        ("decode_diagnostics", ctypes.c_char * 192),
+        ("source_diagnostics", ctypes.c_char * 256),
     ]
 
 

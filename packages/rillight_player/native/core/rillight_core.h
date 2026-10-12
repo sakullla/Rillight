@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RILLIGHT_CORE_ABI_VERSION 11
+#define RILLIGHT_CORE_ABI_VERSION 12
 
 /* Non-FFmpeg failure: the Dolby Vision base layer cannot be displayed with
  * the currently implemented color pipeline. Reported in ffmpeg_error. */
@@ -278,6 +278,13 @@ typedef struct RillightCoreSnapshot {
   int effective_sharpen;
   int dovi_reconstruction;
   int dolby_vision_compatibility;
+  /* NUL-terminated negotiation diagnostics. decode_diagnostics describes the
+   * active video decoder (adapter, thread budget, fallback reason) and stays
+   * empty until an open attempts decoding. source_diagnostics describes the
+   * last media open (demuxer name, url, fatal error) for remote failure
+   * triage. ABI 12. */
+  char decode_diagnostics[192];
+  char source_diagnostics[256];
 } RillightCoreSnapshot;
 
 static inline int rillight_core_frame_is_audio(int type) {
@@ -326,6 +333,15 @@ RILLIGHT_CORE_API void rillight_core_destroy_loopback(RillightCore *core);
 RILLIGHT_CORE_API int rillight_core_configure_hardware(
     RillightCore *core, RillightCoreHardware preference,
     int allow_software_fallback);
+/* Windows only; other platforms return -1. Configure only while idle, ended,
+ * or failed. Attaches the IDXGIAdapter the platform presenter renders with so
+ * hardware decode, composition and presentation share one adapter and legacy
+ * shared textures stay openable across devices. The caller retains ownership;
+ * the core only holds a reference. NULL detaches. The adapter is optional:
+ * without one the core creates the decode device through FFmpeg's default
+ * adapter enumeration, exactly as before. */
+RILLIGHT_CORE_API int rillight_core_attach_d3d11_adapter(RillightCore *core,
+                                                         void *dxgi_adapter);
 /* Device PCM capacity and compressed formats the sink can actually open.
  * max_pcm_channels is 1..8. accepted_passthrough is a mask of RILLIGHT_CORE_AUDIO_ACCEPT_* formats.
  * reports_atmos must be 0 or 1 and is copied to the snapshot only while a

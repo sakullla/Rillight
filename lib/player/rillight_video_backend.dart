@@ -24,6 +24,7 @@ typedef CorePlayerFactory = Future<CorePlayer> Function();
 /// only one sealed loopback URL for each registered resource.
 class RillightVideoBackend extends VideoBackend
     implements
+        VideoBackendFailureContext,
         VideoBackendCapabilities,
         VideoBackendSubtitlePresentation,
         VideoBackendPhonePresentation,
@@ -146,6 +147,8 @@ class RillightVideoBackend extends VideoBackend
   int? _lastCoreErrorCode;
   String? _coreOpenFailureKind;
   int? _actualHardware;
+  String _coreDecodeDiagnostics = '';
+  String _coreSourceDiagnostics = '';
   Map<String, Object?> _lastTransportDiagnostics = const {};
   bool _authenticationReported = false;
   VideoOpenRequest? _lastOpenRequest;
@@ -154,6 +157,7 @@ class RillightVideoBackend extends VideoBackend
   int _openingDownloadBytes = 0;
   int _openingResponseHeaders = 0;
   int _observedMediaHeaderTimeouts = 0;
+  int _observedHlsResourceExpiries = 0;
   bool _wantsPlayback = true;
   bool _recovering = false;
   int _recoveryEpoch = 0;
@@ -192,6 +196,7 @@ class RillightVideoBackend extends VideoBackend
     }
     final next = PlaybackOutputStatus.fromCoreMap(merged);
     if (!next.sampled) return;
+    _readCoreDiagnostics(result);
     if (epoch != null && epoch > 0) {
       _acceptedOutputEpoch = epoch;
       _acknowledgeOutput(epoch);
@@ -277,6 +282,31 @@ class RillightVideoBackend extends VideoBackend
   Future<Map<String, dynamic>> surfaceStatus() async =>
       await _player?.surfaceStatus() ?? const {};
 
+  @override
+  Future<String?> failureContext() async {
+    try {
+      final data = await diagnostics().timeout(const Duration(seconds: 2));
+      final buffer = StringBuffer();
+      final failures = data['upstreamFailures'];
+      if (failures is List && failures.isNotEmpty) {
+        final last = failures.last;
+        if (last is Map) {
+          buffer.write(
+            'upstream ${last['role']} ${last['status']} ${last['path']}',
+          );
+        }
+      }
+      final coreSource = data['coreSourceDiagnostics'];
+      if (coreSource is String && coreSource.isNotEmpty) {
+        if (buffer.isNotEmpty) buffer.write('; ');
+        buffer.write(coreSource);
+      }
+      return buffer.isEmpty ? null : buffer.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, Object?>> diagnostics() async {
     Map<String, dynamic> presentation = const {};
     final native = _nativePresentation;
@@ -318,6 +348,8 @@ class RillightVideoBackend extends VideoBackend
       'coreLastEvent': _lastCoreEvent,
       'coreErrorCode': _lastCoreErrorCode,
       'coreOpenFailureKind': _coreOpenFailureKind,
+      'coreDecodeDiagnostics': _coreDecodeDiagnostics,
+      'coreSourceDiagnostics': _coreSourceDiagnostics,
       'sourceRenewalCount': _sourceRenewalCount,
       'coreActualHardware': _actualHardware,
       'coreActualHardwareName': switch (_actualHardware) {
@@ -509,11 +541,14 @@ class RillightVideoBackend extends VideoBackend
     _openingDownloadBytes = 0;
     _openingResponseHeaders = 0;
     _observedMediaHeaderTimeouts = 0;
+    _observedHlsResourceExpiries = 0;
     _lastFailure = null;
     _lastCoreEvent = null;
     _lastCoreErrorCode = null;
     _coreOpenFailureKind = null;
     _actualHardware = null;
+    _coreDecodeDiagnostics = '';
+    _coreSourceDiagnostics = '';
     _lastTransportDiagnostics = const {};
     _authenticationReported = false;
     _sourceRenewalRequestedAt = null;
@@ -540,6 +575,7 @@ class RillightVideoBackend extends VideoBackend
 
     await _stopSession(keepAndroidPlayer: true, releaseRetainedSnapshot: false);
     if (_disposed || generation != _generation) return;
+    CorePlayer? attemptedPlayer;
     try {
       _openPhase = 'settings';
 
@@ -620,6 +656,7 @@ class RillightVideoBackend extends VideoBackend
       });
       _openPhase = 'openingCore';
 
+      attemptedPlayer = player;
       final result = await player.open(
         CorePlayerOpen(
           url: sealed,
@@ -668,23 +705,49 @@ class RillightVideoBackend extends VideoBackend
       if (generation == _generation) {
         _lastFailure = error.toString();
         _recordCoreFailure(error);
+        if (attemptedPlayer != null) {
+          try {
+            // The failed core still owns this attempt's demuxer/error snapshot.
+            // Read it before stop/dispose clears the native state.
+            final failed = await attemptedPlayer
+                .command('outputStatus')
+                .timeout(const Duration(seconds: 2));
+            if (!_disposed && generation == _generation) {
+              _readCoreDiagnostics(failed);
+            }
+          } catch (_) {
+            // Diagnostics are optional and must preserve the original error.
+          }
+        }
+      }
+      if (!_disposed && generation == _generation) {
         try {
-          _lastTransportDiagnostics =
+          final data =
               await _transport?.diagnostics.timeout(
                 const Duration(seconds: 2),
               ) ??
               const {};
-          _reportAuthentication(_lastTransportDiagnostics, generation);
+          if (!_disposed && generation == _generation) {
+            _lastTransportDiagnostics = data;
+            _reportAuthentication(data, generation);
+          }
         } catch (_) {
-          _lastTransportDiagnostics = {
-            ..._lastTransportDiagnostics,
-            ...?_transport?.localDiagnostics,
-          };
+          if (!_disposed && generation == _generation) {
+            _lastTransportDiagnostics = {
+              ..._lastTransportDiagnostics,
+              ...?_transport?.localDiagnostics,
+            };
+          }
         }
-        await _stopSession(
-          keepAndroidPlayer: true,
-          releaseRetainedSnapshot: false,
-        );
+        if (!_disposed && generation == _generation) {
+          // A failed first segment can end open between timer ticks. Consume
+          // its exhausted-expiry notification before retiring the transport.
+          _maybeRequestSourceRenewal(_lastTransportDiagnostics, generation);
+          await _stopSession(
+            keepAndroidPlayer: true,
+            releaseRetainedSnapshot: false,
+          );
+        }
       }
       if (error is CoreVideoCompatibilityException) {
         throw const VideoCompatibilityException('unsupportedDolbyVision');
@@ -893,6 +956,82 @@ class RillightVideoBackend extends VideoBackend
     }
   }
 
+  void _maybeRequestSourceRenewal(Map<String, Object?> data, int generation) {
+    if (_disposed || generation != _generation) return;
+    final rejectedSource =
+        data['readAheadFailed'] == true &&
+        (data['prefetchAuthenticationStatus'] == 403 ||
+            const {
+              'producer:HttpException',
+              'producer:SocketException',
+              'producer:TimeoutException',
+            }.contains(data['readAheadBypassReason']));
+    final headerTimeouts = (data['mediaHeaderTimeouts'] as num?)?.toInt() ?? 0;
+    final headerTimedOut = headerTimeouts > _observedMediaHeaderTimeouts;
+    _observedMediaHeaderTimeouts = headerTimeouts;
+    final hlsResourceExpiries =
+        (data['hlsResourceExpiries'] as num?)?.toInt() ?? 0;
+    final hlsResourceExpired =
+        hlsResourceExpiries > _observedHlsResourceExpiries;
+    _observedHlsResourceExpiries = hlsResourceExpiries;
+    final awaitingResponse =
+        ((data['upstreamConnectingRequests'] as num?) ?? 0) > 0 ||
+        ((data['upstreamAwaitingHeadersRequests'] as num?) ?? 0) > 0;
+    // Do not let the 15 s renewal heuristic cancel a valid slow response.
+    // An actual transport deadline still permits renewal, even if the next
+    // retry has started between diagnostic polls.
+    final mayRenewStalledSource = !awaitingResponse || headerTimedOut;
+    // Transport retries preserve the scheduler now. Do not require it to
+    // become permanently failed before refreshing a stalled signed source.
+    final stalledSource =
+        mayRenewStalledSource &&
+        ((data['readAheadNoProgressMs'] as num?) ?? 0) >= 15000 &&
+        (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
+        data['readAheadWaitingForDisk'] != true &&
+        ((data['readAheadPublicationActive'] as num?) ?? 0) == 0;
+    // A source can stall before the first frame, while no read-ahead
+    // scheduler exists yet. Renewal must also serve this pending open.
+    final stalledOpening =
+        mayRenewStalledSource &&
+        !_opened &&
+        _openPhase == 'openingCore' &&
+        _openingDownloadProgress.elapsed >= const Duration(seconds: 15) &&
+        (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
+        ((data['activeRequests'] as num?) ?? 0) > 0 &&
+        data['readAheadWaitingForDisk'] != true;
+    // Server transcodes expire their HLS segments by design; an expired
+    // transcode must renew like a stalled signed URL, while live streams
+    // cannot be fixed by renewal at all.
+    final renewalEligible = switch (_lastOpenRequest) {
+      null => false,
+      final request =>
+        !request.dynamicSource ||
+            (hlsResourceExpired && request.playMethod == PlayMethod.transcode),
+    };
+    if ((_opened ||
+            stalledOpening ||
+            (_openPhase == 'openingCore' && hlsResourceExpired)) &&
+        renewalEligible &&
+        (rejectedSource ||
+            stalledSource ||
+            stalledOpening ||
+            hlsResourceExpired) &&
+        (_sourceRenewalRequestedAt == null ||
+            DateTime.now().difference(_sourceRenewalRequestedAt!) >
+                const Duration(seconds: 30))) {
+      _sourceRenewalRequestedAt = DateTime.now();
+      _emit(
+        VideoEventKind.sourceRefreshRequired,
+        rejectedSource
+            ? 403
+            : hlsResourceExpired
+            ? 404
+            : 408,
+        generation,
+      );
+    }
+  }
+
   Future<void> _refreshDiagnostics(int generation) async {
     final transport = _transport;
     if (_diagnosticsBusy ||
@@ -951,56 +1090,7 @@ class RillightVideoBackend extends VideoBackend
       if (rate is num) {
         _emit(VideoEventKind.cacheSpeed, rate.toDouble(), generation);
       }
-      final rejectedSource =
-          data['readAheadFailed'] == true &&
-          (data['prefetchAuthenticationStatus'] == 403 ||
-              const {
-                'producer:HttpException',
-                'producer:SocketException',
-                'producer:TimeoutException',
-              }.contains(data['readAheadBypassReason']));
-      final headerTimeouts =
-          (data['mediaHeaderTimeouts'] as num?)?.toInt() ?? 0;
-      final headerTimedOut = headerTimeouts > _observedMediaHeaderTimeouts;
-      _observedMediaHeaderTimeouts = headerTimeouts;
-      final awaitingResponse =
-          ((data['upstreamConnectingRequests'] as num?) ?? 0) > 0 ||
-          ((data['upstreamAwaitingHeadersRequests'] as num?) ?? 0) > 0;
-      // Do not let the 15 s renewal heuristic cancel a valid slow response.
-      // An actual transport deadline still permits renewal, even if the next
-      // retry has started between diagnostic polls.
-      final mayRenewStalledSource = !awaitingResponse || headerTimedOut;
-      // Transport retries preserve the scheduler now. Do not require it to
-      // become permanently failed before refreshing a stalled signed source.
-      final stalledSource =
-          mayRenewStalledSource &&
-          ((data['readAheadNoProgressMs'] as num?) ?? 0) >= 15000 &&
-          (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
-          data['readAheadWaitingForDisk'] != true &&
-          ((data['readAheadPublicationActive'] as num?) ?? 0) == 0;
-      // A source can stall before the first frame, while no read-ahead
-      // scheduler exists yet. Renewal must also serve this pending open.
-      final stalledOpening =
-          mayRenewStalledSource &&
-          !_opened &&
-          _openPhase == 'openingCore' &&
-          _openingDownloadProgress.elapsed >= const Duration(seconds: 15) &&
-          (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
-          ((data['activeRequests'] as num?) ?? 0) > 0 &&
-          data['readAheadWaitingForDisk'] != true;
-      if ((_opened || stalledOpening) &&
-          _lastOpenRequest?.dynamicSource == false &&
-          (rejectedSource || stalledSource || stalledOpening) &&
-          (_sourceRenewalRequestedAt == null ||
-              DateTime.now().difference(_sourceRenewalRequestedAt!) >
-                  const Duration(seconds: 30))) {
-        _sourceRenewalRequestedAt = DateTime.now();
-        _emit(
-          VideoEventKind.sourceRefreshRequired,
-          rejectedSource ? 403 : 408,
-          generation,
-        );
-      }
+      _maybeRequestSourceRenewal(data, generation);
       if (generation != _generation ||
           _disposed ||
           _cacheTrackPending > 0 ||
@@ -1095,9 +1185,21 @@ class RillightVideoBackend extends VideoBackend
             if (item is num) _remoteTrackIndex(item.toInt())!,
         }
       : const {};
+  void _readCoreDiagnostics(Map<String, dynamic> result) {
+    final decodeDiagnostics = result['decodeDiagnostics'];
+    if (decodeDiagnostics is String) {
+      _coreDecodeDiagnostics = decodeDiagnostics;
+    }
+    final sourceDiagnostics = result['sourceDiagnostics'];
+    if (sourceDiagnostics is String) {
+      _coreSourceDiagnostics = sourceDiagnostics;
+    }
+  }
+
   void _readTrackSupport(Map<String, dynamic> result) {
     final actualHardware = result['actualHardware'];
     if (actualHardware is num) _actualHardware = actualHardware.toInt();
+    _readCoreDiagnostics(result);
     if (!result.containsKey('rejectedAudio')) return;
     final previouslyRejectedAudio = _trackSupportKnown
         ? _rejectedAudio

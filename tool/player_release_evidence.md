@@ -56,80 +56,8 @@ No per-platform sample or evidence path is invented. A synthetic pass does not
 upgrade these fields. Capture UI, static analysis and the full test suite are
 separate Delivery checks; this command does not claim to have run them. Actual
 Plex Home/shared/subscription interoperability, Jellyfin deployment compatibility
-and real encoder termination also need real service evidence. Existing historical
-native runs below remain tied to their original candidates.
-
-## Aggregation/private-region development evidence (T7 working tree)
-
-- `flutter test test/aggregation/presentation_test.dart --plain-name 'desktop actual UI opens isolated'` executed the real desktop aggregation/comparison/detail play action, `DesktopPlayerWindowHost.open`, an OS-isolated Flutter test helper running `PlayerWindowApp.testing`/`PlayerController` with `FakeVideoBackend`, the production per-process file mailboxes, and the main application's sole `HistoryWriter`. It observed ordered B-source 7s then 11s events and revoked the helper and ordinary history on membership migration. This is simulated playback/control/IPC evidence, not a native independent-window rendering pass.
-- `flutter test test/aggregation/presentation_test.dart --plain-name 'TV remote actual'` executed real multi-frame directional-key navigation from TV aggregation to `TvDetailPage`, select to `TvPlayerPage`/`PlayerController`, B-source 7s local history and membership revocation rejecting late 9s. The backend and HTTP are synthetic; this does not establish a physical remote, native surface, decoder or sound.
-- Management/PIN tests exercise the three actual routing trees, mismatch/cancel without widening unknown library scope. Registry tests cover independent target-account login, explicit library discovery without automatic participation expansion, and late private login after lock.
-- Resume development run: `flutter test --no-pub --reporter expanded --timeout 40s test/aggregation/presentation_test.dart --name 'phone|TV remote actual|management'` passed six tests (`/private/tmp/t7-current-adjacent.log`). The real phone tree finds/compares B, manually switches to A, commits an actual synthetic backend observation, preserves A when ordinary Auth selects B, migrates A, reopens private A, locks from its switch dialog and rejects late observations. This remains FakeVideoBackend/HTTP evidence, not native playback. Original business/semantics failures and the tree-locked disposal stack remain in `/private/tmp/t7-resume-phone-reason.log`, `/private/tmp/t7-resume-phone-chain3.log`, and `/private/tmp/t7-current-chain10.log`; the original Flutter semantics root cause is not established by the later scoped pass.
-- Focused prototype capture executed `node tool/capture-ui.mjs --only 'aggregation-management,aggregation-pin-error' --platform desktop --theme light --size 1024`: both states passed; report `build/ui-capture/2026-10-05T11-34-17-151Z-WkGS0Y/index.html`. This establishes only those desktop light-theme appearances, not the full three-platform/two-theme capture or any native result.
-- A3 resumed development closed the old phone/TV consumer failures without removing their behavior/semantics checks. TV history teardown advances fake-zone timers while draining real IO; aggregation pagination uses its actual per-source label, waits for query completion, and drives the remote through lazy card rows. Phone source cancellation now starts from a persisted backend viewing receipt, not a successful open. The combined phone-player/TV-flow run passed 46 tests (`/private/tmp/t7-a3-resume-consumers-final.log`). Earlier bounded failures remain historical evidence, not the current result.
-- The current desktop cumulative test (`--plain-name 'desktop actual helper menu'`) drives the actual isolated helper's menu through production file RPC, B→A switch, target viewing receipt, migration, private reopen/receipt, and urgent lock while catalogue HTTP is stalled. It rejects forged pid/configured-server/verified-server/user/region, old generation and old sequence before the real lock; late catalogue and old writer events cannot revive private state (`/private/tmp/t7-a3-resume-desktop-secure2.log`). The cumulative run exposed concurrent shutdown/revocation deleting the same mailbox; cleanup now shares one Future, and Windows closes the retained original handle once. IPC/control/launch/window/snapshot adjacent tests passed 49 tests; the final cleanup/protocol rerun passed 17 (`/private/tmp/t7-a3-resume-ipc-adjacent2.log`, `/private/tmp/t7-a3-resume-cleanup-final.log`).
-- Real phone/TV switch dialogs lock independently of stalled version preflight and reject late receipts. Both actual episode menus resolve the concrete B episode and its selected version before writing B history. Three routing trees reject pre-lock decoded extras after unlock and forged-account restoration; revocation of covered B detail preserves independently authorized A playback, while a revoked route cannot erase fresh different-source navigation. These scenarios are included in the final development full suite below, not native-device evidence.
-- Final development `TMPDIR=/private/tmp flutter test --no-pub --reporter expanded` passed 1327 tests (`/private/tmp/t7-a3-resume-full-final.log`), after fixing the cumulative mailbox race. Formatting check, suite registration check and analysis also passed (`/private/tmp/t7-a3-resume-format-check.log`, `/private/tmp/t7-a3-resume-suites-check.log`, `/private/tmp/t7-a3-resume-analyze-check.log`). Earlier `/private/tmp/t7-full.log` and A3 failed/timeout logs remain failure history; no conclusion about their original Flutter semantics cause follows solely from a later pass. These are working-tree developer results; formal Delivery verification, including its separate integration/full-capture commands, is not claimed here.
-- Current affected prototype capture: `TMPDIR=/private/tmp node tool/capture-ui.mjs --only 'player-settings-source*,player-settings-quality*,library-filters-watch,library-filters-genre'` passed desktop 1024/1440, phone 360/412 and TV 1920 in both themes (`/private/tmp/t7-a3-resume-capture-final.log`; report `build/ui-capture/2026-10-05T17-55-29-350Z-1kY1sS/index.html`). This is filtered generated-layout evidence, not a full registry capture, a manual visual approval, native windows, decoder, physical audio or hardware acceptance.
-
-Native manual-switch/lock acceptance remains **unverified** on Windows, macOS, Linux, Android phone and Android TV. On each target, use two synthetic Emby services with common provider identity, independently authenticated users, two validated same-server lines, different edition durations/languages, and explicit library scope. Record actual displayed frames, physical audio, actual decoder/source/version, position and pause intent before/after switching, failure restoration, and lock/migration while pending. For Android additionally verify the native view remains mounted while loading, then playback exit + gesture navigation + screen lock/wake. For desktop independently verify helper process termination at the close budget and no post-revocation request/recovery/snapshot reconciliation. PIN persistence/restart and back/forward/overlay cleanup must be exercised in the packaged app. Keep candidate/package hashes, raw network/event/process logs and display/audio observations under ignored `build/`; no release, SDK, GPU or performance result is established here.
-
-## Current workspace observations (2026-09-26)
-
-These runs use the current working tree, including uncommitted changes. They
-are development evidence, not a five-platform release candidate report.
-
-- Windows: `build/player-validation/runs/20260926-212129-319/result.json`
-  and `20260926-212305-411/result.json` passed consecutive release-mode
-  production main/child smokes. The final cache-revision candidate also passed
-  at `build/player-validation/runs/20260926-215733-064/result.json`. These
-  cover changing video, virtual app audio, subtitles, HLS, seek, outage
-  recovery and display power release. The final production
-  `flutter build windows --release` and
-  `python tool/verify_player_dependencies.py` passed. The native core survived
-  interrupted HTTP reads and 21 timeline
-  changes using the 30-second synthetic media fixture. Earlier failed attempts
-  remain under `build/player-validation/runs/`.
-- Linux: `build/player-validation/linux-current-20260926-213519/validation.json`
-  passed a fresh production build, ELF audit, native package tests and actual
-  Xvfb window smoke on Ubuntu 24.04.5 with software Mesa and virtual audio.
-  The immediately preceding source run failed during a subtitle switch and is
-  retained at `linux-current-20260926-212859`; the passing candidate reuses
-  unchanged cache timeline snapshots. Xvfb does not establish physical GPU
-  performance or speaker output.
-- Android Studio API 36 emulators: 360dp phone
-  `build/android-validation/runs/20260926-narrow-final/result.json`, 412dp
-  phone `build/android-validation/runs/20260926-large-final/result.json`, and
-  TV `build/android-validation/runs/20260926-tv-final-grpc/result.json`
-  passed their separate app/native checks, changing frames and virtual audio.
-  The current-source ordinary APK audit passed at
-  `build/android-validation/runs/20260926-apk-final-candidate/result.json`.
-  The TV run used a cold Android Studio AVD with an explicit authenticated
-  emulator gRPC audio endpoint. Earlier failed TV runs are retained: one
-  sampled only 4.48 of 6 requested audio seconds, one lost the emulator, and
-  one used a stale gRPC discovery file. The phone runs predate the final
-  desktop transport/cache revisions; they are not fresh current-source runs.
-  All three targets have emulator evidence only.
-- macOS: an Apple M3 host on 2026-09-26 built the pinned universal SDK/core,
-  verified the Release bundle, probed FFmpeg n9.0.1/ABI 8, adhoc-signed a
-  test DMG and passed the sandbox proxy. GUI H.264/HEVC/VP9/AV1 frames,
-  physical audio, actual VideoToolbox decoder use and Intel remain open in
-  `packages/rillight_player/macos/TESTING_HANDOFF.md`. That is not a
-  playback pass.
-
-The all-hardware release gate and matched baseline/candidate performance
-comparison have not passed: physical Windows/Linux/Android audio and GPU
-observations, macOS target checks, and the required frozen baseline samples
-are unavailable in this workspace. Do not cite the passing local smoke as a
-measured five-platform speedup.
-
-During active playback, the cache bar maps locally present session blocks to
-media time and refreshes when the cache revision changes. The foreground read
-validates each block's CRC; an explicit integrity snapshot can also revoke a
-same-length corrupted disk block. External same-length corruption before the
-next read can temporarily overstate the live bar because its real-time path
-avoids a repeated full CRC scan that blocked seek/subtitle controls on Windows
-and Linux. This limit is not evidence of a fully tamper-proof live buffer bar.
+and real encoder termination also need real service evidence. Historical native runs remain tied to their original candidates and are kept
+outside this document.
 
 ## Package and output gate
 
@@ -167,8 +95,8 @@ CI configuration must be labeled with its actual environment; it cannot count
 as physical output. The JSON example describes a fully observed candidate,
 not a current result.
 
-GUI playback, physical audio and Intel results are still missing. For the
-explicitly agreed handoff, append `--macos-handoff
+When GUI playback or physical audio evidence is unavailable, an explicit
+target handoff can be recorded by appending `--macos-handoff
 packages/rillight_player/macos/TESTING_HANDOFF.md`. The result reports
 `passed: false`, `accepted_with_handoff: true`, and an unverified macOS item.
 This permits local workflow closure while preserving the missing playback proof.
@@ -339,12 +267,12 @@ emulator, or a single screenshot cannot be written as a physical pass.
 参考配置：
 
 - Windows x64 D3D11：HDR 行要一台报告 HDR10 PQ、至少 10 bit 的显示器。原生杜比记能力不支持。Atmos 在没有报告 Atmos 的接收端时记尚未验证。
-- macOS：已有记录的 MacBook Air M3 这一类机器。原生杜比记能力不支持。EDR 只在 headroom 大于 1 时记可测。HDMI Atmos 未接设备则尚未验证。
+- macOS：支持 EDR 的参考配置。原生杜比记能力不支持。EDR 只在 headroom 大于 1 时记可测。HDMI Atmos 未接设备则尚未验证。
 - Linux x64：只验收 SDR 映射和协商后的 PCM。原生杜比与 HDR 记能力不支持。
-- Android 手机：已有记录的 PKM110 / Android 16。该机没有 `video/dolby-vision`，原生杜比记能力不支持。Profile 5 的 RPU 路径和实体锁屏要在本候选重测，旧通过不沿用。
-- Android TV：仓库没有具体 leanback 机器。取得设备前各行记尚未验证，不用手机结果顶替。
+- Android 手机：未声明 Dolby 解码能力的参考手机配置。该机没有 `video/dolby-vision`，原生杜比记能力不支持。Profile 5 的 RPU 路径和实体锁屏要在本候选重测，旧通过不沿用。
+- Android TV：Android TV 需独立验证，各行保留尚未验证，不用手机结果顶替。
 
-scRGB、EDR 和 SDR 映射都是非原生杜比。只有 Android 实际选中 `video/dolby-vision` 且增强未生效时，才可能写成原生杜比；PKM110 没有该类型。
+scRGB、EDR 和 SDR 映射都是非原生杜比。只有 Android 实际选中 `video/dolby-vision` 且增强未生效时，才可能写成原生杜比；参考手机配置 没有该类型。
 
 | platform | capability | status | evidence |
 | --- | --- | --- | --- |
@@ -364,7 +292,7 @@ scRGB、EDR 和 SDR 映射都是非原生杜比。只有 Android 实际选中 `v
 | windows | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
 | windows | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
 | macos | native-dolby-vision | 能力不支持 | macOS EDR 是非原生杜比，本轮不发原生杜比信号 |
-| macos | video-output | 尚未验证 | EDR 是非原生杜比；MacBook Air M3 这一类机器仅在 headroom 大于 1 时可测，本候选未测 |
+| macos | video-output | 尚未验证 | EDR 是非原生杜比；支持 EDR 的参考配置仅在 headroom 大于 1 时可测，本候选未测 |
 | macos | atmos-passthrough | 尚未验证 | HDMI Atmos 未接设备 |
 | macos | multichannel-pcm | 尚未验证 | 本候选没有物理测量 |
 | macos | profile5-rpu | 尚未验证 | 本候选没有物理测量 |
@@ -394,8 +322,8 @@ scRGB、EDR 和 SDR 映射都是非原生杜比。只有 Android 实际选中 `v
 | linux | frame-interval | 尚未验证 | 固定阈值尚未在本候选测量 |
 | linux | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
 | linux | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
-| android-phone | native-dolby-vision | 能力不支持 | PKM110 / Android 16 没有 video/dolby-vision，原生杜比记能力不支持 |
-| android-phone | video-output | 尚未验证 | PKM110 没有 video/dolby-vision；PQ 或 SDR 回退不是原生杜比，旧通过不沿用 |
+| android-phone | native-dolby-vision | 能力不支持 | 参考手机配置 没有 video/dolby-vision，原生杜比记能力不支持 |
+| android-phone | video-output | 尚未验证 | 参考手机配置 没有 video/dolby-vision；PQ 或 SDR 回退不是原生杜比，旧通过不沿用 |
 | android-phone | atmos-passthrough | 尚未验证 | 本候选没有物理测量 |
 | android-phone | multichannel-pcm | 尚未验证 | 本候选没有物理测量 |
 | android-phone | profile5-rpu | 尚未验证 | Profile 5 的 RPU 路径要在本候选重测，旧通过不沿用 |
@@ -410,22 +338,21 @@ scRGB、EDR 和 SDR 映射都是非原生杜比。只有 Android 实际选中 `v
 | android-phone | av-sync | 尚未验证 | 固定阈值尚未在本候选测量 |
 | android-phone | enhancement-working-set | 尚未验证 | 固定阈值尚未在本候选测量 |
 | android-phone | physical-lock | 尚未验证 | 实体锁屏要在本候选重测，旧记录不沿用 |
-| android-tv | native-dolby-vision | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | video-output | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | atmos-passthrough | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | multichannel-pcm | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | profile5-rpu | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | profile7-fel | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | profile8-base-layer | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | frame-interpolation | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | anime4k | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | super-resolution | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | denoise | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | sharpen | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | frame-interval | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | av-sync | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| android-tv | enhancement-working-set | 尚未验证 | 没有 leanback 机器，不用手机结果顶替 |
-| historical-android-2026-10-01 | dolby-frame-interval-and-long-gop-seek | 已失败 | 2026-10-01 杜比 GPU 候选 passed=false，长 GOP 跳转和杜比帧间隔未通过；保留为历史失败，不自动成为当前候选结论 |
+| android-tv | native-dolby-vision | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | video-output | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | atmos-passthrough | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | multichannel-pcm | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | profile5-rpu | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | profile7-fel | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | profile8-base-layer | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | frame-interpolation | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | anime4k | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | super-resolution | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | denoise | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | sharpen | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | frame-interval | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | av-sync | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| android-tv | enhancement-working-set | 尚未验证 | 需在 Android TV 单独验证，不用手机结果顶替 |
+| historical-android-reference | dolby-frame-interval-and-long-gop-seek | 已失败 | 历史失败记录保持 passed=false；不自动成为当前候选结论，需独立重测 |
 
 <!-- capability-record:end -->
-

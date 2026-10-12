@@ -144,6 +144,8 @@ class _CoreSnapshot {
     this.effectiveSharpen = 0,
     this.doviReconstruction = 0,
     this.dolbyVisionCompatibility = -1,
+    this.decodeDiagnostics = '',
+    this.sourceDiagnostics = '',
   });
   final int state;
   final int ffmpegError;
@@ -179,12 +181,15 @@ class _CoreSnapshot {
   final int effectiveSharpen;
   final int doviReconstruction;
   final int dolbyVisionCompatibility;
+  final String decodeDiagnostics;
+  final String sourceDiagnostics;
 }
 
 /// One desktop snapshot plus the enhancement reasons read beside it.
 /// Position and playback state are not part of equality.
 class CoreOutputSample {
   const CoreOutputSample({
+    this.decodeDiagnostics = '',
     required this.dolbyVisionProfile,
     required this.dolbyVisionCompatibility,
     required this.videoOutputKind,
@@ -213,6 +218,7 @@ class CoreOutputSample {
   });
 
   factory CoreOutputSample.fromSnapshot({
+    String decodeDiagnostics = '',
     required int dolbyVisionProfile,
     required int dolbyVisionCompatibility,
     required int videoOutputKind,
@@ -243,6 +249,7 @@ class CoreOutputSample {
     final outputFrameRate = reportedRate is num ? reportedRate.toDouble() : 0.0;
 
     return CoreOutputSample(
+      decodeDiagnostics: decodeDiagnostics,
       dolbyVisionProfile: dolbyVisionProfile,
       dolbyVisionCompatibility: dolbyVisionCompatibility,
       videoOutputKind: videoOutputKind,
@@ -285,6 +292,7 @@ class CoreOutputSample {
     );
   }
 
+  final String decodeDiagnostics;
   final int dolbyVisionProfile;
   final int dolbyVisionCompatibility;
   final int videoOutputKind;
@@ -312,6 +320,7 @@ class CoreOutputSample {
   final double outputFrameRate;
 
   Map<String, Object> toMap() => {
+    'decodeDiagnostics': decodeDiagnostics,
     'dolbyVisionProfile': dolbyVisionProfile,
     'dolbyVisionCompatibility': dolbyVisionCompatibility,
     'videoOutputKind': videoOutputKind,
@@ -342,6 +351,7 @@ class CoreOutputSample {
   @override
   bool operator ==(Object other) {
     return other is CoreOutputSample &&
+        other.decodeDiagnostics == decodeDiagnostics &&
         other.dolbyVisionProfile == dolbyVisionProfile &&
         other.dolbyVisionCompatibility == dolbyVisionCompatibility &&
         other.videoOutputKind == videoOutputKind &&
@@ -371,6 +381,7 @@ class CoreOutputSample {
 
   @override
   int get hashCode => Object.hashAll([
+    decodeDiagnostics,
     dolbyVisionProfile,
     dolbyVisionCompatibility,
     videoOutputKind,
@@ -842,6 +853,7 @@ class DesktopCorePlayer
     final resolved =
         enhancement ?? {'outputFrameRate': _bindings.outputFrameRate(_handle)};
     return CoreOutputSample.fromSnapshot(
+      decodeDiagnostics: snapshot.decodeDiagnostics,
       dolbyVisionProfile: snapshot.dolbyVisionProfile,
       dolbyVisionCompatibility: snapshot.dolbyVisionCompatibility,
       videoOutputKind: snapshot.videoOutputKind,
@@ -926,6 +938,8 @@ class DesktopCorePlayer
         effectiveSharpen: value.effectiveSharpen,
         doviReconstruction: value.doviReconstruction,
         dolbyVisionCompatibility: value.dolbyVisionCompatibility,
+        decodeDiagnostics: _fixedString(value.decodeDiagnostics, 192),
+        sourceDiagnostics: _fixedString(value.sourceDiagnostics, 256),
       );
     } finally {
       calloc.free(pointer);
@@ -1077,6 +1091,8 @@ class DesktopCorePlayer
       'effectiveSharpen': snapshot.effectiveSharpen,
       'doviReconstruction': snapshot.doviReconstruction,
       'dolbyVisionCompatibility': snapshot.dolbyVisionCompatibility,
+      'decodeDiagnostics': snapshot.decodeDiagnostics,
+      'sourceDiagnostics': snapshot.sourceDiagnostics,
     };
   }
 
@@ -1088,6 +1104,16 @@ class DesktopCorePlayer
       values.add(bytes[index]);
     }
     return values.isEmpty ? null : String.fromCharCodes(values).toLowerCase();
+  }
+
+  static String _fixedString(Array<Uint8> bytes, int capacity) {
+    final codes = <int>[];
+    for (var index = 0; index < capacity; index++) {
+      final byte = bytes[index];
+      if (byte == 0) break;
+      codes.add(byte);
+    }
+    return String.fromCharCodes(codes);
   }
 
   int _commandGeneration = 0;

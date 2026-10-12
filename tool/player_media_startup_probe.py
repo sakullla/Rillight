@@ -40,7 +40,8 @@ def main():
             while time.monotonic() - start < 30:
                 value = probe.Snapshot()
                 value.struct_size = c.sizeof(value)
-                lib.rillight_core_snapshot(core, c.byref(value))
+                if lib.rillight_core_snapshot(core, c.byref(value)) != 0:
+                    raise RuntimeError('Core snapshot failed')
                 if value.state == 8:
                     raise RuntimeError(f'Core failure: {value.ffmpeg_error}')
                 if value.first_video_frame_ready:

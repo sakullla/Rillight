@@ -27,7 +27,7 @@ vertex VertexOut edr_vertex(uint id [[vertex_id]]) {
 fragment float4 edr_fragment(VertexOut input [[stage_in]],
                              texture2d<float> image [[texture(0)]]) {
   constexpr sampler color(filter::linear, address::clamp_to_edge);
-  return image.sample(color, input.uv);
+  return float4(image.sample(color, input.uv).rgb, 1.0);
 }
 )";
 
@@ -73,20 +73,10 @@ struct Presenter {
   bool Draw(const uint16_t* pixels, int width, int height, size_t stride) {
     @autoreleasepool {
     if (!layer || !pipeline || width <= 0 || height <= 0 || !pixels) return false;
-    std::vector<uint16_t> packed;
     const uint16_t* rows = pixels;
     size_t row_bytes = stride;
-    if (stride != static_cast<size_t>(width) * 8) {
-      packed.resize(static_cast<size_t>(width) * height * 4);
-      for (int y = 0; y < height; ++y) {
-        std::memcpy(packed.data() + static_cast<size_t>(y) * width * 4,
-                    reinterpret_cast<const uint8_t*>(pixels) +
-                        static_cast<size_t>(y) * stride,
-                    static_cast<size_t>(width) * 8);
-      }
-      rows = packed.data();
-      row_bytes = static_cast<size_t>(width) * 8;
-    }
+    // replaceRegion accepts a padded row pitch; do not repack the whole frame.
+    if (row_bytes < static_cast<size_t>(width) * 8 || row_bytes % 8) return false;
     // The GPU may still be sampling the previous upload. Reuse one of three
     // textures only after its completion handler releases it. An exceptional
     // busy pool uses a one-off texture; nextDrawable bounds the GPU queue.

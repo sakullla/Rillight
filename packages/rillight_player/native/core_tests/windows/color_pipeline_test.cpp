@@ -6,6 +6,73 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 #include <cstring>
+extern "C" {
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
+}
+
+std::vector<uint8_t> TexturePixels(ID3D11Texture2D* texture);
+
+void CheckDecoderContextLockScope() {
+  AVBufferRef* device = nullptr;
+  assert(av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_D3D11VA,
+                               nullptr, nullptr, 0) == 0);
+  auto* device_context = reinterpret_cast<AVHWDeviceContext*>(device->data);
+  auto* native = static_cast<AVD3D11VADeviceContext*>(device_context->hwctx);
+  struct Probe {
+    void (*lock)(void*);
+    void (*unlock)(void*);
+    void* context;
+    int entries = 0;
+    int depth = 0;
+  } probe{native->lock, native->unlock, native->lock_ctx};
+  native->lock_ctx = &probe;
+  native->lock = [](void* value) {
+    auto* p = static_cast<Probe*>(value);
+    p->lock(p->context); ++p->entries; ++p->depth;
+  };
+  native->unlock = [](void* value) {
+    auto* p = static_cast<Probe*>(value);
+    --p->depth; p->unlock(p->context);
+  };
+  AVBufferRef* frames = av_hwframe_ctx_alloc(device);
+  assert(frames);
+  auto* pool = reinterpret_cast<AVHWFramesContext*>(frames->data);
+  pool->format = AV_PIX_FMT_D3D11;
+  pool->sw_format = AV_PIX_FMT_P010LE;
+  pool->width = 64; pool->height = 48; pool->initial_pool_size = 2;
+  assert(av_hwframe_ctx_init(frames) == 0);
+  AVFrame* hardware = av_frame_alloc();
+  AVFrame* software = Picture(AV_PIX_FMT_P010LE, 512);
+  Metadata(software);
+  assert(hardware && av_hwframe_get_buffer(frames, hardware, 0) == 0);
+  assert(av_hwframe_transfer_data(hardware, software, 0) == 0);
+  assert(av_frame_copy_props(hardware, software) == 0);
+  WindowsColorPipeline pipeline;
+  probe.entries = 0;
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+  texture.Attach(static_cast<ID3D11Texture2D*>(
+      pipeline.RenderTexture(hardware, 32, 24, true)));
+  assert(texture && probe.depth == 0 && probe.entries >= 2);
+  const auto expected = TexturePixels(texture.Get());
+  probe.entries = 0;
+  std::vector<uint8_t> pixels(expected.size());
+  assert(pipeline.Render(hardware, 32, 24, true, pixels.data(), 32 * 4));
+  assert(pixels == expected && probe.depth == 0 && probe.entries >= 4);
+  // CPU fallback must not silently reuse a decoder context without its lock.
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> fallback;
+  fallback.Attach(static_cast<ID3D11Texture2D*>(
+      pipeline.RenderTexture(software, 32, 24, true)));
+  assert(fallback && TexturePixels(fallback.Get()) == expected);
+  Microsoft::WRL::ComPtr<ID3D11Device> fallback_device;
+  fallback->GetDevice(&fallback_device);
+  assert(fallback_device.Get() != native->device);
+  av_frame_free(&hardware); av_frame_free(&software);
+  av_buffer_unref(&frames);
+  native->lock = probe.lock; native->unlock = probe.unlock;
+  native->lock_ctx = probe.context;
+  av_buffer_unref(&device);
+}
 
 std::vector<uint8_t> TexturePixels(ID3D11Texture2D* texture) {
   using Microsoft::WRL::ComPtr;
@@ -199,7 +266,48 @@ void CheckFelStaysScRgb() {
   av_frame_free(&base);
 }
 
+void CheckOwnedTextureLifetime() {
+  auto pipeline = std::make_unique<WindowsColorPipeline>();
+  AVFrame* source = Picture(AV_PIX_FMT_P010LE, 512);
+  Metadata(source);
+  auto first = pipeline->RenderOwnedTexture(source, 32, 24, true, 203);
+  assert(first);
+  const auto expected = SharedTextureLinearPixels(static_cast<ID3D11Texture2D*>(first.get()));
+  auto retained = first;
+  void* address = first.get();
+  first.reset();
+  auto second = pipeline->RenderOwnedTexture(source, 32, 24, true, 203);
+  assert(second && second.get() != address);
+  retained.reset();
+  auto recycled = pipeline->RenderOwnedTexture(source, 32, 24, true, 203);
+  assert(recycled && recycled.get() == address);
+  auto* metadata = reinterpret_cast<AVDOVIMetadata*>(
+      av_frame_get_side_data(source, AV_FRAME_DATA_DOVI_METADATA)->data);
+  for (int order : {1, 3, 0}) {
+    for (int c = 0; c < 3; ++c) {
+      auto& curve = av_dovi_get_mapping(metadata)->curves[c];
+      curve.mapping_idc[0] = order ? AV_DOVI_MAPPING_MMR : AV_DOVI_MAPPING_POLYNOMIAL;
+      curve.mmr_order[0] = order;
+      curve.mmr_coef[0][0][c] = 1;
+    }
+    auto variant = pipeline->RenderOwnedTexture(source, 32, 24, true, 203);
+    assert(variant);
+    assert(SharedTextureLinearPixels(static_cast<ID3D11Texture2D*>(variant.get())) == expected);
+  }
+  auto resized = pipeline->RenderOwnedTexture(source, 24, 32, true, 203);
+  auto sdr = pipeline->RenderOwnedTexture(source, 32, 24, true);
+  assert(resized && sdr);
+  assert(SharedTextureLinearPixels(static_cast<ID3D11Texture2D*>(second.get())) == expected);
+  // Outstanding frames remain usable after the pipeline and its device state
+  // retire; late releases must not return them into a replacement device pool.
+  pipeline.reset();
+  assert(SharedTextureLinearPixels(static_cast<ID3D11Texture2D*>(recycled.get())) == expected);
+  av_frame_free(&source);
+}
+
 int main() {
+  CheckOwnedTextureLifetime();
+  CheckDecoderContextLockScope();
   CheckNativeHdr();
   CheckFelStaysScRgb();
   // GPU output must work before any CPU render, retain old images across

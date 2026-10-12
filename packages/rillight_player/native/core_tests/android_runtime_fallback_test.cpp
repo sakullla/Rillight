@@ -12,7 +12,7 @@ extern "C" {
 #include <dlfcn.h>
 static int injected_send_packet(AVCodecContext*, const AVPacket*);
 #define avcodec_send_packet injected_send_packet
-#include "../core/rillight_core.cpp"
+#include "core_implementation.h"
 #undef avcodec_send_packet
 static std::atomic<int> hardware_packets{0};
 static std::atomic<bool> injected{false};
@@ -92,5 +92,11 @@ int main(int argc,char**argv) {
   printf("injected=%d packets=%d frames=%d software_frames=%d distinct=%zu timeline=%llu->%llu hardware=%u last_pts=%lld\n",
       injected.load(),hardware_packets.load(),frames,after,colors.size(),(unsigned long long)initial,(unsigned long long)final,track.actual_hardware,(long long)last);
   assert(injected && after>60 && colors.size()>60 && final>initial && track.actual_hardware==RILLIGHT_CORE_HW_NONE);
+  RillightCoreSnapshot diagnostics{};
+  diagnostics.struct_size = sizeof(diagnostics);
+  assert(!rillight_core_snapshot(core, &diagnostics));
+  assert(std::strstr(diagnostics.decode_diagnostics, "software threads=") == diagnostics.decode_diagnostics);
+  assert(std::strstr(diagnostics.decode_diagnostics, presentation_test
+      ? "presentation requires software" : "runtime decoder failure"));
   rillight_core_destroy(core);AImageReader_delete(reader);return 0;
 }

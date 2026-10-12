@@ -26,7 +26,8 @@ class GpuPresenter {
  public:
   explicit GpuPresenter(IDXGIAdapter* adapter);
   std::shared_ptr<GpuPixelFrame> Present(const RillightCoreFrame& frame,
-      void* native_texture, int width, int height);
+      void* native_texture, int width, int height,
+      const RillightCoreSubtitleOverlay* overlay = nullptr);
   ID3D11Device* device() const { return device_.Get(); }
   void PresentHdr(const RillightCoreFrame& frame, void* native_texture,
       ID3D11Texture2D* target, float sdr_white_nits,

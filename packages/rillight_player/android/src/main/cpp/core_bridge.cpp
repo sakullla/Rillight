@@ -503,6 +503,30 @@ Java_com_rillight_player_CoreNative_snapshot(JNIEnv *env, jobject, jlong handle)
   return numbers(env, values, sizeof(values) / sizeof(values[0]));
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_rillight_player_CoreNative_diagnostics(JNIEnv *env, jobject, jlong handle,
+                                               jlong session, jlong timeline) {
+  if (!handle) return nullptr;
+  RillightCoreSnapshot snapshot{};
+  snapshot.struct_size = sizeof(snapshot);
+  if (rillight_core_snapshot(bridge(handle)->core, &snapshot) != 0 ||
+      snapshot.session_id != static_cast<uint64_t>(session) ||
+      snapshot.timeline_version != static_cast<uint64_t>(timeline)) return nullptr;
+  jclass string_class = env->FindClass("java/lang/String");
+  if (!string_class) return nullptr;
+  jobjectArray values = env->NewObjectArray(2, string_class, nullptr);
+  env->DeleteLocalRef(string_class);
+  if (!values) return nullptr;
+  const char* strings[] = {snapshot.decode_diagnostics, snapshot.source_diagnostics};
+  for (int index = 0; index < 2; ++index) {
+    jstring text = env->NewStringUTF(strings[index]);
+    if (!text) return nullptr;
+    env->SetObjectArrayElement(values, index, text);
+    env->DeleteLocalRef(text);
+  }
+  return values;
+}
+
 JNIEXPORT jint JNICALL
 Java_com_rillight_player_CoreNative_subtitlePresentation(JNIEnv *, jobject,
     jlong handle, jlong session, jdouble width, jdouble height, jdouble font_size,

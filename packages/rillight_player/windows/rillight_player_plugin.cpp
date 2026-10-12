@@ -100,12 +100,16 @@ class RillightPlayerPlugin : public flutter::Plugin {
       if (method == "create") {
         if (surfaces_.count(handle)) throw std::runtime_error("Surface already exists");
         if (!api_) api_ = std::make_shared<CoreApi>();
+        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+        registrar_->GetGraphicsAdapter(adapter.GetAddressOf());
+        // Decode must negotiate on the same adapter the presenter renders
+        // with, or legacy shared textures stop opening across devices.
+        api_->attach_d3d11_adapter(reinterpret_cast<RillightCore*>(handle),
+                                   adapter.Get());
         if (api_->configure_hardware(reinterpret_cast<RillightCore*>(handle),
                                      RILLIGHT_CORE_HW_D3D11, 1) != 0) {
           throw std::runtime_error("Could not configure D3D11 decoding with software fallback");
         }
-        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
-        registrar_->GetGraphicsAdapter(adapter.GetAddressOf());
         auto surface = std::make_shared<VideoSurface>(
             reinterpret_cast<RillightCore*>(handle), api_,
             registrar_->texture_registrar(), adapter.Get(), window_);
@@ -186,6 +190,8 @@ class RillightPlayerPlugin : public flutter::Plugin {
             {Value("error"), Value(surface->error())},
             {Value("audioWarning"), Value(surface->audio_warning())},
             {Value("actualHardware"), Value(static_cast<int32_t>(actual_hardware))},
+            {Value("decodeDiagnostics"), Value(snapshot_valid ? snapshot.decode_diagnostics : "")},
+            {Value("sourceDiagnostics"), Value(snapshot_valid ? snapshot.source_diagnostics : "")},
         }));
       } else if (method == "dispose") {
         surface->HideNativeOverlay();

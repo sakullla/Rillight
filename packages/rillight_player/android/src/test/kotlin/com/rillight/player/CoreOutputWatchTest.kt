@@ -47,4 +47,16 @@ class CoreOutputWatchTest {
         assertEquals(4L, clock.observe(snap(kind = 1, delivery = 3, effective = 0), reasons()))
         assertEquals(5L, clock.observe(snap(kind = 1, delivery = 3, effective = 0), reasons(4)))
     }
+
+    @Test fun diagnosticsOnlyFallbackAdvancesEpoch() {
+        val clock = OutputEpoch()
+        val current = snap()
+        val hardware = listOf("hardware; color=android-private-rpu", "demuxer=mov")
+        val software = listOf("software; color=portable-sdr", "demuxer=mov")
+        assertEquals(1L, clock.observe(current, null, hardware))
+        assertEquals(1L, clock.observe(current.copyOf(), null, hardware.toList()))
+        assertEquals(2L, clock.observe(current, null, software))
+        assertEquals(2L, clock.observe(null, null, emptyList()))
+        assertEquals(3L, clock.observe(current, null, software.map { it.replace("mov", "matroska") }))
+    }
 }

@@ -1996,6 +1996,12 @@ abstract class AppLocalizations {
   /// **'实际音频输出'**
   String get playbackOutputAudio;
 
+  /// No description provided for @playbackOutputDecode.
+  ///
+  /// In zh, this message translates to:
+  /// **'解码路径'**
+  String get playbackOutputDecode;
+
   /// No description provided for @playbackOutputUnknown.
   ///
   /// In zh, this message translates to:

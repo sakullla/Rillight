@@ -71,6 +71,13 @@ class _PlaybackOutputPanelState extends State<PlaybackOutputPanel> {
           playbackAudioOutputLabel(l10n, status),
           theme,
         ),
+        if (status.decodePath.isNotEmpty)
+          _line(
+            'playback-output-decode',
+            l10n.playbackOutputDecode,
+            status.decodePath,
+            theme,
+          ),
         if (status.hdrDisplayActive != null)
           Text(
             status.hdrDisplayActive!

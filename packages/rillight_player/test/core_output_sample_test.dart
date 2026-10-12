@@ -3,12 +3,14 @@ import 'package:rillight_player/src/core_player.dart';
 
 void main() {
   CoreOutputSample sample({
+    String decodeDiagnostics = 'd3d11 threads=4',
     int videoOutputKind = 3,
     int audioDelivery = 4,
     int effectiveInterpolation = 2,
     int reasonInterpolation = 1,
   }) {
     return CoreOutputSample.fromSnapshot(
+      decodeDiagnostics: decodeDiagnostics,
       dolbyVisionProfile: 7,
       dolbyVisionCompatibility: 6,
       videoOutputKind: videoOutputKind,
@@ -39,6 +41,23 @@ void main() {
     expect(first.toMap()['videoOutputKind'], 3);
     expect(first.toMap().containsKey('position'), isFalse);
     expect(first.reasonInterpolation, 1);
+  });
+
+  test('decoder-only fallback changes are published with the sample', () {
+    final hardware = sample();
+    final software = sample(decodeDiagnostics: 'software threads=4');
+    expect(hardware.toMap()['decodeDiagnostics'], 'd3d11 threads=4');
+    expect(software.toMap()['decodeDiagnostics'], 'software threads=4');
+    expect(software, isNot(hardware));
+    expect(software, sample(decodeDiagnostics: 'software threads=4'));
+    expect(
+      software.hashCode,
+      sample(decodeDiagnostics: 'software threads=4').hashCode,
+    );
+    expect(
+      sample(videoOutputKind: 1).toMap()['decodeDiagnostics'],
+      'd3d11 threads=4',
+    );
   });
 
   test('kind, delivery, effective tier and reason are different samples', () {

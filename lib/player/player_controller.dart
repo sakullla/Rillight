@@ -240,6 +240,31 @@ class PlayerController extends ChangeNotifier {
   bool get permissionRevoked => _revoked;
   bool _revokedCleanupComplete = false;
   Future<PlayerStartupData?>? _startupData;
+  final _openStageMs = <String, int>{};
+
+  /// Wall-clock milliseconds per open stage of the latest open attempt.
+  /// Remote triage compares these against the startup baseline document.
+  Map<String, int> get openStageTimings => Map.unmodifiable(_openStageMs);
+  List<PlaybackMediaSource>? _startupVersions;
+  DateTime? _startupVersionsAt;
+
+  /// One-shot inherited versions from the launch handoff. Only a fresh,
+  /// same-item, first open may skip source discovery; every reopen, renewal
+  /// or retry negotiates from the server again.
+  List<PlaybackMediaSource>? _takeStartupVersions(String itemId) {
+    final versions = _startupVersions;
+    final fetchedAt = _startupVersionsAt;
+    _startupVersions = null;
+    _startupVersionsAt = null;
+    if (versions == null || versions.isEmpty) return null;
+    if (openRequest?.itemId != itemId) return null;
+    if (fetchedAt == null ||
+        DateTime.now().difference(fetchedAt) > const Duration(seconds: 30)) {
+      return null;
+    }
+    return versions;
+  }
+
   String itemId;
   final VideoBackend backend;
   final PlayerWindow window;
@@ -892,12 +917,20 @@ class PlayerController extends ChangeNotifier {
           _startupData = null;
           final prepared = await startup;
           if (!_accepts(operation)) return;
-          if (!_scopedPlayback &&
-              prepared != null &&
+          if (prepared != null &&
               prepared.item.id == itemId &&
               (prepared.user == null || prepared.user!.id == client.userId)) {
             loadedItem = prepared.item;
             loadedUser = prepared.user;
+            _startupVersions = prepared.versions;
+            _startupVersionsAt = prepared.fetchedAt;
+            if (loadedUser == null) {
+              try {
+                loadedUser = await _sourceRequest(client.getUser);
+              } on MediaServerException {
+                // Optional preferences must not fail otherwise playable media.
+              }
+            }
             return;
           }
           await Future.wait<void>([
@@ -4061,10 +4094,26 @@ class PlayerController extends ChangeNotifier {
     final current = resolved;
     final renewal = backend;
     if (current == null ||
-        current.isTranscode ||
         renewal is! VideoBackendSourceRenewal ||
         _sourceRenewalOperation == operation.id ||
         !_accepts(operation)) {
+      return;
+    }
+    if (current.isTranscode) {
+      // An expired server transcode cannot renew its URL in place; only a
+      // reopen at the current position restarts segment generation.
+      _sourceRenewalOperation = operation.id;
+      try {
+        if (!_accepts(operation)) return;
+        await _reopen(
+          startTicks: ticksFromDuration(position),
+          startPaused: _pauseIntent,
+        );
+      } finally {
+        if (_sourceRenewalOperation == operation.id) {
+          _sourceRenewalOperation = null;
+        }
+      }
       return;
     }
     _sourceRenewalOperation = operation.id;
@@ -4187,6 +4236,13 @@ class PlayerController extends ChangeNotifier {
       await _releasePrepared(preparedInfo?.resources);
       return;
     }
+    final openedAt = DateTime.now();
+    _openStageMs.clear();
+    void stage(String name) {
+      _openStageMs[name] = DateTime.now().difference(openedAt).inMilliseconds;
+      onStage?.call(name);
+    }
+
     PlaybackResourceLease? preparing;
     _pauseIntent = startPaused;
     loading = true;
@@ -4216,7 +4272,7 @@ class PlayerController extends ChangeNotifier {
     _emit();
 
     try {
-      onStage?.call('metadata');
+      stage('metadata');
       final requestClient = client;
       PlaybackInfo? info = preparedInfo;
       preparing = info?.resources;
@@ -4226,13 +4282,14 @@ class PlayerController extends ChangeNotifier {
       var sources =
           info?.mediaSources ??
           (requestClient is PlaybackMetadataProvider
-              ? await _sourceRequest<List<PlaybackMediaSource>>(
-                  () => (requestClient as PlaybackMetadataProvider)
-                      .getPlaybackSources(
-                        itemId: itemId,
-                        position: durationFromTicks(startTicks),
-                      ),
-                )
+              ? (_takeStartupVersions(itemId) ??
+                    await _sourceRequest<List<PlaybackMediaSource>>(
+                      () => (requestClient as PlaybackMetadataProvider)
+                          .getPlaybackSources(
+                            itemId: itemId,
+                            position: durationFromTicks(startTicks),
+                          ),
+                    ))
               : playbackSourcesFromItem(item!));
       if (!_accepts(operation)) return;
       var legacyDiscovery = false;
@@ -4517,7 +4574,7 @@ class PlayerController extends ChangeNotifier {
       final subtitleRevision = ++_trackRevision;
       _trackRevisions['SubtitleTrackChange'] = subtitleRevision;
 
-      onStage?.call('native open');
+      stage('native open');
       // The transcoding URL already includes StartTimeTicks. Seeking the core
       // to the same absolute time lands inside a playlist that starts at 0.
       _streamOrigin = next.filmTimeline != null
@@ -4597,12 +4654,12 @@ class PlayerController extends ChangeNotifier {
                     TranscodeSubtitleDelivery.burnIn
             ? selectedSubtitle
             : backend.selectedSubtitleIndex;
-        onStage?.call('restore volume');
+        stage('restore volume');
         final volumeApplied = await _restoreParameter(
           operation,
           () => backend.setVolume(mpvVolumeForPercent(volume)),
         );
-        onStage?.call('restore playback rate');
+        stage('restore playback rate');
         final rateApplied = await _restoreParameter(
           operation,
           () => backend.setRate(playbackRate),
@@ -4610,7 +4667,7 @@ class PlayerController extends ChangeNotifier {
         if (isRecovering && (!volumeApplied || !rateApplied)) {
           throw StateError('Required playback settings were not restored');
         }
-        onStage?.call('restore audio track');
+        stage('restore audio track');
         final audioApplied = await _restoreParameter(operation, () async {
           if (selectedAudio != null && !next.isTranscode) {
             if (backend.selectedAudioIndex != selectedAudio) {
@@ -4649,7 +4706,7 @@ class PlayerController extends ChangeNotifier {
       bool ownsSubtitle() =>
           identical(subtitleSession, _session) &&
           subtitleRevision == _trackRevisions['SubtitleTrackChange'];
-      onStage?.call('restore subtitle track');
+      stage('restore subtitle track');
       final subtitleApplied = await _restoreParameter(operation, () async {
         await _applySubtitle(
           next,
@@ -4689,6 +4746,7 @@ class PlayerController extends ChangeNotifier {
         }
       }
       if (!_accepts(operation)) return;
+      stage('ready');
       loading = false;
       state.updatePlaying(isPlaying);
       // 续播落在片头/片尾或最后几分钟时,loading 期间的 position 不会弹出
@@ -4699,7 +4757,7 @@ class PlayerController extends ChangeNotifier {
       _emit();
     } on VideoCompatibilityException catch (failure) {
       if (!forceTranscode && _accepts(operation)) {
-        onStage?.call('compatibility stop');
+        stage('compatibility stop');
         final retirement = _operations.interrupt(
           backend.stop,
           ensureRetired: true,
@@ -4727,7 +4785,16 @@ class PlayerController extends ChangeNotifier {
     } on MediaServerException catch (failure) {
       await _failOpen(operation, failure: failure);
     } catch (error) {
-      await _failOpen(operation, detail: error.toString());
+      var detail = error.toString();
+      if (backend is VideoBackendFailureContext) {
+        final context = await (backend as VideoBackendFailureContext)
+            .failureContext()
+            .timeout(const Duration(seconds: 2));
+        if (context != null && context.isNotEmpty) {
+          detail = '$detail ($context)';
+        }
+      }
+      await _failOpen(operation, detail: detail);
     } finally {
       if (!identical(_session?.resources, preparing)) {
         await _releasePrepared(preparing);
@@ -4802,6 +4869,14 @@ class PlayerController extends ChangeNotifier {
         loadFailure = failure;
         if (detail != null && detail.trim().isNotEmpty) {
           disconnectDetail = detail.trim();
+        }
+        if (_openStageMs.isNotEmpty) {
+          final trace = _openStageMs.entries
+              .map((entry) => '${entry.key}=${entry.value}ms')
+              .join(' ');
+          disconnectDetail = disconnectDetail == null
+              ? 'stages: $trace'
+              : '$disconnectDetail; stages: $trace';
         }
         state.phase = PlaybackPhase.failed;
         loading = false;

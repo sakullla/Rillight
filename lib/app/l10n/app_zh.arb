@@ -1095,6 +1095,7 @@
   "playbackOutputSource": "片源",
   "playbackOutputVideo": "实际视频输出",
   "playbackOutputAudio": "实际音频输出",
+  "playbackOutputDecode": "解码路径",
   "playbackOutputUnknown": "未知",
   "playbackOutputNone": "无",
   "playbackOutputNotDolby": "非杜比视界",

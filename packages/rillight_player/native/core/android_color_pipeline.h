@@ -10,12 +10,13 @@ struct ANativeWindow;
 // conversion or readback.
 class AndroidColorPipeline {
  public:
-  AndroidColorPipeline();
+  explicit AndroidColorPipeline(bool allow_filtered_planes = true);
   ~AndroidColorPipeline();
   static bool SupportsPrivateYuv();
   bool Render(const AVFrame* frame, ANativeWindow* window, bool hdr_supported);
   // True only after a successful BT.2020 PQ surface, never a Dolby HDMI signal.
   bool HdrPresented() const;
+  const char* Path() const;
 
  private:
   struct Impl;

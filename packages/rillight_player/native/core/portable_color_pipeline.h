@@ -20,6 +20,7 @@ class PortableColorPipeline {
   bool RenderLinearHalf(const AVFrame* frame, int width, int height,
                         bool dolby_vision, uint16_t* rgba, int stride,
                         const AVFrame* enhancement = nullptr);
+  bool UsedMetal() const;
 
  private:
   struct Impl;

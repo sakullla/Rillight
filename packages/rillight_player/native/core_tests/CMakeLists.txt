@@ -100,6 +100,19 @@ if(ANDROID AND RILLIGHT_CORE_GPU_TESTS)
   # Run manually with the generated fixture; do not require a private clip in CI.
 endif()
 if(APPLE AND RILLIGHT_CORE_GPU_TESTS)
+  add_executable(rillight_macos_hardware_video_route_test
+    macos/hardware_video_route_test.cpp ../core/portable_color_pipeline.cpp
+    ../core/decoder_probe.cpp ../core/enhancement_compat.cpp)
+  target_include_directories(rillight_macos_hardware_video_route_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
+  target_compile_definitions(rillight_macos_hardware_video_route_test PRIVATE RILLIGHT_HAVE_LIBASS=0)
+  target_compile_options(rillight_macos_hardware_video_route_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+  target_link_libraries(rillight_macos_hardware_video_route_test PRIVATE
+    ${avformat_library} ${avcodec_library} ${avfilter_library} ${avutil_library}
+    ${swscale_library} ${swresample_library} Threads::Threads)
+  set_target_properties(rillight_macos_hardware_video_route_test PROPERTIES BUILD_RPATH "${core_lib_dir}")
+  add_test(NAME rillight_macos_hardware_video_route COMMAND rillight_macos_hardware_video_route_test)
+  set_tests_properties(rillight_macos_hardware_video_route PROPERTIES TIMEOUT 30
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
   add_executable(rillight_macos_color_pipeline_test
     macos/color_pipeline_test.cpp ../core/macos_color_pipeline.mm
     ../core/portable_color_pipeline.cpp)
@@ -137,7 +150,38 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 elseif(APPLE)
   set_tests_properties(rillight_portable_color_pipeline PROPERTIES ENVIRONMENT "DYLD_LIBRARY_PATH=${core_lib_dir}")
 endif()
+if(WIN32)
+  add_executable(rillight_decoder_diagnostics_test
+    windows/decoder_diagnostics_test.cpp ../core/windows_color_pipeline.cpp
+    ../core/portable_color_pipeline.cpp ../core/decoder_probe.cpp
+    ../core/enhancement_compat.cpp)
+  target_include_directories(rillight_decoder_diagnostics_test PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
+  target_compile_definitions(rillight_decoder_diagnostics_test PRIVATE RILLIGHT_HAVE_LIBASS=0)
+  target_link_libraries(rillight_decoder_diagnostics_test PRIVATE
+    ${avformat_library} ${avcodec_library} ${avfilter_library} ${avutil_library}
+    ${swscale_library} ${swresample_library} Threads::Threads d3d11 d3dcompiler dxgi)
+  if(MSVC)
+    target_compile_options(rillight_decoder_diagnostics_test PRIVATE /UNDEBUG)
+  else()
+    target_compile_options(rillight_decoder_diagnostics_test PRIVATE -UNDEBUG)
+  endif()
+  add_test(NAME rillight_decoder_diagnostics COMMAND rillight_decoder_diagnostics_test)
+  set_tests_properties(rillight_decoder_diagnostics PROPERTIES TIMEOUT 20)
+endif()
 if(WIN32 AND RILLIGHT_CORE_GPU_TESTS)
+  add_executable(rillight_windows_color_benchmark
+    windows/color_pipeline_benchmark.cpp ../core/windows_color_pipeline.cpp
+    ../../windows/gpu_present.cpp)
+  target_compile_features(rillight_windows_color_benchmark PRIVATE cxx_std_17)
+  target_compile_definitions(rillight_windows_color_benchmark PRIVATE NOMINMAX)
+  target_include_directories(rillight_windows_color_benchmark PRIVATE "${RILLIGHT_CORE_PREFIX}/include")
+  target_link_libraries(rillight_windows_color_benchmark PRIVATE
+    ${avutil_library} d3d11 d3dcompiler dxgi)
+  if(MSVC)
+    target_compile_options(rillight_windows_color_benchmark PRIVATE /O2 /UNDEBUG)
+  else()
+    target_compile_options(rillight_windows_color_benchmark PRIVATE -O3 -UNDEBUG)
+  endif()
   add_executable(rillight_windows_color_pipeline_test
     windows/color_pipeline_test.cpp ../core/windows_color_pipeline.cpp ../core/portable_color_pipeline.cpp)
   target_compile_features(rillight_windows_color_pipeline_test PRIVATE cxx_std_17)

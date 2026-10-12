@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/media_server/serialization.dart';
 import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/player_startup.dart';
@@ -165,5 +166,127 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('handoff preparation carries negotiated versions losslessly', () async {
+    const source = PlaybackMediaSource(
+      id: 'ms',
+      name: '4K HDR',
+      container: 'mkv',
+      protocol: 'File',
+      path: '/srv/movie.mkv',
+      supportsDirectPlay: true,
+      supportsDirectStream: true,
+      isInfiniteStream: false,
+      directStreamUrl: '/stream?ms=1',
+      bitrate: 42000000,
+      size: 8123456789,
+      width: 3840,
+      height: 2160,
+      runtime: Duration(seconds: 5400),
+      defaultAudioStreamIndex: 2,
+      mediaStreams: [
+        MediaStreamInfo(
+          index: 1,
+          type: 'Video',
+          codec: 'hevc',
+          width: 3840,
+          height: 2160,
+          bitRate: 40000000,
+          videoRange: 'HDR',
+          videoRangeType: 'DOVI',
+        ),
+        MediaStreamInfo(
+          index: 2,
+          type: 'Audio',
+          codec: 'eac3',
+          language: 'chi',
+          displayTitle: '中文 TrueHD Atmos',
+          channels: 8,
+          isDefault: true,
+        ),
+        MediaStreamInfo(
+          index: 3,
+          type: 'Subtitle',
+          codec: 'ass',
+          language: 'chi',
+          isExternal: true,
+          isTextSubtitleStream: true,
+          deliveryMethod: 'External',
+          deliveryUrl: '/sub/3',
+          playbackIndex: 5,
+        ),
+      ],
+    );
+    final protocol = await PlayerProcessProtocol.create();
+    addTearDown(protocol.dispose);
+    final preparation = PlayerStartupPreparation.handoff(
+      userId: 'user',
+      itemId: 'item',
+      item: item,
+      user: user,
+      versions: const [source],
+    );
+    await protocol.write('startup', await preparation.payload);
+    final data = await PlayerStartupData.receive(
+      protocol,
+      itemId: 'item',
+      userId: 'user',
+      timeout: const Duration(milliseconds: 50),
+    );
+    expect(data, isNotNull);
+    expect(data!.fetchedAt, isNotNull);
+    final versions = data.versions!;
+    expect(versions, hasLength(1));
+    final decoded = versions.single;
+    expect(decoded.id, source.id);
+    expect(decoded.container, source.container);
+    expect(decoded.protocol, source.protocol);
+    expect(decoded.path, source.path);
+    expect(decoded.supportsDirectPlay, isTrue);
+    expect(decoded.supportsDirectStream, isTrue);
+    expect(decoded.supportsTranscoding, isFalse);
+    expect(decoded.isInfiniteStream, isFalse);
+    expect(decoded.directStreamUrl, source.directStreamUrl);
+    expect(decoded.transcodingUrl, isNull);
+    expect(decoded.bitrate, source.bitrate);
+    expect(decoded.size, source.size);
+    expect(decoded.width, source.width);
+    expect(decoded.height, source.height);
+    expect(decoded.runtime, source.runtime);
+    expect(decoded.defaultAudioStreamIndex, 2);
+    expect(decoded.mediaStreams, hasLength(3));
+    final video = decoded.mediaStreams[0];
+    expect(video.type, 'Video');
+    expect(video.codec, 'hevc');
+    expect(video.width, 3840);
+    expect(video.bitRate, 40000000);
+    expect(video.videoRangeType, 'DOVI');
+    final audio = decoded.mediaStreams[1];
+    expect(audio.codec, 'eac3');
+    expect(audio.language, 'chi');
+    expect(audio.displayTitle, '中文 TrueHD Atmos');
+    expect(audio.channels, 8);
+    expect(audio.isDefault, isTrue);
+    final subtitle = decoded.mediaStreams[2];
+    expect(subtitle.isExternal, isTrue);
+    expect(subtitle.isTextSubtitleStream, isTrue);
+    expect(subtitle.deliveryMethod, 'External');
+    expect(subtitle.deliveryUrl, '/sub/3');
+    expect(subtitle.playbackIndex, 5);
+  });
+
+  test('handoff without versions still completes a usable payload', () async {
+    final preparation = PlayerStartupPreparation.handoff(
+      userId: 'user',
+      itemId: 'item',
+      item: item,
+    );
+    final payload = await preparation.payload;
+    expect(payload['itemId'], 'item');
+    expect(payload['userId'], 'user');
+    expect((payload['item'] as Map)['id'], 'item');
+    expect(payload.containsKey('user'), isFalse);
+    expect(payload.containsKey('versions'), isFalse);
   });
 }

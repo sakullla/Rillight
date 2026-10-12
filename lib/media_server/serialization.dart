@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'playback.dart';
 
 // Local cache and child-process schema. Never use these maps as server payloads.
 
@@ -307,3 +308,99 @@ LibraryCounts decodeLibraryCounts(Map<String, dynamic> json) => LibraryCounts(
       decodeLibraryCountEntry(Map<String, dynamic>.from(value as Map)),
   ],
 );
+
+/// Negotiated playback metadata for the child-process startup mailbox. These
+/// mirrors must stay field-complete: a dropped field silently downgrades the
+/// child's stream negotiation to the legacy path.
+Map<String, dynamic> encodeMediaStreamInfo(MediaStreamInfo value) => {
+  'index': value.index,
+  'type': value.type,
+  'codec': value.codec,
+  'language': value.language,
+  'displayTitle': value.displayTitle,
+  'isDefault': value.isDefault,
+  'isExternal': value.isExternal,
+  'isTextSubtitleStream': value.isTextSubtitleStream,
+  'deliveryMethod': value.deliveryMethod,
+  'deliveryUrl': value.deliveryUrl,
+  'playbackIndex': value.playbackIndex,
+  'channels': value.channels,
+  'width': value.width,
+  'height': value.height,
+  'bitRate': value.bitRate,
+  'videoRange': value.videoRange,
+  'videoRangeType': value.videoRangeType,
+};
+MediaStreamInfo decodeMediaStreamInfo(Map<String, dynamic> json) =>
+    MediaStreamInfo(
+      index: json['index'] as int? ?? 0,
+      type: json['type'] as String? ?? '',
+      codec: json['codec'] as String?,
+      language: json['language'] as String?,
+      displayTitle: json['displayTitle'] as String?,
+      isDefault: json['isDefault'] as bool? ?? false,
+      isExternal: json['isExternal'] as bool? ?? false,
+      isTextSubtitleStream: json['isTextSubtitleStream'] as bool?,
+      deliveryMethod: json['deliveryMethod'] as String?,
+      deliveryUrl: json['deliveryUrl'] as String?,
+      playbackIndex: json['playbackIndex'] as int?,
+      channels: json['channels'] as int?,
+      width: json['width'] as int?,
+      height: json['height'] as int?,
+      bitRate: json['bitRate'] as int?,
+      videoRange: json['videoRange'] as String?,
+      videoRangeType: json['videoRangeType'] as String?,
+    );
+
+Map<String, dynamic> encodePlaybackMediaSource(PlaybackMediaSource value) => {
+  'id': value.id,
+  'name': value.name,
+  'container': value.container,
+  'protocol': value.protocol,
+  'path': value.path,
+  'supportsDirectPlay': value.supportsDirectPlay,
+  'supportsDirectStream': value.supportsDirectStream,
+  'supportsTranscoding': value.supportsTranscoding,
+  'isRemote': value.isRemote,
+  'isInfiniteStream': value.isInfiniteStream,
+  'directStreamUrl': value.directStreamUrl,
+  'transcodingUrl': value.transcodingUrl,
+  'transcodingOutputBitrate': value.transcodingOutputBitrate,
+  'runtimeUs': value.runtime?.inMicroseconds,
+  'defaultAudioStreamIndex': value.defaultAudioStreamIndex,
+  'defaultSubtitleStreamIndex': value.defaultSubtitleStreamIndex,
+  'size': value.size,
+  'bitrate': value.bitrate,
+  'width': value.width,
+  'height': value.height,
+  'mediaStreams': value.mediaStreams.map(encodeMediaStreamInfo).toList(),
+};
+PlaybackMediaSource decodePlaybackMediaSource(Map<String, dynamic> json) =>
+    PlaybackMediaSource(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String?,
+      container: json['container'] as String?,
+      protocol: json['protocol'] as String?,
+      path: json['path'] as String?,
+      supportsDirectPlay: json['supportsDirectPlay'] as bool? ?? false,
+      supportsDirectStream: json['supportsDirectStream'] as bool? ?? false,
+      supportsTranscoding: json['supportsTranscoding'] as bool? ?? false,
+      isRemote: json['isRemote'] as bool? ?? false,
+      isInfiniteStream: json['isInfiniteStream'] as bool? ?? false,
+      directStreamUrl: json['directStreamUrl'] as String?,
+      transcodingUrl: json['transcodingUrl'] as String?,
+      transcodingOutputBitrate: json['transcodingOutputBitrate'] as int?,
+      runtime: json['runtimeUs'] == null
+          ? null
+          : Duration(microseconds: json['runtimeUs'] as int),
+      defaultAudioStreamIndex: json['defaultAudioStreamIndex'] as int?,
+      defaultSubtitleStreamIndex: json['defaultSubtitleStreamIndex'] as int?,
+      size: json['size'] as int?,
+      bitrate: json['bitrate'] as int?,
+      width: json['width'] as int?,
+      height: json['height'] as int?,
+      mediaStreams: [
+        for (final value in json['mediaStreams'] as List? ?? const [])
+          decodeMediaStreamInfo(Map<String, dynamic>.from(value as Map)),
+      ],
+    );

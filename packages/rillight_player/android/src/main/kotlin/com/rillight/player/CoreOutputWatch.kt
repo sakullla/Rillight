@@ -44,13 +44,17 @@ internal class OutputEpoch {
         private set
     var reasons: IntArray? = null
         private set
+    private var diagnostics: List<String> = emptyList()
 
-    fun observe(current: LongArray?, currentReasons: IntArray?): Long {
+    fun observe(current: LongArray?, currentReasons: IntArray?,
+                currentDiagnostics: List<String> = emptyList()): Long {
         if (current == null) return epoch
-        if (!CoreOutputWatch.changed(snap, current, reasons, currentReasons)) return epoch
+        if (!CoreOutputWatch.changed(snap, current, reasons, currentReasons) &&
+            diagnostics == currentDiagnostics) return epoch
         epoch += 1
         snap = current.copyOf()
         reasons = currentReasons?.copyOf()
+        diagnostics = currentDiagnostics.toList()
         return epoch
     }
 }

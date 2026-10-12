@@ -937,7 +937,10 @@ internal class CorePlayback(
         val rejectedText = serverStreams.filter { it.type == "Subtitle" && !it.external && it.index !in mapping }.map { it.index }
         val containerIds = handle?.let(CoreNative::containerTrackIds)
         val reasons: IntArray? = null
-        val epoch = outputClock.observe(snap, reasons)
+        val diagnostics = if (handle != null && snap != null)
+            CoreNative.diagnostics(handle, snap[1], snap[3])?.toList().orEmpty()
+            else emptyList()
+        val epoch = outputClock.observe(snap, reasons, diagnostics)
         return mapOf("sessionId" to session, "audioIndex" to audioIndex,
             "subtitleIndex" to subtitleIndex,
             "secondarySubtitleIndex" to snap?.getOrNull(36)?.toInt()?.let { native -> mapping.entries.firstOrNull { it.value == native }?.key },
@@ -949,6 +952,8 @@ internal class CorePlayback(
             "audioTrackId" to containerIds?.getOrNull(1)?.takeIf { it > 0 },
             // Decoder actually used for the video track; 0 means software or no video.
             "actualHardware" to actualHardware,
+            "decodeDiagnostics" to diagnostics.getOrElse(0) { "" },
+            "sourceDiagnostics" to diagnostics.getOrElse(1) { "" },
             "dolbyVisionProfile" to (snap?.getOrNull(17)?.toInt() ?: -1),
             "videoOutputKind" to (snap?.getOrNull(18)?.toInt() ?: 0),
             "audioDelivery" to (snap?.getOrNull(19)?.toInt() ?: 0),
