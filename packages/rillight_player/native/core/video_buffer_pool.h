@@ -9,7 +9,8 @@
 #include <vector>
 
 // Returned frames can outlive the decoder and be released on renderer threads.
-// The shared owner retains at most two matching allocations, capped at 64 MiB.
+// Retain at most two matching allocations within 64 MiB, or one oversized
+// frame. The latter avoids reallocating an 8K software output on every frame.
 class VideoBufferPool {
  public:
   uint8_t* Acquire(size_t bytes) {
@@ -28,7 +29,8 @@ class VideoBufferPool {
     std::unique_ptr<uint8_t[]> buffer(data);
     std::lock_guard lock(mutex_);
     if (bytes == size_ && available_.size() < 2 &&
-        bytes <= (64u * 1024u * 1024u) / (available_.size() + 1)) {
+        (available_.empty() ||
+         bytes <= (64u * 1024u * 1024u) / (available_.size() + 1))) {
       available_.push_back(std::move(buffer));
     }
   }
