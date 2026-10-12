@@ -95,7 +95,7 @@ int main(int argc,char**argv) {
   RillightCoreSnapshot diagnostics{};
   diagnostics.struct_size = sizeof(diagnostics);
   assert(!rillight_core_snapshot(core, &diagnostics));
-  assert(std::strstr(diagnostics.decode_diagnostics, "software threads=") == diagnostics.decode_diagnostics);
+  assert(std::strstr(diagnostics.decode_diagnostics, "software ffmpeg_threads=") == diagnostics.decode_diagnostics);
   assert(std::strstr(diagnostics.decode_diagnostics, presentation_test
       ? "presentation requires software" : "runtime decoder failure"));
   rillight_core_destroy(core);AImageReader_delete(reader);return 0;

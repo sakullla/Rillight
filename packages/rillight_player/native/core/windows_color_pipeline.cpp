@@ -276,6 +276,9 @@ struct WindowsColorPipeline::Impl {
   struct OutputPool {
     std::mutex mutex;
     std::vector<std::unique_ptr<OutputImage>> available;
+    int width = 0, height = 0;
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+    bool active = true;
     OutputPool() { available.reserve(3); }
   };
   std::shared_ptr<OutputPool> output_pool = std::make_shared<OutputPool>();
@@ -296,9 +299,17 @@ struct WindowsColorPipeline::Impl {
   std::vector<uint16_t> interleaved;
   bool shared_device = false;
 
+  void RetireOutputPool() {
+    std::lock_guard lock(output_pool->mutex);
+    output_pool->active = false;
+    output_pool->available.clear();
+  }
+  ~Impl() { RetireOutputPool(); }
+
   void Initialize(ID3D11Device* selected, ID3D11DeviceContext* selected_context) {
     if (parameters && (selected ? selected == device.Get() : !shared_device)) return;
     // Outstanding leases retain the old pool/device and cannot enter this one.
+    RetireOutputPool();
     output_pool = std::make_shared<OutputPool>();
     input.Reset(); luma_texture.Reset(); chroma_texture.Reset(); luma.Reset(); chroma.Reset();
     output.Reset(); staging.Reset(); target.Reset(); gpu_complete.Reset();
@@ -391,6 +402,12 @@ struct WindowsColorPipeline::Impl {
     std::unique_ptr<OutputImage> image;
     {
       std::lock_guard lock(output_pool->mutex);
+      if (output_pool->width != width || output_pool->height != height ||
+          output_pool->format != format) {
+        output_pool->available.clear();
+        output_pool->width = width; output_pool->height = height;
+        output_pool->format = format;
+      }
       while (!output_pool->available.empty()) {
         auto candidate = std::move(output_pool->available.back());
         output_pool->available.pop_back();
@@ -411,8 +428,17 @@ struct WindowsColorPipeline::Impl {
         [pool = output_pool](OutputImage* released) {
           std::unique_ptr<OutputImage> owned(released);
           std::lock_guard lock(pool->mutex);
-          // Bound idle VRAM; active/queued frames remain governed by the core.
-          if (pool->available.size() < 3) pool->available.push_back(std::move(owned));
+          D3D11_TEXTURE2D_DESC desc{}; owned->texture->GetDesc(&desc);
+          const size_t bytes = static_cast<size_t>(desc.Width) * desc.Height *
+              (desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ? 8 : 4);
+          // Keep at least one current-sized spare: an 8K image exceeds the
+          // normal idle budget by itself, but must still be reusable between
+          // frames. Only smaller images may retain multiple idle siblings.
+          if (pool->active && desc.Width == static_cast<UINT>(pool->width) &&
+              desc.Height == static_cast<UINT>(pool->height) && desc.Format == pool->format &&
+              pool->available.size() < 3 && (pool->available.empty() ||
+              bytes <= (64u * 1024u * 1024u) / (pool->available.size() + 1)))
+            pool->available.push_back(std::move(owned));
         });
   }
 
@@ -501,9 +527,12 @@ struct WindowsColorPipeline::Impl {
           Vec4{16 * code_scale / maximum, maximum / (219 * code_scale),
                128 * code_scale / maximum, maximum / (224 * code_scale)};
       const bool bt2020 = frame->colorspace == AVCOL_SPC_BT2020_NCL;
-      constants.nonlinear[0] = {1, 0, bt2020 ? 1.4746f : 1.5748f, 0};
-      constants.nonlinear[1] = {1, bt2020 ? -.164553f : -.187324f, bt2020 ? -.571353f : -.468124f, 0};
-      constants.nonlinear[2] = {1, bt2020 ? 1.8814f : 1.8556f, 0, 0};
+      const bool bt601 = frame->colorspace == AVCOL_SPC_SMPTE170M ||
+                         frame->colorspace == AVCOL_SPC_BT470BG;
+      constants.nonlinear[0] = {1, 0, bt2020 ? 1.4746f : bt601 ? 1.402f : 1.5748f, 0};
+      constants.nonlinear[1] = {1, bt2020 ? -.164553f : bt601 ? -.344136f : -.187324f,
+                                  bt2020 ? -.571353f : bt601 ? -.714136f : -.468124f, 0};
+      constants.nonlinear[2] = {1, bt2020 ? 1.8814f : bt601 ? 1.772f : 1.8556f, 0, 0};
     }
     AVD3D11VADeviceContext* shared = nullptr;
     if (hardware) {

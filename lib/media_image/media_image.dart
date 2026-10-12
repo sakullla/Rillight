@@ -2001,8 +2001,14 @@ abstract class MediaImageDiskStore {
 Future<MediaImageDiskStore> openDefaultMediaImageDiskStore({
   int limitBytes = MediaImageCache.defaultDiskLimitBytes,
 }) async {
-  final support = await getApplicationSupportDirectory();
-  final directory = Directory('${support.path}/rillight/image_cache');
+  final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];
+  if (validation != null &&
+      (validation.isEmpty || !Directory(validation).isAbsolute)) {
+    throw ArgumentError('Validation directory must be absolute');
+  }
+  final root =
+      validation ?? '${(await getApplicationSupportDirectory()).path}/rillight';
+  final directory = Directory('$root/image_cache');
   await directory.create(recursive: true);
   return FileMediaImageDiskStore(directory, limitBytes: limitBytes);
 }

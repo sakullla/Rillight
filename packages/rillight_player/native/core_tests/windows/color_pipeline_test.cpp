@@ -6,12 +6,121 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 #include <cstring>
+#include <atomic>
 extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_d3d11va.h>
 }
 
 std::vector<uint8_t> TexturePixels(ID3D11Texture2D* texture);
+
+class TextureLife final : public IUnknown {
+ public:
+  std::shared_ptr<std::atomic_bool> alive = std::make_shared<std::atomic_bool>(true);
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
+    if (!out) return E_POINTER;
+    *out = nullptr;
+    if (!IsEqualIID(id, __uuidof(IUnknown))) return E_NOINTERFACE;
+    *out = this; AddRef(); return S_OK;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG left = --references_;
+    if (!left) delete this;
+    return left;
+  }
+ private:
+  ~TextureLife() { *alive = false; }
+  std::atomic<ULONG> references_{1};
+};
+
+std::shared_ptr<std::atomic_bool> WatchTexture(const std::shared_ptr<void>& texture) {
+  const GUID marker = {0x8cc5a890, 0x93b1, 0x4038, {0xb7,0xdc,0x45,0xf1,0xc3,0x97,0x67,0x12}};
+  auto* probe = new TextureLife;
+  auto alive = probe->alive;
+  assert(SUCCEEDED(static_cast<ID3D11Texture2D*>(texture.get())->SetPrivateDataInterface(marker, probe)));
+  probe->Release();
+  return alive;
+}
+
+void CheckIdleTextureBudget() {
+  auto pipeline = std::make_unique<WindowsColorPipeline>();
+  AVFrame* source = Picture(AV_PIX_FMT_P010LE, 512);
+  std::vector<std::shared_ptr<void>> frames;
+  std::vector<std::shared_ptr<std::atomic_bool>> lives;
+  for (int i = 0; i < 3; ++i) {
+    frames.push_back(pipeline->RenderOwnedTexture(source, 3840, 2160, false, 203));
+    assert(frames.back());
+    lives.push_back(WatchTexture(frames.back()));
+  }
+  Microsoft::WRL::ComPtr<ID3D11Device> device;
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+  static_cast<ID3D11Texture2D*>(frames.front().get())->GetDevice(&device);
+  device->GetImmediateContext(&context);
+  // D3D defers object destruction until a flush; probe driver-held references
+  // only after draining them, rather than mistaking them for pool ownership.
+  const auto drain = [&] {
+    context->ClearState(); context->Flush();
+  };
+  frames.clear();
+  drain();
+  // One 4K FP16 frame fits the 64 MiB idle budget; three do not.
+  int retained = 0;
+  for (auto& alive : lives) retained += alive->load() ? 1 : 0;
+  assert(retained == 1);
+  auto large = pipeline->RenderOwnedTexture(source, 3840, 2160, false, 203);
+  auto large_alive = WatchTexture(large);
+  auto small = pipeline->RenderOwnedTexture(source, 32, 24, false);
+  auto small_alive = WatchTexture(small);
+  large.reset();
+  drain();
+  assert(!large_alive->load());  // Old dimensions cannot return to the new pool.
+  auto held = pipeline->RenderOwnedTexture(source, 32, 24, false);
+  auto held_alive = WatchTexture(held);
+  small.reset();
+  assert(small_alive->load());
+  pipeline.reset();
+  drain();
+  assert(!small_alive->load()); // Retained frame must not keep idle siblings alive.
+  assert(held_alive->load());
+  assert(!TexturePixels(static_cast<ID3D11Texture2D*>(held.get())).empty());
+  held.reset();
+  drain();
+  assert(!held_alive->load());
+  av_frame_free(&source);
+}
+
+void CheckLargeOutputReuse() {
+  AVFrame* source = Picture(AV_PIX_FMT_P010LE, 512);
+  // Exercise actual 8K allocations in both output formats. A fixed 64 MiB
+  // ceiling discards every returned image and allocates again on every frame.
+  for (float sdr_white : {0.0f, 203.0f}) {
+    WindowsColorPipeline pipeline;
+    auto first = pipeline.RenderOwnedTexture(source, 7680, 4320, false, sdr_white);
+    auto second = pipeline.RenderOwnedTexture(source, 7680, 4320, false, sdr_white);
+    assert(first && second);
+    auto first_alive = WatchTexture(first);
+    auto second_alive = WatchTexture(second);
+    void* address = first.get();
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    static_cast<ID3D11Texture2D*>(first.get())->GetDevice(&device);
+    device->GetImmediateContext(&context);
+    first.reset(); second.reset();
+    context->ClearState(); context->Flush();
+    assert(first_alive->load());
+    assert(!second_alive->load()); // One large spare, never several 8K spares.
+    for (int frame = 0; frame < 3; ++frame) {
+      auto reused = pipeline.RenderOwnedTexture(source, 7680, 4320, false, sdr_white);
+      assert(reused && reused.get() == address);
+    }
+    auto small = pipeline.RenderOwnedTexture(source, 32, 24, false);
+    assert(small);
+    context->ClearState(); context->Flush();
+    assert(!first_alive->load()); // Downscaling immediately retires the 8K spare.
+  }
+  av_frame_free(&source);
+}
 
 void CheckDecoderContextLockScope() {
   AVBufferRef* device = nullptr;
@@ -306,6 +415,8 @@ void CheckOwnedTextureLifetime() {
 }
 
 int main() {
+  CheckIdleTextureBudget();
+  CheckLargeOutputReuse();
   CheckOwnedTextureLifetime();
   CheckDecoderContextLockScope();
   CheckNativeHdr();
