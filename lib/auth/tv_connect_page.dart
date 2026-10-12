@@ -1,3 +1,4 @@
+import 'login_widgets.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 import 'package:flutter/material.dart';
@@ -230,15 +231,14 @@ class _TvConnectPageState extends State<TvConnectPage> {
                               TvSectionTitle(l10n.savedServers),
                               SizedBox(height: 4 * s),
                               for (final server in auth.savedServers) ...[
-                                TvNavTile(
-                                  actionKey: ValueKey(server.id),
-                                  icon: Icons.dns_rounded,
-                                  title: server.name,
-                                  subtitle:
-                                      '${server.username} · ${server.activeLine?.hostLabel ?? server.baseUrl}',
+                                _TvServerTile(
+                                  key: ValueKey(server.id),
+                                  server: server,
+                                  selected:
+                                      _draft?.selectedServerId == server.id,
                                   onPressed: auth.isBusy
                                       ? null
-                                      : () => _select(server),
+                                      : () => setState(() => _select(server)),
                                 ),
                                 SizedBox(height: 6 * s),
                               ],
@@ -715,4 +715,53 @@ String _lanClock(DateTime time) {
   final local = time.toLocal();
   String two(int value) => value.toString().padLeft(2, '0');
   return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
+}
+
+/// 已保存服务器行:服务标记 + 名称/账号与地址,当前选中带勾。
+class _TvServerTile extends StatelessWidget {
+  const _TvServerTile({
+    super.key,
+    required this.server,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final SavedServer server;
+  final bool selected;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = TvDesign.scaleOf(context);
+    final host = server.activeLine?.hostLabel ?? server.baseUrl;
+    return TvAction(
+      variant: TvActionVariant.tile,
+      selected: selected,
+      onPressed: onPressed,
+      leading: ServerTypeMark(type: server.serviceType, size: 24 * s),
+      trailing: Builder(
+        builder: (context) => Icon(
+          selected ? Icons.check_circle_rounded : Icons.chevron_right_rounded,
+          color: TvAction.secondaryColor(context),
+        ),
+      ),
+      child: Builder(
+        builder: (context) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(
+              server.username.isEmpty ? host : '${server.username} · $host',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: TvAction.secondaryColor(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

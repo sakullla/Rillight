@@ -38,6 +38,7 @@ import 'package:rillight/player/track_picker.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
+import 'package:rillight/player/playback_title.dart';
 
 export 'package:rillight/player/episode_browser.dart'
     show kPlayerEpisodeRowExtent, playerEpisodeListOffset;
@@ -604,8 +605,14 @@ class PlayerPageState extends State<PlayerPage> {
                         ),
                       ),
                       // 弹幕只绘制,叠在点击层下面,避免 CustomPaint 吃掉单击。
+                      // 弹幕让出顶栏一带:标题、置顶/最小化/关闭钮不再被飘过的
+                      // 弹幕压住;画面区域固定,不随控制层显隐重排轨道。
                       if (_danmakuOverlayVisible(current))
-                        Positioned.fill(
+                        Positioned(
+                          top: kPlayerChromeBarExtent,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
                           child: IgnorePointer(
                             child: TickerMode(
                               enabled: _danmaku!.danmakuOn,
@@ -892,7 +899,8 @@ class _PlayerChromeBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
-    final title = controller.item?.displayName ?? '';
+    final parts = playbackTitleParts(controller.item, fallback: '');
+    final title = parts.title;
     final statusWidth = (MediaQuery.sizeOf(context).width * 0.4).clamp(
       148.0,
       kPlayerNetworkSpeedExtent,
@@ -927,11 +935,39 @@ class _PlayerChromeBar extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: title.isEmpty
                           ? const SizedBox.shrink()
-                          : Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium,
+                          : Column(
+                              key: const Key('player-title'),
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (parts.eyebrow case final eyebrow?)
+                                  Text(
+                                    eyebrow,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: theme.colorScheme.onSurface
+                                              .withValues(alpha: .72),
+                                          height: 1.1,
+                                        ),
+                                  ),
+                                Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2,
+                                    shadows: const [
+                                      Shadow(
+                                        color: Color(0x66000000),
+                                        blurRadius: 6,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                     ),
                   ),
@@ -1285,19 +1321,28 @@ class _EpisodeOverlay extends StatelessWidget {
               ),
             ),
           ),
+          // 悬浮面板:四周留白、圆角与细边,不再是贴着窗口右缘的一整条
+          // 黑框实色栏。
           Positioned(
-            top: 0,
-            bottom: 0,
-            right: 0,
+            top: AppSpacing.xs,
+            bottom: AppSpacing.md,
+            right: AppSpacing.md,
             width: AppViewport.fit(
               420,
-              MediaQuery.sizeOf(context).width,
+              MediaQuery.sizeOf(context).width - AppSpacing.md * 2,
               MediaQuery.sizeOf(context),
             ),
             child: Material(
-              color: scheme.surfaceContainerHigh,
-              elevation: 8,
-              shadowColor: scheme.shadow,
+              color: scheme.surfaceContainerHigh.withValues(alpha: .97),
+              elevation: 6,
+              shadowColor: Colors.black.withValues(alpha: .35),
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                side: BorderSide(
+                  color: scheme.outlineVariant.withValues(alpha: .5),
+                ),
+              ),
               child: PlayerEpisodeBrowser(
                 controller: controller,
                 onClose: onClose,
@@ -1445,8 +1490,8 @@ class _ControlsBar extends StatelessWidget {
   }
 }
 
-/// 时间轴行:当前时间 + 进度滑条 + 总时长。
-class _SeekTimeline extends StatelessWidget {
+/// 时间轴行:当前时间 + 进度滑条 + 总时长。点右侧时长切换为剩余时间。
+class _SeekTimeline extends StatefulWidget {
   const _SeekTimeline({
     required this.controller,
     required this.dragging,
@@ -1464,28 +1509,48 @@ class _SeekTimeline extends StatelessWidget {
   final ValueChanged<double> onDragEnd;
 
   @override
+  State<_SeekTimeline> createState() => _SeekTimelineState();
+}
+
+class _SeekTimelineState extends State<_SeekTimeline> {
+  bool _remaining = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
+    final controller = widget.controller;
+    final dragging = widget.dragging;
     final durationMs = controller.duration.inMilliseconds;
     final seekEnabled = durationMs > 0;
     final value = dragging
-        ? dragValue
+        ? widget.dragValue
         : (durationMs <= 0
               ? 0.0
               : (controller.position.inMilliseconds / durationMs).clamp(
                   0.0,
                   1.0,
                 ));
-    final timeline = Row(
+    final shown = Duration(milliseconds: (durationMs * value).round());
+    final remaining = controller.duration - shown;
+    final trailing = _remaining && seekEnabled
+        ? l10n.playerRemainingClock(
+            _clock(remaining.isNegative ? Duration.zero : remaining),
+          )
+        : _clock(controller.duration);
+    return Row(
       children: [
-        Text(_clock(controller.position), style: _overlayTimeStyle(theme)),
+        Text(
+          _clock(dragging ? shown : controller.position),
+          style: _overlayTimeStyle(theme),
+        ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: SliderTheme(
             data: _overlaySliderTheme(theme, thumbRadius: 6),
             child: SeekPreview(
               controller: controller,
-              dragValue: dragging ? dragValue : null,
+              dragValue: dragging ? widget.dragValue : null,
               child: BufferedRangesTrack(
                 snapshot: controller.bufferSnapshot,
                 duration: controller.duration,
@@ -1496,22 +1561,44 @@ class _SeekTimeline extends StatelessWidget {
                       ? null
                       : (next) {
                           if (!dragging) {
-                            onDragStart(next);
+                            widget.onDragStart(next);
                           } else {
-                            onDragUpdate(next);
+                            widget.onDragUpdate(next);
                           }
                         },
-                  onChangeEnd: !seekEnabled ? null : onDragEnd,
+                  onChangeEnd: !seekEnabled ? null : widget.onDragEnd,
                 ),
               ),
             ),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
-        Text(_clock(controller.duration), style: _overlayTimeStyle(theme)),
+        Tooltip(
+          message: _remaining
+              ? l10n.playerShowDuration
+              : l10n.playerShowRemaining,
+          waitDuration: const Duration(milliseconds: 600),
+          child: MouseRegion(
+            cursor: seekEnabled ? SystemMouseCursors.click : MouseCursor.defer,
+            child: GestureDetector(
+              key: const Key('player-time-toggle'),
+              behavior: HitTestBehavior.opaque,
+              onTap: seekEnabled
+                  ? () => setState(() => _remaining = !_remaining)
+                  : null,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 44),
+                child: Text(
+                  trailing,
+                  textAlign: TextAlign.right,
+                  style: _overlayTimeStyle(theme),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
-    return timeline;
   }
 }
 
@@ -1544,6 +1631,27 @@ class _ControlsRow extends StatelessWidget {
           icon: controller.isPlaying
               ? Icons.pause_rounded
               : Icons.play_arrow_rounded,
+        ),
+        const SizedBox(width: AppSpacing.xxs),
+        _PlayerIconButton(
+          key: const Key('player-rewind'),
+          tooltip: l10n.mobileRewind,
+          onPressed: controller.duration > Duration.zero
+              ? () => unawaited(
+                  controller.seekRelative(const Duration(seconds: -10)),
+                )
+              : null,
+          icon: Icons.replay_10_rounded,
+        ),
+        _PlayerIconButton(
+          key: const Key('player-forward'),
+          tooltip: l10n.mobileForward,
+          onPressed: controller.duration > Duration.zero
+              ? () => unawaited(
+                  controller.seekRelative(const Duration(seconds: 10)),
+                )
+              : null,
+          icon: Icons.forward_10_rounded,
         ),
         _VolumeControl(controller: controller),
         const Spacer(),

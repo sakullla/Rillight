@@ -3837,6 +3837,144 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'Plex 账号与密码在官方网页中管理。请打开浏览器，或在手机上访问下方地址。'**
   String get providerAccountInstructions;
+
+  /// No description provided for @loginWelcomeTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接你的媒体库'**
+  String get loginWelcomeTitle;
+
+  /// No description provided for @loginWelcomeSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录 Emby、Jellyfin 或 Plex 服务器，在这台设备上继续观看。'**
+  String get loginWelcomeSubtitle;
+
+  /// No description provided for @loginServiceLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务类型'**
+  String get loginServiceLabel;
+
+  /// No description provided for @loginEmbyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'填写服务器地址与账号密码登录 Emby。'**
+  String get loginEmbyHint;
+
+  /// No description provided for @loginJellyfinHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用账号密码登录，或在已登录的设备上用 Quick Connect 授权。'**
+  String get loginJellyfinHint;
+
+  /// No description provided for @loginPlexHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用 Plex 账号授权，自动发现你可以访问的服务器。'**
+  String get loginPlexHint;
+
+  /// No description provided for @loginAdvanced.
+  ///
+  /// In zh, this message translates to:
+  /// **'高级选项'**
+  String get loginAdvanced;
+
+  /// No description provided for @loginPlexTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用 Plex 账号登录'**
+  String get loginPlexTitle;
+
+  /// No description provided for @loginPlexStep1.
+  ///
+  /// In zh, this message translates to:
+  /// **'点击下方按钮，在浏览器中打开 plex.tv 授权页'**
+  String get loginPlexStep1;
+
+  /// No description provided for @loginPlexStep2.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录 Plex 账号，允许灯川访问'**
+  String get loginPlexStep2;
+
+  /// No description provided for @loginPlexStep3.
+  ///
+  /// In zh, this message translates to:
+  /// **'回到这里，选择服务器与连接线路'**
+  String get loginPlexStep3;
+
+  /// No description provided for @loginQuickConnectHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'无需输入密码'**
+  String get loginQuickConnectHint;
+
+  /// No description provided for @loginSavedServersHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择一台服务器，自动填入地址与账号'**
+  String get loginSavedServersHint;
+
+  /// No description provided for @loginServerCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 台服务器'**
+  String loginServerCount(int count);
+
+  /// No description provided for @providerCopyCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'复制代码'**
+  String get providerCopyCode;
+
+  /// No description provided for @providerCodeCopied.
+  ///
+  /// In zh, this message translates to:
+  /// **'代码已复制'**
+  String get providerCodeCopied;
+
+  /// No description provided for @providerAuthorizationCodeLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'授权代码'**
+  String get providerAuthorizationCodeLabel;
+
+  /// No description provided for @providerSelectAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全选'**
+  String get providerSelectAll;
+
+  /// No description provided for @providerSelectNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'全不选'**
+  String get providerSelectNone;
+
+  /// No description provided for @playerShowRemaining.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示剩余时间'**
+  String get playerShowRemaining;
+
+  /// No description provided for @playerShowDuration.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示总时长'**
+  String get playerShowDuration;
+
+  /// No description provided for @playerRemainingClock.
+  ///
+  /// In zh, this message translates to:
+  /// **'-{time}'**
+  String playerRemainingClock(String time);
+
+  /// No description provided for @playerEndsAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 结束'**
+  String playerEndsAt(String time);
 }
 
 class _AppLocalizationsDelegate

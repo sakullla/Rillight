@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
+import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/auth/server_list_store.dart';
 
 Future<void> showPhoneServerManager(
@@ -274,10 +275,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  backgroundColor: scheme.surfaceContainerHighest,
-                  child: const Icon(Icons.dns_outlined),
-                ),
+                ServerTypeMark(type: server.serviceType, size: 40),
                 const SizedBox(width: 12),
                 Expanded(
                   child: InkWell(

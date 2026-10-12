@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/emby_mark.dart';
+import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/session_actions.dart';
 
@@ -414,7 +414,7 @@ class _ServerTile extends StatelessWidget {
               left: AppSpacing.sm,
               right: AppSpacing.xs,
             ),
-            leading: const EmbyMark(size: 28),
+            leading: ServerTypeMark(type: server.serviceType, size: 28),
             title: Text(
               server.name,
               maxLines: 1,
@@ -475,7 +475,7 @@ class _ServerTile extends StatelessWidget {
           left: AppSpacing.sm,
           right: AppSpacing.xs,
         ),
-        leading: const EmbyMark(size: 28),
+        leading: ServerTypeMark(type: server.serviceType, size: 28),
         initiallyExpanded: selectedServer,
         title: Text(
           server.name,

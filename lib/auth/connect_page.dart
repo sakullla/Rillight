@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'login_widgets.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 import 'package:rillight/media_server/server_address.dart';
@@ -9,8 +12,8 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
-import 'package:rillight/app/widgets/emby_mark.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
@@ -290,18 +293,16 @@ class _ConnectPageState extends State<ConnectPage> {
     await _loadPassword(remaining.id);
   }
 
-  /// 内容宽度随断点舒展:compact 全宽(减页边距),medium 收敛,
-  /// large 再放宽,宽屏下整体由外层 [Center] 垂直居中。
-  static double _contentWidth(double maxWidth, double maxHeight) {
-    if (maxWidth < AppBreakpoints.compact) {
-      return maxWidth - AppSpacing.xl * 2;
-    }
-    final design = maxWidth <= AppBreakpoints.large ? 520.0 : 580.0;
-    final height = maxHeight.isFinite ? maxHeight : maxWidth * 9 / 16;
-    return AppViewport.fit(
-      design,
-      maxWidth - AppSpacing.xl * 2,
-      Size(maxWidth, height),
+  /// 宽窗口(≥ 980)左右分栏:左侧品牌与已保存的服务器,右侧登录表单;
+  /// 窄窗口单列。表单列顶部对齐,切换服务类型时高度变化只向下延伸,
+  /// 不会把整页重新居中而上下跳动。
+  static const double _wideBreakpoint = 980;
+
+  Widget _wrapForm(Widget form) {
+    return LiquidGlass(
+      kind: LiquidGlassKind.panel,
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      child: Material(type: MaterialType.transparency, child: form),
     );
   }
 
@@ -309,48 +310,144 @@ class _ConnectPageState extends State<ConnectPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final auth = AuthScope.of(context);
+    final hasChrome =
+        context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+    final trailing = hasChrome
+        ? windowChromeTrailingInset() + kWindowChromeActionGap
+        : AppSpacing.sm;
 
     return ListenableBuilder(
       listenable: auth,
       builder: (context, _) {
         return LayoutBuilder(
           builder: (context, constraints) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xl,
-                vertical: AppSpacing.xl,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight - AppSpacing.xl * 2,
+            final wide = constraints.maxWidth >= _wideBreakpoint;
+            final form = ProviderLoginForm(
+              userAgent: () => _userAgent.text,
+              selectedServer: _selectedServer(auth),
+              embyForm: _buildFormCard(context, l10n, auth),
+              wrapForm: _wrapForm,
+            );
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: wide
+                      ? _buildWide(context, l10n, auth, constraints, form)
+                      : _buildNarrow(context, l10n, auth, constraints, form),
                 ),
-                child: Center(
-                  child: SizedBox(
-                    width: _contentWidth(
-                      constraints.maxWidth,
-                      constraints.maxHeight,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _BrandHeader(l10n: l10n),
-                        const SizedBox(height: AppSpacing.xl),
-                        ProviderLoginForm(
-                          userAgent: () => _userAgent.text,
-                          selectedServer: _selectedServer(auth),
-                          embyForm: _buildFormCard(context, l10n, auth),
-                        ),
-                        const SizedBox(height: AppSpacing.xxl),
-                        _buildSavedServers(context, l10n, auth),
-                      ],
-                    ),
+                if (hasChrome)
+                  Positioned(
+                    top: 0,
+                    left: windowChromeLeadingInset(),
+                    right: trailing + 48,
+                    height: kWindowChromeHeight,
+                    child: const WindowDragArea(child: SizedBox.expand()),
+                  ),
+                Positioned(
+                  top: AppSpacing.xxs,
+                  right: trailing,
+                  child: const AppearanceMenuButton(
+                    buttonKey: ConnectFormKeys.connectAppearanceKey,
                   ),
                 ),
-              ),
+              ],
             );
           },
         );
       },
+    );
+  }
+
+  Widget _buildNarrow(
+    BuildContext context,
+    AppLocalizations l10n,
+    AuthController auth,
+    BoxConstraints constraints,
+    Widget form,
+  ) {
+    final width = math.min(560.0, constraints.maxWidth - AppSpacing.xl * 2);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.huge,
+        AppSpacing.xl,
+        AppSpacing.xl,
+      ),
+      child: Center(
+        child: SizedBox(
+          width: width,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _BrandHeader(l10n: l10n),
+              const SizedBox(height: AppSpacing.xl),
+              form,
+              const SizedBox(height: AppSpacing.xxl),
+              _buildSavedServers(context, l10n, auth),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWide(
+    BuildContext context,
+    AppLocalizations l10n,
+    AuthController auth,
+    BoxConstraints constraints,
+    Widget form,
+  ) {
+    final size = Size(constraints.maxWidth, constraints.maxHeight);
+    final formWidth = AppViewport.fit(
+      440,
+      constraints.maxWidth * 6 / 11 - AppSpacing.xxl * 2,
+      size,
+    );
+    // 表单列顶部按视口而不是内容定位:内容高度变化不会移动表单起点。
+    final top = math.max(
+      AppSpacing.huge + AppSpacing.md,
+      (constraints.maxHeight - 640) / 2.6 + AppSpacing.huge,
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          flex: 5,
+          child: _HeroPanel(
+            l10n: l10n,
+            savedServers: _buildSavedServers(context, l10n, auth, fill: true),
+          ),
+        ),
+        Expanded(
+          flex: 6,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.xxl,
+              top,
+              AppSpacing.xxl,
+              AppSpacing.xxl,
+            ),
+            child: Center(
+              child: SizedBox(
+                width: formWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      l10n.connectTitle,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+                    form,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -359,99 +456,97 @@ class _ConnectPageState extends State<ConnectPage> {
     AppLocalizations l10n,
     AuthController auth,
   ) {
-    return LiquidGlass(
-      kind: LiquidGlassKind.panel,
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      child: Material(
-        type: MaterialType.transparency,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (auth.failure != null) ...[
-              AppErrorView(
-                message: embyFailureMessage(l10n, auth.failure!),
-                compact: true,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (auth.failure != null) ...[
+          AppErrorView(
+            message: embyFailureMessage(l10n, auth.failure!),
+            compact: true,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+        AutofillGroup(
+          child: Column(
+            children: [
+              TextField(
+                key: ConnectFormKeys.address,
+                controller: _address,
+                enabled: !auth.isBusy,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                autofillHints: const [AutofillHints.url],
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: l10n.serverAddress,
+                  hintText: l10n.serverAddressHint,
+                  prefixIcon: const Icon(Icons.link_rounded, size: 20),
+                ),
               ),
-              const SizedBox(height: AppSpacing.lg),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                key: ConnectFormKeys.username,
+                controller: _username,
+                enabled: !auth.isBusy,
+                autocorrect: false,
+                autofillHints: const [AutofillHints.username],
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: l10n.username,
+                  prefixIcon: const Icon(
+                    Icons.person_outline_rounded,
+                    size: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                key: ConnectFormKeys.password,
+                controller: _password,
+                enabled: !auth.isBusy,
+                obscureText: !_passwordVisible,
+                autocorrect: false,
+                enableSuggestions: false,
+                autofillHints: const [AutofillHints.password],
+                textInputAction: TextInputAction.done,
+                onSubmitted: auth.isBusy ? null : (_) => _submit(),
+                decoration: InputDecoration(
+                  labelText: l10n.password,
+                  prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
+                  suffixIcon: IconButton(
+                    key: ConnectFormKeys.passwordVisibility,
+                    tooltip: _passwordVisible
+                        ? l10n.hidePassword
+                        : l10n.showPassword,
+                    onPressed: () {
+                      setState(() => _passwordVisible = !_passwordVisible);
+                    },
+                    icon: Icon(
+                      _passwordVisible
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
             ],
-            AutofillGroup(
-              child: Column(
-                children: [
-                  TextField(
-                    key: ConnectFormKeys.address,
-                    controller: _address,
-                    enabled: !auth.isBusy,
-                    keyboardType: TextInputType.url,
-                    autofillHints: const [AutofillHints.url],
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(
-                      labelText: l10n.serverAddress,
-                      hintText: l10n.serverAddressHint,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
-                    key: ConnectFormKeys.username,
-                    controller: _username,
-                    enabled: !auth.isBusy,
-                    autofillHints: const [AutofillHints.username],
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(labelText: l10n.username),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
-                    key: ConnectFormKeys.password,
-                    controller: _password,
-                    enabled: !auth.isBusy,
-                    obscureText: !_passwordVisible,
-                    autofillHints: const [AutofillHints.password],
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: auth.isBusy ? null : (_) => _submit(),
-                    decoration: InputDecoration(
-                      labelText: l10n.password,
-                      suffixIcon: IconButton(
-                        key: ConnectFormKeys.passwordVisibility,
-                        tooltip: _passwordVisible
-                            ? l10n.hidePassword
-                            : l10n.showPassword,
-                        onPressed: () {
-                          setState(() => _passwordVisible = !_passwordVisible);
-                        },
-                        icon: Icon(
-                          _passwordVisible
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            FilledButton(
-              key: ConnectFormKeys.submit,
-              onPressed: auth.isBusy ? null : _submit,
-              child: auth.isBusy
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Text(l10n.connecting),
-                      ],
-                    )
-                  : Text(auth.failure == null ? l10n.connect : l10n.retry),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _buildMoreSection(context, l10n, auth),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: AppSpacing.xl),
+        FilledButton(
+          key: ConnectFormKeys.submit,
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+          onPressed: auth.isBusy ? null : _submit,
+          child: BusyLabel(
+            busy: auth.isBusy,
+            label: auth.failure == null ? l10n.connect : l10n.retry,
+            busyLabel: l10n.connecting,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _buildMoreSection(context, l10n, auth),
+      ],
     );
   }
 
@@ -566,44 +661,108 @@ class _ConnectPageState extends State<ConnectPage> {
   Widget _buildSavedServers(
     BuildContext context,
     AppLocalizations l10n,
-    AuthController auth,
-  ) {
+    AuthController auth, {
+    bool fill = false,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final servers = _filteredServers(auth);
+    final header = Row(
+      children: [
+        Text(
+          l10n.savedServers,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (auth.savedServers.isNotEmpty) ...[
+          const SizedBox(width: AppSpacing.xs),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+            decoration: BoxDecoration(
+              color: scheme.onSurface.withValues(alpha: .08),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '${auth.savedServers.length}',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+        const Spacer(),
+        TextButton.icon(
+          key: ConnectFormKeys.addServer,
+          onPressed: auth.isBusy ? null : _startNewServer,
+          icon: const Icon(Icons.add, size: 18),
+          label: Text(l10n.addServer),
+        ),
+      ],
+    );
+    final search = auth.savedServers.length > 6
+        ? Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: TextField(
+              key: ConnectFormKeys.serverSearch,
+              onChanged: (value) => setState(() => _serverQuery = value),
+              decoration: InputDecoration(
+                hintText: l10n.searchServers,
+                prefixIcon: const Icon(Icons.search, size: 20),
+                isDense: true,
+              ),
+            ),
+          )
+        : null;
+    Widget card(int index) =>
+        _buildServerCard(context, l10n, auth, servers[index]);
+    Widget separator(BuildContext context, int index) =>
+        const SizedBox(height: AppSpacing.sm);
+    if (fill) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          if (auth.savedServers.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: Text(
+                l10n.loginSavedServersHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ?search,
+          Expanded(
+            child: auth.savedServers.isEmpty
+                ? Align(
+                    alignment: Alignment.topCenter,
+                    child: AppEmptyView(
+                      message: l10n.noSavedServers,
+                      icon: Icons.dns_outlined,
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    itemCount: servers.length,
+                    separatorBuilder: separator,
+                    itemBuilder: (context, index) => card(index),
+                  ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                l10n.savedServers,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            TextButton.icon(
-              key: ConnectFormKeys.addServer,
-              onPressed: auth.isBusy ? null : _startNewServer,
-              icon: const Icon(Icons.add, size: 18),
-              label: Text(l10n.addServer),
-            ),
-          ],
-        ),
+        header,
         const SizedBox(height: AppSpacing.sm),
         if (auth.savedServers.isEmpty)
           AppEmptyView(message: l10n.noSavedServers, icon: Icons.dns_outlined)
         else ...[
-          if (auth.savedServers.length > 6)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: TextField(
-                key: ConnectFormKeys.serverSearch,
-                onChanged: (value) => setState(() => _serverQuery = value),
-                decoration: InputDecoration(
-                  hintText: l10n.searchServers,
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  isDense: true,
-                ),
-              ),
-            ),
+          ?search,
           SizedBox(
             height: auth.savedServers.length > 4 ? 320 : null,
             child: ListView.separated(
@@ -611,17 +770,9 @@ class _ConnectPageState extends State<ConnectPage> {
               physics: auth.savedServers.length <= 4
                   ? const NeverScrollableScrollPhysics()
                   : null,
-              itemCount: _filteredServers(auth).length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                return _buildServerCard(
-                  context,
-                  l10n,
-                  auth,
-                  _filteredServers(auth)[index],
-                );
-              },
+              itemCount: servers.length,
+              separatorBuilder: separator,
+              itemBuilder: (context, index) => card(index),
             ),
           ),
         ],
@@ -651,68 +802,98 @@ class _ConnectPageState extends State<ConnectPage> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final selected = server.id == _selectedServerId;
+    final host = server.activeLine?.hostLabel ?? server.baseUrl;
+    final subtitle = server.username.isEmpty
+        ? host
+        : '${server.username} · $host';
 
-    return Card(
-      shape: RoundedRectangleBorder(
+    return AnimatedContainer(
+      duration: AppMotion.durationOf(context, AppMotion.fast),
+      decoration: BoxDecoration(
+        color: selected
+            ? colorScheme.primary.withValues(alpha: .08)
+            : colorScheme.surfaceContainer.withValues(alpha: .7),
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        side: selected
-            ? BorderSide(color: colorScheme.primary, width: 1.5)
-            : BorderSide(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: selected
+              ? colorScheme.primary
+              : colorScheme.outlineVariant.withValues(alpha: .7),
+          width: selected ? 1.5 : 1,
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            key: Key('saved-server-${server.id}'),
-            onTap: auth.isBusy ? null : () => _selectSaved(server),
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Row(
-                children: [
-                  const EmbyMark(size: 28),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(server.name, style: theme.textTheme.titleMedium),
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          server.baseUrl,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              key: Key('saved-server-${server.id}'),
+              onTap: auth.isBusy ? null : () => _selectSaved(server),
+              borderRadius: BorderRadius.circular(AppRadii.lg),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                child: Row(
+                  children: [
+                    ServerTypeMark(type: server.serviceType, size: 36),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            server.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (selected)
+                    const SizedBox(width: AppSpacing.xs),
                     Icon(
-                      Icons.check_circle_rounded,
-                      color: colorScheme.primary,
+                      selected
+                          ? Icons.check_circle_rounded
+                          : Icons.chevron_right_rounded,
+                      color: selected
+                          ? colorScheme.primary
+                          : colorScheme.onSurfaceVariant,
                       size: 20,
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          if (server.lines.length > 1)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                0,
-                AppSpacing.md,
-                AppSpacing.sm,
+            if (server.lines.length > 1)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  0,
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                ),
+                child: Column(
+                  children: [
+                    for (final line in server.lines)
+                      _buildLineTile(context, auth, server, line, selected),
+                  ],
+                ),
               ),
-              child: Column(
-                children: [
-                  for (final line in server.lines)
-                    _buildLineTile(context, auth, server, line, selected),
-                ],
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -788,6 +969,129 @@ class _ConnectPageState extends State<ConnectPage> {
   }
 }
 
+/// 三种服务的小标签:标记 + 名称,说明这里能连哪些服务器。
+class _SupportedServices extends StatelessWidget {
+  const _SupportedServices();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
+        for (final type in MediaServerType.values)
+          Container(
+            padding: const EdgeInsets.fromLTRB(6, 5, 12, 5),
+            decoration: BoxDecoration(
+              color: scheme.surface.withValues(alpha: .55),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: .6),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ServerTypeMark(type: type, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  type.label,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 宽窗口左栏:品牌、欢迎语、支持的服务,下方是已保存的服务器。
+class _HeroPanel extends StatelessWidget {
+  const _HeroPanel({required this.l10n, required this.savedServers});
+
+  final AppLocalizations l10n;
+  final Widget savedServers;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final dark = theme.brightness == Brightness.dark;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.alphaBlend(
+              scheme.primary.withValues(alpha: dark ? .20 : .12),
+              scheme.surfaceContainerLow,
+            ),
+            Color.alphaBlend(
+              scheme.tertiary.withValues(alpha: dark ? .10 : .06),
+              scheme.surfaceContainerLowest,
+            ),
+          ],
+        ),
+        border: Border(
+          right: BorderSide(color: scheme.outlineVariant.withValues(alpha: .4)),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.huge,
+          AppSpacing.huge,
+          AppSpacing.xxxl,
+          AppSpacing.md,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const LoginBrandMark(size: 40),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  l10n.appName,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.huge),
+            Text(
+              l10n.loginWelcomeTitle,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              l10n.loginWelcomeSubtitle,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            const _SupportedServices(),
+            const SizedBox(height: AppSpacing.xxl),
+            Expanded(child: savedServers),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 窄窗口品牌头:品牌方块 + 应用名 + 一句说明。
 class _BrandHeader extends StatelessWidget {
   const _BrandHeader({required this.l10n});
 
@@ -798,45 +1102,24 @@ class _BrandHeader extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Row(
+    return Column(
       children: [
-        const SizedBox(width: 48),
-        Expanded(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                ),
-                child: Icon(
-                  Icons.play_circle_rounded,
-                  color: colorScheme.onPrimaryContainer,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(l10n.appName, style: theme.textTheme.headlineSmall),
-                  Text(
-                    l10n.connectTitle,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+        const LoginBrandMark(size: 52),
+        const SizedBox(height: AppSpacing.md),
+        Text(
+          l10n.appName,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
           ),
         ),
-        const AppearanceMenuButton(
-          buttonKey: ConnectFormKeys.connectAppearanceKey,
+        const SizedBox(height: AppSpacing.xxs),
+        Text(
+          l10n.loginWelcomeSubtitle,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );

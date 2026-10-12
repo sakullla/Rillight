@@ -1,3 +1,4 @@
+import 'login_widgets.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 import 'package:rillight/media_server/server_address.dart';
@@ -6,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
-import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
@@ -283,12 +283,15 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     return Scaffold(
       // 品牌头已经说明了页面用途,顶栏只留外观入口,不再重复一行标题。
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
         // 登录前也能切外观;偏好持久化,设置页同源。
         actions: const [
           AppearanceMenuButton(buttonKey: Key('android-connect-appearance')),
         ],
       ),
       body: SafeArea(
+        top: false,
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
@@ -298,19 +301,20 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
             child: ListenableBuilder(
               listenable: auth,
               builder: (context, _) => SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _PhoneBrandHeader(l10n: l10n),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 28),
                     if (auth.savedServers.isNotEmpty) ...[
                       Row(
                         children: [
                           Expanded(
                             child: Text(
                               l10n.savedServers,
-                              style: Theme.of(context).textTheme.titleSmall,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
                           TextButton.icon(
@@ -321,21 +325,29 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                           ),
                         ],
                       ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final server in auth.savedServers)
-                            OptionPill(
-                              label: server.displayName,
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        // 两行文字随系统字号增高,200% 时卡片不溢出。
+                        height: 24 + MediaQuery.textScalerOf(context).scale(40),
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          clipBehavior: Clip.none,
+                          itemCount: auth.savedServers.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (context, index) {
+                            final server = auth.savedServers[index];
+                            return _PhoneServerChip(
+                              key: Key('phone-saved-server-${server.id}'),
+                              server: server,
                               selected: _draft?.selectedServerId == server.id,
                               onPressed: auth.isBusy
                                   ? null
                                   : () => setState(() => _select(server)),
-                            ),
-                        ],
+                            );
+                          },
+                        ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24),
                     ],
                     ProviderLoginForm(
                       userAgent: () => _userAgent.text,
@@ -345,81 +357,106 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                       embyForm: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          TextField(
-                            key: const Key('android-connect-address'),
-                            controller: _address,
-                            autofocus: false,
-                            enabled: !auth.isBusy,
-                            keyboardType: TextInputType.url,
-                            autocorrect: false,
-                            textInputAction: TextInputAction.next,
-                            decoration: InputDecoration(
-                              labelText: l10n.serverAddress,
-                              hintText: l10n.serverAddressHint,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            key: const Key('android-connect-username'),
-                            controller: _username,
-                            enabled: !auth.isBusy,
-                            autocorrect: false,
-                            textInputAction: TextInputAction.next,
-                            decoration: InputDecoration(
-                              labelText: l10n.username,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            key: const Key('android-connect-password'),
-                            controller: _password,
-                            enabled: !auth.isBusy,
-                            obscureText: !_passwordVisible,
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            textInputAction: TextInputAction.done,
-                            onSubmitted: (_) => _submit(),
-                            decoration: InputDecoration(
-                              labelText: l10n.password,
-                              suffixIcon: IconButton(
-                                key: const Key(
-                                  'android-connect-password-visibility',
+                          AutofillGroup(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                TextField(
+                                  key: const Key('android-connect-address'),
+                                  controller: _address,
+                                  autofocus: false,
+                                  enabled: !auth.isBusy,
+                                  keyboardType: TextInputType.url,
+                                  autocorrect: false,
+                                  autofillHints: const [AutofillHints.url],
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: l10n.serverAddress,
+                                    hintText: l10n.serverAddressHint,
+                                    prefixIcon: const Icon(
+                                      Icons.link_rounded,
+                                      size: 20,
+                                    ),
+                                  ),
                                 ),
-                                tooltip: _passwordVisible
-                                    ? l10n.hidePassword
-                                    : l10n.showPassword,
-                                onPressed: () => setState(
-                                  () => _passwordVisible = !_passwordVisible,
+                                const SizedBox(height: 14),
+                                TextField(
+                                  key: const Key('android-connect-username'),
+                                  controller: _username,
+                                  enabled: !auth.isBusy,
+                                  autocorrect: false,
+                                  autofillHints: const [AutofillHints.username],
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: l10n.username,
+                                    prefixIcon: const Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 20,
+                                    ),
+                                  ),
                                 ),
-                                icon: Icon(
-                                  _passwordVisible
-                                      ? Icons.visibility_off_outlined
-                                      : Icons.visibility_outlined,
+                                const SizedBox(height: 14),
+                                TextField(
+                                  key: const Key('android-connect-password'),
+                                  controller: _password,
+                                  enabled: !auth.isBusy,
+                                  obscureText: !_passwordVisible,
+                                  autocorrect: false,
+                                  enableSuggestions: false,
+                                  autofillHints: const [AutofillHints.password],
+                                  textInputAction: TextInputAction.done,
+                                  onSubmitted: (_) => _submit(),
+                                  decoration: InputDecoration(
+                                    labelText: l10n.password,
+                                    prefixIcon: const Icon(
+                                      Icons.lock_outline_rounded,
+                                      size: 20,
+                                    ),
+                                    suffixIcon: IconButton(
+                                      key: const Key(
+                                        'android-connect-password-visibility',
+                                      ),
+                                      tooltip: _passwordVisible
+                                          ? l10n.hidePassword
+                                          : l10n.showPassword,
+                                      onPressed: () => setState(
+                                        () => _passwordVisible =
+                                            !_passwordVisible,
+                                      ),
+                                      icon: Icon(
+                                        _passwordVisible
+                                            ? Icons.visibility_off_outlined
+                                            : Icons.visibility_outlined,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
                           ),
                           if (auth.failure != null) ...[
                             const SizedBox(height: 16),
-                            _PhoneConnectError(
+                            LoginErrorBanner(
                               message: embyFailureMessage(l10n, auth.failure!),
                             ),
                           ],
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 22),
                           FilledButton(
                             key: const Key('android-connect-submit'),
                             style: FilledButton.styleFrom(
-                              minimumSize: const Size(48, 48),
+                              minimumSize: const Size(52, 52),
                             ),
                             onPressed: auth.isBusy ? null : _submit,
-                            child: Text(
-                              auth.isBusy
-                                  ? l10n.connecting
-                                  : auth.failure != null
+                            child: BusyLabel(
+                              busy: auth.isBusy,
+                              label: auth.failure != null
                                   ? l10n.retry
                                   : l10n.connect,
+                              busyLabel: l10n.connecting,
                             ),
                           ),
+                          const SizedBox(height: 4),
                           _buildMore(context, l10n, auth),
                         ],
                       ),
@@ -524,7 +561,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
   }
 }
 
-/// 手机登录页品牌头:与桌面登录同一枚品牌方块,一句话说明用途。
+/// 手机登录页品牌头:与桌面同一枚渐变品牌方块,一句话说明用途。
 class _PhoneBrandHeader extends StatelessWidget {
   const _PhoneBrandHeader({required this.l10n});
 
@@ -537,30 +574,17 @@ class _PhoneBrandHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: scheme.primaryContainer,
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-          ),
-          child: SizedBox.square(
-            dimension: 56,
-            child: Icon(
-              Icons.play_circle_rounded,
-              size: 32,
-              color: scheme.onPrimaryContainer,
-            ),
-          ),
-        ),
+        const LoginBrandMark(size: 52),
         const SizedBox(height: AppSpacing.lg),
         Text(
           l10n.appName,
           style: theme.textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w800,
           ),
         ),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          l10n.mobileConnectionHint,
+          l10n.loginWelcomeSubtitle,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: scheme.onSurfaceVariant,
             height: 1.45,
@@ -571,47 +595,86 @@ class _PhoneBrandHeader extends StatelessWidget {
   }
 }
 
-/// 连接失败提示:浅错误底色 + 图标,和普通说明文字区分开。
-class _PhoneConnectError extends StatelessWidget {
-  const _PhoneConnectError({required this.message});
+/// 已保存服务器的横滑卡片:服务标记 + 名称 + 地址,选中描主色边。
+class _PhoneServerChip extends StatelessWidget {
+  const _PhoneServerChip({
+    super.key,
+    required this.server,
+    required this.selected,
+    required this.onPressed,
+  });
 
-  final String message;
+  final SavedServer server;
+  final bool selected;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Semantics(
-      liveRegion: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: scheme.errorContainer.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(AppRadii.md),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm,
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected
+            ? scheme.primary.withValues(alpha: .1)
+            : scheme.surfaceContainerHigh,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          side: BorderSide(
+            color: selected
+                ? scheme.primary
+                : scheme.outlineVariant.withValues(alpha: .6),
+            width: selected ? 1.5 : 1,
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: 20,
-                color: scheme.onErrorContainer,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  message,
-                  semanticsLabel: message,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onErrorContainer,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 150, maxWidth: 230),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ServerTypeMark(type: server.serviceType, size: 30),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          server.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          server.activeLine?.hostLabel ?? server.baseUrl,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                  if (selected) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: scheme.primary,
+                    ),
+                  ],
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

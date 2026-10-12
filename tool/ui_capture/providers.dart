@@ -94,6 +94,11 @@ class CaptureProviders {
 extension ProviderCaptures on CaptureSession {
   Future<void> _providerField(String key, String value) async {
     final field = find.byKey(Key(key));
+    // User-Agent 收在「高级选项」里;先展开再填写。
+    final advanced = find.byKey(const Key('provider-advanced'));
+    if (field.evaluate().isEmpty && advanced.evaluate().isNotEmpty) {
+      await activate(advanced);
+    }
     if (platform == 'tv') {
       await activate(field);
       await tester.enterText(find.byKey(const Key('tv-input-editor')), value);
@@ -167,20 +172,18 @@ extension ProviderCaptures on CaptureSession {
         await _providerField('provider-home-pin', '1234');
         await activate(find.byKey(const Key('provider-home-switch')));
         await advance(800);
-        final connection = find.widgetWithText(
-          OutlinedButton,
-          RegExp.escape(CaptureProviders.plex.url.toString()),
-        );
-        // Match the actual rendered resource connection label, including kind.
+        // Match the rendered resource connection by its stable key, which
+        // carries the connection URL.
+        final url = CaptureProviders.plex.url.toString();
         final button = find.byWidgetPredicate(
           (widget) =>
-              widget is OutlinedButton &&
-              widget.child is Text &&
-              (widget.child as Text).data!.contains(
-                CaptureProviders.plex.url.toString(),
-              ),
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'provider-resource-',
+              ) &&
+              (widget.key! as ValueKey<String>).value.contains(url),
         );
-        expect(button, findsOneWidget, reason: connection.toString());
+        expect(button, findsOneWidget, reason: url);
         await activate(button);
       } else {
         await _providerField(

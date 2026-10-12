@@ -830,8 +830,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
             children: [
               c.backend.buildView(),
               if (!_pip) ...[
+                // 弹幕让出顶栏(返回、标题、画中画、锁定)一带,不再压在标题上。
                 if (danmaku != null && _showDanmakuLayer(c))
-                  Positioned.fill(
+                  Positioned(
+                    top:
+                        phonePlayerControlInsets(MediaQuery.of(context)).top +
+                        56,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
                     child: IgnorePointer(
                       child: DanmakuView(controller: danmaku),
                     ),

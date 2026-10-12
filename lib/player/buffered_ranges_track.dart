@@ -81,17 +81,21 @@ class BufferedRangesProgressIndicator extends StatelessWidget {
     required this.snapshot,
     required this.duration,
     required this.value,
+    this.height = 6,
   });
 
   final BufferSnapshot snapshot;
   final Duration duration;
   final double value;
 
+  /// 轨道粗细;TV 按画布缩放后传入。
+  final double height;
+
   @override
   Widget build(BuildContext context) => Semantics(
     value: '${(value.clamp(0, 1) * 100).round()}%',
     child: SizedBox(
-      height: 6,
+      height: height,
       width: double.infinity,
       child: CustomPaint(
         painter: _ProgressPainter(

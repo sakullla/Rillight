@@ -62,11 +62,13 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
       height: 1,
     );
 
+    final duration = AppMotion.durationOf(context, AppMotion.fast);
     return Tooltip(
       message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 600),
       child: AnimatedContainer(
         key: CatalogKeys.back,
-        duration: AppMotion.durationOf(context, AppMotion.fast),
+        duration: duration,
         curve: AppMotion.standard,
         height: 36,
         decoration: ShapeDecoration(
@@ -74,6 +76,15 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
           shape: StadiumBorder(
             side: BorderSide(color: border, width: _focus ? 1.5 : 1),
           ),
+          shadows: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: artwork ? .28 : (light ? .06 : .18),
+              ),
+              blurRadius: highlighted ? 12 : 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Material(
           type: MaterialType.transparency,
@@ -84,14 +95,21 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
             customBorder: const StadiumBorder(),
             splashFactory: NoSplash.splashFactory,
             overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            mouseCursor: SystemMouseCursors.click,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 12, 0),
+              padding: const EdgeInsets.fromLTRB(8, 0, 14, 0),
               child: IconTheme.merge(
-                data: IconThemeData(color: foreground, size: 18),
+                data: IconThemeData(color: foreground, size: 20),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(widget.icon),
+                    // 悬停时箭头向左挪一点,提示「往回」的方向。
+                    AnimatedSlide(
+                      offset: highlighted ? const Offset(-.12, 0) : Offset.zero,
+                      duration: duration,
+                      curve: AppMotion.standard,
+                      child: Icon(widget.icon),
+                    ),
                     const SizedBox(width: 4),
                     Text(widget.label, style: labelStyle),
                   ],

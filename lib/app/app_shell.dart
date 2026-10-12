@@ -43,7 +43,10 @@ class AppShell extends StatefulWidget {
   static const overflowNavKey = Key('app-shell-libraries-overflow');
 
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
-  static const topBarHeight = 40.0;
+  ///
+  /// 52 让 36 高的返回胶囊上下各留 8,不再贴着窗口上缘;右侧应用图标
+  /// 仍与系统标题按钮对齐在上方 32 的标题带里。
+  static const topBarHeight = 52.0;
 
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
   static const topFadeHeight = 36.0;
@@ -479,7 +482,11 @@ class _TopBar extends StatelessWidget {
                       (location != AppRoutes.home &&
                           !AppRoutes.showsBrowseNav(location)))
                     Padding(
-                      padding: const EdgeInsets.only(right: AppSpacing.xs),
+                      // 胶囊左缘落在页面 24 边距上,与下方海报、标题对齐。
+                      padding: const EdgeInsets.only(
+                        left: AppSpacing.page - AppSpacing.sm,
+                        right: AppSpacing.sm,
+                      ),
                       child: DesktopBackButton(
                         overArtwork: !opaque,
                         tooltip: !canPop
@@ -532,17 +539,23 @@ class _TopBar extends StatelessWidget {
                             ),
                     ),
                   ],
-                  SizedBox(
-                    height: kWindowChromeHeight,
-                    child: IconTheme(
-                      data: IconTheme.of(context).copyWith(size: 18),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SearchAction(focusNode: searchFocus),
-                          const SessionActions(),
-                          const SizedBox(width: kWindowChromeActionGap),
-                        ],
+                  Align(
+                    // Windows/Linux 的应用图标与系统标题按钮同在上方标题带。
+                    alignment: hasChrome && windowChromeShowsCaptionButtons
+                        ? Alignment.topCenter
+                        : Alignment.center,
+                    child: SizedBox(
+                      height: kWindowChromeHeight,
+                      child: IconTheme(
+                        data: IconTheme.of(context).copyWith(size: 18),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SearchAction(focusNode: searchFocus),
+                            const SessionActions(),
+                            const SizedBox(width: kWindowChromeActionGap),
+                          ],
+                        ),
                       ),
                     ),
                   ),

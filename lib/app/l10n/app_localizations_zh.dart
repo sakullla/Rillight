@@ -1967,4 +1967,79 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get providerAccountInstructions =>
       'Plex 账号与密码在官方网页中管理。请打开浏览器，或在手机上访问下方地址。';
+
+  @override
+  String get loginWelcomeTitle => '连接你的媒体库';
+
+  @override
+  String get loginWelcomeSubtitle => '登录 Emby、Jellyfin 或 Plex 服务器，在这台设备上继续观看。';
+
+  @override
+  String get loginServiceLabel => '服务类型';
+
+  @override
+  String get loginEmbyHint => '填写服务器地址与账号密码登录 Emby。';
+
+  @override
+  String get loginJellyfinHint => '使用账号密码登录，或在已登录的设备上用 Quick Connect 授权。';
+
+  @override
+  String get loginPlexHint => '使用 Plex 账号授权，自动发现你可以访问的服务器。';
+
+  @override
+  String get loginAdvanced => '高级选项';
+
+  @override
+  String get loginPlexTitle => '使用 Plex 账号登录';
+
+  @override
+  String get loginPlexStep1 => '点击下方按钮，在浏览器中打开 plex.tv 授权页';
+
+  @override
+  String get loginPlexStep2 => '登录 Plex 账号，允许灯川访问';
+
+  @override
+  String get loginPlexStep3 => '回到这里，选择服务器与连接线路';
+
+  @override
+  String get loginQuickConnectHint => '无需输入密码';
+
+  @override
+  String get loginSavedServersHint => '选择一台服务器，自动填入地址与账号';
+
+  @override
+  String loginServerCount(int count) {
+    return '$count 台服务器';
+  }
+
+  @override
+  String get providerCopyCode => '复制代码';
+
+  @override
+  String get providerCodeCopied => '代码已复制';
+
+  @override
+  String get providerAuthorizationCodeLabel => '授权代码';
+
+  @override
+  String get providerSelectAll => '全选';
+
+  @override
+  String get providerSelectNone => '全不选';
+
+  @override
+  String get playerShowRemaining => '显示剩余时间';
+
+  @override
+  String get playerShowDuration => '显示总时长';
+
+  @override
+  String playerRemainingClock(String time) {
+    return '-$time';
+  }
+
+  @override
+  String playerEndsAt(String time) {
+    return '$time 结束';
+  }
 }

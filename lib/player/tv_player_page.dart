@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/routes.dart';
+import 'package:rillight/player/playback_title.dart';
 import 'package:rillight/player/playback_ended_panel.dart';
 import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
-import 'package:rillight/library/item_format.dart';
 import 'package:rillight/player/episode_browser.dart';
 import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/player_setting_choices.dart';
@@ -337,19 +337,6 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       c.onUserActivity();
     }
     return KeyEventResult.ignored;
-  }
-
-  String _playbackTitle(PlayerController c, AppLocalizations l) {
-    final item = c.item;
-    if (item == null) return l.playerLoading;
-    final code = item.isEpisode ? seasonEpisodeCode(item) : null;
-    if (code == null) return item.displayName;
-    final series = item.seriesName?.trim();
-    final name = item.name.trim();
-    if (series != null && series.isNotEmpty) {
-      return '$series · $code $name';
-    }
-    return '$code $name';
   }
 
   Future<void> _openEpisodes() async {
@@ -912,6 +899,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         child: Column(
           children: [
             BufferedRangesProgressIndicator(
+              height: context.tvdp(7),
               snapshot: c.bufferSnapshot,
               duration: c.duration,
               value: c.duration.inMilliseconds <= 0
@@ -933,7 +921,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   ),
                 ),
                 Text(
-                  _time(c.duration),
+                  c.duration > Duration.zero
+                      ? '${AppLocalizations.of(context).playerRemainingClock(_time(c.duration - position < Duration.zero ? Duration.zero : c.duration - position))}  /  ${_time(c.duration)}'
+                      : _time(c.duration),
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     color: Colors.white70,
                     fontFeatures: const [FontFeature.tabularFigures()],
@@ -1000,8 +990,25 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (playbackTitleParts(
+                                c.item,
+                                fallback: l.playerLoading,
+                              ).eyebrow
+                              case final eyebrow?)
+                            Text(
+                              eyebrow,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: Colors.white.withValues(alpha: .78),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           Text(
-                            _playbackTitle(c, l),
+                            playbackTitleParts(
+                              c.item,
+                              fallback: l.playerLoading,
+                            ).title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.headlineSmall?.copyWith(
@@ -1033,6 +1040,18 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       ),
                     ),
                     SizedBox(width: 16 * s),
+                    Padding(
+                      padding: EdgeInsets.only(top: 10 * s, right: 14 * s),
+                      child: Tooltip(
+                        message: l.playerNetworkSpeedTooltip,
+                        child: NetworkSpeedReadout(
+                          key: const Key('tv-player-network-speed'),
+                          bytesPerSecond: c.cacheSpeedBytesPerSec,
+                          textStyle: theme.textTheme.labelMedium,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
                     _action(
                       'tv-player-close',
                       Icons.close_rounded,
@@ -1098,19 +1117,6 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     ],
                   ),
                 ),
-                Tooltip(
-                  message: l.playerNetworkSpeedTooltip,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: NetworkSpeedReadout(
-                      key: const Key('tv-player-network-speed'),
-                      bytesPerSecond: c.cacheSpeedBytesPerSec,
-                      textStyle: theme.textTheme.labelMedium,
-                      color: Colors.white70,
-                    ),
-                  ),
-                ),
-                SizedBox(height: 6 * s),
                 _timeline(c),
                 SizedBox(height: 10 * s),
                 LayoutBuilder(
@@ -1143,7 +1149,6 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     Icons.video_library_rounded,
                                     l.playerEpisodes,
                                     ready ? _openEpisodes : null,
-                                    showLabel: false,
                                   ),
                                 if (c.canSwitchAudioTrack ||
                                     c.canConfigureSubtitles)
