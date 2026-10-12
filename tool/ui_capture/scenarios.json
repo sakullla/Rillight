@@ -576,6 +576,15 @@
     "id": "movie-detail-chapters",
     "feature": "detail",
     "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "movie-detail-cast",
+    "feature": "detail",
+    "platforms": [
+      "desktop",
       "phone"
     ]
   },

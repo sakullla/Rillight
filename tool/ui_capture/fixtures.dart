@@ -260,23 +260,39 @@ FakeEmbyServer captureServer() {
   movie.overview =
       '一段关于约定、勇气与重新出发的旅程。老人卡尔带着满屋气球飞向远方，却意外遇见了热心的小伙伴。穿过云海与群山，他们发现最珍贵的冒险就在彼此身边。';
   // 没有服务器剪影的章节：详情页画序号底板，不是一排灰块。
-  movie.chapters = const [
-    FakeChapter(
-      name: '启程',
-      startPosition: Duration(microseconds: (0) ~/ 10),
-    ),
-    FakeChapter(
-      name: '飞越云海',
-      startPosition: Duration(microseconds: (8 * 60 * 10000000) ~/ 10),
-    ),
-    FakeChapter(
-      name: '天堂瀑布',
-      startPosition: Duration(microseconds: (31 * 60 * 10000000) ~/ 10),
-    ),
-    FakeChapter(
-      name: '归途',
-      startPosition: Duration(microseconds: (72 * 60 * 10000000) ~/ 10),
-    ),
+  // 十二条用来撑出桌面横滑和左右翻页按钮。
+  movie.chapters = [
+    const FakeChapter(name: '启程', startPosition: Duration.zero),
+    const FakeChapter(name: '飞越云海', startPosition: Duration(minutes: 8)),
+    const FakeChapter(name: '天堂瀑布', startPosition: Duration(minutes: 31)),
+    const FakeChapter(name: '归途', startPosition: Duration(minutes: 72)),
+    for (var index = 5; index <= 12; index++)
+      FakeChapter(
+        name: '章节 $index',
+        startPosition: Duration(minutes: 72 + (index - 4) * 6),
+      ),
+  ];
+  movie.people = [
+    for (final (index, name) in const [
+      '卡尔',
+      '罗素',
+      '查尔斯',
+      '艾莉',
+      '凯文',
+      '达根',
+      '阿尔法',
+      '贝塔',
+      '伽玛',
+      '德尔塔',
+      '艾普西龙',
+      '泽塔',
+    ].indexed)
+      FakePerson(
+        id: 'person-cast-$index',
+        name: name,
+        type: 'Actor',
+        role: '角色 ${index + 1}',
+      ),
   ];
   server.setSeasons('series-friends', const [
     FakeSeason(

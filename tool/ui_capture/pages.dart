@@ -21,6 +21,7 @@ import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
+import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/player/player_host_command.dart';
@@ -306,6 +307,7 @@ extension PageCaptures on CaptureSession {
             .first;
         for (final (key, name) in const [
           (Key('phone-chapter-strip'), 'movie-detail-chapters'),
+          (EpisodePeopleSection.sectionKey, 'movie-detail-cast'),
           (EpisodeMediaStreamsSection.sectionKey, 'movie-detail-media'),
         ]) {
           await tester.scrollUntilVisible(
@@ -333,6 +335,27 @@ extension PageCaptures on CaptureSession {
       if (platform == 'desktop') {
         await modal(CatalogKeys.detailAudio, 'detail-audio');
         await modal(CatalogKeys.detailSubtitle, 'detail-subtitles');
+        final page = find
+            .descendant(
+              of: find.byType(ItemDetailPage),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Scrollable && widget.axis == Axis.vertical,
+              ),
+            )
+            .first;
+        for (final (finder, name) in [
+          (find.byKey(CatalogKeys.chapter(0)), 'movie-detail-chapters'),
+          (find.byKey(EpisodePeopleSection.sectionKey), 'movie-detail-cast'),
+        ]) {
+          await tester.scrollUntilVisible(finder, 400, scrollable: page);
+          await Scrollable.ensureVisible(
+            tester.element(finder),
+            alignment: 0.12,
+          );
+          await advance(300);
+          await save(name);
+        }
       }
       expect(
         tester

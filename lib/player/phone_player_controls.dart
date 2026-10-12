@@ -267,26 +267,15 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           children: [
             _buildTopBar(context, insets),
             Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: insets.left,
-                  right: insets.right,
-                ),
-                child: locked
-                    ? const SizedBox.shrink()
-                    : _canControl
-                    ? Align(
-                        alignment: Alignment.bottomCenter,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _buildTransport(context),
-                          ),
-                        ),
-                      )
-                    : widget.center,
-              ),
+              child: locked || _canControl
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: EdgeInsets.only(
+                        left: insets.left,
+                        right: insets.right,
+                      ),
+                      child: widget.center,
+                    ),
             ),
             if (!locked) _buildBottomBar(context, insets),
           ],
@@ -351,7 +340,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       tooltip: l.mobileUnlock,
                       style: _phoneChromeButton,
                       onPressed: toggleLock,
-                      icon: const Icon(Icons.lock),
+                      icon: const Icon(Icons.lock_open_rounded),
                     ),
                   if (!widget.interaction.unlockVisible)
                     const SizedBox(width: 48, height: 48),
@@ -362,9 +351,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     tooltip: l.closePlayer,
                     style: _phoneChromeButton,
                     onPressed: widget.onClose,
-                    icon: const Icon(Icons.arrow_back),
+                    icon: const Icon(Icons.arrow_back_rounded),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 8),
                   Expanded(child: _title(l)),
                   if (widget.onPictureInPicture != null)
                     IconButton(
@@ -379,14 +368,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               !_controller.playbackEnded
                           ? widget.onPictureInPicture
                           : null,
-                      icon: const Icon(Icons.picture_in_picture_alt),
+                      icon: const Icon(Icons.picture_in_picture_alt_rounded),
                     ),
                   IconButton(
                     key: const Key('mobile-player-lock'),
                     tooltip: l.mobileLock,
                     style: _phoneChromeButton,
                     onPressed: toggleLock,
-                    icon: const Icon(Icons.lock_open),
+                    icon: const Icon(Icons.lock_outline_rounded),
                   ),
                 ],
         ),
@@ -434,47 +423,35 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     final l = AppLocalizations.of(context);
     final c = _controller;
     final canSeek = widget.interaction.canSeek(c);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .46),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: .18)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _transportButton(
-              key: const Key('mobile-player-rewind'),
-              tooltip: l.mobileRewind,
-              onPressed: canSeek
-                  ? () => c.seekRelative(const Duration(seconds: -10))
-                  : null,
-              icon: Icons.replay_10_rounded,
-            ),
-            const SizedBox(width: 8),
-            _transportButton(
-              key: const Key('mobile-player-toggle'),
-              tooltip: c.isPlaying ? l.pause : l.play,
-              onPressed: c.togglePlay,
-              icon: c.isPlaying
-                  ? Icons.pause_rounded
-                  : Icons.play_arrow_rounded,
-              primary: true,
-            ),
-            const SizedBox(width: 8),
-            _transportButton(
-              key: const Key('mobile-player-forward'),
-              tooltip: l.mobileForward,
-              onPressed: canSeek
-                  ? () => c.seekRelative(const Duration(seconds: 10))
-                  : null,
-              icon: Icons.forward_10_rounded,
-            ),
-          ],
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _transportButton(
+          key: const Key('mobile-player-rewind'),
+          tooltip: l.mobileRewind,
+          onPressed: canSeek
+              ? () => c.seekRelative(const Duration(seconds: -10))
+              : null,
+          icon: Icons.replay_10_rounded,
         ),
-      ),
+        const SizedBox(width: 8),
+        _transportButton(
+          key: const Key('mobile-player-toggle'),
+          tooltip: c.isPlaying ? l.pause : l.play,
+          onPressed: c.togglePlay,
+          icon: c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          primary: true,
+        ),
+        const SizedBox(width: 8),
+        _transportButton(
+          key: const Key('mobile-player-forward'),
+          tooltip: l.mobileForward,
+          onPressed: canSeek
+              ? () => c.seekRelative(const Duration(seconds: 10))
+              : null,
+          icon: Icons.forward_10_rounded,
+        ),
+      ],
     );
   }
 
@@ -493,9 +470,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       ),
     );
     final clock = Text(
-      '${phonePlayerClock(Duration(milliseconds: (_seek ?? c.position.inMilliseconds).round()))} / ${phonePlayerClock(c.duration)}',
+      '${phonePlayerClock(Duration(milliseconds: (_seek ?? c.position.inMilliseconds).round()))}  /  ${phonePlayerClock(c.duration)}',
       key: const Key('mobile-player-clock'),
-      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        fontFeatures: [FontFeature.tabularFigures()],
+      ),
     );
     final notices = [
       if (c.progressSyncFailed) l.progressSyncFailed,
@@ -576,11 +557,35 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ),
               ),
+            Row(
+              children: [
+                clock,
+                if (c.isBuffering && !c.loading) ...[
+                  const SizedBox(width: 10),
+                  const SizedBox.square(
+                    dimension: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    l.playerBuffering,
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
+                const Spacer(),
+                cache,
+              ],
+            ),
             if (_holdSeek)
               SizedBox(height: _seekSlotHeight(context))
             else
               SliderTheme(
                 data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3,
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white.withValues(alpha: .28),
+                  thumbColor: Colors.white,
+                  overlayColor: Colors.white24,
                   showValueIndicator: ShowValueIndicator.onDrag,
                   valueIndicatorColor: Colors.white,
                   valueIndicatorTextStyle: const TextStyle(
@@ -592,7 +597,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                 child: BufferedRangesTrack(
                   snapshot: c.bufferSnapshot,
                   duration: c.duration,
-                  trackHeight: 6,
+                  trackHeight: 3,
                   child: Slider(
                     key: const Key('mobile-player-seek'),
                     value: (_seek ?? c.position.inMilliseconds.toDouble())
@@ -623,111 +628,98 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ),
               ),
-            Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              alignment: WrapAlignment.spaceBetween,
-              spacing: 12,
-              runSpacing: 2,
-              children: [
-                if (c.isBuffering && !c.loading)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox.square(
-                        dimension: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        l.playerBuffering,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ),
-                clock,
-                cache,
-              ],
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                if (c.canBrowseEpisodes)
-                  _shortcut(
-                    'mobile-player-episodes',
-                    Icons.video_library_rounded,
-                    l.playerEpisodes,
-                    _openEpisodes,
-                    showLabel: false,
-                  ),
-                _shortcut(
-                  'mobile-player-speed',
-                  Icons.speed,
-                  playerRateLabel(c.playbackRate),
-                  () => _openMore(section: 'speed'),
-                ),
-                if (c.canSwitchAudioTrack || c.canConfigureSubtitles)
-                  _shortcut(
-                    'mobile-player-tracks',
-                    Icons.subtitles_outlined,
-                    c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
-                    () => _openMore(section: 'tracks'),
-                  ),
-                _shortcut(
-                  'mobile-player-more',
-                  Icons.tune,
-                  l.mobileMore,
-                  () => _openMore(),
-                ),
-                if (widget.danmaku?.isConfigured == true)
-                  _shortcut(
-                    'mobile-player-danmaku',
-                    Icons.forum_outlined,
-                    l.danmaku,
-                    () => _openMore(section: 'danmaku'),
-                  ),
-              ],
-            ),
+            _buildControlDock(context),
           ],
         ),
       ),
     );
   }
 
-  Widget _shortcut(
-    String key,
-    IconData icon,
-    String label,
-    Future<void> Function() action, {
-    bool showLabel = true,
-  }) {
-    return Expanded(
-      child: TextButton(
-        key: Key(key),
-        style: TextButton.styleFrom(
-          foregroundColor: Colors.white,
-          minimumSize: const Size(48, 56),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  /// Wide landscape keeps transport on the left and tools on the right.
+  /// Narrow portrait stacks them so every target stays at least 48dp.
+  Widget _buildControlDock(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 640;
+    final transport = _buildTransport(context);
+    final actions = _buildActionRow(context);
+    if (!wide) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [transport, const SizedBox(height: 8), actions],
+      );
+    }
+    return Row(children: [transport, const Spacer(), actions]);
+  }
+
+  Widget _buildActionRow(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final c = _controller;
+    final buttons = <Widget>[
+      if (c.canBrowseEpisodes)
+        _actionButton(
+          keyName: 'mobile-player-episodes',
+          tooltip: l.playerEpisodes,
+          icon: const Icon(Icons.video_library_rounded, size: 22),
+          action: _openEpisodes,
         ),
-        onPressed: _controller.loading ? null : () => unawaited(action()),
-        child: showLabel
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 22),
-                  const SizedBox(height: 2),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, height: 1.1),
-                  ),
-                ],
-              )
-            : Tooltip(message: label, child: Icon(icon, size: 22)),
+      _actionButton(
+        keyName: 'mobile-player-speed',
+        tooltip: l.playbackRate,
+        icon: Text(
+          playerRateLabel(c.playbackRate),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+        action: () => _openMore(section: 'speed'),
+      ),
+      if (c.canSwitchAudioTrack || c.canConfigureSubtitles)
+        _actionButton(
+          keyName: 'mobile-player-tracks',
+          tooltip: c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
+          icon: const Icon(Icons.subtitles_outlined, size: 22),
+          action: () => _openMore(section: 'tracks'),
+        ),
+      if (widget.danmaku?.isConfigured == true)
+        _actionButton(
+          keyName: 'mobile-player-danmaku',
+          tooltip: l.danmaku,
+          icon: const Icon(Icons.chat_bubble_outline_rounded, size: 22),
+          action: () => _openMore(section: 'danmaku'),
+        ),
+      _actionButton(
+        keyName: 'mobile-player-more',
+        tooltip: l.mobileMore,
+        icon: const Icon(Icons.tune_rounded, size: 22),
+        action: () => _openMore(),
+      ),
+    ];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var index = 0; index < buttons.length; index++) ...[
+          if (index > 0) const SizedBox(width: 2),
+          buttons[index],
+        ],
+      ],
+    );
+  }
+
+  Widget _actionButton({
+    required String keyName,
+    required String tooltip,
+    required Widget icon,
+    required Future<void> Function() action,
+  }) {
+    return IconButton(
+      key: Key(keyName),
+      tooltip: tooltip,
+      onPressed: _controller.loading ? null : () => unawaited(action()),
+      icon: icon,
+      style: IconButton.styleFrom(
+        foregroundColor: Colors.white,
+        minimumSize: const Size(48, 48),
+        fixedSize: const Size(48, 48),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.standard,
       ),
     );
   }

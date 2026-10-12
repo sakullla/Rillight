@@ -400,6 +400,56 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('wide cast drags with the left mouse button and the arrow', (
+    tester,
+  ) async {
+    await _pumpPeople(
+      tester,
+      width: 1024,
+      height: 900,
+      people: [
+        for (var i = 0; i < 12; i++)
+          ItemPerson(name: '演员$i', type: 'Actor', role: '角色$i'),
+      ],
+    );
+    final section = find.byKey(EpisodePeopleSection.sectionKey);
+    final scrollable = find.descendant(
+      of: section,
+      matching: find.byType(Scrollable),
+    );
+    ScrollPosition position() {
+      return tester.state<ScrollableState>(scrollable).position;
+    }
+
+    expect(position().maxScrollExtent, greaterThan(0));
+    expect(position().pixels, 0);
+    expect(
+      find.byKey(CatalogKeys.shelfScrollRight('people-Actor')),
+      findsOneWidget,
+    );
+    final before = tester.getTopLeft(
+      find.byKey(const ValueKey('episode-person-Actor-0')),
+    );
+    await tester.drag(
+      find.byKey(const ValueKey('episode-person-Actor-0')),
+      const Offset(-120, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    expect(position().pixels, greaterThan(40));
+    expect(
+      tester
+          .getTopLeft(find.byKey(const ValueKey('episode-person-Actor-0')))
+          .dx,
+      lessThan(before.dx - 40),
+    );
+    final dragged = position().pixels;
+    await tester.tap(find.byKey(CatalogKeys.shelfScrollRight('people-Actor')));
+    await tester.pumpAndSettle();
+    expect(position().pixels, greaterThan(dragged + 40));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('narrow desktop pages whole poster cards', (tester) async {
     const width = 360.0;
     const height = 1800.0;

@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:rillight/app/widgets/scrim_icon_button.dart';
+import 'package:rillight/home/catalog_keys.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
@@ -519,6 +522,81 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
   // 详情页的竖向 PageStorage 不能把这一行恢复到末尾。
   final _scroll = ScrollController(keepScrollOffset: false);
   final _nodes = <int, FocusNode>{};
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_updateButtons);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateButtons();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _PeopleGroupRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.people.length != widget.people.length ||
+        oldWidget.metrics.width != widget.metrics.width) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _updateButtons();
+      });
+    }
+  }
+
+  void _updateButtons() {
+    if (!mounted || !_scroll.hasClients) {
+      return;
+    }
+    final position = _scroll.position;
+    if (!position.hasContentDimensions) {
+      return;
+    }
+    final overflowing = position.maxScrollExtent > 0.5;
+    final canLeft = overflowing && position.pixels > 0.5;
+    final canRight =
+        overflowing && position.pixels < position.maxScrollExtent - 0.5;
+    if (canLeft == _canScrollLeft && canRight == _canScrollRight) {
+      return;
+    }
+    setState(() {
+      _canScrollLeft = canLeft;
+      _canScrollRight = canRight;
+    });
+  }
+
+  void _page(int direction) {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    if (!position.hasContentDimensions || !position.hasViewportDimension) {
+      return;
+    }
+    final target =
+        (position.pixels + position.viewportDimension * 0.9 * direction).clamp(
+          0.0,
+          position.maxScrollExtent,
+        );
+    final duration = AppMotion.durationOf(context);
+    if (duration == Duration.zero) {
+      _scroll.jumpTo(target);
+      return;
+    }
+    _scroll.animateTo(target, duration: duration, curve: AppMotion.standard);
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (event.scrollDelta.dy.abs() <= event.scrollDelta.dx.abs()) return;
+    final vertical = Scrollable.maybeOf(context, axis: Axis.vertical);
+    if (vertical == null) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
+      final dy = (resolved as PointerScrollEvent).scrollDelta.dy;
+      final position = vertical.position;
+      if (!position.hasPixels) return;
+      position.pointerScroll(dy);
+    });
+  }
 
   FocusNode _nodeFor(int index) {
     return _nodes.putIfAbsent(index, () {
@@ -592,6 +670,7 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
 
   @override
   void dispose() {
+    _scroll.removeListener(_updateButtons);
     _scroll.dispose();
     for (final node in _nodes.values) {
       node.dispose();
@@ -645,30 +724,83 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
         _nodeFor(index);
       }
     }
-    final row = SingleChildScrollView(
-      controller: _scroll,
-      scrollDirection: Axis.horizontal,
-      primary: false,
-      clipBehavior: widget.rail == _PersonRail.tv ? Clip.none : Clip.hardEdge,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var index = 0; index < widget.people.length; index++) ...[
-            if (index > 0) SizedBox(width: metrics.cardGap),
-            _card(context, index),
+    final row = ScrollConfiguration(
+      behavior: const _RowScrollBehavior(),
+      child: SingleChildScrollView(
+        controller: _scroll,
+        scrollDirection: Axis.horizontal,
+        primary: false,
+        clipBehavior: widget.rail == _PersonRail.tv ? Clip.none : Clip.hardEdge,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var index = 0; index < widget.people.length; index++) ...[
+              if (index > 0) SizedBox(width: metrics.cardGap),
+              _card(context, index),
+            ],
           ],
+        ),
+      ),
+    );
+    if (widget.rail == _PersonRail.tv) {
+      return Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onKeyEvent: _onKey,
+        child: SizedBox(width: double.infinity, height: height, child: row),
+      );
+    }
+    final l10n = AppLocalizations.of(context);
+    final shelfId = 'people-${widget.typeKey}';
+    return SizedBox(
+      height: height,
+      child: Stack(
+        children: [
+          NotificationListener<ScrollMetricsNotification>(
+            onNotification: (_) {
+              _updateButtons();
+              return false;
+            },
+            child: Listener(onPointerSignal: _onPointerSignal, child: row),
+          ),
+          if (_canScrollLeft)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ScrimIconButton(
+                key: CatalogKeys.shelfScrollLeft(shelfId),
+                tooltip: l10n.scrollLeft,
+                icon: const Icon(Icons.chevron_left),
+                onPressed: () => _page(-1),
+              ),
+            ),
+          if (_canScrollRight)
+            Align(
+              alignment: Alignment.centerRight,
+              child: ScrimIconButton(
+                key: CatalogKeys.shelfScrollRight(shelfId),
+                tooltip: l10n.scrollRight,
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => _page(1),
+              ),
+            ),
         ],
       ),
     );
-    final strip = SizedBox(width: double.infinity, height: height, child: row);
-    if (widget.rail != _PersonRail.tv) return strip;
-    return Focus(
-      canRequestFocus: false,
-      skipTraversal: true,
-      onKeyEvent: _onKey,
-      child: strip,
-    );
   }
+}
+
+/// 桌面鼠标左键可以拖动演职员横条。竖直滚轮仍交给外层详情页。
+class _RowScrollBehavior extends MaterialScrollBehavior {
+  const _RowScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.touch,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.invertedStylus,
+  };
 }
 
 class _PersonCard extends StatelessWidget {

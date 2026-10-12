@@ -1547,17 +1547,17 @@ class _ControlsRow extends StatelessWidget {
         ),
         _VolumeControl(controller: controller),
         const Spacer(),
+        if (danmakuController != null && danmakuController.isConfigured)
+          _DanmakuButton(
+            danmaku: danmakuController,
+            onPressed: onDanmakuSearch,
+          ),
         if (controller.canBrowseEpisodes)
           _PlayerIconButton(
             key: const Key('player-episodes'),
             tooltip: l10n.playerEpisodes,
             onPressed: onOpenEpisodes,
             icon: Icons.video_library_rounded,
-          ),
-        if (danmakuController != null && danmakuController.isConfigured)
-          _DanmakuButton(
-            danmaku: danmakuController,
-            onPressed: onDanmakuSearch,
           ),
         if (controller.canConfigureSubtitles)
           SubtitleTrackMenu(controller: controller),

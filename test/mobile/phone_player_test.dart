@@ -1369,7 +1369,7 @@ void main() {
   );
 
   testWidgets(
-    'fit is the default scale with central transport and a full-width timeline',
+    'fit is the default scale with transport under a full-width timeline',
     (tester) async {
       final backend = FakeVideoBackend(
         duration: const Duration(hours: 1, minutes: 5),
@@ -1386,9 +1386,9 @@ void main() {
         find.byKey(const Key('mobile-player-toggle')),
       );
       final seek = tester.getRect(find.byKey(const Key('mobile-player-seek')));
-      expect(toggle.center.dx, closeTo(400, .2));
-      expect(toggle.bottom, lessThan(seek.top));
       expect(seek.width, greaterThan(740));
+      expect(toggle.top, greaterThan(seek.bottom - 1));
+      expect(toggle.center.dx, lessThan(320));
 
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
@@ -1709,7 +1709,10 @@ void main() {
       expect(picture.right - more.right, greaterThanOrEqualTo(24));
       expect(rewind.left - picture.left, greaterThanOrEqualTo(24));
       expect(picture.bottom - more.bottom, greaterThanOrEqualTo(40));
-      expect(rewind.bottom, lessThan(more.top));
+      final seek = tester.getRect(find.byKey(const Key('mobile-player-seek')));
+      expect(rewind.top, greaterThan(seek.bottom - 1));
+      expect(more.left, greaterThan(rewind.right));
+      expect((rewind.center.dy - more.center.dy).abs(), lessThan(1));
       await tester.tap(find.byKey(const Key('mobile-player-lock')));
       await tester.pump();
       expect(tester.getRect(topScrim).top, closeTo(picture.top, 0.01));

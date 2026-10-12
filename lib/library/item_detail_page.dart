@@ -1685,24 +1685,27 @@ class _ChapterStripState extends State<_ChapterStrip> {
                     _updateButtons();
                     return false;
                   },
-                  child: Listener(
-                    onPointerSignal: _onPointerSignal,
-                    child: ListView.separated(
-                      controller: _controller,
-                      scrollDirection: Axis.horizontal,
-                      itemCount: widget.chapters.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: AppSpacing.sm),
-                      itemBuilder: (context, index) {
-                        final chapter = widget.chapters[index];
-                        return _ChapterTile(
-                          key: CatalogKeys.chapter(index),
-                          itemId: widget.itemId,
-                          chapter: chapter,
-                          index: index,
-                          onTap: () => widget.onSelect(chapter),
-                        );
-                      },
+                  child: ScrollConfiguration(
+                    behavior: const _ChapterScrollBehavior(),
+                    child: Listener(
+                      onPointerSignal: _onPointerSignal,
+                      child: ListView.separated(
+                        controller: _controller,
+                        scrollDirection: Axis.horizontal,
+                        itemCount: widget.chapters.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: AppSpacing.sm),
+                        itemBuilder: (context, index) {
+                          final chapter = widget.chapters[index];
+                          return _ChapterTile(
+                            key: CatalogKeys.chapter(index),
+                            itemId: widget.itemId,
+                            chapter: chapter,
+                            index: index,
+                            onTap: () => widget.onSelect(chapter),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
@@ -1737,6 +1740,20 @@ class _ChapterStripState extends State<_ChapterStrip> {
       ),
     );
   }
+}
+
+/// 桌面鼠标左键可以拖动章节条。竖直滚轮仍交给外层详情页。
+class _ChapterScrollBehavior extends MaterialScrollBehavior {
+  const _ChapterScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.touch,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.invertedStylus,
+  };
 }
 
 class _ChapterTile extends StatelessWidget {
