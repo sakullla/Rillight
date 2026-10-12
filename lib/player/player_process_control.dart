@@ -295,7 +295,12 @@ abstract class DesktopPlayerProcessControl
   Future<void> acknowledgeWatchEvent(
     int pid,
     Map<String, dynamic> receipt,
-  ) async => _endpoints[pid]?.write('watch-ack', receipt);
+  ) async => _endpoints[pid]?.write(
+    // Separate files prevent consuming a pending receipt from deleting a
+    // final acknowledgement written concurrently by fast verification.
+    receipt['pending'] == true ? 'watch-pending' : 'watch-ack',
+    receipt,
+  );
   @override
   Future<void> revoke(
     int pid,

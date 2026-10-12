@@ -66,8 +66,13 @@ layout(std140) uniform Params {
   vec4 linearMatrix[3];
   Curve curves[3];
 };
+#ifdef RILLIGHT_FILTERED
+uniform highp sampler2D luma;
+uniform highp sampler2D chroma;
+#else
 uniform usampler2D luma;
 uniform usampler2D chroma;
+#endif
 uniform float inputMaximum;
 uniform highp sampler2D transferTable;
 #ifdef RILLIGHT_EXTERNAL
@@ -76,6 +81,11 @@ uniform highp __samplerExternal2DY2YEXT source;
 in vec2 uv;
 out vec4 color;
 
+#ifdef RILLIGHT_FILTERED
+vec2 samplePlane(highp sampler2D plane, vec2 position) {
+  return texture(plane, position).rg * inputMaximum;
+}
+#else
 vec2 samplePlane(usampler2D plane, vec2 position) {
   ivec2 size = textureSize(plane, 0);
   vec2 p = position * vec2(size) - 0.5;
@@ -88,6 +98,7 @@ vec2 samplePlane(usampler2D plane, vec2 position) {
   vec2 d = vec2(texelFetch(plane, clamp(base + ivec2(1, 1), ivec2(0), high), 0).rg);
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y) / inputMaximum;
 }
+#endif
 float pivot(int channel, int i) { return curves[channel].pivots[i / 4][i % 4]; }
 #ifdef RILLIGHT_POLYNOMIAL
 // Constant member offsets avoid mobile drivers lowering nested dynamic
@@ -232,6 +243,8 @@ struct AndroidColorPipeline::Impl {
   int source_format = AV_PIX_FMT_NONE;
   bool hdr = false, requested_hdr = false;
   bool external = false;
+  bool allow_filtered_planes = true;
+  bool filtered = false, requested_ten_bit = false;
   EGLImageKHR imported = EGL_NO_IMAGE_KHR;
   std::shared_ptr<AVFrame> imported_frame;
   PFNEGLCREATEIMAGEKHRPROC create_image = nullptr;
@@ -268,10 +281,11 @@ struct AndroidColorPipeline::Impl {
     width = height = 0; hdr = false;
   }
 
-  bool Create(ANativeWindow* target, bool prefer_hdr, bool use_external) {
+  bool Create(ANativeWindow* target, bool prefer_hdr, bool use_external, bool ten_bit) {
     Reset();
     external = use_external;
     requested_hdr = prefer_hdr;
+    requested_ten_bit = ten_bit;
     display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (display == EGL_NO_DISPLAY || !eglInitialize(display, nullptr, nullptr)) return false;
     if (!eglBindAPI(EGL_OPENGL_ES_API)) return false;
@@ -308,13 +322,17 @@ struct AndroidColorPipeline::Impl {
     surface = eglCreateWindowSurface(display, config, target, want_hdr ? hdr_attributes : sdr_attributes);
     if (surface == EGL_NO_SURFACE && want_hdr) {
       // Retry with a complete 8-bit SDR configuration, never tag SDR as PQ.
-      const bool created = Create(target, false, use_external);
+      const bool created = Create(target, false, use_external, ten_bit);
       requested_hdr = prefer_hdr;
       return created;
     }
     if (surface == EGL_NO_SURFACE || !eglMakeCurrent(display, surface, surface, context)) return false;
     window = target; ANativeWindow_acquire(window);
     hdr = want_hdr;
+    // NV12 normalized filtering is GLES 3 core. Preserve all P010 bits with
+    // EXT_texture_norm16; devices without it retain integer/manual bilinear.
+    filtered = allow_filtered_planes && !external && (!ten_bit || HasExtension(
+        reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)), "GL_EXT_texture_norm16"));
     if (external) {
       if (!HasExtension(reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)), "GL_EXT_YUV_target"))
         return false;
@@ -330,6 +348,7 @@ struct AndroidColorPipeline::Impl {
     const GLuint vertex = Compile(GL_VERTEX_SHADER, kVertex);
     GLuint fragment = 0;
     std::string fragment_source = kFragment;
+    if (filtered) fragment_source.insert(fragment_source.find('\n') + 1, "#define RILLIGHT_FILTERED\n");
     if (external) fragment_source.insert(fragment_source.find('\n') + 1, "#define RILLIGHT_EXTERNAL\n");
     try { fragment = Compile(GL_FRAGMENT_SHADER, fragment_source.c_str()); }
     catch (...) { glDeleteShader(vertex); throw; }
@@ -421,8 +440,9 @@ struct AndroidColorPipeline::Impl {
     for (const auto& curve : constants.curves)
       for (int piece = 0; piece < static_cast<int>(curve.bounds.x) - 1; ++piece)
         if (curve.pieces[piece].polynomial.w != 0) polynomial_only = false;
-    if (target != window || prefer_hdr != requested_hdr || external != (decoder_surface != nullptr))
-      if (!Create(target, prefer_hdr, decoder_surface != nullptr)) return false;
+    if (target != window || prefer_hdr != requested_hdr || external != (decoder_surface != nullptr) ||
+        (!decoder_surface && requested_ten_bit != ten_bit))
+      if (!Create(target, prefer_hdr, decoder_surface != nullptr, ten_bit)) return false;
     if (!eglMakeCurrent(display, surface, surface, context)) return false;
     constants.range.w = hdr ? 1 : 0;
     glBindBuffer(GL_UNIFORM_BUFFER, parameters);
@@ -462,22 +482,25 @@ struct AndroidColorPipeline::Impl {
       glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
       image_target(GL_TEXTURE_EXTERNAL_OES, imported);
     } else {
-      glUniform1f(glGetUniformLocation(selected_program, "inputMaximum"), ten_bit ? 65472.f : 255.f);
+      glUniform1f(glGetUniformLocation(selected_program, "inputMaximum"), filtered
+          ? (ten_bit ? 65535.f / 65472.f : 1.f) : (ten_bit ? 65472.f : 255.f));
       glPixelStorei(GL_UNPACK_ALIGNMENT, component_bytes);
       const bool allocate = width != frame->width || height != frame->height || source_format != frame->format;
       for (int plane = 0; plane < 2; ++plane) {
         const int plane_width = plane == 0 ? frame->width : (frame->width + 1) / 2;
         const int plane_height = plane == 0 ? frame->height : (frame->height + 1) / 2;
-        const GLenum format = plane == 0 ? GL_RED_INTEGER : GL_RG_INTEGER;
+        const GLenum format = filtered ? (plane == 0 ? GL_RED : GL_RG)
+                                       : (plane == 0 ? GL_RED_INTEGER : GL_RG_INTEGER);
         glActiveTexture(GL_TEXTURE0 + plane); glBindTexture(GL_TEXTURE_2D, textures[plane]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filtered ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filtered ? GL_LINEAR : GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[plane] / (component_bytes * (plane == 0 ? 1 : 2)));
         const GLenum component = ten_bit ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
-        const GLenum storage = ten_bit ? (plane == 0 ? GL_R16UI : GL_RG16UI) :
-                                        (plane == 0 ? GL_R8UI : GL_RG8UI);
+        const GLenum storage = filtered
+            ? (ten_bit ? (plane == 0 ? GL_R16_EXT : GL_RG16_EXT) : (plane == 0 ? GL_R8 : GL_RG8))
+            : (ten_bit ? (plane == 0 ? GL_R16UI : GL_RG16UI) : (plane == 0 ? GL_R8UI : GL_RG8UI));
         if (allocate) glTexImage2D(GL_TEXTURE_2D, 0, storage,
             plane_width, plane_height, 0, format, component, nullptr);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, plane_width, plane_height,
@@ -498,7 +521,9 @@ struct AndroidColorPipeline::Impl {
   }
 };
 
-AndroidColorPipeline::AndroidColorPipeline() : impl_(std::make_unique<Impl>()) {}
+AndroidColorPipeline::AndroidColorPipeline(bool allow_filtered_planes) : impl_(std::make_unique<Impl>()) {
+  impl_->allow_filtered_planes = allow_filtered_planes;
+}
 AndroidColorPipeline::~AndroidColorPipeline() = default;
 bool AndroidColorPipeline::SupportsPrivateYuv() {
   static const bool supported = [] {
@@ -539,3 +564,7 @@ bool AndroidColorPipeline::Render(const AVFrame* frame, ANativeWindow* window, b
   }
 }
 bool AndroidColorPipeline::HdrPresented() const { return impl_ && impl_->hdr; }
+const char* AndroidColorPipeline::Path() const {
+  return impl_->external ? "android-private-rpu" :
+      impl_->filtered ? "android-filtered-rpu" : "android-upload-rpu";
+}

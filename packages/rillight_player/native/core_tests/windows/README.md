@@ -28,10 +28,10 @@ Windows core SDK, and MSYS2 MinGW64 installed:
 ```powershell
 $env:RILLIGHT_CORE_PREFIX_WINDOWS_X64 = (Resolve-Path build/ffmpeg-core-windows-hw-sdk).Path
 $sdk = $env:RILLIGHT_CORE_PREFIX_WINDOWS_X64
-$env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+# Add your MinGW64 bin directory to PATH before running these commands.
 python packages/rillight_player/native/verify_core_dependencies.py --prefix $sdk --target windows-x64 --require-subtitles
-python tool/player_fixtures.py --media build/player-validation/media --ffmpeg C:\path\to\ffmpeg.exe
-& C:\msys64\mingw64\bin\g++.exe -std=c++17 -shared -O2 packages/rillight_player/native/core_tests/windows/flutter_smoke_source.cpp "-L$sdk/lib" -lrillight_core -o build/t4_smoke_helper.dll
+python tool/player_fixtures.py --media build/player-validation/media --ffmpeg ffmpeg
+g++ -std=c++17 -shared -O2 packages/rillight_player/native/core_tests/windows/flutter_smoke_source.cpp "-L$sdk/lib" -lrillight_core -o build/t4_smoke_helper.dll
 flutter build windows --debug -t packages/rillight_player/native/core_tests/windows/flutter_core_smoke.dart
 Copy-Item build/t4_smoke_helper.dll build/windows/x64/runner/Debug/t4_smoke_helper.dll -Force
 $app = (Resolve-Path build/windows/x64/runner/Debug/rillight.exe).Path
@@ -72,18 +72,18 @@ flutter build windows --debug -t packages/rillight_player/native/core_tests/wind
 # advance without an audio warning after the delayed WASAPI initialization.
 Remove-Item Env:RILLIGHT_TEST_AUDIO_INIT_DELAY_MS
 
-& C:\path\to\ffmpeg.exe -y -f lavfi -i 'color=c=red:s=640x360:r=30:d=4' -f lavfi -i 'color=c=blue:s=640x360:r=30:d=4' -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=8' -filter_complex '[0:v][1:v]concat=n=2:v=1:a=0[v]' -map '[v]' -map 2:a -c:v mpeg4 -q:v 4 -c:a pcm_s16le build/player-validation/media/seek-colors.mkv
+& ffmpeg -y -f lavfi -i 'color=c=red:s=640x360:r=30:d=4' -f lavfi -i 'color=c=blue:s=640x360:r=30:d=4' -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=8' -filter_complex '[0:v][1:v]concat=n=2:v=1:a=0[v]' -map '[v]' -map 2:a -c:v mpeg4 -q:v 4 -c:a pcm_s16le build/player-validation/media/seek-colors.mkv
 flutter build windows --debug -t packages/rillight_player/native/core_tests/windows/flutter_core_smoke.dart --dart-define=RILLIGHT_SMOKE_SEEK=true --dart-define=RILLIGHT_SMOKE_MEDIA=build/player-validation/media/seek-colors.mkv
 # Copy the helper DLL and launch as above. Pass requires the actual Flutter
 # texture center to change from red to blue after the seek's timeline advances.
 
 # A generated 3 s video with just 0.2 s of PCM audio exercises clock handoff.
-& C:\path\to\ffmpeg.exe -y -f lavfi -i 'testsrc2=size=640x360:rate=30:duration=3' -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=0.2' -map 0:v -map 1:a -c:v mpeg4 -q:v 4 -c:a pcm_s16le build/player-validation/media/short-audio-long-video.mkv
+& ffmpeg -y -f lavfi -i 'testsrc2=size=640x360:rate=30:duration=3' -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=0.2' -map 0:v -map 1:a -c:v mpeg4 -q:v 4 -c:a pcm_s16le build/player-validation/media/short-audio-long-video.mkv
 flutter build windows --debug -t packages/rillight_player/native/core_tests/windows/flutter_core_smoke.dart --dart-define=RILLIGHT_SMOKE_MEDIA=build/player-validation/media/short-audio-long-video.mkv --dart-define=RILLIGHT_SMOKE_MIN_POSITION_US=1500000
 # Copy the helper DLL and launch as above. maxPosition must exceed 1.5 s.
 
 # Two 0.2 s PCM spans separated by a 1.8 s packet-PTS gap must not hold video.
-& C:\path\to\ffmpeg.exe -y -f lavfi -i 'testsrc2=size=640x360:rate=30:duration=3' -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=2.5' -filter_complex "[1:a]aselect='between(t,0,0.2)+between(t,2,2.2)'[a]" -map 0:v -map '[a]' -c:v mpeg4 -q:v 4 -c:a pcm_s16le build/player-validation/media/gapped-audio-video.mkv
+& ffmpeg -y -f lavfi -i 'testsrc2=size=640x360:rate=30:duration=3' -f lavfi -i 'sine=frequency=440:sample_rate=48000:duration=2.5' -filter_complex "[1:a]aselect='between(t,0,0.2)+between(t,2,2.2)'[a]" -map 0:v -map '[a]' -c:v mpeg4 -q:v 4 -c:a pcm_s16le build/player-validation/media/gapped-audio-video.mkv
 flutter build windows --debug -t packages/rillight_player/native/core_tests/windows/flutter_core_smoke.dart --dart-define=RILLIGHT_SMOKE_MEDIA=build/player-validation/media/gapped-audio-video.mkv --dart-define=RILLIGHT_SMOKE_MIN_POSITION_US=2800000 --dart-define=RILLIGHT_SMOKE_MAX_STALL_MS=300
 # Copy the helper DLL and launch as above. maxStallMs must stay <= 300 ms.
 ```

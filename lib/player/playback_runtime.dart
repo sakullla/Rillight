@@ -45,10 +45,27 @@ class PlaybackRuntime {
   // Imperative routes retain their page key across extra-codec refreshes.
   final Map<Object, PlaybackOrigin? Function()> _mountedPlayers = {};
 
+  /// Verified item→library memberships. Proving membership walks ancestors
+  /// serially (up to 32 GETs); re-opens of the same item must not pay that
+  /// again while the proof is fresh. Library moves are rare; a short TTL
+  /// bounds staleness.
+  static const _membershipProofTtl = Duration(minutes: 10);
+  final _membershipProofs = <String, DateTime>{};
+
   void mountPlayer(Object request, PlaybackOrigin? Function() origin) =>
       _mountedPlayers[request] = origin;
 
   void unmountPlayer(Object request) => _mountedPlayers.remove(request);
+
+  void _rememberMembership(String key) {
+    final now = DateTime.now();
+    _membershipProofs
+      ..removeWhere((_, at) => now.difference(at) >= _membershipProofTtl)
+      ..[key] = now;
+    while (_membershipProofs.length > 256) {
+      _membershipProofs.remove(_membershipProofs.keys.first);
+    }
+  }
 
   bool hasMountedPlayer(Object request) => _mountedPlayers.containsKey(request);
 
@@ -146,19 +163,27 @@ class PlaybackRuntime {
     }
     final item = await permit.dispatch((c) => c.getItem(source!.itemId));
     // A library id supplied by a route/IPC message is not membership proof.
-    var ancestor = item;
-    final visited = <String>{};
-    while (ancestor.id != library) {
-      if (!visited.add(ancestor.id) ||
-          ancestor.hierarchyParentId == null ||
-          visited.length > 32) {
-        throw StateError(
-          'Playback item does not belong to the permitted library',
+    final proofKey =
+        '${source.account.configuredServerId}|${source.itemId}|$library';
+    final proof = _membershipProofs[proofKey];
+    final proven =
+        proof != null && DateTime.now().difference(proof) < _membershipProofTtl;
+    if (!proven) {
+      var ancestor = item;
+      final visited = <String>{};
+      while (ancestor.id != library) {
+        if (!visited.add(ancestor.id) ||
+            ancestor.hierarchyParentId == null ||
+            visited.length > 32) {
+          throw StateError(
+            'Playback item does not belong to the permitted library',
+          );
+        }
+        ancestor = await permit.dispatch(
+          (c) => c.getItem(ancestor.hierarchyParentId!),
         );
       }
-      ancestor = await permit.dispatch(
-        (c) => c.getItem(ancestor.hierarchyParentId!),
-      );
+      _rememberMembership(proofKey);
     }
     final work =
         request.work ??

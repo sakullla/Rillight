@@ -61,6 +61,7 @@ class PlayerProcessProtocol {
       'open-item',
       'heartbeat',
       'watch-event',
+      'watch-pending',
       'watch-ack',
       'watch-sync',
       'revoke',

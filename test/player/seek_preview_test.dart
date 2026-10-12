@@ -162,6 +162,18 @@ void main() {
         );
       };
       await moveTo(tester, .75);
+      // Engine tile decoding is not drained by pumpAndSettle. Wait for the
+      // failed preview to clear instead of assuming it finishes within 20 ms.
+      for (
+        var i = 0;
+        i < 200 && find.byType(Image).evaluate().isNotEmpty;
+        i++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
       expect(tester.takeException(), isNull);
       expect(find.byType(Image), findsNothing);
       expect(find.text('07:30'), findsOneWidget);

@@ -557,22 +557,35 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   ),
                 ),
               ),
-            Row(
+            // Buffering text and accessibility scaling can exceed a phone's
+            // width. Keep every readout visible by wrapping whole groups.
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 10,
+              runSpacing: 4,
               children: [
                 clock,
-                if (c.isBuffering && !c.loading) ...[
-                  const SizedBox(width: 10),
-                  const SizedBox.square(
-                    dimension: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                if (c.isBuffering && !c.loading)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox.square(
+                        dimension: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          l.playerBuffering,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    l.playerBuffering,
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                ],
-                const Spacer(),
                 cache,
               ],
             ),

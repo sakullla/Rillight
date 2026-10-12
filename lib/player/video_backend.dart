@@ -92,6 +92,12 @@ abstract interface class VideoBackendSourceRenewal {
   Future<void> refreshSourceUrl(Uri url);
 }
 
+/// Optional upstream/native failure context for an open failure. Returns null
+/// when nothing diagnosable was observed; must never throw.
+abstract interface class VideoBackendFailureContext {
+  Future<String?> failureContext();
+}
+
 /// Native video can be composed behind the transparent Flutter controls.
 abstract interface class VideoBackendNativeOverlay {
   ValueListenable<bool> get nativeOverlay;

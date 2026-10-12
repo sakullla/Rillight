@@ -24,7 +24,7 @@ node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
 | 功能 | 主要状态 |
 | --- | --- |
 | `home` / 首页 | 两帧加载过程、内容、货架、鼠标悬浮过程、遥控焦点、手机首页编辑 |
-| `aggregation` / 聚合 | 真实三端入口、两服务确认合并、来源裁剪、空范围、同源比较、局部失败、单服务搜索；两服务独立 registry 会话和内存本机记录 authority |
+| `aggregation` / 聚合 | 真实三端入口、两服务确认合并、来源裁剪、空范围、同源比较、局部失败、单服务搜索；两服务独立 registry 会话和内存记录 authority |
 | `library` / 片库 | 片库列表、电影/剧集片库、排序、筛选、继续观看及最新入库列表 |
 | `detail` / 详情 | 电影、剧集、季、分集、选季/选集弹窗、分集右键菜单、音轨和字幕选择、剧照查看器与翻页 |
 | `search` / 搜索 | 初始、输入、结果、空结果、筛选、TV 输入弹窗 |
@@ -40,7 +40,7 @@ node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
 
 所有账号、偏好、图片缓存与播放器均为内存夹具。插画由捕获工具绘制，不依赖外网图片。捕获脚本位于 `tool/`，不会加入默认测试收集。PNG 与索引是原型呈现证据，不证明平台原生能力、实际视频、声音或硬件性能。
 
-`provider-*` 从三端真实服务入口捕获 Emby、Jellyfin、Plex 登录、错误、库选择和播放器加载/完成。Jellyfin Quick Connect、Plex 授权码、自有/共享服务器发现及 Home PIN 使用独立协议 fake 的本机 HTTP 服务；Emby 使用注入协议适配器。TV 文本输入使用实际遥控编辑器。播放器仍使用合成后端，这些截图不证明解码或真实服务兼容性。
+`provider-*` 从三端真实服务入口捕获 Emby、Jellyfin、Plex 登录、错误、库选择和播放器加载/完成。Jellyfin Quick Connect、Plex 授权码、自有/共享服务器发现及 Home PIN 使用独立协议 fake 的回环 HTTP 服务；Emby 使用注入协议适配器。TV 文本输入使用实际遥控编辑器。播放器仍使用合成后端，这些截图不证明解码或真实服务兼容性。
 
 ## 参考与实现取舍
 

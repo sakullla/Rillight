@@ -32,6 +32,7 @@ class PlaybackOutputStatus {
     this.effectiveSharpen = 0,
     this.reasonSharpen = 0,
     this.outputFrameRate = 0,
+    this.decodePath = '',
   });
 
   static const unknown = PlaybackOutputStatus();
@@ -69,6 +70,10 @@ class PlaybackOutputStatus {
 
   /// Target display rate from the core. Zero means the sample did not report one.
   final double outputFrameRate;
+
+  /// Native decode negotiation line (adapter, thread budget, fallback
+  /// reason). Empty until the core reports it; diagnostic, never localized.
+  final String decodePath;
 
   static int _int(Object? value, int fallback) =>
       value is num ? value.toInt() : fallback;
@@ -123,6 +128,9 @@ class PlaybackOutputStatus {
       effectiveSharpen: _int(raw['effectiveSharpen'], 0),
       reasonSharpen: _int(raw['reasonSharpen'], 0),
       outputFrameRate: _rate(raw['outputFrameRate']),
+      decodePath: raw['decodeDiagnostics'] is String
+          ? raw['decodeDiagnostics'] as String
+          : '',
     );
   }
 
@@ -155,7 +163,8 @@ class PlaybackOutputStatus {
         other.requestedSharpen == requestedSharpen &&
         other.effectiveSharpen == effectiveSharpen &&
         other.reasonSharpen == reasonSharpen &&
-        other.outputFrameRate == outputFrameRate;
+        other.outputFrameRate == outputFrameRate &&
+        other.decodePath == decodePath;
   }
 
   @override
@@ -187,6 +196,7 @@ class PlaybackOutputStatus {
     effectiveSharpen,
     reasonSharpen,
     outputFrameRate,
+    decodePath,
   ]);
 }
 

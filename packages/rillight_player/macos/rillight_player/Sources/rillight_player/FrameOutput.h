@@ -175,6 +175,18 @@ inline bool ValidLinearSource(const RillightCoreFrame& frame) {
          static_cast<int64_t>(frame.stride) * frame.height <= frame.data_size;
 }
 
+// Core conversion already produces opaque linear FP16 at the requested size.
+// Matching geometry without subtitles can be uploaded directly while the
+// caller retains the frame; no intermediate full-frame CPU copy is needed.
+inline bool CanPresentLinearUnchanged(const RillightCoreFrame& frame,
+    int width, int height, const RillightCoreSubtitleOverlay* overlay) {
+  return frame.type == RILLIGHT_CORE_VIDEO_RGBA16F && ValidLinearSource(frame) &&
+      frame.stride % 8 == 0 &&
+      frame.width == width && frame.height == height && !frame.has_display_matrix &&
+      (frame.sar_num <= 0 || frame.sar_den <= 0 || frame.sar_num == frame.sar_den) &&
+      !(overlay && overlay->data && overlay->width > 0 && overlay->height > 0);
+}
+
 // Fits an 8-bit sRGB or RGBA16F source into tightly packed extended-linear
 // RGBA16F. Overlay coordinates are in the source image, before SAR and rotation.
 inline bool WriteLinearHalf(const RillightCoreFrame& frame, int requested_width,

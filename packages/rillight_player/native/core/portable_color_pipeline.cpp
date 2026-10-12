@@ -212,6 +212,7 @@ class RowWorkers {
 }  // namespace
 
 struct PortableColorPipeline::Impl {
+  bool used_metal = false;
   SwsContext* scaler = nullptr;
   SwsContext* enhancement_scaler = nullptr;
   AVFrame* sampled = nullptr;
@@ -230,6 +231,7 @@ struct PortableColorPipeline::Impl {
   bool Render(const AVFrame* frame, int width, int height, bool dovi,
               uint8_t* rgba, int stride, uint16_t* linear_half,
               const AVFrame* enhancement) {
+    used_metal = false;
     const auto format = static_cast<AVPixelFormat>(frame->format);
     const auto* description = av_pix_fmt_desc_get(format);
     if (!description || description->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_RGB) ||
@@ -282,7 +284,7 @@ struct PortableColorPipeline::Impl {
     // which adds the normalized residual after that same reshape.
     if (linear_half && !fel_ptr && metal.RenderLinearHalf(sampled, parameters, depth, full,
             dovi, frame->color_trc, tables.pq.data(), tables.hlg.data(),
-            linear_half, stride)) return true;
+            linear_half, stride)) { used_metal = true; return true; }
 #endif
     if (!workers) workers = std::make_unique<RowWorkers>();
     workers->Execute([&](int partition) {
@@ -371,6 +373,7 @@ struct PortableColorPipeline::Impl {
 
 PortableColorPipeline::PortableColorPipeline() : impl_(std::make_unique<Impl>()) {}
 PortableColorPipeline::~PortableColorPipeline() = default;
+bool PortableColorPipeline::UsedMetal() const { return impl_->used_metal; }
 bool PortableColorPipeline::Render(const AVFrame* frame, int width, int height, bool dovi,
                                     uint8_t* rgba, int stride, const AVFrame* enhancement) {
   if (!frame || !rgba || width <= 0 || width > std::numeric_limits<int>::max() / 4 ||

@@ -131,6 +131,8 @@ class PlaybackHttpProxy {
   final FutureOr<void> Function(PlaybackCacheStream)? onStreamChanged;
   final _routes = SealedMediaRoutes();
   final _refreshedUrls = <String, Uri>{};
+  final _upstreamFailureLog = <Map<String, Object?>>[];
+  int _hlsResourceExpiries = 0;
   final _privateSubtitles = <String, String>{};
   final _roles = <String, PlaybackResourceRole>{};
   final _hlsNext = <String, _HlsNext>{};
@@ -168,6 +170,12 @@ class PlaybackHttpProxy {
   // must not queue all of the reads needed to start decoding.
   static const _maxRequests = 8;
   static const _cachedResponseWorkspace = 1024 * 1024;
+
+  /// Pre-playback media responses are bounded at the origin so their sockets
+  /// cannot stay coupled to decoder backpressure. Four megabytes covers the
+  /// moov index plus probe window of typical movies without a second request
+  /// churn on the critical startup path.
+  static const _startupRangeBound = 4 * 1024 * 1024;
   int _cacheWorkspace = 0;
   int _nextRepresentation = 0;
   int _upstreamBytes = 0;
@@ -430,6 +438,30 @@ class PlaybackHttpProxy {
     return _samples.fold<int>(0, (sum, sample) => sum + sample.$2).toDouble();
   }
 
+  /// Remote triage: remember the last failed upstream resources. Paths only —
+  /// signed query strings never enter diagnostics.
+  void _noteUpstreamFailure(String key, Uri url, int status) {
+    final role = _roles[key];
+    if (role == null) return;
+    while (_upstreamFailureLog.length >= 12) {
+      _upstreamFailureLog.removeAt(0);
+    }
+    _upstreamFailureLog.add({
+      'role': role.name,
+      'path': url.path,
+      'status': status,
+      'atMs': DateTime.now().toUtc().millisecondsSinceEpoch,
+    });
+    final hlsResource =
+        role == PlaybackResourceRole.segment ||
+        role == PlaybackResourceRole.initialization ||
+        role == PlaybackResourceRole.key ||
+        role == PlaybackResourceRole.playlist;
+    if (hlsResource && (status == 404 || status == 410)) {
+      _hlsResourceExpiries++;
+    }
+  }
+
   Map<String, Object?> get diagnostics {
     final byteCurrent = _byteCoverageCurrent;
     final responseBytes = _responseCoverageCurrent;
@@ -459,6 +491,10 @@ class PlaybackHttpProxy {
       'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
       'authenticationStatus': _authenticationStatus,
       'prefetchAuthenticationStatus': _prefetchAuthenticationStatus,
+      'hlsResourceExpiries': _hlsResourceExpiries,
+      'upstreamFailures': [
+        for (final entry in _upstreamFailureLog) Map<String, Object?>.of(entry),
+      ],
       'proxyInFlightBytes': _inFlight,
       'proxyInFlightPeakBytes': _inFlightPeak,
       'registeredResources': _roles.length,
@@ -1610,6 +1646,14 @@ class PlaybackHttpProxy {
   }) async {
     final started = DateTime.now();
     Object? lastFailure;
+    // A transcode server legitimately lags segment generation right after a
+    // seek or cold start: a segment/key/init 404 or 410 then means "not
+    // generated yet", not a dead resource. Retry those with failover pacing.
+    final role = _roles[read.resourceKey];
+    final hlsPartRole =
+        role == PlaybackResourceRole.segment ||
+        role == PlaybackResourceRole.initialization ||
+        role == PlaybackResourceRole.key;
     for (var attempt = 0; attempt < 6; attempt++) {
       read.check();
       try {
@@ -1623,12 +1667,14 @@ class PlaybackHttpProxy {
           reportAuthentication: reportAuthentication,
         );
         final status = result.$1.statusCode;
+        final expiryRetry = hlsPartRole && (status == 404 || status == 410);
+        final statusRetryable = _retryableStatus(status) || expiryRetry;
         if ((method ?? incoming.method) == 'HEAD' ||
             (incoming.headers.value('x-rillight-prefetch') == '1' &&
                 (status == 429 || status == 409)) ||
-            !_retryableStatus(status) ||
+            !statusRetryable ||
             attempt == 5) {
-          if (_retryableStatus(status) && attempt == 5) {
+          if (statusRetryable && attempt == 5) {
             _recoveryFailures++;
           } else if (attempt > 0 && status >= 200 && status < 400) {
             _recoveries++;
@@ -1645,7 +1691,7 @@ class PlaybackHttpProxy {
           started,
           read,
           retryAfter: retryAfter,
-          fastFailover: status == 502 || status == 504,
+          fastFailover: status == 502 || status == 504 || expiryRetry,
         );
         _recoveryAttempts++;
       } on SocketException catch (error) {
@@ -3364,11 +3410,8 @@ class PlaybackHttpProxy {
         !dynamicSource &&
         !_playbackActive &&
         rangeValue != null &&
-        range.length > _cachedResponseWorkspace) {
-      range = MediaByteRange(
-        range.start,
-        range.start + _cachedResponseWorkspace - 1,
-      );
+        range.length > _startupRangeBound) {
+      range = MediaByteRange(range.start, range.start + _startupRangeBound - 1);
     }
     if (representation.policy.strongEtag == null &&
         (range.start < representation.responseStart ||
@@ -3923,9 +3966,9 @@ class PlaybackHttpProxy {
       final startupOverrides = <String, String?>{};
       if (startupStart != null &&
           (startupEnd == null ||
-              startupEnd - startupStart + 1 > _cachedResponseWorkspace)) {
+              startupEnd - startupStart + 1 > _startupRangeBound)) {
         startupOverrides['range'] =
-            'bytes=$startupStart-${startupStart + _cachedResponseWorkspace - 1}';
+            'bytes=$startupStart-${startupStart + _startupRangeBound - 1}';
       }
       var (response, effective) = await _fetch(
         incoming,
@@ -3934,6 +3977,9 @@ class PlaybackHttpProxy {
         read: read,
         overrides: startupOverrides,
       );
+      if (response.statusCode >= 400) {
+        _noteUpstreamFailure(key, url, response.statusCode);
+      }
       // Start HTTP/TLS while the disk coordinator inventories old sessions.
       // Storage must be ready before we admit/publish media, but it need not
       // delay sending the first request to a high-latency origin.

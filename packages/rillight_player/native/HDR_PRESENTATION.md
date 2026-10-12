@@ -86,60 +86,6 @@ check. frames counts committed decoded pictures. Neither proves every displayed
 scanout. DXGI frame statistics may become temporarily disjoint on resize or
 fullscreen and are usable only when presentStatsValid is true.
 
-## Local Windows evidence: 2026-10-01
-
-The local display reported active 10-bit PQ/BT.2020, approximately 455.5-nit
-peak and 240-nit SDR white. Actual server HDR60 and Dolby Vision sources used
-D3D11 decode and FP16/scRGB output with visible changing pictures and subtitles.
-Pause/resume, seek and fullscreen were exercised. The Dolby Vision source was
-approximately 25 fps, not a 60-fps sample.
-
-A separate HDR60 run exercised four rate changes, minimize/restore, resize,
-maximization and fullscreen. A local compatible danmaku fixture provided 240
-synthetic comments. Composed desktop screenshots showed comments, subtitles
-and controls over video after rate changes and window restore. Timeline, media
-clock and submitted pictures continued advancing, with no native surface
-error. This verifies rendering, not the user's external danmaku service.
-
-A slow-start HDR60 run delayed metadata and media requests by eight seconds
-each. Its first reported position was the requested resume position; 1646
-captured native-video frames contained no detected red spikes. The detector
-cannot prove absence of every intermittent flicker.
-The same delayed Dolby Vision resume captured 621 frames with no detected red
-spikes, starting at the requested resume position.
-
-Ignored evidence under build/:
-
-- hdr-native-core-regression.log: five native core cases, including FP16
-  HDR/DV color readback and owned-core HDR ASS plane lifetime.
-- hdr-native-present-tests.log: five Windows cases, including highlight
-  preservation, linear subtitle blending and HDR-to-SDR rejection.
-- hdr-native-dart-regression.log: 64 settings, album, recovery and danmaku
-  controller cases.
-- hdr-native-android-core-build.log: Android arm64 core compilation, not
-  Android HDR or device playback.
-- native-hdr-native-hdr-4019933-player.log and cadence log: HDR60 seek/fullscreen,
-  approximately 56.6 changed captured fps.
-- native-hdr-native-hdr-4019917-player.log and cadence log: Dolby Vision,
-  approximately 25.1 changed captured fps. FFmpeg bitstream/RPU warnings remain;
-  the run does not establish warning-free support for all profiles.
-- native-hdr-lifecycle-4019933-player.log, cadence log and
-  hdr-lifecycle-4019933-*.png: rates/window lifecycle and visible synthetic
-  danmaku, approximately 56.5 changed captured fps.
-- hdr-native-slow-start-4019933-22337750000-summary.json and matching video:
-  delayed HDR60 resume with no detected red spikes.
-- hdr-native-slow-start-4019917-22337750000-summary.json and matching video:
-  delayed Dolby Vision resume with no detected red spikes.
-- presentation-reference-run.log and capture log: independent native 60-Hz
-  reference presented about 59.4 fps while WGC captured about 56.7 fps.
-
-WGC of the transparent Flutter HWND captures UI separately from native video.
-Use the native video HWND for cadence and a composed desktop region for
-video plus controls/danmaku. SDR screenshots cannot measure physical HDR
-luminance or reproduce its full gamut. WGC itself missed frames in the native
-reference. Current evidence does not establish stable 60-fps final scanout,
-physical peak brightness, absence of every flicker, or physical audio output.
-
 ## Remaining platform work
 
 | Platform | Native HDR requirements |
@@ -149,9 +95,9 @@ physical peak brightness, absence of every flicker, or physical audio output.
 | Android phone/TV | High-precision native Surface, matching PQ/HLG dataspace, display capability and EGL/Vulkan negotiation; API 24 SDR and lock/wake/navigation lifecycle. |
 
 Compilation, parsed HDR metadata and hardware decode selection do not
-establish native HDR presentation on these targets. FFmpeg's standalone
-Android MediaCodec decoder does not export per-frame RPU. Automatic Profile 5
-playback uses software HEVC; hardware-only requests fail explicitly.
+establish native HDR presentation on these targets. The pinned Android FFmpeg patches preserve per-frame RPU. Select native Dolby,
+private Surface mapping, byte planes or software fallback according to actual
+decoder/display capabilities; Profile 5 must not use an ordinary HDR10 base.
 
 ## References
 

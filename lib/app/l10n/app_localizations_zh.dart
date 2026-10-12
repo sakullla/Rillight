@@ -1005,6 +1005,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get playbackOutputAudio => '实际音频输出';
 
   @override
+  String get playbackOutputDecode => '解码路径';
+
+  @override
   String get playbackOutputUnknown => '未知';
 
   @override

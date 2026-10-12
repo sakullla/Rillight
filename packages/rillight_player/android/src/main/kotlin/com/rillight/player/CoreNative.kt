@@ -48,6 +48,7 @@ internal object CoreNative {
     external fun selectSubtitle(handle: Long, stream: Int, operation: Long): Int
     external fun addSubtitle(handle: Long, url: String, operation: Long): Int
     external fun snapshot(handle: Long): LongArray?
+    external fun diagnostics(handle: Long, session: Long, timeline: Long): Array<String>?
     external fun trackCount(handle: Long): Int
     /** Selected MP4/MOV track IDs, or -1 where the container identity is unknown. */
     external fun containerTrackIds(handle: Long): IntArray?

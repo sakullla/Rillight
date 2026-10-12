@@ -59,6 +59,17 @@ int main() {
   ComPtr<ID3D11DeviceContext> context; device->GetImmediateContext(&context); context->Flush();
   source.type = RILLIGHT_CORE_VIDEO_D3D11; source.data = nullptr;
   assert(Read(presenter.Present(source,gpu.Get(),2,1)) == bgra);
+  // SDR subtitles use the same cropped overlay contract as HDR. The source
+  // stays a shared GPU texture; no full-frame CPU readback is needed.
+  const uint8_t translucent_white[] = {128,128,128,128};
+  RillightCoreSubtitleOverlay sdr_overlay{
+      sizeof(sdr_overlay),0,0,1,1,4,translucent_white};
+  const auto subtitled = Read(presenter.Present(source,gpu.Get(),2,1,&sdr_overlay));
+  assert(subtitled[0] >= 127 && subtitled[0] <= 129);
+  assert(subtitled[1] >= 127 && subtitled[1] <= 129);
+  assert(subtitled[2] == 255 && subtitled[3] == 255);
+  assert(std::equal(subtitled.begin()+4, subtitled.end(), bgra.begin()+4));
+  assert(Read(first) == bgra);
   bool invalid = false;
   try { presenter.Present(source,nullptr,2,1); }
   catch (const std::exception&) { invalid = true; }

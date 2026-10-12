@@ -22,11 +22,14 @@ void check_linear_fit() {
   frame.data = reinterpret_cast<uint8_t*>(source);
   frame.data_size = sizeof(source);
   frame.sar_num = frame.sar_den = 1;
+  assert(rillight_macos::CanPresentLinearUnchanged(frame, 2, 2, nullptr));
+  assert(!rillight_macos::CanPresentLinearUnchanged(frame, 4, 2, nullptr));
   // Row-major source indices after each quarter-turn, independent of the fit.
   const int orders[4][4] = {{0, 1, 2, 3}, {2, 0, 3, 1},
                            {3, 2, 1, 0}, {1, 3, 0, 2}};
   for (int rotation = 0; rotation < 4; ++rotation) {
     frame.has_display_matrix = 1;
+    assert(!rillight_macos::CanPresentLinearUnchanged(frame, 2, 2, nullptr));
     frame.display_matrix[0] = rotation == 0 ? 65536 : rotation == 2 ? -65536 : 0;
     frame.display_matrix[1] = rotation == 1 ? 65536 : rotation == 3 ? -65536 : 0;
     std::vector<uint16_t> fitted(24, 0xabcd);
@@ -42,6 +45,7 @@ void check_linear_fit() {
   }
   frame.has_display_matrix = 0;
   frame.sar_num = 2;
+  assert(!rillight_macos::CanPresentLinearUnchanged(frame, 2, 2, nullptr));
   std::vector<uint16_t> fitted(4 * 4 * 4, 0xabcd);
   assert(rillight_macos::WriteLinearHalf(frame, 4, 4, fitted.data(), 32,
                                          fitted.size() * 2, nullptr));
@@ -58,6 +62,7 @@ void check_linear_fit() {
   overlay.width = overlay.height = 1;
   overlay.stride = 4;
   overlay.data = subtitle;
+  assert(!rillight_macos::CanPresentLinearUnchanged(frame, 2, 2, &overlay));
   fitted.assign(16, 0xabcd);
   assert(rillight_macos::WriteLinearHalf(frame, 2, 2, fitted.data(), 16,
                                          fitted.size() * 2, &overlay));

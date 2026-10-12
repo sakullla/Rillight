@@ -90,6 +90,10 @@ final class NativeCoreSnapshot extends Struct {
   external int doviReconstruction;
   @Int32()
   external int dolbyVisionCompatibility;
+  @Array(192)
+  external Array<Uint8> decodeDiagnostics;
+  @Array(256)
+  external Array<Uint8> sourceDiagnostics;
 }
 
 final class NativeCoreTrack extends Struct {
@@ -152,10 +156,10 @@ class CoreBindings {
   CoreBindings({String? libraryPath})
     : libraryPath = libraryPath ?? defaultLibraryPath,
       _library = DynamicLibrary.open(libraryPath ?? defaultLibraryPath) {
-    if (abiVersion() != 11) {
+    if (abiVersion() != 12) {
       throw StateError('Unsupported Rillight core ABI ${abiVersion()}');
     }
-    // ABI 11 requires presentation and both-slot selection entry points.
+    // ABI 12 requires presentation and both-slot selection entry points.
     setSubtitlePresentation;
     selectSubtitleSlot;
   }

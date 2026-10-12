@@ -2748,6 +2748,9 @@ void main() {
       'startup cached=$cachedPrefix hands off to one continuous playback transfer',
       () async {
         const mib = 1024 * 1024;
+        // The pre-playback response is bounded at the origin; the bound covers
+        // a movie header plus probe window before the read-ahead takes over.
+        const startup = 4 * mib;
         final fixture = await _CacheFixture.open(
           memoryBytes: 8 * mib,
           disk: true,
@@ -2761,18 +2764,18 @@ void main() {
         request.headers.set('range', 'bytes=0-');
         final opening = await request.close();
         fixture.proxy.setPlaybackActive(true);
-        expect(opening.contentLength, mib);
+        expect(opening.contentLength, startup);
         expect(
           await opening.fold<int>(0, (count, bytes) => count + bytes.length),
-          mib,
+          startup,
         );
-        await fixture.readBytes('bytes=$mib-');
+        await fixture.readBytes('bytes=$startup-');
         expect(fixture.proxy.diagnostics['readAheadConcurrencyLimit'], 1);
         expect(fixture.proxy.diagnostics['readAheadTransferPeak'], 1);
         expect(
           fixture.ranges
               .whereType<String>()
-              .where((range) => range.startsWith('bytes=$mib-'))
+              .where((range) => range.startsWith('bytes=$startup-'))
               .length,
           1,
         );
@@ -2780,11 +2783,14 @@ void main() {
         // Wait for the observed contract, not the response socket's completion.
         final published = DateTime.now().add(const Duration(seconds: 5));
         while (fixture.proxy.diagnostics['readAheadPublishedBytes'] !=
-                23 * mib &&
+                24 * mib - startup &&
             DateTime.now().isBefore(published)) {
           await Future<void>.delayed(const Duration(milliseconds: 10));
         }
-        expect(fixture.proxy.diagnostics['readAheadPublishedBytes'], 23 * mib);
+        expect(
+          fixture.proxy.diagnostics['readAheadPublishedBytes'],
+          24 * mib - startup,
+        );
       },
     );
   }
@@ -3883,6 +3889,144 @@ void main() {
       }
     },
   );
+
+  test('lagging transcode segment 404 retries and recovers', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    var segmentRequests = 0;
+    final playlistRead = Completer<void>();
+    upstream.listen((request) async {
+      final output = request.response;
+      if (request.uri.path == '/index.m3u8') {
+        output.headers.contentType = ContentType(
+          'application',
+          'vnd.apple.mpegurl',
+        );
+        output.write('#EXTM3U\n#EXTINF:2,\na.ts\n#EXT-X-ENDLIST\n');
+        await output.close();
+        if (!playlistRead.isCompleted) playlistRead.complete();
+        return;
+      }
+      segmentRequests++;
+      // The transcode session has not generated this segment yet.
+      if (segmentRequests <= 3) {
+        output.statusCode = HttpStatus.notFound;
+        await output.close();
+        return;
+      }
+      output.headers.set('etag', '"segment"');
+      output.contentLength = 4;
+      output.add([1, 2, 3, 4]);
+      await output.close();
+    });
+    Future<HttpClientResponse> get(Uri uri) async =>
+        (await client.getUrl(uri)).close();
+    try {
+      final playlist = await get(
+        proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/index.m3u8'),
+        ),
+      ).then((response) => response.transform(utf8.decoder).join());
+      final segment = Uri.parse(
+        playlist.split('\n').firstWhere((line) => line.startsWith('http')),
+      );
+      final response = await get(segment);
+      expect(response.statusCode, HttpStatus.ok);
+      expect(await response.expand((chunk) => chunk).toList(), [1, 2, 3, 4]);
+      expect(segmentRequests, 4);
+      expect(proxy.diagnostics['hlsResourceExpiries'], 0);
+      expect(proxy.diagnostics['upstreamFailures'], isEmpty);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  });
+
+  test(
+    'persistently expired segment records upstream failure context',
+    () async {
+      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await PlaybackHttpProxy.create();
+      final client = HttpClient();
+      var segmentRequests = 0;
+      upstream.listen((request) async {
+        final output = request.response;
+        if (request.uri.path == '/index.m3u8') {
+          output.headers.contentType = ContentType(
+            'application',
+            'vnd.apple.mpegurl',
+          );
+          output.write('#EXTM3U\n#EXTINF:2,\na.ts\n#EXT-X-ENDLIST\n');
+          await output.close();
+          return;
+        }
+        segmentRequests++;
+        output.statusCode = HttpStatus.notFound;
+        await output.close();
+      });
+      Future<HttpClientResponse> get(Uri uri) async =>
+          (await client.getUrl(uri)).close();
+      try {
+        final playlist = await get(
+          proxy.register(
+            Uri.parse('http://127.0.0.1:${upstream.port}/index.m3u8'),
+          ),
+        ).then((response) => response.transform(utf8.decoder).join());
+        final segment = Uri.parse(
+          playlist.split('\n').firstWhere((line) => line.startsWith('http')),
+        );
+        final response = await get(segment);
+        expect(response.statusCode, HttpStatus.notFound);
+        await response.drain<void>();
+        expect(segmentRequests, 6);
+        expect(proxy.diagnostics['hlsResourceExpiries'], 1);
+        final failures = proxy.diagnostics['upstreamFailures'] as List;
+        expect(failures, hasLength(1));
+        final entry = Map<String, dynamic>.from(failures.single as Map);
+        expect(entry['role'], 'segment');
+        expect(entry['status'], 404);
+        expect(entry['path'], '/a.ts');
+      } finally {
+        client.close(force: true);
+        await proxy.close();
+        await upstream.close(force: true);
+      }
+    },
+  );
+
+  test('plain media 404 is not retried but is recorded', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await PlaybackHttpProxy.create();
+    final client = HttpClient();
+    var requests = 0;
+    upstream.listen((request) async {
+      requests++;
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    });
+    try {
+      final response = await (await client.getUrl(
+        proxy.register(
+          Uri.parse('http://127.0.0.1:${upstream.port}/movie.mkv'),
+        ),
+      )).close();
+      expect(response.statusCode, HttpStatus.notFound);
+      await response.drain<void>();
+      expect(requests, 1);
+      expect(proxy.diagnostics['hlsResourceExpiries'], 0);
+      final failures = proxy.diagnostics['upstreamFailures'] as List;
+      expect(failures, hasLength(1));
+      final entry = Map<String, dynamic>.from(failures.single as Map);
+      expect(entry['role'], 'media');
+      expect(entry['status'], 404);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+    }
+  });
 }
 
 class _CacheFixture {

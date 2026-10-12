@@ -7,7 +7,93 @@
 #include <cstdio>
 #include <thread>
 
-int main() {
+std::vector<uint8_t> ReadImage(AImageReader* reader, int width, int height) {
+  AImage* image = nullptr;
+  for (int retry = 0; retry < 100 && !image; ++retry) {
+    AImageReader_acquireNextImage(reader, &image);
+    if (!image) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  assert(image);
+  uint8_t* pixels = nullptr; int length = 0, stride = 0;
+  assert(AImage_getPlaneData(image, 0, &pixels, &length) == AMEDIA_OK);
+  assert(AImage_getPlaneRowStride(image, 0, &stride) == AMEDIA_OK);
+  std::vector<uint8_t> result(static_cast<size_t>(width) * height * 4);
+  for (int y = 0; y < height; ++y)
+    std::memcpy(result.data() + static_cast<size_t>(y) * width * 4,
+                pixels + static_cast<size_t>(y) * stride, width * 4);
+  AImage_delete(image);
+  return result;
+}
+
+void CheckFilteredPlanes(bool benchmark) {
+  const int width = benchmark ? 1920 : 64, height = benchmark ? 1080 : 48;
+  const int out_width = benchmark ? 1920 : 47, out_height = benchmark ? 1080 : 35;
+  for (const auto format : {AV_PIX_FMT_P010LE, AV_PIX_FMT_NV12}) {
+    AVFrame* source = av_frame_alloc();
+    source->format = format; source->width = width; source->height = height;
+    source->color_range = AVCOL_RANGE_JPEG;
+    assert(av_frame_get_buffer(source, 32) == 0);
+    for (int plane = 0; plane < 2; ++plane)
+      for (int y = 0; y < height / (plane + 1); ++y)
+        for (int x = 0; x < width; ++x) {
+          const int value = plane ? 96 + (x / 2 + y) % 64 : 16 + (x + y) % 224;
+          if (format == AV_PIX_FMT_P010LE)
+            reinterpret_cast<uint16_t*>(source->data[plane] + y * source->linesize[plane])[x] =
+                static_cast<uint16_t>((value * 1023 / 255) << 6);
+          else source->data[plane][y * source->linesize[plane] + x] = static_cast<uint8_t>(value);
+        }
+    auto* metadata = Metadata(source);
+    for (int order : {0, 1, 3}) {
+      for (int c = 0; c < 3; ++c) {
+        auto& curve = av_dovi_get_mapping(metadata)->curves[c];
+        curve.mapping_idc[0] = order ? AV_DOVI_MAPPING_MMR : AV_DOVI_MAPPING_POLYNOMIAL;
+        curve.mmr_order[0] = order;
+        curve.mmr_coef[0][0][c] = 1;
+      }
+      std::vector<uint8_t> reference;
+      for (bool filtered : {false, true}) {
+        AImageReader* reader = nullptr;
+        assert(AImageReader_new(out_width, out_height, AIMAGE_FORMAT_RGBA_8888, 2, &reader) == AMEDIA_OK);
+        ANativeWindow* window = nullptr;
+        assert(AImageReader_getWindow(reader, &window) == AMEDIA_OK);
+        {
+          AndroidColorPipeline pipeline(filtered);
+          std::vector<double> samples;
+          for (int i = 0; i < (benchmark ? 40 : 1); ++i) {
+            const auto start = std::chrono::steady_clock::now();
+            assert(pipeline.Render(source, window, false));
+            auto pixels = ReadImage(reader, out_width, out_height);
+            const double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start).count();
+            if (!filtered) reference = pixels;
+            else {
+              int worst = 0;
+              for (size_t j = 0; j < pixels.size(); ++j)
+                worst = std::max(worst, std::abs(int(pixels[j]) - reference[j]));
+              assert(worst <= 3);
+            }
+            if (i >= 10) samples.push_back(ms);
+          }
+          if (benchmark) {
+            std::sort(samples.begin(), samples.end());
+            std::printf("{\"route\":\"%s\",\"format\":%d,\"mmrOrder\":%d,\"samples\":%zu,"
+                        "\"medianMs\":%.3f,\"p95Ms\":%.3f}\n", pipeline.Path(), format, order,
+                        samples.size(), samples[samples.size()/2], samples[samples.size()*95/100]);
+          }
+        }
+        AImageReader_delete(reader);
+      }
+    }
+    av_frame_free(&source);
+  }
+}
+
+int main(int argc, char** argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--benchmark") == 0) {
+    CheckFilteredPlanes(true);
+    return 0;
+  }
+  CheckFilteredPlanes(false);
   AImageReader* reader = nullptr;
   assert(AImageReader_new(64, 48, AIMAGE_FORMAT_RGBA_8888, 2, &reader) == AMEDIA_OK);
   ANativeWindow* window = nullptr;

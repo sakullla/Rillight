@@ -1,5 +1,21 @@
 # macOS aggregation/private-region handoff
 
+## Conversion-copy optimization validation
+
+The current candidate tries read-only VideoToolbox frame mapping before copying
+hardware planes. Failed mapping retains the prior transfer fallback. Matching
+FP16 frames without subtitles/geometry changes bypass the intermediate CPU fit
+copy, and Metal/portable diagnostics now identify the selected implementation.
+This does not establish an end-to-end GPU texture path.
+
+Host-portable frame/buffer and header/bundle tests do not establish native
+macOS execution or performance. On the target Mac, enable `RILLIGHT_CORE_GPU_TESTS=ON` and run
+`rillight_macos_hardware_video_route` and `rillight_macos_color_pipeline`, then
+check SDR/EDR playback, subtitles, padded rows, rotation/SAR, seek and close/reopen.
+Record actual decoder, `mapped+metal-linear` versus CPU fallback, displayed
+frames, physical audio and candidate hashes separately. See
+`../native/PLATFORM_OPTIMIZATION.md` for the cross-platform evidence.
+
 ## v0.1.55 digital audio output
 
 The candidate adds exclusive Core Audio HAL output for IEC 61937 AC-3,
@@ -17,7 +33,7 @@ that codec's acceptance for the route before reopening PCM. A real default
 device change permits a fresh probe. No forced PCM-as-bitstream workaround is
 used. Pause, seek, stream changes and shutdown reset queued compressed bursts.
 
-Local Windows/WSL checks exercise packet sample counts, byte preservation,
+Host-portable checks exercise packet sample counts, byte preservation,
 queue wrap/backpressure/concurrency, Linux route rejection and a virtual
 PulseAudio sink. The dedicated `Native audio contracts` workflow compiles the
 actual macOS header against Apple frameworks and tests format rejection without
@@ -34,9 +50,7 @@ Measure lip-sync separately. Current physical passthrough result: **unverified**
 Also verify application mute and non-unity volume switch to PCM, and restoring
 100% permits passthrough again. Receiver volume remains independent.
 
-The T7 working-tree developer checks use synthetic Emby clients, Flutter widgets and a `FakeVideoBackend`. The desktop cumulative case launches a genuinely separate Flutter test helper process, uses production per-process file IPC and the main-process `HistoryWriter`; it is **not** a native macOS playback/window, decoder, GPU or physical-audio pass. No macOS native build or SDK/package verification was executed for T7. Earlier platform observations, if any, do not accept this candidate.
-
-## Target-machine procedure (not yet executed)
+## Target-machine procedure
 
 Use macOS 12+ and the pinned verified universal SDK/core artifact described by the package README. Record the candidate commit, built package and native dependency hashes, machine/OS/GPU, the actually loaded decoder/libraries and raw logs under ignored `build/`. Use disposable synthetic server credentials only.
 
@@ -47,4 +61,4 @@ Use macOS 12+ and the pinned verified universal SDK/core artifact described by t
 5. During a pending switch and during playback, move a service ordinary→private and lock private. Record main/helper PIDs, generation, close-budget timing and mailbox acknowledgements. The helper must stop/exit or be terminated within the configured budget; stale observations, snapshots, image requests, reports and restoration/retries must be rejected. Migration failure must remain explainable, not auto-resume playback.
 6. Repeat with mouse/keyboard and at a narrow window. Separately retain display-frame capture, speaker observation, actual decoder evidence and GPU stability. A first-frame event, fake backend or virtual audio sink does not establish these facts.
 
-Result: **unverified on target hardware**. Do not replace the above observations with screenshot captures or a configured CI job.
+Keep target results unverified until the candidate is measured. Do not substitute prototype captures or a configured CI job for target observations.
