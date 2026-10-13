@@ -1,11 +1,12 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/region_access_fixture.dart';
 import '../helpers/image_cache_fixture.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -115,7 +116,7 @@ void main() {
     MediaServerClient client() =>
         EmbyClient(device: _device, dio: dioForFakeEmby(adapter));
     final sources = SourceSessionRegistry(
-      access: RegionAccessController(),
+      access: TestRegionAccessController(),
       store: store,
       credentials: credentials,
       createClient: client,

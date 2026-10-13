@@ -3,13 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:win32/win32.dart';
 import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_process_protocol.dart';
 import 'package:rillight/player/spawn_player_process.dart';
 
 Future<void> _until(bool Function() ready) async {
-  for (var i = 0; i < 100 && !ready(); i++) {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (!ready() && DateTime.now().isBefore(deadline)) {
     await Future<void>.delayed(const Duration(milliseconds: 1));
   }
   expect(ready(), isTrue);
@@ -443,16 +445,7 @@ Future<void> main(List<String> args) async {
       var executable = _dartExecutable();
       final DesktopPlayerProcessControl control;
       if (Platform.isWindows) {
-        executable = '${root.path}/child.exe';
-        final compiled = await Process.run(
-          '${File(_dartExecutable()).parent.path}/dart.exe',
-          ['compile', 'exe', script.path, '-o', executable],
-        );
-        expect(
-          compiled.exitCode,
-          0,
-          reason: '${compiled.stdout}\n${compiled.stderr}',
-        );
+        executable = await _compiledChild(script);
         control = WindowsPlayerProcessControl(
           pollInterval: const Duration(milliseconds: 10),
           startupTimeout: const Duration(seconds: 5),
@@ -500,6 +493,45 @@ Future<void> main(List<String> args) async {
       }
     },
   );
+}
+
+/// Cache the build, never the test outcome. Both graceful and forced real
+/// process launches still execute on every run. SDK, helper and protocol edits
+/// invalidate this artifact; a damaged executable is rebuilt.
+Future<String> _compiledChild(File script) async {
+  final compiler = '${File(_dartExecutable()).parent.path}/dart.exe';
+  final hash = await Sha256().hash([
+    ...await script.readAsBytes(),
+    ...await File('lib/player/player_process_protocol.dart').readAsBytes(),
+    ...utf8.encode('${Platform.version}\n$compiler'),
+  ]);
+  String hex(List<int> bytes) =>
+      bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  final directory = Directory('build/test-execution/child-${hex(hash.bytes)}');
+  await directory.create(recursive: true);
+  final binary = File('${directory.path}/child.exe');
+  final checksum = File('${directory.path}/child.sha256');
+  if (await binary.exists() && await checksum.exists()) {
+    final actual = hex((await Sha256().hash(await binary.readAsBytes())).bytes);
+    if (actual == (await checksum.readAsString()).trim()) return binary.path;
+  }
+  final compiled = await Process.run(compiler, [
+    'compile',
+    'exe',
+    script.path,
+    '-o',
+    binary.path,
+  ]);
+  expect(
+    compiled.exitCode,
+    0,
+    reason: '${compiled.stdout}\n${compiled.stderr}',
+  );
+  await checksum.writeAsString(
+    hex((await Sha256().hash(await binary.readAsBytes())).bytes),
+    flush: true,
+  );
+  return binary.path;
 }
 
 void _readyForWindowsChild(String payloadPath, int pid) {

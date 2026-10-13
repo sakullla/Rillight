@@ -1,6 +1,8 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/android_bootstrap.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -56,11 +58,11 @@ void main() {
           },
         ),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.textContaining('private-secret'), findsNothing);
       expect(find.text('无法初始化应用，请重试。'), findsOneWidget);
       await tester.tap(find.text('重试'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byType(AndroidConnectPage), findsOneWidget);
       expect(attempts, 2);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -80,10 +82,10 @@ void main() {
         createAuth: () async => AuthController.memory(),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.text('重试'), findsOneWidget);
     await tester.tap(find.text('以手机模式继续'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.byType(AndroidConnectPage), findsOneWidget);
     expect(find.byType(MainWindowCloseGuard), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());

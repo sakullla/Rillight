@@ -1,6 +1,8 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 
@@ -88,7 +90,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 16));
     expect(highlights, [true, false]);
     expect(_scale(tester).scale, 1);
-    await tester.pumpAndSettle();
+    await settle(tester);
     await scrolling;
   });
 
@@ -285,7 +287,7 @@ void main() {
     );
 
     await tester.tap(find.text('卡片'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(taps, 1);
   });
 }

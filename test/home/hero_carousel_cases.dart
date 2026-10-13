@@ -1,6 +1,8 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme/tokens.dart';
@@ -406,16 +408,16 @@ void main() {
           supportedLocales: AppLocalizations.supportedLocales,
         ),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.drag(find.text('Movie A'), const Offset(-180, 0));
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.byKey(const ValueKey('hero-resume-movie-b')));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('play movie-b'), findsOneWidget);
       router.pop();
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.text('详情'));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('item movie-b'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await unmount(tester);

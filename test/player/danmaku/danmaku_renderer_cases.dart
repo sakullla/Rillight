@@ -1,7 +1,9 @@
+import '../../helpers/widget_harness.dart';
+import '../../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_glyph_cache.dart';
 import 'package:rillight/player/danmaku/danmaku_layout.dart';
@@ -133,7 +135,7 @@ void main() {
     final before = (await tester.runAsync(whitePixels))!;
     expect(before, greaterThan(100));
     await tester.pumpWidget(scene(true));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(await tester.runAsync(whitePixels), before);
   });
 

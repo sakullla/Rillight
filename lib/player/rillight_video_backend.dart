@@ -39,12 +39,19 @@ class RillightVideoBackend extends VideoBackend
     PlayerSettingsStore? settingsStore,
     CorePlayerFactory? createPlayer,
     Directory? diskCacheDirectory,
+    this.mediaHeaderTimeout = const Duration(seconds: 45),
+    this.sourceStallTimeout = const Duration(seconds: 15),
+    this.waitForRetry,
   }) : _settingsStore = settingsStore,
        _createPlayer = createPlayer ?? CorePlayer.create,
        _diskCacheDirectory = diskCacheDirectory,
        _player = Platform.isAndroid && createPlayer == null
            ? AndroidCorePlayer()
            : null;
+
+  final Duration mediaHeaderTimeout;
+  final Duration sourceStallTimeout;
+  final Future<void> Function(Duration)? waitForRetry;
 
   @override
   final ValueNotifier<Map<String, dynamic>> phonePresentation = ValueNotifier(
@@ -606,6 +613,8 @@ class RillightVideoBackend extends VideoBackend
         // too; restarting every 32 MiB repeatedly pays origin header latency.
         continuousTransfers: true,
         readAheadConcurrency: 1,
+        mediaHeaderTimeout: mediaHeaderTimeout,
+        waitForRetry: waitForRetry,
       );
       if (_disposed || generation != _generation) {
         await transport.close();
@@ -985,7 +994,8 @@ class RillightVideoBackend extends VideoBackend
     // become permanently failed before refreshing a stalled signed source.
     final stalledSource =
         mayRenewStalledSource &&
-        ((data['readAheadNoProgressMs'] as num?) ?? 0) >= 15000 &&
+        ((data['readAheadNoProgressMs'] as num?) ?? 0) >=
+            sourceStallTimeout.inMilliseconds &&
         (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
         data['readAheadWaitingForDisk'] != true &&
         ((data['readAheadPublicationActive'] as num?) ?? 0) == 0;
@@ -995,7 +1005,7 @@ class RillightVideoBackend extends VideoBackend
         mayRenewStalledSource &&
         !_opened &&
         _openPhase == 'openingCore' &&
-        _openingDownloadProgress.elapsed >= const Duration(seconds: 15) &&
+        _openingDownloadProgress.elapsed >= sourceStallTimeout &&
         (headerTimedOut || ((data['recoveryAttempts'] as num?) ?? 0) > 0) &&
         ((data['activeRequests'] as num?) ?? 0) > 0 &&
         data['readAheadWaitingForDisk'] != true;

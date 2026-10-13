@@ -1,6 +1,6 @@
+import 'region_access_fixture.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
@@ -33,7 +33,7 @@ class SyntheticSourceAuth extends AuthController {
     MediaServerClient client() =>
         EmbyClient(device: device, dio: dioForFakeEmby(adapter));
     final sources = SourceSessionRegistry(
-      access: RegionAccessController(),
+      access: TestRegionAccessController(),
       store: store,
       credentials: credentials,
       createClient: client,

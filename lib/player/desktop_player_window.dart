@@ -1603,7 +1603,8 @@ class PlayerWindowApp extends StatefulWidget {
   const PlayerWindowApp({super.key, required this.launch})
     : _client = null,
       _bindings = null,
-      _onExit = null;
+      _onExit = null,
+      _clock = null;
 
   /// Exercises the helper's command, observation and shutdown paths without
   /// configuring a native window or terminating the test process.
@@ -1614,14 +1615,17 @@ class PlayerWindowApp extends StatefulWidget {
     required MediaServerClient client,
     required PlayerBindings bindings,
     required VoidCallback onExit,
+    DateTime Function()? clock,
   }) : _client = client,
        _bindings = bindings,
-       _onExit = onExit;
+       _onExit = onExit,
+       _clock = clock;
 
   final PlayerWindowLaunch launch;
   final MediaServerClient? _client;
   final PlayerBindings? _bindings;
   final VoidCallback? _onExit;
+  final DateTime Function()? _clock;
 
   @override
   State<PlayerWindowApp> createState() => _PlayerWindowAppState();
@@ -1862,12 +1866,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       'savePreference': controller?.scopedPreferencePending == true,
       'settings': settings.toJson(),
     });
-    final started = DateTime.now();
+    final now = widget._clock ?? DateTime.now;
+    final started = now();
     var deadline = started.add(const Duration(seconds: 3));
     final verificationDeadline = started.add(const Duration(seconds: 30));
     // Graceful close drains final observations and their acknowledgements.
     // Revocation alone cancels this channel, including while draining close.
-    while (DateTime.now().isBefore(deadline) &&
+    while (now().isBefore(deadline) &&
         _playerKey.currentState?.controller?.permissionRevoked != true) {
       final pending = await endpoint.read('watch-pending');
       if (pending?['sequence'] == sequence) {

@@ -1,6 +1,8 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -174,10 +176,10 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     await tester.tap(find.byKey(const ValueKey('settings-section-外观')));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(
       tester
           .widget<PlayerRateCell>(
@@ -188,7 +190,7 @@ void main() {
     );
 
     await tester.tap(find.byKey(const ValueKey('settings-appearance-light')));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(controller.style, AppearanceStyle.light);
     expect((await store.read()).appearanceStyle, 'light');
@@ -202,7 +204,7 @@ void main() {
     await tester.pumpWidget(
       RillightApp(auth: AuthController.memory(), appearance: controller),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(find.byKey(ConnectFormKeys.connectAppearanceKey), findsOneWidget);
     // 未保存过外观时默认深色。
@@ -213,9 +215,9 @@ void main() {
     );
 
     await tester.tap(find.byKey(ConnectFormKeys.connectAppearanceKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.tap(find.text('浅色').last);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(controller.style, AppearanceStyle.light);
     expect((await store.read()).appearanceStyle, 'light');
@@ -244,7 +246,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       final lightOption = find.byKey(const Key('tv-appearance-light'));
       final darkOption = find.byKey(const Key('tv-appearance-dark'));
@@ -254,20 +256,20 @@ void main() {
 
       // 选中浅色:按钮标记 selected,偏好即时生效并持久化。
       await tester.tap(lightOption);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(controller.style, AppearanceStyle.light);
       expect(tester.widget<TvAction>(lightOption).selected, isTrue);
       expect((await store.read()).appearanceStyle, 'light');
 
       // 方向键在选项间移动:焦点从浅色移到深色后按 SELECT 生效。
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.pumpAndSettle();
+      await settle(tester);
       final focused = FocusManager.instance.primaryFocus?.context
           ?.findAncestorWidgetOfExactType<TvAction>();
       expect(focused?.key, const Key('tv-appearance-dark'));
 
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(controller.style, AppearanceStyle.dark);
       expect((await store.read()).appearanceStyle, 'dark');
     },
@@ -294,7 +296,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     final lightOption = find.byKey(const Key('tv-appearance-light'));
     final darkOption = find.byKey(const Key('tv-appearance-dark'));
@@ -305,20 +307,20 @@ void main() {
     expect(tester.widget<TvAction>(darkOption).selected, isTrue);
 
     await tester.tap(lightOption);
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(controller.style, AppearanceStyle.light);
     expect(tester.widget<TvAction>(lightOption).selected, isTrue);
     expect(tester.widget<TvAction>(darkOption).selected, isFalse);
     expect((await store.read()).appearanceStyle, 'light');
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
+    await settle(tester);
     final focused = FocusManager.instance.primaryFocus?.context
         ?.findAncestorWidgetOfExactType<TvAction>();
     expect(focused?.key, const Key('tv-appearance-dark'));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.select);
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(controller.style, AppearanceStyle.dark);
     expect(tester.widget<TvAction>(darkOption).selected, isTrue);
     expect((await store.read()).appearanceStyle, 'dark');

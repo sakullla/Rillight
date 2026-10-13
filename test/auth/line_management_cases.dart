@@ -1,7 +1,9 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'configured_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
@@ -392,7 +394,7 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('open-line-dialog')));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     // 只有地址输入,没有 User-Agent 输入项。
     expect(find.byType(TextField), findsOneWidget);
@@ -411,7 +413,7 @@ void main() {
     );
     await tester.pump();
     await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(result, 'http://line-wan.test:8096');
   });
 
@@ -439,7 +441,7 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('open-line-dialog')));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(
       tester
           .widget<TextField>(find.byKey(LineAddressDialog.fieldKey))
@@ -452,7 +454,7 @@ void main() {
 
     // 取消不改动任何内容。
     await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(result, isNull);
   });
 
@@ -527,7 +529,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     // 面板列表可滚动:先滚到目标再点击。
     final dialogScrollable = find
@@ -542,9 +544,9 @@ void main() {
         120,
         scrollable: dialogScrollable,
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(finder);
-      await tester.pumpAndSettle();
+      await settle(tester);
     }
 
     // 只剩一条线路的服务器:点击条目直接切换;不提供删除线路入口,
@@ -668,13 +670,13 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     Future<void> sheetTap(Finder finder) async {
       await tester.ensureVisible(finder);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(finder);
-      await tester.pumpAndSettle();
+      await settle(tester);
     }
 
     final serverId = auth.savedServers.single.id;
@@ -690,7 +692,7 @@ void main() {
     );
     await tester.pump();
     await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(
       auth.savedServers.single.lines.map((l) => l.address),
       contains(wan3.baseUrl.toString()),
@@ -716,7 +718,7 @@ void main() {
     );
     await tester.pump();
     await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(auth.client.baseUrl, wan4.baseUrl);
     expect(auth.session?.username, 'alice');
 
@@ -809,7 +811,7 @@ void main() {
       app.router.dispose();
     });
     await tester.pumpWidget(app);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     FocusNode navFocus(int index) => tester
         .widget<FocusableActionDetector>(
@@ -822,7 +824,7 @@ void main() {
     navFocus(3).requestFocus();
     FocusManager.instance.applyFocusChangesIfNeeded();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     // 设置页是懒构建的 ListView:先滚动到目标再点击。
     final tvScrollable = find
@@ -834,11 +836,11 @@ void main() {
     Future<void> tvTap(Finder finder) async {
       // 目标可能在当前视口上方:先回到列表顶部再向下找。
       tester.state<ScrollableState>(tvScrollable).position.jumpTo(0);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.scrollUntilVisible(finder, 200, scrollable: tvScrollable);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(finder);
-      await tester.pumpAndSettle();
+      await settle(tester);
     }
 
     final serverId = auth.savedServers.single.id;
@@ -853,7 +855,7 @@ void main() {
     );
     await tester.pump();
     await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(
       auth.savedServers.single.lines.map((l) => l.address),
       contains(wan3.baseUrl.toString()),
@@ -940,7 +942,7 @@ void main() {
         app.router.dispose();
       });
       await tester.pumpWidget(app);
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       final navFocus = tester
           .widget<FocusableActionDetector>(
@@ -953,7 +955,7 @@ void main() {
       navFocus.requestFocus();
       FocusManager.instance.applyFocusChangesIfNeeded();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       final serverId = auth.savedServers.single.id;
       final lanLine = auth.savedServers.single.lines.firstWhere(
@@ -969,12 +971,12 @@ void main() {
           )
           .first;
       tester.state<ScrollableState>(tvScrollable).position.jumpTo(0);
-      await tester.pumpAndSettle();
+      await settle(tester);
       final lanOption = find.byKey(ValueKey('$serverId-${lanLine.id}'));
       await tester.scrollUntilVisible(lanOption, 200, scrollable: tvScrollable);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(lanOption);
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       // 原线路与会话保持,失败原因在设置面板内可见。
       expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');

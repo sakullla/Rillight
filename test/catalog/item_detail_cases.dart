@@ -1,3 +1,4 @@
+import '../helpers/case_shard.dart';
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -207,7 +208,7 @@ void main() {
     expect(find.byKey(ItemDetailPage.headerKey), findsOneWidget);
   }
 
-  testWidgets(
+  cases.testWidgets(
     'resume episode list renders while season and similar requests are held',
     (tester) async {
       final seasons = server.holdSeasons = Completer<void>();
@@ -250,7 +251,7 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets(
+  cases.testWidgets(
     'header, seasons and episodes render before secondary responses',
     (tester) async {
       server.setSeasons(_series, const [
@@ -303,7 +304,7 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets(
+  cases.testWidgets(
     'a late initial season response cannot replace a newly selected season',
     (tester) async {
       server.setSeasons(_series, const [
@@ -357,7 +358,7 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('episode card play and check keep the detail flow intact', (
+  cases.testWidgets('episode card play and check keep the detail flow intact', (
     tester,
   ) async {
     final host = _SilentPlayerHost();
@@ -420,7 +421,7 @@ void main() {
     );
   }, tags: ['integration']);
 
-  testWidgets('switching episodes keeps the cast and album still', (
+  cases.testWidgets('switching episodes keeps the cast and album still', (
     tester,
   ) async {
     const first = 'episode-friends-s1e1';
@@ -498,7 +499,7 @@ void main() {
   }, tags: ['integration']);
 
   for (final explicit in [false, true]) {
-    testWidgets(
+    cases.testWidgets(
       'series opens ${explicit ? 'requested' : 'resuming'} season with specials first',
       (tester) async {
         server.setSeasons(_series, const [
@@ -542,7 +543,7 @@ void main() {
     );
   }
 
-  testWidgets(
+  cases.testWidgets(
     'episode title link keeps its season without a duplicate action',
     (tester) async {
       server.setSeasons(_series, const [
@@ -576,7 +577,7 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets(
+  cases.testWidgets(
     'episode load-more failure keeps the window and retry appends without duplicates',
     (tester) async {
       server.failEpisodeWindowsAfterStart = true;
@@ -683,3 +684,8 @@ List<String> _loadedEpisodeIds(WidgetTester tester) => tester
     .episodes
     .map((episode) => episode.id)
     .toList();
+
+final cases = CaseShard(3);
+
+void mainShard(int part, int expectedParts) =>
+    cases.register(part, main, expectedParts: expectedParts);

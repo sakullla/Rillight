@@ -23,6 +23,7 @@
 ```sh
 flutter pub get
 flutter analyze
+flutter test --exclude-tags integration
 flutter test
 flutter test --tags integration
 flutter test packages/rillight_player/test
@@ -32,7 +33,7 @@ python tool/provider_acceptance.py --verify
 
 Android APK 在设置 `RILLIGHT_CORE_SDK_ROOT` 后使用 `flutter build apk --debug` 构建；SDK 必须含 arm64-v8a、armeabi-v7a 和 x86_64。Android Studio 手机与 TV 模拟器用隔离的 `.validation` 应用和合成凭据验证，操作与证据边界见 [Android 验证说明](integration_test/android/README.md)。桌面使用 `flutter run -d windows`、`linux` 或 `macos`，分别在对应宿主构建。
 
-新增或重命名 `test/*_cases.dart` 后运行 `python tool/test_execution/generate_suites.py`。完整页面用例标记 `integration`；默认 `flutter test` 仍包含这些用例。播放代理、缓存和 UI 用例不能代替实际画面、声音及硬件稳定性测试。
+新增或重命名 `test/*_cases.dart` 后运行 `python tool/test_execution/generate_suites.py`。完整页面用例标记 `integration`；默认 `flutter test` 仍包含这些用例。执行 `python tool/test_execution/benchmark.py` 实测快速、全量与集成命令的完整耗时，预算超限会返回失败；当前实测、用例精简和独立 IPC 验证见[测试执行说明](tool/test_execution/README.md)。播放代理、缓存和 UI 用例不能代替实际画面、声音及硬件稳定性测试。
 
 三服务核验入口会实际运行独立协议 fake 的登录、目录、播放协商、进度写入、停止清理、退出/恢复与拒绝路径，再运行认证、隔离、历史和切换回归。它绑定当前 Git HEAD 及工作区内容，结果与原始日志写入忽略目录 `build/provider-acceptance/`；执行时请暂停编辑，并避免与另一 Flutter 测试进程并行。该入口不接受现成报告替代执行，不要求个人服务器账号。所有真实“服务 × 平台”组合仍单列为未验证，详见[集成验证说明](integration_test/README.md#three-provider-synthetic-protocol-run)。
 

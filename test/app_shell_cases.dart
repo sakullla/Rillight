@@ -1,3 +1,4 @@
+import 'helpers/region_access_fixture.dart';
 import 'helpers/image_cache_fixture.dart';
 import 'helpers/settle.dart';
 import 'package:flutter/material.dart';
@@ -104,7 +105,9 @@ void main() {
       'stored appearance applies on startup and switching keeps the login '
       'page and its inputs',
       (tester) async {
-        final auth = AuthController.memory();
+        final auth = AuthController.memory(
+          regionAccess: TestRegionAccessController(),
+        );
         final appearance = AppearanceController(
           store: MemoryPlayerSettingsStore(
             const PlayerSettings(appearanceStyle: 'light'),

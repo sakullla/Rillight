@@ -1,5 +1,6 @@
+import '../helpers/widget_harness.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 

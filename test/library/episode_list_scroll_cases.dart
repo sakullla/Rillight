@@ -1,0 +1,94 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
+import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/media_server/models.dart';
+import 'package:rillight/library/episode_list.dart';
+
+void main() {
+  testWidgets('long seasons are lazy and distant episodes remain reachable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final scroll = ScrollController();
+    final selected = ValueNotifier(0);
+    addTearDown(scroll.dispose);
+    addTearDown(selected.dispose);
+    final episodes = List.generate(
+      200,
+      (index) => MediaItem(
+        id: 'episode-$index',
+        name: '分集 $index',
+        type: 'Episode',
+        indexNumber: index + 1,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: Scaffold(
+          body: ValueListenableBuilder(
+            valueListenable: selected,
+            builder: (context, index, _) => CustomScrollView(
+              controller: scroll,
+              slivers: [
+                const SliverToBoxAdapter(child: SizedBox(height: 600)),
+                EpisodeList(
+                  episodes: episodes,
+                  currentId: 'episode-$index',
+                  revealToken: index,
+                  loading: false,
+                  error: null,
+                  onRetry: null,
+                  hasMore: false,
+                  loadingMore: false,
+                  onLoadMore: () {},
+                  headerAction: const SizedBox.shrink(),
+                  onTap: (_) {},
+                  onPlay: (_) {},
+                  onTogglePlayed: (_) {},
+                  busyPlayedIds: const {},
+                  onMore: null,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+    // 网格一行四五张卡，视口附近只构建几行。
+    expect(find.byType(EpisodeRow).evaluate().length, lessThan(40));
+    expect(find.byKey(const ValueKey('episode-row-episode-199')), findsNothing);
+
+    selected.value = 180;
+    await settle(tester);
+    final target = find.byKey(const ValueKey('episode-row-episode-180'));
+    expect(target, findsOneWidget);
+    expect(
+      tester.getRect(target).overlaps(const Rect.fromLTWH(0, 0, 1440, 900)),
+      isTrue,
+    );
+    expect(find.byType(EpisodeRow).evaluate().length, lessThan(40));
+
+    // Revisiting the selected row through normal scrolling must not trigger
+    // another automatic seek merely because its element was recreated.
+    scroll.jumpTo(0);
+    await settle(tester);
+    expect(scroll.offset, 0);
+    selected.value = 199;
+    await settle(tester);
+    expect(
+      find.byKey(const ValueKey('episode-row-episode-199')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+}

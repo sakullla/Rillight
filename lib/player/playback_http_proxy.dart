@@ -47,6 +47,7 @@ class PlaybackHttpProxy {
     this.bodyStallTimeout,
     this.verifiedSnapshotTtl,
     this.integrityRecheck,
+    this._waitForRetry,
   ) : _secret = List.generate(
         24,
         (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
@@ -97,6 +98,8 @@ class PlaybackHttpProxy {
 
   /// Minimum gap before another checksum pass of an unchanged snapshot.
   final Duration integrityRecheck;
+
+  final Future<void> Function(Duration) _waitForRetry;
 
   SessionReadAhead? _readAhead;
   final _readAheadBypass = <String>{};
@@ -616,6 +619,7 @@ class PlaybackHttpProxy {
     Duration bodyStallTimeout = const Duration(seconds: 15),
     Duration verifiedSnapshotTtl = const Duration(seconds: 5),
     Duration integrityRecheck = const Duration(seconds: 2),
+    Future<void> Function(Duration)? waitForRetry,
   }) async => PlaybackHttpProxy._(
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
     origin,
@@ -642,7 +646,11 @@ class PlaybackHttpProxy {
     bodyStallTimeout,
     verifiedSnapshotTtl,
     integrityRecheck,
+    waitForRetry ?? _retryTimer,
   );
+
+  static Future<void> _retryTimer(Duration duration) =>
+      Future<void>.delayed(duration);
 
   Duration bufferedEnd(Duration position, Duration demuxerEnd) {
     var end = demuxerEnd < position ? position : demuxerEnd;
@@ -1789,7 +1797,7 @@ class PlaybackHttpProxy {
     if (remaining <= Duration.zero || delay > remaining) {
       throw const _MediaRecoveryExhausted();
     }
-    await Future.any([Future<void>.delayed(delay), read.cancelledFuture]);
+    await Future.any([_waitForRetry(delay), read.cancelledFuture]);
     read.check();
   }
 

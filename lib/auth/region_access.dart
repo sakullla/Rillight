@@ -88,10 +88,15 @@ class RestrictedStopPermit {
 typedef RegionCleanup = Future<void> Function(RestrictedStopPermit permit);
 
 class RegionAccessController extends ChangeNotifier {
-  RegionAccessController({PinVerifier? verifier, DateTime Function()? clock})
-    : _verifier = verifier,
-      _clock = clock ?? DateTime.now;
+  RegionAccessController({
+    PinVerifier? verifier,
+    DateTime Function()? clock,
+    Future<PinVerifier> Function(String)? createVerifier,
+  }) : _verifier = verifier,
+       _createVerifier = createVerifier ?? PinVerifier.create,
+       _clock = clock ?? DateTime.now;
   PinVerifier? _verifier;
+  final Future<PinVerifier> Function(String) _createVerifier;
   final DateTime Function() _clock;
   PrivateAccessState _state = PrivateAccessState.locked;
   int _generation = 0;
@@ -125,7 +130,7 @@ class RegionAccessController extends ChangeNotifier {
       throw StateError('Unlock required');
     }
     if (pin != confirmation) throw ArgumentError('PIN confirmation differs');
-    final verifier = await PinVerifier.create(pin);
+    final verifier = await _createVerifier(pin);
     await persist(verifier);
     _verifier = verifier;
     notifyListeners();

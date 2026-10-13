@@ -48,7 +48,7 @@ node tool/capture-ui.mjs --only 'home-ready,home-display,poster-hover-transition
 - 聚合的继续观看、收藏、媒体库分别发布结果，单个慢模块不阻塞同服务器其他模块；最多并行加载三台服务器。页面按需构建服务器行，三个模块分别保存滚动位置。
 
 ```powershell
-flutter test --no-pub test/catalog/shelf_grid_scroll_rebuild_cases.dart test/app/desktop_scroll_test.dart test/home/library_latest_row_test.dart test/aggregation/server_sections_test.dart test/library/episode_list_scroll_test.dart test/catalog/item_detail_cases.dart test/widgets/media_image_cases.dart
+flutter test --no-pub test/catalog/shelf_grid_scroll_rebuild_cases.dart test/app/desktop_scroll_cases.dart test/home/library_latest_row_cases.dart test/aggregation/server_sections_cases.dart test/library/episode_list_scroll_cases.dart test/catalog/item_detail_cases.dart test/widgets/media_image_cases.dart
 ```
 
 全量测试修复同时处理了以下问题：测试平台对系统方向/UI 请求的异步应答与假时钟竞争（补齐平台桩，不在纯 HTTP 套件初始化 widget binding）；搜索提交、服务器分组、海报与季图片的过期断言；顶栏下方控件的实际点击位置；TV 遥控器目标定位和来源限定的分页入口。TV 首页在横幅为空、隐藏或不是首栏时为顶部导航留出空间，继续观看入口不再被遮挡，并断言该入口可实际命中。Windows 全页滚轮回归单独运行于测试 isolate，避免其他平台用例已缓存的 ThemeData 干扰。桌面模拟播放器的启动器在等待子进程编译时续写心跳，避免编译超过 15 秒后被子进程误判为父进程失联；原有超时保持不变，子进程启动时额外断言心跳有效。测试消息只有在 JSON 完整且文件可删除时才被消费；Windows 写入句柄尚未关闭或消息写到一半时保留文件，等待下一次有限轮询，并有真实文件句柄的回归测试。

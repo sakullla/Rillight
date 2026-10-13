@@ -1,10 +1,11 @@
+import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -32,6 +33,18 @@ const _device = ClientDeviceInfo(
   deviceId: 'device-host',
   version: '0.1.0',
 );
+
+// These scenarios use only in-memory process/HTTP adapters. Flush their actual
+// async work without letting scheduler contention expire fixture deadlines.
+void _runSyntheticAsync(Future<void> Function() exercise) {
+  fakeAsync((async) {
+    var completed = false;
+    unawaited(exercise().then((_) => completed = true));
+    async.flushMicrotasks();
+    async.elapse(Duration.zero);
+    expect(completed, isTrue, reason: 'synthetic operation must finish');
+  });
+}
 
 /// 把 logout/switchTo 记入与进程控制假实现共享的调用序列。
 class _TrackingAuth extends AuthController {
@@ -251,134 +264,147 @@ void main() {
     });
 
     test('opening a second item requests close, kills on timeout, and resends '
-        'Stopped once from the snapshot before deleting it', () async {
-      final auth = await loggedInAuth();
-      final host = newHost(auth);
-      addTearDown(() {
-        host.dispose();
-        auth.dispose();
-      });
-
-      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-      final firstPid = control.lastPid;
-      expect(host.current?.itemId, 'movie-up');
-      await storeFor(firstPid).write(snapshotFor(auth));
-
-      await host.open(const PlayerOpenRequest(itemId: 'movie-inception'));
-
-      expect(calls, [
-        'spawn:$firstPid',
-        'requestClose:$firstPid',
-        'kill:$firstPid',
-        'spawn:${firstPid + 1}',
-      ]);
-      expect(host.current?.itemId, 'movie-inception');
-      final stopped = stoppedEvents();
-      expect(stopped, hasLength(1));
-      expect(stopped.single.body['ItemId'], 'movie-up');
-      expect(stopped.single.body['PlaySessionId'], 'play-host-1');
-      expect(stopped.single.body['PositionTicks'], 4200000000);
-      expect(storeFor(firstPid).snapshot, isNull);
-      expect(storeFor(firstPid).deleteCount, 1);
-    });
-
-    test('cancelled late spawn reconciles after exit and before release '
-        'when closing or reopening', () async {
-      for (final reopen in [false, true]) {
+        'Stopped once from the snapshot before deleting it', () {
+      _runSyntheticAsync(() async {
         final auth = await loggedInAuth();
         final host = newHost(auth);
         addTearDown(() {
           host.dispose();
           auth.dispose();
         });
-        control.spawnHold = Completer<void>();
-        control.killHold = Completer<void>();
-        final spawnsBefore = control.spawnedArguments.length;
-        final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-        for (
-          var i = 0;
-          i < 50 && control.spawnedArguments.length == spawnsBefore;
-          i++
-        ) {
-          await Future<void>.delayed(Duration.zero);
-        }
-        final pid = control.lastPid;
-        final stoppedBefore = stoppedEvents().length;
-        await storeFor(pid).write(snapshotFor(auth));
-        var released = false;
-        control.onRelease = (releasedPid) {
-          if (releasedPid != pid) return;
-          expect(control.isAlive(pid), isFalse);
-          expect(stoppedEvents().length, stoppedBefore + 1);
-          expect(storeFor(pid).snapshot, isNull);
-          released = true;
-        };
-        final next = reopen
-            ? host.open(const PlayerOpenRequest(itemId: 'movie-inception'))
-            : host.close();
-        control.spawnHold!.complete();
-        for (var i = 0; i < 50 && !calls.contains('kill:$pid'); i++) {
-          await Future<void>.delayed(Duration.zero);
-        }
-        expect(calls, contains('kill:$pid'));
-        expect(stoppedEvents().length, stoppedBefore);
-        expect(released, isFalse);
-        control.killHold!.complete();
-        await Future.wait([opening, next]);
-        expect(released, isTrue);
-        expect(
-          stoppedEvents().elementAt(stoppedBefore).body['PlaySessionId'],
-          'play-host-1',
-        );
-        expect(
-          host.current?.itemId,
-          reopen ? 'movie-inception' : null,
-          reason: reopen ? 'reopening' : 'closing',
-        );
-        control.onRelease = null;
-        await host.close();
+
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final firstPid = control.lastPid;
+        expect(host.current?.itemId, 'movie-up');
+        await storeFor(firstPid).write(snapshotFor(auth));
+
+        await host.open(const PlayerOpenRequest(itemId: 'movie-inception'));
+
+        expect(calls, [
+          'spawn:$firstPid',
+          'requestClose:$firstPid',
+          'kill:$firstPid',
+          'spawn:${firstPid + 1}',
+        ]);
+        expect(host.current?.itemId, 'movie-inception');
+        final stopped = stoppedEvents();
+        expect(stopped, hasLength(1));
+        expect(stopped.single.body['ItemId'], 'movie-up');
+        expect(stopped.single.body['PlaySessionId'], 'play-host-1');
+        expect(stopped.single.body['PositionTicks'], 4200000000);
+        expect(storeFor(firstPid).snapshot, isNull);
+        expect(storeFor(firstPid).deleteCount, 1);
+      });
+    });
+
+    test('cancelled late spawn reconciles after exit and before release '
+        'when closing or reopening', () async {
+      for (final reopen in [false, true]) {
+        final auth = await loggedInAuth();
+        addTearDown(auth.dispose);
+        // Synthetic IO and explicit spawn/exit gates establish ordering;
+        // wall-clock contention must not consume the 50 ms report deadline.
+        fakeAsync((async) {
+          final host = newHost(auth);
+          addTearDown(host.dispose);
+          control.spawnHold = Completer<void>();
+          control.killHold = Completer<void>();
+          final spawnsBefore = control.spawnedArguments.length;
+          final opening = host.open(
+            const PlayerOpenRequest(itemId: 'movie-up'),
+          );
+          async.flushMicrotasks();
+          expect(control.spawnedArguments.length, spawnsBefore + 1);
+          final pid = control.lastPid;
+          final stoppedBefore = stoppedEvents().length;
+          unawaited(storeFor(pid).write(snapshotFor(auth)));
+          async.flushMicrotasks();
+          var released = false;
+          control.onRelease = (releasedPid) {
+            if (releasedPid != pid) return;
+            expect(control.isAlive(pid), isFalse);
+            expect(stoppedEvents().length, stoppedBefore + 1);
+            expect(storeFor(pid).snapshot, isNull);
+            released = true;
+          };
+          final next = reopen
+              ? host.open(const PlayerOpenRequest(itemId: 'movie-inception'))
+              : host.close();
+          control.spawnHold!.complete();
+          async.flushMicrotasks();
+          expect(calls, contains('kill:$pid'));
+          expect(stoppedEvents().length, stoppedBefore);
+          expect(released, isFalse);
+          var completed = false;
+          Future.wait([opening, next]).then((_) => completed = true);
+          control.killHold!.complete();
+          async.flushMicrotasks();
+          async.elapse(Duration.zero);
+          expect(completed, isTrue);
+          expect(released, isTrue);
+          expect(
+            stoppedEvents().elementAt(stoppedBefore).body['PlaySessionId'],
+            'play-host-1',
+          );
+          expect(
+            host.current?.itemId,
+            reopen ? 'movie-inception' : null,
+            reason: reopen ? 'reopening' : 'closing',
+          );
+          control.onRelease = null;
+          var closed = false;
+          host.close().then((_) => closed = true);
+          async.flushMicrotasks();
+          async.elapse(Duration.zero);
+          expect(closed, isTrue);
+        });
       }
     });
 
     test(
       'cancelled late spawn retains foreign and failed Stopped snapshots',
-      () async {
-        server.stoppedStatus = 500;
-        // foreign 先行:快照属于其他用户时不重发;failed 随后:重发失败保留快照。
-        for (final foreignSnapshot in [true, false]) {
-          final auth = await loggedInAuth();
-          final host = newHost(auth);
-          addTearDown(() {
-            host.dispose();
-            auth.dispose();
-          });
-          control.spawnHold = Completer<void>();
-          final spawnsBefore = control.spawnedArguments.length;
-          final opening = host.open(
-            const PlayerOpenRequest(itemId: 'movie-up'),
-          );
-          for (
-            var i = 0;
-            i < 50 && control.spawnedArguments.length == spawnsBefore;
-            i++
-          ) {
-            await Future<void>.delayed(Duration.zero);
+      () {
+        _runSyntheticAsync(() async {
+          server.stoppedStatus = 500;
+          // foreign 先行:快照属于其他用户时不重发;failed 随后:重发失败保留快照。
+          for (final foreignSnapshot in [true, false]) {
+            final auth = await loggedInAuth();
+            final host = newHost(auth);
+            addTearDown(() {
+              host.dispose();
+              auth.dispose();
+            });
+            control.spawnHold = Completer<void>();
+            final spawnsBefore = control.spawnedArguments.length;
+            final opening = host.open(
+              const PlayerOpenRequest(itemId: 'movie-up'),
+            );
+            for (
+              var i = 0;
+              i < 50 && control.spawnedArguments.length == spawnsBefore;
+              i++
+            ) {
+              await Future<void>.delayed(Duration.zero);
+            }
+            final pid = control.lastPid;
+            await storeFor(pid).write(
+              snapshotFor(
+                auth,
+                userId: foreignSnapshot ? 'another-user' : null,
+              ),
+            );
+            final closing = host.close();
+            control.spawnHold!.complete();
+            await Future.wait([opening, closing]);
+            expect(
+              stoppedEvents(),
+              hasLength(foreignSnapshot ? 0 : 1),
+              reason: foreignSnapshot ? 'foreign' : 'failed',
+            );
+            expect(storeFor(pid).snapshot, isNotNull);
+            expect(storeFor(pid).deleteCount, 0);
           }
-          final pid = control.lastPid;
-          await storeFor(pid).write(
-            snapshotFor(auth, userId: foreignSnapshot ? 'another-user' : null),
-          );
-          final closing = host.close();
-          control.spawnHold!.complete();
-          await Future.wait([opening, closing]);
-          expect(
-            stoppedEvents(),
-            hasLength(foreignSnapshot ? 0 : 1),
-            reason: foreignSnapshot ? 'foreign' : 'failed',
-          );
-          expect(storeFor(pid).snapshot, isNotNull);
-          expect(storeFor(pid).deleteCount, 0);
-        }
+        });
       },
     );
 
@@ -416,27 +442,29 @@ void main() {
       expect(openedSeason, 'season-friends-1');
     });
 
-    test('graceful close skips kill and tolerates a stale snapshot', () async {
-      final auth = await loggedInAuth();
-      control.requestCloseResult = true;
-      final host = newHost(auth);
-      final notices = <PlayerHostNotice>[];
-      host.notices.listen(notices.add);
-      addTearDown(() {
-        host.dispose();
-        auth.dispose();
+    test('graceful close skips kill and tolerates a stale snapshot', () {
+      _runSyntheticAsync(() async {
+        final auth = await loggedInAuth();
+        control.requestCloseResult = true;
+        final host = newHost(auth);
+        final notices = <PlayerHostNotice>[];
+        host.notices.listen(notices.add);
+        addTearDown(() {
+          host.dispose();
+          auth.dispose();
+        });
+
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final pid = control.lastPid;
+        await storeFor(pid).write(snapshotFor(auth));
+        await host.close();
+
+        expect(calls, ['spawn:$pid', 'requestClose:$pid']);
+        expect(host.current, isNull);
+        expect(stoppedEvents(), hasLength(1));
+        expect(storeFor(pid).snapshot, isNull);
+        expect(notices, isEmpty);
       });
-
-      await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
-      final pid = control.lastPid;
-      await storeFor(pid).write(snapshotFor(auth));
-      await host.close();
-
-      expect(calls, ['spawn:$pid', 'requestClose:$pid']);
-      expect(host.current, isNull);
-      expect(stoppedEvents(), hasLength(1));
-      expect(storeFor(pid).snapshot, isNull);
-      expect(notices, isEmpty);
     });
 
     test('no snapshot means nothing is resent', () async {
@@ -872,7 +900,7 @@ void main() {
       listener.onWindowClose();
       await tester.pump();
       await pumpUntil(tester, () => calls.contains('destroy'));
-      await tester.pumpAndSettle();
+      await settle(tester);
 
       expect(calls, [
         'spawn:$pid',

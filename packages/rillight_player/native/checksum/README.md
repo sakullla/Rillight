@@ -14,7 +14,7 @@ The x86 folding function is adapted from the pinned Chromium source documented
 in `../../THIRD_PARTY_NOTICES.md`. Its BSD license is shipped with the other
 native dependency notices. ARM and software implementations are owned source.
 
-`flutter test test/player/cache_crc32_test.dart` from the repository root builds
+`flutter test test/player/cache_crc32_cases.dart` from the repository root builds
 and tests the real native asset, including software dispatch, unaligned input,
 empty input, incremental seeds, SIMD boundaries and multi-chunk buffers. It
 prints the detected backend; a passing test on x86 does not establish ARM or

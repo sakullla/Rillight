@@ -31,12 +31,14 @@ class ProviderConnectController extends ChangeNotifier {
     this.existing,
     this.region = AccessRegion.ordinary,
     String? userAgent,
+    this.pollInterval,
   }) : type = existing?.serviceType ?? MediaServerType.emby,
        userAgent = userAgent ?? existing?.userAgent ?? '';
 
   final AuthController auth;
   final SavedServer? existing;
   final AccessRegion region;
+  final Duration? pollInterval;
   MediaServerType type;
   String userAgent;
   String? _submittedPassword;
@@ -186,7 +188,7 @@ class ProviderConnectController extends ChangeNotifier {
 
   void _schedulePoll(int epoch, Uri? uri) {
     _timer?.cancel();
-    _timer = Timer(attempt!.pollInterval, () {
+    _timer = Timer(pollInterval ?? attempt!.pollInterval, () {
       if (!_disposed && epoch == _epoch) unawaited(_poll(epoch, uri));
     });
   }

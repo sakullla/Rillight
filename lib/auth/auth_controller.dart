@@ -46,6 +46,7 @@ class AuthController extends ChangeNotifier {
     required this.credentials,
     required ServerListStore servers,
     SourceSessionRegistry? sources,
+    RegionAccessController? regionAccess,
     this.persistPin,
     MediaServerClient Function(MediaServerType)? providerClientFactory,
     PlexAuthentication? plexAuthentication,
@@ -59,7 +60,7 @@ class AuthController extends ChangeNotifier {
     this.sources =
         sources ??
         SourceSessionRegistry(
-          access: RegionAccessController(),
+          access: regionAccess ?? RegionAccessController(),
           store: servers,
           credentials: credentials,
           createClient: client.createDetached,
@@ -80,7 +81,10 @@ class AuthController extends ChangeNotifier {
     this.sources.addSourceRevocation(_sourceChanged);
   }
 
-  factory AuthController.memory({MediaServerClient? client}) {
+  factory AuthController.memory({
+    MediaServerClient? client,
+    RegionAccessController? regionAccess,
+  }) {
     return AuthController(
       client:
           client ??
@@ -94,6 +98,7 @@ class AuthController extends ChangeNotifier {
           ),
       credentials: MemoryCredentialStore(),
       servers: MemoryServerListStore(),
+      regionAccess: regionAccess,
     );
   }
 

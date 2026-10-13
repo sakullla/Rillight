@@ -1,7 +1,9 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'configured_source.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -362,12 +364,12 @@ void main() {
       ),
     );
     await tester.tap(find.byKey(const Key('open-switcher')));
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.byType(ServerSwitcherDialog), findsOneWidget);
     expect(find.text('修改密码'), findsOneWidget);
 
     await tester.tap(find.byKey(ServerSwitcherDialog.changePasswordKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(requested, isTrue);
     // 宿主接管弹改密对话框,切换面板关闭。
@@ -405,7 +407,7 @@ void main() {
     await tester.ensureVisible(entry);
     await tester.pump();
     await tester.tap(entry);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(find.byType(ChangePasswordDialog), findsOneWidget);
     expect(
@@ -512,7 +514,7 @@ Key? _focusedPasswordKey() {
 
 Future<void> _key(WidgetTester tester, LogicalKeyboardKey key) async {
   await tester.sendKeyEvent(key);
-  await tester.pumpAndSettle();
+  await settle(tester);
 }
 
 Future<void> _editFocused(WidgetTester tester, String text) async {
@@ -520,7 +522,7 @@ Future<void> _editFocused(WidgetTester tester, String text) async {
   expect(find.byKey(const Key('tv-input-editor')), findsOneWidget);
   await tester.enterText(find.byKey(const Key('tv-input-editor')), text);
   await tester.testTextInput.receiveAction(TextInputAction.done);
-  await tester.pumpAndSettle();
+  await settle(tester);
 }
 
 Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
@@ -554,7 +556,7 @@ Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
     ),
   );
   await tester.tap(find.byKey(const Key('open-change-password')));
-  await tester.pumpAndSettle();
+  await settle(tester);
 }
 
 Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {
@@ -581,7 +583,7 @@ Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {
     ),
   );
   await tester.tap(find.byKey(const Key('open-change-password')));
-  await tester.pumpAndSettle();
+  await settle(tester);
 }
 
 Future<void> _pumpUntilGone(WidgetTester tester, Finder finder) async {

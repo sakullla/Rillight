@@ -88,6 +88,8 @@ class PlaybackTransportSession {
     bool dynamicSource = false,
     bool sessionBuffering = false,
     bool continuousTransfers = false,
+    Duration mediaHeaderTimeout = const Duration(seconds: 45),
+    Future<void> Function(Duration)? waitForRetry,
   }) async {
     final inbox = ReceivePort();
     final ready = ReceivePort();
@@ -110,6 +112,8 @@ class PlaybackTransportSession {
           readAheadConcurrency,
           authorization?.headersByOrigin,
           authorization?.publicHeaders,
+          mediaHeaderTimeout,
+          waitForRetry,
         ],
         onError: inbox.sendPort,
         onExit: inbox.sendPort,
@@ -303,6 +307,8 @@ Future<void> _serveTransport(List<Object?> arguments) async {
       sessionBuffering: arguments[10]! as bool,
       continuousTransfers: arguments[11]! as bool,
       readAheadConcurrency: arguments[12]! as int,
+      mediaHeaderTimeout: arguments[15]! as Duration,
+      waitForRetry: arguments[16] as Future<void> Function(Duration)?,
     );
     ready.send(commands.sendPort);
     await for (final message in commands) {

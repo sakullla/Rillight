@@ -1,9 +1,11 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'configured_source.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
@@ -211,7 +213,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('电影 7'), findsOneWidget);
       expect(find.text('剧集 1'), findsOneWidget);
       expect(find.text('单集 0'), findsOneWidget);
@@ -234,7 +236,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byKey(LibraryCountsPanel.failureKey), findsOneWidget);
       expect(find.text('HTTP 403: counts unavailable'), findsOneWidget);
       expect(find.text('电影 7'), findsNothing);
@@ -338,7 +340,7 @@ void main() {
       app.router.dispose();
     });
     await tester.pumpWidget(app);
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect(find.byType(TvShell), findsOneWidget);
 
     FocusNode navFocus(int index) => tester
@@ -352,7 +354,7 @@ void main() {
     navFocus(3).requestFocus();
     FocusManager.instance.applyFocusChangesIfNeeded();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     expect(
       find.byKey(ValueKey('tv-line-add-${auth.session!.server.id}')),

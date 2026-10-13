@@ -1,6 +1,8 @@
+import 'helpers/widget_harness.dart';
+import 'helpers/settle.dart';
 import 'helpers/image_cache_fixture.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
@@ -30,14 +32,14 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
   }
 
   Future<void> expandSection(WidgetTester tester, String title) async {
     final section = find.byKey(ValueKey('settings-section-$title'));
     await tester.ensureVisible(section);
     await tester.tap(find.descendant(of: section, matching: find.text(title)));
-    await tester.pumpAndSettle();
+    await settle(tester);
   }
 
   testWidgets('shows the stored settings and changing the disk cache limit '
@@ -81,7 +83,7 @@ void main() {
 
     // 写:点选磁盘缓冲上限并落盘回显。
     await tester.tap(find.byKey(const ValueKey('settings-cache-1024')));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     final settings = await store.read();
     expect(settings.diskCacheLimitMiB, 1024);
@@ -111,7 +113,7 @@ void main() {
     await expandSection(tester, '播放');
 
     await tester.tap(find.byKey(SettingsPage.restoreDefaultsKey));
-    await tester.pumpAndSettle();
+    await settle(tester);
 
     final settings = await store.read();
     expect(settings.diskCacheLimitMiB, PlayerRuntimeDefaults.diskCacheLimitMiB);
@@ -131,16 +133,16 @@ void main() {
       await expandSection(tester, '播放');
       expect(find.byKey(const Key('phone-subtitle-reset')), findsNothing);
       await tester.tap(find.byKey(const Key('phone-subtitle-extraLarge')));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(
         (await store.read()).effectivePhoneSubtitles.size,
         PhoneSubtitleSize.extraLarge,
       );
       await tester.tap(find.byKey(const Key('phone-subtitle-original')));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect((await store.read()).effectivePhoneSubtitles.originalAss, isTrue);
       await tester.tap(find.byKey(const Key('phone-subtitle-reset')));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(
         (await store.read()).effectivePhoneSubtitles.size,
         PhoneSubtitleSize.standard,
@@ -168,11 +170,11 @@ void main() {
     );
     expect(switches, findsNWidgets(2));
     await tester.tap(switches.first);
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect((await store.read()).isSkipIntroEnabled, isFalse);
     expect((await store.read()).isSkipOutroEnabled, isTrue);
     await tester.tap(switches.last);
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect((await store.read()).isSkipOutroEnabled, isFalse);
     expect((await store.read()).volume, 40);
     await expandSection(tester, '播放');
@@ -198,7 +200,7 @@ void main() {
           )
           .first,
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
     expect((await store.read()).volume, 75);
     expect((await store.read()).isSkipIntroEnabled, isFalse);
   }, tags: ['integration']);
@@ -209,7 +211,7 @@ void main() {
       final store = MemoryPlayerSettingsStore();
       await pumpPage(tester, store: store);
       tester.view.physicalSize = const Size(360, 1600);
-      await tester.pumpAndSettle();
+      await settle(tester);
       await expandSection(tester, '弹幕配置');
       expect(find.text('样式预览'), findsOneWidget);
       expect(find.text('一起看剧，弹幕也清晰舒适'), findsOneWidget);
@@ -217,14 +219,14 @@ void main() {
       final scroll = find.byKey(DanmakuKeys.typeScroll);
       await tester.ensureVisible(scroll);
       await tester.tap(scroll);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect((await store.read()).danmakuDisplay?.showScroll, isFalse);
       final advanced = find.byKey(const ValueKey('danmaku-advanced-settings'));
       await tester.ensureVisible(advanced);
       await tester.tap(
         find.descendant(of: advanced, matching: find.byType(ListTile)),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byType(SwitchListTile), findsWidgets);
       expect(tester.takeException(), isNull);
     },

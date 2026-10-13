@@ -1,0 +1,215 @@
+import '../helpers/widget_harness.dart';
+import 'dart:async';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/media_server/device.dart';
+import 'package:rillight/player/android_playback_lifecycle.dart';
+import 'package:rillight/player/playback_output_status.dart';
+import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/player_window.dart';
+import 'package:rillight/player/video_backend.dart';
+
+class _Controller extends PlayerController {
+  _Controller()
+    : super(
+        client: EmbyClient(
+          device: const ClientDeviceInfo(
+            clientName: 'test',
+            deviceName: 'test',
+            deviceId: 'test',
+            version: '1',
+          ),
+        ),
+        itemId: 'synthetic',
+        backend: FakeVideoBackend(),
+        window: PlayerWindow(),
+      );
+  int suspends = 0, restores = 0;
+  @override
+  Future<void> suspendPlayback() async {
+    suspends++;
+  }
+
+  @override
+  Future<void> restorePlayback() async {
+    restores++;
+  }
+}
+
+class _ReleaseProbe extends PlayerController {
+  _ReleaseProbe()
+    : super(
+        client: EmbyClient(
+          device: const ClientDeviceInfo(
+            clientName: 'test',
+            deviceName: 'test',
+            deviceId: 'test',
+            version: '1',
+          ),
+        ),
+        itemId: 'synthetic',
+        backend: FakeVideoBackend(),
+        window: PlayerWindow(),
+      );
+
+  int suspends = 0, restores = 0;
+
+  @override
+  Future<void> suspendPlayback() {
+    suspends++;
+    return super.suspendPlayback();
+  }
+
+  @override
+  Future<void> restorePlayback() {
+    restores++;
+    return super.restorePlayback();
+  }
+}
+
+class _Presentation implements VideoBackendPhonePresentation {
+  @override
+  final ValueNotifier<Map<String, dynamic>> phonePresentation = ValueNotifier(
+    const {},
+  );
+  Future<Map<String, dynamic>> Function()? query;
+  @override
+  Future<Map<String, dynamic>> refreshPhonePresentation() async =>
+      query == null ? phonePresentation.value : await query!();
+  @override
+  Future<void> configurePhonePresentation(bool enabled) async {}
+  @override
+  Future<bool> enterPictureInPicture() async => true;
+}
+
+void main() {
+  testWidgets(
+    'native transition and PiP retain the same paused/playing session',
+    (tester) async {
+      final c = _Controller(), p = _Presentation();
+      final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+      addTearDown(lifecycle.dispose);
+      p.phonePresentation.value = {'retainPlayback': true, 'entering': true};
+      lifecycle.didChangeAppLifecycleState(AppLifecycleState.paused);
+      await tester.pump();
+      expect(c.suspends, 0);
+      p.phonePresentation.value = {'retainPlayback': true, 'active': true};
+      await tester.pump();
+      expect(c.suspends, 0);
+      p.phonePresentation.value = {
+        'retainPlayback': false,
+        'shouldSuspend': true,
+      };
+      await tester.pump();
+      expect(c.suspends, 1);
+      p.phonePresentation.value = {
+        'retainPlayback': false,
+        'shouldSuspend': true,
+      };
+      await tester.pump();
+      expect(
+        c.suspends,
+        1,
+        reason: 'duplicate native callbacks do not release twice',
+      );
+    },
+  );
+  testWidgets(
+    'queued native stop cannot release a replacement foreground session',
+    (tester) async {
+      final c = _Controller(), p = _Presentation();
+      final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+      addTearDown(lifecycle.dispose);
+      p.phonePresentation.value = {'session': 'old', 'shouldSuspend': true};
+      p.phonePresentation.value = {
+        'session': 'new',
+        'foreground': true,
+        'shouldSuspend': false,
+      };
+      await tester.pump();
+      expect(c.suspends, 0);
+    },
+  );
+
+  testWidgets('failed native query cannot bypass background release', (
+    tester,
+  ) async {
+    final c = _Controller(), p = _Presentation();
+    p.query = () async => throw StateError('bridge gone');
+    final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+    addTearDown(lifecycle.dispose);
+    lifecycle.didChangeAppLifecycleState(AppLifecycleState.paused);
+    await tester.pump();
+    expect(c.suspends, 1);
+  });
+  testWidgets('unanswered native query has bounded background grace', (
+    tester,
+  ) async {
+    final c = _Controller(), p = _Presentation();
+    p.query = () => Completer<Map<String, dynamic>>().future;
+    final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+    addTearDown(lifecycle.dispose);
+    lifecycle.didChangeAppLifecycleState(AppLifecycleState.paused);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 701));
+    expect(c.suspends, 1);
+  });
+
+  testWidgets('output status does not release or restore the session', (
+    tester,
+  ) async {
+    final c = _ReleaseProbe(), p = _Presentation();
+    final lifecycle = AndroidPlaybackLifecycle(c, phonePresentation: p);
+    addTearDown(c.dispose);
+    addTearDown(lifecycle.dispose);
+    c.applyObservedOutput(
+      PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 1,
+        'audioDelivery': 1,
+        'audioChannels': 2,
+        'catalogVideo': '杜比视界',
+      }),
+    );
+    await tester.pump();
+    expect(c.suspends, 0);
+    expect(c.restores, 0);
+    expect(c.backgroundReleased, isFalse);
+    expect(c.outputStatus.videoOutputKind, 1);
+    p.phonePresentation.value = {
+      'retainPlayback': false,
+      'shouldSuspend': true,
+    };
+    await tester.pump();
+    await lifecycle.settled;
+    expect(c.suspends, 1);
+    expect(c.backgroundReleased, isTrue);
+    c.applyObservedOutput(
+      PlaybackOutputStatus.fromCoreMap({
+        'dolbyVisionProfile': 5,
+        'videoOutputKind': 1,
+        'audioDelivery': 1,
+        'audioChannels': 2,
+        'requestedInterpolation': 2,
+        'effectiveInterpolation': 2,
+        'reasonInterpolation': 1,
+      }),
+    );
+    c.settingsStore = MemoryPlayerSettingsStore();
+    await c.refreshOutputStatus();
+    await tester.pump();
+    expect(c.outputStatus.effectiveInterpolation, 2);
+    expect(c.outputStatus.videoOutputKind, 1);
+    expect(c.suspends, 1);
+    expect(c.restores, 0);
+    expect(c.backgroundReleased, isTrue);
+    c.applyObservedOutput(PlaybackOutputStatus.unknown);
+    await tester.pump();
+    expect(c.suspends, 1);
+    expect(c.restores, 0);
+    expect(c.backgroundReleased, isTrue);
+    expect(c.outputStatus.sampled, isFalse);
+  });
+}

@@ -1,6 +1,8 @@
+import '../helpers/widget_harness.dart';
+import '../helpers/settle.dart';
 import 'configured_source.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -226,7 +228,7 @@ void main() {
       }
 
       await pump(initial);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('家庭影院'), findsOneWidget);
       expect(find.text('第二台'), findsOneWidget);
 
@@ -234,11 +236,11 @@ void main() {
       await tester.tap(
         find.byKey(ServerSwitcherDialog.deleteKey('server-id-2')),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(find.textContaining('第二台'), findsWidgets);
       await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(deleted, isEmpty);
       expect(find.text('第二台'), findsOneWidget);
 
@@ -246,9 +248,9 @@ void main() {
       await tester.tap(
         find.byKey(ServerSwitcherDialog.deleteKey('server-id-2')),
       );
-      await tester.pumpAndSettle();
+      await settle(tester);
       await tester.tap(find.byKey(ServerSwitcherDialog.deleteConfirmKey));
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(deleted, ['server-id-2']);
 
       // 删除后列表不再出现,搜索也找不到。
@@ -256,7 +258,7 @@ void main() {
         _saved('server-id-1', '家庭影院', ['http://emby.test:8096']),
       ];
       await pump(remaining);
-      await tester.pumpAndSettle();
+      await settle(tester);
       expect(find.text('家庭影院'), findsOneWidget);
       expect(find.text('第二台'), findsNothing);
       // 服务器很少时一眼可见,不再提供空搜索框。
@@ -295,7 +297,7 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await settle(tester);
     await tester.enterText(
       find.byKey(ServerSwitcherDialog.searchField),
       'emby-6',
@@ -359,7 +361,7 @@ void main() {
 
       for (final theme in [AppTheme.light(), AppTheme.dark()]) {
         await pump(theme);
-        await tester.pumpAndSettle();
+        await settle(tester);
         final scheme = theme.colorScheme;
 
         // 面板底色来自 colorScheme 且完全不透明:背景海报/简介/播放控件
