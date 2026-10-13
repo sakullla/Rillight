@@ -1,44 +1,8 @@
 #include "core_internal.h"
 #include "core_lanes.h"
+#include "vod_header.h"
 
 namespace rillight::core {
-bool complete_mp4_header(AVFormatContext* format) {
-  if (!format || !format->iformat || !format->iformat->name ||
-      std::string_view(format->iformat->name).find("mov,mp4") != 0 ||
-      (format->ctx_flags & AVFMTCTX_NOHEADER)) return false;
-  bool video = false;
-  int64_t duration = 0;
-  for (unsigned int i = 0; i < format->nb_streams; ++i) {
-    const auto* stream = format->streams[i];
-    const auto* parameters = stream->codecpar;
-    if (parameters->codec_type == AVMEDIA_TYPE_VIDEO &&
-        !(stream->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
-      if (parameters->codec_id != AV_CODEC_ID_H264 &&
-          parameters->codec_id != AV_CODEC_ID_HEVC &&
-          parameters->codec_id != AV_CODEC_ID_AV1 &&
-          parameters->codec_id != AV_CODEC_ID_MPEG4) return false;
-      if (parameters->width <= 0 || parameters->height <= 0 ||
-          parameters->extradata_size <= 0 ||
-          stream->nb_frames <= 0 || stream->duration <= 0 ||
-          stream->time_base.num <= 0 || stream->time_base.den <= 0 ||
-          (stream->avg_frame_rate.num <= 0 && stream->r_frame_rate.num <= 0))
-        return false;
-      video = true;
-    } else if (parameters->codec_type == AVMEDIA_TYPE_AUDIO) {
-      // Unknown MP4 sample entries cannot become playable by probing their
-      // payload. They must not block fully described supported tracks.
-      if (parameters->codec_id != AV_CODEC_ID_NONE &&
-          (parameters->sample_rate <= 0 || parameters->ch_layout.nb_channels <= 0))
-        return false;
-    }
-    if (stream->duration > 0 && stream->time_base.num > 0 && stream->time_base.den > 0)
-      duration = std::max(duration, av_rescale_q(stream->duration,
-                           stream->time_base, AVRational{1, AV_TIME_BASE}));
-  }
-  if (!video || duration <= 0) return false;
-  if (format->duration == AV_NOPTS_VALUE) format->duration = duration;
-  return true;
-}
 
 Decoder open_video_decoder(RillightCoreImpl *core, AVFormatContext *format,
                            int index, int64_t discard_before_us) {
@@ -122,11 +86,9 @@ void run(RillightCoreImpl *core, uint64_t session) {
 
   result = avformat_open_input(&format, core->url.c_str(), nullptr, nullptr);
   if (result < 0) goto finish;
-  // MP4 sample tables and codec configuration already describe complete VOD
-  // streams. Probing every optional track can otherwise force distant network
-  // reads before playback, even though the selected decoders can open now.
-  // Fragmented/live/incomplete headers retain FFmpeg's full discovery path.
-  if (!complete_mp4_header(format)) {
+  // Complete MP4/Matroska VOD headers can open their decoders without reading
+  // payloads from every optional track. Incomplete/live headers still probe.
+  if (!complete_vod_header(format)) {
     result = avformat_find_stream_info(format, nullptr);
     if (result < 0) goto finish;
   }
@@ -430,7 +392,10 @@ void run(RillightCoreImpl *core, uint64_t session) {
         if (bitmap_subtitle_codec(codec))
           result = decode_bitmap_subtitle(selected_decoder, packet,
               format->streams[selected_decoder.stream]->time_base, &selected_cues,
-              core->media_origin_us);
+              core->media_origin_us,
+              video.stream >= 0 ? format->streams[video.stream]->codecpar->width : 0,
+              video.stream >= 0 ? format->streams[video.stream]->codecpar->height : 0,
+              video.stream >= 0 ? format->streams[video.stream]->codecpar : nullptr);
 #if RILLIGHT_HAVE_LIBASS
         else if (text_subtitle_codec(codec) && selected_ass.track)
           result = decode_text_subtitle(selected_decoder, packet,

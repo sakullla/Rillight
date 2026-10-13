@@ -164,7 +164,7 @@ def main() -> int:
     configure = [
         str(source / "configure"), f"--prefix={prefix}", "--libdir=" + str(prefix / "lib"),
         "--enable-shared", "--disable-static", "--disable-programs", "--disable-doc",
-        "--enable-network", "--enable-pic", "--enable-avfilter",
+        "--enable-network", "--enable-zlib", "--enable-pic", "--enable-avfilter",
         "--enable-swresample", "--enable-swscale", "--enable-vaapi",
         "--enable-libdrm", "--enable-libdav1d",
         "--enable-decoder=ac3", "--enable-decoder=eac3", "--enable-decoder=truehd",

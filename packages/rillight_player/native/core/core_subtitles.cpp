@@ -1,6 +1,7 @@
 #include "core_state.h"
 #include "core_tracks.h"
 #include "core_video.h"
+#include "bitmap_subtitle_color.h"
 
 namespace rillight::core {
 #if RILLIGHT_HAVE_LIBASS
@@ -284,6 +285,43 @@ void apply_subtitle_presentation(AssRenderer *, int, int,
     const RillightCoreSubtitlePresentation &) {}
 #endif
 
+namespace {
+struct BitmapBounds { int left, top, right, bottom; };
+
+BitmapBounds bitmap_bounds(const SubtitleCue& cue, const SubtitleBitmap& bitmap,
+                           int width, int height) {
+  const double sx = cue.canvas_width > 0 ? static_cast<double>(width) / cue.canvas_width : 1;
+  const double sy = cue.canvas_height > 0 ? static_cast<double>(height) / cue.canvas_height : 1;
+  const auto clip = [](double value, int limit) {
+    return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(limit)));
+  };
+  return {clip(std::floor(bitmap.x * sx), width), clip(std::floor(bitmap.y * sy), height),
+          clip(std::ceil((static_cast<int64_t>(bitmap.x) + bitmap.width) * sx), width),
+          clip(std::ceil((static_cast<int64_t>(bitmap.y) + bitmap.height) * sy), height)};
+}
+
+template <typename Blend>
+void draw_bitmap(const SubtitleCue& cue, const SubtitleBitmap& bitmap,
+                 int width, int height, Blend blend) {
+  if (width <= 0 || height <= 0 || bitmap.width <= 0 || bitmap.height <= 0) return;
+  const auto bounds = bitmap_bounds(cue, bitmap, width, height);
+  const int canvas_width = cue.canvas_width > 0 ? cue.canvas_width : width;
+  const int canvas_height = cue.canvas_height > 0 ? cue.canvas_height : height;
+  for (int y = bounds.top; y < bounds.bottom; ++y) {
+    const int64_t source_y = canvas_height == height ? y :
+        (2LL * y + 1) * canvas_height / (2LL * height);
+    const auto row = std::clamp<int64_t>(source_y - bitmap.y, 0, bitmap.height - 1);
+    for (int x = bounds.left; x < bounds.right; ++x) {
+      const int64_t source_x = canvas_width == width ? x :
+          (2LL * x + 1) * canvas_width / (2LL * width);
+      const auto column = std::clamp<int64_t>(source_x - bitmap.x, 0, bitmap.width - 1);
+      const auto index = bitmap.indices[static_cast<size_t>(row) * bitmap.width + column];
+      if (index < bitmap.palette.size()) blend(x, y, bitmap.palette[index]);
+    }
+  }
+}
+} // namespace
+
 void blend_subtitles(RillightCoreFrame *frame,
                      const std::vector<SubtitleCue> &cues) {
   if (!frame || frame->type != RILLIGHT_CORE_VIDEO_RGBA || frame->pts_us < 0)
@@ -291,30 +329,17 @@ void blend_subtitles(RillightCoreFrame *frame,
   for (const auto &cue : cues) {
     if (frame->pts_us < cue.start_us || frame->pts_us >= cue.end_us) continue;
     for (const auto &bitmap : cue.bitmaps) {
-      for (int row = 0; row < bitmap.height; ++row) {
-        const int y = bitmap.y + row;
-        if (y < 0 || y >= frame->height) continue;
-        for (int column = 0; column < bitmap.width; ++column) {
-          const int x = bitmap.x + column;
-          if (x < 0 || x >= frame->width) continue;
-          const uint8_t index = bitmap.indices[
-              static_cast<size_t>(row) * bitmap.width + column];
-          if (index >= bitmap.palette.size()) continue;
-          const uint32_t color = bitmap.palette[index];
-          const unsigned int alpha = color >> 24;
-          if (!alpha) continue;
-          uint8_t *pixel = frame->data + static_cast<size_t>(y) *
-                                          frame->stride + x * 4;
-          for (int channel = 0; channel < 3; ++channel) {
-            const unsigned int foreground =
-                (color >> (16 - channel * 8)) & 0xff;
-            pixel[channel] = static_cast<uint8_t>(
-                (foreground * alpha + pixel[channel] * (255 - alpha) + 127) /
-                255);
-          }
-          pixel[3] = 255;
+      draw_bitmap(cue, bitmap, frame->width, frame->height, [&](int x, int y, uint32_t color) {
+        const unsigned int alpha = color >> 24;
+        if (!alpha) return;
+        uint8_t *pixel = frame->data + static_cast<size_t>(y) * frame->stride + x * 4;
+        for (int channel = 0; channel < 3; ++channel) {
+          const unsigned int foreground = (color >> (16 - channel * 8)) & 0xff;
+          pixel[channel] = static_cast<uint8_t>(
+              (foreground * alpha + pixel[channel] * (255 - alpha) + 127) / 255);
         }
-      }
+        pixel[3] = 255;
+      });
     }
   }
 }
@@ -361,7 +386,10 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
   for (const auto* group : {&cues, secondary_cues})
   for (const auto& cue : *group) {
     if (frame->pts_us < cue.start_us || frame->pts_us >= cue.end_us) continue;
-    for (const auto& bitmap : cue.bitmaps) include(bitmap.x, bitmap.y, bitmap.width, bitmap.height);
+    for (const auto& bitmap : cue.bitmaps) {
+      const auto bounds = bitmap_bounds(cue, bitmap, frame->width, frame->height);
+      include(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+    }
   }
 #if RILLIGHT_HAVE_LIBASS
   const ASS_Image* images = nullptr;
@@ -407,14 +435,9 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
   for (const auto& cue : *group) {
     if (frame->pts_us < cue.start_us || frame->pts_us >= cue.end_us) continue;
     for (const auto& bitmap : cue.bitmaps) {
-      for (int row = 0; row < bitmap.height; ++row) {
-        for (int column = 0; column < bitmap.width; ++column) {
-          const auto index = bitmap.indices[static_cast<size_t>(row) * bitmap.width + column];
-          if (index >= bitmap.palette.size()) continue;
-          const auto color = bitmap.palette[index];
-          blend(static_cast<int64_t>(bitmap.x) + column, static_cast<int64_t>(bitmap.y) + row, color, color >> 24);
-        }
-      }
+      draw_bitmap(cue, bitmap, frame->width, frame->height, [&](int x, int y, uint32_t color) {
+        blend(x, y, color, color >> 24);
+      });
     }
   }
 #if RILLIGHT_HAVE_LIBASS
@@ -437,7 +460,9 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
 int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
                            AVRational time_base,
                            std::vector<SubtitleCue> *cues,
-                           int64_t origin_us) {
+                           int64_t origin_us,
+                           int fallback_width, int fallback_height,
+                           const AVCodecParameters* video_color) {
   AVSubtitle subtitle{};
   int got = 0;
   const int result = avcodec_decode_subtitle2(decoder.context, &subtitle,
@@ -449,6 +474,10 @@ int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
     start = av_rescale_q(packet->pts, time_base, AVRational{1, 1000000});
   if (start == AV_NOPTS_VALUE) start = 0;
   SubtitleCue cue;
+  // PGS/DVD positions belong to the subtitle canvas, not the output texture.
+  // Video conversion can shrink that texture to the current viewport.
+  cue.canvas_width = decoder.context->width > 0 ? decoder.context->width : fallback_width;
+  cue.canvas_height = decoder.context->height > 0 ? decoder.context->height : fallback_height;
   cue.start_us = start + subtitle.start_display_time * 1000LL - origin_us;
   cue.end_us = start + subtitle.end_display_time * 1000LL - origin_us;
   if (cue.end_us <= cue.start_us) cue.end_us = cue.start_us + 5000000;
@@ -477,6 +506,13 @@ int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
     const int colors = std::clamp(rect->nb_colors, 0, 256);
     const auto *palette = reinterpret_cast<const uint32_t *>(rect->data[1]);
     bitmap.palette.assign(palette, palette + colors);
+    if (decoder.context->codec_id == AV_CODEC_ID_HDMV_PGS_SUBTITLE &&
+        video_color && video_color->color_trc == AVCOL_TRC_SMPTE2084 &&
+        video_color->color_primaries == AVCOL_PRI_BT2020 &&
+        video_color->color_space == AVCOL_SPC_BT2020_NCL) {
+      const bool bt601 = decoder.context->height > 0 && decoder.context->height <= 576;
+      for (auto& color : bitmap.palette) color = pq_pgs_to_srgb(color, bt601);
+    }
     cue_bytes += bitmap.indices.size();
     cue.bitmaps.push_back(std::move(bitmap));
   }

@@ -344,15 +344,18 @@ inline bool ExtractInterleavedEnhancement(const uint8_t* data, size_t size,
       });
       return;
     }
-    // A parameter set or IRAP identified from the RBSP wins. An RBSP can share
-    // the high bit of a NAL header (a VPS starts with 0x0c) and must not be
-    // forwarded unchanged. A nested NAL that is not one of those shapes keeps
-    // the header already inside the payload.
-    const int restored = RestoredElNalType(payload, payload_size);
-    if (restored != 1 || !HevcNalHeader(payload, payload_size))
-      AppendRestoredElNal(annexb, nal, nal_size);
-    else
+    // Standard Profile 7 type 63 encapsulates a complete HEVC NAL. Preserve
+    // its header: a slice's first bytes can resemble the historical short
+    // SPS prefix, and relabeling those slices produces no EL pictures.
+    // Keep recovery for the older rewritten-header form, using complete
+    // parameter-set parsing rather than the loose profile-only SPS prefix.
+    const auto rbsp = RbspPayload(payload, payload_size);
+    const bool parameter_set = LooksLikeVps(rbsp.data(), rbsp.size()) ||
+                               LooksLikeSps(rbsp.data(), rbsp.size());
+    if (HevcNalHeader(payload, payload_size) && !parameter_set)
       AppendAnnexB(annexb, payload, payload_size);
+    else
+      AppendRestoredElNal(annexb, nal, nal_size);
   });
   if (!framed) annexb->clear();
   return framed;

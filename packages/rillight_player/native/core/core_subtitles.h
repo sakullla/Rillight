@@ -63,7 +63,9 @@ void render_gpu_subtitles(VideoOutputFrame* frame,
 int decode_bitmap_subtitle(Decoder &decoder, const AVPacket *packet,
                            AVRational time_base,
                            std::vector<SubtitleCue> *cues,
-                           int64_t origin_us = 0);
+                           int64_t origin_us = 0,
+                           int fallback_width = 0, int fallback_height = 0,
+                           const AVCodecParameters* video_color = nullptr);
 #if RILLIGHT_HAVE_LIBASS
 int read_external_ass(RillightCoreImpl *core, const std::string &url,
                       std::vector<char> *script);

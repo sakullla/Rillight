@@ -1,5 +1,18 @@
 # macOS aggregation/private-region handoff
 
+## Compressed PGS subtitle regression
+
+The FFmpeg builder explicitly enables zlib despite disabled autodetection.
+SDK verification rejects missing/disabled zlib on macOS, Windows and Android
+(Linux also requests it explicitly). Run the native `rillight_bitmap_subtitle`
+test against the rebuilt universal SDK: it demuxes an in-memory Matroska track
+with zlib-compressed PGS, decodes it, and checks visible scaled pixels.
+On both Intel and Apple Silicon, select a compressed Simplified Chinese PGS
+track and verify visible subtitles during playback, seeking and resizing.
+Record the actual loaded SDK hashes and displayed frames separately.
+Current macOS build and actual-window subtitle results: **unverified** on the
+Windows development host.
+
 ## GPU texture presentation validation
 
 The candidate imports VideoToolbox NV12/P010 planes with CVMetalTextureCache,

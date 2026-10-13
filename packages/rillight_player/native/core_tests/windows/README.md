@@ -11,6 +11,13 @@ separate FFmpeg capability and is reported per video track. The suite also
 checks audio startup offset and the handoff to a monotonic clock after a short
 audio track ends.
 
+With `-DRILLIGHT_CORE_PREFIX_WINDOWS_X64=<verified-sdk>`, the suite also builds
+`rillight_windows_audio_catchup`. It feeds 40-sample PCM blocks starting 500 ms
+behind the clock through the production `AudioOutput` and a real WASAPI
+endpoint. It requires catch-up within two seconds, continued audio-clock
+reports, and balanced frame ownership. This silent synthetic check establishes
+endpoint consumption, not physical sound or Dolby Vision rendering.
+
 `rillight_windows_gpu_present` checks GPU color-channel order, rotation,
 letterboxing, cross-device shared imports, and immutability of held frames.
 It also reads FP16 highlights and linear subtitle blending back from a native

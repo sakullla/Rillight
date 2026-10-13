@@ -115,7 +115,7 @@ def main() -> None:
         configure = [f'--prefix={prefix_unix}', f'--libdir={prefix_unix}/lib',
                      '--target-os=mingw32', '--arch=x86_64', '--enable-shared',
                      '--disable-static', '--disable-programs', '--disable-doc',
-                     '--enable-network', '--disable-autodetect', '--enable-avfilter',
+                     '--enable-network', '--disable-autodetect', '--enable-zlib', '--enable-avfilter',
                      '--enable-swresample', '--enable-swscale', '--enable-d3d11va',
                      '--enable-dxva2', '--enable-libdav1d',
                      '--enable-decoder=ac3', '--enable-decoder=eac3',

@@ -1,4 +1,5 @@
 #include "core_decoder.h"
+#include "fel_frame_queue.h"
 
 namespace rillight::core {
 AVHWDeviceType hardware_device_type(RillightCoreHardware hardware) {
@@ -608,11 +609,7 @@ bool EnhancementDecoder::ReceiveOne() {
     av_frame_free(&decoded);
     return false;
   }
-  if (frames.size() >= 8) {
-    av_frame_free(&frames.front());
-    frames.pop_front();
-  }
-  frames.push_back(decoded);
+  retain_fel_frame(frames, decoded);
   return true;
 }
 
@@ -653,46 +650,7 @@ void EnhancementDecoder::Feed(AVPacket* packet) {
 AVFrame* EnhancementDecoder::Take(int64_t pts_us) {
   std::lock_guard lock(mutex);
   if (!enabled || frames.empty()) return nullptr;
-  auto release_until = [&](size_t index) {
-    AVFrame* found = frames[index];
-    for (size_t i = 0; i < index; ++i) av_frame_free(&frames[i]);
-    frames.erase(frames.begin(), frames.begin() + static_cast<std::ptrdiff_t>(index) + 1);
-    return found;
-  };
-  auto stamp_us = [&](const AVFrame* frame) {
-    int64_t stamp = frame->best_effort_timestamp;
-    if (stamp == AV_NOPTS_VALUE) stamp = frame->pts;
-    if (stamp == AV_NOPTS_VALUE || time_base.num <= 0 || time_base.den <= 0)
-      return static_cast<int64_t>(AV_NOPTS_VALUE);
-    return av_rescale_q(stamp, time_base, AVRational{1, 1000000});
-  };
-  if (pts_us >= 0) {
-    size_t best = frames.size();
-    int64_t best_delta = 0;
-    for (size_t i = 0; i < frames.size(); ++i) {
-      const int64_t stamp = stamp_us(frames[i]);
-      if (stamp == AV_NOPTS_VALUE) continue;
-      const int64_t delta = stamp > pts_us ? stamp - pts_us : pts_us - stamp;
-      if (delta <= 2000 && (best == frames.size() || delta < best_delta)) {
-        best = i;
-        best_delta = delta;
-      }
-    }
-    if (best < frames.size()) return release_until(best);
-    while (!frames.empty()) {
-      const int64_t stamp = stamp_us(frames.front());
-      if (stamp != AV_NOPTS_VALUE && stamp + 2000 < pts_us) {
-        av_frame_free(&frames.front());
-        frames.pop_front();
-        continue;
-      }
-      break;
-    }
-    if (!frames.empty() && stamp_us(frames.front()) == AV_NOPTS_VALUE)
-      return release_until(0);
-    return nullptr;
-  }
-  return release_until(0);
+  return take_fel_frame(frames, time_base, pts_us);
 }
 
 int find_fel_stream(AVFormatContext* format, int base) {

@@ -29,6 +29,51 @@ struct Constants {
 };
 static_assert(sizeof(Constants) % 16 == 0);
 
+// A LINEAR_DZ RPU with zero slope and threshold contributes exactly zero
+// for every EL code. This is a per-frame proof, never a profile/file heuristic.
+// A caller claiming FEL reconstruction must also supply the matched EL.
+inline bool HasZeroFelResidual(const AVFrame* frame,
+                               const AVFrame* enhancement = nullptr) {
+  if (!frame) return false;
+  const auto* side = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
+  if (!side || !side->data || side->size < sizeof(AVDOVIMetadata)) return false;
+  const auto* metadata = reinterpret_cast<const AVDOVIMetadata*>(side->data);
+  const auto contains = [&](size_t offset, size_t size) {
+    return offset <= side->size && size <= side->size - offset;
+  };
+  if (!contains(metadata->header_offset, sizeof(AVDOVIRpuDataHeader)) ||
+      !contains(metadata->mapping_offset, sizeof(AVDOVIDataMapping))) return false;
+  const auto* header = av_dovi_get_header(metadata);
+  const auto* mapping = av_dovi_get_mapping(metadata);
+  if (header->disable_residual_flag || header->coef_log2_denom > 62 ||
+      header->el_bit_depth < 10 || header->el_bit_depth > 16 ||
+      mapping->nlq_method_idc != AV_DOVI_NLQ_LINEAR_DZ) return false;
+  for (const auto& channel : mapping->nlq)
+    if (channel.linear_deadzone_slope || channel.linear_deadzone_threshold)
+      return false;
+  if (enhancement) {
+    const auto format = static_cast<AVPixelFormat>(enhancement->format);
+    const bool packed = format == AV_PIX_FMT_P010LE || format == AV_PIX_FMT_P012LE ||
+                        format == AV_PIX_FMT_P016LE;
+    const bool planar = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_YUV420P12LE ||
+                        format == AV_PIX_FMT_YUV420P16LE;
+    const auto* description = av_pix_fmt_desc_get(format);
+    if ((!packed && !planar) || !description ||
+        description->comp[0].depth != header->el_bit_depth ||
+        enhancement->width <= 0 || enhancement->height <= 0 ||
+        !((frame->width == enhancement->width && frame->height == enhancement->height) ||
+          (frame->width % 2 == 0 && frame->height % 2 == 0 &&
+           frame->width / 2 == enhancement->width && frame->height / 2 == enhancement->height)))
+      return false;
+    const int chroma_stride = ((enhancement->width + 1) / 2) * (packed ? 4 : 2);
+    if (!enhancement->data[0] || enhancement->linesize[0] < enhancement->width * 2 ||
+        !enhancement->data[1] || enhancement->linesize[1] < chroma_stride ||
+        (planar && (!enhancement->data[2] || enhancement->linesize[2] < chroma_stride)))
+      return false;
+  }
+  return true;
+}
+
 inline bool DoviConstants(const AVFrame* frame, Constants* constants,
                           bool allow_residual = false) {
   const auto* side = av_frame_get_side_data(frame, AV_FRAME_DATA_DOVI_METADATA);
@@ -162,7 +207,6 @@ inline AVFrame* CopyFrameForCompose(const AVFrame* source) {
 // 2^coef_log2_denom and the sample is normalized by the full code range.
 struct FelResidual {
   bool formula = false;
-  bool differs = false;
   int depth = 0;
   int neutral = 0;
   int maximum = 0;
@@ -179,26 +223,33 @@ struct FelResidual {
     if (!formula) return (el_code - neutral) / span;
     const int index = std::clamp(channel, 0, 2);
     const Channel& shape = channels[index];
-    const double delta = el_code / span - shape.offset;
-    const double magnitude = std::fabs(delta);
-    double residual = 0;
-    if (magnitude > shape.threshold)
-      residual = std::copysign(shape.slope * (magnitude - shape.threshold), delta);
+    const double delta = el_code - shape.offset;
+    if (delta == 0) return 0;
+    const double sign = delta < 0 ? -1 : 1;
+    // ETSI GS CCM 001 5.4.3.2: one-code midpoint correction and a signed
+    // additive deadzone threshold, normalized from the 16-bit output domain.
+    const double residual = ((2 * delta - sign) * shape.slope * 32768 +
+                             sign * shape.threshold * 65536) / 65535;
     return std::clamp(residual, -shape.limit, shape.limit);
   }
 };
 
-// False when geometry, pixel format, or NLQ cannot be composed. True with
-// differs == false leaves the caller on the base layer. Neither frame is written.
+// False when geometry, pixel format, or NLQ cannot be composed. A valid
+// neutral EL is still composable; validity never requires a nonzero residual.
+// Neither frame is written.
 inline bool LoadFelResidual(const AVFrame* base, const AVFrame* enhancement,
                             FelResidual* out) {
   if (!out) return false;
   *out = FelResidual{};
-  if (!base || !enhancement || base->format != enhancement->format ||
+  if (!base || !enhancement ||
       base->width <= 0 || base->height <= 0 || base->width != enhancement->width ||
       base->height != enhancement->height)
     return false;
-  const auto format = static_cast<AVPixelFormat>(base->format);
+  if (base->format != AV_PIX_FMT_P010LE && base->format != AV_PIX_FMT_P012LE &&
+      base->format != AV_PIX_FMT_P016LE && base->format != AV_PIX_FMT_YUV420P10LE &&
+      base->format != AV_PIX_FMT_YUV420P12LE && base->format != AV_PIX_FMT_YUV420P16LE)
+    return false;
+  const auto format = static_cast<AVPixelFormat>(enhancement->format);
   const auto* description = av_pix_fmt_desc_get(format);
   const bool packed = format == AV_PIX_FMT_P010LE || format == AV_PIX_FMT_P012LE ||
                       format == AV_PIX_FMT_P016LE;
@@ -209,7 +260,6 @@ inline bool LoadFelResidual(const AVFrame* base, const AVFrame* enhancement,
       (!packed && !planar))
     return false;
   const int depth = description->comp[0].depth;
-  const int shift = packed ? 16 - depth : 0;
   out->depth = depth;
   out->neutral = 1 << (depth - 1);
   out->maximum = (1 << depth) - 1;
@@ -223,7 +273,7 @@ inline bool LoadFelResidual(const AVFrame* base, const AVFrame* enhancement,
     if (header_ok && mapping_ok) {
       const auto* header = av_dovi_get_header(metadata);
       const auto* mapping = av_dovi_get_mapping(metadata);
-      bool shaped = false;
+      bool shaped = mapping->nlq_method_idc == AV_DOVI_NLQ_LINEAR_DZ;
       for (int channel = 0; channel < 3; ++channel) {
         if (mapping->nlq[channel].linear_deadzone_slope != 0 ||
             mapping->nlq[channel].linear_deadzone_threshold != 0)
@@ -234,49 +284,27 @@ inline bool LoadFelResidual(const AVFrame* base, const AVFrame* enhancement,
           return false;
         const int el_bits = header->el_bit_depth >= 8 && header->el_bit_depth <= 16
                                 ? header->el_bit_depth : depth;
-        const double el_max = static_cast<double>((1 << el_bits) - 1);
+        if (el_bits != depth) return false;
         const double scale = std::ldexp(1.0, -header->coef_log2_denom);
         out->formula = true;
         for (int channel = 0; channel < 3; ++channel) {
           const auto& nlq = mapping->nlq[channel];
-          out->channels[channel] = {nlq.nlq_offset / el_max,
+          out->channels[channel] = {static_cast<double>(nlq.nlq_offset),
                                     static_cast<double>(nlq.linear_deadzone_slope) * scale,
                                     static_cast<double>(nlq.linear_deadzone_threshold) * scale,
-                                    static_cast<double>(nlq.vdr_in_max) * scale};
+                                    static_cast<double>(nlq.vdr_in_max) * scale * 65536 / 65535};
         }
       }
     }
   }
   const int chroma_width = (base->width + 1) / 2;
-  const int chroma_height = (base->height + 1) / 2;
   const int chroma_samples = packed ? chroma_width * 2 : chroma_width;
   const int chroma_stride = chroma_samples * 2;
-  const int planes = packed ? 1 : 2;
-  if (base->linesize[0] < base->width * 2 || enhancement->linesize[0] < base->width * 2 ||
-      !base->data[1] || !enhancement->data[1] ||
-      base->linesize[1] < chroma_stride || enhancement->linesize[1] < chroma_stride)
+  if (enhancement->linesize[0] < enhancement->width * 2 ||
+      !enhancement->data[1] || enhancement->linesize[1] < chroma_stride)
     return false;
-  if (!packed && (!base->data[2] || !enhancement->data[2] ||
-                  base->linesize[2] < chroma_stride ||
-                  enhancement->linesize[2] < chroma_stride))
+  if (!packed && (!enhancement->data[2] || enhancement->linesize[2] < chroma_stride))
     return false;
-  const auto scan = [&](const uint16_t* residual, int count, int channel, bool alternate) {
-    for (int index = 0; index < count; ++index) {
-      const int which = alternate ? 1 + (index & 1) : channel;
-      if (out->Delta(which, residual[index] >> shift) != 0.0) out->differs = true;
-    }
-  };
-  for (int y = 0; y < base->height && !out->differs; ++y) {
-    scan(reinterpret_cast<const uint16_t*>(enhancement->data[0] + y * enhancement->linesize[0]),
-         base->width, 0, false);
-  }
-  for (int plane = 0; plane < planes && !out->differs; ++plane) {
-    for (int y = 0; y < chroma_height && !out->differs; ++y) {
-      scan(reinterpret_cast<const uint16_t*>(enhancement->data[1 + plane] +
-                                            y * enhancement->linesize[1 + plane]),
-           chroma_samples, 1 + plane, packed);
-    }
-  }
   return true;
 }
 }  // namespace rillight_color

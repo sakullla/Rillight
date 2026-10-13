@@ -1,6 +1,8 @@
 #include "../core/dovi_color_metadata.h"
 #include "../core/dovi_enhancement.h"
 #include "../core/dovi_profile.h"
+#include "../core/fel_resample.h"
+#include "../core/fel_frame_queue.h"
 #include "../core/portable_color_pipeline.h"
 #include "color_pipeline_fixtures.h"
 
@@ -84,7 +86,43 @@ float HalfToFloat(uint16_t half) {
   return value;
 }
 
+void FelFrameMatching() {
+  using namespace rillight::core;
+  std::deque<AVFrame*> frames;
+  const AVRational time_base{1, 1000};
+  constexpr int origin = 900000;
+  // Live reproduction: the EL leads the delayed base by 11 pictures. An
+  // 8-picture retention queue loses every match after startup.
+  for (int i = 0; i < 80; ++i) {
+    auto* frame = av_frame_alloc();
+    assert(frame);
+    frame->pts = frame->best_effort_timestamp = origin + i * 40;
+    retain_fel_frame(frames, frame);
+    if (i >= 11) {
+      auto* match = take_fel_frame(frames, time_base,
+          static_cast<int64_t>(origin + (i - 11) * 40) * 1000);
+      assert(match && match->pts == origin + (i - 11) * 40);
+      av_frame_free(&match);
+    }
+  }
+  // Missing timestamps must not substitute a known future picture.
+  assert(!take_fel_frame(frames, time_base, 1));
+  for (auto*& frame : frames) av_frame_free(&frame);
+  frames.clear();
+  for (int i = 0; i < 100; ++i) {
+    auto* frame = av_frame_alloc();
+    assert(frame);
+    frame->pts = frame->best_effort_timestamp = i * 40;
+    retain_fel_frame(frames, frame);
+  }
+  assert(frames.size() <= 32);
+  auto* last = take_fel_frame(frames, time_base, 99 * 40000);
+  assert(last && last->pts == 99 * 40 && frames.empty());
+  av_frame_free(&last);
+}
+
 int main() {
+  FelFrameMatching();
   PortableColorPipeline pipeline;
   {
     AVFrame* bright = Picture(AV_PIX_FMT_YUV420P10LE, 940);
@@ -188,8 +226,8 @@ int main() {
     if (nlq) {
       base_mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
       for (int channel = 0; channel < 3; ++channel) {
-        base_mapping->nlq[channel].nlq_offset = 0;
-        base_mapping->nlq[channel].linear_deadzone_slope = 1024;
+        base_mapping->nlq[channel].nlq_offset = 512;
+        base_mapping->nlq[channel].linear_deadzone_slope = 1;
         base_mapping->nlq[channel].linear_deadzone_threshold = 0;
         base_mapping->nlq[channel].vdr_in_max = 1024;
       }
@@ -200,8 +238,7 @@ int main() {
     }
     rillight_color::FelResidual fel;
     assert(rillight_color::LoadFelResidual(base, layer, &fel));
-    assert(fel.differs);
-    const double expected = nlq ? 800.0 / 1023.0 : (800.0 - 512.0) / 1023.0;
+    const double expected = nlq ? 18400.0 / 65535.0 : (800.0 - 512.0) / 1023.0;
     assert(std::fabs(fel.Delta(0, 800) - expected) < 1e-9);
     AVFrame* summed = rillight_color::CopyFrameForCompose(base);
     assert(summed && summed->data[0] != base->data[0]);
@@ -245,7 +282,7 @@ int main() {
   AVFrame* neutral = Picture(AV_PIX_FMT_YUV420P10LE, 512);
   rillight_color::FelResidual neutral_fel;
   assert(neutral && rillight_color::LoadFelResidual(base, neutral, &neutral_fel));
-  assert(!neutral_fel.differs);
+  assert(neutral_fel.Delta(0, 512) == 0);
   assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
   assert(dovi_frame_decision(7, 6, 1, 1, 1, 0).reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
   base_mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
@@ -254,16 +291,96 @@ int main() {
     base_mapping->nlq[channel].linear_deadzone_slope = 1024;
     base_mapping->nlq[channel].linear_deadzone_threshold = 1024;
     base_mapping->nlq[channel].vdr_in_max = 1024;
+    base_mapping->nlq[channel].nlq_offset = channel == 0 ? 800 : 512;
   }
   rillight_color::FelResidual deadzone;
   assert(rillight_color::LoadFelResidual(base, layer, &deadzone));
-  assert(!deadzone.differs);
+  assert(deadzone.Delta(0, 800) == 0);
+  // Independent ETSI 5.4.3.2 vector, including the one-code midpoint and
+  // signed additive threshold. Offsets are raw EL codes, not normalized.
+  base_mapping->nlq[0].nlq_offset = 512;
+  base_mapping->nlq[0].linear_deadzone_slope = 16;
+  base_mapping->nlq[0].linear_deadzone_threshold = 5;
+  base_mapping->nlq[0].vdr_in_max = 128;
+  rillight_color::FelResidual reference_nlq;
+  assert(rillight_color::LoadFelResidual(base, layer, &reference_nlq));
+  assert(std::fabs(reference_nlq.Delta(0, 514) - 1856.0 / 65535.0) < 1e-9);
+  assert(std::fabs(reference_nlq.Delta(0, 510) + 1856.0 / 65535.0) < 1e-9);
+  assert(reference_nlq.Delta(0, 512) == 0);
   assert(reinterpret_cast<uint16_t*>(base->data[0])[0] == 64);
   assert(dovi_frame_decision(7, 6, 1, 1, 1, 0).reconstruction != RILLIGHT_CORE_DOVI_RECON_FEL);
+  // LINEAR_DZ with zero coefficients is a valid zero residual, not the
+  // unshaped fallback (which would incorrectly turn code 800 into a signal).
+  for (int c = 0; c < 3; ++c) base_mapping->nlq[c] = {};
+  rillight_color::FelResidual zero_nlq;
+  base_header->disable_residual_flag = 0;
+  const bool zero_composable = rillight_color::LoadFelResidual(base, layer, &zero_nlq);
+  assert(zero_composable && zero_nlq.formula && zero_nlq.Delta(0, 800) == 0);
+  assert(rillight_color::HasZeroFelResidual(base, layer));
+  const int saved_stride = layer->linesize[1];
+  layer->linesize[1] = 0;
+  assert(!rillight_color::HasZeroFelResidual(base, layer));
+  layer->linesize[1] = saved_stride;
+  base_mapping->nlq[2].linear_deadzone_threshold = 1;
+  assert(!rillight_color::HasZeroFelResidual(base, layer));
+  base_mapping->nlq[2].linear_deadzone_threshold = 0;
+  assert(dovi_frame_decision(7, 6, 1, 1, 1, zero_composable).reconstruction ==
+         RILLIGHT_CORE_DOVI_RECON_FEL);
+  base_mapping->nlq[0].linear_deadzone_slope = 16;
+  assert(!rillight_color::HasZeroFelResidual(base, layer));
   base_mapping->nlq_method_idc = static_cast<AVDOVINLQMethod>(-2);
   base_mapping->nlq[0].linear_deadzone_threshold = 0;
   rillight_color::FelResidual rejected;
   assert(!rillight_color::LoadFelResidual(base, layer, &rejected));
+  base_mapping->nlq_method_idc = AV_DOVI_NLQ_NONE;
+  for (int c = 0; c < 3; ++c) base_mapping->nlq[c] = {};
+  AVFrame* half_el = av_frame_alloc();
+  assert(half_el);
+  half_el->format = AV_PIX_FMT_YUV420P10LE;
+  half_el->width = 32; half_el->height = 24;
+  assert(av_frame_get_buffer(half_el, 32) == 0);
+  for (int c = 0; c < 3; ++c)
+    for (int y = 0; y < (c ? 12 : 24); ++y)
+      std::fill_n(reinterpret_cast<uint16_t*>(half_el->data[c] + y * half_el->linesize[c]),
+                  c ? 16 : 32, c ? 512 : 800);
+  AVFrame* scaled_el = rillight_color::UpsampleFel(half_el, 64, 48);
+  assert(scaled_el && scaled_el->data[0] != half_el->data[0]);
+  for (int c = 0; c < 3; ++c)
+    for (int y = 0; y < (c ? 24 : 48); ++y) {
+      auto* row = reinterpret_cast<const uint16_t*>(scaled_el->data[c] + y * scaled_el->linesize[c]);
+      for (int x = 0; x < (c ? 32 : 64); ++x) assert(row[x] == (c ? 512 : 800));
+    }
+  // Nonconstant Annex B ramp: check both luma phases, the chroma quarter
+  // phase, horizontal half samples, and replicated top-left boundaries.
+  for (int c = 0; c < 3; ++c)
+    for (int y = 0; y < (c ? 12 : 24); ++y) {
+      auto* row = reinterpret_cast<uint16_t*>(half_el->data[c] + y * half_el->linesize[c]);
+      for (int x = 0; x < (c ? 16 : 32); ++x)
+        row[x] = static_cast<uint16_t>(c ? 200 + 10*x + 20*y : 100 + 10*x + 20*y);
+    }
+  AVFrame* ramp = rillight_color::UpsampleFel(half_el, 64, 48);
+  assert(ramp);
+  const auto code = [&](int c, int x, int y) {
+    return reinterpret_cast<uint16_t*>(ramp->data[c] + y*ramp->linesize[c])[x];
+  };
+  assert(code(0, 8, 8) == 215 && code(0, 8, 9) == 225);
+  assert(code(0, 9, 8) == 220 && code(0, 9, 9) == 230);
+  assert(code(1, 8, 8) == 315 && code(1, 9, 9) == 330);
+  assert(code(0, 0, 0) == 99 && code(1, 0, 0) == 200);
+  av_frame_free(&ramp);
+  // P010 hardware downloads and planar software EL need not have the same
+  // memory layout. Render both paths and compare the real composed pixels.
+  AVFrame* packed_base = Picture(AV_PIX_FMT_P010LE, 64);
+  assert(av_frame_copy_props(packed_base, base) == 0);
+  rillight_color::FelResidual mixed;
+  assert(rillight_color::LoadFelResidual(packed_base, scaled_el, &mixed));
+  std::vector<uint8_t> full_pixels(32 * 24 * 4), scaled_pixels(full_pixels.size());
+  assert(pipeline.Render(base, 32, 24, true, full_pixels.data(), 32 * 4, layer));
+  assert(pipeline.Render(packed_base, 32, 24, true, scaled_pixels.data(), 32 * 4, scaled_el));
+  assert(full_pixels == scaled_pixels);
+  av_frame_free(&packed_base);
+  av_frame_free(&scaled_el);
+  av_frame_free(&half_el);
   const uint8_t length_prefixed[] = {
       0, 0, 0, 4, 0x02, 0x01, 0xaa, 0xbb,
       0, 0, 0, 8, 0x7e, 0x01, 0x40, 0x01, 0x00, 0x00, 0x03, 0x00};
@@ -325,6 +442,25 @@ int main() {
       0, 0, 0, 1, 0x28, 0x01, 0xad, 0xe0, 0xd1, 0x17, 0xce, 0x73, 0x23, 0x8b, 0x80};
   assert(HevcAnnexProducesPicture(
       std::vector<uint8_t>(hevc_access_unit, hevc_access_unit + sizeof(hevc_access_unit))));
+  // Canonical type-63 wrapping retains every original inner NAL header.
+  std::vector<uint8_t> canonical;
+  rillight_dovi::ForEachHevcNal(hevc_access_unit, sizeof(hevc_access_unit), 0,
+      [&](const uint8_t* nal, size_t size) {
+        canonical.insert(canonical.end(), {0, 0, 0, 1, 0x7e, 0x01});
+        canonical.insert(canonical.end(), nal, nal + size);
+      });
+  assert(rillight_dovi::ExtractInterleavedEnhancement(canonical.data(), canonical.size(), 0, &extracted));
+  assert(extracted == std::vector<uint8_t>(hevc_access_unit, hevc_access_unit + sizeof(hevc_access_unit)));
+  assert(HevcAnnexProducesPicture(extracted));
+  // A valid VCL header and slice prefix can pass the old 16-byte SPS check.
+  // It must remain a slice, with its bytes intact.
+  const uint8_t slice_prefix[] = {0x02, 0x01, 0x40, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xaa};
+  std::vector<uint8_t> wrapped_slice{0, 0, 0, 1, 0x7e, 0x01};
+  wrapped_slice.insert(wrapped_slice.end(), slice_prefix, slice_prefix + sizeof(slice_prefix));
+  assert(rillight_dovi::ExtractInterleavedEnhancement(wrapped_slice.data(), wrapped_slice.size(), 0, &extracted));
+  assert(extracted.size() == sizeof(slice_prefix) + 4);
+  assert(std::memcmp(extracted.data() + 4, slice_prefix, sizeof(slice_prefix)) == 0);
   const std::vector<uint8_t> wrapped = RewriteHevcTypes(
       hevc_access_unit, sizeof(hevc_access_unit), 63);
   assert(rillight_dovi::ExtractInterleavedEnhancement(

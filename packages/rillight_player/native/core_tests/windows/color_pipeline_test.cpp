@@ -349,6 +349,7 @@ void CheckFelStaysScRgb() {
   header->disable_residual_flag = 1;
   assert(portable.RenderLinearHalf(base, width, height, true, base_half.data(), width * 8));
   header->disable_residual_flag = 0;
+  mapping->nlq_method_idc = AV_DOVI_NLQ_NONE;
   assert(portable.RenderLinearHalf(base, width, height, true, fel_half.data(), width * 8, layer));
   assert(base_half != fel_half);
   Microsoft::WRL::ComPtr<ID3D11Texture2D> base_texture;
@@ -371,6 +372,24 @@ void CheckFelStaysScRgb() {
   for (size_t i = 0; i < fel_pixels.size() && i < base_pixels.size(); ++i)
     if (std::fabs(fel_pixels[i] - base_pixels[i]) > 0.001f) differed = true;
   assert(differed);
+  // Zero LINEAR_DZ coefficients cancel any EL code. GPU RPU output must
+  // equal actual portable FEL composition, not ordinary HDR10 rendering.
+  mapping->nlq_method_idc = AV_DOVI_NLQ_LINEAR_DZ;
+  for (auto& channel : mapping->nlq) channel = {};
+  std::vector<uint8_t> cpu(width * height * 4), gpu(cpu.size()), hdr(cpu.size());
+  assert(portable.Render(base, width, height, true, cpu.data(), width * 4, layer));
+  assert(windows.Render(base, width, height, true, gpu.data(), width * 4));
+  assert(windows.Render(base, width, height, false, hdr.data(), width * 4));
+  for (size_t i = 0; i < cpu.size(); ++i)
+    assert(std::abs(static_cast<int>(cpu[i]) - gpu[i]) <= 2);
+  assert(gpu != hdr);
+  mapping->nlq[1].linear_deadzone_slope = 1;
+  assert(!windows.Render(base, width, height, true, gpu.data(), width * 4));
+  mapping->nlq[1].linear_deadzone_slope = 0;
+  mapping->nlq[2].linear_deadzone_threshold = 1;
+  assert(!windows.Render(base, width, height, true, gpu.data(), width * 4));
+  mapping->nlq[2].linear_deadzone_threshold = 0;
+  assert(windows.Render(base, width, height, true, gpu.data(), width * 4));
   av_frame_free(&layer);
   av_frame_free(&base);
 }

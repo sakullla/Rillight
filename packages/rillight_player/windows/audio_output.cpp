@@ -793,6 +793,7 @@ void AudioOutput::Run() {
         pending_ = pending != nullptr;
         offset = 0;
       }
+      const bool had_pending_audio = pending != nullptr;
       bool waiting_future_audio = false;
       bool wrote_audio = false;
       if (pending && pending->type == RILLIGHT_CORE_AUDIO_PASSTHROUGH) {
@@ -1020,7 +1021,12 @@ void AudioOutput::Run() {
           }
         }
       }
-      if (!wrote_audio || !endpoint.client ||
+      // Tiny decoded blocks (e.g. 40-sample TrueHD PCM) arrive faster than
+      // WASAPI events. After retiring a late/startup block, drain the next
+      // block immediately; sleeping here makes catch-up permanently slower
+      // than the media clock and fills the demuxer's audio queue.
+      const bool consumed_audio = had_pending_audio && pending == nullptr;
+      if ((!wrote_audio && !consumed_audio) || !endpoint.client ||
           device_padding_ >= endpoint.capacity) {
         if (endpoint.event)
           WaitForSingleObject(endpoint.event, running ? 5 : 4);

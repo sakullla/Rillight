@@ -28,7 +28,7 @@ ANDROID_SYSTEM_LIBRARIES = {
     # Public NDK graphics libraries, available before the supported API 24 floor.
     'libEGL.so', 'libGLESv3.so',
     'libandroid.so', 'libc.so', 'libcamera2ndk.so', 'libdl.so', 'liblog.so',
-    'libm.so', 'libmediandk.so', 'libnativewindow.so',
+    'libm.so', 'libmediandk.so', 'libnativewindow.so', 'libz.so',
 }
 CORE_LIBRARIES = {'librillight_android_core.so', 'librillight_core.so',
                   'librillight_crc32.so', 'libass.so'}

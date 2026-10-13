@@ -1,4 +1,5 @@
 #include "core_video.h"
+#include "fel_resample.h"
 #include "core_state.h"
 
 namespace rillight::core {
@@ -94,8 +95,14 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
     }
   };
   std::unique_ptr<AVFrame, AvFrameDeleter> downloaded;
+  std::unique_ptr<AVFrame, AvFrameDeleter> resampled_el;
   const AVFrame* compose_base = frame;
-  if (residual && enhancement && rpu_usable && frame->hw_frames_ctx) {
+  bool zero_residual = false;
+#if defined(_WIN32)
+  zero_residual = gpu_video && residual && enhancement && rpu_usable &&
+      rillight_color::HasZeroFelResidual(frame, enhancement);
+#endif
+  if (!zero_residual && residual && enhancement && rpu_usable && frame->hw_frames_ctx) {
     downloaded.reset(av_frame_alloc());
     if (!downloaded || av_hwframe_transfer_data(downloaded.get(), frame, 0) < 0 ||
         av_frame_copy_props(downloaded.get(), frame) < 0)
@@ -106,12 +113,16 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
   // Residual stays out of the base codes. The mapper reshapes the original
   // base and adds the normalized NLQ afterwards.
   rillight_color::FelResidual fel{};
+  if (!zero_residual && residual && enhancement && rpu_usable &&
+      enhancement->width * 2 == frame->width && enhancement->height * 2 == frame->height) {
+    resampled_el.reset(rillight_color::UpsampleFel(enhancement, frame->width, frame->height));
+    enhancement = resampled_el.get();
+  }
   const AVFrame* fel_source = nullptr;
-  int composed_ok = 0;
-  if (residual && enhancement && rpu_usable && compose_base &&
+  int composed_ok = zero_residual ? 1 : 0;
+  if (!zero_residual && residual && enhancement && rpu_usable && compose_base &&
       !compose_base->hw_frames_ctx &&
-      rillight_color::LoadFelResidual(compose_base, enhancement, &fel) &&
-      fel.differs) {
+      rillight_color::LoadFelResidual(compose_base, enhancement, &fel)) {
     composed_ok = 1;
     fel_source = enhancement;
   }
@@ -292,7 +303,9 @@ RillightCoreFrame *convert_video(const AVFrame *frame, int64_t pts,
       if (texture) {
         output->gpu_texture = std::move(texture);
         converted = true;
-        output->color_path = hdr_video ? "gpu-scrgb" : "gpu-sdr";
+        output->color_path = zero_residual && !used_base
+            ? (hdr_video ? "gpu-fel-zero-scrgb" : "gpu-fel-zero-sdr")
+            : (hdr_video ? "gpu-scrgb" : "gpu-sdr");
         if (used_base) reconstruction = RILLIGHT_CORE_DOVI_RECON_BASE_FALLBACK;
       }
     }
@@ -466,7 +479,8 @@ int convert_video_frame(RillightCoreImpl *core, AVFormatContext *format,
     ~FrameRelease() { av_frame_free(&frame); }
   } enhancement_frame, mapped_frame;
   if (scale->enhancement.enabled)
-    enhancement_frame.frame = scale->enhancement.Take(pts);
+    enhancement_frame.frame = scale->enhancement.Take(
+        frame_time(decoded, format->streams[stream_index]));
   if (discard) {
     // Decode reference frames, but skip GPU readback, RGBA conversion and
     // subtitle composition for output that is already late. Doing all that

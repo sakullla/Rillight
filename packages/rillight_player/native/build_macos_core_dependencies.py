@@ -33,7 +33,7 @@ FONTCONFIG_PROVENANCE = "disabled (macOS CoreText)"
 
 FFMPEG_CONFIGURE = [
     "--enable-shared", "--disable-static", "--disable-programs", "--disable-doc",
-    "--disable-avdevice", "--enable-network", "--disable-autodetect",
+    "--disable-avdevice", "--enable-network", "--disable-autodetect", "--enable-zlib",
     "--enable-pic", "--enable-avfilter", "--enable-swresample", "--enable-swscale",
     "--enable-videotoolbox", "--enable-libdav1d",
     "--enable-decoder=ac3", "--enable-decoder=eac3", "--enable-decoder=truehd",

@@ -122,7 +122,7 @@ def build_abi(
         "--disable-doc", "--disable-network", "--disable-autodetect",
         "--disable-asm", "--enable-pic", "--enable-avfilter",
         "--enable-swresample", "--enable-swscale", "--enable-jni",
-        "--enable-mediacodec",
+        "--enable-mediacodec", "--enable-zlib",
         "--enable-decoder=ac3", "--enable-decoder=eac3", "--enable-decoder=truehd",
     ]
     script = "\n".join([

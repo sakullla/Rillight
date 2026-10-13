@@ -53,3 +53,21 @@ else()
 endif()
 add_test(NAME rillight_windows_audio_route
          COMMAND rillight_windows_audio_route_test)
+
+# Opt in with a verified SDK; CoreApi loads the DLL beside the executable.
+set(RILLIGHT_CORE_PREFIX_WINDOWS_X64 "" CACHE PATH "Verified Windows core SDK")
+if(RILLIGHT_CORE_PREFIX_WINDOWS_X64)
+  add_executable(rillight_windows_audio_catchup_test audio_catchup_test.cpp
+    ../../../windows/audio_output.cpp)
+  target_compile_features(rillight_windows_audio_catchup_test PRIVATE cxx_std_17)
+  target_compile_definitions(rillight_windows_audio_catchup_test PRIVATE NOMINMAX)
+  target_link_libraries(rillight_windows_audio_catchup_test PRIVATE ole32 uuid)
+  file(GLOB core_runtime "${RILLIGHT_CORE_PREFIX_WINDOWS_X64}/bin/*.dll")
+  foreach(runtime IN LISTS core_runtime)
+    add_custom_command(TARGET rillight_windows_audio_catchup_test POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${runtime}"
+        "$<TARGET_FILE_DIR:rillight_windows_audio_catchup_test>")
+  endforeach()
+  add_test(NAME rillight_windows_audio_catchup
+    COMMAND rillight_windows_audio_catchup_test)
+endif()

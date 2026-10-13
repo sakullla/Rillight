@@ -16,7 +16,7 @@ import verify_core_dependencies
 class MacosBuilderHelpersTest(unittest.TestCase):
     def test_ffmpeg_flags_enable_owned_core_requirements(self):
         for flag in ("--enable-libdav1d", "--enable-videotoolbox",
-                     "--enable-network", "--disable-autodetect",
+                     "--enable-network", "--disable-autodetect", "--enable-zlib",
                      "--disable-avdevice", "--enable-shared", "--disable-static"):
             self.assertIn(flag, macos.FFMPEG_CONFIGURE)
         self.assertNotIn("--enable-cross-compile", macos.FFMPEG_CONFIGURE)
@@ -86,7 +86,7 @@ class MacosBuilderHelpersTest(unittest.TestCase):
             project = work / "libunibreak-project"
             generated = (project / "meson.build").read_text(encoding="utf-8")
             self.assertIn("static_library('unibreak'", generated)
-            self.assertIn(str(work / "libunibreak/src/linebreak.c"), generated)
+            self.assertIn((work / "libunibreak/src/linebreak.c").as_posix(), generated)
             for arch in macos.ARCHES:
                 calls = [call.args for call in builds.call_args_list
                          if call.args[2] == work / f"libunibreak-{arch}"]

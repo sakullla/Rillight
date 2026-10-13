@@ -17,6 +17,8 @@ struct SubtitleCue {
   int64_t end_us = 0;
   std::vector<SubtitleBitmap> bitmaps;
   uint64_t identity = 0;
+  int canvas_width = 0;
+  int canvas_height = 0;
 };
 
 struct BitmapSubtitleKey {

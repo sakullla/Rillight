@@ -518,7 +518,10 @@ struct WindowsColorPipeline::Impl {
       if (data->MaxCLL >= 203 && data->MaxCLL <= 10000)
         constants.visible.w = static_cast<float>(data->MaxCLL);
     }
-    if (dovi && !DoviConstants(frame, &constants)) return false;
+    // Zero residual still requires the RPU transform; rendering ordinary
+    // HDR10 here would be a base fallback. Nonzero residuals stay rejected.
+    if (dovi && !DoviConstants(frame, &constants,
+                              rillight_color::HasZeroFelResidual(frame))) return false;
     // The RPU transform reserves offset.w. Apply sink policy after parsing.
     constants.offset.w = sc_rgb_white;
     if (!dovi) {

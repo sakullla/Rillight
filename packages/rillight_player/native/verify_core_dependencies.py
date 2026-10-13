@@ -100,6 +100,11 @@ def verify(prefix: Path, target: str, require_subtitles: bool = False) -> list[s
         patches.update(SPEC["ffmpeg"].get("platform_patches", {}).get("android", {}))
     if marker.get("ffmpeg_patches") != patches:
         errors.append(f"{target}: FFmpeg patch provenance mismatch")
+    if target.startswith("android-") or target in ("windows-x64", "linux-x64", "macos-universal"):
+        configure = marker.get("configure")
+        if not isinstance(configure, list) or "--enable-zlib" not in configure or \
+                "--disable-zlib" in configure:
+            errors.append(f"{target}: zlib support for compressed Matroska tracks was not enabled")
     if target in ("windows-x64", "linux-x64", "macos-universal"):
         configure = marker.get("configure")
         if not isinstance(configure, list) or "--enable-network" not in configure or \

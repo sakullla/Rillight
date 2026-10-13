@@ -17,7 +17,6 @@ int decode_packet(RillightCoreImpl *core, AVFormatContext *format,
                   uint64_t session, uint64_t timeline, std::mutex *subtitle_mutex = nullptr,
                   const VideoSink *video_sink = nullptr);
 // core_session.cpp
-bool complete_mp4_header(AVFormatContext* format);
 Decoder open_video_decoder(RillightCoreImpl *core, AVFormatContext *format,
                            int index, int64_t discard_before_us = -1);
 void run(RillightCoreImpl *core, uint64_t session);

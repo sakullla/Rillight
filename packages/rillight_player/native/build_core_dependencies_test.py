@@ -1,6 +1,7 @@
 """Regression checks for source locking in the Linux dependency builder."""
 
 import os
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from build_core_dependencies import (
     fetch_source, locked_ffmpeg_patches, remove_enhancement_runtime)
 from build_android_core_dependencies import verify_supplied_source
+from verify_core_dependencies import verify
 
 
 def git(*args, cwd=None):
@@ -19,6 +21,19 @@ def git(*args, cwd=None):
 
 
 class SourceLockTest(unittest.TestCase):
+    def test_sdk_rejects_missing_or_disabled_matroska_zlib(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory)
+            marker = prefix / 'rillight-core-dependencies.json'
+            for target in ('android-arm64-v8a', 'windows-x64', 'linux-x64', 'macos-universal'):
+                for flags in ([], ['--disable-autodetect'], ['--disable-zlib'],
+                              ['--enable-zlib', '--disable-zlib'], ['--enable-zlib']):
+                    with self.subTest(target=target, flags=flags):
+                        marker.write_text(json.dumps({'configure': flags}), encoding='utf-8')
+                        errors = verify(prefix, target)
+                        rejected = any('compressed Matroska' in error for error in errors)
+                        self.assertEqual(rejected, flags != ['--enable-zlib'])
+
     def test_android_surface_patch_is_locked_and_excluded_from_desktop(self):
         desktop = locked_ffmpeg_patches()
         android = locked_ffmpeg_patches("android")

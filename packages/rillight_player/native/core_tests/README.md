@@ -1,5 +1,20 @@
 # Direct FFmpeg core development check
 
+`rillight_portable_color_pipeline` includes P7 enhancement extraction, mixed
+P010/planar composition, ETSI NLQ vectors, neutral residuals, and spatial
+resampling phase/edge vectors. Its timestamp queue regression holds the base
+11 pictures behind the EL, matching the asynchronous decoder/conversion case;
+the former 8-picture retention loses those matches. The queue remains bounded.
+
+On Windows, enable `RILLIGHT_CORE_GPU_TESTS` to run
+`rillight_windows_color_pipeline`. Zero LINEAR_DZ slope/threshold coefficients
+prove a zero residual for that frame; GPU RPU rendering must match portable
+FEL pixels and differ from plain HDR10 fallback. Changing either coefficient
+to nonzero must reject the shortcut. Production also requires a matched,
+valid EL frame before reporting FEL. Nonzero FEL still uses portable CPU
+composition; these tests do not establish real-time performance for all P7
+content, native Dolby display output, or physical audio.
+
 Linux x86_64 uses `../build_core_dependencies.py`. macOS universal
 x86_64+arm64 uses `../build_macos.sh`. Both build FFmpeg from the commit
 pinned in `../core_dependencies.json`; the core links directly to its C
@@ -107,7 +122,33 @@ device/configuration permits software fallback. `actual_hardware` changes only
 after a hardware frame is actually decoded and transferred. The synthetic BMP
 test has no hardware decoder and therefore proves fallback/strict failure, not
 GPU decoding on target hardware.
-It decodes and blends embedded bitmap subtitles, and routes audio through
+It decodes and blends embedded bitmap subtitles.
+The `rillight_bitmap_subtitle` regression decodes a synthetic PGS display set
+with the pinned FFmpeg decoder. It verifies actual RGBA pixels and cropped GPU
+overlay pixels at native, half and quarter resolution, including secondary
+subtitles, immutable overlay reuse and a timed empty display set. Subtitle
+canvas coordinates map to the output texture when video is resized. This is
+a native composition check; it does not establish displayed device frames.
+On every platform the same executable also demuxes an in-memory Matroska track with
+zlib-compressed PGS packets and requires decompressed packets and visible
+subtitle pixels. All SDK builders explicitly enable zlib (the public NDK zlib on Android);
+verification rejects old SDK manifests without this capability.
+
+PQ PGS palette coverage uses a real decoded 149-code gray glyph: explicitly
+BT.2020 non-constant-luminance/PQ video converts it to about 205 sRGB, while
+SDR/unspecified input stays untouched. The core normalizes this palette to its
+existing sRGB overlay contract once per display set, before premultiplication;
+HDR presenters continue to place that overlay at their SDR reference white.
+The fixed 1000-nit source peak avoids scene-dependent subtitle brightness.
+This is a bounded SDR overlay mapping, not native HDR subtitle peak retention.
+FFmpeg's already-clipped palette colors cannot be reconstructed losslessly.
+Two rows within one bitmap, an independent vertical object, blank space and
+partial alpha are compared between CPU and cropped GPU composition at three
+output sizes. Authored bitmap text is never reflowed as text lines.
+Background: [mpv's overlay color handling](https://github.com/mpv-player/mpv/blob/master/video/out/vo_gpu_next.c)
+and [Kodi's UHD PGS discussion](https://github.com/xbmc/xbmc/issues/28603).
+
+The core routes audio through
 FFmpeg `atempo` and `aformat` with automatic resampling. A conditional libass
 path processes embedded ASS events and font attachments plus decoded SRT and
 WebVTT text, then blends libass images into decoded video. External ASS/SSA,
