@@ -1,6 +1,6 @@
 name: rillight_player
 description: Rillight's owned FFmpeg playback core for desktop and Android.
-version: 0.1.0
+version: 0.1.1
 publish_to: none
 environment:
   sdk: ^3.11.5
