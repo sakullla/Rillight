@@ -82,9 +82,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         if (title.isNotEmpty)
           Text(
             title,
-            style: AppUiTheme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(color: scheme.onSurfaceVariant),
+            style: AppUiTheme.of(context).textTheme.titleSmall
+                ?.copyWith(color: scheme.onSurfaceVariant),
           ),
         if (title.isNotEmpty) const SizedBox(height: AppSpacing.xs),
         Container(
@@ -179,9 +178,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               embyFailureMessage(l10n, failure),
               key: PhoneMinePage.failureKey,
-              style: AppUiTheme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
+              style: AppUiTheme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: scheme.error),
             ),
           ],
           if (lineSwitchFailure != null) ...[
@@ -189,9 +187,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               l10n.lineSwitchFailed(lineSwitchFailure.detail),
               key: PhoneMinePage.lineSwitchFailureKey,
-              style: AppUiTheme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
+              style: AppUiTheme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: scheme.error),
             ),
           ],
           const SizedBox(height: AppSpacing.xl),

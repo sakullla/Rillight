@@ -127,9 +127,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     context,
     auth: AuthScope.of(context),
     onSelect: (id, lineId) async {
-      final server = AuthScope.of(
-        context,
-      ).savedServers.firstWhere((s) => s.id == id);
+      final server = AuthScope.of(context).savedServers
+          .firstWhere((s) => s.id == id);
       setState(() => _select(server.copyWith(activeLineId: lineId)));
     },
     onAddServer: () {

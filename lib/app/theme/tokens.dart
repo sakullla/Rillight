@@ -120,9 +120,8 @@ class _ReadingScope extends StatelessWidget {
     if (factor == 1) return child;
     final current = MediaQuery.textScalerOf(context);
     return MediaQuery(
-      data: MediaQuery.of(
-        context,
-      ).copyWith(textScaler: TextScaler.linear(current.scale(1) * factor)),
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: TextScaler.linear(current.scale(1) * factor)),
       child: child,
     );
   }

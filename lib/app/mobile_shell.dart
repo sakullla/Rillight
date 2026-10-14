@@ -65,9 +65,8 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         runtime: PlayerScope.of(context).runtime,
       );
       if (mounted && recovered) {
-        AppNoticeHost.of(
-          context,
-        ).show(AppLocalizations.of(context).mobilePreviousSession);
+        AppNoticeHost.of(context)
+            .show(AppLocalizations.of(context).mobilePreviousSession);
       }
     } catch (_) {
       if (mounted) setState(() => _recoveryFailed = true);
