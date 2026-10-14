@@ -6,12 +6,18 @@ import '../helpers/settle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/app.dart';
+import 'package:rillight/app/phone_mine_page.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
+
+import '../emby/fake_emby_server.dart';
 
 const _first = SavedServer(
   id: 'one',
@@ -98,6 +104,72 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('current logged-in server deletion redirects and undo survives', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final server = FakeEmbyServer();
+    final auth = AuthController.memory(
+      client: EmbyClient(
+        device: const ClientDeviceInfo(
+          clientName: 'test',
+          deviceName: 'phone',
+          deviceId: 'delete-current-test',
+          version: '1',
+        ),
+        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+      ),
+    );
+    addTearDown(auth.dispose);
+    await tester.runAsync(
+      () => auth.connect(
+        address: server.baseUrl.toString(),
+        username: 'alice',
+        password: 'correct-horse',
+      ),
+    );
+    expect(auth.isLoggedIn, isTrue);
+    final saved = auth.savedServers.single;
+    final credentials = await auth.credentials.read(saved.id);
+    final app = RillightApp(
+      auth: auth,
+      environment: PresentationEnvironment.phone,
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    });
+    app.router.go(AppRoutes.mine);
+    await tester.pumpWidget(app);
+    await settle(tester);
+    await tester.tap(find.byKey(PhoneMinePage.lineKey));
+    await settle(tester);
+    await tester.tap(find.byKey(Key('phone-mine-server-delete-${saved.id}')));
+    await settle(tester);
+    await tester.tap(find.byKey(PhoneMinePage.serverDeleteConfirmKey));
+    await settle(tester);
+    expect(auth.isLoggedIn, isFalse);
+    expect(app.router.state.uri.path, AppRoutes.connect);
+    expect(find.byType(PhoneServerManager), findsNothing);
+    expect(auth.savedServers, isEmpty);
+    expect(await auth.credentials.read(saved.id), isNull);
+    expect(find.text('撤销'), findsOneWidget);
+    await tester.tap(find.text('撤销'));
+    await settle(tester);
+    expect(auth.savedServers.single.id, saved.id);
+    expect(
+      (await auth.credentials.read(saved.id))?.accessToken,
+      credentials!.accessToken,
+    );
+    expect(auth.isLoggedIn, isFalse);
+    expect((await auth.servers.load()).lastServerId, isNull);
+    expect(app.router.state.uri.path, AppRoutes.connect);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('phone management deletes locally and offers a reachable undo', (
     tester,
   ) async {

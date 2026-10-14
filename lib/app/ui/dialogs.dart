@@ -431,41 +431,65 @@ VoidCallback showAppNotice(
   String? actionLabel,
   VoidCallback? onAction,
   Duration duration = const Duration(seconds: 4),
-}) {
-  final overlay = Overlay.of(context, rootOverlay: true);
-  final theme = AppUiTheme.of(context);
-  final noticeKey = GlobalKey<_NoticeState>();
-  var removed = false;
-  late OverlayEntry entry;
-  entry = OverlayEntry(
-    builder: (context) => _Notice(
-      key: noticeKey,
-      theme: theme,
-      message: message,
-      messageKey: key,
-      actionLabel: actionLabel,
-      onAction: onAction,
-      duration: duration,
-      dismiss: () {
-        if (removed) return;
+}) => AppNoticeHost.of(context).show(
+  message,
+  key: key,
+  actionLabel: actionLabel,
+  onAction: onAction,
+  duration: duration,
+);
+
+/// Capture before closing a route so feedback can survive its disposal.
+/// The root overlay and theme do not depend on the outgoing route's context.
+class AppNoticeHost {
+  AppNoticeHost.of(BuildContext context)
+    : _overlay = Overlay.of(context, rootOverlay: true),
+      _theme = AppUiTheme.of(context);
+
+  final OverlayState _overlay;
+  final AppUiThemeData _theme;
+
+  VoidCallback show(
+    String message, {
+    Key? key,
+    String? actionLabel,
+    VoidCallback? onAction,
+    Duration duration = const Duration(seconds: 4),
+  }) {
+    if (!_overlay.mounted) return () {};
+    final noticeKey = GlobalKey<_NoticeState>();
+    var removed = false;
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (context) => _Notice(
+        key: noticeKey,
+        theme: _theme,
+        message: message,
+        messageKey: key,
+        actionLabel: actionLabel,
+        onAction: onAction,
+        duration: duration,
+        dismiss: () {
+          if (removed) return;
+          removed = true;
+          entry.remove();
+          entry.dispose();
+        },
+      ),
+    );
+    _overlay.insert(entry);
+    return () {
+      if (removed) return;
+      final notice = noticeKey.currentState;
+      if (notice != null) {
+        notice._dismiss();
+      } else {
         removed = true;
         entry.remove();
         entry.dispose();
-      },
-    ),
-  );
-  overlay.insert(entry);
-  return () {
-    if (removed) return;
-    final notice = noticeKey.currentState;
-    if (notice != null) {
-      notice._dismiss();
-    } else {
-      removed = true;
-      entry.remove();
-      entry.dispose();
-    }
-  };
+      }
+    };
+  }
 }
 
 class _Notice extends StatefulWidget {

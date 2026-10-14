@@ -15,6 +15,38 @@ Widget _app(Widget child) => CupertinoApp(
 );
 
 void main() {
+  testWidgets('disabled list action leaves independent controls reachable', (
+    tester,
+  ) async {
+    var rowCalls = 0;
+    var actionCalls = 0;
+    await tester.pumpWidget(
+      _app(
+        Center(
+          child: AppListTile(
+            enabled: false,
+            title: const Text('不可切换'),
+            onTap: () => rowCalls++,
+            trailing: AppIconButton(
+              icon: const Icon(CupertinoIcons.pencil),
+              onPressed: () => actionCalls++,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('不可切换'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(rowCalls, 0);
+    expect(actionCalls, 1);
+    await tester.tap(find.byType(AppIconButton));
+    await tester.pump();
+    expect(rowCalls, 0);
+    expect(actionCalls, 2);
+  });
+
   testWidgets('switch label, switch and keyboard each toggle once', (
     tester,
   ) async {
@@ -113,10 +145,12 @@ void main() {
       await tester.pump();
       expect(find.text('已保存'), findsNothing);
       final afterDispose = showAppNotice(context, '待关闭');
+      final host = AppNoticeHost.of(context);
       await tester.pump();
       await tester.pumpWidget(const SizedBox());
       afterDispose();
       afterDispose();
+      host.show('宿主已移除')();
       await tester.pump(const Duration(seconds: 5));
       expect(tester.takeException(), isNull);
     },

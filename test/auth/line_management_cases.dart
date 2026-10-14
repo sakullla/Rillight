@@ -561,6 +561,46 @@ void main() {
     );
     await settle(tester);
 
+    // Traverse actual server rows: primary action and every nested control
+    // must remain separately reachable without firing the row callback.
+    Future<void> keyboardActivate(Finder target) async {
+      bool focusedWithin() {
+        final elements = target.evaluate().toSet();
+        var found = false;
+        FocusManager.instance.primaryFocus?.context?.visitAncestorElements((e) {
+          if (elements.contains(e)) found = true;
+          return !found;
+        });
+        return found;
+      }
+
+      for (var i = 0; i < 35 && !focusedWithin(); i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+      }
+      expect(focusedWithin(), isTrue, reason: 'Keyboard cannot reach $target');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await settle(tester);
+    }
+
+    await keyboardActivate(
+      find.byKey(ServerSwitcherDialog.addLineKey('server-id-1')),
+    );
+    expect(added, ['server-id-1']);
+    await keyboardActivate(
+      find.byKey(ServerSwitcherDialog.editLineKey('server-id-1', 'line-1')),
+    );
+    expect(edited.single.$1, 'server-id-1');
+    await keyboardActivate(
+      find.byKey(ServerSwitcherDialog.deleteKey('server-id-1')),
+    );
+    expect(find.byKey(ServerSwitcherDialog.deleteCancelKey), findsOneWidget);
+    await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
+    await settle(tester);
+    expect(selected, isEmpty);
+    added.clear();
+    edited.clear();
+
     // 面板列表可滚动:先滚到目标再点击。
     final dialogScrollable = find
         .descendant(
@@ -597,12 +637,22 @@ void main() {
     );
 
     // 改版前的线路仍可见:展开旧数据服务器。
-    await dialogTap(find.text('旧数据'));
+    await keyboardActivate(
+      find
+          .ancestor(of: find.text('旧数据'), matching: find.byType(ui.AppListTile))
+          .first,
+    );
     expect(find.text('legacy-lan.test:8096'), findsOneWidget);
     expect(find.text('legacy-wan.test:8096'), findsOneWidget);
+    await keyboardActivate(
+      find.byKey(ServerSwitcherDialog.deleteKey('server-id-legacy')),
+    );
+    await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
+    await settle(tester);
+    expect(find.text('legacy-lan.test:8096'), findsOneWidget);
 
     // 旧线路可选。
-    await dialogTap(
+    await keyboardActivate(
       find.byKey(
         ServerSwitcherDialog.lineOptionKey('server-id-legacy', 'line-1'),
       ),
@@ -611,19 +661,23 @@ void main() {
 
     // 修改地址与删除线路入口回调正确的线路。
     final legacyLan = legacy.lines.first;
-    await dialogTap(
+    await keyboardActivate(
       find.byKey(
         ServerSwitcherDialog.editLineKey('server-id-legacy', 'line-1'),
       ),
     );
     expect(edited.single, ('server-id-legacy', legacyLan));
 
-    await dialogTap(
+    await keyboardActivate(
       find.byKey(
         ServerSwitcherDialog.deleteLineKey('server-id-legacy', 'line-1'),
       ),
     );
     expect(deletedLines.single, ('server-id-legacy', legacyLan));
+    expect(selected, [
+      ('server-id-1', 'line-1'),
+      ('server-id-legacy', 'line-1'),
+    ]);
 
     // 添加线路入口按服务器回调。
     await dialogTap(

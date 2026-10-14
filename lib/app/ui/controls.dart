@@ -640,13 +640,22 @@ class AppListTile extends StatelessWidget {
       enabled: enabled,
       child: onTap == null
           ? Padding(padding: contentPadding, child: content)
-          : AppButton(
+          : AppSurfaceAction(
               autofocus: autofocus,
-              onPressed: enabled ? onTap : null,
-              padding: contentPadding,
-              color: selected ? theme.colorScheme.primaryContainer : null,
-              foregroundColor: theme.colorScheme.onSurface,
-              child: content,
+              onTap: enabled ? onTap : null,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 44),
+                padding: contentPadding,
+                decoration: BoxDecoration(
+                  color: selected ? theme.colorScheme.primaryContainer : null,
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                ),
+                child: IconTheme.merge(
+                  data: IconThemeData(color: theme.colorScheme.onSurface),
+                  child: content,
+                ),
+              ),
             ),
     );
   }

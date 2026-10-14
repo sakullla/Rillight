@@ -181,7 +181,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    final noticeContext = Navigator.of(context, rootNavigator: true).context;
+    final noticeHost = AppNoticeHost.of(context);
     await _act(() async {
       final stored = await auth.credentials.read(server.id);
       // Close before auth redirects; never pop the new login route afterwards.
@@ -194,9 +194,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
         });
         return;
       }
-      if (!noticeContext.mounted) return;
-      showAppNotice(
-        noticeContext,
+      noticeHost.show(
         l.phoneServerDeleted(server.displayName),
         actionLabel: l.undoAction,
         onAction: () => unawaited(auth.restoreSavedServer(server, stored)),
