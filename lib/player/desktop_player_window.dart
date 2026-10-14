@@ -1956,11 +1956,13 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
               ? null
               : _dispatchSwitch,
           startupData: _startup,
-          snapshotStore: _launch.protocol == null
-              ? null
-              : FilePlaybackSessionSnapshotStore(
-                  File('${_launch.protocol!.directory.path}/snapshot.json'),
-                ),
+          snapshotStore:
+              widget._bindings?.snapshotStore ??
+              (_launch.protocol == null
+                  ? null
+                  : FilePlaybackSessionSnapshotStore(
+                      File('${_launch.protocol!.directory.path}/snapshot.json'),
+                    )),
         ),
         child: CupertinoApp(
           title: _playerWindowTitle,

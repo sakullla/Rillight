@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// 可多选的圆角选项。宽度随文字收缩，方便在筛选里换行排列。
 class OptionPill extends StatelessWidget {
@@ -15,7 +15,7 @@ class OptionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final foreground = selected && light
         ? scheme.onPrimaryContainer
@@ -26,21 +26,23 @@ class OptionPill extends StatelessWidget {
         button: true,
         selected: selected,
         enabled: onPressed != null,
-        child: Material(
-          color: selected
-              ? (light ? scheme.primaryContainer : scheme.surfaceBright)
-              : scheme.surfaceContainerHighest,
-          shape: StadiumBorder(
-            side: BorderSide(
+        child: AppSurfaceAction(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: DecoratedBox(
+            decoration: ShapeDecoration(
               color: selected
-                  ? (light ? scheme.primary : scheme.onSurface)
-                  : scheme.outlineVariant,
-              width: selected ? 1.5 : 1,
+                  ? (light ? scheme.primaryContainer : scheme.surfaceBright)
+                  : scheme.surfaceContainerHighest,
+              shape: StadiumBorder(
+                side: BorderSide(
+                  color: selected
+                      ? (light ? scheme.primary : scheme.onSurface)
+                      : scheme.outlineVariant,
+                  width: selected ? 1.5 : 1,
+                ),
+              ),
             ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onPressed,
             child: ConstrainedBox(
               constraints: const BoxConstraints(minWidth: 48, minHeight: 40),
               child: Padding(
@@ -52,17 +54,22 @@ class OptionPill extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (selected) ...[
-                      Icon(Icons.check_rounded, size: 16, color: foreground),
+                      Icon(
+                        CupertinoIcons.check_mark,
+                        size: 16,
+                        color: foreground,
+                      ),
                       const SizedBox(width: 4),
                     ],
                     Text(
                       label,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: foreground,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
+                      style: AppUiTheme.of(context).textTheme.labelLarge
+                          ?.copyWith(
+                            color: foreground,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
                     ),
                   ],
                 ),
@@ -90,18 +97,22 @@ class RemovablePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final foreground = scheme.onSurface;
-    final tooltip = MaterialLocalizations.of(context).deleteButtonTooltip;
+    final tooltip = CupertinoLocalizations.of(context).clearButtonLabel;
     return Semantics(
       button: true,
       label: '$label, $tooltip',
-      child: Material(
-        color: scheme.surfaceContainerHighest,
-        shape: StadiumBorder(side: BorderSide(color: scheme.outlineVariant)),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onDeleted,
+      child: AppSurfaceAction(
+        onTap: onDeleted,
+        borderRadius: BorderRadius.circular(999),
+        child: DecoratedBox(
+          decoration: ShapeDecoration(
+            color: scheme.surfaceContainerHighest,
+            shape: StadiumBorder(
+              side: BorderSide(color: scheme.outlineVariant),
+            ),
+          ),
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: compact ? 28 : 36),
             child: Padding(
@@ -118,8 +129,8 @@ class RemovablePill extends StatelessWidget {
                     label,
                     style:
                         (compact
-                                ? Theme.of(context).textTheme.labelSmall
-                                : Theme.of(context).textTheme.labelLarge)
+                                ? AppUiTheme.of(context).textTheme.labelSmall
+                                : AppUiTheme.of(context).textTheme.labelLarge)
                             ?.copyWith(
                               color: foreground,
                               fontWeight: FontWeight.w500,
@@ -127,7 +138,7 @@ class RemovablePill extends StatelessWidget {
                   ),
                   SizedBox(width: compact ? 2 : 4),
                   Icon(
-                    Icons.close_rounded,
+                    CupertinoIcons.xmark,
                     size: compact ? 14 : 16,
                     color: scheme.onSurfaceVariant,
                   ),
