@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
@@ -122,7 +122,7 @@ class _TvFocusRegionState extends State<TvFocusRegion> {
           return;
         }
       }
-      // Material chips, dropdowns and cards are legitimate remote targets too.
+      // Shared chips, dropdowns and cards are legitimate remote targets too.
       // Never steal their focus back to a registered nav TvAction each frame.
       if (current != null && _legalTarget(current)) {
         _lastRect = current.rect;
@@ -231,7 +231,7 @@ class TvAction extends StatefulWidget {
 
   /// 次要文字色:聚焦反相时随前景走,否则用 onSurfaceVariant。
   static Color secondaryColor(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final scope = context.dependOnInheritedWidgetOfExactType<_TvActionScope>();
     if (scope?.inverted == true) {
       return scheme.onInverseSurface.withValues(alpha: .72);
@@ -361,7 +361,7 @@ class _TvActionState extends State<TvAction>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final variant = widget.variant;
@@ -371,7 +371,7 @@ class _TvActionState extends State<TvAction>
     final rest = scheme.onSurface;
     final Color fill;
     if (card) {
-      fill = Colors.transparent;
+      fill = const Color(0x00000000);
     } else if (focused) {
       fill = scheme.inverseSurface;
     } else if (widget.emphasized) {
@@ -518,7 +518,8 @@ class _TvActionState extends State<TvAction>
                             BoxShadow(
                               blurRadius: 14 * s,
                               offset: Offset(0, 4 * s),
-                              color: Colors.black.withValues(alpha: .35),
+                              color: const Color(0xff000000)
+                                  .withValues(alpha: .35),
                             ),
                           ]
                         : null,
@@ -543,14 +544,14 @@ class _TvStaged extends InheritedWidget {
   bool updateShouldNotify(_TvStaged oldWidget) => false;
 }
 
-/// TV 舞台主题:按 960 画布换算字号、弹窗与 Material 控件的焦点样式。
+/// TV 舞台主题:按 960 画布换算字号、弹窗与 共享控件的焦点样式。
 ///
 /// 应用根部已套一层;页面里重复套用不会二次放大。
 class TvStageTheme extends StatelessWidget {
   const TvStageTheme({super.key, required this.child});
   final Widget child;
 
-  static ThemeData themeFor(ThemeData base, double s) {
+  static AppUiThemeData themeFor(AppUiThemeData base, double s) {
     final t = base.textTheme;
     TextStyle? size(
       TextStyle? style,
@@ -595,102 +596,7 @@ class TvStageTheme extends StatelessWidget {
       labelMedium: size(t.labelMedium, 12.5, weight: FontWeight.w500),
       labelSmall: size(t.labelSmall, 11, weight: FontWeight.w500),
     );
-    final scheme = base.colorScheme;
-    // 遥控器聚焦到原生 Material 控件(弹窗按钮、开关)时同样整块反相。
-    ButtonStyle focusInverts() => ButtonStyle(
-      backgroundColor: WidgetStateProperty.resolveWith(
-        (states) =>
-            states.contains(WidgetState.focused) ? scheme.inverseSurface : null,
-      ),
-      foregroundColor: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.focused)
-            ? scheme.onInverseSurface
-            : null,
-      ),
-      textStyle: WidgetStatePropertyAll(text.labelLarge),
-      padding: WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 16 * s, vertical: 9 * s),
-      ),
-      minimumSize: WidgetStatePropertyAll(Size(0, 38 * s)),
-      shape: WidgetStatePropertyAll(
-        RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(TvDesign.controlRadius * s),
-        ),
-      ),
-    );
-    return base.copyWith(
-      textTheme: text,
-      focusColor: scheme.onSurface.withValues(alpha: .16),
-      dialogTheme: DialogThemeData(
-        backgroundColor: scheme.surfaceContainer,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        insetPadding: EdgeInsets.symmetric(
-          horizontal: 48 * s,
-          vertical: 27 * s,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16 * s),
-        ),
-        titleTextStyle: text.headlineSmall?.copyWith(color: scheme.onSurface),
-        contentTextStyle: text.bodyMedium?.copyWith(
-          color: scheme.onSurfaceVariant,
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: focusInverts().merge(base.textButtonTheme.style),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: focusInverts().merge(base.filledButtonTheme.style),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: focusInverts().merge(base.outlinedButtonTheme.style),
-      ),
-      iconButtonTheme: IconButtonThemeData(
-        style: ButtonStyle(
-          backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.focused)
-                ? scheme.inverseSurface
-                : null,
-          ),
-          foregroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.focused)
-                ? scheme.onInverseSurface
-                : scheme.onSurface,
-          ),
-          iconSize: WidgetStatePropertyAll(22 * s),
-        ),
-      ),
-      snackBarTheme: base.snackBarTheme.copyWith(
-        contentTextStyle: text.bodyMedium,
-        insetPadding: EdgeInsets.fromLTRB(48 * s, 0, 48 * s, 27 * s),
-      ),
-      listTileTheme: base.listTileTheme.copyWith(
-        titleTextStyle: text.bodyLarge?.copyWith(color: scheme.onSurface),
-        subtitleTextStyle: text.bodySmall?.copyWith(
-          color: scheme.onSurfaceVariant,
-        ),
-        selectedTileColor: scheme.onSurface.withValues(alpha: .1),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(TvDesign.controlRadius * s),
-        ),
-      ),
-      inputDecorationTheme: base.inputDecorationTheme.copyWith(
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: 16 * s,
-          vertical: 14 * s,
-        ),
-        labelStyle: text.bodyMedium,
-        hintStyle: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(TvDesign.controlRadius * s),
-          borderSide: BorderSide(color: scheme.onSurface, width: 2 * s),
-        ),
-      ),
-      progressIndicatorTheme: base.progressIndicatorTheme.copyWith(
-        linearMinHeight: 3 * s,
-      ),
-    );
+    return base.copyWith(textTheme: text, tv: true);
   }
 
   @override
@@ -700,7 +606,10 @@ class TvStageTheme extends StatelessWidget {
     }
     final s = TvDesign.scaleOf(context);
     return _TvStaged(
-      child: Theme(data: themeFor(Theme.of(context), s), child: child),
+      child: AppUiTheme(
+        data: themeFor(AppUiTheme.of(context), s),
+        child: child,
+      ),
     );
   }
 }
@@ -719,7 +628,7 @@ class TvPageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -764,7 +673,7 @@ class TvSectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Padding(
       padding: padding ?? EdgeInsets.only(bottom: 4 * s),
@@ -829,8 +738,8 @@ class TvFrame extends StatelessWidget {
     final s = TvDesign.scaleOf(context);
     return TvStageTheme(
       child: TvFocusRegion(
-        child: Scaffold(
-          body: edgeToEdge
+        child: CupertinoPageScaffold(
+          child: edgeToEdge
               ? FocusTraversalGroup(child: child)
               : SafeArea(
                   child: Column(
@@ -866,14 +775,14 @@ class TvFailure extends StatelessWidget {
   final VoidCallback retry;
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 6 * s),
       child: Row(
         children: [
           Icon(
-            Icons.error_outline_rounded,
+            CupertinoIcons.exclamationmark_circle,
             size: 20 * s,
             color: theme.colorScheme.error,
           ),
@@ -889,7 +798,7 @@ class TvFailure extends StatelessWidget {
           SizedBox(width: 14 * s),
           TvAction(
             autofocus: true,
-            leading: const Icon(Icons.refresh_rounded),
+            leading: const Icon(CupertinoIcons.arrow_clockwise),
             onPressed: retry,
             child: Text(AppLocalizations.of(context).retry),
           ),
@@ -904,7 +813,7 @@ class TvEmptyState extends StatelessWidget {
   const TvEmptyState({
     super.key,
     required this.message,
-    this.icon = Icons.inbox_outlined,
+    this.icon = CupertinoIcons.tray,
     this.action,
   });
   final String message;
@@ -913,7 +822,7 @@ class TvEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Center(
       child: Padding(
@@ -974,7 +883,7 @@ class TvCardMetrics {
     bool subtitle = false,
   }) {
     final s = TvDesign.scaleOf(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final w = width ?? (wide ? TvDesign.wideWidth : TvDesign.posterWidth) * s;
     final image = wide ? w * 9 / 16 : w * 1.5;
     final title = _lineHeight(context, theme.textTheme.bodyMedium);
@@ -1090,7 +999,7 @@ class _TvCardState extends State<TvCard> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final progress = item.playbackProgress;
@@ -1122,7 +1031,7 @@ class _TvCardState extends State<TvCard> {
             foregroundDecoration: BoxDecoration(
               borderRadius: radius,
               border: Border.all(
-                color: focused ? scheme.onSurface : Colors.transparent,
+                color: focused ? scheme.onSurface : const Color(0x00000000),
                 width: TvAction.focusRingWidth * s,
                 strokeAlign: BorderSide.strokeAlignOutside,
               ),
@@ -1152,14 +1061,14 @@ class _TvCardState extends State<TvCard> {
                       bottom: 0,
                       child: Semantics(
                         container: true,
-                        label: AppLocalizations.of(
-                          context,
-                        ).playbackProgress((progress * 100).round()),
-                        child: LinearProgressIndicator(
+                        label: AppLocalizations.of(context)
+                            .playbackProgress((progress * 100).round()),
+                        child: AppLoadingBar(
                           value: progress,
                           minHeight: 3 * s,
                           color: scheme.primary,
-                          backgroundColor: Colors.black.withValues(alpha: .5),
+                          backgroundColor: const Color(0xff000000)
+                              .withValues(alpha: .5),
                         ),
                       ),
                     ),
@@ -1178,10 +1087,10 @@ class _TvCardState extends State<TvCard> {
                   if (widget.current)
                     Center(
                       child: Icon(
-                        Icons.play_circle_fill_rounded,
+                        CupertinoIcons.play_circle_fill,
                         key: const Key('tv-episode-current'),
                         size: 36 * s,
-                        color: Colors.white.withValues(alpha: .92),
+                        color: const Color(0xffffffff).withValues(alpha: .92),
                       ),
                     ),
                 ],
@@ -1516,15 +1425,14 @@ class TvMoreTile extends StatelessWidget {
           builder: (context) => Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.arrow_forward_rounded, size: 26 * s),
+              Icon(CupertinoIcons.arrow_right, size: 26 * s),
               SizedBox(height: 8 * s),
               Text(
                 text,
                 textAlign: TextAlign.center,
                 maxLines: 2,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: DefaultTextStyle.of(context).style.color,
-                ),
+                style: AppUiTheme.of(context).textTheme.labelLarge
+                    ?.copyWith(color: DefaultTextStyle.of(context).style.color),
               ),
             ],
           ),
@@ -1544,9 +1452,8 @@ class TvRowSkeleton extends StatelessWidget {
     final metrics = TvCardMetrics.of(context, wide: wide);
     final s = TvDesign.scaleOf(context);
     final gutter = tvSafeGutter(MediaQuery.sizeOf(context).width);
-    final color = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: .07);
+    final color = AppUiTheme.of(context).colorScheme.onSurface
+        .withValues(alpha: .07);
     return SizedBox(
       height: metrics.height + metrics.focusRoom * 2,
       child: ListView.separated(
@@ -1723,16 +1630,16 @@ class TvInput extends StatelessWidget {
   final TextInputType? keyboardType;
 
   Future<void> _edit(BuildContext context) async {
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       useRootNavigator: false,
       builder: (context) {
         final s = TvDesign.scaleOf(context);
-        return AlertDialog(
+        return AppDialog(
           title: Text(label),
           content: SizedBox(
             width: 520 * s,
-            child: TextField(
+            child: AppTextField(
               key: const Key('tv-input-editor'),
               controller: controller,
               autofocus: true,
@@ -1740,7 +1647,7 @@ class TvInput extends StatelessWidget {
               autocorrect: false,
               enableSuggestions: !secret,
               keyboardType: keyboardType,
-              style: Theme.of(context).textTheme.bodyLarge,
+              style: AppUiTheme.of(context).textTheme.bodyLarge,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => Navigator.pop(context),
             ),
@@ -1789,11 +1696,11 @@ class TvInput extends StatelessWidget {
         autofocus: autofocus,
         variant: TvActionVariant.tile,
         leading: leading,
-        trailing: const Icon(Icons.edit_rounded),
+        trailing: const Icon(CupertinoIcons.pencil),
         onPressed: () => _edit(context),
         child: Builder(
           builder: (context) {
-            final theme = Theme.of(context);
+            final theme = AppUiTheme.of(context);
             final secondary = TvAction.secondaryColor(context);
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1856,7 +1763,7 @@ class TvChoiceTile extends StatelessWidget {
       leading: leading,
       onPressed: onPressed,
       trailing: Icon(
-        selected ? Icons.check_rounded : null,
+        selected ? CupertinoIcons.check_mark : null,
         key: selected ? const Key('tv-choice-check') : null,
       ),
       child: Builder(
@@ -1870,9 +1777,8 @@ class TvChoiceTile extends StatelessWidget {
                 value,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: TvAction.secondaryColor(context),
-                ),
+                style: AppUiTheme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: TvAction.secondaryColor(context)),
               ),
           ],
         ),
@@ -1906,7 +1812,7 @@ class TvNavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return TvAction(
       key: actionKey,
       variant: TvActionVariant.tile,
@@ -1938,7 +1844,7 @@ class TvNavTile extends StatelessWidget {
               ),
             if (chevron)
               Icon(
-                Icons.chevron_right_rounded,
+                CupertinoIcons.chevron_right,
                 color: TvAction.secondaryColor(context),
               ),
           ],
@@ -1962,9 +1868,8 @@ class TvNavTile extends StatelessWidget {
                 text,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: TvAction.secondaryColor(context),
-                ),
+                style: AppUiTheme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: TvAction.secondaryColor(context)),
               ),
           ],
         ),
@@ -1981,16 +1886,16 @@ class TvDarkStage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     if (theme.brightness == Brightness.dark) return child;
     final dark = TvStageTheme.themeFor(
-      AppTheme.tvDark(),
+      AppUiTheme.tvDark(),
       TvDesign.scaleOf(context),
     );
-    return Theme(
+    return AppUiTheme(
       data: dark,
       child: DefaultTextStyle.merge(
-        style: const TextStyle(color: Colors.white),
+        style: const TextStyle(color: Color(0xffffffff)),
         child: child,
       ),
     );
@@ -2036,10 +1941,9 @@ class TvHeroScrim extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(
-                      alpha: AppScrim.of(context, AppScrim.top),
-                    ),
-                    Colors.black.withValues(alpha: 0),
+                    const Color(0xff000000)
+                        .withValues(alpha: AppScrim.of(context, AppScrim.top)),
+                    const Color(0xff000000).withValues(alpha: 0),
                   ],
                 ),
               ),
@@ -2053,9 +1957,11 @@ class TvHeroScrim extends StatelessWidget {
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
-                    Colors.black.withValues(alpha: AppScrim.of(context, .82)),
-                    Colors.black.withValues(alpha: AppScrim.of(context, .45)),
-                    Colors.black.withValues(alpha: 0),
+                    const Color(0xff000000)
+                        .withValues(alpha: AppScrim.of(context, .82)),
+                    const Color(0xff000000)
+                        .withValues(alpha: AppScrim.of(context, .45)),
+                    const Color(0xff000000).withValues(alpha: 0),
                   ],
                   stops: const [0, .42, .78],
                 ),
@@ -2070,11 +1976,12 @@ class TvHeroScrim extends StatelessWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0),
-                    Colors.black.withValues(
+                    const Color(0xff000000).withValues(alpha: 0),
+                    const Color(0xff000000).withValues(
                       alpha: AppScrim.of(context, AppScrim.bottomMid),
                     ),
-                    Colors.black.withValues(alpha: AppScrim.of(context, .9)),
+                    const Color(0xff000000)
+                        .withValues(alpha: AppScrim.of(context, .9)),
                   ],
                   stops: const [.45, .8, 1],
                 ),

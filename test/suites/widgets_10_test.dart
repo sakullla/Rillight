@@ -7,43 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/presentation_test.dart [part 3]',
-    caseEntrypoints['aggregation/presentation_cases.dart#2']!,
+    'app/android_bootstrap_test.dart',
+    caseEntrypoints['app/android_bootstrap_cases.dart']!,
   );
   group(
-    'app/app_shell_top_bar_test.dart',
-    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
-  );
-  group(
-    'catalog/library_filter_test.dart',
-    caseEntrypoints['catalog/library_filter_cases.dart']!,
+    'home/shelf_hover_clip_test.dart',
+    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
   );
   group(
     'library/external_link_test.dart',
     caseEntrypoints['library/external_link_cases.dart']!,
   );
   group(
-    'library/person_works_test.dart',
-    caseEntrypoints['library/person_works_cases.dart']!,
+    'library/source_detail_route_test.dart [part 3]',
+    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
   );
   group(
-    'mobile/phone_pages_test.dart [part 2]',
-    caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
+    'mobile/motion_behaviors_test.dart',
+    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
   );
   group(
-    'player/android_seek_cancellation_test.dart',
-    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
+    'mobile/phone_pages_test.dart [part 1]',
+    caseEntrypoints['mobile/phone_pages_cases.dart#0']!,
   );
   group(
-    'player/buffer_snapshot_test.dart',
-    caseEntrypoints['player/buffer_snapshot_cases.dart']!,
+    'player/player_cache_status_test.dart',
+    caseEntrypoints['player/player_cache_status_cases.dart']!,
   );
   group(
-    'tv/tv_detail_test.dart [part 2]',
-    caseEntrypoints['tv/tv_detail_cases.dart#1']!,
+    'player/player_controls_test.dart',
+    caseEntrypoints['player/player_controls_cases.dart']!,
   );
-  group(
-    'tv/tv_lan_pair_test.dart [part 1]',
-    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
-  );
+  group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
 }

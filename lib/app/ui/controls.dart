@@ -139,7 +139,9 @@ class _AppButtonState extends State<AppButton> {
           AppButtonVariant.tinted => colors.primaryContainer,
           _ => const Color(0x00000000),
         };
-    final foreground = enabled
+    final foreground = theme.tv && _focused && enabled
+        ? colors.onInverseSurface
+        : enabled
         ? widget.foregroundColor ??
               widget.style?.foregroundColor ??
               (filled ? colors.onPrimary : colors.primary)
@@ -180,7 +182,9 @@ class _AppButtonState extends State<AppButton> {
               ? null
               : BoxConstraints.tight(widget.style!.fixedSize!),
           decoration: ShapeDecoration(
-            color: !enabled && filled
+            color: theme.tv && _focused && enabled
+                ? colors.inverseSurface
+                : !enabled && filled
                 ? colors.surfaceContainerHigh
                 : _hovered
                 ? widget.style?.hoverColor ?? background
@@ -598,6 +602,7 @@ class AppListTile extends StatelessWidget {
     this.onTap,
     this.enabled = true,
     this.selected = false,
+    this.minTileHeight = 44,
     this.contentPadding = const EdgeInsets.symmetric(
       horizontal: 16,
       vertical: 10,
@@ -608,32 +613,39 @@ class AppListTile extends StatelessWidget {
   final Widget title;
   final VoidCallback? onTap;
   final bool enabled, selected;
+  final double minTileHeight;
   final bool autofocus;
   final EdgeInsetsGeometry contentPadding;
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final content = Row(
-      children: [
-        if (leading != null) ...[leading!, const SizedBox(width: 12)],
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DefaultTextStyle(style: theme.textTheme.bodyLarge!, child: title),
-              if (subtitle != null)
+    final content = ConstrainedBox(
+      constraints: BoxConstraints(minHeight: minTileHeight),
+      child: Row(
+        children: [
+          if (leading != null) ...[leading!, const SizedBox(width: 12)],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 DefaultTextStyle(
-                  style: theme.textTheme.bodySmall!.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  child: subtitle!,
+                  style: theme.textTheme.bodyLarge!,
+                  child: title,
                 ),
-            ],
+                if (subtitle != null)
+                  DefaultTextStyle(
+                    style: theme.textTheme.bodySmall!.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    child: subtitle!,
+                  ),
+              ],
+            ),
           ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-      ],
+          if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+        ],
+      ),
     );
     return Semantics(
       selected: selected,
@@ -668,13 +680,19 @@ class AppSwitchTile extends StatelessWidget {
     required this.value,
     this.subtitle,
     this.onChanged,
+    this.contentPadding = const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 10,
+    ),
   });
+  final EdgeInsetsGeometry contentPadding;
   final Widget title;
   final Widget? subtitle;
   final bool value;
   final ValueChanged<bool>? onChanged;
   @override
   Widget build(BuildContext context) => AppListTile(
+    contentPadding: contentPadding,
     title: title,
     subtitle: subtitle,
     enabled: onChanged != null,

@@ -1,14 +1,15 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/library_tiles.dart';
@@ -28,15 +29,18 @@ void main() {
             ),
         ];
         await tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.dark(),
+          CupertinoTestApp(
+            theme: AppUiTheme.dark(),
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
             supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(
-              body: libraries
+            home: CupertinoPageScaffold(
+              child: libraries
                   ? LibraryTiles(libraries: items)
                   : MediaShelf(
                       shelfId: 'test',
@@ -46,7 +50,7 @@ void main() {
                     ),
             ),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),

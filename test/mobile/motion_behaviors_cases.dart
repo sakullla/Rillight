@@ -1,11 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 
@@ -17,20 +17,21 @@ void main() {
     addTearDown(index.dispose);
     addTearDown(reduced.dispose);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: ValueListenableBuilder<bool>(
           valueListenable: reduced,
           builder: (context, disableAnimations, _) => MediaQuery(
             data: MediaQueryData(disableAnimations: disableAnimations),
-            child: Scaffold(
-              body: ValueListenableBuilder<int>(
+            child: CupertinoPageScaffold(
+              child: ValueListenableBuilder<int>(
                 valueListenable: index,
                 builder: (context, selected, _) => PhoneTabTransition(
                   index: selected,
                   child: Center(
-                    child: TextButton(
+                    child: AppButton(
                       key: ValueKey('tab-$selected'),
                       onPressed: () => pressed.add(selected),
+                      variant: AppButtonVariant.plain,
                       child: Text('tab $selected'),
                     ),
                   ),
@@ -73,51 +74,57 @@ void main() {
     );
   });
 
-  testWidgets('navigation pill obeys reduced motion', (tester) async {
-    Widget app(bool reduced) => MaterialApp(
-      locale: const Locale('zh'),
-      supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      home: MediaQuery(
-        data: MediaQueryData(disableAnimations: reduced),
-        child: Scaffold(
-          bottomNavigationBar: PhoneBottomNav(
-            index: 0,
-            floating: false,
-            onSelected: (_) {},
+  testWidgets(
+    'Cupertino navigation selection is immediate with reduced motion',
+    (tester) async {
+      Widget app(bool reduced, int index) => CupertinoTestApp(
+        home: MediaQuery(
+          data: MediaQueryData(disableAnimations: reduced),
+          child: CupertinoPageScaffold(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: PhoneBottomNav(
+                index: index,
+                floating: false,
+                onSelected: (_) {},
+              ),
+            ),
           ),
         ),
-      ),
-    );
-
-    await tester.pumpWidget(app(false));
-    expect(
-      tester
-          .widget<NavigationBar>(find.byType(NavigationBar))
-          .animationDuration,
-      AppMobileNav.pillDuration,
-    );
-    await tester.pumpWidget(app(true));
-    expect(
-      tester
-          .widget<NavigationBar>(find.byType(NavigationBar))
-          .animationDuration,
-      Duration.zero,
-    );
-  });
+      );
+      await tester.pumpWidget(app(false, 0));
+      expect(
+        tester
+            .widget<CupertinoTabBar>(find.byType(CupertinoTabBar))
+            .currentIndex,
+        0,
+      );
+      await tester.pumpWidget(app(true, 1));
+      expect(
+        tester
+            .widget<CupertinoTabBar>(find.byType(CupertinoTabBar))
+            .currentIndex,
+        1,
+      );
+      expect(tester.binding.transientCallbackCount, 0);
+    },
+  );
 
   testWidgets(
     'skeleton stops when hidden or reduced and resumes when visible',
     (tester) async {
-      Widget app({required bool visible, required bool reduced}) => MaterialApp(
-        home: MediaQuery(
-          data: MediaQueryData(disableAnimations: reduced),
-          child: TickerMode(
-            enabled: visible,
-            child: const Scaffold(body: SkeletonBlock(width: 120, height: 80)),
-          ),
-        ),
-      );
+      Widget app({required bool visible, required bool reduced}) =>
+          CupertinoTestApp(
+            home: MediaQuery(
+              data: MediaQueryData(disableAnimations: reduced),
+              child: TickerMode(
+                enabled: visible,
+                child: const CupertinoPageScaffold(
+                  child: SkeletonBlock(width: 120, height: 80),
+                ),
+              ),
+            ),
+          );
 
       BoxDecoration decoration() =>
           tester
@@ -154,11 +161,11 @@ void main() {
         node.dispose();
       }
     });
-    Widget app(bool reduced) => MaterialApp(
+    Widget app(bool reduced) => CupertinoTestApp(
       home: MediaQuery(
         data: MediaQueryData(disableAnimations: reduced),
-        child: Scaffold(
-          body: SizedBox(
+        child: CupertinoPageScaffold(
+          child: SizedBox(
             height: 220,
             child: SingleChildScrollView(
               child: Column(

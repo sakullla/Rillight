@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/player/danmaku/dandanplay_client.dart';
 

@@ -1,4 +1,5 @@
 import '../helpers/region_access_fixture.dart';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/authentication.dart';
@@ -14,6 +15,7 @@ import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/media_server/capabilities.dart';
+
 import 'fake_plex.dart';
 
 const device = ClientDeviceInfo(
@@ -85,146 +87,137 @@ void main() {
     connection: fake.url,
   );
 
-  test(
-    'search uses full filtered media query beyond default hubs and subsequent page',
-    () async {
-      fake.catalog = [
-        for (var n = 0; n < 90; n++)
-          {
-            ...fake.movie,
-            'ratingKey': '${100 + n}',
-            'title': 'Needle $n',
-            'viewCount': n % 3 == 0 ? 1 : 0,
-          },
-        {...fake.movie, 'ratingKey': '999', 'title': 'Unrelated'},
-      ];
-      // This is the real structure that defeated the original implementation.
-      final response = await Dio().getUri(
-        fake.url.replace(
-          path: '${fake.url.path}/hubs/search',
-          queryParameters: {'query': 'Needle'},
-        ),
-        options: Options(
-          headers: {
-            'Accept': 'application/json',
-            'X-Plex-Token': 'owner-resource',
-          },
-        ),
-      );
-      final hub = (response.data['MediaContainer']['Hub'] as List).single;
-      expect(hub['Metadata'], hasLength(3));
-      expect(hub['more'], true);
-      expect(hub['totalSize'], 90);
-      final first = await client.queryItems(
-        searchTerm: 'Needle',
-        includeItemTypes: 'Movie',
-        filters: ['IsUnplayed'],
-        limit: 40,
-        startIndex: 0,
-      );
-      final second = await client.queryItems(
-        searchTerm: 'Needle',
-        includeItemTypes: 'Movie',
-        filters: ['IsUnplayed'],
-        limit: 40,
-        startIndex: 40,
-      );
-      expect(first.totalRecordCount, 60);
-      expect(first.items, hasLength(40));
-      expect(second.items, hasLength(20));
-      expect({
-        ...first.items.map((v) => v.id),
-        ...second.items.map((v) => v.id),
-      }, hasLength(60));
-      expect(
-        [...first.items, ...second.items].every((v) => !v.userData.played),
-        true,
-      );
-      expect(fake.requests.last.path, '/library/all');
-      expect(fake.requests.last.query['title'], 'Needle');
-      expect(
-        (await client.searchByName('Needle', startIndex: 80)),
-        hasLength(10),
-      );
-    },
-  );
+  test('search uses full filtered media query beyond default hubs and subsequent page', () async {
+    fake.catalog = [
+      for (var n = 0; n < 90; n++)
+        {
+          ...fake.movie,
+          'ratingKey': '${100 + n}',
+          'title': 'Needle $n',
+          'viewCount': n % 3 == 0 ? 1 : 0,
+        },
+      {...fake.movie, 'ratingKey': '999', 'title': 'Unrelated'},
+    ];
+    // This is the real structure that defeated the original implementation.
+    final response = await Dio().getUri(
+      fake.url.replace(
+        path: '${fake.url.path}/hubs/search',
+        queryParameters: {'query': 'Needle'},
+      ),
+      options: Options(
+        headers: {
+          'Accept': 'application/json',
+          'X-Plex-Token': 'owner-resource',
+        },
+      ),
+    );
+    final hub = (response.data['MediaContainer']['Hub'] as List).single;
+    expect(hub['Metadata'], hasLength(3));
+    expect(hub['more'], true);
+    expect(hub['totalSize'], 90);
+    final first = await client.queryItems(
+      searchTerm: 'Needle',
+      includeItemTypes: 'Movie',
+      filters: ['IsUnplayed'],
+      limit: 40,
+      startIndex: 0,
+    );
+    final second = await client.queryItems(
+      searchTerm: 'Needle',
+      includeItemTypes: 'Movie',
+      filters: ['IsUnplayed'],
+      limit: 40,
+      startIndex: 40,
+    );
+    expect(first.totalRecordCount, 60);
+    expect(first.items, hasLength(40));
+    expect(second.items, hasLength(20));
+    expect({
+      ...first.items.map((v) => v.id),
+      ...second.items.map((v) => v.id),
+    }, hasLength(60));
+    expect(
+      [...first.items, ...second.items].every((v) => !v.userData.played),
+      true,
+    );
+    expect(fake.requests.last.path, '/library/all');
+    expect(fake.requests.last.query['title'], 'Needle');
+    expect(
+      (await client.searchByName('Needle', startIndex: 80)),
+      hasLength(10),
+    );
+  });
 
-  test(
-    'genre display labels resolve to each library tag ID and unknown labels stay empty',
-    () async {
-      fake.catalog = [
-        fake.movie,
-        {
-          ...fake.movie,
-          'ratingKey': '44',
-          'type': 'episode',
-          'librarySectionID': 2,
-          'Genre': [
-            {'id': 27, 'tag': 'Drama'},
-          ],
-        },
-        {
-          ...fake.movie,
-          'ratingKey': '45',
-          'type': 'episode',
-          'librarySectionID': 2,
-          'Genre': [
-            {'id': 28, 'tag': 'Comedy'},
-          ],
-        },
-      ];
-      expect(await client.getLibraryGenres('section:1'), ['Drama']);
-      final movie = await client.queryItems(
+  test('genre display labels resolve to each library tag ID and unknown labels stay empty', () async {
+    fake.catalog = [
+      fake.movie,
+      {
+        ...fake.movie,
+        'ratingKey': '44',
+        'type': 'episode',
+        'librarySectionID': 2,
+        'Genre': [
+          {'id': 27, 'tag': 'Drama'},
+        ],
+      },
+      {
+        ...fake.movie,
+        'ratingKey': '45',
+        'type': 'episode',
+        'librarySectionID': 2,
+        'Genre': [
+          {'id': 28, 'tag': 'Comedy'},
+        ],
+      },
+    ];
+    expect(await client.getLibraryGenres('section:1'), ['Drama']);
+    final movie = await client.queryItems(
+      parentId: 'section:1',
+      genres: ['Drama'],
+    );
+    expect(movie.items.map((v) => v.id), ['42']);
+    expect(fake.requests.last.query['genre'], '17');
+    final tv = await client.queryItems(
+      parentId: 'section:2',
+      genres: ['Drama'],
+    );
+    expect(tv.items.map((v) => v.id), ['44']);
+    expect(fake.requests.last.query['genre'], '27');
+    final all = await client.queryItems(genres: ['Drama']);
+    expect(all.items.map((v) => v.id), ['42', '44']);
+    expect(
+      (await client.queryItems(
         parentId: 'section:1',
-        genres: ['Drama'],
-      );
-      expect(movie.items.map((v) => v.id), ['42']);
-      expect(fake.requests.last.query['genre'], '17');
-      final tv = await client.queryItems(
-        parentId: 'section:2',
-        genres: ['Drama'],
-      );
-      expect(tv.items.map((v) => v.id), ['44']);
-      expect(fake.requests.last.query['genre'], '27');
-      final all = await client.queryItems(genres: ['Drama']);
-      expect(all.items.map((v) => v.id), ['42', '44']);
-      expect(
-        (await client.queryItems(
-          parentId: 'section:1',
-          genres: ['Unknown'],
-        )).items,
-        isEmpty,
-      );
-    },
-  );
+        genres: ['Unknown'],
+      )).items,
+      isEmpty,
+    );
+  });
 
-  test(
-    'owner token cannot be bound to child, including forged local resource record',
-    () async {
-      final account = await authorize();
-      final owner = (await auth.discoverResources(account)).single;
-      client.attachSession(
-        baseUrl: fake.url,
-        accessToken: 'owner-resource',
-        userId: '2',
-      );
-      await expectLater(client.getUser(), throwsA(forbidden));
-      await expectLater(
-        verify(account, owner, userId: '2', homeUserId: '2'),
-        throwsA(forbidden),
-      );
-      final child = (await auth.switchHomeUser(
-        account,
-        (await auth.homeUsers(account)).last,
-        pin: '1234',
-      )).single;
-      store[child.resourceCredentialRef]!['accessToken'] = 'owner-resource';
-      await expectLater(
-        verify(account, child, token: 'owner-resource'),
-        throwsA(forbidden),
-      );
-    },
-  );
+  test('owner token cannot be bound to child, including forged local resource record', () async {
+    final account = await authorize();
+    final owner = (await auth.discoverResources(account)).single;
+    client.attachSession(
+      baseUrl: fake.url,
+      accessToken: 'owner-resource',
+      userId: '2',
+    );
+    await expectLater(client.getUser(), throwsA(forbidden));
+    await expectLater(
+      verify(account, owner, userId: '2', homeUserId: '2'),
+      throwsA(forbidden),
+    );
+    final child = (await auth.switchHomeUser(
+      account,
+      (await auth.homeUsers(account)).last,
+      pin: '1234',
+    )).single;
+    store[child.resourceCredentialRef]!['accessToken'] = 'owner-resource';
+    await expectLater(
+      verify(account, child, token: 'owner-resource'),
+      throwsA(forbidden),
+    );
+  });
 
   test(
     'live Home proof grants restricted child and attach invalidates old proof',
@@ -277,92 +270,89 @@ void main() {
     await expectLater(verify(account, resource), throwsA(forbidden));
   });
 
-  test(
-    'source authority commit and restore both require live Plex resource binding',
-    () async {
-      final account = await authorize();
-      final child = (await auth.switchHomeUser(
-        account,
-        (await auth.homeUsers(account)).last,
-        pin: '1234',
-      )).single;
-      final savedStore = MemoryServerListStore();
-      final credentialStore = MemoryCredentialStore();
-      SourceSessionRegistry registry() => SourceSessionRegistry(
-        access: TestRegionAccessController(),
-        store: savedStore,
-        credentials: credentialStore,
-        createClient: () => PlexClient(device: device),
-        createProviderClient: (_) => PlexClient(device: device),
-        sessionIdentityVerifier: (server, value, attached) async {
-          final proof = await auth.verifyResourceIdentity(
-            cloudCredentialRef: server.cloudCredentialRef!,
-            resourceCredentialRef: server.resourceCredentialRef!,
-            cloudAccountId: server.cloudAccountId!,
-            serverId: server.verifiedServerId!,
-            userId: value.userId,
-            resourceToken: value.accessToken,
-            homeUserId: server.homeUserId,
-            connection: Uri.parse(server.baseUrl),
-          );
-          (attached as PlexClient).bindVerifiedIdentity(proof);
-        },
-      );
-      final sourceRegistry = registry();
-      addTearDown(sourceRegistry.dispose);
-      Future<SourceSession> commit(String token) async {
-        final attempt = await sourceRegistry.beginAuthorization(
-          serviceType: MediaServerType.plex,
-          region: AccessRegion.ordinary,
+  test('source authority commit and restore both require live Plex resource binding', () async {
+    final account = await authorize();
+    final child = (await auth.switchHomeUser(
+      account,
+      (await auth.homeUsers(account)).last,
+      pin: '1234',
+    )).single;
+    final savedStore = MemoryServerListStore();
+    final credentialStore = MemoryCredentialStore();
+    SourceSessionRegistry registry() => SourceSessionRegistry(
+      access: TestRegionAccessController(),
+      store: savedStore,
+      credentials: credentialStore,
+      createClient: () => PlexClient(device: device),
+      createProviderClient: (_) => PlexClient(device: device),
+      sessionIdentityVerifier: (server, value, attached) async {
+        final proof = await auth.verifyResourceIdentity(
+          cloudCredentialRef: server.cloudCredentialRef!,
+          resourceCredentialRef: server.resourceCredentialRef!,
+          cloudAccountId: server.cloudAccountId!,
+          serverId: server.verifiedServerId!,
+          userId: value.userId,
+          resourceToken: value.accessToken,
+          homeUserId: server.homeUserId,
+          connection: Uri.parse(server.baseUrl),
         );
-        final server = SavedServer(
-          id: attempt.id,
-          name: 'Shared',
+        (attached as PlexClient).bindVerifiedIdentity(proof);
+      },
+    );
+    final sourceRegistry = registry();
+    addTearDown(sourceRegistry.dispose);
+    Future<SourceSession> commit(String token) async {
+      final attempt = await sourceRegistry.beginAuthorization(
+        serviceType: MediaServerType.plex,
+        region: AccessRegion.ordinary,
+      );
+      final server = SavedServer(
+        id: attempt.id,
+        name: 'Shared',
+        username: 'Child',
+        serviceType: MediaServerType.plex,
+        verifiedServerId: 'server-a',
+        cloudAccountId: account.id,
+        cloudCredentialRef: account.credentialRef,
+        homeUserId: '2',
+        resourceCredentialRef: child.resourceCredentialRef,
+        lines: [ServerLine(id: 'local', address: fake.url.toString())],
+      );
+      return sourceRegistry.commitAuthorization(
+        attempt,
+        server: server,
+        value: StoredCredentials(
+          accessToken: token,
+          userId: '2',
           username: 'Child',
           serviceType: MediaServerType.plex,
-          verifiedServerId: 'server-a',
           cloudAccountId: account.id,
           cloudCredentialRef: account.credentialRef,
           homeUserId: '2',
           resourceCredentialRef: child.resourceCredentialRef,
-          lines: [ServerLine(id: 'local', address: fake.url.toString())],
-        );
-        return sourceRegistry.commitAuthorization(
-          attempt,
-          server: server,
-          value: StoredCredentials(
-            accessToken: token,
-            userId: '2',
-            username: 'Child',
-            serviceType: MediaServerType.plex,
-            cloudAccountId: account.id,
-            cloudCredentialRef: account.credentialRef,
-            homeUserId: '2',
-            resourceCredentialRef: child.resourceCredentialRef,
-          ),
-        );
-      }
+        ),
+      );
+    }
 
-      await expectLater(commit('owner-resource'), throwsA(forbidden));
-      final session = await commit('child-resource');
-      expect(session.account.userId, '2');
-      final restored = registry();
-      addTearDown(restored.dispose);
-      await restored.load();
-      final resumed = await restored.ensureSession(
-        session.account.configuredServerId,
-      );
-      expect((await resumed.client.getViews()).map((v) => v.id), ['section:1']);
-      fake.sharedDenied = true;
-      final refused = registry();
-      addTearDown(refused.dispose);
-      await refused.load();
-      await expectLater(
-        refused.ensureSession(session.account.configuredServerId),
-        throwsA(forbidden),
-      );
-    },
-  );
+    await expectLater(commit('owner-resource'), throwsA(forbidden));
+    final session = await commit('child-resource');
+    expect(session.account.userId, '2');
+    final restored = registry();
+    addTearDown(restored.dispose);
+    await restored.load();
+    final resumed = await restored.ensureSession(
+      session.account.configuredServerId,
+    );
+    expect((await resumed.client.getViews()).map((v) => v.id), ['section:1']);
+    fake.sharedDenied = true;
+    final refused = registry();
+    addTearDown(refused.dispose);
+    await refused.load();
+    await expectLater(
+      refused.ensureSession(session.account.configuredServerId),
+      throwsA(forbidden),
+    );
+  });
 
   test(
     'capability decision follows selected audio in the located Part only',
@@ -413,45 +403,42 @@ void main() {
     },
   );
 
-  test(
-    'external ASS burning maps actual delivery and turning off renegotiates without burn',
-    () async {
-      fake.subtitleCodec = 'ass';
-      final info = await client.getPlaybackInfo(
-        itemId: '42',
-        capabilities: caps,
-        subtitleStreamIndex: 13,
-      );
-      final subtitle =
-          info.primarySource!.streamByIndex(13)! as PlexNegotiatedStream;
-      expect(fake.requests.last.query['subtitles'], 'burn');
-      expect(subtitle.deliveryMethod, 'Encode');
-      expect(subtitle.deliveryUrl, isNull);
-      expect(subtitle.isExternal, false);
-      expect(subtitle.index, 13);
-      expect(subtitle.playbackIndex, 2);
-      final backend = RillightVideoBackend();
-      addTearDown(backend.dispose);
-      expect(
-        backend.transcodeSubtitleDelivery(subtitle),
-        TranscodeSubtitleDelivery.burnIn,
-      );
-      final off = await client.getPlaybackInfo(
-        itemId: '42',
-        capabilities: caps,
-        subtitleStreamIndex: -1,
-        forceTranscode: true,
-      );
-      expect(off.primarySource!.defaultSubtitleStreamIndex, -1);
-      expect(fake.requests.last.query['subtitles'], 'none');
-      expect(
-        off.primarySource!.subtitleStreams.any(
-          (s) => s.deliveryMethod == 'Encode',
-        ),
-        false,
-      );
-    },
-  );
+  test('external ASS burning maps actual delivery and turning off renegotiates without burn', () async {
+    fake.subtitleCodec = 'ass';
+    final info = await client.getPlaybackInfo(
+      itemId: '42',
+      capabilities: caps,
+      subtitleStreamIndex: 13,
+    );
+    final subtitle =
+        info.primarySource!.streamByIndex(13)! as PlexNegotiatedStream;
+    expect(fake.requests.last.query['subtitles'], 'burn');
+    expect(subtitle.deliveryMethod, 'Encode');
+    expect(subtitle.deliveryUrl, isNull);
+    expect(subtitle.isExternal, false);
+    expect(subtitle.index, 13);
+    expect(subtitle.playbackIndex, 2);
+    final backend = RillightVideoBackend();
+    addTearDown(backend.dispose);
+    expect(
+      backend.transcodeSubtitleDelivery(subtitle),
+      TranscodeSubtitleDelivery.burnIn,
+    );
+    final off = await client.getPlaybackInfo(
+      itemId: '42',
+      capabilities: caps,
+      subtitleStreamIndex: -1,
+      forceTranscode: true,
+    );
+    expect(off.primarySource!.defaultSubtitleStreamIndex, -1);
+    expect(fake.requests.last.query['subtitles'], 'none');
+    expect(
+      off.primarySource!.subtitleStreams.any(
+        (s) => s.deliveryMethod == 'Encode',
+      ),
+      false,
+    );
+  });
 
   for (final entry in {
     'segments-subs': 'Hls',

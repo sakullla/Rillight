@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -9,7 +11,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -51,7 +53,7 @@ void main() {
         ],
         [const ItemImageRef(itemId: 'title', type: 'Primary', tag: 'poster')],
       );
-      Widget subject() => MaterialApp(
+      Widget subject() => CupertinoTestApp(
         home: AuthScope(
           controller: imageAuth,
           child: SizedBox(
@@ -66,7 +68,7 @@ void main() {
         ),
         localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -100,7 +102,7 @@ void main() {
     final imageAuth = AuthController.memory(client: client);
     addTearDown(imageAuth.dispose);
     HeroArtworkData? resolved;
-    Widget subject({bool prefetch = false}) => MaterialApp(
+    Widget subject({bool prefetch = false}) => CupertinoTestApp(
       home: AuthScope(
         controller: imageAuth,
         child: HeroArtwork(
@@ -115,7 +117,7 @@ void main() {
       ),
       localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
       builder: (context, child) => ui.AppUiTheme(
-        data: Theme.of(context).brightness == Brightness.dark
+        data: AppUiTheme.of(context).brightness == Brightness.dark
             ? ui.AppUiTheme.dark()
             : ui.AppUiTheme.light(),
         child: child ?? const SizedBox.shrink(),
@@ -295,12 +297,14 @@ void main() {
       routes: [
         GoRoute(
           path: '/',
-          builder: (_, _) => Scaffold(body: HomeHero(catalog: catalog)),
+          builder: (_, _) =>
+              CupertinoPageScaffold(child: HomeHero(catalog: catalog)),
         ),
         GoRoute(
           path: '/item/:id',
-          builder: (_, state) =>
-              Scaffold(body: Text('Details ${state.pathParameters['id']}')),
+          builder: (_, state) => CupertinoPageScaffold(
+            child: Text('Details ${state.pathParameters['id']}'),
+          ),
         ),
       ],
     );
@@ -308,16 +312,19 @@ void main() {
     await tester.pumpWidget(
       PlayerWindowScope(
         host: host,
-        child: MaterialApp.router(
+        child: CupertinoTestApp.router(
           routerConfig: router,
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -384,9 +391,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Column(
+      CupertinoTestApp(
+        home: CupertinoPageScaffold(
+          child: Column(
             children: [
               HeroRatingBadge(rating: null),
               HeroRatingBadge(rating: 8.84),
@@ -395,7 +402,7 @@ void main() {
         ),
         localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -428,10 +435,13 @@ void main() {
       );
       expect(featuredHomeItems(catalog).length, 5);
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
@@ -440,12 +450,12 @@ void main() {
               size: Size(320, 1100),
               textScaler: TextScaler.linear(2),
             ),
-            child: Scaffold(
-              body: SingleChildScrollView(child: PhoneHero(catalog: catalog)),
+            child: CupertinoPageScaffold(
+              child: SingleChildScrollView(child: PhoneHero(catalog: catalog)),
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -479,28 +489,34 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final phone = width < 600;
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.teal,
-              brightness: brightness,
+          theme: AppUiThemeData(
+            colorScheme: composeContentPalette(
+              (brightness == Brightness.dark
+                      ? AppUiTheme.dark()
+                      : AppUiTheme.light())
+                  .colorScheme,
+              const Color(0xff008080),
             ),
           ),
-          home: Scaffold(
-            body: SingleChildScrollView(
+          home: CupertinoPageScaffold(
+            child: SingleChildScrollView(
               child: phone
                   ? PhoneHero(catalog: catalog)
                   : HomeHero(catalog: catalog),
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -550,7 +566,7 @@ void main() {
 
 Future<Uint8List> _imageBytes(int width, int height) async {
   final recorder = ui.PictureRecorder();
-  Canvas(recorder).drawColor(Colors.green, BlendMode.src);
+  Canvas(recorder).drawColor(const Color(0xff34c759), BlendMode.src);
   final picture = recorder.endRecording();
   final image = await picture.toImage(width, height);
   final bytes = await image.toByteData(format: ui.ImageByteFormat.png);

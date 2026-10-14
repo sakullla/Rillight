@@ -2,7 +2,7 @@ import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/player/player_bindings.dart';

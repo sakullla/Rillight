@@ -1,9 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -11,7 +13,6 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/library_tiles.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_server/models.dart';
-import 'package:rillight/app/theme/tokens.dart';
 
 void main() {
   testWidgets('library rail never restores the outer page vertical offset', (
@@ -20,15 +21,18 @@ void main() {
     final page = ScrollController();
     addTearDown(page.dispose);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: ListView(
+        home: CupertinoPageScaffold(
+          child: ListView(
             key: const PageStorageKey('home-scroll'),
             controller: page,
             scrollCacheExtent: const ScrollCacheExtent.pixels(0),
@@ -49,7 +53,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -78,16 +82,19 @@ void main() {
         ),
     ];
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(body: LibraryTiles(libraries: libraries)),
+        home: CupertinoPageScaffold(child: LibraryTiles(libraries: libraries)),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -128,15 +135,18 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: LibraryTiles(
+        home: CupertinoPageScaffold(
+          child: LibraryTiles(
             libraries: [
               for (var index = 0; index < 4; index++)
                 MediaItem(
@@ -148,7 +158,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -173,15 +183,18 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: LibraryTiles(
+        home: CupertinoPageScaffold(
+          child: LibraryTiles(
             libraries: [
               for (var index = 0; index < 8; index++)
                 MediaItem(
@@ -193,7 +206,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),

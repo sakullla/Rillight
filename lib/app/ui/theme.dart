@@ -6,6 +6,7 @@ import '../theme/palette.dart';
 class AppUiThemeData {
   AppUiThemeData({
     required this.colorScheme,
+    this.tv = false,
     AppTextTheme? textTheme,
     Color? scaffoldBackgroundColor,
   }) : textTheme = textTheme ?? AppTextTheme.standard(colorScheme.onSurface),
@@ -18,6 +19,7 @@ class AppUiThemeData {
         textTheme: AppTextTheme.standard(tones.onSurface, phone: phone),
       );
 
+  final bool tv;
   final AppColorScheme colorScheme;
   final AppTextTheme textTheme;
   final Color scaffoldBackgroundColor;
@@ -27,10 +29,12 @@ class AppUiThemeData {
   Color get disabledColor => colorScheme.onSurfaceVariant.withValues(alpha: .5);
 
   AppUiThemeData copyWith({
+    bool? tv,
     AppColorScheme? colorScheme,
     AppTextTheme? textTheme,
     Color? scaffoldBackgroundColor,
   }) => AppUiThemeData(
+    tv: tv ?? this.tv,
     colorScheme: colorScheme ?? this.colorScheme,
     textTheme: textTheme ?? this.textTheme,
     scaffoldBackgroundColor:
@@ -49,14 +53,27 @@ class AppUiThemeData {
       actionTextStyle: textTheme.labelLarge!.copyWith(
         color: colorScheme.primary,
       ),
-      navTitleTextStyle: textTheme.titleMedium!,
-      navLargeTitleTextStyle: textTheme.displaySmall!,
+      navTitleTextStyle: textTheme.titleMedium!.copyWith(inherit: false),
+      navLargeTitleTextStyle: textTheme.displaySmall!.copyWith(inherit: false),
+      navActionTextStyle: textTheme.labelLarge!.copyWith(
+        inherit: false,
+        color: colorScheme.primary,
+      ),
       tabLabelTextStyle: textTheme.labelSmall!,
     ),
   );
 }
 
 class AppUiTheme extends StatelessWidget {
+  static const darkTones = AppPalette.darkTones;
+  static const lightTones = AppPalette.lightTones;
+  static const tvDarkTones = AppPalette.tvDarkTones;
+  static const tvLightTones = AppPalette.tvLightTones;
+  static (Color page, Color symbol) windowChromeColors(Brightness brightness) {
+    final tones = brightness == Brightness.dark ? darkTones : lightTones;
+    return (tones.base, tones.onSurface);
+  }
+
   const AppUiTheme({super.key, required this.data, required this.child});
   final AppUiThemeData data;
   final Widget child;

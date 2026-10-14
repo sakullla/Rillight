@@ -1,9 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:ui' show FrameTiming;
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/desktop_performance_host.dart';
 import 'package:rillight/app/desktop_scroll.dart';
@@ -12,8 +14,8 @@ Widget _subject(
   ScrollController controller, {
   bool reduced = false,
   TargetPlatform platform = TargetPlatform.windows,
-}) => MaterialApp(
-  theme: ThemeData(platform: platform),
+}) => CupertinoTestApp(
+  scrollBehavior: _PlatformScrollBehavior(platform),
   home: MediaQuery(
     data: MediaQueryData(disableAnimations: reduced),
     child: DesktopPerformanceHost(
@@ -200,8 +202,8 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: ThemeData(platform: TargetPlatform.windows),
+      CupertinoTestApp(
+        scrollBehavior: const _PlatformScrollBehavior(TargetPlatform.windows),
         home: DesktopScrollScope(
           child: ListView.builder(
             itemExtent: 60,
@@ -219,4 +221,11 @@ void main() {
     await settle(tester);
     expect(position.pixels, closeTo(192, 0.01));
   });
+}
+
+class _PlatformScrollBehavior extends CupertinoScrollBehavior {
+  const _PlatformScrollBehavior(this.platform);
+  final TargetPlatform platform;
+  @override
+  TargetPlatform getPlatform(BuildContext context) => platform;
 }

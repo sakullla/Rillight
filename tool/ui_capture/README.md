@@ -51,7 +51,7 @@ node tool/capture-ui.mjs --only 'provider-*' --platform phone --size 360
 - [Playwright Visual comparisons](https://playwright.dev/docs/test-snapshots)：截图随系统、字体及环境改变；记录宿主、Flutter 版本、字体路径及哈希，不把跨环境像素差异当成 UI 回归。
 - [Playwright Best practices](https://playwright.dev/docs/best-practices)：隔离状态、控制测试数据、使用稳定定位和可交互性检查。这里使用实际页面的 Key、语义/标签定位与内存数据，缺少入口或点击被遮挡就失败。
 - [Flutter pumpAndSettle](https://api.flutter.dev/flutter/flutter_test/WidgetTester/pumpAndSettle.html)：持续加载动画无法 settle；这里用门闩保持请求，推进明确的虚拟帧间隔，单独捕获加载/悬浮过程。
-- [Flutter matchesGoldenFile 字体说明](https://api.flutter.dev/flutter/flutter_test/matchesGoldenFile.html)：测试默认 Ahem 字体显示方块；显式加载中文和 Material 图标字体。
+- [Flutter matchesGoldenFile 字体说明](https://api.flutter.dev/flutter/flutter_test/matchesGoldenFile.html)：测试默认 Ahem 字体显示方块；显式加载中文和 CupertinoIcons 图标字体。
 
 运行前先 `flutter pub get`。捕获不自动更新视觉基线，也不以截图存在代替人工视觉评审；完整矩阵完成后再检查截图中的文字、选中反馈、焦点、遮挡与内容密度。
 

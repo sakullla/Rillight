@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/player_host_command.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/desktop_scroll.dart';
@@ -37,6 +36,7 @@ import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_window_host.dart';
+
 import 'source_route_extra_codec.dart';
 
 import 'package:rillight/app/tv_shell.dart';
@@ -54,6 +54,20 @@ GoRouter createAppRouter({
   late final GoRouter router;
   router = GoRouter(
     initialLocation: AppRoutes.home,
+    errorPageBuilder: (context, state) => _routePage(
+      context,
+      state,
+      (context, state) => CupertinoPageScaffold(
+        navigationBar: const CupertinoNavigationBar(middle: Text('页面不可用')),
+        child: Center(
+          child: AppButton(
+            onPressed: () => context.go(AppRoutes.home),
+            child: const Text('返回首页'),
+          ),
+        ),
+      ),
+      environment,
+    ),
     extraCodec: const SourceRouteExtraCodec(),
     observers: [_ConnectFlowObserver(auth)],
     refreshListenable: Listenable.merge([auth, auth.regionAccess]),
@@ -155,15 +169,7 @@ GoRouter createAppRouter({
           ),
         ),
         ShellRoute(
-          builder: (context, state, child) => CatalogShell(
-            // The catalog invalidates selected-session data itself. Preserve
-            // the Navigator and independent source-bound playback on selection.
-            auth: auth,
-            child: child,
-          ),
           routes: [
-            // Keep detail and playback on one Navigator: an underlying shell
-            // route otherwise remains current for Android predictive back.
             GoRoute(
               path: '/play/:itemId',
               pageBuilder: (context, state) {
@@ -171,8 +177,8 @@ GoRouter createAppRouter({
                 return PhoneMotion.fadeThroughPage(
                   context: context,
                   state: state,
-                  child: Theme(
-                    data: AppTheme.dark(),
+                  child: AppUiTheme(
+                    data: AppUiTheme.dark(),
                     child: MobilePlayerPage(
                       routeLeaseKey: state.pageKey,
                       sourceRequest: request,
@@ -196,8 +202,13 @@ GoRouter createAppRouter({
             ),
             GoRoute(
               path: '/private',
-              builder: (context, state) =>
-                  const RegionAggregationGate(region: AccessRegion.private),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) =>
+                    const RegionAggregationGate(region: AccessRegion.private),
+                environment,
+              ),
             ),
             GoRoute(
               path: AppRoutes.mine,
@@ -280,98 +291,146 @@ GoRouter createAppRouter({
               ),
             ),
           ],
+          pageBuilder: (context, state, child) => _shellPage(
+            context,
+            state,
+            child,
+            (context, state, child) => CatalogShell(auth: auth, child: child),
+          ),
         ),
       ],
       if (environment.isTv) ...[
         GoRoute(
           path: AppRoutes.connect,
           name: AppRoutes.connect,
-          builder: (context, state) => TvConnectPage(
-            addingAnother: state.uri.queryParameters['add'] == '1',
+          pageBuilder: (context, state) => _routePage(
+            context,
+            state,
+            (context, state) => TvConnectPage(
+              addingAnother: state.uri.queryParameters['add'] == '1',
+            ),
+            environment,
           ),
         ),
         ShellRoute(
-          builder: (context, state, child) => CatalogShell(
-            // As on phone, selection is not ownership of the active player.
-            auth: auth,
-            child: child,
-          ),
           routes: [
             GoRoute(
               path: AppRoutes.home,
-              builder: (context, state) => const TvShell(),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) => const TvShell(),
+                environment,
+              ),
             ),
             GoRoute(
               path: '/private',
-              builder: (context, state) =>
-                  const RegionAggregationGate(region: AccessRegion.private),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) =>
+                    const RegionAggregationGate(region: AccessRegion.private),
+                environment,
+              ),
             ),
             GoRoute(
               path: '/library/:viewId',
-              builder: (context, state) =>
-                  TvLibraryPage(viewId: state.pathParameters['viewId']!),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) =>
+                    TvLibraryPage(viewId: state.pathParameters['viewId']!),
+                environment,
+              ),
             ),
             GoRoute(
               path: '/server/:serverId/library/:viewId',
-              builder: (context, state) => ServerLibraryPage(
-                serverId: state.pathParameters['serverId']!,
-                viewId: state.pathParameters['viewId']!,
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) => ServerLibraryPage(
+                  serverId: state.pathParameters['serverId']!,
+                  viewId: state.pathParameters['viewId']!,
+                ),
+                environment,
               ),
             ),
             GoRoute(
               path: '/server/:serverId/resume',
-              builder: (context, state) =>
-                  ServerResumePage(serverId: state.pathParameters['serverId']!),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) => ServerResumePage(
+                  serverId: state.pathParameters['serverId']!,
+                ),
+                environment,
+              ),
             ),
             GoRoute(
               path: '/shelf/:source',
-              builder: (context, state) => _shelfPage(auth, state, environment),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) => _shelfPage(auth, state, environment),
+                environment,
+              ),
             ),
             GoRoute(
               path: '/person/:personId',
-              builder: (context, state) => _personWorks(state),
+              pageBuilder: (context, state) => _routePage(
+                context,
+                state,
+                (context, state) => _personWorks(state),
+                environment,
+              ),
             ),
             GoRoute(
               path: '/item/:itemId',
-              builder: (context, state) => _sourceDetail(
-                auth,
+              pageBuilder: (context, state) => _routePage(
+                context,
                 state,
-                TvDetailPage(
-                  key: ValueKey(state.uri.toString()),
-                  itemId: state.pathParameters['itemId']!,
-                  initialSeasonId: state.uri.queryParameters['season'],
-                  initialEpisodeId: state.uri.queryParameters['episode'],
+                (context, state) => _sourceDetail(
+                  auth,
+                  state,
+                  TvDetailPage(
+                    key: ValueKey(state.uri.toString()),
+                    itemId: state.pathParameters['itemId']!,
+                    initialSeasonId: state.uri.queryParameters['season'],
+                    initialEpisodeId: state.uri.queryParameters['episode'],
+                  ),
                 ),
+                environment,
               ),
             ),
             GoRoute(
               path: '/play/:itemId',
-              builder: (context, state) {
-                final request = state.extra as PlayerOpenRequest?;
-                return Theme(
-                  data: AppTheme.dark(),
-                  child: TvPlayerPage(
-                    routeLeaseKey: state.pageKey,
-                    sourceRequest: request,
-                    itemId: state.pathParameters['itemId']!,
-                    mediaSourceId: request?.mediaSourceId,
-                    autoResume: request?.autoResume ?? true,
-                  ),
-                );
-              },
+              pageBuilder: (context, state) =>
+                  _routePage(context, state, (context, state) {
+                    final request = state.extra as PlayerOpenRequest?;
+                    return AppUiTheme(
+                      data: AppUiTheme.dark(),
+                      child: TvPlayerPage(
+                        routeLeaseKey: state.pageKey,
+                        sourceRequest: request,
+                        itemId: state.pathParameters['itemId']!,
+                        mediaSourceId: request?.mediaSourceId,
+                        autoResume: request?.autoResume ?? true,
+                      ),
+                    );
+                  }, environment),
             ),
           ],
+          pageBuilder: (context, state, child) => _shellPage(
+            context,
+            state,
+            child,
+            (context, state, child) => CatalogShell(auth: auth, child: child),
+          ),
         ),
       ],
       if (environment.isDesktop)
         ShellRoute(
           observers: [_ConnectFlowObserver(auth)],
-          builder: (context, state, child) {
-            return CatalogShell(
-              auth: auth,
-              child: AppShell(child: child),
-            );
-          },
           routes: [
             GoRoute(
               path: AppRoutes.connect,
@@ -458,6 +517,13 @@ GoRouter createAppRouter({
               ),
             ),
           ],
+          pageBuilder: (context, state, child) =>
+              _shellPage(context, state, child, (context, state, child) {
+                return CatalogShell(
+                  auth: auth,
+                  child: AppShell(child: child),
+                );
+              }),
         ),
     ],
   );
@@ -615,3 +681,28 @@ class _ConnectFlowObserver extends NavigatorObserver {
     _endFlow(route);
   }
 }
+
+// go_router 16 detects the bundled CupertinoApp by exact type. Explicit pages
+// retain route identity and transitions with the standalone design library.
+Page<void> _routePage(
+  BuildContext context,
+  GoRouterState state,
+  Widget Function(BuildContext, GoRouterState) builder,
+  PresentationEnvironment environment,
+) => environment.isDesktop || environment.isTv
+    ? _desktopPage(state, builder(context, state))
+    : PhoneMotion.fadeThroughPage(
+        context: context,
+        state: state,
+        child: builder(context, state),
+      );
+Page<void> _shellPage(
+  BuildContext context,
+  GoRouterState state,
+  Widget child,
+  Widget Function(BuildContext, GoRouterState, Widget) builder,
+) => NoTransitionPage<void>(
+  key: state.pageKey,
+  name: state.name,
+  child: builder(context, state, child),
+);

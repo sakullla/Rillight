@@ -1,7 +1,6 @@
 import 'dart:ui';
 
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 enum LiquidGlassKind { bar, panel, control, pill }
 
@@ -127,15 +126,15 @@ class LiquidGlass extends StatelessWidget {
   Widget build(BuildContext context) {
     final skipBlur =
         reduced(context) || !LiquidGlassBackdrop.enabledOf(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final radius = _radius;
     final fill = scheme.surface.withValues(
       alpha: skipBlur ? (tint ?? AppGlass.reducedTint) : (tint ?? _tint),
     );
     // 描边与高光随亮度取反:深色主题提白,浅色主题压深,两种亮度下都可见。
     final edge = scheme.brightness == Brightness.dark
-        ? Colors.white
-        : Colors.black;
+        ? const Color(0xffffffff)
+        : const Color(0xff000000);
     Widget body = child;
     if (padding != null) {
       body = Padding(padding: padding!, child: body);
@@ -181,7 +180,7 @@ class LiquidGlass extends StatelessWidget {
                       colors: [
                         edge.withValues(alpha: AppGlass.specular),
                         edge.withValues(alpha: 0.04),
-                        Colors.transparent,
+                        const Color(0x00000000),
                       ],
                     ),
                   ),

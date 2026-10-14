@@ -1,4 +1,5 @@
 import 'emby_socket.dart';
+
 import 'package:rillight/emby/emby_device.dart';
 import 'package:rillight/media_server/authentication.dart';
 import 'package:rillight/media_server/resources.dart';
@@ -7,6 +8,7 @@ import 'package:rillight/emby/emby_playback.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/emby/emby_codec.dart';
+
 import 'dart:io';
 import 'dart:typed_data';
 

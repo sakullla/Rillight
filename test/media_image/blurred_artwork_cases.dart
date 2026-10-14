@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -5,7 +7,7 @@ import '../helpers/widget_harness.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/media_image/blurred_artwork.dart';
 
@@ -14,11 +16,11 @@ Future<Uint8List> _source() async {
   final canvas = Canvas(recorder);
   canvas.drawRect(
     const Rect.fromLTWH(0, 0, 60, 60),
-    Paint()..color = Colors.red,
+    Paint()..color = const Color(0xffff3b30),
   );
   canvas.drawRect(
     const Rect.fromLTWH(60, 0, 60, 60),
-    Paint()..color = Colors.blue,
+    Paint()..color = const Color(0xff007aff),
   );
   final picture = recorder.endRecording();
   final image = await picture.toImage(120, 60);
@@ -32,7 +34,7 @@ Future<Uint8List> _source() async {
 }
 
 Widget _subject(Uint8List bytes, {double width = 1600, double height = 800}) =>
-    MaterialApp(
+    CupertinoTestApp(
       home: Center(
         child: SizedBox(
           width: width,
@@ -42,7 +44,7 @@ Widget _subject(Uint8List bytes, {double width = 1600, double height = 800}) =>
       ),
       localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
       builder: (context, child) => ui.AppUiTheme(
-        data: Theme.of(context).brightness == Brightness.dark
+        data: AppUiTheme.of(context).brightness == Brightness.dark
             ? ui.AppUiTheme.dark()
             : ui.AppUiTheme.light(),
         child: child ?? const SizedBox.shrink(),

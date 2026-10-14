@@ -1,9 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// 海报/缩略图底部的实色渐变简介带。
 ///
-/// 铺在图上,不走玻璃。底带用 [ColorScheme.scrim] + [AppScrim],保证白字
+/// 铺在图上,不走玻璃。底带用 [AppColorScheme.scrim] + [AppScrim],保证白字
 /// 在任意海报上对比度够。常驻用于详情海报与分集缩略图;目录墙悬停揭示
 /// 仍走卡片内 overlay,避免小海报始终盖字。
 class PosterOverviewBand extends StatelessWidget {
@@ -26,7 +25,7 @@ class PosterOverviewBand extends StatelessWidget {
     if (body.isEmpty) {
       return const SizedBox.shrink();
     }
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final highContrast = MediaQuery.highContrastOf(context);
     final scrim = theme.colorScheme.scrim;
     Color at(double alpha) => scrim.withValues(
@@ -35,7 +34,7 @@ class PosterOverviewBand extends StatelessWidget {
     final textStyle =
         style ??
         theme.textTheme.bodySmall?.copyWith(
-          color: Colors.white.withValues(alpha: 0.94),
+          color: const Color(0xffffffff).withValues(alpha: 0.94),
           height: 1.35,
         );
     return Align(

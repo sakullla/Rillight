@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/catalog_cache.dart';
@@ -11,6 +12,7 @@ import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/media_server/resources.dart';
 import 'package:rillight/media_server/serialization.dart';
 import 'package:rillight/player/playback_persistence.dart';
+
 import '../emby/fake_emby_server.dart';
 
 class _CatalogProvider implements MediaServerClient {
@@ -57,26 +59,23 @@ class _CatalogProvider implements MediaServerClient {
 }
 
 void main() {
-  test(
-    'catalog consumer calls an independent provider and preserves opaque IDs and capability reason',
-    () async {
-      final provider = _CatalogProvider();
-      final json = await executeCatalogRequest(
-        provider,
-        catalogItemsRequest(userId: 'u', parentId: 'library/opaque'),
-      );
-      final page = parseCatalogPage(json);
-      expect(provider.parent, 'library/opaque');
-      expect(page.items.single.id, 'not/a-guid?1');
-      expect(page.items.single.runtime, const Duration(minutes: 91));
-      expect(page.pagination.availability, CapabilityAvailability.restricted);
-      expect(page.pagination.reason, 'synthetic account limit');
-      await expectLater(
-        executeCatalogRequest(provider, const CatalogRequest('/Users/u/Items')),
-        throwsArgumentError,
-      );
-    },
-  );
+  test('catalog consumer calls an independent provider and preserves opaque IDs and capability reason', () async {
+    final provider = _CatalogProvider();
+    final json = await executeCatalogRequest(
+      provider,
+      catalogItemsRequest(userId: 'u', parentId: 'library/opaque'),
+    );
+    final page = parseCatalogPage(json);
+    expect(provider.parent, 'library/opaque');
+    expect(page.items.single.id, 'not/a-guid?1');
+    expect(page.items.single.runtime, const Duration(minutes: 91));
+    expect(page.pagination.availability, CapabilityAvailability.restricted);
+    expect(page.pagination.reason, 'synthetic account limit');
+    await expectLater(
+      executeCatalogRequest(provider, const CatalogRequest('/Users/u/Items')),
+      throwsArgumentError,
+    );
+  });
 
   test(
     'business serialization uses microseconds and keeps all catalog metadata',
@@ -132,10 +131,8 @@ void main() {
       );
       expect(timeline.locate(const Duration(seconds: 31)), isNull);
       expect(
-        MediaTimeline([
-          part('a', null),
-          part('b', const Duration(seconds: 20)),
-        ]).locate(const Duration(seconds: 12)),
+        MediaTimeline([part('a', null), part('b', const Duration(seconds: 20))])
+            .locate(const Duration(seconds: 12)),
         isNull,
       );
     },
@@ -182,78 +179,72 @@ void main() {
     });
   });
 
-  test(
-    'old Emby snapshot reads ticks while current snapshot records provider and microseconds',
-    () {
-      final old = PlaybackSessionSnapshot.fromJson({
-        'itemId': 'i',
-        'mediaSourceId': 'm',
-        'playSessionId': 'p',
-        'positionTicks': 12345678,
-        'baseUrl': 'https://synthetic.invalid',
-        'userId': 'u',
-        'playMethod': 'Transcode',
-      })!;
-      expect(old.serviceType, MediaServerType.emby);
-      expect(old.position, const Duration(microseconds: 1234567));
-      expect(old.toJson()['positionUs'], 1234567);
-      expect(old.toJson().containsKey('positionTicks'), isFalse);
-      expect(
-        PlaybackSessionSnapshot.fromJson({
-          ...old.toJson(),
-          'serviceType': 'unknown',
-        }),
-        isNull,
-      );
-    },
-  );
+  test('old Emby snapshot reads ticks while current snapshot records provider and microseconds', () {
+    final old = PlaybackSessionSnapshot.fromJson({
+      'itemId': 'i',
+      'mediaSourceId': 'm',
+      'playSessionId': 'p',
+      'positionTicks': 12345678,
+      'baseUrl': 'https://synthetic.invalid',
+      'userId': 'u',
+      'playMethod': 'Transcode',
+    })!;
+    expect(old.serviceType, MediaServerType.emby);
+    expect(old.position, const Duration(microseconds: 1234567));
+    expect(old.toJson()['positionUs'], 1234567);
+    expect(old.toJson().containsKey('positionTicks'), isFalse);
+    expect(
+      PlaybackSessionSnapshot.fromJson({
+        ...old.toJson(),
+        'serviceType': 'unknown',
+      }),
+      isNull,
+    );
+  });
 
-  test(
-    'Emby cleanup targets only its session and succeeds independently of stopped reporting',
-    () async {
-      final server = FakeEmbyServer();
-      final client = EmbyClient(
-        device: const ClientDeviceInfo(
-          clientName: 'test',
-          deviceName: 'test',
-          deviceId: 'device',
-          version: '1',
-        ),
-        dio: Dio()..httpClientAdapter = FakeEmbyAdapter([server]),
-      );
-      final info = await client.getPublicInfo(server.baseUrl);
-      final auth = await client.authenticateByName(
-        baseUrl: server.baseUrl,
-        username: 'alice',
-        password: 'correct-horse',
-        serverId: info.id,
-      );
-      client.attachSession(
-        baseUrl: server.baseUrl,
-        accessToken: auth.accessToken,
-        userId: auth.user.id,
-      );
-      final playback = await client.getPlaybackInfo(
-        itemId: 'movie-transcode',
-        startPosition: const Duration(seconds: 3),
-      );
-      expect(playback.resources, isNotNull);
-      final report = PlaybackReport(
-        itemId: 'movie-transcode',
-        mediaSourceId: playback.mediaSources.first.id,
-        playSessionId: playback.playSessionId,
-        playMethod: PlayMethod.transcode,
-        position: const Duration(seconds: 3),
-      );
-      server.stoppedStatus = 500;
-      await expectLater(client.stopPlayback(report), throwsA(isA<Exception>()));
-      expect(server.releasedPlaybackSessions, [playback.playSessionId]);
-      await client.releasePlayback(report);
-      expect(server.releasedPlaybackSessions, hasLength(1));
-      expect(
-        server.requests.where((r) => r.contains('ActiveEncodings')).single,
-        contains('PlaySessionId='),
-      );
-    },
-  );
+  test('Emby cleanup targets only its session and succeeds independently of stopped reporting', () async {
+    final server = FakeEmbyServer();
+    final client = EmbyClient(
+      device: const ClientDeviceInfo(
+        clientName: 'test',
+        deviceName: 'test',
+        deviceId: 'device',
+        version: '1',
+      ),
+      dio: Dio()..httpClientAdapter = FakeEmbyAdapter([server]),
+    );
+    final info = await client.getPublicInfo(server.baseUrl);
+    final auth = await client.authenticateByName(
+      baseUrl: server.baseUrl,
+      username: 'alice',
+      password: 'correct-horse',
+      serverId: info.id,
+    );
+    client.attachSession(
+      baseUrl: server.baseUrl,
+      accessToken: auth.accessToken,
+      userId: auth.user.id,
+    );
+    final playback = await client.getPlaybackInfo(
+      itemId: 'movie-transcode',
+      startPosition: const Duration(seconds: 3),
+    );
+    expect(playback.resources, isNotNull);
+    final report = PlaybackReport(
+      itemId: 'movie-transcode',
+      mediaSourceId: playback.mediaSources.first.id,
+      playSessionId: playback.playSessionId,
+      playMethod: PlayMethod.transcode,
+      position: const Duration(seconds: 3),
+    );
+    server.stoppedStatus = 500;
+    await expectLater(client.stopPlayback(report), throwsA(isA<Exception>()));
+    expect(server.releasedPlaybackSessions, [playback.playSessionId]);
+    await client.releasePlayback(report);
+    expect(server.releasedPlaybackSessions, hasLength(1));
+    expect(
+      server.requests.where((r) => r.contains('ActiveEncodings')).single,
+      contains('PlaySessionId='),
+    );
+  });
 }

@@ -1,12 +1,11 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// 空状态视图:图标 + 文案,可选主操作,风格与 [AppErrorView] 对齐。
 class AppEmptyView extends StatelessWidget {
   const AppEmptyView({
     super.key,
     required this.message,
-    this.icon = Icons.inbox_outlined,
+    this.icon = CupertinoIcons.tray,
     this.actionLabel,
     this.onAction,
     this.action,
@@ -24,10 +23,10 @@ class AppEmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
 
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -50,16 +49,19 @@ class AppEmptyView extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
+              style: AppUiTheme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: colorScheme.onSurfaceVariant),
             ),
             if (action != null) ...[
               const SizedBox(height: AppSpacing.md),
               action!,
             ] else if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: AppSpacing.md),
-              OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
+              AppButton(
+                onPressed: onAction,
+                variant: AppButtonVariant.outlined,
+                child: Text(actionLabel!),
+              ),
             ],
           ],
         ),

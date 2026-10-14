@@ -1,15 +1,15 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/media_server/models.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/ui/ui.dart' as app_ui;
 import 'package:rillight/media_image/media_image.dart';
 
@@ -22,11 +22,11 @@ void main() {
         final schemes = await tester.runAsync(
           () async => [
             for (final color in [
-              Colors.red,
-              Colors.blue,
-              Colors.green,
-              Colors.white,
-              Colors.black,
+              const Color(0xffff3b30),
+              const Color(0xff007aff),
+              const Color(0xff34c759),
+              const Color(0xffffffff),
+              const Color(0xff000000),
             ])
               await app_ui.contentPaletteFromBytes(
                 await _solidPng(color),
@@ -57,11 +57,13 @@ void main() {
     tester,
   ) async {
     ContentTheme.debugClear();
-    final bytes = (await tester.runAsync(() => _solidPng(Colors.red)))!;
+    final bytes = (await tester.runAsync(
+      () => _solidPng(const Color(0xffff3b30)),
+    ))!;
     late ArtworkColorScope report;
-    late ColorScheme scheme;
-    Widget page(String episode, String backdrop) => MaterialApp(
-      theme: AppTheme.dark(),
+    late AppColorScheme scheme;
+    Widget page(String episode, String backdrop) => CupertinoTestApp(
+      theme: AppUiTheme.dark(),
       home: ContentTheme(
         item: MediaItem(
           id: episode,
@@ -74,7 +76,7 @@ void main() {
         child: Builder(
           builder: (context) {
             report = ArtworkColorScope.maybeOf(context)!;
-            scheme = Theme.of(context).colorScheme;
+            scheme = AppUiTheme.of(context).colorScheme;
             return const SizedBox();
           },
         ),
@@ -84,11 +86,11 @@ void main() {
     report.report('episode-1', 'shared-backdrop', bytes);
     await _settlePalette(tester);
     final resolved = scheme;
-    expect(resolved.primary, isNot(AppTheme.dark().colorScheme.primary));
+    expect(resolved.primary, isNot(AppUiTheme.dark().colorScheme.primary));
     await tester.pumpWidget(page('episode-2', 'shared'));
     expect(scheme, resolved);
     await tester.pumpWidget(page('episode-2', 'replacement'));
-    expect(scheme, AppTheme.dark().colorScheme);
+    expect(scheme, AppUiTheme.dark().colorScheme);
   });
 
   testWidgets('artwork palette waits for scrolling to become idle', (
@@ -96,20 +98,22 @@ void main() {
   ) async {
     ContentTheme.debugClear();
     addTearDown(MediaImage.debugResetCacheConfiguration);
-    final red = (await tester.runAsync(() => _solidPng(Colors.red)))!;
+    final red = (await tester.runAsync(
+      () => _solidPng(const Color(0xffff3b30)),
+    ))!;
     late ArtworkColorScope report;
-    late ColorScheme scheme;
+    late AppColorScheme scheme;
     var builds = 0;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         home: ContentTheme(
           item: const MediaItem(id: 'poster', name: '', type: 'Movie'),
           child: Builder(
             builder: (context) {
               builds++;
               report = ArtworkColorScope.maybeOf(context)!;
-              scheme = Theme.of(context).colorScheme;
+              scheme = AppUiTheme.of(context).colorScheme;
               return const SizedBox();
             },
           ),
@@ -120,10 +124,10 @@ void main() {
     MediaImageCache.instance.markScrollActivity();
     report.report('poster', 'scroll-palette', red);
     await tester.pump(const Duration(milliseconds: 20));
-    expect(scheme, AppTheme.dark().colorScheme);
+    expect(scheme, AppUiTheme.dark().colorScheme);
     expect(builds, before);
     await _settlePalette(tester);
-    expect(scheme.primary, isNot(AppTheme.dark().colorScheme.primary));
+    expect(scheme.primary, isNot(AppUiTheme.dark().colorScheme.primary));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -135,33 +139,33 @@ void main() {
       final focus = FocusNode();
       addTearDown(focus.dispose);
       late ArtworkColorScope report;
-      late ColorScheme scheme;
+      late AppColorScheme scheme;
       var taps = 0;
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           theme: brightness == Brightness.dark
-              ? AppTheme.dark()
-              : AppTheme.light(),
-          home: Scaffold(
-            body: ContentTheme(
+              ? AppUiTheme.dark()
+              : AppUiTheme.light(),
+          home: CupertinoPageScaffold(
+            child: ContentTheme(
               item: const MediaItem(id: 'genre', name: '', type: 'Movie'),
               child: Builder(
                 builder: (context) {
                   report = ArtworkColorScope.maybeOf(context)!;
-                  scheme = Theme.of(context).colorScheme;
+                  scheme = AppUiTheme.of(context).colorScheme;
                   return Wrap(
                     children: [
-                      ActionChip(
+                      AppChoiceChip(
                         focusNode: focus,
                         label: const Text('动作冒险'),
-                        onPressed: () => taps++,
+                        onSelected: (_) => taps++,
                       ),
-                      ChoiceChip(
+                      AppChoiceChip(
                         label: const Text('已选择'),
                         selected: true,
                         onSelected: (_) {},
                       ),
-                      const ActionChip(label: Text('不可用')),
+                      const AppChoiceChip(label: Text('不可用')),
                     ],
                   );
                 },
@@ -172,11 +176,11 @@ void main() {
       );
       ShapeDecoration chipDecoration(String label) =>
           tester
-                  .widget<Ink>(
+                  .widget<AnimatedContainer>(
                     find
                         .descendant(
-                          of: find.widgetWithText(RawChip, label),
-                          matching: find.byType(Ink),
+                          of: find.widgetWithText(AppChoiceChip, label),
+                          matching: find.byType(AnimatedContainer),
                         )
                         .first,
                   )
@@ -192,7 +196,11 @@ void main() {
           .text
           .style!
           .color!;
-      for (final color in [Colors.red, Colors.blue, Colors.green]) {
+      for (final color in [
+        const Color(0xffff3b30),
+        const Color(0xff007aff),
+        const Color(0xff34c759),
+      ]) {
         final bytes = (await tester.runAsync(() => _solidPng(color)))!;
         report.report('genre', 'genre-$brightness-$color', bytes);
         await _settlePalette(tester);
@@ -202,7 +210,7 @@ void main() {
         expect(_contrast(labelColor('动作冒险'), background), greaterThan(4.5));
         expect(chipDecoration('已选择').color, scheme.primaryContainer);
         expect(labelColor('已选择'), scheme.onPrimaryContainer);
-        expect(chipDecoration('不可用').color, scheme.surfaceContainer);
+        expect(chipDecoration('不可用').color, scheme.surfaceContainerHigh);
         focus.requestFocus();
         await settle(tester);
         expect(
@@ -216,20 +224,22 @@ void main() {
       expect(taps, 1);
     });
 
-    for (final seed in [Colors.red, Colors.yellow, Colors.black]) {
+    for (final seed in [
+      const Color(0xffff3b30),
+      const Color(0xffffcc00),
+      const Color(0xff000000),
+    ]) {
       test('artwork $seed uses paired $brightness content tones', () {
         final base = brightness == Brightness.dark
-            ? AppTheme.dark().colorScheme
-            : AppTheme.light().colorScheme;
-        final artwork = ColorScheme.fromSeed(
-          seedColor: seed,
-          brightness: brightness,
+            ? AppUiTheme.dark().colorScheme
+            : AppUiTheme.light().colorScheme;
+        final composed = composeContentPalette(base, seed);
+        expect(
+          _contrast(composed.onPrimary, composed.primary),
+          greaterThan(4.5),
         );
-        final composed = composeContentScheme(base, artwork);
-        expect(composed.primary, artwork.primary);
-        expect(composed.onPrimary, artwork.onPrimary);
-        expect(composed.onSurface, artwork.onSurface);
-        expect(composed.onSurfaceVariant, artwork.onSurfaceVariant);
+        expect(composed.onSurface, base.onSurface);
+        expect(composed.onSurfaceVariant, base.onSurfaceVariant);
         expect(composed.error, base.error);
         final luminances = [
           composed.onSurfaceVariant.computeLuminance(),
@@ -248,20 +258,20 @@ void main() {
       tester,
     ) async {
       final base = brightness == Brightness.dark
-          ? AppTheme.dark().colorScheme
-          : AppTheme.light().colorScheme;
+          ? AppUiTheme.dark().colorScheme
+          : AppUiTheme.light().colorScheme;
       final schemes = await tester.runAsync(() async {
-        final output = <ColorScheme>[];
+        final output = <AppColorScheme>[];
         for (final color in [
-          Colors.red,
-          Colors.blue,
-          Colors.green,
-          Colors.white,
-          Colors.black,
-          Colors.grey,
+          const Color(0xffff3b30),
+          const Color(0xff007aff),
+          const Color(0xff34c759),
+          const Color(0xffffffff),
+          const Color(0xff000000),
+          const Color(0xff808080),
         ]) {
           output.add(
-            await contentSchemeFromBytes(await _solidPng(color), base),
+            await contentPaletteFromBytes(await _solidPng(color), base),
           );
         }
         return output;
@@ -270,7 +280,7 @@ void main() {
       expect(schemes.first.brightness, brightness);
       expect(schemes.first.primary.r, greaterThan(schemes.first.primary.b));
       expect(schemes.first.error, base.error);
-      expect(schemes.first.surfaceTint, Colors.transparent);
+      expect(schemes.first.surfaceTint, const Color(0x00000000));
       expect(
         schemes.first.onSurface.computeLuminance(),
         brightness == Brightness.dark ? greaterThan(.5) : lessThan(.1),
@@ -294,17 +304,20 @@ void main() {
     (tester) async {
       ContentTheme.debugClear();
       late ArtworkColorScope leftReport, rightReport;
-      late ColorScheme leftScheme, rightScheme, globalScheme;
-      final red = (await tester.runAsync(() => _solidPng(Colors.red)))!;
-      final blue = (await tester.runAsync(() => _solidPng(Colors.blue)))!;
-      Widget app(String id, Brightness brightness) => MaterialApp(
-        themeAnimationDuration: Duration.zero,
+      late AppColorScheme leftScheme, rightScheme, globalScheme;
+      final red = (await tester.runAsync(
+        () => _solidPng(const Color(0xffff3b30)),
+      ))!;
+      final blue = (await tester.runAsync(
+        () => _solidPng(const Color(0xff007aff)),
+      ))!;
+      Widget app(String id, Brightness brightness) => CupertinoTestApp(
         theme: brightness == Brightness.dark
-            ? AppTheme.dark()
-            : AppTheme.light(),
+            ? AppUiTheme.dark()
+            : AppUiTheme.light(),
         home: Builder(
           builder: (context) {
-            globalScheme = Theme.of(context).colorScheme;
+            globalScheme = AppUiTheme.of(context).colorScheme;
             return Row(
               children: [
                 Expanded(
@@ -313,7 +326,7 @@ void main() {
                     child: Builder(
                       builder: (context) {
                         leftReport = ArtworkColorScope.maybeOf(context)!;
-                        leftScheme = Theme.of(context).colorScheme;
+                        leftScheme = AppUiTheme.of(context).colorScheme;
                         return const SizedBox(height: 80);
                       },
                     ),
@@ -325,7 +338,7 @@ void main() {
                     child: Builder(
                       builder: (context) {
                         rightReport = ArtworkColorScope.maybeOf(context)!;
-                        rightScheme = Theme.of(context).colorScheme;
+                        rightScheme = AppUiTheme.of(context).colorScheme;
                         return const SizedBox(height: 80);
                       },
                     ),
@@ -347,11 +360,11 @@ void main() {
       await _settlePalette(tester);
       expect(leftScheme.surface, isNot(rightScheme.surface));
       expect(leftScheme.surface, isNot(globalScheme.surface));
-      expect(globalScheme, AppTheme.dark().colorScheme);
+      expect(globalScheme, AppUiTheme.dark().colorScheme);
       final oldLightCallback = leftReport;
       await tester.pumpWidget(app('new', Brightness.light));
       expect(leftScheme.brightness, Brightness.light);
-      expect(leftScheme.surface, AppTheme.light().colorScheme.surface);
+      expect(leftScheme.surface, AppUiTheme.light().colorScheme.surface);
       oldLightCallback.report('new', 'account-a/new/Primary/tag', blue);
       leftReport.report('new', 'account-a/new/Primary/new-tag', red);
       await _settlePalette(tester);

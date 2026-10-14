@@ -1,12 +1,13 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:animations/animations.dart';
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -19,7 +20,6 @@ import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -132,7 +132,7 @@ void main() {
     }
 
     String textOf(WidgetTester tester, Key key) {
-      return tester.widget<TextField>(find.byKey(key)).controller!.text;
+      return tester.widget<AppTextField>(find.byKey(key)).controller!.text;
     }
 
     Future<void> enterCredentials(
@@ -289,18 +289,15 @@ void main() {
     setUp(isolateImageCache);
 
     cases.test(
-      'dark theme exposes the mobile navigation bar theme from tokens',
+      'dark Cupertino theme exposes application navigation colors',
       () {
-        final theme = AppTheme.dark();
-        final nav = theme.navigationBarTheme;
-        expect(nav.elevation, 0);
-        expect(nav.surfaceTintColor, Colors.transparent);
+        final theme = AppUiTheme.dark();
+        expect(theme.cupertino.brightness, Brightness.dark);
+        expect(theme.cupertino.primaryColor, theme.colorScheme.primary);
         expect(
-          nav.backgroundColor!.a,
-          closeTo(AppMobileNav.backgroundAlpha, 1e-6),
+          theme.cupertino.barBackgroundColor,
+          theme.colorScheme.surfaceContainerLow,
         );
-        expect(nav.indicatorShape, isA<StadiumBorder>());
-        expect(nav.indicatorColor, isNotNull);
         // 选中 pill 动效档位对齐 AppMotion。
         expect(AppMobileNav.pillDuration, AppMotion.normal);
         expect(AppMobileCard.pressDuration, AppMotion.fast);
@@ -308,7 +305,10 @@ void main() {
         expect(AppMobileControls.bottomAlpha, AppScrim.playerBar);
         expect(AppMobileControls.bottomSoftAlpha, AppScrim.playerBarSoft);
         // 桌面 NavigationRail 主题保持原样,不受手机 token 影响。
-        expect(theme.navigationRailTheme, isNotNull);
+        expect(
+          theme.cupertino.scaffoldBackgroundColor,
+          theme.scaffoldBackgroundColor,
+        );
       },
     );
 
@@ -380,7 +380,7 @@ void main() {
           tester.getTopLeft(title).dy,
           greaterThan(tester.getBottomLeft(find.byKey(PhoneHero.openKey)).dy),
         );
-        expect(find.byTooltip('暂停轮播'), findsNothing);
+        expect(findAppTooltip('暂停轮播'), findsNothing);
         // 横幅只留标题和元信息行，不再叠剧情简介。
         expect(find.textContaining('剧情简介'), findsNothing);
 
@@ -465,10 +465,10 @@ void main() {
     ) async {
       Future<void> pumpPressable() {
         return tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.dark(),
-            home: Scaffold(
-              body: Center(
+          CupertinoTestApp(
+            theme: AppUiTheme.dark(),
+            home: CupertinoPageScaffold(
+              child: Center(
                 child: MobilePressable(
                   onTap: () {},
                   child: const SizedBox(width: 100, height: 100),
@@ -502,7 +502,7 @@ void main() {
               ),
             )
             .colorFilter,
-        const ColorFilter.mode(Colors.transparent, BlendMode.plus),
+        const ColorFilter.mode(Color(0x00000000), BlendMode.plus),
       );
 
       final pointer = await tester.startGesture(tester.getCenter(gesture));
@@ -551,7 +551,7 @@ void main() {
                 widget.tag ==
                     PhoneMotion.imageTag(
                       'movie-inception',
-                      preferBackdrop: false,
+                      preferBackdrop: true,
                     ),
           ),
           findsOneWidget,
@@ -564,6 +564,7 @@ void main() {
         await tester.tap(poster);
         await _homeUntil(tester, find.byKey(PhoneItemBanner.bannerKey));
         _expectSameImage(tester, posterImage, onstage: true);
+        await _homeSettle(tester);
         expect(
           find.byWidgetPredicate(
             (widget) =>
@@ -571,7 +572,7 @@ void main() {
                 widget.tag ==
                     PhoneMotion.imageTag(
                       'movie-inception',
-                      preferBackdrop: false,
+                      preferBackdrop: true,
                     ),
           ),
           findsWidgets,
@@ -585,7 +586,7 @@ void main() {
         expect(landed.maxWidth, posterImage.maxWidth);
         expect(landed.item.primaryImageTag, posterImage.item.primaryImageTag);
         final play = find.byKey(const Key('mobile-detail-play'));
-        expect(tester.widget<FilledButton>(play).onPressed, isNotNull);
+        expect(tester.widget<AppButton>(play).onPressed, isNotNull);
         expect(find.text('Inception'), findsWidgets);
         expect(tester.takeException(), isNull);
       },
@@ -646,7 +647,7 @@ void main() {
         expect(find.textContaining('2010'), findsOneWidget);
         expect(
           tester
-              .widget<FilledButton>(find.byKey(const Key('mobile-detail-play')))
+              .widget<AppButton>(find.byKey(const Key('mobile-detail-play')))
               .onPressed,
           isNotNull,
         );
@@ -673,7 +674,7 @@ void main() {
     );
 
     cases.testWidgets(
-      'detail, shelf and mine pushes run material motion page transitions',
+      'detail, shelf and mine pushes run neutral page transitions',
       (tester) async {
         final (router, _) = await _openPhone(
           tester,
@@ -686,7 +687,13 @@ void main() {
         await tester.tap(find.byKey(PhoneHero.openKey));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 80));
-        expect(find.byType(FadeScaleTransition), findsNothing);
+        expect(
+          find.ancestor(
+            of: find.byType(MobileDetailPage),
+            matching: find.byType(ScaleTransition),
+          ),
+          findsNothing,
+        );
         final detailSlide = find.ancestor(
           of: find.byType(MobileDetailPage),
           matching: find.byType(SlideTransition),
@@ -697,9 +704,8 @@ void main() {
           inExclusiveRange(0, 0.025),
         );
         expect(
-          ModalRoute.of(
-            tester.element(find.byType(MobileDetailPage)),
-          )!.transitionDuration,
+          ModalRoute.of(tester.element(find.byType(MobileDetailPage)))!
+              .transitionDuration,
           PhoneMotion.pageTransition,
         );
         await _homeSettle(tester);
@@ -711,18 +717,22 @@ void main() {
         await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 80));
+        final phoneMinePageSlide = find.ancestor(
+          of: find.byType(PhoneMinePage),
+          matching: find.byType(SlideTransition),
+        );
+        expect(phoneMinePageSlide, findsWidgets);
         expect(
           tester
-              .widget<SharedAxisTransition>(
-                find.byType(SharedAxisTransition).last,
-              )
-              .transitionType,
-          SharedAxisTransitionType.vertical,
+              .widget<SlideTransition>(phoneMinePageSlide.first)
+              .position
+              .value
+              .dy,
+          inExclusiveRange(0, .04),
         );
         expect(
-          ModalRoute.of(
-            tester.element(find.byType(PhoneMinePage)),
-          )!.transitionDuration,
+          ModalRoute.of(tester.element(find.byType(PhoneMinePage)))!
+              .transitionDuration,
           PhoneMotion.pageTransition,
         );
         await _homeSettle(tester);
@@ -735,13 +745,18 @@ void main() {
         await tester.tap(more);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 80));
+        final phoneShelfPageSlide = find.ancestor(
+          of: find.byType(PhoneShelfPage),
+          matching: find.byType(SlideTransition),
+        );
+        expect(phoneShelfPageSlide, findsWidgets);
         expect(
           tester
-              .widget<SharedAxisTransition>(
-                find.byType(SharedAxisTransition).last,
-              )
-              .transitionType,
-          SharedAxisTransitionType.vertical,
+              .widget<SlideTransition>(phoneShelfPageSlide.first)
+              .position
+              .value
+              .dy,
+          inExclusiveRange(0, .04),
         );
         expect(find.byType(PhoneShelfPage), findsOneWidget);
         await _homeSettle(tester);
@@ -761,9 +776,8 @@ void main() {
       // Source resolution remains async with reduced route motion.
       await _homeSettle(tester);
       expect(
-        ModalRoute.of(
-          tester.element(find.byType(MobileDetailPage)),
-        )!.transitionDuration,
+        ModalRoute.of(tester.element(find.byType(MobileDetailPage)))!
+            .transitionDuration,
         Duration.zero,
       );
       await _homeSettle(tester);
@@ -774,9 +788,8 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
       await tester.pump();
       expect(
-        ModalRoute.of(
-          tester.element(find.byType(PhoneMinePage)),
-        )!.transitionDuration,
+        ModalRoute.of(tester.element(find.byType(PhoneMinePage)))!
+            .transitionDuration,
         Duration.zero,
       );
       await _homeSettle(tester);
@@ -1120,7 +1133,7 @@ void main() {
           findsNothing,
         );
         // 下拉刷新容器保留。
-        expect(find.byType(RefreshIndicator), findsOneWidget);
+        expect(find.byType(AppRefresh), findsOneWidget);
 
         await tester.tap(find.byKey(MobileEmptyState.actionKey));
         await tester.pump();
@@ -1258,7 +1271,7 @@ void main() {
         expect(find.byType(AggregationPage), findsNothing);
         expect(find.byType(ShelfGridPage), findsOneWidget);
         expect(find.byType(PhoneShelfPage), findsNothing);
-        // Desktop routes remain independent of phone Material Motion.
+        // Desktop routes remain independent of phone transitions.
         final desktopShelfRoute = ModalRoute.of(
           tester.element(find.byType(ShelfGridPage)),
         )!;
@@ -1338,7 +1351,8 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (context, state) => const Scaffold(body: SizedBox()),
+            builder: (context, state) =>
+                const CupertinoPageScaffold(child: SizedBox()),
           ),
           GoRoute(
             path: '/item/:itemId',
@@ -1376,11 +1390,14 @@ void main() {
                 snapshotStore: MemoryPlaybackSessionSnapshotStore(),
                 settingsStore: MemoryPlayerSettingsStore(),
               ),
-              child: MaterialApp.router(
+              child: CupertinoTestApp.router(
                 locale: const Locale('zh', 'CN'),
                 supportedLocales: AppLocalizations.supportedLocales,
-                localizationsDelegates: AppLocalizations.localizationsDelegates,
-                theme: AppTheme.dark(),
+                localizationsDelegates: [
+                  AppLocalizations.delegate,
+                  ...GlobalCupertinoLocalizations.delegates,
+                ],
+                theme: AppUiTheme.dark(),
                 routerConfig: router,
               ),
             ),
@@ -1472,14 +1489,14 @@ void main() {
         );
         expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
         expect(
-          find.byWidgetPredicate((widget) => widget is DropdownButton),
+          find.byWidgetPredicate((widget) => widget is AppDropdown),
           findsNothing,
         );
         final play = find.byKey(const Key('mobile-detail-play'));
         expect(
           tester
-              .widget<Tooltip>(
-                find.ancestor(of: play, matching: find.byType(Tooltip)),
+              .widget<AppTooltip>(
+                find.ancestor(of: play, matching: find.byType(AppTooltip)),
               )
               .message,
           contains('The One with the Resume'),
@@ -1512,7 +1529,7 @@ void main() {
         expect(find.text('Halfway through season two.'), findsOneWidget);
         expect(find.byKey(CatalogKeys.seriesLink), findsOneWidget);
         expect(find.byKey(CatalogKeys.viewSeries), findsNothing);
-        expect(find.byTooltip('下一集'), findsOneWidget);
+        expect(findAppTooltip('下一集'), findsOneWidget);
         await tester.tap(find.byKey(CatalogKeys.nextEpisode));
         await settle(tester);
         expect(find.text('The next night.'), findsOneWidget);
@@ -1542,13 +1559,13 @@ void main() {
         final (router, backend) = await start(tester, server, width: 412);
         await openItem(tester, router, 'movie-inception');
 
-        expect(find.byType(ChoiceChip), findsNothing);
+        expect(find.byType(AppChoiceChip), findsNothing);
         expect(
-          find.byWidgetPredicate((widget) => widget is DropdownButton),
+          find.byWidgetPredicate((widget) => widget is AppDropdown),
           findsNothing,
         );
-        expect(find.byTooltip('继续播放'), findsOneWidget);
-        expect(find.byTooltip('从头播放'), findsOneWidget);
+        expect(findAppTooltip('继续播放'), findsOneWidget);
+        expect(findAppTooltip('从头播放'), findsOneWidget);
         expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
 
         await tester.tap(find.byKey(const Key('mobile-detail-play')));
@@ -1566,9 +1583,8 @@ void main() {
         await settle(tester);
         expect(backend.position, const Duration(minutes: 7));
         final extra =
-            GoRouterState.of(
-                  tester.element(find.byType(MobilePlayerPage)),
-                ).extra
+            GoRouterState.of(tester.element(find.byType(MobilePlayerPage)))
+                    .extra
                 as PlayerOpenRequest;
         expect(extra.startPosition, Duration(microseconds: (7 * minute) ~/ 10));
         await closePlayer(tester);
@@ -1593,7 +1609,7 @@ void main() {
         expect(find.text('演职员'), findsNothing);
         expect(find.text('章节'), findsNothing);
         expect(find.text('演员'), findsNothing);
-        expect(find.byType(ChoiceChip), findsNothing);
+        expect(find.byType(AppChoiceChip), findsNothing);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -1608,7 +1624,7 @@ void main() {
         await tester.ensureVisible(find.byKey(CatalogKeys.playedToggle));
         await tester.tap(find.byKey(CatalogKeys.playedToggle));
         await settle(tester);
-        expect(find.byTooltip('标记未看'), findsOneWidget);
+        expect(findAppTooltip('标记未看'), findsOneWidget);
         expect(
           server.items
               .firstWhere((item) => item.id == 'movie-inception')
@@ -1631,7 +1647,7 @@ void main() {
         await tester.ensureVisible(find.byKey(CatalogKeys.playedToggle));
         await tester.tap(find.byKey(CatalogKeys.playedToggle));
         await settle(tester);
-        expect(find.byTooltip('标记已看'), findsOneWidget);
+        expect(findAppTooltip('标记已看'), findsOneWidget);
 
         await tester.binding.handlePopRoute();
         await settle(tester);
@@ -1799,8 +1815,8 @@ void main() {
         final play = find.byKey(const Key('mobile-detail-play'));
         expect(
           tester
-              .widget<Tooltip>(
-                find.ancestor(of: play, matching: find.byType(Tooltip)),
+              .widget<AppTooltip>(
+                find.ancestor(of: play, matching: find.byType(AppTooltip)),
               )
               .message,
           contains('Far Resume'),
@@ -2236,7 +2252,7 @@ void main() {
         final before = _itemRequests(lineA);
         await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
         final option = find.byKey(PhoneMinePage.lineOptionKey(target.id));
-        expect(tester.widget<ListTile>(option).selected, isFalse);
+        expect(tester.widget<AppListTile>(option).selected, isFalse);
         await _mineTap(tester, option);
         await _mineUntil(
           tester,
@@ -2252,7 +2268,7 @@ void main() {
         await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
         expect(
           tester
-              .widget<ListTile>(
+              .widget<AppListTile>(
                 find.byKey(PhoneMinePage.lineOptionKey(target.id)),
               )
               .selected,
@@ -2380,18 +2396,28 @@ void main() {
         expect(find.text('留空使用官方源'), findsOneWidget);
         expect(
           tester
-              .widget<TextField>(find.byKey(SettingsPage.danmakuTokenFieldKey))
+              .widget<CupertinoTextField>(
+                find.descendant(
+                  of: find.byKey(SettingsPage.danmakuTokenFieldKey),
+                  matching: find.byType(CupertinoTextField),
+                ),
+              )
               .obscureText,
           isTrue,
         );
         await _mineTap(tester, find.byKey(SettingsPage.tokenVisibilityKey));
         expect(
           tester
-              .widget<TextField>(find.byKey(SettingsPage.danmakuTokenFieldKey))
+              .widget<CupertinoTextField>(
+                find.descendant(
+                  of: find.byKey(SettingsPage.danmakuTokenFieldKey),
+                  matching: find.byType(CupertinoTextField),
+                ),
+              )
               .obscureText,
           isFalse,
         );
-        expect(find.byTooltip('隐藏令牌'), findsOneWidget);
+        expect(findAppTooltip('隐藏令牌'), findsOneWidget);
 
         await _enter(
           tester,
@@ -2589,7 +2615,12 @@ void main() {
         _librarySectionOrder(tester),
         isNot(contains('home-section-library-view-movies')),
       );
-      await tester.tap(find.byType(NavigationDestination).at(1));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CupertinoTabBar),
+          matching: find.text('聚合'),
+        ),
+      );
       await _homeSettle(tester);
       expect(find.byType(AggregationPage), findsOneWidget);
       await tester.scrollUntilVisible(
@@ -2603,7 +2634,12 @@ void main() {
             .first,
       );
       expect(find.text('Inception'), findsWidgets);
-      await tester.tap(find.byType(NavigationDestination).at(0));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CupertinoTabBar),
+          matching: find.text('首页'),
+        ),
+      );
       await _homeSettle(tester);
 
       // 重新打开:分栏按编辑后的顺序恢复。
@@ -2634,10 +2670,13 @@ void main() {
 Widget _harness(AuthController auth, {int generation = 0}) {
   return AuthScope(
     controller: auth,
-    child: MaterialApp(
+    child: CupertinoTestApp(
       locale: const Locale('zh', 'CN'),
       supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
       home: AndroidConnectPage(key: ValueKey(generation)),
     ),
   );
@@ -2729,14 +2768,14 @@ List<String> _librarySectionOrder(WidgetTester tester) {
   final context = tester.element(list);
   return [
     for (var index = 0; index < delegate.childCount!; index++)
-      if (delegate.builder(context, index)?.key case ValueKey<String>(
-        value: final value,
-      ) when value.startsWith('home-section-library-'))
+      if (delegate.builder(context, index)?.key
+          case ValueKey<String>(value: final value)
+          when value.startsWith('home-section-library-'))
         value,
   ];
 }
 
-/// 长按拖住编辑行手柄上移一格,触发 ReorderableListView 的 onReorder。
+/// 长按拖住编辑行手柄上移一格,触发 ReorderableList 的 onReorder。
 Future<void> _dragSectionUp(WidgetTester tester, Finder tile) async {
   final handle = find.descendant(
     of: tile,
@@ -2760,11 +2799,14 @@ void _usePhoneSurface(WidgetTester tester) {
 }
 
 Widget _scriptedApp(CatalogController catalog, {required GoRouter router}) {
-  return MaterialApp.router(
-    theme: AppTheme.dark(),
+  return CupertinoTestApp.router(
+    theme: AppUiTheme.dark(),
     locale: const Locale('zh'),
     supportedLocales: AppLocalizations.supportedLocales,
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
     routerConfig: router,
   );
 }
@@ -2786,7 +2828,7 @@ GoRouter _router(CatalogController catalog) {
             path: '/item/:itemId',
             builder: (context, state) {
               final id = state.pathParameters['itemId']!;
-              return Scaffold(body: Text('详情 $id'));
+              return CupertinoPageScaffold(child: Text('详情 $id'));
             },
           ),
           GoRoute(
@@ -2972,12 +3014,19 @@ Future<void> _pumpMotionHome(
     routes: [
       GoRoute(
         path: AppRoutes.home,
-        builder: (context, state) => const PhoneHome(),
+        pageBuilder: (context, state) => PhoneMotion.fadeThroughPage(
+          context: context,
+          state: state,
+          child: const PhoneHome(),
+        ),
       ),
       GoRoute(
         path: '/item/:itemId',
-        builder: (context, state) =>
-            MobileDetailPage(itemId: state.pathParameters['itemId']!),
+        pageBuilder: (context, state) => PhoneMotion.detailPage(
+          context: context,
+          state: state,
+          child: MobileDetailPage(itemId: state.pathParameters['itemId']!),
+        ),
       ),
     ],
   );
@@ -2994,11 +3043,14 @@ Future<void> _pumpMotionHome(
       controller: auth,
       child: CatalogScope(
         controller: catalog,
-        child: MaterialApp.router(
-          theme: AppTheme.dark(),
+        child: CupertinoTestApp.router(
+          theme: AppUiTheme.dark(),
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           routerConfig: router,
         ),
       ),
@@ -3018,10 +3070,15 @@ Future<void> _homeUntil(WidgetTester tester, Finder finder) async {
 }
 
 Future<void> _filterUnwatched(WidgetTester tester) async {
+  final noticeClose = findAppTooltip('关闭提示');
+  if (noticeClose.evaluate().isNotEmpty) {
+    await tester.tap(noticeClose);
+    await settle(tester);
+  }
   await tester.tap(find.byKey(const Key('phone-library-filter')));
   await settle(tester);
   await _libraryTap(tester, const Key('phone-library-watch-IsUnplayed'));
-  await tester.tap(find.byKey(const Key('phone-library-apply')));
+  await _libraryTap(tester, const Key('phone-library-apply'));
   await settle(tester);
 }
 
@@ -3183,10 +3240,13 @@ Future<_Harness> _start(
     await tester.pumpWidget(const SizedBox.shrink());
   });
   await tester.pumpWidget(
-    MaterialApp.router(
-      theme: AppTheme.dark(),
+    CupertinoTestApp.router(
+      theme: AppUiTheme.dark(),
       locale: const Locale('zh'),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
       builder: (context, child) {
@@ -3262,12 +3322,15 @@ Future<void> _pump(
         bindings: PlayerBindings(
           settingsStore: store ?? MemoryPlayerSettingsStore(),
         ),
-        child: MaterialApp(
-          theme: AppTheme.dark(),
+        child: CupertinoTestApp(
+          theme: AppUiTheme.dark(),
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          home: Scaffold(body: page),
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          home: CupertinoPageScaffold(child: page),
         ),
       ),
     ),
@@ -3290,7 +3353,7 @@ Future<void> _mineSettle(WidgetTester tester) async {
 }
 
 Finder _mineScrollable(WidgetTester tester) {
-  // 首个为 ListView 自身纵向 Scrollable;其后是 TextField 横向滚动条。
+  // 首个为 ListView 自身纵向 Scrollable;其后是 AppTextField 横向滚动条。
   return find
       .descendant(
         of: find.byKey(const PageStorageKey('mobile-mine-scroll')),

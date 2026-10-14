@@ -1,4 +1,5 @@
 import '../helpers/fake_time.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -36,9 +37,7 @@ class _RecordingDiskStore implements CatalogDiskStore, PrefixCatalogDiskStore {
 }
 
 class _FakeConnection implements EmbySocketConnection {
-  _FakeConnection({void Function()? onClose}) : _onClose = onClose;
-
-  final void Function()? _onClose;
+  _FakeConnection();
   final StreamController<String> _messages = StreamController<String>();
   bool closed = false;
 
@@ -51,7 +50,6 @@ class _FakeConnection implements EmbySocketConnection {
       return;
     }
     closed = true;
-    _onClose?.call();
     await _messages.close();
   }
 

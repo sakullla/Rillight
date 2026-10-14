@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/library/browse_controller.dart';
 import 'package:rillight/library/detail_controller.dart';
 import 'package:rillight/search/search_controller.dart';
+
 import '../emby/fake_emby_server.dart';
 
 class _SlowReadStore implements CatalogDiskStore {

@@ -1,18 +1,20 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
+
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -84,13 +86,16 @@ void main() {
   }
 
   Widget wrap(AuthController auth, Widget child) {
-    return MaterialApp(
-      theme: AppTheme.dark(),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+    return CupertinoTestApp(
+      theme: AppUiTheme.dark(),
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       home: AuthScope(
         controller: auth,
-        child: Scaffold(body: Center(child: child)),
+        child: CupertinoPageScaffold(child: Center(child: child)),
       ),
     );
   }
@@ -182,7 +187,7 @@ void main() {
         final recorder = ui.PictureRecorder();
         Canvas(recorder).drawRect(
           const Rect.fromLTWH(0, 0, 32, 32),
-          Paint()..color = Colors.green,
+          Paint()..color = const Color(0xff34c759),
         );
         final picture = recorder.endRecording();
         final image = await picture.toImage(32, 32);
@@ -218,14 +223,14 @@ void main() {
         tag: 'valid-primary',
         maxWidth: 120,
       );
-      late ColorScheme displayed;
+      late AppColorScheme displayed;
       Widget subject() => wrap(
         auth,
         ContentTheme(
           item: item,
           child: Builder(
             builder: (context) {
-              displayed = Theme.of(context).colorScheme;
+              displayed = AppUiTheme.of(context).colorScheme;
               return MediaImage(
                 item: item,
                 preferBackdrop: true,
@@ -239,7 +244,7 @@ void main() {
         ),
       );
       final expected = (await tester.runAsync(
-        () => contentSchemeFromBytes(good, AppTheme.dark().colorScheme),
+        () => contentPaletteFromBytes(good, AppUiTheme.dark().colorScheme),
       ))!;
       Future<void> verify() async {
         await tester.pumpWidget(subject());
@@ -252,7 +257,7 @@ void main() {
         expect(find.byType(Image), findsOneWidget);
         expect(find.byType(PosterPlaceholder), findsNothing);
         expect(displayed.surface, expected.surface);
-        expect(displayed.surface, isNot(AppTheme.dark().colorScheme.surface));
+        expect(displayed.surface, isNot(AppUiTheme.dark().colorScheme.surface));
         expect(tester.takeException(), isNull);
         expect(disk.files.containsKey(badKey), isFalse);
       }
@@ -440,7 +445,7 @@ void main() {
       RepaintBoundary(
         key: boundaryKey,
         child: ColoredBox(
-          color: Colors.black,
+          color: const Color(0xff000000),
           child: MediaImage(item: withTag, width: 120, height: 180, fit: fit),
         ),
       ),
@@ -1543,7 +1548,7 @@ void main() {
 
   testWidgets('scroll notifications mark the image cache busy', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: SizedBox(
           height: 200,
           child: MediaImageScrollListener(

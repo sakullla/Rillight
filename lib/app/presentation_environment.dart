@@ -42,9 +42,8 @@ class PresentationEnvironment {
   }
 
   static Future<bool> _detectTv() async {
-    final result = await const MethodChannel(
-      'com.rillight/environment',
-    ).invokeMethod<bool>('isTelevision');
+    final result = await const MethodChannel('com.rillight/environment')
+        .invokeMethod<bool>('isTelevision');
     if (result == null) throw StateError('Missing device presentation');
     return result;
   }

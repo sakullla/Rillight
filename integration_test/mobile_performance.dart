@@ -14,7 +14,7 @@ import 'dart:math';
 import 'dart:ui' show FramePhase, FrameTiming;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/main.dart' as production;
@@ -289,10 +289,9 @@ class _PageProbe {
   }
 
   bool _enabled(Widget widget) => switch (widget) {
-    ButtonStyleButton(:final onPressed) => onPressed != null,
-    IconButton(:final onPressed) => onPressed != null,
+    AppButton(:final onPressed) => onPressed != null,
+    AppIconButton(:final onPressed) => onPressed != null,
     TvAction(:final onPressed) => onPressed != null,
-    InkWell(:final onTap) => onTap != null,
     GestureDetector(:final onTap) => onTap != null,
     _ => true,
   };

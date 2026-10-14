@@ -1,17 +1,18 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -379,12 +380,15 @@ void main() {
   testWidgets('line address dialog edits an address only', (tester) async {
     String? result;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         home: Builder(
@@ -397,7 +401,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -432,12 +436,15 @@ void main() {
   testWidgets('line address dialog prefills and can cancel', (tester) async {
     String? result = 'untouched';
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         home: Builder(
@@ -453,7 +460,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -524,16 +531,19 @@ void main() {
     expect(legacy.normalizedUserAgent, 'OldUA/2');
 
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
-        home: Scaffold(
-          body: ServerSwitcherDialog(
+        home: CupertinoPageScaffold(
+          child: ServerSwitcherDialog(
             servers: [
               saved('server-id-1', '家庭影院', ['http://emby.test:8096']),
               legacy,
@@ -552,7 +562,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -739,22 +749,25 @@ void main() {
         controller: auth,
         child: PlayerScope(
           bindings: PlayerBindings(settingsStore: MemoryPlayerSettingsStore()),
-          child: MaterialApp(
-            theme: AppTheme.dark(),
+          child: CupertinoTestApp(
+            theme: AppUiTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
-            home: Scaffold(
-              body: CatalogScope(
+            home: CupertinoPageScaffold(
+              child: CatalogScope(
                 controller: catalog,
                 child: const PhoneMinePage(),
               ),
             ),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),

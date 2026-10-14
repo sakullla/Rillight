@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
@@ -11,7 +13,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -190,8 +192,8 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (context, _) => Scaffold(
-              body: Center(
+            builder: (context, _) => CupertinoPageScaffold(
+              child: Center(
                 child: scopeServerPosters(
                   account: account,
                   serverId: 'b',
@@ -212,8 +214,8 @@ void main() {
               itemId: state.pathParameters['id']!,
               command: state.extra as PlayerHostOpenItemCommand,
               showComparison: false,
-              child: Scaffold(
-                body: Center(
+              child: CupertinoPageScaffold(
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -232,15 +234,18 @@ void main() {
           controller: auth,
           child: PlayerWindowScope(
             host: host,
-            child: MaterialApp.router(
+            child: CupertinoTestApp.router(
               routerConfig: router,
               localizationsDelegates: [
-                ...AppLocalizations.localizationsDelegates,
+                ...[
+                  AppLocalizations.delegate,
+                  ...GlobalCupertinoLocalizations.delegates,
+                ],
                 ui.GlobalCupertinoLocalizations.delegate,
               ],
               supportedLocales: AppLocalizations.supportedLocales,
               builder: (context, child) => ui.AppUiTheme(
-                data: Theme.of(context).brightness == Brightness.dark
+                data: AppUiTheme.of(context).brightness == Brightness.dark
                     ? ui.AppUiTheme.dark()
                     : ui.AppUiTheme.light(),
                 child: child ?? const SizedBox.shrink(),
@@ -368,9 +373,12 @@ void main() {
       final showLatePoster = ValueNotifier(false);
       addTearDown(showLatePoster.dispose);
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
@@ -424,7 +432,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),

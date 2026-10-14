@@ -1,16 +1,17 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -310,20 +311,23 @@ void main() {
   ) async {
     var requested = false;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
-        home: Scaffold(
-          body: Builder(
+        home: CupertinoPageScaffold(
+          child: Builder(
             builder: (context) => Center(
               child: ui.AppButton(
                 key: const Key('open-switcher'),
-                onPressed: () => showDialog<void>(
+                onPressed: () => showAppDialog<void>(
                   context: context,
                   builder: (dialogContext) => ServerSwitcherDialog(
                     servers: [
@@ -362,7 +366,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -396,17 +400,20 @@ void main() {
         controller: auth,
         child: PlayerScope(
           bindings: PlayerBindings(settingsStore: MemoryPlayerSettingsStore()),
-          child: MaterialApp(
-            theme: AppTheme.dark(),
+          child: CupertinoTestApp(
+            theme: AppUiTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
             home: const PhoneMinePage(),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),
@@ -547,20 +554,23 @@ Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
   await tester.pumpWidget(
     PresentationScope(
       environment: PresentationEnvironment.tv,
-      child: MaterialApp(
-        theme: AppTheme.dark(),
+      child: CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
-        home: Scaffold(
-          body: Builder(
+        home: CupertinoPageScaffold(
+          child: Builder(
             builder: (context) => Center(
               child: ui.AppButton(
                 key: const Key('open-change-password'),
-                onPressed: () => showDialog<void>(
+                onPressed: () => showAppDialog<void>(
                   context: context,
                   builder: (_) => ChangePasswordDialog(auth: auth),
                 ),
@@ -570,7 +580,7 @@ Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -584,20 +594,23 @@ Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
 
 Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {
   await tester.pumpWidget(
-    MaterialApp(
-      theme: AppTheme.dark(),
+    CupertinoTestApp(
+      theme: AppUiTheme.dark(),
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: [
-        ...AppLocalizations.localizationsDelegates,
+        ...[
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         ui.GlobalCupertinoLocalizations.delegate,
       ],
-      home: Scaffold(
-        body: Builder(
+      home: CupertinoPageScaffold(
+        child: Builder(
           builder: (context) => Center(
             child: ui.AppButton(
               key: const Key('open-change-password'),
-              onPressed: () => showDialog<void>(
+              onPressed: () => showAppDialog<void>(
                 context: context,
                 builder: (_) => ChangePasswordDialog(auth: auth),
               ),
@@ -607,7 +620,7 @@ Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {
         ),
       ),
       builder: (context, child) => ui.AppUiTheme(
-        data: Theme.of(context).brightness == Brightness.dark
+        data: AppUiTheme.of(context).brightness == Brightness.dark
             ? ui.AppUiTheme.dark()
             : ui.AppUiTheme.light(),
         child: child ?? const SizedBox.shrink(),

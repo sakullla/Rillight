@@ -4,7 +4,7 @@ import 'package:rillight/media_server/device.dart';
 
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations_zh.dart';

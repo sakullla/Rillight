@@ -1,10 +1,12 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -27,7 +29,6 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/library/poster_card.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -336,14 +337,17 @@ void main() {
     final hidden = ValueNotifier(true);
     addTearDown(hidden.dispose);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh', 'CN'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        theme: AppTheme.dark(),
+        theme: AppUiTheme.dark(),
         home: ValueListenableBuilder<bool>(
           valueListenable: hidden,
           builder: (context, value, _) => Offstage(
@@ -361,7 +365,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -385,16 +389,19 @@ void main() {
   ) async {
     var retried = 0;
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh', 'CN'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: MediaShelf(
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: MediaShelf(
             shelfId: 'latest-movies',
             title: '最近电影',
             items: const [],
@@ -411,7 +418,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -423,8 +430,8 @@ void main() {
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.byType(AppEmptyView), findsNothing);
     expect(find.text('货架加载失败'), findsOneWidget);
-    expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.inbox_outlined), findsNothing);
+    expect(find.byIcon(CupertinoIcons.exclamationmark_circle), findsOneWidget);
+    expect(find.byIcon(CupertinoIcons.tray), findsNothing);
     expect(find.text('重试'), findsOneWidget);
     expect(find.byKey(homeRefreshKey), findsOneWidget);
     await tester.tap(find.text('重试'));
@@ -443,16 +450,19 @@ void main() {
       Future<void> pumpShelf(Size size, int count) async {
         tester.view.physicalSize = size;
         await tester.pumpWidget(
-          MaterialApp(
+          CupertinoTestApp(
             locale: const Locale('zh', 'CN'),
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
             supportedLocales: AppLocalizations.supportedLocales,
-            theme: AppTheme.dark(),
-            home: Scaffold(
-              body: MediaShelf(
+            theme: AppUiTheme.dark(),
+            home: CupertinoPageScaffold(
+              child: MediaShelf(
                 shelfId: 'peek',
                 title: '最近电影',
                 wide: true,
@@ -464,7 +474,7 @@ void main() {
               ),
             ),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),

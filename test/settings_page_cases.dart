@@ -1,7 +1,9 @@
+import 'helpers/cupertino_test_app.dart';
 import 'helpers/widget_harness.dart';
 import 'helpers/settle.dart';
 import 'helpers/image_cache_fixture.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/settings/settings_page.dart';
@@ -23,12 +25,15 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        home: Scaffold(
-          body: SettingsPage(settingsStore: store, platform: platform),
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
+        home: CupertinoPageScaffold(
+          child: SettingsPage(settingsStore: store, platform: platform),
         ),
       ),
     );
@@ -164,8 +169,7 @@ void main() {
       of: find.byKey(const ValueKey('settings-section-播放')),
       matching: find.byWidgetPredicate(
         (w) =>
-            w is SwitchListTile &&
-            w.key != const Key('phone-subtitle-original'),
+            w is AppSwitchTile && w.key != const Key('phone-subtitle-original'),
       ),
     );
     expect(switches, findsNWidgets(2));
@@ -180,8 +184,8 @@ void main() {
     await expandSection(tester, '播放');
     expect(find.byKey(SettingsPage.diskCacheLimitKey), findsNothing);
     await expandSection(tester, '播放');
-    expect(tester.widget<SwitchListTile>(switches.first).value, isFalse);
-    expect(tester.widget<SwitchListTile>(switches.last).value, isFalse);
+    expect(tester.widget<AppSwitchTile>(switches.first).value, isFalse);
+    expect(tester.widget<AppSwitchTile>(switches.last).value, isFalse);
   }, tags: ['integration']);
 
   testWidgets('settings changes preserve volume updated by the player', (
@@ -195,7 +199,7 @@ void main() {
       find
           .byWidgetPredicate(
             (w) =>
-                w is SwitchListTile &&
+                w is AppSwitchTile &&
                 w.key != const Key('phone-subtitle-original'),
           )
           .first,
@@ -215,7 +219,7 @@ void main() {
       await expandSection(tester, '弹幕配置');
       expect(find.text('样式预览'), findsOneWidget);
       expect(find.text('一起看剧，弹幕也清晰舒适'), findsOneWidget);
-      expect(find.byType(FilterChip), findsNothing);
+      expect(find.byType(AppChoiceChip), findsNothing);
       final scroll = find.byKey(DanmakuKeys.typeScroll);
       await tester.ensureVisible(scroll);
       await tester.tap(scroll);
@@ -224,10 +228,10 @@ void main() {
       final advanced = find.byKey(const ValueKey('danmaku-advanced-settings'));
       await tester.ensureVisible(advanced);
       await tester.tap(
-        find.descendant(of: advanced, matching: find.byType(ListTile)),
+        find.descendant(of: advanced, matching: find.byType(AppListTile)),
       );
       await settle(tester);
-      expect(find.byType(SwitchListTile), findsWidgets);
+      expect(find.byType(AppSwitchTile), findsWidgets);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -255,7 +259,7 @@ void main() {
       expect((await store.read()).volume, 40);
       await expandSection(tester, '弹幕配置');
       expect(
-        tester.widget<TextField>(field).controller!.text,
+        tester.widget<AppTextField>(field).controller!.text,
         'https://danmaku.example.test',
       );
     },

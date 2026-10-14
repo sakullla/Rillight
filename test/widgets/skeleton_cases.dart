@@ -1,13 +1,14 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 
 Widget _wrap(Widget child) {
-  return MaterialApp(
-    theme: AppTheme.dark(),
-    home: Scaffold(body: child),
+  return CupertinoTestApp(
+    theme: AppUiTheme.dark(),
+    home: CupertinoPageScaffold(child: child),
   );
 }
 

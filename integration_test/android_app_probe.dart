@@ -2,7 +2,8 @@
 // entrypoint does not replace authentication, routes, controllers or the core.
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/main.dart' as production;
 import 'package:rillight/app/app.dart';
@@ -89,7 +90,7 @@ Future<Map<String, Object?>> snapshot() async {
       }
       final label = switch (widget) {
         Text() => widget.data,
-        IconButton() => widget.tooltip,
+        AppIconButton() => widget.tooltip,
         _ => null,
       };
       final key = widget.key is ValueKey<String>

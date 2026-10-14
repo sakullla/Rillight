@@ -1,6 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/tv_widgets.dart';
@@ -13,20 +15,19 @@ void main() {
     final editor = FocusNode();
     addTearDown(editor.dispose);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: Navigator(
-          onGenerateRoute: (_) => MaterialPageRoute<void>(
-            builder: (context) => Scaffold(
-              body: TvFocusRegion(
+          onGenerateRoute: (_) => CupertinoPageRoute<void>(
+            builder: (context) => CupertinoPageScaffold(
+              child: TvFocusRegion(
                 child: Center(
                   child: TvAction(
                     autofocus: true,
                     onPressed: () {
-                      // A void callback is common for opening settings dialogs.
-                      showDialog<void>(
+                      showAppDialog<void>(
                         context: context,
-                        builder: (_) => AlertDialog(
-                          content: TextField(
+                        builder: (_) => AppDialog(
+                          content: AppTextField(
                             focusNode: editor,
                             autofocus: true,
                           ),
@@ -89,9 +90,9 @@ void main() {
         },
       );
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Column(children: [row('upper', 4), row('lower', 15)]),
+        CupertinoTestApp(
+          home: CupertinoPageScaffold(
+            child: Column(children: [row('upper', 4), row('lower', 15)]),
           ),
         ),
       );

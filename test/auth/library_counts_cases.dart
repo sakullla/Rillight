@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -6,14 +8,13 @@ import 'configured_source.dart';
 
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -188,23 +189,26 @@ void main() {
         bool loading = false,
         MediaServerException? failure,
       }) {
-        return MaterialApp(
-          theme: AppTheme.dark(),
+        return CupertinoTestApp(
+          theme: AppUiTheme.dark(),
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
-          home: Scaffold(
-            body: LibraryCountsPanel(
+          home: CupertinoPageScaffold(
+            child: LibraryCountsPanel(
               counts: counts,
               loading: loading,
               failure: failure,
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -290,17 +294,20 @@ void main() {
             bindings: PlayerBindings(
               settingsStore: MemoryPlayerSettingsStore(),
             ),
-            child: MaterialApp(
-              theme: AppTheme.dark(),
+            child: CupertinoTestApp(
+              theme: AppUiTheme.dark(),
               locale: const Locale('zh'),
               supportedLocales: AppLocalizations.supportedLocales,
               localizationsDelegates: [
-                ...AppLocalizations.localizationsDelegates,
+                ...[
+                  AppLocalizations.delegate,
+                  ...GlobalCupertinoLocalizations.delegates,
+                ],
                 ui.GlobalCupertinoLocalizations.delegate,
               ],
-              home: const Scaffold(body: PhoneMinePage()),
+              home: const CupertinoPageScaffold(child: PhoneMinePage()),
               builder: (context, child) => ui.AppUiTheme(
-                data: Theme.of(context).brightness == Brightness.dark
+                data: AppUiTheme.of(context).brightness == Brightness.dark
                     ? ui.AppUiTheme.dark()
                     : ui.AppUiTheme.light(),
                 child: child ?? const SizedBox.shrink(),

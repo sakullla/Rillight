@@ -1,8 +1,13 @@
+import 'package:rillight/player/buffered_ranges_track.dart';
+
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
 import '../helpers/region_access_fixture.dart';
+
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -14,7 +19,6 @@ import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
@@ -43,6 +47,7 @@ import 'package:rillight/player/player_page.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
+
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
@@ -257,7 +262,13 @@ void main() {
       }
 
       bool transparent() =>
-          tester.widget<AppBar>(find.byType(AppBar)).forceMaterialTransparency;
+          tester
+              .widget<CupertinoNavigationBar>(
+                find.byType(CupertinoNavigationBar),
+              )
+              .backgroundColor
+              ?.a ==
+          0;
       expect(transparent(), isTrue);
       final home = position('mobile-home-scroll');
       // No pump between jumps: the final notification must supersede the first,
@@ -343,7 +354,7 @@ void main() {
       await settle(tester);
       expect(find.byType(MobileShell), findsOneWidget);
       expect(find.byType(MobilePlayerPage), findsNothing);
-      expect(tester.widget<FilledButton>(resume).onPressed, isNotNull);
+      expect(tester.widget<AppButton>(resume).onPressed, isNotNull);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -406,7 +417,7 @@ void main() {
       await settle(tester);
       await tester.tap(find.text('搜索').last);
       await settle(tester);
-      expect(tester.widget<TextField>(field).controller!.text, 'Inception');
+      expect(tester.widget<AppTextField>(field).controller!.text, 'Inception');
 
       // 片库:剧集块打开系列分集页,电影块打开详情页。
       tester.view.physicalSize = const Size(width, 800);
@@ -443,8 +454,8 @@ void main() {
       await tester.tap(find.text('Inception').first);
       await settle(tester);
       expect(find.byType(MobileDetailPage), findsOneWidget);
-      expect(find.byTooltip('继续播放'), findsOneWidget);
-      expect(find.byTooltip('从头播放'), findsOneWidget);
+      expect(findAppTooltip('继续播放'), findsOneWidget);
+      expect(findAppTooltip('从头播放'), findsOneWidget);
       expectPhoneOnly(tester);
 
       final play = find.byKey(const Key('mobile-detail-play'));
@@ -498,7 +509,7 @@ void main() {
       final seek = find.byKey(const Key('mobile-player-seek'));
       await tester.ensureVisible(seek);
       await settle(tester);
-      final slider = tester.widget<Slider>(seek);
+      final slider = tester.widget<PlayerSlider>(seek);
       slider.onChangeEnd!(slider.max * .75);
       await settle(tester);
       expect(backend.position, greaterThan(const Duration(minutes: 70)));
@@ -533,11 +544,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(
         tester
-            .widget<IconButton>(find.byKey(const Key('mobile-player-toggle')))
+            .widget<AppIconButton>(
+              find.byKey(const Key('mobile-player-toggle')),
+            )
             .onPressed,
         isNotNull,
       );
-      await tester.tap(find.byTooltip('快进 10 秒'));
+      await tester.tap(findAppTooltip('快进 10 秒'));
       await settle(tester);
       expect(backend.position, greaterThan(const Duration(minutes: 70)));
 
@@ -568,7 +581,7 @@ void main() {
       await settle(tester);
       expect(find.byType(MobilePlayerPage), findsNothing);
       expect(find.byType(MobileDetailPage), findsOneWidget);
-      expect(find.byTooltip('继续播放'), findsOneWidget);
+      expect(findAppTooltip('继续播放'), findsOneWidget);
       expect(
         server.playbackEvents.where((event) => event.kind == 'Stopped'),
         isNotEmpty,
@@ -700,7 +713,7 @@ void main() {
       expect(
         find.descendant(
           of: field,
-          matching: find.byIcon(Icons.arrow_forward_rounded),
+          matching: find.byIcon(CupertinoIcons.arrow_right),
         ),
         findsNothing,
       );
@@ -845,7 +858,7 @@ void main() {
       expect(find.text('输入片名后搜索'), findsNothing);
       expect(find.text('所选范围没有匹配作品'), findsNothing);
       expect(find.text('Page 00'), findsNothing);
-      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byType(CupertinoTabBar), findsOneWidget);
 
       server.searchStatus = null;
       await tester.tap(find.text('重试'));
@@ -907,8 +920,7 @@ void main() {
       expect(
         server.playbackEvents.where((event) => event.kind == 'Progress'),
         isNotEmpty,
-        reason:
-            'Writer draining must reach the synthetic remote report, not only a local error',
+        reason: 'Writer draining must reach the synthetic remote report, not only a local error',
       );
       expect(
         current.progressSyncFailed,
@@ -923,8 +935,8 @@ void main() {
       // Reveal them before exercising the actual close button.
       current.onUserActivity();
       await settle(tester);
-      expect(find.byTooltip('关闭').hitTestable(), findsOneWidget);
-      await tester.tap(find.byTooltip('关闭'));
+      expect(findAppTooltip('关闭').hitTestable(), findsOneWidget);
+      await tester.tap(findAppTooltip('关闭'));
       await settle(tester);
       await tester.pump(const Duration(seconds: 4));
       await settle(tester);
@@ -951,12 +963,12 @@ void main() {
       await tester.enterText(field, 'Inception');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await settle(tester);
-      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byType(CupertinoTabBar), findsNothing);
       expect(tester.getRect(field).bottom, lessThanOrEqualTo(200));
       expect(tester.takeException(), isNull);
       tester.view.viewInsets = const FakeViewPadding();
       await settle(tester);
-      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.byType(CupertinoTabBar), findsOneWidget);
       await tester.binding.handlePopRoute();
       await settle(tester);
       expect(
@@ -983,7 +995,7 @@ void main() {
         of: find.byWidgetPredicate(
           (widget) => widget is AggregationPage && widget.search,
         ),
-        matching: find.byType(BackButton),
+        matching: find.byType(CupertinoNavigationBarBackButton),
       );
 
       await openSearch();
@@ -1039,7 +1051,7 @@ void main() {
         tester.element(find.byType(AndroidConnectPage)),
       );
       navigator.push(
-        MaterialPageRoute<void>(builder: (context) => const AggregationPage()),
+        CupertinoPageRoute<void>(builder: (context) => const AggregationPage()),
       );
       await settle(tester);
       expect(find.widgetWithText(AppEmptyView, '没有已登录的服务器'), findsOneWidget);
@@ -1175,7 +1187,7 @@ void main() {
       await settle(tester);
       expect(
         tester
-            .widget<TextField>(find.byKey(const Key('aggregation-keyword')))
+            .widget<AppTextField>(find.byKey(const Key('aggregation-keyword')))
             .controller!
             .text,
         'Scroll',
@@ -1200,13 +1212,16 @@ void main() {
       addTearDown(auth.dispose);
       Future<void> pumpTab(Widget child) {
         return tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.dark(),
+          CupertinoTestApp(
+            theme: AppUiTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            home: Scaffold(
-              body: CatalogScope(controller: catalog, child: child),
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            home: CupertinoPageScaffold(
+              child: CatalogScope(controller: catalog, child: child),
             ),
           ),
         );
@@ -1216,7 +1231,7 @@ void main() {
       await pumpTab(const PhoneHome());
       await tester.pump();
       expect(find.byKey(MobileLoadingPlaceholder.homeKey), findsOneWidget);
-      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.byType(AppLoadingBar), findsNothing);
       expect(find.text('暂无内容'), findsNothing);
       expect(find.text('重试'), findsNothing);
       final blocks = tester
@@ -1339,8 +1354,8 @@ void main() {
       await login(tester, server);
       expect(
         tester
-            .widget<NavigationBar>(find.byType(NavigationBar))
-            .destinations
+            .widget<CupertinoTabBar>(find.byType(CupertinoTabBar))
+            .items
             .length,
         3,
       );
@@ -1391,7 +1406,7 @@ void main() {
       tester.view.viewInsets = const FakeViewPadding(bottom: 240);
       addTearDown(tester.view.resetViewInsets);
       await settle(tester);
-      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byType(CupertinoTabBar), findsNothing);
       expect(
         tester.getRect(find.byKey(const Key('aggregation-keyword'))).bottom,
         lessThanOrEqualTo(560),
@@ -1448,7 +1463,7 @@ void main() {
       await settle(tester);
       await tester.tap(find.text('搜索').last);
       await settle(tester);
-      expect(tester.widget<TextField>(field).controller!.text, 'Inception');
+      expect(tester.widget<AppTextField>(field).controller!.text, 'Inception');
 
       // 减少动效:切换即时就位。
       tester.platformDispatcher.accessibilityFeaturesTestValue =

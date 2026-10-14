@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_nav_style.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 
 /// 悬浮导航盖住内容时，滚动区底部要留出系统手势条、间距、导航本身和溶入带。
@@ -45,31 +44,26 @@ class PhoneBottomNav extends StatelessWidget {
         child: MediaQuery.removePadding(
           context: context,
           removeBottom: floating,
-          child: NavigationBar(
+          child: CupertinoTabBar(
+            activeColor: AppUiTheme.of(context).colorScheme.primary,
+            inactiveColor: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
             height: 72,
-            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            indicatorShape: const StadiumBorder(),
-            animationDuration: AppMotion.durationOf(
-              context,
-              AppMobileNav.pillDuration,
-            ),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            selectedIndex: index,
-            onDestinationSelected: onSelected,
-            destinations: [
-              NavigationDestination(
-                icon: const Icon(Icons.home_outlined),
-                selectedIcon: const Icon(Icons.home),
+            backgroundColor: const Color(0x00000000),
+            currentIndex: index,
+            onTap: onSelected,
+            items: [
+              BottomNavigationBarItem(
+                icon: const Icon(CupertinoIcons.house),
+                activeIcon: const Icon(CupertinoIcons.house),
                 label: l.home,
               ),
-              NavigationDestination(
-                icon: const Icon(Icons.video_library_outlined),
-                selectedIcon: const Icon(Icons.video_library),
+              BottomNavigationBarItem(
+                icon: const Icon(CupertinoIcons.rectangle_stack),
+                activeIcon: const Icon(CupertinoIcons.rectangle_stack),
                 label: l.aggregation,
               ),
-              NavigationDestination(
-                icon: const Icon(Icons.search),
+              BottomNavigationBarItem(
+                icon: const Icon(CupertinoIcons.search),
                 label: l.search,
               ),
             ],
@@ -106,7 +100,7 @@ class PhoneBottomNav extends StatelessWidget {
     if (!floating) {
       return padded;
     }
-    final surface = Theme.of(context).colorScheme.surface;
+    final surface = AppUiTheme.of(context).colorScheme.surface;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

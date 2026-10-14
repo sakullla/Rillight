@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 
 /// A navigation drag joins the arena, so a horizontal shelf gets first refusal.
@@ -195,7 +195,7 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                   child: Center(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Colors.black87,
+                        color: const Color(0xdd000000),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Padding(
@@ -208,11 +208,12 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                           children: [
                             Icon(
                               _gesture == _PlaybackGesture.seek
-                                  ? Icons.fast_forward
+                                  ? CupertinoIcons.forward_fill
                                   : _gesture == _PlaybackGesture.volume
-                                  ? Icons.volume_up
-                                  : Icons.fullscreen,
-                              color: Colors.white,
+                                  ? CupertinoIcons.speaker_2_fill
+                                  : CupertinoIcons
+                                        .arrow_up_left_arrow_down_right,
+                              color: const Color(0xffffffff),
                             ),
                             const SizedBox(width: 12),
                             Text(
@@ -222,7 +223,7 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                                   ? '$_volume%'
                                   : '${(_scale * 100).round()}%',
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: Color(0xffffffff),
                                 fontSize: 22,
                               ),
                             ),

@@ -1,10 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
+
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/media_shelf.dart';
@@ -23,15 +24,18 @@ const _movie = MediaItem(
 Widget _wrap({
   required OverlayPlayerWindowHost host,
   required Widget child,
-  ThemeData? theme,
+  AppUiThemeData? theme,
 }) {
-  return MaterialApp(
-    theme: theme ?? AppTheme.dark(),
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
+  return CupertinoTestApp(
+    theme: theme ?? AppUiTheme.dark(),
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
     supportedLocales: AppLocalizations.supportedLocales,
     home: PlayerWindowScope(
       host: host,
-      child: Scaffold(body: Center(child: child)),
+      child: CupertinoPageScaffold(child: Center(child: child)),
     ),
   );
 }
@@ -121,7 +125,7 @@ void main() {
     expect(find.textContaining('2020'), findsOneWidget);
     expect(find.textContaining('45分钟'), findsOneWidget);
     expect(find.text('可播电影'), findsWidgets);
-    expect(find.byTooltip('可播电影'), findsOneWidget);
+    expect(findAppTooltip('可播电影'), findsOneWidget);
     expect(taps, 0);
     expect(host.current, isNull);
   });
@@ -132,7 +136,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         host: host,
-        theme: AppTheme.light(),
+        theme: AppUiTheme.light(),
         child: PosterCard(item: _movie, onTap: () {}),
       ),
     );
@@ -148,16 +152,13 @@ void main() {
       ),
       findsNothing,
     );
-    final play = tester.widget<IconButton>(
+    final play = tester.widget<AppIconButton>(
       find.byKey(PosterCard.playButtonKey(_movie.id)),
     );
+    expect(play.style?.backgroundColor, AppUiTheme.light().colorScheme.primary);
     expect(
-      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      AppTheme.light().colorScheme.primary,
-    );
-    expect(
-      play.style?.foregroundColor?.resolve(const <WidgetState>{}),
-      AppTheme.light().colorScheme.onPrimary,
+      play.style?.foregroundColor,
+      AppUiTheme.light().colorScheme.onPrimary,
     );
   });
 
@@ -165,7 +166,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         host: host,
-        theme: AppTheme.light(),
+        theme: AppUiTheme.light(),
         child: PosterCard(
           item: _movie,
           onTap: () {},
@@ -174,18 +175,12 @@ void main() {
       ),
     );
     await _hover(tester, find.byType(PosterCard));
-    final close = tester.widget<IconButton>(
+    final close = tester.widget<AppIconButton>(
       find.byKey(CatalogKeys.removeFromResume(_movie.id)),
     );
-    final scheme = AppTheme.light().colorScheme;
-    expect(
-      close.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      scheme.surfaceContainerLowest,
-    );
-    expect(
-      close.style?.foregroundColor?.resolve(const <WidgetState>{}),
-      scheme.onSurface,
-    );
+    final scheme = AppUiTheme.light().colorScheme;
+    expect(close.style?.backgroundColor, scheme.surfaceContainerLowest);
+    expect(close.style?.foregroundColor, scheme.onSurface);
   });
 
   testWidgets('dark hover keeps the white play control', (tester) async {
@@ -196,13 +191,10 @@ void main() {
       ),
     );
     await _hover(tester, find.byType(PosterCard));
-    final play = tester.widget<IconButton>(
+    final play = tester.widget<AppIconButton>(
       find.byKey(PosterCard.playButtonKey(_movie.id)),
     );
-    expect(
-      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      Colors.white,
-    );
+    expect(play.style?.backgroundColor, const Color(0xffffffff));
   });
 
   testWidgets('play button opens the player and does not open detail', (

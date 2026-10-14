@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/home/home_page.dart';
 
 class AppHomePage extends StatelessWidget {

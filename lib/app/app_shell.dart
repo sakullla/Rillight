@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/desktop_gestures.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/session_actions.dart';
@@ -131,6 +130,8 @@ class _AppShellState extends State<AppShell> {
   FocusNode? _searchReturnFocus;
   bool _contentScrolled = false;
   String _scrollPath = '';
+  (String, bool)? _pendingScroll;
+  bool _scrollUpdateScheduled = false;
 
   @override
   void dispose() {
@@ -191,7 +192,7 @@ class _AppShellState extends State<AppShell> {
     // it reads as fog on the artwork, so the light home bar is solid and the
     // hero starts with a crisp edge beneath it. Dark stays immersive.
     if (location == AppRoutes.home &&
-        Theme.of(context).brightness == Brightness.light) {
+        AppUiTheme.of(context).brightness == Brightness.light) {
       return false;
     }
     return location == AppRoutes.home || AppRoutes.isItem(location);
@@ -208,7 +209,7 @@ class _AppShellState extends State<AppShell> {
     // 是外壳自身的匹配(恒为 '/'),只有 uri 反映 push 进来的当前子路由。
     final location = GoRouterState.of(context).uri.path;
     if (location == AppRoutes.connect) {
-      return Scaffold(body: widget.child);
+      return CupertinoPageScaffold(child: widget.child);
     }
 
     final gestureLocation = GoRouterState.of(context).uri.toString();
@@ -235,17 +236,31 @@ class _AppShellState extends State<AppShell> {
           child: Focus(
             autofocus: true,
             skipTraversal: true,
-            child: Scaffold(
-              body: Stack(
+            child: CupertinoPageScaffold(
+              child: Stack(
                 fit: StackFit.expand,
                 children: [
                   NotificationListener<HomeScrollNotification>(
                     onNotification: (notification) {
-                      if (_scrollPath != location ||
-                          _contentScrolled != notification.scrolled) {
-                        setState(() {
-                          _scrollPath = location;
-                          _contentScrolled = notification.scrolled;
+                      _pendingScroll = (location, notification.scrolled);
+                      if (!_scrollUpdateScheduled) {
+                        _scrollUpdateScheduled = true;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _scrollUpdateScheduled = false;
+                          final next = _pendingScroll;
+                          _pendingScroll = null;
+                          if (!mounted ||
+                              next == null ||
+                              GoRouterState.of(context).uri.path != next.$1) {
+                            return;
+                          }
+                          if (_scrollPath != next.$1 ||
+                              _contentScrolled != next.$2) {
+                            setState(() {
+                              _scrollPath = next.$1;
+                              _contentScrolled = next.$2;
+                            });
+                          }
                         });
                       }
                       return true;
@@ -268,18 +283,16 @@ class _AppShellState extends State<AppShell> {
                       ),
                     ),
                   ),
-                  // 遮罩在顶栏之上、覆盖层之下:压暗整个背景并拦截穿透
-                  // 覆盖层非交互区域的点击,点击等同关闭;关闭后立即恢复。
+
                   SearchOverlayBarrier(
                     visible: _searchOpen,
                     onDismiss: _closeSearch,
                   ),
                   if (_searchOpen)
                     Positioned.fill(
-                      child: Material(
+                      child: Container(
+                        decoration: BoxDecoration(),
                         child: SafeArea(
-                          // 让出窗口标题栏；关闭钮与搜索框排在同一行，
-                          // 不再单占一行放重复的返回和关闭。
                           child: Padding(
                             padding: const EdgeInsets.only(
                               top: AppShell.topBarHeight,
@@ -370,10 +383,10 @@ class _TopBar extends StatelessWidget {
                 AppRoutes.shelfLatestSeries => l10n.latestSeriesRow,
                 _ => l10n.details,
               });
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final scrim = light
-        ? Theme.of(context).scaffoldBackgroundColor
+        ? AppUiTheme.of(context).scaffoldBackgroundColor
         : scheme.scrim;
     final overlayHeight = height + AppShell.topFadeHeight;
     final item = AppRoutes.isItem(location);
@@ -397,11 +410,15 @@ class _TopBar extends StatelessWidget {
                     sigmaY: AppGlass.barBlur,
                   ),
                   child: ColoredBox(
-                    color: (light ? Colors.white : Colors.black).withValues(
-                      alpha: highContrast
-                          ? AppGlass.reducedTint
-                          : (light ? 0.62 : 0.42),
-                    ),
+                    color:
+                        (light
+                                ? const Color(0xffffffff)
+                                : const Color(0xff000000))
+                            .withValues(
+                              alpha: highContrast
+                                  ? AppGlass.reducedTint
+                                  : (light ? 0.62 : 0.42),
+                            ),
                   ),
                 ),
               ),
@@ -409,7 +426,7 @@ class _TopBar extends StatelessWidget {
           else if (opaque)
             Positioned.fill(
               child: ColoredBox(
-                color: Theme.of(context).scaffoldBackgroundColor,
+                color: AppUiTheme.of(context).scaffoldBackgroundColor,
               ),
             )
           else
@@ -466,11 +483,9 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ),
-          Material(
+          Container(
+            decoration: BoxDecoration(),
             key: AppShell.topBarKey,
-            type: MaterialType.transparency,
-            // 左侧多让 12：导航文字（自带 12 内边距）正好落在页面 24 边距上，
-            // 与下方标题、海报对齐；返回钮的图标也贴近这条竖线。
             child: Padding(
               padding: EdgeInsets.only(
                 left: leading + AppSpacing.sm,
@@ -482,22 +497,17 @@ class _TopBar extends StatelessWidget {
                       (location != AppRoutes.home &&
                           !AppRoutes.showsBrowseNav(location)))
                     Padding(
-                      // 胶囊左缘落在页面 24 边距上,与下方海报、标题对齐。
                       padding: const EdgeInsets.only(
                         left: AppSpacing.page - AppSpacing.sm,
                         right: AppSpacing.sm,
                       ),
                       child: DesktopBackButton(
                         overArtwork: !opaque,
-                        tooltip: !canPop
-                            ? l10n.home
-                            : MaterialLocalizations.of(
-                                context,
-                              ).backButtonTooltip,
+                        tooltip: !canPop ? l10n.home : l10n.mobileBack,
                         onPressed: onBack,
                         icon: canPop
-                            ? Icons.chevron_left_rounded
-                            : Icons.home_outlined,
+                            ? CupertinoIcons.chevron_left
+                            : CupertinoIcons.house,
                         label: canPop ? l10n.mobileBack : l10n.home,
                       ),
                     ),
@@ -510,14 +520,14 @@ class _TopBar extends StatelessWidget {
                       onPressed: () => context.go(AppRoutes.aggregation),
                     ),
                     const Spacer(),
-                    IconButton(
+                    AppIconButton(
                       key: AppShell.overflowNavKey,
                       tooltip: l10n.phoneHomeEdit,
-                      visualDensity: VisualDensity.compact,
+
                       onPressed: () {
                         unawaited(showHomeDisplayDialog(context));
                       },
-                      icon: const Icon(Icons.tune_rounded),
+                      icon: const Icon(CupertinoIcons.slider_horizontal_3),
                     ),
                   ] else ...[
                     Expanded(
@@ -533,14 +543,15 @@ class _TopBar extends StatelessWidget {
                                 title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
+                                style: AppUiTheme.of(context)
+                                    .textTheme
+                                    .titleMedium
                                     ?.copyWith(fontWeight: FontWeight.w600),
                               ),
                             ),
                     ),
                   ],
                   Align(
-                    // Windows/Linux 的应用图标与系统标题按钮同在上方标题带。
                     alignment: hasChrome && windowChromeShowsCaptionButtons
                         ? Alignment.topCenter
                         : Alignment.center,
@@ -611,21 +622,21 @@ class _NavTextButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
-    return TextButton(
+    return AppButton(
       key: buttonKey,
       onPressed: onPressed,
-      style: TextButton.styleFrom(
+      style: AppButtonStyle(
         foregroundColor: selected
             ? colorScheme.onSurface
             : colorScheme.onSurfaceVariant,
         textStyle: theme.textTheme.titleMedium?.copyWith(
           fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
         ),
-        visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
       ),
+      variant: AppButtonVariant.plain,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -641,7 +652,7 @@ class _NavTextButton extends StatelessWidget {
                   ? (colorScheme.brightness == Brightness.light
                         ? colorScheme.primary
                         : colorScheme.onSurface)
-                  : Colors.transparent,
+                  : const Color(0x00000000),
               borderRadius: BorderRadius.circular(1),
             ),
           ),
@@ -711,10 +722,9 @@ class _SearchRouteGuardState extends State<SearchRouteGuard> {
 class _SearchPopRouter extends GoRouter {
   _SearchPopRouter({
     required this.host,
-    required GoRouter parent,
+    required this._parent,
     required super.routingConfig,
-  }) : _parent = parent,
-       super.routingConfig(
+  }) : super.routingConfig(
          initialLocation: '/',
          overridePlatformDefaultLocation: true,
          routerNeglect: true,

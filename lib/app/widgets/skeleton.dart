@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// 骨架屏 shimmer 块:圆角色块叠加循环扫过的渐变高亮。
 ///
@@ -67,7 +66,7 @@ class _SkeletonBlockState extends State<SkeletonBlock>
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
     final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.sm);
     final controller = _controller;
     if (!widget.animated ||

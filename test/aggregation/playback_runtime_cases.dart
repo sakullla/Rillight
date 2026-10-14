@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
@@ -22,7 +24,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/player/mobile_player_page.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/playback_ended_panel.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_page.dart';
@@ -853,15 +855,20 @@ void main() {
         await _eventually(() => controller.activeMediaSourceId == 'v');
       });
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(body: SourceSwitchButton(controller: controller)),
+          home: CupertinoPageScaffold(
+            child: SourceSwitchButton(controller: controller),
+          ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -2096,8 +2103,9 @@ void main() {
           await tester.pump();
         }
         var cleaned = false;
-        final cleanup = controller
+        final cleanup = c
             .disposeAsync()
+            .then((_) => controller.disposeAsync())
             .then((_) => runtime.history.close())
             .then((_) {
               cleaned = true;
@@ -2439,7 +2447,8 @@ void main() {
             routes: [
               GoRoute(
                 path: '/',
-                builder: (_, _) => const Scaffold(body: Text('main window')),
+                builder: (_, _) =>
+                    const CupertinoPageScaffold(child: Text('main window')),
               ),
             ],
           );
@@ -2499,7 +2508,7 @@ void main() {
           expect(find.textContaining('来源切换失败'), findsOneWidget);
           expect(find.text('播放进度未能同步'), findsNothing);
           final button = find.byKey(const Key('desktop-restore-original'));
-          expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+          expect(tester.widget<AppButton>(button).onPressed, isNotNull);
           if (revokeOriginal) {
             await tester.runAsync(
               () => runtime.registry.configureScope(
@@ -2510,7 +2519,7 @@ void main() {
             );
             await settle(tester);
             expect(find.text('原来源访问许可已失效，无法恢复。'), findsOneWidget);
-            expect(tester.widget<FilledButton>(button).onPressed, isNull);
+            expect(tester.widget<AppButton>(button).onPressed, isNull);
             await tester.runAsync(() async {
               await expectLater(host.restoreOriginalSource(), throwsStateError);
             });

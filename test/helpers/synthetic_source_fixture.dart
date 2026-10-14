@@ -1,4 +1,5 @@
 import 'region_access_fixture.dart';
+
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -9,6 +10,7 @@ import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/playback_runtime.dart';
+
 import '../emby/fake_emby_server.dart';
 
 /// Full-app fixtures explicitly declare their synthetic libraries and use

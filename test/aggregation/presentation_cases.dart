@@ -10,7 +10,7 @@ import 'package:dio/dio.dart';
 import 'dart:ui' as ui;
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -694,7 +694,12 @@ void main() {
         } else if (environment.isTv) {
           await tester.tap(find.byKey(const ValueKey('tv-nav-1')));
         } else {
-          await tester.tap(find.byType(NavigationDestination).at(1));
+          await tester.tap(
+            find.descendant(
+              of: find.byType(CupertinoTabBar),
+              matching: find.text('聚合'),
+            ),
+          );
         }
         await _settle(tester);
         final management = find.byKey(
@@ -1047,7 +1052,12 @@ void main() {
       });
       await tester.pumpWidget(app);
       await _settle(tester);
-      await tester.tap(find.byType(NavigationDestination).at(1));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CupertinoTabBar),
+          matching: find.text('聚合'),
+        ),
+      );
       await _settle(tester);
       await _openOwnedDetail(
         tester,
@@ -1165,8 +1175,12 @@ void main() {
       addTearDown(f.close);
       f.a.items.first.backdropImageTags = ['a-one', 'a-two'];
       f.b.items.first.backdropImageTags = ['b-one', 'b-two'];
-      f.a.itemImageBytes = await tester.runAsync(() => _png(Colors.red));
-      f.b.itemImageBytes = await tester.runAsync(() => _png(Colors.blue));
+      f.a.itemImageBytes = await tester.runAsync(
+        () => _png(const Color(0xffff3b30)),
+      );
+      f.b.itemImageBytes = await tester.runAsync(
+        () => _png(const Color(0xff007aff)),
+      );
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -1294,7 +1308,7 @@ void main() {
   );
 
   cases.testWidgets(
-    'TV D-pad enters aggregation and retains Material control focus for multiple frames',
+    'TV D-pad enters aggregation and retains Cupertino control focus for multiple frames',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
@@ -1555,7 +1569,12 @@ void main() {
         } else if (environment.isTv) {
           await tester.tap(find.byKey(const ValueKey('tv-nav-1')));
         } else {
-          await tester.tap(find.byType(NavigationDestination).at(1));
+          await tester.tap(
+            find.descendant(
+              of: find.byType(CupertinoTabBar),
+              matching: find.text('聚合'),
+            ),
+          );
         }
         await _settle(tester);
         expect(find.byType(AggregationPage), findsOneWidget);
@@ -1674,7 +1693,7 @@ void main() {
         find.byWidgetPredicate(
           (widget) =>
               (widget is ui.AppTooltip && widget.message == '从本机记录的实际来源继续') ||
-              (widget is Tooltip && widget.message == '从本机记录的实际来源继续'),
+              (widget is AppTooltip && widget.message == '从本机记录的实际来源继续'),
         ),
         findsNothing,
       );

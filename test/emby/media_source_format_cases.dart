@@ -75,9 +75,8 @@ void main() {
       'Show · LINETV · WEB-DL · SonyHD',
     );
     expect(
-      formatMediaSource(
-        name: 'Show.S01E01.LINETV.WEB-DL.1080p.H264.AAC-SonyHD',
-      ).detail,
+      formatMediaSource(name: 'Show.S01E01.LINETV.WEB-DL.1080p.H264.AAC-SonyHD')
+          .detail,
       'Show · LINETV · WEB-DL · SonyHD',
     );
     expect(mediaSourceFingerprint('4K 版本'), '版本');

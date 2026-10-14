@@ -1,12 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
@@ -148,9 +147,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _saveFailed() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppLocalizations.of(context).settingsSaveFailed)),
-    );
+    AppNoticeHost.of(context)
+        .show(AppLocalizations.of(context).settingsSaveFailed);
   }
 
   /// 弹幕显示只携带 [PlayerSettings.danmakuDisplay],其余字段留 null 走合并写。
@@ -303,14 +301,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (showPageTitle) ...[
                   Text(
                     l10n.settings,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: AppUiTheme.of(context).textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: AppSpacing.xl),
                 ],
                 _SettingsSection(
-                  icon: Icons.brightness_6_outlined,
+                  icon: CupertinoIcons.circle_lefthalf_fill,
                   title: l10n.settingsAppearance,
                   subtitle: (appearance?.style ?? AppearanceStyle.system).label(
                     l10n,
@@ -319,7 +316,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     if (nav != null)
                       ListenableBuilder(
                         listenable: nav,
-                        builder: (context, _) => SwitchListTile.adaptive(
+                        builder: (context, _) => AppSwitchTile(
                           contentPadding: EdgeInsets.zero,
                           title: Text(l10n.phoneFloatingNav),
                           subtitle: Text(l10n.phoneFloatingNavHint),
@@ -348,21 +345,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: Icons.play_circle_outline_rounded,
+                  icon: CupertinoIcons.play_circle,
                   title: l10n.settingsPlayback,
                   subtitle:
                       '${_settings.effectivePlaybackRate}× · ${l10n.settingsCacheSize(effectiveLimit / 1024)}',
-                  trailing: TextButton.icon(
+                  trailing: AppButton.icon(
                     key: SettingsPage.restoreDefaultsKey,
                     onPressed: _loaded ? _restoreDefaults : null,
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
+                    style: AppButtonStyle(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.sm,
                       ),
                     ),
-                    icon: const Icon(Icons.settings_backup_restore_rounded),
+                    icon: const Icon(CupertinoIcons.arrow_counterclockwise),
                     label: Text(l10n.settingsRestoreDefaults),
+                    variant: AppButtonVariant.plain,
                   ),
                   children: [
                     PhoneSubtitleSettingsControls(
@@ -371,7 +368,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         _save(PlayerSettings(phoneSubtitles: value)),
                       ),
                     ),
-                    const Divider(),
+                    const AppDivider(),
                     Padding(
                       key: const Key('settings-playback-rate'),
                       padding: const EdgeInsets.symmetric(
@@ -382,7 +379,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         children: [
                           Text(
                             l10n.playbackRate,
-                            style: Theme.of(context).textTheme.titleSmall,
+                            style: AppUiTheme.of(context).textTheme.titleSmall,
                           ),
                           const SizedBox(height: AppSpacing.sm),
                           PlayerRateGrid(
@@ -395,7 +392,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ],
                       ),
                     ),
-                    SwitchListTile.adaptive(
+                    AppSwitchTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(l10n.settingsSkipIntro),
                       subtitle: Text(l10n.settingsSkipIntroHint),
@@ -406,7 +403,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               _save(PlayerSettings(skipIntroEnabled: value)),
                             ),
                     ),
-                    SwitchListTile.adaptive(
+                    AppSwitchTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(l10n.settingsSkipOutro),
                       subtitle: Text(l10n.settingsSkipOutroHint),
@@ -490,7 +487,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: Icons.tune_rounded,
+                  icon: CupertinoIcons.slider_horizontal_3,
                   title: l10n.playbackOutputSection,
                   subtitle: l10n.settingsOutputSummary,
                   children: [
@@ -501,24 +498,24 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: Icons.chat_bubble_outline_rounded,
+                  icon: CupertinoIcons.chat_bubble,
                   title: l10n.settingsDanmakuConfiguration,
                   subtitle: l10n.settingsDanmakuConfigurationSummary,
-                  trailing: TextButton.icon(
+                  trailing: AppButton.icon(
                     key: DanmakuKeys.restoreDefaults,
                     onPressed: _loaded
                         ? () => _saveDanmakuDisplay(
                             const DanmakuDisplaySettings(),
                           )
                         : null,
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
+                    style: AppButtonStyle(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.sm,
                       ),
                     ),
-                    icon: const Icon(Icons.settings_backup_restore_rounded),
+                    icon: const Icon(CupertinoIcons.arrow_counterclockwise),
                     label: Text(l10n.danmakuRestoreDefaults),
+                    variant: AppButtonVariant.plain,
                   ),
                   children: [
                     DanmakuDisplayForm(
@@ -538,16 +535,16 @@ class _SettingsPageState extends State<SettingsPage> {
                         children: [
                           Text(
                             l10n.settingsDanmakuService,
-                            style: Theme.of(context).textTheme.titleSmall,
+                            style: AppUiTheme.of(context).textTheme.titleSmall,
                           ),
                           const SizedBox(height: AppSpacing.xs),
                           Text(
                             l10n.settingsDanmakuServiceHint,
-                            style: Theme.of(context).textTheme.bodySmall
+                            style: AppUiTheme.of(context).textTheme.bodySmall
                                 ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
+                                  color: AppUiTheme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                                 ),
                           ),
                         ],
@@ -555,7 +552,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     _SettingsField(
                       label: l10n.settingsDanmakuServer,
-                      child: TextField(
+                      child: AppTextField(
                         key: SettingsPage.danmakuServerFieldKey,
                         controller: _danmakuServerController,
                         focusNode: _danmakuServerFocus,
@@ -566,14 +563,12 @@ class _SettingsPageState extends State<SettingsPage> {
                           _commitDanmakuService();
                           _danmakuAppIdFocus.requestFocus();
                         },
-                        decoration: InputDecoration(
-                          hintText: l10n.settingsDanmakuServerHint,
-                        ),
+                        placeholder: l10n.settingsDanmakuServerHint,
                       ),
                     ),
                     _SettingsField(
                       label: l10n.settingsDanmakuAppId,
-                      child: TextField(
+                      child: AppTextField(
                         key: SettingsPage.danmakuAppIdFieldKey,
                         controller: _danmakuAppIdController,
                         focusNode: _danmakuAppIdFocus,
@@ -583,14 +578,12 @@ class _SettingsPageState extends State<SettingsPage> {
                           _commitDanmakuService();
                           _danmakuTokenFocus.requestFocus();
                         },
-                        decoration: InputDecoration(
-                          hintText: l10n.settingsDanmakuAppIdHint,
-                        ),
+                        placeholder: l10n.settingsDanmakuAppIdHint,
                       ),
                     ),
                     _SettingsField(
                       label: l10n.settingsDanmakuToken,
-                      child: TextField(
+                      child: AppTextField(
                         key: SettingsPage.danmakuTokenFieldKey,
                         controller: _danmakuTokenController,
                         focusNode: _danmakuTokenFocus,
@@ -598,21 +591,19 @@ class _SettingsPageState extends State<SettingsPage> {
                         obscureText: !_tokenVisible,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _commitDanmakuService(),
-                        decoration: InputDecoration(
-                          hintText: l10n.settingsDanmakuTokenHint,
-                          suffixIcon: IconButton(
-                            key: SettingsPage.tokenVisibilityKey,
-                            tooltip: _tokenVisible
-                                ? l10n.settingsHideToken
-                                : l10n.settingsShowToken,
-                            onPressed: () {
-                              setState(() => _tokenVisible = !_tokenVisible);
-                            },
-                            icon: Icon(
-                              _tokenVisible
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
-                            ),
+                        placeholder: l10n.settingsDanmakuTokenHint,
+                        suffix: AppIconButton(
+                          key: SettingsPage.tokenVisibilityKey,
+                          tooltip: _tokenVisible
+                              ? l10n.settingsHideToken
+                              : l10n.settingsShowToken,
+                          onPressed: () {
+                            setState(() => _tokenVisible = !_tokenVisible);
+                          },
+                          icon: Icon(
+                            _tokenVisible
+                                ? CupertinoIcons.eye_slash
+                                : CupertinoIcons.eye,
                           ),
                         ),
                       ),
@@ -683,18 +674,18 @@ class _SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    return Material(
-      color: scheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+      ),
       clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
+      child: AppDisclosure(
         key: ValueKey('settings-section-$title'),
         tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-        shape: const Border(),
-        collapsedShape: const Border(),
         onExpansionChanged: (expanded) {
           if (!expanded) FocusScope.of(context).unfocus();
         },
@@ -754,7 +745,7 @@ class _SettingsOptionBlock extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (title != null) ...[
-            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            Text(title, style: AppUiTheme.of(context).textTheme.titleSmall),
             const SizedBox(height: AppSpacing.sm),
           ],
           PlayerOptionGrid(options: options),
@@ -772,7 +763,7 @@ class _SettingsField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Column(

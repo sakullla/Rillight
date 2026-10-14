@@ -1,10 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/phone_nav_style.dart';
-import 'package:rillight/app/theme.dart';
 
 void main() {
   test(
@@ -30,16 +31,28 @@ void main() {
     (tester) async {
       Future<void> pump(bool floating) {
         return tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.dark(),
+          CupertinoTestApp(
+            theme: AppUiTheme.dark(),
             locale: const Locale('zh', 'CN'),
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             supportedLocales: AppLocalizations.supportedLocales,
-            home: Scaffold(
-              bottomNavigationBar: PhoneBottomNav(
-                index: 0,
-                floating: floating,
-                onSelected: (_) {},
+            home: CupertinoPageScaffold(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  const SizedBox.expand(),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: PhoneBottomNav(
+                      index: 0,
+                      floating: floating,
+                      onSelected: (_) {},
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -47,13 +60,13 @@ void main() {
       }
 
       await pump(true);
-      final floatingRect = tester.getRect(find.byType(NavigationBar));
+      final floatingRect = tester.getRect(find.byType(CupertinoTabBar));
       expect(floatingRect.left, AppMobileNav.floatMargin);
       expect(floatingRect.right, 800 - AppMobileNav.floatMargin);
       expect(floatingRect.bottom, lessThan(600));
 
       await pump(false);
-      final dockedRect = tester.getRect(find.byType(NavigationBar));
+      final dockedRect = tester.getRect(find.byType(CupertinoTabBar));
       expect(dockedRect.left, 0);
       expect(dockedRect.right, 800);
       expect(dockedRect.bottom, 600);

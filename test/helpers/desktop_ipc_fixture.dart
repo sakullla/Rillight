@@ -3,7 +3,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/player/desktop_player_window.dart';
@@ -14,6 +15,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/player/video_backend.dart';
+
 import '../emby/fake_emby_server.dart';
 import 'synthetic_mailbox.dart';
 

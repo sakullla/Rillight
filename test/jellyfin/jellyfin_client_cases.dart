@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/jellyfin/jellyfin_client.dart';
 import 'package:rillight/media_server/authentication.dart';
@@ -9,6 +10,7 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/playback.dart';
+
 import 'fake_jellyfin_server.dart';
 
 void main() {
@@ -47,35 +49,32 @@ void main() {
     position: const Duration(milliseconds: 1234),
   );
 
-  test(
-    'transcode quality uses server encoder selection, never input or request ceiling',
-    () async {
-      attach();
-      for (final sample in <(String, int?)>[
-        ('&VideoBitrate=3808000&AudioBitrate=192000', 4000000),
-        ('&VideoBitrate=7808000&AudioBitrate=192000', 8000000),
-        ('&MaxStreamingBitrate=4000000', null),
-        ('&VideoBitrate=3808000', null),
-        ('&VideoBitrate=3808000&VideoBitrate=1&AudioBitrate=192000', null),
-      ]) {
-        fake.transcodeOutputQuery = sample.$1;
-        final info = await client.getPlaybackInfo(
-          itemId: 'movie-1',
-          maxStreamingBitrate: 4000000,
-          forceTranscode: true,
-        );
-        final playback = client.resolvePlayback(
-          info: info,
-          itemId: 'movie-1',
-          forceTranscode: true,
-        )!;
-        expect(playback.mediaSource.bitrate, 24000000);
-        expect(playback.outputBitrate, sample.$2, reason: sample.$1);
-        await info.resources!.release();
-      }
-      expect(fake.resources, isEmpty);
-    },
-  );
+  test('transcode quality uses server encoder selection, never input or request ceiling', () async {
+    attach();
+    for (final sample in <(String, int?)>[
+      ('&VideoBitrate=3808000&AudioBitrate=192000', 4000000),
+      ('&VideoBitrate=7808000&AudioBitrate=192000', 8000000),
+      ('&MaxStreamingBitrate=4000000', null),
+      ('&VideoBitrate=3808000', null),
+      ('&VideoBitrate=3808000&VideoBitrate=1&AudioBitrate=192000', null),
+    ]) {
+      fake.transcodeOutputQuery = sample.$1;
+      final info = await client.getPlaybackInfo(
+        itemId: 'movie-1',
+        maxStreamingBitrate: 4000000,
+        forceTranscode: true,
+      );
+      final playback = client.resolvePlayback(
+        info: info,
+        itemId: 'movie-1',
+        forceTranscode: true,
+      )!;
+      expect(playback.mediaSource.bitrate, 24000000);
+      expect(playback.outputBitrate, sample.$2, reason: sample.$1);
+      await info.resources!.release();
+    }
+    expect(fake.resources, isEmpty);
+  });
   test(
     'password verifies server identity, restore and logout use official routes',
     () async {
@@ -148,53 +147,50 @@ void main() {
       );
     },
   );
-  test(
-    'Quick Connect disabled, cancelled, expired, denied and offline remain distinct',
-    () async {
-      fake.quickEnabled = false;
-      expect(
-        (await client.availability(
-          AuthorizationMethod.quickConnect,
-          server: fake.url,
-        )).availability,
-        CapabilityAvailability.restricted,
-      );
-      await expectLater(
-        client.begin(AuthorizationMethod.quickConnect, server: fake.url),
-        throwsA(failure(MediaServerFailureKind.unsupported)),
-      );
-      fake.quickEnabled = true;
-      final a = await client.begin(
+  test('Quick Connect disabled, cancelled, expired, denied and offline remain distinct', () async {
+    fake.quickEnabled = false;
+    expect(
+      (await client.availability(
         AuthorizationMethod.quickConnect,
         server: fake.url,
-      );
-      await a.cancel();
-      expect(await a.poll(), AuthorizationStatus.cancelled);
-      var now = DateTime.utc(2026);
-      final timed = JellyfinClient(device: device, clock: () => now);
-      final b = await timed.begin(
-        AuthorizationMethod.quickConnect,
-        server: fake.url,
-      );
-      now = now.add(const Duration(minutes: 11));
-      expect(await b.poll(), AuthorizationStatus.expired);
-      final c = await client.begin(
-        AuthorizationMethod.quickConnect,
-        server: fake.url,
-      );
-      fake.nextStatus = 403;
-      expect(await c.poll(), AuthorizationStatus.denied);
-      final d = await client.begin(
-        AuthorizationMethod.quickConnect,
-        server: fake.url,
-      );
-      fake.nextStatus = 429;
-      await expectLater(
-        d.poll(),
-        throwsA(failure(MediaServerFailureKind.rateLimited)),
-      );
-    },
-  );
+      )).availability,
+      CapabilityAvailability.restricted,
+    );
+    await expectLater(
+      client.begin(AuthorizationMethod.quickConnect, server: fake.url),
+      throwsA(failure(MediaServerFailureKind.unsupported)),
+    );
+    fake.quickEnabled = true;
+    final a = await client.begin(
+      AuthorizationMethod.quickConnect,
+      server: fake.url,
+    );
+    await a.cancel();
+    expect(await a.poll(), AuthorizationStatus.cancelled);
+    var now = DateTime.utc(2026);
+    final timed = JellyfinClient(device: device, clock: () => now);
+    final b = await timed.begin(
+      AuthorizationMethod.quickConnect,
+      server: fake.url,
+    );
+    now = now.add(const Duration(minutes: 11));
+    expect(await b.poll(), AuthorizationStatus.expired);
+    final c = await client.begin(
+      AuthorizationMethod.quickConnect,
+      server: fake.url,
+    );
+    fake.nextStatus = 403;
+    expect(await c.poll(), AuthorizationStatus.denied);
+    final d = await client.begin(
+      AuthorizationMethod.quickConnect,
+      server: fake.url,
+    );
+    fake.nextStatus = 429;
+    await expectLater(
+      d.poll(),
+      throwsA(failure(MediaServerFailureKind.rateLimited)),
+    );
+  });
   test('cancel during exchange rejects late authorization', () async {
     fake.quickAuthorized = true;
     final a = await client.begin(
@@ -255,72 +251,66 @@ void main() {
       await check;
     },
   );
-  test(
-    'catalog mapping and paging, real segments, genres, counts and watched state',
-    () async {
-      attach();
-      expect((await client.getViews()).single.id, 'library-1');
-      final page = await client.queryItems(
-        parentId: 'library-1',
-        searchTerm: '测试',
-        includeItemTypes: 'Movie',
-        startIndex: 20,
-        limit: 10,
-        genres: ['剧情'],
-        years: [2026],
-        sortBy: 'SortName',
-        sortOrder: 'Ascending',
-      );
-      expect(page.totalRecordCount, 31);
-      expect(page.offset, 20);
-      expect(page.items.single.runtime, const Duration(seconds: 120));
-      final item = await client.getItem('movie-1');
-      expect(
-        item.chapters.where((c) => c.markerType == 'IntroStart').length,
-        1,
-      );
-      expect(
-        item.chapters
-            .where((c) => c.markerType == 'IntroEnd')
-            .single
-            .startPosition,
-        const Duration(seconds: 3),
-      );
-      expect(item.mediaSources.single.streams.single.language, 'zho');
-      expect(await client.getLibraryGenres('library-1'), ['剧情']);
-      expect((await client.getItemCounts()).series, isNull);
-      await client.markPlayed('movie-1');
-      expect(fake.watched, contains('movie-1'));
-      await client.markUnplayed('movie-1');
-      expect(fake.watched, isEmpty);
-      await client.hideFromResume('movie-1');
-      expect(fake.userData['PlaybackPositionTicks'], 0);
-      expect(fake.userData['Played'], false);
-      await client.getResumeItems();
-      await client.getNextUp();
-      await client.getLatestItems(includeItemTypes: 'Movie');
-      await client.searchByName('测试');
-      expect(
-        (await client.querySimilar('movie-1')).pagination.availability,
-        CapabilityAvailability.unsupported,
-      );
-      expect(
-        (await client.getNextEpisode(
-          const MediaItem(
-            id: 'current',
-            name: '当前',
-            type: 'Episode',
-            seriesId: 'series-1',
-          ),
-        ))?.id,
-        'next',
-      );
-      expect(
-        () => client.queryNextUp(sortBy: 'Name'),
-        throwsA(failure(MediaServerFailureKind.unsupported)),
-      );
-    },
-  );
+  test('catalog mapping and paging, real segments, genres, counts and watched state', () async {
+    attach();
+    expect((await client.getViews()).single.id, 'library-1');
+    final page = await client.queryItems(
+      parentId: 'library-1',
+      searchTerm: '测试',
+      includeItemTypes: 'Movie',
+      startIndex: 20,
+      limit: 10,
+      genres: ['剧情'],
+      years: [2026],
+      sortBy: 'SortName',
+      sortOrder: 'Ascending',
+    );
+    expect(page.totalRecordCount, 31);
+    expect(page.offset, 20);
+    expect(page.items.single.runtime, const Duration(seconds: 120));
+    final item = await client.getItem('movie-1');
+    expect(item.chapters.where((c) => c.markerType == 'IntroStart').length, 1);
+    expect(
+      item.chapters
+          .where((c) => c.markerType == 'IntroEnd')
+          .single
+          .startPosition,
+      const Duration(seconds: 3),
+    );
+    expect(item.mediaSources.single.streams.single.language, 'zho');
+    expect(await client.getLibraryGenres('library-1'), ['剧情']);
+    expect((await client.getItemCounts()).series, isNull);
+    await client.markPlayed('movie-1');
+    expect(fake.watched, contains('movie-1'));
+    await client.markUnplayed('movie-1');
+    expect(fake.watched, isEmpty);
+    await client.hideFromResume('movie-1');
+    expect(fake.userData['PlaybackPositionTicks'], 0);
+    expect(fake.userData['Played'], false);
+    await client.getResumeItems();
+    await client.getNextUp();
+    await client.getLatestItems(includeItemTypes: 'Movie');
+    await client.searchByName('测试');
+    expect(
+      (await client.querySimilar('movie-1')).pagination.availability,
+      CapabilityAvailability.unsupported,
+    );
+    expect(
+      (await client.getNextEpisode(
+        const MediaItem(
+          id: 'current',
+          name: '当前',
+          type: 'Episode',
+          seriesId: 'series-1',
+        ),
+      ))?.id,
+      'next',
+    );
+    expect(
+      () => client.queryNextUp(sortBy: 'Name'),
+      throwsA(failure(MediaServerFailureKind.unsupported)),
+    );
+  });
   test(
     'playback units, isolated simultaneous leases and crash recovery',
     () async {
@@ -539,51 +529,45 @@ void main() {
       await assertion;
     },
   );
-  test(
-    'both playing sessions keep separate devices and releasing one preserves other',
-    () async {
-      attach();
-      final a = await client.getPlaybackInfo(itemId: 'movie-1');
-      final b = await client.getPlaybackInfo(itemId: 'movie-1');
-      await client.reportPlaying(report(a));
-      await client.reportPlaying(report(b));
-      expect(fake.nowPlaying.length, 2);
-      await client.reportStopped(report(a));
-      await client.releasePlayback(report(a));
-      expect(fake.nowPlaying.length, 1);
-      expect(fake.resources.length, 1);
-      await client.reportStopped(report(b));
-      expect(fake.nowPlaying, isEmpty);
-    },
-  );
-  test(
-    'direct resource uses raw session and isolated authorization; unknown version fails',
-    () async {
-      attach();
-      final info = await client.getPlaybackInfo(itemId: 'movie-1');
-      final resolved = client.resolvePlayback(info: info, itemId: 'movie-1')!;
-      expect(resolved.playMethod, PlayMethod.directPlay);
-      expect(
-        resolved.streamUrl.queryParameters['playSessionId'],
-        'raw-session-1',
-      );
-      expect(
-        resolved.authorization!.headersFor(
-          Uri.parse('https://foreign.example/media'),
-        )['Authorization'],
-        isNull,
-      );
-      expect(
-        client.resolvePlayback(
-          info: info,
-          itemId: 'movie-1',
-          mediaSourceId: 'unknown',
-        ),
-        isNull,
-      );
-      await info.resources!.release();
-    },
-  );
+  test('both playing sessions keep separate devices and releasing one preserves other', () async {
+    attach();
+    final a = await client.getPlaybackInfo(itemId: 'movie-1');
+    final b = await client.getPlaybackInfo(itemId: 'movie-1');
+    await client.reportPlaying(report(a));
+    await client.reportPlaying(report(b));
+    expect(fake.nowPlaying.length, 2);
+    await client.reportStopped(report(a));
+    await client.releasePlayback(report(a));
+    expect(fake.nowPlaying.length, 1);
+    expect(fake.resources.length, 1);
+    await client.reportStopped(report(b));
+    expect(fake.nowPlaying, isEmpty);
+  });
+  test('direct resource uses raw session and isolated authorization; unknown version fails', () async {
+    attach();
+    final info = await client.getPlaybackInfo(itemId: 'movie-1');
+    final resolved = client.resolvePlayback(info: info, itemId: 'movie-1')!;
+    expect(resolved.playMethod, PlayMethod.directPlay);
+    expect(
+      resolved.streamUrl.queryParameters['playSessionId'],
+      'raw-session-1',
+    );
+    expect(
+      resolved.authorization!.headersFor(
+        Uri.parse('https://foreign.example/media'),
+      )['Authorization'],
+      isNull,
+    );
+    expect(
+      client.resolvePlayback(
+        info: info,
+        itemId: 'movie-1',
+        mediaSourceId: 'unknown',
+      ),
+      isNull,
+    );
+    await info.resources!.release();
+  });
   test(
     'direct stream remux uses negotiated URL instead of static original',
     () async {

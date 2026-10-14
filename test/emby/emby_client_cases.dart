@@ -1,4 +1,5 @@
 import 'package:rillight/emby/emby_codec.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -144,21 +145,18 @@ void main() {
     expect(error.detail, isNot(contains('\n')));
   });
 
-  test(
-    'catalog, search and player load feedback retain status and short server text',
-    () {
-      final l10n = AppLocalizationsZh();
-      for (final status in [403, 500, 503]) {
-        final error = responseFailure({'Message': '该线路已被禁用'}, status: status);
-        final expected = 'HTTP $status: 该线路已被禁用';
-        expect(error.statusCode, status);
-        expect(embyFailureMessage(l10n, error), expected);
-        // PlayerPage uses catalogFailureMessage for its Emby loadFailure.
-        expect(catalogFailureMessage(l10n, error), expected);
-        expect(searchFailureMessage(l10n, error), expected);
-      }
-    },
-  );
+  test('catalog, search and player load feedback retain status and short server text', () {
+    final l10n = AppLocalizationsZh();
+    for (final status in [403, 500, 503]) {
+      final error = responseFailure({'Message': '该线路已被禁用'}, status: status);
+      final expected = 'HTTP $status: 该线路已被禁用';
+      expect(error.statusCode, status);
+      expect(embyFailureMessage(l10n, error), expected);
+      // PlayerPage uses catalogFailureMessage for its Emby loadFailure.
+      expect(catalogFailureMessage(l10n, error), expected);
+      expect(searchFailureMessage(l10n, error), expected);
+    }
+  });
 
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -270,9 +268,9 @@ void main() {
   test('hung Public Info maps to timeout', () async {
     server.hangPublicInfo = true;
     expect(
-      () => client(
-        timeout: const Duration(milliseconds: 80),
-      ).getPublicInfo(server.baseUrl),
+      () =>
+          client(timeout: const Duration(milliseconds: 80))
+              .getPublicInfo(server.baseUrl),
       throwsA(_kind(MediaServerFailureKind.timeout)),
     );
   });

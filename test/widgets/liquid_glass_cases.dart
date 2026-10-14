@@ -1,18 +1,19 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 
 void main() {
   testWidgets('LiquidGlass blurs content behind it', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
-        home: const Scaffold(
-          body: Stack(
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: const CupertinoPageScaffold(
+          child: Stack(
             children: [
-              ColoredBox(color: Colors.red, child: SizedBox.expand()),
+              ColoredBox(color: Color(0xffff3b30), child: SizedBox.expand()),
               Center(
                 child: LiquidGlass(
                   kind: LiquidGlassKind.panel,
@@ -35,9 +36,11 @@ void main() {
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(disableAnimations: true),
-        child: MaterialApp(
-          theme: AppTheme.dark(),
-          home: const Scaffold(body: LiquidGlass(child: Text('实色'))),
+        child: CupertinoTestApp(
+          theme: AppUiTheme.dark(),
+          home: const CupertinoPageScaffold(
+            child: LiquidGlass(child: Text('实色')),
+          ),
         ),
       ),
     );
@@ -47,10 +50,10 @@ void main() {
 
   testWidgets('LiquidGlassBackdrop can disable blur', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
-        home: const Scaffold(
-          body: LiquidGlassBackdrop(
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: const CupertinoPageScaffold(
+          child: LiquidGlassBackdrop(
             enabled: false,
             child: LiquidGlass(child: Text('播放器')),
           ),

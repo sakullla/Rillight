@@ -366,46 +366,43 @@ void main() {
     },
   );
 
-  test(
-    'acceptance plex discovers owned and shared without granting Home ownership',
-    () async {
-      plex.includeOwnedResource = true;
-      final (auth, cloud, credentials) = await account();
-      final resources = await auth.discoverResources(cloud);
-      expect(resources.map((resource) => resource.server.id), [
-        'server-a',
-        'server-b',
-      ]);
-      // Discovery does not attach either resource to a source client.
-      final client = PlexClient(device: device);
-      expect(client.hasSession, isFalse);
-      final selected = resources.last;
-      final connection = selected.connections.single.uri;
-      final token =
-          credentials[selected.resourceCredentialRef]!['accessToken'] as String;
-      client.attachSession(
-        baseUrl: connection,
-        accessToken: token,
+  test('acceptance plex discovers owned and shared without granting Home ownership', () async {
+    plex.includeOwnedResource = true;
+    final (auth, cloud, credentials) = await account();
+    final resources = await auth.discoverResources(cloud);
+    expect(resources.map((resource) => resource.server.id), [
+      'server-a',
+      'server-b',
+    ]);
+    // Discovery does not attach either resource to a source client.
+    final client = PlexClient(device: device);
+    expect(client.hasSession, isFalse);
+    final selected = resources.last;
+    final connection = selected.connections.single.uri;
+    final token =
+        credentials[selected.resourceCredentialRef]!['accessToken'] as String;
+    client.attachSession(
+      baseUrl: connection,
+      accessToken: token,
+      userId: selected.user.id,
+    );
+    client.bindVerifiedIdentity(
+      await auth.verifyResourceIdentity(
+        cloudCredentialRef: cloud.credentialRef,
+        resourceCredentialRef: selected.resourceCredentialRef,
+        cloudAccountId: cloud.id,
+        serverId: selected.server.id,
         userId: selected.user.id,
-      );
-      client.bindVerifiedIdentity(
-        await auth.verifyResourceIdentity(
-          cloudCredentialRef: cloud.credentialRef,
-          resourceCredentialRef: selected.resourceCredentialRef,
-          cloudAccountId: cloud.id,
-          serverId: selected.server.id,
-          userId: selected.user.id,
-          resourceToken: token,
-          connection: connection,
-        ),
-      );
-      expect((await client.getUser()).id, selected.user.id);
-      expect(client.baseUrl, connection);
-      expect(await client.getViews(), isNotEmpty);
-      final users = await auth.homeUsers(cloud);
-      final child = await auth.switchHomeUser(cloud, users.last, pin: '1234');
-      expect(child.map((resource) => resource.server.id), ['server-a']);
-      expect(child.single.homeUserId, '2');
-    },
-  );
+        resourceToken: token,
+        connection: connection,
+      ),
+    );
+    expect((await client.getUser()).id, selected.user.id);
+    expect(client.baseUrl, connection);
+    expect(await client.getViews(), isNotEmpty);
+    final users = await auth.homeUsers(cloud);
+    final child = await auth.switchHomeUser(cloud, users.last, pin: '1234');
+    expect(child.map((resource) => resource.server.id), ['server-a']);
+    expect(child.single.homeUserId, '2');
+  });
 }

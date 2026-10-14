@@ -7,43 +7,39 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/playback_runtime_test.dart [part 3]',
-    caseEntrypoints['aggregation/playback_runtime_cases.dart#2']!,
+    'auth/library_counts_test.dart',
+    caseEntrypoints['auth/library_counts_cases.dart']!,
   );
   group(
-    'auth/server_management_test.dart',
-    caseEntrypoints['auth/server_management_cases.dart']!,
-  );
-  group(
-    'catalog/desktop_provider_filter_test.dart',
-    caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
-  );
-  group(
-    'mobile/detail_route_identity_test.dart',
-    caseEntrypoints['mobile/detail_route_identity_cases.dart']!,
+    'catalog/item_detail_test.dart [part 3]',
+    caseEntrypoints['catalog/item_detail_cases.dart#2']!,
   );
   group(
     'mobile/phone_home_rails_test.dart',
     caseEntrypoints['mobile/phone_home_rails_cases.dart']!,
   );
   group(
-    'mobile/phone_player_test.dart [part 2]',
-    caseEntrypoints['mobile/phone_player_cases.dart#1']!,
+    'mobile/phone_nav_style_test.dart',
+    caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
   );
   group(
-    'widgets/artwork_crop_test.dart',
-    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
+    'mobile/phone_player_test.dart [part 1]',
+    caseEntrypoints['mobile/phone_player_cases.dart#0']!,
+  );
+  group(
+    'mobile/search_cached_refresh_test.dart',
+    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
+  );
+  group(
+    'player/desktop_player_page_test.dart',
+    caseEntrypoints['player/desktop_player_page_cases.dart']!,
+  );
+  group(
+    'settings_page_test.dart',
+    caseEntrypoints['settings_page_cases.dart']!,
   );
   group(
     'widgets/backdrop_scrim_test.dart',
     caseEntrypoints['widgets/backdrop_scrim_cases.dart']!,
-  );
-  group(
-    'widgets/desktop_back_button_test.dart',
-    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
-  );
-  group(
-    'widgets/poster_card_test.dart',
-    caseEntrypoints['widgets/poster_card_cases.dart']!,
   );
 }

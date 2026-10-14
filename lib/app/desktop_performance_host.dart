@@ -2,7 +2,7 @@ import 'dart:collection';
 import 'dart:ui' show FramePhase, FrameTiming;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// Use measured raster pressure rather than guessing GPU speed from its name.
 /// Once effects are reduced, keep that choice until this window is closed to

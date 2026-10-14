@@ -1,12 +1,11 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_widgets.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/phone_hero.dart';
 
 /// 手机滚动不使用 Android 拉伸回弹，避免下拉刷新和上拉时把横幅、卡片拉变形。
-class PhoneScrollBehavior extends MaterialScrollBehavior {
+class PhoneScrollBehavior extends ScrollBehavior {
   const PhoneScrollBehavior();
 
   @override
@@ -21,7 +20,7 @@ class PhoneScrollBehavior extends MaterialScrollBehavior {
 
 /// 手机上的加载、空、失败三种画面。
 ///
-/// 颜色和字号跟随当前 [AppTheme]，出现过渡使用 [AppMotion]。
+/// 颜色和字号跟随当前 [AppUiTheme]，出现过渡使用 [AppMotion]。
 /// 可点操作的最小尺寸为 48dp。
 const Size _minHit = Size(AppSpacing.huge, AppSpacing.huge);
 
@@ -287,7 +286,7 @@ double phoneHomeRailHeight(BuildContext context, {required bool wide}) {
       ? phoneHomeWideCardWidth(screen)
       : phoneHomePosterCardWidth(screen);
   if (!wide) return width * 1.5 + phonePosterCardLabelExtent(context) + 2;
-  final theme = Theme.of(context).textTheme;
+  final theme = AppUiTheme.of(context).textTheme;
   final scaler = MediaQuery.textScalerOf(context);
   final title = scaler.scale(theme.bodyMedium?.fontSize ?? 14) * 1.2;
   final meta = scaler.scale(theme.labelSmall?.fontSize ?? 12) * 1.2;
@@ -368,12 +367,13 @@ class MobileEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final action = actionLabel != null && onAction != null
-        ? OutlinedButton(
+        ? AppButton(
             key: actionKey,
-            style: OutlinedButton.styleFrom(minimumSize: _minHit),
+            style: AppButtonStyle(minimumSize: _minHit),
             onPressed: onAction,
+            variant: AppButtonVariant.outlined,
             child: Text(actionLabel!),
           )
         : null;
@@ -395,7 +395,7 @@ class MobileEmptyState extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Icon(
-                    Icons.movie_outlined,
+                    CupertinoIcons.film,
                     size: 28,
                     color: scheme.onSurfaceVariant,
                   ),
@@ -405,9 +405,8 @@ class MobileEmptyState extends StatelessWidget {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+                style: AppUiTheme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: scheme.onSurfaceVariant),
               ),
               if (action != null) ...[
                 const SizedBox(height: AppSpacing.md),
@@ -438,7 +437,7 @@ class MobileFailureState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Semantics(
       key: stateKey,
       container: true,
@@ -457,7 +456,7 @@ class MobileFailureState extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Icon(
-                    Icons.error_outline_rounded,
+                    CupertinoIcons.exclamationmark_circle,
                     size: 28,
                     color: scheme.onErrorContainer,
                   ),
@@ -467,13 +466,14 @@ class MobileFailureState extends StatelessWidget {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge,
+                style: AppUiTheme.of(context).textTheme.bodyLarge,
               ),
               const SizedBox(height: AppSpacing.md),
-              FilledButton(
+              AppButton(
                 key: retryKey,
-                style: FilledButton.styleFrom(minimumSize: _minHit),
+                style: AppButtonStyle(minimumSize: _minHit),
                 onPressed: onRetry,
+                variant: AppButtonVariant.filled,
                 child: Text(l10n.retry),
               ),
             ],

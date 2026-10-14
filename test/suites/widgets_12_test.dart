@@ -7,39 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/presentation_test.dart [part 1]',
-    caseEntrypoints['aggregation/presentation_cases.dart#0']!,
+    'aggregation/playback_runtime_test.dart [part 3]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#2']!,
   );
   group(
-    'auth/connect_page_test.dart',
-    caseEntrypoints['auth/connect_page_cases.dart']!,
+    'aggregation/presentation_test.dart [part 2]',
+    caseEntrypoints['aggregation/presentation_cases.dart#1']!,
+  );
+  group(
+    'auth/change_password_test.dart',
+    caseEntrypoints['auth/change_password_cases.dart']!,
   );
   group(
     'auth/provider_connect_dialog_test.dart',
     caseEntrypoints['auth/provider_connect_dialog_cases.dart']!,
   );
   group(
-    'catalog/item_detail_test.dart [part 2]',
-    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
+    'auth/provider_connect_routing_test.dart',
+    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 3]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#2']!,
+    'catalog/filter_panel_test.dart',
+    caseEntrypoints['catalog/filter_panel_cases.dart']!,
   );
   group(
-    'mobile/phone_nav_style_test.dart',
-    caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
+    'media_image/blurred_artwork_test.dart',
+    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
   );
   group(
-    'player/desktop_player_window_host_test.dart',
-    caseEntrypoints['player/desktop_player_window_host_cases.dart']!,
+    'mobile/mobile_performance_timing_test.dart',
+    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
+    'mobile/phone_pages_test.dart [part 3]',
+    caseEntrypoints['mobile/phone_pages_cases.dart#2']!,
   );
   group(
-    'player/player_controls_test.dart',
-    caseEntrypoints['player/player_controls_cases.dart']!,
+    'widgets/app_empty_view_test.dart',
+    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
   );
 }

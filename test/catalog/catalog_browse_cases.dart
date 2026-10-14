@@ -2,7 +2,7 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -16,7 +16,6 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/item_detail_page.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/search/search_overlay.dart';
 
@@ -168,11 +167,16 @@ void main() {
         find.byWidgetPredicate(
           (widget) =>
               (widget is ui.AppTooltip && widget.message == '灯川测试\n切换服务器') ||
-              (widget is Tooltip && widget.message == '灯川测试\n切换服务器'),
+              (widget is AppTooltip && widget.message == '灯川测试\n切换服务器'),
         ),
         findsOneWidget,
       );
-      expect(find.byType(NavigationRail), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget.runtimeType.toString() == 'NavigationRail',
+        ),
+        findsNothing,
+      );
       expect(find.byKey(AppShell.topBarKey), findsOneWidget);
       expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
       expect(find.byKey(AppShell.overflowNavKey), findsOneWidget);
@@ -425,7 +429,7 @@ void main() {
         find.byWidgetPredicate(
           (widget) =>
               (widget is ui.AppTooltip && widget.message == '搜索') ||
-              (widget is Tooltip && widget.message == '搜索'),
+              (widget is AppTooltip && widget.message == '搜索'),
         ),
       );
       await settle(tester);
@@ -480,7 +484,7 @@ void main() {
         find.byWidgetPredicate(
           (widget) =>
               (widget is ui.AppTooltip && widget.message == '搜索') ||
-              (widget is Tooltip && widget.message == '搜索'),
+              (widget is AppTooltip && widget.message == '搜索'),
         ),
       );
       await settle(tester);

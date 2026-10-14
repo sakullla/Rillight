@@ -1,12 +1,12 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -85,21 +85,23 @@ void main() {
             snapshotStore: MemoryPlaybackSessionSnapshotStore(),
             settingsStore: MemoryPlayerSettingsStore(),
           ),
-          child: MaterialApp(
+          child: CupertinoApp(
             locale: const Locale('zh', 'CN'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            theme: AppTheme.dark(),
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            theme: AppUiTheme.dark().cupertino,
             builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(disableAnimations: reducedMotion),
+              data: MediaQuery.of(context)
+                  .copyWith(disableAnimations: reducedMotion),
               child: child!,
             ),
             home: Builder(
-              builder: (context) => TextButton(
+              builder: (context) => AppButton(
                 onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
+                  CupertinoPageRoute<void>(
                     builder: (_) =>
                         TvPlayerPage(itemId: itemId, autoResume: false),
                   ),
@@ -771,7 +773,7 @@ class _DelayedBackend extends FakeVideoBackend {
 
   @override
   Widget buildView({Key? key}) =>
-      const ColoredBox(key: Key('native-view'), color: Colors.blue);
+      const ColoredBox(key: Key('native-view'), color: Color(0xff2196f3));
 }
 
 class _SourceSwitchBackend extends FakeVideoBackend {

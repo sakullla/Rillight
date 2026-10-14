@@ -1,10 +1,12 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -15,7 +17,6 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -77,13 +78,16 @@ void main() {
         ),
     ];
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: Builder(
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: Builder(
             builder: (context) => CustomScrollView(
               slivers: MobileSeriesPage(
                 item: const MediaItem(id: 'series', name: '剧', type: 'Series'),
@@ -141,13 +145,16 @@ void main() {
       scroll.dispose();
     });
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: Builder(
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: Builder(
             builder: (context) => CustomScrollView(
               controller: scroll,
               slivers: MobileSeriesPage(
@@ -234,13 +241,18 @@ void main() {
       expect(decoration.borderRadius, BorderRadius.circular(AppRadii.md));
       expect(
         decoration.color,
-        Theme.of(tester.element(image)).colorScheme.surfaceContainerLow,
+        AppUiTheme.of(tester.element(image)).colorScheme.surfaceContainerLow,
       );
       expect(
         find.descendant(of: image, matching: find.text('B')),
         findsOneWidget,
       );
-      expect(find.byType(CircleAvatar), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget.runtimeType.toString() == 'CircleAvatar',
+        ),
+        findsNothing,
+      );
       final role = tester.getRect(
         find.descendant(of: actor1, matching: find.text('Friend')),
       );
@@ -470,7 +482,12 @@ void main() {
     );
     expect(poster.width, closeTo(MediaShelf.posterWidthFor(width), 0.5));
     expect(poster.height, closeTo(poster.width * 1.5, 0.5));
-    expect(find.byType(CircleAvatar), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget.runtimeType.toString() == 'CircleAvatar',
+      ),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -634,13 +651,15 @@ void main() {
           path: '/detail',
           builder: (context, state) => PresentationScope(
             environment: PresentationEnvironment.tv,
-            child: Scaffold(body: EpisodePeopleSection(people: people)),
+            child: CupertinoPageScaffold(
+              child: EpisodePeopleSection(people: people),
+            ),
           ),
         ),
         GoRoute(
           path: '/person/:personId',
-          builder: (context, state) => Scaffold(
-            body: Text('person ${state.pathParameters['personId']}'),
+          builder: (context, state) => CupertinoPageScaffold(
+            child: Text('person ${state.pathParameters['personId']}'),
           ),
         ),
       ],
@@ -648,11 +667,14 @@ void main() {
     addTearDown(router.dispose);
     _useSurface(tester, width, height);
     await tester.pumpWidget(
-      MaterialApp.router(
+      CupertinoTestApp.router(
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        theme: AppTheme.dark(),
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
+        theme: AppUiTheme.dark(),
         routerConfig: router,
       ),
     );
@@ -718,7 +740,7 @@ void main() {
             find.descendant(
               of: unnamed,
               matching: find.byWidgetPredicate(
-                (widget) => widget is InkWell || widget is TvAction,
+                (widget) => widget is AppSurfaceAction || widget is TvAction,
               ),
             ),
             findsNothing,
@@ -1324,7 +1346,7 @@ void main() {
       expect(find.textContaining('dream-sharing'), findsOneWidget);
       expect(
         tester
-            .widget<FilledButton>(find.byKey(const Key('mobile-detail-play')))
+            .widget<AppButton>(find.byKey(const Key('mobile-detail-play')))
             .onPressed,
         isNotNull,
       );
@@ -1487,12 +1509,17 @@ void main() {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
-          MaterialApp(
+          CupertinoTestApp(
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            theme: AppTheme.dark(),
-            home: Scaffold(body: EpisodeMediaStreamsSection(source: source)),
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            theme: AppUiTheme.dark(),
+            home: CupertinoPageScaffold(
+              child: EpisodeMediaStreamsSection(source: source),
+            ),
           ),
         );
       }
@@ -1543,13 +1570,16 @@ void main() {
       final scroll = ScrollController();
       addTearDown(scroll.dispose);
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          theme: AppTheme.dark(),
-          home: Scaffold(
-            body: Builder(
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          theme: AppUiTheme.dark(),
+          home: CupertinoPageScaffold(
+            child: Builder(
               builder: (context) {
                 final page = MobileSeriesPage(
                   item: MediaItem(
@@ -1709,12 +1739,12 @@ void main() {
 
     final grid = find.byType(GridView);
     expect(grid, findsOneWidget);
-    expect(find.widgetWithText(OutlinedButton, '29'), findsOneWidget);
+    expect(find.widgetWithText(AppButton, '29'), findsOneWidget);
     final tinted = tester
-        .widgetList<OutlinedButton>(
-          find.descendant(of: grid, matching: find.byType(OutlinedButton)),
+        .widgetList<AppButton>(
+          find.descendant(of: grid, matching: find.byType(AppButton)),
         )
-        .where((button) => button.style?.backgroundColor?.resolve({}) != null);
+        .where((button) => button.style?.backgroundColor != null);
     expect(tinted, isEmpty);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
@@ -1773,7 +1803,7 @@ Future<void> _pumpPeople(
 }) async {
   _useSurface(tester, width, height);
   final section = EpisodePeopleSection(people: people ?? _samplePeople);
-  Widget home = Scaffold(body: section);
+  Widget home = CupertinoPageScaffold(child: section);
   if (environment != null) {
     home = PresentationScope(environment: environment, child: home);
   }
@@ -1781,11 +1811,14 @@ Future<void> _pumpPeople(
     home = AuthScope(controller: auth, child: home);
   }
   await tester.pumpWidget(
-    MaterialApp(
+    CupertinoTestApp(
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      theme: AppTheme.dark(),
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
+      theme: AppUiTheme.dark(),
       home: home,
     ),
   );
@@ -1816,8 +1849,8 @@ Future<GoRouter> _pumpCastRoute(
       GoRoute(
         path: '/detail',
         builder: (context, state) {
-          final page = Scaffold(
-            body: ListView(
+          final page = CupertinoPageScaffold(
+            child: ListView(
               children: [
                 Focus(focusNode: anchor, child: const Text('原详情')),
                 const EpisodePeopleSection(people: _routePeople),
@@ -1837,17 +1870,21 @@ Future<GoRouter> _pumpCastRoute(
       ),
       GoRoute(
         path: '/person/:personId',
-        builder: (context, state) =>
-            Scaffold(body: Text('person ${state.pathParameters['personId']}')),
+        builder: (context, state) => CupertinoPageScaffold(
+          child: Text('person ${state.pathParameters['personId']}'),
+        ),
       ),
     ],
   );
   await tester.pumpWidget(
-    MaterialApp.router(
+    CupertinoTestApp.router(
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      theme: AppTheme.dark(),
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
+      theme: AppUiTheme.dark(),
       routerConfig: router,
     ),
   );
@@ -1917,13 +1954,16 @@ Future<void> _pumpSeasonPlaceholder(WidgetTester tester, double width) async {
       const FakeAccessibilityFeatures(disableAnimations: true);
   addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
   await tester.pumpWidget(
-    MaterialApp(
+    CupertinoTestApp(
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      theme: AppTheme.dark(),
-      home: Scaffold(
-        body: ListView(
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
+      theme: AppUiTheme.dark(),
+      home: CupertinoPageScaffold(
+        child: ListView(
           children: [
             MobileSeriesPage(
               item: const MediaItem(
@@ -2087,7 +2127,8 @@ Future<_Started> _start(
     routes: [
       GoRoute(
         path: '/empty',
-        builder: (context, state) => const Scaffold(body: SizedBox()),
+        builder: (context, state) =>
+            const CupertinoPageScaffold(child: SizedBox()),
       ),
       GoRoute(
         path: '/library/:viewId',
@@ -2121,11 +2162,14 @@ Future<_Started> _start(
       controller: auth,
       child: CatalogScope(
         controller: catalog,
-        child: MaterialApp.router(
+        child: CupertinoTestApp.router(
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          theme: AppTheme.dark(),
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          theme: AppUiTheme.dark(),
           routerConfig: router,
         ),
       ),

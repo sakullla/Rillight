@@ -1,9 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
+
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/media_image/artwork_crop.dart';
 
@@ -66,11 +68,11 @@ void main() {
       final bytes = (await tester.runAsync(() async {
         final recorder = ui.PictureRecorder();
         final canvas = Canvas(recorder);
-        canvas.drawColor(Colors.black, BlendMode.src);
+        canvas.drawColor(const Color(0xff000000), BlendMode.src);
         for (var y = 5; y < 20; y += 2) {
           canvas.drawRect(
             Rect.fromLTWH(10, y.toDouble(), 44, 1),
-            Paint()..color = Colors.white,
+            Paint()..color = const Color(0xffffffff),
           );
         }
         final picture = recorder.endRecording();
@@ -83,7 +85,7 @@ void main() {
       final idle = Completer<void>();
       var waits = 0;
       late Alignment alignment;
-      Widget app(double height) => MaterialApp(
+      Widget app(double height) => CupertinoTestApp(
         home: Center(
           child: SizedBox(
             width: 200,

@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
 import 'package:rillight/media_server/authentication.dart';
@@ -6,12 +7,16 @@ import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
+
 import 'plex_http.dart';
 
-typedef PlexCredentialReader =
-    Future<Map<String, dynamic>?> Function(String ref);
-typedef PlexCredentialWriter =
-    Future<void> Function(String ref, Map<String, dynamic> value);
+typedef PlexCredentialReader = Future<Map<String, dynamic>?> Function(
+  String ref,
+);
+typedef PlexCredentialWriter = Future<void> Function(
+  String ref,
+  Map<String, dynamic> value,
+);
 typedef PlexCredentialDeleter = Future<void> Function(String ref);
 
 /// Only live verification below can construct this proof. PMS '/' identifies

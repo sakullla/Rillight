@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -6,8 +6,6 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
-
-import 'theme/tokens.dart';
 
 /// 手机端通用按压反馈基件(T1):按下时缩放 + 提亮,供海报卡、主按钮等复用。
 ///
@@ -71,10 +69,10 @@ class _MobilePressableState extends State<MobilePressable> {
         child: ColorFiltered(
           colorFilter: _pressed
               ? ColorFilter.mode(
-                  Colors.white.withValues(alpha: widget.brighten),
+                  const Color(0xffffffff).withValues(alpha: widget.brighten),
                   BlendMode.plus,
                 )
-              : const ColorFilter.mode(Colors.transparent, BlendMode.plus),
+              : const ColorFilter.mode(Color(0x00000000), BlendMode.plus),
           child: widget.child,
         ),
       ),
@@ -123,7 +121,7 @@ class _PhoneCardBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.scrim.withValues(alpha: 0.72),
@@ -135,7 +133,7 @@ class _PhoneCardBadge extends StatelessWidget {
           label,
           maxLines: 1,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: Colors.white,
+            color: const Color(0xffffffff),
             fontWeight: FontWeight.w600,
             height: 1.2,
           ),
@@ -208,7 +206,7 @@ class PhonePosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l10n = AppLocalizations.of(context);
     final badges = phoneCardBadgeLabels(
       l10n,
@@ -220,9 +218,11 @@ class PhonePosterCard extends StatelessWidget {
       maxWidth: imageMaxWidth,
       fit: BoxFit.cover,
     );
-    final card = Material(
-      color: theme.colorScheme.surface,
-      borderRadius: BorderRadius.circular(16),
+    final card = Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
       clipBehavior: Clip.antiAlias,
       child: MobilePressable(
         key: pressKey,
@@ -237,7 +237,7 @@ class PhonePosterCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppRadii.md),
               child: AspectRatio(
                 aspectRatio: 2 / 3,
-                // 图缺失时 MediaImage 落主题化占位,底衬与页面分层。
+
                 child: ColoredBox(
                   color: theme.colorScheme.surfaceContainerLow,
                   child: Stack(
@@ -385,7 +385,7 @@ class PhoneGridPosterCard extends StatelessWidget {
 /// 网格 childAspectRatio 与骨架共用,保证单元格刚好容纳网格态
 /// [PhonePosterCard](年份缺失的卡片底部留空,不挤压图区 2:3)。
 double phonePosterCardLabelExtent(BuildContext context) {
-  final theme = Theme.of(context);
+  final theme = AppUiTheme.of(context);
   double lineHeight(TextStyle? style) {
     final painter = TextPainter(
       text: TextSpan(text: 'Ag', style: style),

@@ -1,12 +1,13 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -114,12 +115,15 @@ void main() {
             controller: auth,
             child: CatalogScope(
               controller: catalog,
-              child: MaterialApp(
-                theme: AppTheme.dark(),
+              child: CupertinoTestApp(
+                theme: AppUiTheme.dark(),
                 locale: const Locale('zh'),
                 supportedLocales: AppLocalizations.supportedLocales,
-                localizationsDelegates: AppLocalizations.localizationsDelegates,
-                home: Scaffold(body: page),
+                localizationsDelegates: [
+                  AppLocalizations.delegate,
+                  ...GlobalCupertinoLocalizations.delegates,
+                ],
+                home: CupertinoPageScaffold(child: page),
               ),
             ),
           ),
@@ -133,7 +137,7 @@ void main() {
           );
           await tester.testTextInput.receiveAction(TextInputAction.done);
         } else {
-          await tester.enterText(find.byType(TextField).first, 'Film');
+          await tester.enterText(find.byType(AppTextField).first, 'Film');
           await tester.testTextInput.receiveAction(TextInputAction.search);
         }
         for (var i = 0; i < 40; i++) {

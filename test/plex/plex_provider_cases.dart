@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/authentication.dart';
 import 'package:rillight/media_server/device.dart';
@@ -8,6 +9,7 @@ import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/plex/plex_authentication.dart';
 import 'package:rillight/plex/plex_client.dart';
+
 import 'fake_plex.dart';
 
 const device = ClientDeviceInfo(
@@ -56,61 +58,58 @@ void main() {
     return ((await attempt.exchange()) as CloudAuthorizationGrant).account;
   }
 
-  test(
-    'JWK PIN signature, cloud verification, refresh coalescing and separate Home resources',
-    () async {
-      final attempt = await auth.begin(AuthorizationMethod.browserPin);
-      expect(attempt.code, 'ABCD');
-      expect(attempt.verificationUri!.host, 'app.plex.tv');
-      expect(await attempt.poll(), AuthorizationStatus.pending);
-      fake.authorized = true;
-      expect(await attempt.poll(), AuthorizationStatus.authorized);
-      final account =
-          ((await attempt.exchange()) as CloudAuthorizationGrant).account;
-      expect(
-        credentials[account.credentialRef]!['accessToken'],
-        FakePlex.cloudToken,
-      );
-      final resources = await auth.discoverResources(account);
-      expect(resources.single.server.id, 'server-a');
-      expect(resources.single.connections.last.limitedBandwidth, true);
-      expect(
-        credentials[resources.single.resourceCredentialRef]!['accessToken'],
-        'owner-resource',
-      );
-      final users = await auth.homeUsers(account);
-      expect(users.last.requiresPin, true);
-      await expectLater(
-        auth.switchHomeUser(account, users.last, pin: 'bad'),
-        throwsA(failure(MediaServerFailureKind.forbidden)),
-      );
-      final switched = await auth.switchHomeUser(
-        account,
-        users.last,
-        pin: '1234',
-      );
-      expect(switched.single.user.id, '2');
-      expect(switched.single.homeUserId, '2');
-      expect(
-        credentials[switched.single.resourceCredentialRef]!['accessToken'],
-        'child-resource',
-      );
-      expect(
-        credentials[resources.single.resourceCredentialRef]!['accessToken'],
-        'owner-resource',
-      );
-      await Future.wait([
-        auth.refreshAccount(account),
-        auth.refreshAccount(account),
-      ]);
-      expect(fake.refreshes, 1);
-      expect(
-        credentials[account.credentialRef]!['accessToken'],
-        FakePlex.refreshedToken,
-      );
-      expect((await auth.restoreAccount(account.credentialRef)).id, '1');
-    },
-  );
+  test('JWK PIN signature, cloud verification, refresh coalescing and separate Home resources', () async {
+    final attempt = await auth.begin(AuthorizationMethod.browserPin);
+    expect(attempt.code, 'ABCD');
+    expect(attempt.verificationUri!.host, 'app.plex.tv');
+    expect(await attempt.poll(), AuthorizationStatus.pending);
+    fake.authorized = true;
+    expect(await attempt.poll(), AuthorizationStatus.authorized);
+    final account =
+        ((await attempt.exchange()) as CloudAuthorizationGrant).account;
+    expect(
+      credentials[account.credentialRef]!['accessToken'],
+      FakePlex.cloudToken,
+    );
+    final resources = await auth.discoverResources(account);
+    expect(resources.single.server.id, 'server-a');
+    expect(resources.single.connections.last.limitedBandwidth, true);
+    expect(
+      credentials[resources.single.resourceCredentialRef]!['accessToken'],
+      'owner-resource',
+    );
+    final users = await auth.homeUsers(account);
+    expect(users.last.requiresPin, true);
+    await expectLater(
+      auth.switchHomeUser(account, users.last, pin: 'bad'),
+      throwsA(failure(MediaServerFailureKind.forbidden)),
+    );
+    final switched = await auth.switchHomeUser(
+      account,
+      users.last,
+      pin: '1234',
+    );
+    expect(switched.single.user.id, '2');
+    expect(switched.single.homeUserId, '2');
+    expect(
+      credentials[switched.single.resourceCredentialRef]!['accessToken'],
+      'child-resource',
+    );
+    expect(
+      credentials[resources.single.resourceCredentialRef]!['accessToken'],
+      'owner-resource',
+    );
+    await Future.wait([
+      auth.refreshAccount(account),
+      auth.refreshAccount(account),
+    ]);
+    expect(fake.refreshes, 1);
+    expect(
+      credentials[account.credentialRef]!['accessToken'],
+      FakePlex.refreshedToken,
+    );
+    expect((await auth.restoreAccount(account.credentialRef)).id, '1');
+  });
   test('late authorized PIN cannot commit after cancellation', () async {
     final attempt = await auth.begin(AuthorizationMethod.browserPin);
     fake.authorized = true;
@@ -289,9 +288,10 @@ void main() {
       startPosition: const Duration(seconds: 62),
       audioStreamIndex: 22,
     );
-    final resolved =
-        client.resolvePlayback(info: info, itemId: '42')
-            as PlexResolvedPlayback;
+    final resolved = client.resolvePlayback(
+      info: info,
+      itemId: '42',
+    ) as PlexResolvedPlayback;
     expect(resolved.partIndex, 1);
     expect(resolved.partStartPosition, const Duration(seconds: 2));
     expect(resolved.streamUrl.path, '/prefix/library/parts/102/file.mkv');
@@ -321,58 +321,56 @@ void main() {
       throwsA(failure(MediaServerFailureKind.unsupported)),
     );
   });
-  test(
-    'decision local offset, global timeline report and owned idempotent cleanup',
-    () async {
-      final info = await client.getPlaybackInfo(
-        itemId: '42',
-        mediaSourceId: '7',
-        forceTranscode: true,
-        maxStreamingBitrate: 8000000,
-        startPosition: const Duration(seconds: 62),
-        audioStreamIndex: 22,
-      );
-      final decision = fake.requests.last;
-      expect(decision.path, '/video/:/transcode/universal/decision');
-      expect(decision.query['partIndex'], '1');
-      expect(decision.query['offset'], '2.0');
-      final selection = fake.requests
-          .where((r) => r.method == 'PUT' && r.path == '/library/parts/102')
-          .single;
-      expect(selection.query['audioStreamID'], '22');
-      expect(selection.query['allParts'], '0');
-      expect(decision.query['videoBitrate'], '8000');
-      expect(decision.query['peakBitrate'], '8000');
-      final resolved =
-          client.resolvePlayback(info: info, itemId: '42')
-              as PlexResolvedPlayback;
-      expect(resolved.timeline, isNull);
-      expect(resolved.filmTimeline.duration, const Duration(minutes: 2));
-      expect(resolved.partStartPosition, const Duration(seconds: 2));
-      expect(resolved.streamUrl.path, endsWith('/start.m3u8'));
-      expect(
-        utf8.decode(await client.readAuthorizedBytes(resolved.streamUrl)),
-        contains('#EXTM3U'),
-      );
-      final report = PlaybackReport(
-        itemId: '42',
-        mediaSourceId: '7',
-        playSessionId: info.playSessionId,
-        playMethod: PlayMethod.transcode,
-        position: const Duration(milliseconds: 62345),
-      );
-      await client.reportPlaying(report);
-      expect(fake.requests.last.query['time'], '62345');
-      expect(fake.requests.last.query['duration'], '120000');
-      await client.reportStopped(report);
-      expect(fake.sessions, isNotEmpty);
-      client.clearSession();
-      await Future.wait([info.resources!.release(), info.resources!.release()]);
-      expect(fake.stops, 1);
-      expect(fake.sessions, isEmpty);
-      expect(fake.requests.last.token, 'owner-resource');
-    },
-  );
+  test('decision local offset, global timeline report and owned idempotent cleanup', () async {
+    final info = await client.getPlaybackInfo(
+      itemId: '42',
+      mediaSourceId: '7',
+      forceTranscode: true,
+      maxStreamingBitrate: 8000000,
+      startPosition: const Duration(seconds: 62),
+      audioStreamIndex: 22,
+    );
+    final decision = fake.requests.last;
+    expect(decision.path, '/video/:/transcode/universal/decision');
+    expect(decision.query['partIndex'], '1');
+    expect(decision.query['offset'], '2.0');
+    final selection = fake.requests
+        .where((r) => r.method == 'PUT' && r.path == '/library/parts/102')
+        .single;
+    expect(selection.query['audioStreamID'], '22');
+    expect(selection.query['allParts'], '0');
+    expect(decision.query['videoBitrate'], '8000');
+    expect(decision.query['peakBitrate'], '8000');
+    final resolved = client.resolvePlayback(
+      info: info,
+      itemId: '42',
+    ) as PlexResolvedPlayback;
+    expect(resolved.timeline, isNull);
+    expect(resolved.filmTimeline.duration, const Duration(minutes: 2));
+    expect(resolved.partStartPosition, const Duration(seconds: 2));
+    expect(resolved.streamUrl.path, endsWith('/start.m3u8'));
+    expect(
+      utf8.decode(await client.readAuthorizedBytes(resolved.streamUrl)),
+      contains('#EXTM3U'),
+    );
+    final report = PlaybackReport(
+      itemId: '42',
+      mediaSourceId: '7',
+      playSessionId: info.playSessionId,
+      playMethod: PlayMethod.transcode,
+      position: const Duration(milliseconds: 62345),
+    );
+    await client.reportPlaying(report);
+    expect(fake.requests.last.query['time'], '62345');
+    expect(fake.requests.last.query['duration'], '120000');
+    await client.reportStopped(report);
+    expect(fake.sessions, isNotEmpty);
+    client.clearSession();
+    await Future.wait([info.resources!.release(), info.resources!.release()]);
+    expect(fake.stops, 1);
+    expect(fake.sessions, isEmpty);
+    expect(fake.requests.last.token, 'owner-resource');
+  });
   test(
     'rejected preflight releases own resource without timeline or new start',
     () async {
@@ -391,44 +389,41 @@ void main() {
       );
     },
   );
-  test(
-    'failed release is retryable and recovered cleanup never starts a transcode',
-    () async {
-      final info = await client.getPlaybackInfo(
-        itemId: '42',
-        forceTranscode: true,
+  test('failed release is retryable and recovered cleanup never starts a transcode', () async {
+    final info = await client.getPlaybackInfo(
+      itemId: '42',
+      forceTranscode: true,
+    );
+    fake.errorStatus = 403;
+    await expectLater(
+      info.resources!.release(),
+      throwsA(failure(MediaServerFailureKind.forbidden)),
+    );
+    expect(info.resources!.isReleased, false);
+    fake.errorStatus = null;
+    await info.resources!.release();
+    expect(info.resources!.isReleased, true);
+    final recovered = PlexClient(device: device)
+      ..attachSession(
+        baseUrl: fake.url,
+        accessToken: 'owner-resource',
+        userId: '1',
       );
-      fake.errorStatus = 403;
-      await expectLater(
-        info.resources!.release(),
-        throwsA(failure(MediaServerFailureKind.forbidden)),
-      );
-      expect(info.resources!.isReleased, false);
-      fake.errorStatus = null;
-      await info.resources!.release();
-      expect(info.resources!.isReleased, true);
-      final recovered = PlexClient(device: device)
-        ..attachSession(
-          baseUrl: fake.url,
-          accessToken: 'owner-resource',
-          userId: '1',
-        );
-      final report = PlaybackReport(
-        itemId: '42',
-        mediaSourceId: '7',
-        playSessionId: 'recorded-old-session',
-        playMethod: PlayMethod.transcode,
-        position: Duration.zero,
-      );
-      final before = fake.requests.length;
-      await recovered.releasePlayback(report);
-      await recovered.releasePlayback(report);
-      expect(fake.requests.skip(before).map((r) => r.path), [
-        '/video/:/transcode/universal/stop',
-      ]);
-      expect(fake.requests.last.query['session'], 'recorded-old-session');
-    },
-  );
+    final report = PlaybackReport(
+      itemId: '42',
+      mediaSourceId: '7',
+      playSessionId: 'recorded-old-session',
+      playMethod: PlayMethod.transcode,
+      position: Duration.zero,
+    );
+    final before = fake.requests.length;
+    await recovered.releasePlayback(report);
+    await recovered.releasePlayback(report);
+    expect(fake.requests.skip(before).map((r) => r.path), [
+      '/video/:/transcode/universal/stop',
+    ]);
+    expect(fake.requests.last.query['session'], 'recorded-old-session');
+  });
   test(
     'source guard rejects late response, cleanup survives revoked read guard',
     () async {

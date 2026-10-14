@@ -1,6 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -18,11 +20,14 @@ void main() {
       imageMaxWidth: 200,
       childAspectRatio: 0.7,
     );
-    Widget page(List<MediaItem> items) => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+    Widget page(List<MediaItem> items) => CupertinoTestApp(
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(
-        body: CustomScrollView(
+      home: CupertinoPageScaffold(
+        child: CustomScrollView(
           slivers: [TvPosterSliver(items: items, metrics: metrics)],
         ),
       ),

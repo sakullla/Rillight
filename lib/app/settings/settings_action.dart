@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
@@ -18,15 +18,15 @@ class SettingsAction extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
-    return IconButton(
+    return AppIconButton(
       key: actionKey,
       tooltip: l10n.settings,
       onPressed: () => context.push(AppRoutes.settings),
       padding: EdgeInsets.zero,
       constraints: kTitleBarIconConstraints,
-      visualDensity: VisualDensity.compact,
-      iconSize: 18,
-      icon: const Icon(Icons.settings_outlined),
+
+      size: 18,
+      icon: const Icon(CupertinoIcons.gear),
     );
   }
 }

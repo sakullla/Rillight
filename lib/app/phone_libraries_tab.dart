@@ -1,10 +1,9 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -53,7 +52,7 @@ class PhoneLibrariesTab extends StatelessWidget {
         } else {
           status = null;
         }
-        return RefreshIndicator(
+        return AppRefresh(
           onRefresh: catalog.reload,
           child: CustomScrollView(
             key: const PageStorageKey('mobile-libraries-scroll'),
@@ -133,14 +132,16 @@ class _LibraryBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final hasImage = _hasImage;
-    return Material(
-      color: scheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(20),
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+      ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
+      child: AppSurfaceAction(
         key: Key('phone-library-block-${library.id}'),
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
@@ -148,9 +149,11 @@ class _LibraryBlock extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: Material(
-                color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(20),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 clipBehavior: Clip.antiAlias,
                 child: hasImage
                     ? MediaImage(
@@ -166,7 +169,7 @@ class _LibraryBlock extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
-            // 标题左对齐,与全仓卡片规范一致(ADR-5)。
+
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
               child: Text(
@@ -189,13 +192,13 @@ class _LibraryNamePlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final icon = switch (collectionType) {
-      'movies' => Icons.movie_outlined,
-      'tvshows' => Icons.tv_rounded,
-      'music' => Icons.music_note_rounded,
-      'photos' => Icons.photo_library_outlined,
-      _ => Icons.video_library_outlined,
+      'movies' => CupertinoIcons.film,
+      'tvshows' => CupertinoIcons.tv,
+      'music' => CupertinoIcons.music_note,
+      'photos' => CupertinoIcons.photo_on_rectangle,
+      _ => CupertinoIcons.rectangle_stack,
     };
     return DecoratedBox(
       decoration: BoxDecoration(

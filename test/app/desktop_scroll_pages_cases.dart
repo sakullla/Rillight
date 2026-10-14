@@ -1,5 +1,6 @@
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -14,9 +15,8 @@ import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
-// Keep this platform-specific app test in its own isolate. AppTheme caches
-// ThemeData (including platform), so an earlier Android-theme test in the
-// catalog suite would disable desktop primary-scroll-controller inheritance.
+// The platform variant exercises desktop primary-controller inheritance and
+// smooth discrete wheel input through the actual application scroll behavior.
 void main() {
   setUp(isolateImageCache);
   late FakeEmbyServer server;

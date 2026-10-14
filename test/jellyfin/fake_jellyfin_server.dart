@@ -71,11 +71,9 @@ class JellyfinFakeServer {
     },
   };
   Future<void> start() async {
-    contract =
-        jsonDecode(
-              await File('test/jellyfin/protocol_contract.json').readAsString(),
-            )
-            as Map<String, dynamic>;
+    contract = jsonDecode(
+      await File('test/jellyfin/protocol_contract.json').readAsString(),
+    ) as Map<String, dynamic>;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((r) async {
       try {

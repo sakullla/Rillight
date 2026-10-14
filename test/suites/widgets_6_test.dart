@@ -7,40 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/playback_runtime_test.dart [part 2]',
-    caseEntrypoints['aggregation/playback_runtime_cases.dart#1']!,
-  );
-  group(
     'app/desktop_scroll_test.dart',
     caseEntrypoints['app/desktop_scroll_cases.dart']!,
   );
-  group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
   group(
-    'auth/library_counts_test.dart',
-    caseEntrypoints['auth/library_counts_cases.dart']!,
+    'auth/line_management_test.dart',
+    caseEntrypoints['auth/line_management_cases.dart']!,
   );
   group(
-    'auth/provider_connect_routing_test.dart',
-    caseEntrypoints['auth/provider_connect_routing_cases.dart']!,
+    'home/library_latest_row_test.dart',
+    caseEntrypoints['home/library_latest_row_cases.dart']!,
   );
   group(
-    'media_image/blurred_artwork_test.dart',
-    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
+    'library/source_detail_route_test.dart [part 2]',
+    caseEntrypoints['library/source_detail_route_cases.dart#1']!,
   );
   group(
-    'mobile/mobile_performance_timing_test.dart',
-    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
+    'player/player_window_test.dart',
+    caseEntrypoints['player/player_window_cases.dart']!,
   );
   group(
-    'mobile/phone_player_test.dart [part 1]',
-    caseEntrypoints['mobile/phone_player_cases.dart#0']!,
+    'tv/tv_detail_test.dart [part 2]',
+    caseEntrypoints['tv/tv_detail_cases.dart#1']!,
+  );
+  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
+  group(
+    'widgets/app_hover_card_test.dart',
+    caseEntrypoints['widgets/app_hover_card_cases.dart']!,
   );
   group(
-    'player/phone_presentation_lifecycle_test.dart',
-    caseEntrypoints['player/phone_presentation_lifecycle_cases.dart']!,
-  );
-  group(
-    'widgets/app_empty_view_test.dart',
-    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
+    'widgets/scrim_icon_button_test.dart',
+    caseEntrypoints['widgets/scrim_icon_button_cases.dart']!,
   );
 }

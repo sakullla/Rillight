@@ -1,9 +1,10 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -12,7 +13,9 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
 import 'package:rillight/app/tv_top_nav.dart';
+
 import 'dart:async';
+
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -27,6 +30,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/video_backend.dart';
+
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
@@ -222,7 +226,7 @@ void main() {
       );
       // 聚焦反相为主题的反色实底(深色主题近白、浅色主题近黑),
       // 与静止态的半透明底和页面底色对比度都远高于 3:1。
-      final scheme = Theme.of(tester.element(focusedAction())).colorScheme;
+      final scheme = AppUiTheme.of(tester.element(focusedAction())).colorScheme;
       expect(
         (focusedContainer.decoration as BoxDecoration).color,
         scheme.inverseSurface,

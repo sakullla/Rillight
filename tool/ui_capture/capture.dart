@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,7 +44,9 @@ import '../../test/helpers/image_cache_fixture.dart';
 import 'fixtures.dart';
 import 'pages.dart';
 import 'providers.dart';
+
 import 'package:rillight/auth/provider_identity.dart';
+
 import 'danmaku.dart';
 
 void main() {
@@ -53,17 +55,17 @@ void main() {
   final out = Platform.environment['RILLIGHT_CAPTURE_OUT'];
   if (out == null) throw StateError('请运行 node tool/capture-ui.mjs');
   setUpAll(() async {
-    final bytes = await File(
-      Platform.environment['RILLIGHT_CAPTURE_FONT']!,
-    ).readAsBytes();
-    for (final family in {'Segoe UI', 'Roboto', ...danmakuFontFallbacks()}) {
+    final bytes = await File(Platform.environment['RILLIGHT_CAPTURE_FONT']!)
+        .readAsBytes();
+    for (final family in {'Segoe UI', ...danmakuFontFallbacks()}) {
       await (FontLoader(
         family,
       )..addFont(Future.value(ByteData.sublistView(bytes)))).load();
     }
-    await (FontLoader(
-      'MaterialIcons',
-    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+    await (FontLoader('packages/cupertino_icons/CupertinoIcons')..addFont(
+          rootBundle.load('packages/cupertino_icons/assets/CupertinoIcons.ttf'),
+        ))
+        .load();
   });
   final configurations = <(String, PresentationEnvironment, Size)>[
     ('desktop', PresentationEnvironment.desktop, const Size(1440, 1000)),
@@ -340,7 +342,12 @@ void main() {
         if (config.$1 == 'phone' && capture.wants('home')) {
           app.router.go('/');
           await capture.advance(400);
-          await tester.tap(find.byType(NavigationDestination).first);
+          await tester.tap(
+            find.descendant(
+              of: find.byType(CupertinoTabBar),
+              matching: find.text('首页'),
+            ),
+          );
           await capture.advance(400);
           await revealPhoneHero(tester, capture);
           final catalog = CatalogScope.of(
@@ -348,9 +355,8 @@ void main() {
           );
           // 轮播只取最近入库的电影/剧集交错,与观看记录无关;用圆点切到
           // 剧集页,主操作「播放」要先解析出该播的那一集。
-          final seriesPage = PhoneHero.featuredItemsOf(
-            catalog,
-          ).indexWhere((item) => item.id == 'series-friends');
+          final seriesPage = PhoneHero.featuredItemsOf(catalog)
+              .indexWhere((item) => item.id == 'series-friends');
           expect(seriesPage, greaterThanOrEqualTo(0));
           await tester.ensureVisible(find.byKey(PhoneHero.bannerKey));
           await capture.advance(300);
@@ -756,11 +762,9 @@ class CaptureSession {
   final Size size;
   final boundary = GlobalKey();
   final records = <Map<String, Object>>[];
-  static final knownStates =
-      (jsonDecode(File('tool/ui_capture/scenarios.json').readAsStringSync())
-              as List)
-          .map((entry) => (entry as Map)['id'] as String)
-          .toSet();
+  static final knownStates = (jsonDecode(
+    File('tool/ui_capture/scenarios.json').readAsStringSync(),
+  ) as List).map((entry) => (entry as Map)['id'] as String).toSet();
   final selectedStates = (Platform.environment['RILLIGHT_CAPTURE_STATES'] ?? '')
       .split(',')
       .where((s) => s.isNotEmpty)
@@ -834,11 +838,11 @@ class CaptureSession {
           ?.requestFocus();
       await advance(450);
     }
-    // ExpansionTile's whole render box includes its expanded children. Click
+    // AppDisclosure's whole render box includes its expanded children. Click
     // the header, otherwise a tall section's midpoint can hit a child instead.
-    if (tester.widget(target) is ExpansionTile) {
+    if (tester.widget(target) is AppDisclosure) {
       target = find
-          .descendant(of: target, matching: find.byType(ListTile))
+          .descendant(of: target, matching: find.byType(AppListTile))
           .first;
     }
     await Scrollable.ensureVisible(tester.element(target), alignment: .5);
@@ -922,9 +926,8 @@ class CaptureSession {
             : theme,
         'file': file,
       });
-      await File(
-        '$out/$platform-${size.width.toInt()}-$theme.json',
-      ).writeAsString(jsonEncode(records));
+      await File('$out/$platform-${size.width.toInt()}-$theme.json')
+          .writeAsString(jsonEncode(records));
     });
     // ignore: avoid_print
     print('CAPTURE $file');
@@ -1091,12 +1094,14 @@ class CaptureSession {
       await _waitForKey(const Key('tv-lan-address'));
       manual = Uri.parse(
         tester
-            .widget<SelectableText>(find.byKey(const Key('tv-lan-address')))
-            .data!,
+            .widget<AppSelectableText>(find.byKey(const Key('tv-lan-address')))
+            .data,
       );
       final fingerprint = tester
-          .widget<SelectableText>(find.byKey(const Key('tv-lan-fingerprint')))
-          .data!;
+          .widget<AppSelectableText>(
+            find.byKey(const Key('tv-lan-fingerprint')),
+          )
+          .data;
       expect(manual.queryParameters.keys.toSet(), {'id', 'fp'});
       expect(manual.queryParameters['fp'], fingerprint);
       expect(manual.toString().contains(secret), isFalse);
@@ -1398,9 +1403,9 @@ class _LanPhonePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return Container(
+      decoration: BoxDecoration(color: const Color(0xFF101726)),
       key: _lanPreviewKey,
-      color: const Color(0xFF101726),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -1551,7 +1556,7 @@ class _LanLogo extends StatelessWidget {
         child: Text(
           '灯',
           style: TextStyle(
-            color: Colors.white,
+            color: Color(0xffffffff),
             fontSize: 17,
             fontWeight: FontWeight.w800,
           ),
@@ -1642,7 +1647,7 @@ class _LanStatePreview extends StatelessWidget {
       _ => (const Color(0x29FF6B6B), const Color(0xFFFF6B6B)),
     };
     final icon = switch (page.tone) {
-      'ok' => Icon(Icons.check_rounded, color: fg, size: 34),
+      'ok' => Icon(CupertinoIcons.check_mark, color: fg, size: 34),
       'wait' => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1656,11 +1661,11 @@ class _LanStatePreview extends StatelessWidget {
           ],
         ],
       ),
-      _ => Icon(Icons.close_rounded, color: fg, size: 34),
+      _ => Icon(CupertinoIcons.xmark, color: fg, size: 34),
     };
-    return Material(
+    return Container(
+      decoration: BoxDecoration(color: const Color(0xFF101726)),
       key: _lanPreviewKey,
-      color: const Color(0xFF101726),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(

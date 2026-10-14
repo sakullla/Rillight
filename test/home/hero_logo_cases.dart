@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -8,7 +10,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -95,7 +97,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: HeroLogo(
           item: item,
           fallback: fallback,
@@ -104,7 +106,7 @@ void main() {
         ),
         localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -121,28 +123,29 @@ void main() {
     return (auth, client);
   }
 
-  Widget subject(AuthController auth, {bool prefetch = false}) => MaterialApp(
-    home: AuthScope(
-      controller: auth,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: HeroLogo(
-          item: item,
-          fallback: fallback,
-          maxWidth: 400,
-          maxHeight: 120,
-          prefetch: prefetch,
+  Widget subject(AuthController auth, {bool prefetch = false}) =>
+      CupertinoTestApp(
+        home: AuthScope(
+          controller: auth,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: HeroLogo(
+              item: item,
+              fallback: fallback,
+              maxWidth: 400,
+              maxHeight: 120,
+              prefetch: prefetch,
+            ),
+          ),
         ),
-      ),
-    ),
-    localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
-    builder: (context, child) => ui.AppUiTheme(
-      data: Theme.of(context).brightness == Brightness.dark
-          ? ui.AppUiTheme.dark()
-          : ui.AppUiTheme.light(),
-      child: child ?? const SizedBox.shrink(),
-    ),
-  );
+        localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+        builder: (context, child) => ui.AppUiTheme(
+          data: AppUiTheme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
+      );
 
   testWidgets('a wide logo fits the width budget at its own aspect', (
     tester,
@@ -223,7 +226,7 @@ void main() {
 
 Future<Uint8List> _png(int width, int height) async {
   final recorder = ui.PictureRecorder();
-  Canvas(recorder).drawColor(Colors.white, BlendMode.src);
+  Canvas(recorder).drawColor(const Color(0xffffffff), BlendMode.src);
   final picture = recorder.endRecording();
   final image = await picture.toImage(width, height);
   final bytes = await image.toByteData(format: ui.ImageByteFormat.png);

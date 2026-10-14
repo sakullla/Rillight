@@ -1,16 +1,86 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
+
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
+import 'package:flutter/services.dart';
 import 'package:rillight/app/tv_widgets.dart';
 
 void main() {
   testWidgets(
+    'nested TV stages preserve scaled neutral and Cupertino typography',
+    (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final focus = FocusNode();
+      addTearDown(focus.dispose);
+      var activated = 0;
+      for (final base in [AppUiTheme.tvDark(), AppUiTheme.tvLight()]) {
+        late AppUiThemeData outer, inner;
+        late CupertinoThemeData cupertino;
+        await tester.pumpWidget(
+          CupertinoTestApp(
+            theme: base,
+            home: TvStageTheme(
+              child: Builder(
+                builder: (context) {
+                  outer = AppUiTheme.of(context);
+                  return TvStageTheme(
+                    child: Builder(
+                      builder: (context) {
+                        inner = AppUiTheme.of(context);
+                        cupertino = CupertinoTheme.of(context);
+                        return Center(
+                          child: AppButton(
+                            focusNode: focus,
+                            onPressed: () => activated++,
+                            child: const Text('电视焦点'),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        focus.requestFocus();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+        final decoration =
+            tester
+                    .widget<AnimatedContainer>(
+                      find.descendant(
+                        of: find.byType(AppButton),
+                        matching: find.byType(AnimatedContainer),
+                      ),
+                    )
+                    .decoration!
+                as ShapeDecoration;
+        expect(decoration.color, inner.colorScheme.inverseSurface);
+        final before = activated;
+        await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        expect(activated, before + 1);
+        expect(inner, same(outer));
+        expect(inner.tv, isTrue);
+        expect(inner.brightness, base.brightness);
+        expect(inner.textTheme.titleLarge!.fontSize, 34);
+        expect(inner.textTheme.bodyMedium!.fontSize, 27);
+        expect(cupertino.textTheme.textStyle.fontSize, 27);
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
+  testWidgets(
     'reduced motion still shows focus as an instant high-contrast inverted fill',
     (tester) async {
-      for (final theme in [AppTheme.tvDark(), AppTheme.tvLight()]) {
+      for (final theme in [AppUiTheme.tvDark(), AppUiTheme.tvLight()]) {
         final first = FocusNode();
         final second = FocusNode();
         addTearDown(() async {
@@ -21,14 +91,14 @@ void main() {
         // A new FocusNode must attach to a new TvAction state.
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pumpWidget(
-          MaterialApp(
+          CupertinoTestApp(
             theme: theme,
             builder: (context, child) => MediaQuery(
               data: MediaQuery.of(context).copyWith(disableAnimations: true),
               child: child!,
             ),
-            home: Scaffold(
-              body: Center(
+            home: CupertinoPageScaffold(
+              child: Center(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -93,8 +163,8 @@ void main() {
 
         late EdgeInsets content;
         await tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.tvDark(),
+          CupertinoTestApp(
+            theme: AppUiTheme.tvDark(),
             home: TvFrame(
               title: '片库',
               child: Builder(
@@ -155,7 +225,7 @@ void main() {
       late double scale;
       late int poster;
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           home: Builder(
             builder: (context) {
               scale = TvDesign.scaleOf(context);
@@ -174,7 +244,7 @@ void main() {
     tester.view.devicePixelRatio = 1.5;
     late double scale;
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: Builder(
           builder: (context) {
             scale = TvDesign.scaleOf(context);
@@ -198,7 +268,7 @@ BoxDecoration _decoration(WidgetTester tester, String key) =>
             .decoration
         as BoxDecoration;
 
-void _expectRest(WidgetTester tester, String key, ColorScheme scheme) {
+void _expectRest(WidgetTester tester, String key, AppColorScheme scheme) {
   final fill = _decoration(tester, key).color!;
   expect(fill, isNot(scheme.inverseSurface));
   // 静止态是半透明的前景色薄底,不是实色块。
@@ -208,7 +278,7 @@ void _expectRest(WidgetTester tester, String key, ColorScheme scheme) {
 void _expectFocused(
   WidgetTester tester,
   String key,
-  ColorScheme scheme,
+  AppColorScheme scheme,
   Color page,
 ) {
   final fill = _decoration(tester, key).color!;

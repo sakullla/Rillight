@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -5,10 +7,9 @@ import '../helpers/settle.dart';
 
 import 'package:rillight/emby/emby_codec.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/catalog_cache.dart';
@@ -109,16 +110,16 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (_, _) => Scaffold(
-              body: SingleChildScrollView(child: PhoneHero(catalog: catalog)),
+            builder: (_, _) => CupertinoPageScaffold(
+              child: SingleChildScrollView(child: PhoneHero(catalog: catalog)),
             ),
           ),
           GoRoute(
             path: '/play/:id',
             builder: (_, state) {
               opened = state.extra! as PlayerOpenRequest;
-              return Scaffold(
-                body: Text('playing ${state.pathParameters['id']}'),
+              return CupertinoPageScaffold(
+                child: Text('playing ${state.pathParameters['id']}'),
               );
             },
           ),
@@ -131,17 +132,20 @@ void main() {
         auth.dispose();
       });
       await tester.pumpWidget(
-        MaterialApp.router(
-          theme: AppTheme.phoneDark(),
+        CupertinoTestApp.router(
+          theme: AppUiTheme.phoneDark(),
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           routerConfig: router,
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: ((context, child) => AuthScope(
@@ -183,10 +187,13 @@ void main() {
         auth.dispose();
       });
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
@@ -196,8 +203,8 @@ void main() {
               controller: catalog,
               child: PlayerWindowScope(
                 host: host,
-                child: Scaffold(
-                  body: Center(
+                child: CupertinoPageScaffold(
+                  child: Center(
                     child: HeroPlaybackActions(
                       item: catalog.latestSeries.items.single,
                       catalog: catalog,
@@ -209,7 +216,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -246,17 +253,20 @@ void main() {
     });
     expect(item.canResume, isTrue);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: PlayerWindowScope(
           host: host,
-          child: Scaffold(
-            body: Center(
+          child: CupertinoPageScaffold(
+            child: Center(
               child: HeroPlaybackActions(
                 item: item,
                 onDetails: () => details = true,
@@ -265,7 +275,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -299,24 +309,27 @@ void main() {
       'Type': 'Movie',
     });
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light(),
+      CupertinoTestApp(
+        theme: AppUiTheme.light(),
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: PlayerWindowScope(
           host: host,
-          child: Scaffold(
-            body: Center(
+          child: CupertinoPageScaffold(
+            child: Center(
               child: HeroPlaybackActions(item: item, onDetails: () {}),
             ),
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -326,13 +339,13 @@ void main() {
     final play = tester.widget<ui.AppButton>(
       find.byKey(const ValueKey('hero-resume-movie')),
     );
-    expect(play.style?.backgroundColor, AppTheme.light().colorScheme.primary);
+    expect(play.style?.backgroundColor, AppUiTheme.light().colorScheme.primary);
     final details = tester.widget<ui.AppButton>(
       find.widgetWithText(ui.AppButton, '详情'),
     );
     expect(
       details.style?.foregroundColor,
-      AppTheme.light().colorScheme.onSurface,
+      AppUiTheme.light().colorScheme.onSurface,
     );
   });
 
@@ -345,24 +358,27 @@ void main() {
       'Type': 'Movie',
     });
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: PlayerWindowScope(
           host: host,
-          child: Scaffold(
-            body: Center(
+          child: CupertinoPageScaffold(
+            child: Center(
               child: HeroPlaybackActions(item: item, onDetails: () {}),
             ),
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -372,6 +388,6 @@ void main() {
     final play = tester.widget<ui.AppButton>(
       find.byKey(const ValueKey('hero-resume-movie')),
     );
-    expect(play.style?.backgroundColor, Colors.white);
+    expect(play.style?.backgroundColor, const Color(0xffffffff));
   });
 }

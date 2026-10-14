@@ -1,7 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 
 void main() {
@@ -10,23 +11,23 @@ void main() {
   ) async {
     var actions = 0;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
-        home: const Scaffold(
-          body: AppEmptyView(message: '这里什么都没有', actionLabel: '刷新'),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: const CupertinoPageScaffold(
+          child: AppEmptyView(message: '这里什么都没有', actionLabel: '刷新'),
         ),
       ),
     );
     expect(find.text('这里什么都没有'), findsOneWidget);
-    expect(find.byIcon(Icons.inbox_outlined), findsOneWidget);
+    expect(find.byIcon(CupertinoIcons.tray), findsOneWidget);
     // 未提供 onAction 时不渲染按钮。
-    expect(find.byType(OutlinedButton), findsNothing);
+    expect(find.byType(AppButton), findsNothing);
 
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: AppEmptyView(
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: AppEmptyView(
             message: '这里什么都没有',
             actionLabel: '刷新',
             onAction: () => actions++,

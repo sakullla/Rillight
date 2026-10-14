@@ -24,17 +24,15 @@ void main() {
   test(
     'detail refresh preserves complete provenance but invents no permit',
     () {
-      final restored =
-          roundTrip(
-                const PlayerHostOpenItemCommand(
-                  itemId: 'episode-b',
-                  seasonId: 'season-b',
-                  source: source,
-                  libraryId: 'library-b',
-                  regionGeneration: 17,
-                ),
-              )
-              as PlayerHostOpenItemCommand;
+      final restored = roundTrip(
+        const PlayerHostOpenItemCommand(
+          itemId: 'episode-b',
+          seasonId: 'season-b',
+          source: source,
+          libraryId: 'library-b',
+          regionGeneration: 17,
+        ),
+      ) as PlayerHostOpenItemCommand;
       expect(restored.source, source);
       expect(restored.itemId, 'episode-b');
       expect(restored.seasonId, 'season-b');
@@ -46,25 +44,23 @@ void main() {
   test(
     'player refresh preserves concrete version timeline intent and tracks',
     () {
-      final restored =
-          roundTrip(
-                PlayerOpenRequest(
-                  itemId: 'episode-b',
-                  source: source,
-                  work: source.item,
-                  libraryId: 'library-b',
-                  regionGeneration: 17,
-                  autoResume: false,
-                  mediaSourceId: 'version-b',
-                  audioStreamIndex: 4,
-                  subtitleStreamIndex: 7,
-                  startPosition: Duration(microseconds: 123456789 ~/ 10),
-                  startPaused: true,
-                  subtitleOff: true,
-                  maxStreamingBitrate: 12000000,
-                ),
-              )
-              as PlayerOpenRequest;
+      final restored = roundTrip(
+        PlayerOpenRequest(
+          itemId: 'episode-b',
+          source: source,
+          work: source.item,
+          libraryId: 'library-b',
+          regionGeneration: 17,
+          autoResume: false,
+          mediaSourceId: 'version-b',
+          audioStreamIndex: 4,
+          subtitleStreamIndex: 7,
+          startPosition: Duration(microseconds: 123456789 ~/ 10),
+          startPaused: true,
+          subtitleOff: true,
+          maxStreamingBitrate: 12000000,
+        ),
+      ) as PlayerOpenRequest;
       expect(restored.source, source);
       expect(restored.work, source.item);
       expect(restored.libraryId, 'library-b');
@@ -81,9 +77,9 @@ void main() {
   );
 
   test('legacy extras gain no source and unknown versions fail closed', () {
-    final legacy =
-        roundTrip(const PlayerOpenRequest(itemId: 'legacy'))
-            as PlayerOpenRequest;
+    final legacy = roundTrip(
+      const PlayerOpenRequest(itemId: 'legacy'),
+    ) as PlayerOpenRequest;
     expect(legacy.source, isNull);
     expect(legacy.libraryId, isNull);
     expect(legacy.regionGeneration, isNull);

@@ -1,6 +1,7 @@
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/media_server/errors.dart';
+
 import 'plex_http.dart';
 
 Duration? plexDuration(Object? value) =>
@@ -135,9 +136,8 @@ MediaItem plexItem(Map<String, dynamic> row, {bool section = false}) {
           width: plexInt(m['width']),
           height: plexInt(m['height']),
           runtime: plexDuration(m['duration'] ?? row['duration']),
-          size: plexList(
-            m['Part'],
-          ).fold<int>(0, (n, p) => n + (plexInt(p['size']) ?? 0)),
+          size: plexList(m['Part'])
+              .fold<int>(0, (n, p) => n + (plexInt(p['size']) ?? 0)),
           streams: [
             for (final s in plexStreams(m))
               ItemMediaStream(

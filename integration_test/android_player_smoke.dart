@@ -1,12 +1,14 @@
 import 'package:dio/dio.dart';
 import 'package:rillight/emby/emby_codec.dart';
+
 // Real owned-core smoke entrypoint. Build with -t and ANDROID_SMOKE_BASE; failures
 // emit RILLIGHT_ANDROID_SMOKE_FAIL, never the success marker. Host tooling must
 // separately inspect displayed frames/audio; position is not output evidence.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -21,7 +23,7 @@ import 'package:rillight/player/video_backend.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MaterialApp(home: _Smoke()));
+  runApp(const CupertinoApp(home: _Smoke()));
 }
 
 class _Smoke extends StatefulWidget {
@@ -245,9 +247,8 @@ class _SmokeState extends State<_Smoke> {
       await backend.dispose();
       await backend.dispose();
       final http = HttpClient();
-      final response = await (await http.getUrl(
-        base.resolve('__checks'),
-      )).close();
+      final response = await (await http.getUrl(base.resolve('__checks')))
+          .close();
       final checks =
           jsonDecode(await response.transform(utf8.decoder).join()) as Map;
       http.close();
@@ -393,19 +394,22 @@ class _SmokeState extends State<_Smoke> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: Colors.black,
-    body: Stack(
+  Widget build(BuildContext context) => CupertinoPageScaffold(
+    backgroundColor: CupertinoColors.black,
+    child: Stack(
       children: [
         if (showView) Positioned.fill(child: backend.buildView()),
         Positioned(
           top: 35,
           left: 20,
           child: ColoredBox(
-            color: Colors.black87,
+            color: Color(0xdd000000),
             child: Text(
               stage,
-              style: const TextStyle(color: Colors.white, fontSize: 16),
+              style: const TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 16,
+              ),
             ),
           ),
         ),

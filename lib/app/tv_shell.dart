@@ -1,14 +1,15 @@
 import '../auth/provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
+
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 
 import 'package:rillight/app/tv_appearance_picker.dart';
@@ -286,16 +287,16 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
       },
       child: TvStageTheme(
         child: TvFocusRegion(
-          child: Scaffold(
-            body: Stack(
+          child: CupertinoPageScaffold(
+            child: Stack(
               fit: StackFit.expand,
               children: [
                 Positioned.fill(
                   child: _recovering
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const Center(child: CupertinoActivityIndicator())
                       : _failed
                       ? TvEmptyState(
-                          icon: Icons.cloud_off_rounded,
+                          icon: CupertinoIcons.cloud,
                           message: l.mobileRecoveryFailed,
                           action: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -434,7 +435,7 @@ class _TvSession extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context), l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     final size = MediaQuery.sizeOf(context);
     final gutter = tvSafeGutter(size.width);
@@ -499,7 +500,7 @@ class _TvAccountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final name = auth.session?.username ?? '';
@@ -515,9 +516,14 @@ class _TvAccountCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 22 * s,
-                backgroundColor: scheme.primaryContainer,
+              Container(
+                width: (22 * s) * 2,
+                height: (22 * s) * 2,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: scheme.primaryContainer,
+                ),
                 child: Text(
                   name.isEmpty ? '?' : name.characters.first.toUpperCase(),
                   style: theme.textTheme.titleLarge?.copyWith(
@@ -557,7 +563,7 @@ class _TvAccountCard extends StatelessWidget {
         ),
         SizedBox(height: 14 * s),
         TvNavTile(
-          icon: Icons.add_rounded,
+          icon: CupertinoIcons.plus,
           title: l.mobileAddServer,
           onPressed: () => context.push('${AppRoutes.connect}?add=1'),
         ),
@@ -569,7 +575,7 @@ class _TvAccountCard extends StatelessWidget {
                 .isAvailable)
           TvNavTile(
             actionKey: _TvSession.changePasswordKey,
-            icon: Icons.password_rounded,
+            icon: CupertinoIcons.lock,
             title: auth.client.serviceType == MediaServerType.plex
                 ? l.providerAccountManage
                 : l.changePassword,
@@ -577,7 +583,7 @@ class _TvAccountCard extends StatelessWidget {
                 ? null
                 : auth.client.serviceType == MediaServerType.plex
                 ? () => showProviderAccountSettings(context)
-                : () => showDialog<void>(
+                : () => showAppDialog<void>(
                     context: context,
                     builder: (dialogContext) =>
                         ChangePasswordDialog(auth: auth),
@@ -585,7 +591,7 @@ class _TvAccountCard extends StatelessWidget {
           ),
         SizedBox(height: 6 * s),
         TvNavTile(
-          icon: Icons.logout_rounded,
+          icon: CupertinoIcons.square_arrow_right,
           title: l.logout,
           destructive: true,
           chevron: false,
@@ -606,7 +612,7 @@ class _TvServerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final current = auth.session?.server.id == server.id;
@@ -622,7 +628,11 @@ class _TvServerCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.dns_rounded, size: 20 * s, color: scheme.primary),
+              Icon(
+                CupertinoIcons.cube_box,
+                size: 20 * s,
+                color: scheme.primary,
+              ),
               SizedBox(width: 10 * s),
               Expanded(
                 child: Row(
@@ -646,7 +656,7 @@ class _TvServerCard extends StatelessWidget {
               TvAction(
                 key: _TvSession.lineAddKey(server.id),
                 variant: TvActionVariant.ghost,
-                leading: const Icon(Icons.add_rounded),
+                leading: const Icon(CupertinoIcons.plus),
                 onPressed: auth.isBusy
                     ? null
                     : () => _addLine(context, auth, server.id),
@@ -656,7 +666,7 @@ class _TvServerCard extends StatelessWidget {
               TvAction(
                 key: _TvSession.serverDeleteKey(server.id),
                 variant: TvActionVariant.ghost,
-                leading: const Icon(Icons.delete_outline_rounded),
+                leading: const Icon(CupertinoIcons.trash),
                 onPressed: auth.isBusy
                     ? null
                     : () => _confirmDelete(context, auth, server),
@@ -713,7 +723,7 @@ class _TvServerCard extends StatelessWidget {
                       : () => _editLine(context, auth, server, line),
                   child: Semantics(
                     label: l.editLine,
-                    child: const Icon(Icons.edit_outlined),
+                    child: const Icon(CupertinoIcons.pencil),
                   ),
                 ),
                 SizedBox(width: 4 * s),
@@ -725,7 +735,7 @@ class _TvServerCard extends StatelessWidget {
                       : () => _deleteLine(context, auth, server, line),
                   child: Semantics(
                     label: l.deleteLine,
-                    child: const Icon(Icons.delete_outline_rounded),
+                    child: const Icon(CupertinoIcons.trash),
                   ),
                 ),
               ],
@@ -800,11 +810,11 @@ class _TvServerCard extends StatelessWidget {
     SavedServer server,
   ) async {
     final l10n = AppLocalizations.of(context);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dialogContext) {
         final s = TvDesign.scaleOf(dialogContext);
-        return AlertDialog(
+        return AppDialog(
           title: Text(l10n.deleteServer),
           content: SizedBox(
             width: 420 * s,
@@ -838,7 +848,7 @@ class _Tag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 8 * s, vertical: 2 * s),

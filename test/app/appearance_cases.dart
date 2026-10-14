@@ -1,16 +1,17 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'dart:ui' show PointerDeviceKind;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/settings/settings_page.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -62,16 +63,24 @@ void main() {
         addTearDown(controller.dispose);
         await controller.ready;
         await tester.pumpWidget(
-          MaterialApp(
-            locale: const Locale('zh', 'CN'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            theme: brightness == Brightness.dark
-                ? AppTheme.dark()
-                : AppTheme.light(),
-            home: AppearanceScope(
-              controller: controller,
-              child: const Scaffold(body: AppearanceMenuButton()),
+          ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => CupertinoTestApp(
+              locale: const Locale('zh', 'CN'),
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: [
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
+              theme: controller.brightness == Brightness.dark
+                  ? AppUiTheme.dark()
+                  : AppUiTheme.light(),
+              home: AppearanceScope(
+                controller: controller,
+                child: const CupertinoPageScaffold(
+                  child: AppearanceMenuButton(),
+                ),
+              ),
             ),
           ),
         );
@@ -250,7 +259,7 @@ void main() {
   );
 
   test('light theme keeps AA contrast for body text and controls', () {
-    final scheme = AppTheme.light().colorScheme;
+    final scheme = AppUiTheme.light().colorScheme;
 
     expect(scheme.brightness, Brightness.light);
     expect(
@@ -266,7 +275,7 @@ void main() {
     expect(_contrast(scheme.onError, scheme.error), greaterThan(4.5));
 
     // 深色分层与操作在新的冷调表面上同样保持对比。
-    final dark = AppTheme.dark();
+    final dark = AppUiTheme.dark();
     expect(dark.colorScheme.brightness, Brightness.dark);
     expect(
       _contrast(
@@ -284,8 +293,8 @@ void main() {
       greaterThan(dark.scaffoldBackgroundColor.computeLuminance()),
     );
     // 遮罩底色两种亮度下都是黑色:海报/画面上的渐变不受外观影响。
-    expect(AppTheme.light().colorScheme.scrim, Colors.black);
-    expect(dark.colorScheme.scrim, Colors.black);
+    expect(AppUiTheme.light().colorScheme.scrim, const Color(0xff000000));
+    expect(dark.colorScheme.scrim, const Color(0xff000000));
   });
 
   test('system choice falls back to dark unless light is confirmed', () {
@@ -358,7 +367,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(controller.style, AppearanceStyle.dark);
-    expect(controller.themeMode, ThemeMode.dark);
+    expect(controller.brightness, Brightness.dark);
   });
 
   test('a stored preference loads and setStyle persists without clearing '
@@ -371,7 +380,7 @@ void main() {
 
     // 重启后保持上次选择。
     expect(controller.style, AppearanceStyle.dark);
-    expect(controller.themeMode, ThemeMode.dark);
+    expect(controller.brightness, Brightness.dark);
 
     await controller.setStyle(AppearanceStyle.light);
 
@@ -386,13 +395,16 @@ void main() {
     final store = MemoryPlayerSettingsStore();
     final controller = AppearanceController(store: store);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         home: AppearanceScope(
           controller: controller,
-          child: const Scaffold(body: SettingsPage()),
+          child: const CupertinoPageScaffold(child: SettingsPage()),
         ),
       ),
     );
@@ -430,8 +442,8 @@ void main() {
     // 未保存过外观时默认深色。
     expect(controller.style, AppearanceStyle.dark);
     expect(
-      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
-      ThemeMode.dark,
+      tester.widget<CupertinoApp>(find.byType(CupertinoApp)).theme!.brightness,
+      Brightness.dark,
     );
 
     await tester.tap(find.byKey(ConnectFormKeys.connectAppearanceKey));
@@ -453,10 +465,13 @@ void main() {
       final store = MemoryPlayerSettingsStore();
       final controller = AppearanceController(store: store);
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           home: AppearanceScope(
             controller: controller,
             child: AuthScope(
@@ -506,13 +521,16 @@ void main() {
     final store = MemoryPlayerSettingsStore();
     final controller = AppearanceController(store: store);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         home: AppearanceScope(
           controller: controller,
-          child: const Scaffold(body: TvAppearancePicker()),
+          child: const CupertinoPageScaffold(child: TvAppearancePicker()),
         ),
       ),
     );
@@ -550,8 +568,8 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light(),
+      CupertinoTestApp(
+        theme: AppUiTheme.light(),
         home: const WindowChromeHost(child: SizedBox.expand()),
       ),
     );
@@ -592,7 +610,7 @@ void main() {
     }
 
     await tester.pumpWidget(
-      const MaterialApp(
+      const CupertinoTestApp(
         home: WindowChromeHost(
           brightness: Brightness.light,
           child: SizedBox.expand(),
@@ -601,10 +619,10 @@ void main() {
     );
     await tester.pump();
     expect(calls, hasLength(1));
-    expectTone(calls.single, AppTheme.lightTones, dark: false);
+    expectTone(calls.single, AppUiTheme.lightTones, dark: false);
 
     await tester.pumpWidget(
-      const MaterialApp(
+      const CupertinoTestApp(
         home: WindowChromeHost(
           brightness: Brightness.dark,
           child: SizedBox.expand(),
@@ -613,6 +631,6 @@ void main() {
     );
     await tester.pump();
     expect(calls, hasLength(2));
-    expectTone(calls.last, AppTheme.darkTones, dark: true);
+    expectTone(calls.last, AppUiTheme.darkTones, dark: true);
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

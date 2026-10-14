@@ -1,14 +1,14 @@
 import '../auth/provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
+
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
@@ -105,21 +105,23 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     required String title,
     required List<Widget> children,
   }) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (title.isNotEmpty)
           Text(
             title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(color: scheme.onSurfaceVariant),
+            style: AppUiTheme.of(context).textTheme.titleSmall
+                ?.copyWith(color: scheme.onSurfaceVariant),
           ),
         if (title.isNotEmpty) const SizedBox(height: AppSpacing.xs),
-        Card(
+        Container(
+          decoration: BoxDecoration(
+            color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
           margin: EdgeInsets.zero,
-          clipBehavior: Clip.antiAlias,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             child: Column(children: children),
@@ -133,14 +135,14 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final session = auth.session;
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
     final failure = auth.failure;
     final lineSwitchFailure = auth.lineSwitchFailure;
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.mobileMine)),
-      body: ListView(
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(middle: Text(l10n.mobileMine)),
+      child: ListView(
         key: const PageStorageKey('mobile-mine-scroll'),
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
@@ -153,11 +155,16 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             ),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: scheme.secondaryContainer,
+                Container(
+                  width: (28) * 2,
+                  height: (28) * 2,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: scheme.secondaryContainer,
+                  ),
                   child: Icon(
-                    Icons.person_rounded,
+                    CupertinoIcons.person,
                     size: 32,
                     color: scheme.onSecondaryContainer,
                   ),
@@ -170,7 +177,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                       Text(
                         session?.username ?? '',
                         key: PhoneMinePage.userKey,
-                        style: Theme.of(context).textTheme.headlineSmall,
+                        style: AppUiTheme.of(context).textTheme.headlineSmall,
                       ),
                       const SizedBox(height: AppSpacing.xxs),
                       Text(
@@ -178,14 +185,14 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                             ? ''
                             : '${session.server.serviceType.name} · ${session.server.displayName}',
                         key: PhoneMinePage.serverKey,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: AppUiTheme.of(context).textTheme.titleMedium,
                       ),
                       if (lineLabel.isNotEmpty) ...[
                         const SizedBox(height: AppSpacing.xxs),
                         Text(
                           lineLabel,
                           key: PhoneMinePage.currentLineKey,
-                          style: Theme.of(context).textTheme.bodyMedium
+                          style: AppUiTheme.of(context).textTheme.bodyMedium
                               ?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ],
@@ -200,9 +207,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               embyFailureMessage(l10n, failure),
               key: PhoneMinePage.failureKey,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
+              style: AppUiTheme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: scheme.error),
             ),
           ],
           if (lineSwitchFailure != null) ...[
@@ -210,9 +216,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               l10n.lineSwitchFailed(lineSwitchFailure.detail),
               key: PhoneMinePage.lineSwitchFailureKey,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
+              style: AppUiTheme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: scheme.error),
             ),
           ],
           const SizedBox(height: AppSpacing.xl),
@@ -220,21 +225,21 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             context,
             title: l10n.mobileAccountServerGroup,
             children: [
-              ListTile(
+              AppListTile(
                 key: PhoneMinePage.lineKey,
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.dns_outlined),
+                leading: const Icon(CupertinoIcons.cube_box),
                 title: Text(l10n.phoneServerManagement),
-                trailing: const Icon(Icons.chevron_right_rounded),
+                trailing: const Icon(CupertinoIcons.chevron_right),
                 onTap: _lines,
               ),
-              ListTile(
+              AppListTile(
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.add_rounded),
+                leading: const Icon(CupertinoIcons.plus),
                 title: Text(l10n.mobileAddServer),
-                trailing: const Icon(Icons.chevron_right_rounded),
+                trailing: const Icon(CupertinoIcons.chevron_right),
                 onTap: () => context.push('${AppRoutes.connect}?add=1'),
               ),
               if (auth.client.serviceType == MediaServerType.plex ||
@@ -242,11 +247,11 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                       .client
                       .capabilities[ServiceCapability.changePassword]
                       .isAvailable)
-                ListTile(
+                AppListTile(
                   key: PhoneMinePage.changePasswordKey,
                   minTileHeight: AppSpacing.huge,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.password_outlined),
+                  leading: const Icon(CupertinoIcons.lock),
                   title: Text(
                     auth.client.serviceType == MediaServerType.plex
                         ? l10n.providerAccountManage
@@ -254,19 +259,19 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   ),
                   onTap: auth.client.serviceType == MediaServerType.plex
                       ? () => showProviderAccountSettings(context)
-                      : () => showDialog<void>(
+                      : () => showAppDialog<void>(
                           context: context,
                           builder: (dialogContext) =>
                               ChangePasswordDialog(auth: auth),
                         ),
                 ),
-              ListTile(
+              AppListTile(
                 key: PhoneMinePage.privateKey,
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.lock_outline_rounded),
+                leading: const Icon(CupertinoIcons.lock),
                 title: Text(l10n.aggregationPrivate),
-                trailing: const Icon(Icons.chevron_right_rounded),
+                trailing: const Icon(CupertinoIcons.chevron_right),
                 onTap: () async {
                   if (await SessionActions.ensurePrivateAccess(context) &&
                       context.mounted) {
@@ -274,18 +279,20 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   }
                 },
               ),
-              ListTile(
+              AppListTile(
                 key: PhoneMinePage.settingsKey,
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.tune_rounded),
+                leading: const Icon(CupertinoIcons.slider_horizontal_3),
                 title: Text(l10n.settings),
-                trailing: const Icon(Icons.chevron_right_rounded),
+                trailing: const Icon(CupertinoIcons.chevron_right),
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (context) => Scaffold(
-                      appBar: AppBar(title: Text(l10n.settings)),
-                      body: SettingsPage(
+                  CupertinoPageRoute<void>(
+                    builder: (context) => CupertinoPageScaffold(
+                      navigationBar: CupertinoNavigationBar(
+                        middle: Text(l10n.settings),
+                      ),
+                      child: SettingsPage(
                         showTitle: false,
                         settingsStore: PlayerScope.of(context).settingsStore,
                       ),
@@ -293,10 +300,13 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   ),
                 ),
               ),
-              ListTile(
+              AppListTile(
                 minTileHeight: AppSpacing.huge,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.logout_rounded, color: scheme.error),
+                leading: Icon(
+                  CupertinoIcons.square_arrow_right,
+                  color: scheme.error,
+                ),
                 title: Text(l10n.logout, style: TextStyle(color: scheme.error)),
                 onTap: auth.isBusy ? null : auth.logout,
               ),
@@ -313,14 +323,13 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   Expanded(
                     child: Text(
                       l10n.appName,
-                      style: Theme.of(context).textTheme.titleMedium,
+                      style: AppUiTheme.of(context).textTheme.titleMedium,
                     ),
                   ),
                   Text(
                     l10n.mobileVersion(kAppVersion),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                    style: AppUiTheme.of(context).textTheme.bodyMedium
+                        ?.copyWith(color: scheme.onSurfaceVariant),
                   ),
                 ],
               ),

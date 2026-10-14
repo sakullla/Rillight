@@ -1,8 +1,9 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/episode_list.dart';
@@ -20,15 +21,18 @@ void main() {
       runtime: Duration(microseconds: (23 * 60 * 10000000) ~/ 10),
     );
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: Align(
+        home: CupertinoPageScaffold(
+          child: Align(
             alignment: Alignment.topCenter,
             child: SizedBox(
               width: 300,
@@ -44,7 +48,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -83,15 +87,18 @@ void main() {
     (tester) async {
       var played = 0;
       var opened = 0;
-      Widget row(MediaItem item) => MaterialApp(
+      Widget row(MediaItem item) => CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: Align(
+        home: CupertinoPageScaffold(
+          child: Align(
             alignment: Alignment.topLeft,
             child: SizedBox(
               width: 320,
@@ -107,7 +114,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -175,15 +182,18 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: Align(
+        home: CupertinoPageScaffold(
+          child: Align(
             alignment: Alignment.topLeft,
             child: SizedBox(
               width: 320,
@@ -211,7 +221,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -272,10 +282,13 @@ void main() {
     Future<double> titleHeight(Size view) async {
       tester.view.physicalSize = view;
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
@@ -297,7 +310,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),

@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// 海报/剧照之上的三段实色渐变遮罩:顶带、左侧文字带、底带。
 ///
@@ -36,7 +35,7 @@ class BackdropScrim extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final highContrast = MediaQuery.highContrastOf(context);
     final light = theme.brightness == Brightness.light;
     final lightSurface = light && lightTextSurface;

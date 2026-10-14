@@ -1405,10 +1405,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     final playerTheme = AppUiTheme.of(context);
     final themes = InheritedTheme.capture(
       from: context,
-      to: Navigator.of(context, rootNavigator: true).context,
+      to: Navigator.of(context).context,
     );
     return showGeneralDialog<void>(
       context: context,
+      useRootNavigator: false,
       barrierDismissible: true,
       barrierLabel: '关闭',
       barrierColor: const Color(0x8a000000),

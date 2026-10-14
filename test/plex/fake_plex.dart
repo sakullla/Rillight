@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:cryptography/cryptography.dart';
 
 /// Independent synthetic account + PMS fixture. Protocol baseline: official PMS
@@ -277,9 +278,9 @@ class FakePlex {
         path == '/library/onDeck') {
       final start = int.tryParse(q['X-Plex-Container-Start'] ?? '0') ?? 0;
       final size = int.tryParse(q['X-Plex-Container-Size'] ?? '20') ?? 20;
-      final section = RegExp(
-        r'^/library/sections/(\d+)/all$',
-      ).firstMatch(path)?.group(1);
+      final section = RegExp(r'^/library/sections/(\d+)/all$')
+          .firstMatch(path)
+          ?.group(1);
       final rows = catalogRows.where((row) {
         if (token == 'child-resource' && row['librarySectionID'] != 1) {
           return false;

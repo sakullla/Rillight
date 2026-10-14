@@ -1,10 +1,6 @@
-import 'dart:ui' as ui;
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme.dart';
-
-import 'ui/theme.dart';
+import 'ui/ui.dart';
 
 import 'package:rillight/auth/auth_scope.dart';
 
@@ -15,7 +11,7 @@ import 'package:rillight/media_image/media_image.dart';
 
 /// 从当前海报取出的内容方案(亮度跟随当前主题)。页面局部套用，不改应用外壳。
 ///
-/// 用 Material 的内容取色：小图量化出一个主色，再生成成对的按钮色和表面色，
+/// 从可见彩色像素提取主色，再生成成对的按钮色和中性表面色，
 /// 保证字和按钮对比度。出错色沿用应用主题，避免失败提示被海报带偏。
 class ContentTheme extends StatefulWidget {
   const ContentTheme({
@@ -40,27 +36,28 @@ class ContentTheme extends StatefulWidget {
   @visibleForTesting
   static void debugClear() => _schemes.clear();
 
-  static final _schemes = <String, ColorScheme>{};
-  static final _pending = <String, Future<ColorScheme>>{};
+  static final _schemes = <String, AppColorScheme>{};
+  static final _pending = <String, Future<AppColorScheme>>{};
 
   @override
   State<ContentTheme> createState() => _ContentThemeState();
 }
 
 class _ContentThemeState extends State<ContentTheme> {
-  ColorScheme? _scheme;
+  AppColorScheme? _scheme;
   String? _identity, _owner;
   int _generation = 0;
 
   void _report(String itemId, String identity, Uint8List bytes) {
     if (itemId != widget.item?.id) return;
     final brightness =
-        AppUiTheme.maybeOf(context)?.brightness ?? Theme.of(context).brightness;
+        AppUiTheme.maybeOf(context)?.brightness ??
+        AppUiTheme.of(context).brightness;
     final token = '$identity/${brightness.name}';
     if (_identity == token) return;
     final base = brightness == Brightness.dark
-        ? AppTheme.dark().colorScheme
-        : AppTheme.light().colorScheme;
+        ? AppUiTheme.dark().colorScheme
+        : AppUiTheme.light().colorScheme;
     _identity = token;
     final generation = ++_generation;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -75,7 +72,7 @@ class _ContentThemeState extends State<ContentTheme> {
           ContentTheme._schemes[token] ??
           await ContentTheme._pending.putIfAbsent(
             token,
-            () => contentSchemeFromBytes(bytes, base).whenComplete(() {
+            () => contentPaletteFromBytes(bytes, base).whenComplete(() {
               ContentTheme._pending.remove(token);
             }),
           );
@@ -83,16 +80,12 @@ class _ContentThemeState extends State<ContentTheme> {
       _remember(token, scheme);
       setState(() => _scheme = scheme);
     });
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   @override
   Widget build(BuildContext context) {
-    final uiTheme = AppUiTheme.maybeOf(context);
-    final theme = uiTheme == null
-        ? Theme.of(context)
-        : uiTheme.brightness == Brightness.dark
-        ? AppTheme.dark()
-        : AppTheme.light();
+    final theme = AppUiTheme.of(context);
     final auth = AuthScope.maybeOf(context);
     final item = widget.item;
     final refs =
@@ -108,8 +101,7 @@ class _ContentThemeState extends State<ContentTheme> {
         ? 'item:${item?.id}'
         : '${preferred.itemId}:${preferred.type}:${preferred.tag}';
     final owner = '${mediaImageAccountScope(auth)}/${theme.brightness}/$source';
-    final sourceChanged = _owner != owner;
-    if (sourceChanged) {
+    if (_owner != owner) {
       _owner = owner;
       _identity = null;
       _scheme = null;
@@ -118,225 +110,32 @@ class _ContentThemeState extends State<ContentTheme> {
     final scheme =
         _scheme ??
         (theme.brightness == Brightness.dark
-            ? AppTheme.dark().colorScheme
-            : AppTheme.light().colorScheme);
-    final data = theme.copyWith(
-      colorScheme: scheme,
-      scaffoldBackgroundColor: scheme.surface,
-      // 顶栏跟随内容主题:详情页滚动收起的 AppBar 与页面同色,
-      // 不再露出应用中性底色(与海报动态色拼接的异色条)。
-      appBarTheme: theme.appBarTheme.copyWith(
-        backgroundColor: scheme.surface,
-        surfaceTintColor: Colors.transparent,
-      ),
-      textTheme: theme.textTheme.apply(
-        bodyColor: scheme.onSurface,
-        displayColor: scheme.onSurface,
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: theme.filledButtonTheme.style?.copyWith(
-          backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.disabled)
-                ? scheme.surfaceContainerHighest
-                : scheme.primary,
-          ),
-          foregroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.disabled)
-                ? scheme.onSurfaceVariant
-                : scheme.onPrimary,
-          ),
+            ? AppUiTheme.dark().colorScheme
+            : AppUiTheme.light().colorScheme);
+    return AppUiTheme(
+      data: theme.copyWith(
+        colorScheme: scheme,
+        scaffoldBackgroundColor: scheme.surface,
+        textTheme: theme.textTheme.apply(
+          bodyColor: scheme.onSurface,
+          displayColor: scheme.onSurface,
         ),
       ),
-      textButtonTheme: TextButtonThemeData(
-        style: theme.textButtonTheme.style?.copyWith(
-          foregroundColor: WidgetStatePropertyAll(scheme.primary),
-        ),
-      ),
-      iconButtonTheme: IconButtonThemeData(
-        style: theme.iconButtonTheme.style?.copyWith(
-          foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
-        ),
-      ),
-      chipTheme: theme.chipTheme.copyWith(
-        // A flat ActionChip otherwise paints the inherited canvas color,
-        // which still belongs to the application rather than this artwork.
-        backgroundColor: scheme.surfaceContainerHigh,
-        disabledColor: scheme.surfaceContainer,
-        selectedColor: scheme.primaryContainer,
-        labelStyle: theme.textTheme.labelLarge?.copyWith(
-          color: WidgetStateColor.resolveWith((states) {
-            if (states.contains(WidgetState.disabled)) {
-              return scheme.onSurface.withValues(alpha: .38);
-            }
-            return states.contains(WidgetState.selected)
-                ? scheme.onPrimaryContainer
-                : scheme.onSurface;
-          }),
-        ),
-        side: WidgetStateBorderSide.resolveWith((states) {
-          if (states.contains(WidgetState.focused)) {
-            return BorderSide(color: scheme.primary, width: 2);
-          }
-          return BorderSide(
-            color: states.contains(WidgetState.disabled)
-                ? scheme.onSurface.withValues(alpha: .12)
-                : scheme.outlineVariant,
-          );
-        }),
-        checkmarkColor: scheme.onPrimaryContainer,
-        surfaceTintColor: Colors.transparent,
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: theme.outlinedButtonTheme.style?.copyWith(
-          foregroundColor: WidgetStatePropertyAll(scheme.onSurface),
-          side: WidgetStatePropertyAll(BorderSide(color: scheme.outline)),
-        ),
-      ),
-    );
-    final neutralScheme = AppColorScheme(
-      brightness: scheme.brightness,
-      primary: scheme.primary,
-      onPrimary: scheme.onPrimary,
-      primaryContainer: scheme.primaryContainer,
-      onPrimaryContainer: scheme.onPrimaryContainer,
-      secondary: scheme.secondary,
-      onSecondary: scheme.onSecondary,
-      secondaryContainer: scheme.secondaryContainer,
-      onSecondaryContainer: scheme.onSecondaryContainer,
-      tertiary: scheme.tertiary,
-      onTertiary: scheme.onTertiary,
-      tertiaryContainer: scheme.tertiaryContainer,
-      onTertiaryContainer: scheme.onTertiaryContainer,
-      error: scheme.error,
-      onError: scheme.onError,
-      errorContainer: scheme.errorContainer,
-      onErrorContainer: scheme.onErrorContainer,
-      surface: scheme.surface,
-      onSurface: scheme.onSurface,
-      onSurfaceVariant: scheme.onSurfaceVariant,
-      surfaceDim: scheme.surfaceDim,
-      surfaceBright: scheme.surfaceBright,
-      surfaceContainerLowest: scheme.surfaceContainerLowest,
-      surfaceContainerLow: scheme.surfaceContainerLow,
-      surfaceContainer: scheme.surfaceContainer,
-      surfaceContainerHigh: scheme.surfaceContainerHigh,
-      surfaceContainerHighest: scheme.surfaceContainerHighest,
-      outline: scheme.outline,
-      outlineVariant: scheme.outlineVariant,
-      scrim: scheme.scrim,
-      inverseSurface: scheme.inverseSurface,
-      onInverseSurface: scheme.onInverseSurface,
-      inversePrimary: scheme.inversePrimary,
-      shadow: scheme.shadow,
-      surfaceTint: scheme.surfaceTint,
-    );
-    return AnimatedTheme(
-      data: data,
-      duration: sourceChanged
-          ? Duration.zero
-          : AppMotion.durationOf(context, AppMotion.slow),
-      child: AppUiTheme(
-        data: (uiTheme ?? AppUiThemeData(colorScheme: neutralScheme)).copyWith(
-          colorScheme: neutralScheme,
-          scaffoldBackgroundColor: neutralScheme.surface,
-        ),
-        child: ArtworkColorScope(
-          report: (itemId, identity, bytes) {
-            if (_owner == owner) _report(itemId, identity, bytes);
-          },
-          child: widget.fillSurface
-              ? ColoredBox(color: scheme.surface, child: widget.child)
-              : widget.child,
-        ),
+      child: ArtworkColorScope(
+        report: (itemId, identity, bytes) {
+          if (_owner == owner) _report(itemId, identity, bytes);
+        },
+        child: widget.fillSurface
+            ? ColoredBox(color: scheme.surface, child: widget.child)
+            : widget.child,
       ),
     );
   }
 }
 
-void _remember(String token, ColorScheme scheme) {
+void _remember(String token, AppColorScheme scheme) {
   ContentTheme._schemes[token] = scheme;
   if (ContentTheme._schemes.length > 48) {
     ContentTheme._schemes.remove(ContentTheme._schemes.keys.first);
   }
-}
-
-/// 把图片字节收成随当前亮度的 [ColorScheme]:跟随应用主题的
-/// [ColorScheme.brightness],浅色主题派生浅色内容色。出错色、表面着色
-/// 保持应用自己的约定;海报与视频画面本身不受影响。
-@visibleForTesting
-Future<ColorScheme> contentSchemeFromBytes(
-  Uint8List bytes,
-  ColorScheme fallback,
-) async {
-  try {
-    final codec = await ui.instantiateImageCodec(
-      bytes,
-      targetWidth: 32,
-      targetHeight: 32,
-      allowUpscaling: false,
-    );
-    final frame = await codec.getNextFrame();
-    final data = await frame.image.toByteData(
-      format: ui.ImageByteFormat.rawRgba,
-    );
-    frame.image.dispose();
-    codec.dispose();
-    var colorful = 0;
-    if (data != null) {
-      final rgba = data.buffer.asUint8List();
-      for (var i = 0; i + 3 < rgba.length; i += 4) {
-        final rgb = [rgba[i], rgba[i + 1], rgba[i + 2]]..sort();
-        if (rgba[i + 3] > 128 &&
-            rgb.last - rgb.first > 24 &&
-            rgb.last > 32 &&
-            rgb.first < 235) {
-          colorful++;
-        }
-      }
-    }
-    if (colorful < 32) return fallback;
-    final extracted = await ColorScheme.fromImageProvider(
-      provider: ResizeImage(MemoryImage(bytes), width: 64),
-      brightness: fallback.brightness,
-      dynamicSchemeVariant: DynamicSchemeVariant.content,
-    );
-    return composeContentScheme(fallback, extracted);
-  } catch (_) {
-    return fallback;
-  }
-}
-
-/// Artwork may tint the local surface, but the page stays in the app neutrals.
-/// Global navigation and semantic errors retain their application theme.
-@visibleForTesting
-ColorScheme composeContentScheme(ColorScheme base, ColorScheme artwork) {
-  // 表面以应用自己的冷灰/石墨为主，只混进一成半画面色。
-  // 再往海报原色靠，整页会变成一块饱和色板。
-  Color tone(Color neutral, Color tint) => Color.lerp(neutral, tint, .16)!;
-  return artwork.copyWith(
-    surface: tone(base.surface, artwork.surface),
-    surfaceContainerLowest: tone(
-      base.surfaceContainerLowest,
-      artwork.surfaceContainerLowest,
-    ),
-    surfaceContainerLow: tone(
-      base.surfaceContainerLow,
-      artwork.surfaceContainerLow,
-    ),
-    surfaceContainer: tone(base.surfaceContainer, artwork.surfaceContainer),
-    surfaceContainerHigh: tone(
-      base.surfaceContainerHigh,
-      artwork.surfaceContainerHigh,
-    ),
-    surfaceContainerHighest: tone(
-      base.surfaceContainerHighest,
-      artwork.surfaceContainerHighest,
-    ),
-    surfaceBright: tone(base.surfaceBright, artwork.surfaceBright),
-    error: base.error,
-    onError: base.onError,
-    errorContainer: base.errorContainer,
-    onErrorContainer: base.onErrorContainer,
-    surfaceTint: Colors.transparent,
-  );
 }

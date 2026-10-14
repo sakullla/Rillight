@@ -120,9 +120,8 @@ class _ReadingScope extends StatelessWidget {
     if (factor == 1) return child;
     final current = MediaQuery.textScalerOf(context);
     return MediaQuery(
-      data: MediaQuery.of(
-        context,
-      ).copyWith(textScaler: TextScaler.linear(current.scale(1) * factor)),
+      data: MediaQuery.of(context)
+          .copyWith(textScaler: TextScaler.linear(current.scale(1) * factor)),
       child: child,
     );
   }
@@ -271,7 +270,7 @@ abstract final class AppMobileNav {
   /// 64dp 高的导航做成胶囊。贴底栏不加外圆角。
   static const double floatRadius = 32;
 
-  /// Material 3 NavigationBar 的高度，加上上方溶入带。
+  /// CupertinoTabBar 的高度，加上上方溶入带。
   /// 悬浮时页面要留出这段，最后一行才能滚到栏的上面。
   static const double barHeight = 80;
   static const double fadeHeight = 36;

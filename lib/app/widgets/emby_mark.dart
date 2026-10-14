@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// Emby 风格标记:圆角方块 + 播放三角,给服务器列表当图标用。
 class EmbyMark extends StatelessWidget {
@@ -36,7 +36,7 @@ class _EmbyMarkPainter extends CustomPainter {
       ..lineTo(size.width * 0.72, size.height * 0.50)
       ..lineTo(size.width * 0.36, size.height * 0.72)
       ..close();
-    canvas.drawPath(play, Paint()..color = Colors.white);
+    canvas.drawPath(play, Paint()..color = const Color(0xffffffff));
   }
 
   @override

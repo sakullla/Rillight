@@ -1,15 +1,16 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 
 Widget _wrap(Widget child) {
-  return MaterialApp(
-    theme: AppTheme.dark(),
-    home: Scaffold(body: Center(child: child)),
+  return CupertinoTestApp(
+    theme: AppUiTheme.dark(),
+    home: CupertinoPageScaffold(child: Center(child: child)),
   );
 }
 
@@ -97,7 +98,7 @@ void main() {
   testWidgets('hover scales the card up and shows the focus ring', (
     tester,
   ) async {
-    final theme = AppTheme.dark();
+    final theme = AppUiTheme.dark();
     await tester.pumpWidget(
       _wrap(
         AppHoverCard(
@@ -108,7 +109,7 @@ void main() {
     );
     expect(_scale(tester).scale, 1.0);
     expect((_decoration(tester).boxShadow!.single.color.a), 0);
-    expect(_ring(tester).top.color, Colors.transparent);
+    expect(_ring(tester).top.color, const Color(0x00000000));
 
     final gesture = await _hoverCard(tester);
 
@@ -121,13 +122,13 @@ void main() {
     await tester.pump();
 
     expect(_scale(tester).scale, 1.0);
-    expect(_ring(tester).top.color, Colors.transparent);
+    expect(_ring(tester).top.color, const Color(0x00000000));
   });
 
   testWidgets('keyboard focus shows the same focus ring without scaling', (
     tester,
   ) async {
-    final theme = AppTheme.dark();
+    final theme = AppUiTheme.dark();
     await tester.pumpWidget(
       _wrap(
         AppHoverCard(
@@ -147,7 +148,7 @@ void main() {
   testWidgets(
     'reduced motion keeps a default-scale card at scale 1 with the focus ring',
     (tester) async {
-      final theme = AppTheme.dark();
+      final theme = AppUiTheme.dark();
       await tester.pumpWidget(
         MediaQuery(
           data: const MediaQueryData(disableAnimations: true),
@@ -172,7 +173,7 @@ void main() {
   testWidgets('hoverScale of 1 shows the ring without enlarging', (
     tester,
   ) async {
-    final theme = AppTheme.dark();
+    final theme = AppUiTheme.dark();
     await tester.pumpWidget(
       _wrap(
         AppHoverCard(
@@ -204,17 +205,17 @@ void main() {
       ),
     );
     // 静止:无描边。
-    expect(_ring(tester).top.color, Colors.transparent);
+    expect(_ring(tester).top.color, const Color(0x00000000));
 
     // 悬停:放大与阴影保留,环仍被抑制。
     final gesture = await _hoverCard(tester);
     expect(_scale(tester).scale, 1.04);
     expect((_decoration(tester).boxShadow!.single.color.a), greaterThan(0));
-    expect(_ring(tester).top.color, Colors.transparent);
+    expect(_ring(tester).top.color, const Color(0x00000000));
 
     await gesture.moveTo(Offset.zero);
     await tester.pump();
-    expect(_ring(tester).top.color, Colors.transparent);
+    expect(_ring(tester).top.color, const Color(0x00000000));
   });
 
   testWidgets('showRing false suppresses the ring under keyboard focus', (
@@ -232,7 +233,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(_ring(tester).top.color, Colors.transparent);
+    expect(_ring(tester).top.color, const Color(0x00000000));
   });
 
   testWidgets('hover and focus notify onHighlighted', (tester) async {

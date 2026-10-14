@@ -1,17 +1,18 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -62,13 +63,16 @@ void main() {
         addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
         var opened = false;
         await tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.phoneLight(),
+          CupertinoTestApp(
+            theme: AppUiTheme.phoneLight(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            home: Scaffold(
-              body: SingleChildScrollView(
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            home: CupertinoPageScaffold(
+              child: SingleChildScrollView(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: MobileGrid(
@@ -152,7 +156,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: Column(
           children: [
             KeyedSubtree(
@@ -316,7 +320,7 @@ void main() {
       expect(find.text('老友记'), findsOneWidget);
       expect(
         tester
-            .widget<TextButton>(find.byKey(PhoneShelfPage.loadMoreKey))
+            .widget<AppButton>(find.byKey(PhoneShelfPage.loadMoreKey))
             .onPressed,
         isNull,
       );
@@ -640,11 +644,14 @@ Future<_ShelfHarness> _pumpShelf(
   await tester.pumpWidget(
     AuthScope(
       controller: auth,
-      child: MaterialApp(
-        theme: AppTheme.dark(),
+      child: CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         home: PhoneShelfPage(source: source, title: '货架'),
       ),
     ),
@@ -720,22 +727,36 @@ MediaItem _movie(String id, String name) {
 }
 
 Widget _homeApp(CatalogController catalog, {bool nav = false}) {
-  return MaterialApp(
-    theme: AppTheme.dark(),
+  return CupertinoTestApp(
+    theme: AppUiTheme.dark(),
     locale: const Locale('zh'),
     supportedLocales: AppLocalizations.supportedLocales,
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
-    home: Scaffold(
-      extendBody: nav,
-      extendBodyBehindAppBar: nav,
-      appBar: nav ? AppBar(toolbarHeight: 56, title: const Text('首页')) : null,
-      body: AuthScope(
-        controller: catalog.auth,
-        child: CatalogScope(controller: catalog, child: const PhoneHome()),
-      ),
-      bottomNavigationBar: nav
-          ? PhoneBottomNav(index: 0, floating: true, onSelected: (_) {})
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
+    home: CupertinoPageScaffold(
+      navigationBar: nav
+          ? CupertinoNavigationBar(
+              backgroundColor: const Color(0x00000000),
+              middle: const Text('首页'),
+            )
           : null,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          AuthScope(
+            controller: catalog.auth,
+            child: CatalogScope(controller: catalog, child: const PhoneHome()),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: nav
+                ? PhoneBottomNav(index: 0, floating: true, onSelected: (_) {})
+                : null,
+          ),
+        ],
+      ),
     ),
   );
 }

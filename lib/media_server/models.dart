@@ -1,4 +1,5 @@
 import 'capabilities.dart';
+
 import 'package:rillight/media_server/media_source_format.dart';
 
 class PublicServerInfo {

@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/danmaku/dandanplay_models.dart';
 
@@ -546,7 +546,7 @@ Future<Uint8List> drawLogo(String id) async {
     text: TextSpan(
       text: 'UP',
       style: TextStyle(
-        fontFamily: 'Roboto',
+        fontFamily: 'Segoe UI',
         fontSize: 200,
         fontWeight: FontWeight.w900,
         letterSpacing: 24,
@@ -594,7 +594,7 @@ Future<Uint8List> drawArtwork(String id, {required bool wide}) async {
     canvas.drawCircle(
       Offset(size.width * .7, size.height * .25),
       size.shortestSide * .12,
-      Paint()..color = Colors.white.withValues(alpha: .2),
+      Paint()..color = const Color(0xffffffff).withValues(alpha: .2),
     );
   } else {
     LandscapePainter(seed: seed).paint(canvas, size);

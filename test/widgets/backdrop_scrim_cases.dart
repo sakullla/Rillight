@@ -1,7 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 
 LinearGradient _gradientOf(WidgetTester tester, Key key) {
@@ -23,10 +24,10 @@ Future<void> _pump(
         disableAnimations: disableAnimations,
         highContrast: highContrast,
       ),
-      child: MaterialApp(
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: SizedBox(
+      child: CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: SizedBox(
             width: 800,
             height: 400,
             child: BackdropScrim(backdrop: backdrop),
@@ -45,7 +46,7 @@ void main() {
       tester,
       backdrop: const ColoredBox(
         key: Key('backdrop'),
-        color: Colors.red,
+        color: Color(0xffff3b30),
         child: SizedBox.expand(),
       ),
     );
@@ -134,7 +135,7 @@ void main() {
     final base = tester.widget<ColoredBox>(
       find.descendant(of: scrim, matching: find.byType(ColoredBox)).first,
     );
-    expect(base.color, AppTheme.dark().scaffoldBackgroundColor);
+    expect(base.color, AppUiTheme.dark().scaffoldBackgroundColor);
     expect(find.byKey(BackdropScrim.topBandKey), findsOneWidget);
     expect(find.byKey(BackdropScrim.textBandKey), findsOneWidget);
     expect(find.byKey(BackdropScrim.bottomBandKey), findsOneWidget);
@@ -145,10 +146,10 @@ void main() {
   ) async {
     var taps = 0;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: Stack(
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: Stack(
             fit: StackFit.expand,
             children: [
               GestureDetector(
@@ -157,7 +158,7 @@ void main() {
               ),
               const BackdropScrim(
                 backdrop: ColoredBox(
-                  color: Colors.red,
+                  color: Color(0xffff3b30),
                   child: SizedBox.expand(),
                 ),
               ),

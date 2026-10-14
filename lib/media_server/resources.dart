@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+
 import 'capabilities.dart';
 
 /// Credentials are evaluated anew for every redirect, manifest and subtitle.
@@ -131,8 +132,8 @@ class PlaybackResourceLease {
     required this.id,
     this.itemId,
     this.mediaSourceId,
-    required Future<void> Function() release,
-  }) : _release = release;
+    required this._release,
+  });
   final String id;
 
   /// Concrete remote identity captured when this resource was allocated.

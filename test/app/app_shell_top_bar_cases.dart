@@ -1,12 +1,13 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -29,20 +30,21 @@ void main() {
             GoRoute(
               path: AppRoutes.home,
               builder: (context, state) =>
-                  const ColoredBox(color: Colors.black),
+                  const ColoredBox(color: Color(0xff000000)),
             ),
             GoRoute(
               path: AppRoutes.aggregation,
               builder: (context, state) =>
-                  const ColoredBox(color: Colors.black),
+                  const ColoredBox(color: Color(0xff000000)),
             ),
             GoRoute(
               path: '/library/:id',
               builder: (context, state) => Builder(
-                builder: (context) => TextButton(
+                builder: (context) => AppButton(
                   key: const Key('scroll-under-bar'),
                   onPressed: () =>
                       const HomeScrollNotification(true).dispatch(context),
+                  variant: AppButtonVariant.plain,
                   child: const Text('scroll'),
                 ),
               ),
@@ -53,11 +55,14 @@ void main() {
     );
     addTearDown(router.dispose);
     await tester.pumpWidget(
-      MaterialApp.router(
-        theme: light ? AppTheme.light() : AppTheme.dark(),
+      CupertinoTestApp.router(
+        theme: light ? AppUiTheme.light() : AppUiTheme.dark(),
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         routerConfig: router,
         builder: (context, child) => AuthScope(controller: auth, child: child!),
       ),
@@ -94,9 +99,8 @@ void main() {
     );
     expect(
       fill.color,
-      Theme.of(
-        tester.element(find.byKey(AppShell.topBarKey)),
-      ).scaffoldBackgroundColor,
+      AppUiTheme.of(tester.element(find.byKey(AppShell.topBarKey)))
+          .scaffoldBackgroundColor,
     );
   });
 

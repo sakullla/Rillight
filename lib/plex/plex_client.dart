@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:rillight/media_server/authentication.dart';
 import 'package:rillight/media_server/capabilities.dart';
@@ -8,26 +9,23 @@ import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/media_server/playback_metadata.dart';
 import 'package:rillight/media_server/resources.dart';
+
 import 'plex_authentication.dart';
 import 'plex_codec.dart';
 import 'plex_http.dart';
 
 class PlexClient extends MediaServerClient
     implements PartPlaybackProvider, PlaybackMetadataProvider {
-  PlexClient({
-    required this.device,
-    Dio? dio,
-    PlexAuthentication? authentication,
-  }) : _dio =
-           dio ??
-           Dio(
-             BaseOptions(
-               connectTimeout: const Duration(seconds: 10),
-               receiveTimeout: const Duration(seconds: 30),
-               sendTimeout: const Duration(seconds: 30),
-             ),
-           ),
-       _authentication = authentication;
+  PlexClient({required this.device, Dio? dio, this._authentication})
+    : _dio =
+          dio ??
+          Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 10),
+              receiveTimeout: const Duration(seconds: 30),
+              sendTimeout: const Duration(seconds: 30),
+            ),
+          );
   final Dio _dio;
   final PlexAuthentication? _authentication;
   void Function()? _guard;
@@ -1005,9 +1003,9 @@ class PlexClient extends MediaServerClient
     final location = timeline.locate(position);
     final streams = location == null
         ? <MediaStreamInfo>[]
-        : plexList(
-            parts[location.index]['Stream'],
-          ).map(plexPlaybackStream).toList();
+        : plexList(parts[location.index]['Stream'])
+              .map(plexPlaybackStream)
+              .toList();
     return PlaybackMediaSource(
       id: plexString(media['id']),
       name: plexString(media['videoResolution']),
@@ -1044,9 +1042,9 @@ class PlexClient extends MediaServerClient
     PlaybackCapabilities? capabilities,
   }) async {
     await getItem(itemId);
-    final media = plexList(
-      _metadata[itemId]?['Media'],
-    ).where((v) => plexString(v['id']) == previous.id).firstOrNull;
+    final media = plexList(_metadata[itemId]?['Media'])
+        .where((v) => plexString(v['id']) == previous.id)
+        .firstOrNull;
     if (media == null) {
       throw const MediaServerException(MediaServerFailureKind.invalidResponse);
     }
@@ -1069,9 +1067,9 @@ class PlexClient extends MediaServerClient
         detail: '分段时长未知，无法定位',
       );
     }
-    final tracks = plexList(
-      parts[location.index]['Stream'],
-    ).map(plexPlaybackStream).toList();
+    final tracks = plexList(parts[location.index]['Stream'])
+        .map(plexPlaybackStream)
+        .toList();
     final target = PlaybackMediaSource(
       id: previous.id,
       runtime: timeline.duration,
@@ -1530,9 +1528,9 @@ class PlexClient extends MediaServerClient
     required int index,
     String format = 'srt',
   }) {
-    final media = plexList(
-      _metadata[itemId]?['Media'],
-    ).where((v) => plexString(v['id']) == mediaSourceId).firstOrNull;
+    final media = plexList(_metadata[itemId]?['Media'])
+        .where((v) => plexString(v['id']) == mediaSourceId)
+        .firstOrNull;
     for (final part in plexList(media?['Part'])) {
       for (final stream in plexList(part['Stream'])) {
         if (plexInt(stream['id']) == index && stream['key'] is String) {

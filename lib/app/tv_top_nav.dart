@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 
 /// 顶部导航:品牌字标 + 四个胶囊标签 + 用户名片。
@@ -47,16 +46,16 @@ class TvTopNavBar extends StatelessWidget {
       reserveHeight * TvDesign.scaleOf(context);
 
   static const _icons = [
-    Icons.home_rounded,
-    Icons.video_library_rounded,
-    Icons.search_rounded,
-    Icons.settings_rounded,
+    CupertinoIcons.house,
+    CupertinoIcons.rectangle_stack,
+    CupertinoIcons.search,
+    CupertinoIcons.gear,
   ];
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final labels = [l.home, l.aggregation, l.search, l.settings];
@@ -138,7 +137,7 @@ class _Brand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -155,7 +154,7 @@ class _Brand extends StatelessWidget {
             ),
           ),
           child: Icon(
-            Icons.play_arrow_rounded,
+            CupertinoIcons.play_fill,
             size: 16 * s,
             color: theme.colorScheme.onPrimary,
           ),
@@ -178,7 +177,7 @@ class _UserChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final initial = name.characters.first.toUpperCase();
@@ -197,9 +196,14 @@ class _UserChip extends StatelessWidget {
           ),
         ),
         SizedBox(width: 10 * s),
-        CircleAvatar(
-          radius: 15 * s,
-          backgroundColor: scheme.primaryContainer,
+        Container(
+          width: (15 * s) * 2,
+          height: (15 * s) * 2,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: scheme.primaryContainer,
+          ),
           child: Text(
             initial,
             style: theme.textTheme.labelLarge?.copyWith(

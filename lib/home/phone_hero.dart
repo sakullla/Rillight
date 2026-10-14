@@ -45,7 +45,7 @@ class PhoneHero extends StatefulWidget {
   /// 顶栏到海报、海报到文字、文字到按钮、按钮到圆点的垂直节奏。
   static const double topGap = 12;
   static const double posterGap = 14;
-  static const double actionsGap = 14;
+  static const double actionsGap = 12;
   static const double dotsGap = 0;
   static const double sidePadding = 24;
   static const double actionsHeight = 48;

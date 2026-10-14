@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:rillight/media_server/authentication.dart';
 import 'package:rillight/media_server/capabilities.dart';
@@ -10,6 +11,7 @@ import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/media_server/resources.dart';
+
 import 'jellyfin_codec.dart';
 part 'jellyfin_auth.dart';
 part 'jellyfin_preview.dart';
@@ -882,13 +884,16 @@ class JellyfinClient extends MediaServerClient
           ? PlayMethod.directPlay
           : PlayMethod.directStream;
       resource = s.isRemoteHttpPath ? s.path : s.directStreamUrl;
-      resource ??=
-          _uri(baseUrl!, 'Videos/${Uri.encodeComponent(itemId)}/stream', {
-            'static': true,
-            'mediaSourceId': s.id,
-            'playSessionId': handle.rawId,
-            'deviceId': handle.deviceId,
-          }).toString();
+      resource ??= _uri(
+        baseUrl!,
+        'Videos/${Uri.encodeComponent(itemId)}/stream',
+        {
+          'static': true,
+          'mediaSourceId': s.id,
+          'playSessionId': handle.rawId,
+          'deviceId': handle.deviceId,
+        },
+      ).toString();
     } else {
       method = !forceTranscode && s.supportsDirectStream
           ? PlayMethod.directStream

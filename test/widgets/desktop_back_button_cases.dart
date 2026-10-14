@@ -1,7 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -9,19 +10,18 @@ import 'package:rillight/home/catalog_keys.dart';
 void main() {
   Future<AnimatedContainer> pump(
     WidgetTester tester, {
-    required ThemeData theme,
+    required AppUiThemeData theme,
     required bool overArtwork,
   }) async {
     await tester.pumpWidget(
-      MaterialApp(
-        themeAnimationDuration: Duration.zero,
+      CupertinoTestApp(
         theme: theme,
-        home: Scaffold(
-          body: Center(
+        home: CupertinoPageScaffold(
+          child: Center(
             child: DesktopBackButton(
               tooltip: '返回',
               onPressed: () {},
-              icon: Icons.chevron_left_rounded,
+              icon: CupertinoIcons.chevron_left,
               label: '返回',
               overArtwork: overArtwork,
             ),
@@ -38,30 +38,34 @@ void main() {
   testWidgets('back chip follows theme and artwork surface', (tester) async {
     final light = await pump(
       tester,
-      theme: AppTheme.light(),
+      theme: AppUiTheme.light(),
       overArtwork: true,
     );
     expect(find.byType(ScrimIconButton), findsNothing);
     expect(
       decorationOf(light).color,
-      AppTheme.light().colorScheme.surfaceContainerLowest,
+      AppUiTheme.light().colorScheme.surfaceContainerLowest,
     );
     expect(tester.getSize(find.byKey(CatalogKeys.back)).height, 36);
     expect(find.text('返回'), findsOneWidget);
-    final dark = await pump(tester, theme: AppTheme.dark(), overArtwork: true);
+    final dark = await pump(
+      tester,
+      theme: AppUiTheme.dark(),
+      overArtwork: true,
+    );
     expect(
       decorationOf(dark).color,
-      isNot(AppTheme.dark().colorScheme.surfaceContainerHigh),
+      isNot(AppUiTheme.dark().colorScheme.surfaceContainerHigh),
     );
     expect(decorationOf(dark).color!.a, greaterThan(0.4));
     final solid = await pump(
       tester,
-      theme: AppTheme.dark(),
+      theme: AppUiTheme.dark(),
       overArtwork: false,
     );
     expect(
       decorationOf(solid).color,
-      AppTheme.dark().colorScheme.surfaceContainerHigh,
+      AppUiTheme.dark().colorScheme.surfaceContainerHigh,
     );
   });
 }

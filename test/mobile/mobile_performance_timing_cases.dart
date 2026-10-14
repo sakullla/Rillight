@@ -1,9 +1,11 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:convert';
 import 'dart:ui' show FrameTiming;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 
 import '../../integration_test/mobile_performance.dart' as probe;
@@ -25,7 +27,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(home: SizedBox(key: ValueKey('content'))),
+      const CupertinoTestApp(home: SizedBox(key: ValueKey('content'))),
     );
     expect(
       probe.hasDecodedImage(
@@ -40,7 +42,7 @@ void main() {
     final decoded = await tester.runAsync(() => decodeImageFromList(pixel));
     expect(decoded, isNotNull);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: SizedBox(
           key: const ValueKey('content'),
           child: RawImage(image: decoded),
@@ -56,7 +58,7 @@ void main() {
       isTrue,
     );
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: SizedBox(
           key: const ValueKey('content'),
           child: Opacity(opacity: 0, child: RawImage(image: decoded)),
@@ -71,7 +73,7 @@ void main() {
       isFalse,
     );
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: Align(
           alignment: Alignment.topLeft,
           child: SizedBox(
@@ -103,7 +105,7 @@ void main() {
       isFalse,
     );
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: Stack(
           children: [
             Positioned(

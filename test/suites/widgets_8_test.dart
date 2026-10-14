@@ -7,43 +7,39 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/browsing_polish_test.dart',
-    caseEntrypoints['app/browsing_polish_cases.dart']!,
+    'aggregation/presentation_test.dart [part 3]',
+    caseEntrypoints['aggregation/presentation_cases.dart#2']!,
   );
   group(
-    'app/desktop_gestures_test.dart',
-    caseEntrypoints['app/desktop_gestures_cases.dart']!,
+    'app/appearance_test.dart',
+    caseEntrypoints['app/appearance_cases.dart']!,
   );
   group(
-    'auth/provider_connect_management_test.dart',
-    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
+    'auth/connect_page_test.dart',
+    caseEntrypoints['auth/connect_page_cases.dart']!,
   );
   group(
-    'home/hero_artwork_test.dart',
-    caseEntrypoints['home/hero_artwork_cases.dart']!,
+    'auth/provider_connect_entry_user_agent_test.dart',
+    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 1]',
-    caseEntrypoints['library/source_detail_route_cases.dart#0']!,
+    'mobile/mobile_flow_test.dart [part 4]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 2]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#1']!,
+    'mobile/phone_detail_redesign_test.dart',
+    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
   );
   group(
-    'mobile/phone_player_interaction_test.dart',
-    caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
+    'player/desktop_player_window_host_test.dart',
+    caseEntrypoints['player/desktop_player_window_host_cases.dart']!,
   );
   group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'player/ended_navigation_test.dart',
+    caseEntrypoints['player/ended_navigation_cases.dart']!,
   );
   group(
-    'tv/tv_home_featured_test.dart',
-    caseEntrypoints['tv/tv_home_featured_cases.dart']!,
-  );
-  group(
-    'widgets/app_hover_card_test.dart',
-    caseEntrypoints['widgets/app_hover_card_cases.dart']!,
+    'widgets/skeleton_test.dart',
+    caseEntrypoints['widgets/skeleton_cases.dart']!,
   );
 }

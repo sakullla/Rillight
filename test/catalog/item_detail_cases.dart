@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
@@ -10,12 +12,11 @@ import '../helpers/settle.dart';
 import '../helpers/synthetic_source_fixture.dart';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -193,22 +194,25 @@ void main() {
     });
     expect(auth.isLoggedIn, isTrue);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
-        theme: AppTheme.dark(),
-        home: Scaffold(
-          body: AuthScope(
+        theme: AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: AuthScope(
             controller: auth,
             child: const ItemDetailPage(itemId: _series),
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -650,7 +654,12 @@ void main() {
         findsOneWidget,
       );
       expect(find.byType(ItemDetailPage), findsOneWidget);
-      expect(find.byType(SnackBar), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget.runtimeType.toString() == '_Notice',
+        ),
+        findsNothing,
+      );
 
       // 重试成功:追加下一窗且按 id 去重,分区内错误清空。
       server.failEpisodeWindowsAfterStart = false;

@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 
 class AppErrorView extends StatelessWidget {
   const AppErrorView({
@@ -17,7 +16,7 @@ class AppErrorView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
 
     if (compact) {
       return Semantics(
@@ -26,7 +25,7 @@ class AppErrorView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              Icons.error_outline_rounded,
+              CupertinoIcons.exclamationmark_circle,
               color: colorScheme.error,
               size: 20,
             ),
@@ -36,9 +35,8 @@ class AppErrorView extends StatelessWidget {
                 message,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: colorScheme.error),
+                style: AppUiTheme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: colorScheme.error),
               ),
             ),
           ],
@@ -60,7 +58,7 @@ class AppErrorView extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Icon(
-                  Icons.error_outline_rounded,
+                  CupertinoIcons.exclamationmark_circle,
                   size: 28,
                   color: colorScheme.onErrorContainer,
                 ),
@@ -70,13 +68,16 @@ class AppErrorView extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(color: colorScheme.onSurface),
+              style: AppUiTheme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: colorScheme.onSurface),
             ),
             if (onRetry != null) ...[
               const SizedBox(height: AppSpacing.md),
-              FilledButton(onPressed: onRetry, child: Text(l10n.retry)),
+              AppButton(
+                onPressed: onRetry,
+                variant: AppButtonVariant.filled,
+                child: Text(l10n.retry),
+              ),
             ],
           ],
         ),

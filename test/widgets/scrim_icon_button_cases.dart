@@ -1,7 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 
 const _key = Key('scrim-button');
@@ -20,7 +21,7 @@ Future<void> _pump(
   Widget button, {
   bool disableAnimations = false,
   bool highContrast = false,
-  ThemeData? theme,
+  AppUiThemeData? theme,
 }) async {
   await tester.pumpWidget(
     MediaQuery(
@@ -28,12 +29,15 @@ Future<void> _pump(
         disableAnimations: disableAnimations,
         highContrast: highContrast,
       ),
-      child: MaterialApp(
-        theme: theme ?? AppTheme.dark(),
-        home: Scaffold(
-          body: Stack(
+      child: CupertinoTestApp(
+        theme: theme ?? AppUiTheme.dark(),
+        home: CupertinoPageScaffold(
+          child: Stack(
             children: [
-              const ColoredBox(color: Colors.white, child: SizedBox.expand()),
+              const ColoredBox(
+                color: Color(0xffffffff),
+                child: SizedBox.expand(),
+              ),
               Center(child: button),
             ],
           ),
@@ -43,12 +47,12 @@ Future<void> _pump(
   );
 }
 
-ButtonStyle _styleOf(WidgetTester tester) {
+AppButtonStyle _styleOf(WidgetTester tester) {
   return tester
-      .widget<IconButton>(
+      .widget<AppIconButton>(
         find.descendant(
           of: find.byKey(_key),
-          matching: find.byType(IconButton),
+          matching: find.byType(AppIconButton),
         ),
       )
       .style!;
@@ -64,25 +68,25 @@ void main() {
       ScrimIconButton(
         key: _key,
         tooltip: '向左',
-        icon: const Icon(Icons.chevron_left_rounded),
+        icon: const Icon(CupertinoIcons.chevron_left),
         onPressed: () => taps++,
       ),
     );
 
     expect(find.byKey(_key), findsOneWidget);
     expect(find.byType(BackdropFilter), findsNothing);
-    expect(find.byTooltip('向左'), findsOneWidget);
+    expect(findAppTooltip('向左'), findsOneWidget);
     expect(tester.getSize(find.byKey(_key)), const Size(40, 40));
 
-    final scheme = AppTheme.dark().colorScheme;
+    final scheme = AppUiTheme.dark().colorScheme;
     final style = _styleOf(tester);
-    final background = style.backgroundColor!.resolve({})!;
+    final background = style.backgroundColor!;
     expect(background.a, closeTo(AppScrim.control, 0.01));
     expect(background.withValues(alpha: 1), scheme.scrim.withValues(alpha: 1));
     // 图标固定白色:叠在黑色 scrim 上,不随主题 onSurface 换色。
-    expect(style.foregroundColor!.resolve({}), Colors.white);
-    expect(style.shape!.resolve({}), isA<CircleBorder>());
-    final side = style.side!.resolve({})!;
+    expect(style.foregroundColor!, const Color(0xffffffff));
+    expect(style.shape!, isA<CircleBorder>());
+    final side = style.side!;
     expect(side.width, 1);
     expect(side.color.a, closeTo(AppGlass.edgeLight, 0.01));
 
@@ -90,7 +94,7 @@ void main() {
       find.descendant(of: find.byKey(_key), matching: find.byType(Icon)),
     );
     final iconTheme = IconTheme.of(tester.element(find.byWidget(icon)));
-    expect(iconTheme.color, Colors.white);
+    expect(iconTheme.color, const Color(0xffffffff));
     expect(iconTheme.size, 20);
 
     await tester.tap(find.byKey(_key));
@@ -106,21 +110,21 @@ void main() {
       tester,
       ScrimIconButton(
         key: _key,
-        icon: const Icon(Icons.chevron_left_rounded),
+        icon: const Icon(CupertinoIcons.chevron_left),
         onPressed: () {},
       ),
-      theme: AppTheme.light(),
+      theme: AppUiTheme.light(),
     );
 
-    final scheme = AppTheme.light().colorScheme;
+    final scheme = AppUiTheme.light().colorScheme;
     final style = _styleOf(tester);
-    final background = style.backgroundColor!.resolve({})!;
+    final background = style.backgroundColor!;
     expect(background.withValues(alpha: 1), scheme.scrim.withValues(alpha: 1));
-    final foreground = style.foregroundColor!.resolve({})!;
-    expect(foreground, Colors.white);
+    final foreground = style.foregroundColor!;
+    expect(foreground, const Color(0xffffffff));
     // 白图标与黑色 scrim 底衬的对比度。
     expect(
-      _contrast(Colors.white, background.withValues(alpha: 1)),
+      _contrast(const Color(0xffffffff), background.withValues(alpha: 1)),
       greaterThan(3),
     );
   });
@@ -133,7 +137,7 @@ void main() {
       ScrimIconButton(
         key: _key,
         size: ScrimIconButtonSize.large,
-        icon: const Icon(Icons.play_arrow_rounded),
+        icon: const Icon(CupertinoIcons.play_fill),
         onPressed: () {},
       ),
     );
@@ -151,12 +155,15 @@ void main() {
       tester,
       const ScrimIconButton(
         key: _key,
-        icon: Icon(Icons.chevron_right_rounded),
+        icon: Icon(CupertinoIcons.chevron_right),
         onPressed: null,
       ),
     );
-    final button = tester.widget<IconButton>(
-      find.descendant(of: find.byKey(_key), matching: find.byType(IconButton)),
+    final button = tester.widget<AppIconButton>(
+      find.descendant(
+        of: find.byKey(_key),
+        matching: find.byType(AppIconButton),
+      ),
     );
     expect(button.onPressed, isNull);
 
@@ -166,11 +173,8 @@ void main() {
     final color = IconTheme.of(tester.element(find.byWidget(icon))).color!;
     expect(color.a, closeTo(AppScrim.controlDisabledIcon, 0.01));
     // 禁用态也是白色图标降 alpha,底衬保持黑色 scrim。
-    expect(color.withValues(alpha: 1), Colors.white);
-    expect(
-      _styleOf(tester).backgroundColor!.resolve({WidgetState.disabled}),
-      isNotNull,
-    );
+    expect(color.withValues(alpha: 1), const Color(0xffffffff));
+    expect(_styleOf(tester).backgroundColor!, isNotNull);
   });
 
   testWidgets('ScrimIconButton raises backing alpha for high contrast', (
@@ -180,12 +184,12 @@ void main() {
       tester,
       ScrimIconButton(
         key: _key,
-        icon: const Icon(Icons.refresh_rounded),
+        icon: const Icon(CupertinoIcons.arrow_clockwise),
         onPressed: () {},
       ),
       highContrast: true,
     );
-    final background = _styleOf(tester).backgroundColor!.resolve({})!;
+    final background = _styleOf(tester).backgroundColor!;
     expect(
       background.a,
       greaterThanOrEqualTo(AppScrim.highContrastAlpha - 0.01),
@@ -199,13 +203,13 @@ void main() {
       tester,
       ScrimIconButton(
         key: _key,
-        icon: const Icon(Icons.refresh_rounded),
+        icon: const Icon(CupertinoIcons.arrow_clockwise),
         onPressed: () {},
       ),
       disableAnimations: true,
     );
     expect(
-      _styleOf(tester).backgroundColor!.resolve({})!.a,
+      _styleOf(tester).backgroundColor!.a,
       closeTo(AppScrim.control, 0.01),
     );
   });

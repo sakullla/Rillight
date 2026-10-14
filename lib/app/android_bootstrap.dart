@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 import 'ui/ui.dart' as ui;
 
@@ -13,7 +13,6 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_bootstrap.dart';
 import 'package:rillight/auth/auth_controller.dart';
 
@@ -129,15 +128,15 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
   @override
   Widget build(BuildContext context) =>
       _app ??
-      MaterialApp(
+      CupertinoApp(
         debugShowCheckedModeBanner: false,
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
-          ui.GlobalCupertinoLocalizations.delegate,
+          AppLocalizations.delegate,
+          ...ui.GlobalCupertinoLocalizations.delegates,
         ],
-        theme: AppTheme.dark(),
+        theme: AppUiTheme.dark().cupertino,
         builder: (context, child) => ui.AppUiTheme(
           data: ui.AppUiTheme.dark(),
           child: child ?? const SizedBox.shrink(),
@@ -145,15 +144,15 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         home: Builder(
           builder: (context) {
             final l10n = AppLocalizations.of(context);
-            return Scaffold(
-              body: SafeArea(
+            return CupertinoPageScaffold(
+              child: SafeArea(
                 child: Center(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (_busy) const CircularProgressIndicator(),
+                        if (_busy) const CupertinoActivityIndicator(),
                         if (_failed || _detectionFailed) ...[
                           Text(
                             _detectionFailed
@@ -161,14 +160,16 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
                                 : l10n.appInitializationFailed,
                           ),
                           const SizedBox(height: 16),
-                          FilledButton(
+                          AppButton(
                             autofocus: true,
                             onPressed: () => _initialize(),
+                            variant: AppButtonVariant.filled,
                             child: Text(l10n.retry),
                           ),
                           if (_detectionFailed)
-                            TextButton(
+                            AppButton(
                               onPressed: () => _initialize(usePhone: true),
+                              variant: AppButtonVariant.plain,
                               child: Text(l10n.continueAsPhone),
                             ),
                         ],

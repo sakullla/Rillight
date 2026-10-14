@@ -1,8 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
-
-import 'ui/ui.dart' as ui;
+import 'ui/ui.dart';
 
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
@@ -13,7 +11,6 @@ import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -45,129 +42,71 @@ class RillightApp extends StatelessWidget {
   late final GoRouter router;
 
   @override
-  Widget build(BuildContext context) {
-    return AppearanceScope(
+  Widget build(BuildContext context) => AppearanceScope(
+    controller: appearance,
+    child: _SystemBrightnessObserver(
       controller: appearance,
-      child: _SystemBrightnessObserver(
-        controller: appearance,
-        child: ListenableBuilder(
-          listenable: appearance,
-          builder: (context, _) {
-            // themeMode 已含「跟随系统且平台无偏好时深色」的判定:
-            // 引擎亮度变化由 _SystemBrightnessObserver 触发重判。
-            final mode = appearance.themeMode;
-            if (!environment.isDesktop) {
-              final app = PresentationScope(
-                environment: environment,
-                child: AuthScope(
-                  controller: auth,
-                  child: PlayerScope(
-                    bindings: playerBindings,
-                    child: MaterialApp.router(
-                      title: kProductName,
-                      debugShowCheckedModeBanner: false,
-                      locale: const Locale('zh', 'CN'),
-                      supportedLocales: AppLocalizations.supportedLocales,
-                      localizationsDelegates: [
-                        ...AppLocalizations.localizationsDelegates,
-                        ui.GlobalCupertinoLocalizations.delegate,
-                      ],
-                      theme: environment.isTv
-                          ? AppTheme.tvLight()
-                          : AppTheme.phoneLight(),
-                      darkTheme: environment.isTv
-                          ? AppTheme.tvDark()
-                          : AppTheme.phoneDark(),
-                      // TV 每条路由(含弹窗)共用按画布换算的字号与弹窗样式。
-                      builder: (context, child) => ui.AppUiTheme(
-                        data: environment.isTv
-                            ? (appearance.brightness == Brightness.dark
-                                  ? ui.AppUiTheme.tvDark()
-                                  : ui.AppUiTheme.tvLight())
-                            : (appearance.brightness == Brightness.dark
-                                  ? ui.AppUiTheme.phoneDark()
-                                  : ui.AppUiTheme.phoneLight()),
-                        child: environment.isTv
-                            ? TvStageTheme(
-                                child: child ?? const SizedBox.shrink(),
-                              )
-                            : child ?? const SizedBox.shrink(),
-                      ),
-                      themeMode: mode,
-                      scrollBehavior: environment.isTv
-                          ? null
-                          : const PhoneScrollBehavior(),
-                      routerConfig: router,
-                    ),
-                  ),
-                ),
-              );
-              if (environment.isTv) {
-                return app;
-              }
-              return PhoneNavStyleHost(child: app);
-            }
-            return PresentationScope(
-              environment: environment,
-              child: _buildDesktop(context, mode),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDesktop(BuildContext context, ThemeMode mode) {
-    return AuthScope(
-      controller: auth,
-      child: PlayerScope(
-        bindings: playerBindings,
-        child: PlayerWindowScope(
-          host: windowHost,
-          child: MainWindowCloseGuard(
-            host: windowHost,
-            child: MaterialApp.router(
-              title: kProductName,
-              debugShowCheckedModeBanner: false,
-              locale: const Locale('zh', 'CN'),
-              supportedLocales: AppLocalizations.supportedLocales,
-              localizationsDelegates: [
-                ...AppLocalizations.localizationsDelegates,
-                ui.GlobalCupertinoLocalizations.delegate,
-              ],
-              theme: AppTheme.light(),
-              darkTheme: AppTheme.dark(),
-              themeMode: mode,
-              routerConfig: router,
-              builder: (context, child) {
-                return ui.AppUiTheme(
-                  data: appearance.brightness == Brightness.dark
-                      ? ui.AppUiTheme.dark()
-                      : ui.AppUiTheme.light(),
-                  child: DesktopPerformanceHost(
-                    child: PlayerScope(
-                      bindings: playerBindings,
-                      child: PlayerWindowScope(
-                        host: windowHost,
-                        child: _PlayerHostNoticeListener(
-                          host: windowHost,
-                          child: _PlayerWindowLayer(
-                            host: windowHost,
-                            router: router,
-                            child: child ?? const SizedBox.shrink(),
-                          ),
-                        ),
-                      ),
+      child: ListenableBuilder(
+        listenable: appearance,
+        builder: (context, _) {
+          final dark = appearance.brightness == Brightness.dark;
+          final theme = environment.isTv
+              ? (dark ? AppUiTheme.tvDark() : AppUiTheme.tvLight())
+              : environment.isDesktop
+              ? (dark ? AppUiTheme.dark() : AppUiTheme.light())
+              : (dark ? AppUiTheme.phoneDark() : AppUiTheme.phoneLight());
+          Widget app = CupertinoApp.router(
+            title: kProductName,
+            debugShowCheckedModeBanner: false,
+            locale: const Locale('zh', 'CN'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            theme: theme.cupertino,
+            scrollBehavior: environment.isDesktop || environment.isTv
+                ? null
+                : const PhoneScrollBehavior(),
+            routerConfig: router,
+            builder: (context, child) {
+              Widget content = child ?? const SizedBox.shrink();
+              if (environment.isTv) content = TvStageTheme(child: content);
+              if (environment.isDesktop) {
+                content = DesktopPerformanceHost(
+                  child: _PlayerHostNoticeListener(
+                    host: windowHost,
+                    router: router,
+                    child: _PlayerWindowLayer(
+                      host: windowHost,
+                      router: router,
+                      child: content,
                     ),
                   ),
                 );
-              },
+              }
+              return AppUiTheme(data: theme, child: content);
+            },
+          );
+          if (environment.isDesktop) {
+            app = PlayerWindowScope(
+              host: windowHost,
+              child: MainWindowCloseGuard(host: windowHost, child: app),
+            );
+          } else if (!environment.isTv) {
+            app = PhoneNavStyleHost(child: app);
+          }
+          return PresentationScope(
+            environment: environment,
+            child: AuthScope(
+              controller: auth,
+              child: PlayerScope(bindings: playerBindings, child: app),
             ),
-          ),
-        ),
+          );
+        },
       ),
-    );
-  }
+    ),
+  );
 }
 
 /// 系统亮度变化时重判「跟随系统」的落点。
@@ -299,9 +238,14 @@ class _MainWindowCloseGuardState extends State<MainWindowCloseGuard>
   Widget build(BuildContext context) => widget.child;
 }
 
-/// 把宿主提示(如代发 Stopped 失败)以 SnackBar 呈现在主窗口。
+/// 把宿主提示(如代发 Stopped 失败)以 Cupertino 提示呈现在主窗口。
 class _PlayerHostNoticeListener extends StatefulWidget {
-  const _PlayerHostNoticeListener({required this.host, required this.child});
+  const _PlayerHostNoticeListener({
+    required this.host,
+    required this.router,
+    required this.child,
+  });
+  final GoRouter router;
 
   final PlayerWindowHost host;
   final Widget child;
@@ -337,16 +281,15 @@ class _PlayerHostNoticeListenerState extends State<_PlayerHostNoticeListener> {
     if (!mounted) {
       return;
     }
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) {
-      return;
-    }
+    final navigator = widget.router.routerDelegate.navigatorKey.currentState;
+    if (navigator?.overlay == null) return;
     final l10n = AppLocalizations.of(context);
     switch (notice) {
       case PlayerHostNotice.progressSyncFailed:
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.progressSyncFailedMain)),
-        );
+        AppNoticeHost.navigator(
+          navigator!,
+          AppUiTheme.of(context),
+        ).show(l10n.progressSyncFailedMain);
     }
   }
 
@@ -387,9 +330,10 @@ class _PlayerWindowLayer extends StatelessWidget {
               Align(
                 alignment: Alignment.bottomCenter,
                 child: SafeArea(
-                  child: Material(
-                    elevation: 8,
-                    color: Theme.of(context).colorScheme.errorContainer,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppUiTheme.of(context).colorScheme.errorContainer,
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -398,7 +342,7 @@ class _PlayerWindowLayer extends StatelessWidget {
                           Text(l10n.desktopSourceSwitchFailed),
                           if (!host.canRestoreOriginal)
                             Text(l10n.desktopSourceRestoreUnavailable),
-                          FilledButton(
+                          AppButton(
                             key: const Key('desktop-restore-original'),
                             onPressed: !host.canRestoreOriginal
                                 ? null
@@ -407,16 +351,16 @@ class _PlayerWindowLayer extends StatelessWidget {
                                       await host.restoreOriginalSource();
                                     } catch (_) {
                                       if (!context.mounted) return;
-                                      ScaffoldMessenger.maybeOf(context)
-                                          ?.showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                l10n.desktopSourceRestoreFailed,
-                                              ),
-                                            ),
-                                          );
+                                      AppNoticeHost.navigator(
+                                        router
+                                            .routerDelegate
+                                            .navigatorKey
+                                            .currentState!,
+                                        AppUiTheme.of(context),
+                                      ).show(l10n.desktopSourceRestoreFailed);
                                     }
                                   },
+                            variant: AppButtonVariant.filled,
                             child: Text(l10n.switchRestore),
                           ),
                         ],
@@ -435,8 +379,8 @@ class _PlayerWindowLayer extends StatelessWidget {
             Positioned.fill(
               child: FocusScope(
                 autofocus: true,
-                child: Theme(
-                  data: AppTheme.dark(),
+                child: AppUiTheme(
+                  data: AppUiTheme.dark(),
                   child: Navigator(
                     key: ObjectKey(request),
                     onGenerateRoute: (settings) {

@@ -2,11 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/product.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/window_geometry.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -23,7 +22,7 @@ Future<void> _publishWindowsCaptionColors(Brightness brightness) async {
   if (defaultTargetPlatform != TargetPlatform.windows) {
     return;
   }
-  final (page, symbol) = AppTheme.windowChromeColors(brightness);
+  final (page, symbol) = AppUiTheme.windowChromeColors(brightness);
   try {
     await _kWindowCaptionChannel.invokeMethod<void>('setCaptionColors', {
       'dark': brightness == Brightness.dark,
@@ -250,7 +249,7 @@ class _WindowChromeHostState extends State<WindowChromeHost> {
   Brightness? _captionBrightness;
 
   void _publishCaptionColors() {
-    final brightness = widget.brightness ?? Theme.of(context).brightness;
+    final brightness = widget.brightness ?? AppUiTheme.of(context).brightness;
     if (_captionBrightness == brightness) {
       return;
     }
@@ -336,7 +335,7 @@ class _WindowChromeHostState extends State<WindowChromeHost> {
                   // 标题按钮外观随外观偏好走:浅色主题下按钮图标用深色。
                   child: WindowChromeButtons(
                     brightness:
-                        widget.brightness ?? Theme.of(context).brightness,
+                        widget.brightness ?? AppUiTheme.of(context).brightness,
                   ),
                 ),
               ),
@@ -371,8 +370,7 @@ class _CaptionButtonHitTarget extends SingleChildRenderObjectWidget {
 }
 
 class _RenderCaptionButtonHitTarget extends RenderProxyBox {
-  _RenderCaptionButtonHitTarget({required double trailingWidth})
-    : _trailingWidth = trailingWidth;
+  _RenderCaptionButtonHitTarget({required this._trailingWidth});
 
   double _trailingWidth;
 

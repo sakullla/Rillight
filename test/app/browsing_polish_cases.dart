@@ -1,12 +1,12 @@
-import 'package:flutter/material.dart';
+import '../helpers/cupertino_test_app.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
-import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -49,12 +49,12 @@ void main() {
 
   test('shipped theme pairs keep body text at least 4.5:1', () {
     final themes = [
-      AppTheme.light(),
-      AppTheme.dark(),
-      AppTheme.tvLight(),
-      AppTheme.tvDark(),
-      AppTheme.phoneLight(),
-      AppTheme.phoneDark(),
+      AppUiTheme.light(),
+      AppUiTheme.dark(),
+      AppUiTheme.tvLight(),
+      AppUiTheme.tvDark(),
+      AppUiTheme.phoneLight(),
+      AppUiTheme.phoneDark(),
     ];
     for (final theme in themes) {
       final scheme = theme.colorScheme;
@@ -80,16 +80,13 @@ void main() {
   test('artwork color tints detail surfaces without replacing them', () {
     for (final brightness in Brightness.values) {
       final base = brightness == Brightness.dark
-          ? AppTheme.dark().colorScheme
-          : AppTheme.light().colorScheme;
-      final artwork = ColorScheme.fromSeed(
-        seedColor: const Color(0xFFE23B3B),
-        brightness: brightness,
-      );
-      final composed = composeContentScheme(base, artwork);
+          ? AppUiTheme.dark().colorScheme
+          : AppUiTheme.light().colorScheme;
+      const artwork = Color(0xFFE23B3B);
+      final composed = composeContentPalette(base, artwork);
       expect(
         _channelDistance(composed.surface, base.surface),
-        lessThan(_channelDistance(composed.surface, artwork.primary)),
+        lessThan(_channelDistance(composed.surface, artwork)),
       );
       expect(
         _contrast(composed.onSurface, composed.surface),
@@ -185,21 +182,21 @@ void main() {
         await settle(tester);
         expect(find.byKey(PlayerKeys.open), findsOneWidget);
         expect(find.text('继续播放'), findsOneWidget);
-        expect(find.byTooltip('标记已看'), findsOneWidget);
+        expect(findAppTooltip('标记已看'), findsOneWidget);
         expect(find.text('已看 40%'), findsNothing);
         expect(
           tester
-              .widget<LinearProgressIndicator>(
+              .widget<AppLoadingBar>(
                 find.descendant(
                   of: find.byKey(CatalogKeys.resumeProgress),
-                  matching: find.byType(LinearProgressIndicator),
+                  matching: find.byType(AppLoadingBar),
                 ),
               )
               .value,
           closeTo(0.4, 0.001),
         );
 
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         expect(find.byType(AggregationPage), findsOneWidget);
         expect(find.text('输入片名后搜索'), findsOneWidget);
@@ -291,13 +288,16 @@ void main() {
       final focus = FocusNode();
       addTearDown(focus.dispose);
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.tvDark(),
+        CupertinoTestApp(
+          theme: AppUiTheme.tvDark(),
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(
-            body: TvStageTheme(
+          home: CupertinoPageScaffold(
+            child: TvStageTheme(
               child: Row(
                 children: [
                   SizedBox(
@@ -326,7 +326,7 @@ void main() {
         expect(find.byType(EpisodeWatchedBadge), findsOneWidget);
         expect(find.text('已看'), findsNothing);
         expect(find.text('已看 40%'), findsNothing);
-        expect(find.byType(LinearProgressIndicator), findsOneWidget);
+        expect(find.byType(AppLoadingBar), findsOneWidget);
         expect(find.bySemanticsLabel('已看 40%'), findsOneWidget);
 
         focus.requestFocus();

@@ -18,7 +18,7 @@
 
 ## 开发与验证
 
-使用 Flutter 3.47.7（Dart 3.13.0+）及对应平台工具链。原生构建需要仓库固定来源的 FFmpeg/libass SDK；不同平台的构建入口、环境变量、来源哈希与许可证材料见[播放器包说明](packages/rillight_player/README.md)。缺少 SDK 时构建应明确失败，不会改用 libmpv 或 Media3。
+使用 Flutter 3.47.7（Dart 3.13.0+）及对应平台工具链。所有平台使用 cupertino_ui 1.1.2；桌面保留鼠标、快捷键和滚轮，手机保留触摸导航，TV 保留方向键焦点与确认/返回操作。原生构建需要仓库固定来源的 FFmpeg/libass SDK；不同平台的构建入口、环境变量、来源哈希与许可证材料见[播放器包说明](packages/rillight_player/README.md)。缺少 SDK 时构建应明确失败，不会改用 libmpv 或 Media3。
 
 ```sh
 flutter pub get

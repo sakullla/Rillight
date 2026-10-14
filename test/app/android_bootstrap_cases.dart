@@ -1,6 +1,7 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/android_bootstrap.dart';

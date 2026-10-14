@@ -69,7 +69,7 @@ Future<PhoneNavStyleStore> openPhoneNavStyleStore() async {
 }
 
 class PhoneNavStyleController extends ChangeNotifier {
-  PhoneNavStyleController({PhoneNavStyleStore? store}) : _store = store;
+  PhoneNavStyleController({this._store});
 
   PhoneNavStyleStore? _store;
   bool floating = false;

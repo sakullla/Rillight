@@ -880,7 +880,7 @@ Widget _sharedPosterImage(MediaItem item, bool shared) {
   }
   return PhoneMotion.sharedImage(
     itemId: item.id,
-    preferBackdrop: false,
+    preferBackdrop: image.preferBackdrop,
     child: image,
   );
 }

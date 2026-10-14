@@ -1,14 +1,15 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:ui' show FrameTiming;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/desktop_performance_host.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -27,15 +28,16 @@ FrameTiming _frame({int buildUs = 1000, int rasterUs = 1000, int start = 0}) =>
 void _report(WidgetTester tester, List<FrameTiming> frames) =>
     tester.binding.platformDispatcher.onReportTimings!(frames);
 
-Widget _subject({bool monitor = true, bool reduced = false}) => MaterialApp(
-  home: MediaQuery(
-    data: MediaQueryData(disableAnimations: reduced),
-    child: DesktopPerformanceHost(
-      monitorTimings: monitor,
-      child: const Center(child: LiquidGlass(child: Text('操作仍可用'))),
-    ),
-  ),
-);
+Widget _subject({bool monitor = true, bool reduced = false}) =>
+    CupertinoTestApp(
+      home: MediaQuery(
+        data: MediaQueryData(disableAnimations: reduced),
+        child: DesktopPerformanceHost(
+          monitorTimings: monitor,
+          child: const Center(child: LiquidGlass(child: Text('操作仍可用'))),
+        ),
+      ),
+    );
 
 void main() {
   testWidgets('automatic reduction preserves immersive bar and backdrop', (
@@ -51,8 +53,9 @@ void main() {
           routes: [
             GoRoute(
               path: '/item/:id',
-              builder: (context, state) =>
-                  const BackdropScrim(backdrop: ColoredBox(color: Colors.blue)),
+              builder: (context, state) => const BackdropScrim(
+                backdrop: ColoredBox(color: Color(0xff007aff)),
+              ),
             ),
           ],
         ),
@@ -60,11 +63,14 @@ void main() {
     );
     addTearDown(router.dispose);
     await tester.pumpWidget(
-      MaterialApp.router(
-        theme: AppTheme.dark(),
+      CupertinoTestApp.router(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         routerConfig: router,
         builder: (context, child) => AuthScope(
           controller: auth,

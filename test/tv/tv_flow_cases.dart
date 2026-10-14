@@ -1,7 +1,9 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -20,6 +22,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/video_backend.dart';
+
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
@@ -136,7 +139,7 @@ void main() {
           w.properties.button == true,
     );
     if (explicit.evaluate().isNotEmpty) return explicit;
-    // Aggregation's Material controls own real FocusNodes without exporting
+    // Aggregation's Cupertino controls own real FocusNodes without exporting
     // TvAction's explicit Semantics widget. Inspect the actual focused subtree.
     final context = FocusManager.instance.primaryFocus?.context;
     return context == null ? explicit : find.byWidget(context.widget);
@@ -146,7 +149,7 @@ void main() {
     final focused = FocusManager.instance.primaryFocus?.context;
     Element? button;
     focused?.visitAncestorElements((element) {
-      if (element.widget is TextButton) {
+      if (element.widget is AppButton) {
         button = element;
         return false;
       }
@@ -405,7 +408,7 @@ void main() {
       );
       await settle(tester);
       expect(find.byType(AggregationPage), findsOneWidget);
-      final types = find.widgetWithText(DropdownButton<String>, '全部类型');
+      final types = find.widgetWithText(AppDropdown<String>, '全部类型');
       await focusTarget(tester, types, '全部类型');
       await key(tester, LogicalKeyboardKey.select);
       expect(find.text('电影'), findsWidgets);
@@ -417,7 +420,7 @@ void main() {
       await tester.binding.handlePopRoute();
       await settle(tester);
       expect(find.byType(AggregationPage), findsOneWidget);
-      final more = find.widgetWithText(TextButton, '加载此来源更多');
+      final more = find.widgetWithText(AppButton, '加载此来源更多');
       // Catalogue/source reload also performs real asynchronous history IO.
       for (var frame = 0; frame < 60 && more.evaluate().isEmpty; frame++) {
         await tester.pump(const Duration(milliseconds: 50));

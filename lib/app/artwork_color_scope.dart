@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 /// Only a successfully displayed frame can choose a content palette. The image

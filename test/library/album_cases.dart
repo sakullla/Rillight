@@ -1,3 +1,5 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -8,11 +10,10 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -80,24 +81,29 @@ void main() {
   Future<void> pumpAlbum(
     WidgetTester tester,
     _AlbumClient client, {
-    ThemeData? theme,
+    AppUiThemeData? theme,
   }) async {
     final auth = AuthController.memory(client: client);
     addTearDown(auth.dispose);
     await tester.pumpWidget(
       AuthScope(
         controller: auth,
-        child: MaterialApp(
+        child: CupertinoTestApp(
           theme: theme,
           locale: const Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
-          home: const Scaffold(body: DetailAlbumStrip(item: item)),
+          home: const CupertinoPageScaffold(
+            child: DetailAlbumStrip(item: item),
+          ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -172,15 +178,18 @@ void main() {
     await tester.pumpWidget(
       AuthScope(
         controller: auth,
-        child: MaterialApp(
+        child: CupertinoTestApp(
           locale: Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
-          home: Scaffold(
-            body: ListView(
+          home: CupertinoPageScaffold(
+            child: ListView(
               children: [
                 DetailAlbumStrip(
                   item: MediaItem(
@@ -196,7 +205,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -285,7 +294,7 @@ void main() {
   testWidgets('light viewer uses the paper dialog and dark stays black', (
     tester,
   ) async {
-    await pumpAlbum(tester, _AlbumClient(), theme: AppTheme.light());
+    await pumpAlbum(tester, _AlbumClient(), theme: AppUiTheme.light());
     expect(
       tester
           .widget<ui.AppModalFrame>(find.byType(ui.AppModalFrame))
@@ -296,12 +305,12 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await settle(tester);
 
-    await pumpAlbum(tester, _AlbumClient(), theme: AppTheme.dark());
+    await pumpAlbum(tester, _AlbumClient(), theme: AppUiTheme.dark());
     expect(
       tester
           .widget<ui.AppModalFrame>(find.byType(ui.AppModalFrame))
           .backgroundColor,
-      Colors.black,
+      const Color(0xff000000),
     );
   });
 

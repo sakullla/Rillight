@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 
 class PosterPlaceholder extends StatelessWidget {
@@ -16,7 +16,7 @@ class PosterPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
 
     return Semantics(
       label: semanticLabel ?? l10n.posterPlaceholder,
@@ -32,7 +32,7 @@ class PosterPlaceholder extends StatelessWidget {
             builder: (context, constraints) => Center(
               child: ExcludeSemantics(
                 child: Icon(
-                  Icons.image_not_supported_outlined,
+                  CupertinoIcons.photo,
                   size: (constraints.biggest.shortestSide * .2).clamp(16, 40),
                   color: colorScheme.onSurfaceVariant.withValues(alpha: .65),
                 ),

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/foundation.dart' show precisionErrorTolerance;
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/rendering.dart' show ScrollDirection;
@@ -65,9 +65,8 @@ class _DesktopScrollPosition extends ScrollPositionWithSingleContext {
 
   @override
   void pointerScroll(double delta) {
-    final platform = ScrollConfiguration.of(
-      context.storageContext,
-    ).getPlatform(context.storageContext);
+    final platform = ScrollConfiguration.of(context.storageContext)
+        .getPlatform(context.storageContext);
     if ((platform != TargetPlatform.windows &&
             platform != TargetPlatform.linux) ||
         delta.abs() <= 8) {
@@ -119,11 +118,10 @@ class _DesktopScrollPosition extends ScrollPositionWithSingleContext {
 class _WheelScrollActivity extends ScrollActivity {
   _WheelScrollActivity(
     super.delegate, {
-    required double from,
+    required this._from,
     required double to,
     required TickerProvider vsync,
-  }) : _from = from,
-       target = to {
+  }) : target = to {
     _ticker = vsync.createTicker(_tick)..start();
   }
 

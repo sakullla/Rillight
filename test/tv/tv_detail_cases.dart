@@ -1,7 +1,9 @@
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
@@ -18,6 +20,7 @@ import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/video_backend.dart';
+
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
@@ -391,10 +394,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(
-          of: currentTile,
-          matching: find.byType(LinearProgressIndicator),
-        ),
+        find.descendant(of: currentTile, matching: find.byType(AppLoadingBar)),
         findsOneWidget,
       );
       // 分集是横向一行:在分集行里往回滑到第一集。
@@ -526,7 +526,12 @@ void main() {
         find.descendant(of: toggle, matching: find.text('标记未看')),
         findsOneWidget,
       );
-      expect(find.byType(SnackBar), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget.runtimeType.toString() == '_Notice',
+        ),
+        findsOneWidget,
+      );
       await tester.pump(const Duration(seconds: 4));
       await _settle(tester);
 

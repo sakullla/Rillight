@@ -1,10 +1,12 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import '../helpers/region_access_fixture.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -28,15 +30,18 @@ void main() {
     final auth = AuthController.memory(
       regionAccess: TestRegionAccessController(),
     );
-    Widget app() => MaterialApp(
+    Widget app() => CupertinoTestApp(
       localizationsDelegates: [
-        ...AppLocalizations.localizationsDelegates,
+        ...[
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         ui.GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
       home: ProviderConnectDialog(auth: auth),
       builder: (context, child) => ui.AppUiTheme(
-        data: Theme.of(context).brightness == Brightness.dark
+        data: AppUiTheme.of(context).brightness == Brightness.dark
             ? ui.AppUiTheme.dark()
             : ui.AppUiTheme.light(),
         child: child ?? const SizedBox.shrink(),
@@ -124,18 +129,21 @@ void main() {
       );
       CatalogSort? applied;
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Builder(
-            builder: (context) => Scaffold(
-              body: ui.AppButton(
-                onPressed: () => showDialog<void>(
+            builder: (context) => CupertinoPageScaffold(
+              child: ui.AppButton(
+                onPressed: () => showAppDialog<void>(
                   context: context,
-                  builder: (_) => Dialog(
+                  builder: (_) => AppModalFrame(
                     child: LibraryFilterPanel(
                       initial: const ShelfFilters(),
                       sort: CatalogSort.name,
@@ -149,7 +157,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -210,15 +218,18 @@ void main() {
       await tester.pumpWidget(
         PresentationScope(
           environment: PresentationEnvironment.tv,
-          child: MaterialApp(
+          child: CupertinoTestApp(
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
             supportedLocales: AppLocalizations.supportedLocales,
             home: Builder(
-              builder: (context) => Scaffold(
-                body: ui.AppButton(
+              builder: (context) => CupertinoPageScaffold(
+                child: ui.AppButton(
                   onPressed: () => showProviderConnect(
                     context,
                     auth,
@@ -229,7 +240,7 @@ void main() {
               ),
             ),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),
@@ -268,15 +279,18 @@ void main() {
       regionAccess: TestRegionAccessController(),
     );
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: ProviderConnectDialog(auth: auth),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -305,15 +319,18 @@ void main() {
     await tester.pumpWidget(
       PresentationScope(
         environment: PresentationEnvironment.tv,
-        child: MaterialApp(
+        child: CupertinoTestApp(
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: ProviderConnectDialog(auth: auth),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),

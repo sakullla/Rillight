@@ -1,7 +1,9 @@
+import 'helpers/cupertino_test_app.dart';
 import 'helpers/region_access_fixture.dart';
 import 'helpers/image_cache_fixture.dart';
 import 'helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -15,7 +17,9 @@ import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
+
 import 'helpers/synthetic_source_fixture.dart';
+
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/media_server/device.dart';
@@ -96,7 +100,7 @@ void main() {
     );
 
     expect(find.byType(PosterPlaceholder), findsOneWidget);
-    expect(find.byIcon(Icons.movie_outlined), findsNothing);
+    expect(find.byIcon(CupertinoIcons.film), findsNothing);
     expect(find.bySemanticsLabel('封面不可用'), findsOneWidget);
   });
 
@@ -121,8 +125,11 @@ void main() {
         // 重启后保持上次选择:持久化的 light 在首屏生效。
         expect(appearance.style, AppearanceStyle.light);
         expect(
-          tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
-          ThemeMode.light,
+          tester
+              .widget<CupertinoApp>(find.byType(CupertinoApp))
+              .theme!
+              .brightness,
+          Brightness.light,
         );
         expect(find.byType(ConnectPage), findsOneWidget);
         expect(find.byKey(ConnectFormKeys.address), findsOneWidget);
@@ -138,13 +145,16 @@ void main() {
 
         // 切换外观:登录页与已输入内容保持不变,只有亮度变化。
         expect(
-          tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
-          ThemeMode.dark,
+          tester
+              .widget<CupertinoApp>(find.byType(CupertinoApp))
+              .theme!
+              .brightness,
+          Brightness.dark,
         );
         expect(find.byType(ConnectPage), findsOneWidget);
         expect(
           tester
-              .widget<TextField>(find.byKey(ConnectFormKeys.address))
+              .widget<AppTextField>(find.byKey(ConnectFormKeys.address))
               .controller
               ?.text,
           'http://emby.test:8096',
@@ -175,8 +185,11 @@ void main() {
 
       // 页面不因外观切换重建/丢状态,首页内容原样保留。
       expect(
-        tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
-        ThemeMode.dark,
+        tester
+            .widget<CupertinoApp>(find.byType(CupertinoApp))
+            .theme!
+            .brightness,
+        Brightness.dark,
       );
       expect(find.byType(HomePage), findsOneWidget);
       expect(find.text('Inception'), findsWidgets);
@@ -223,7 +236,12 @@ void main() {
         await tester.pumpWidget(await _sourceApp(tester, auth));
         await settle(tester);
 
-        expect(find.byType(NavigationRail), findsNothing);
+        expect(
+          find.byWidgetPredicate(
+            (widget) => widget.runtimeType.toString() == 'NavigationRail',
+          ),
+          findsNothing,
+        );
         expect(find.byKey(AppShell.topBarKey), findsOneWidget);
         expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
         expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
@@ -250,7 +268,12 @@ void main() {
         expect(auth.session?.server.name, '灯川测试');
         expect(find.text('Inception'), findsWidgets);
         expect(find.text('第二台电影'), findsNothing);
-        expect(find.byType(NavigationRail), findsNothing);
+        expect(
+          find.byWidgetPredicate(
+            (widget) => widget.runtimeType.toString() == 'NavigationRail',
+          ),
+          findsNothing,
+        );
         expect(find.byKey(AppShell.topBarKey), findsOneWidget);
         expect(
           first.requests.where(isHomeCatalog).length,
@@ -355,7 +378,12 @@ void main() {
         await tester.pumpWidget(app);
         await settle(tester);
 
-        expect(find.byType(NavigationRail), findsNothing);
+        expect(
+          find.byWidgetPredicate(
+            (widget) => widget.runtimeType.toString() == 'NavigationRail',
+          ),
+          findsNothing,
+        );
         expect(find.byKey(AppShell.topBarKey), findsOneWidget);
         expect(find.byType(HomePage), findsOneWidget);
         expect(tester.getTopLeft(find.byType(HomePage)).dy, 0);
@@ -381,7 +409,7 @@ void main() {
         );
 
         final searchClose = find.byKey(SearchOverlay.closeKey);
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         expect(searchClose, findsOneWidget);
         expect(find.byType(AggregationPage), findsOneWidget);
@@ -396,13 +424,15 @@ void main() {
         expect(find.byType(LibraryPage), findsOneWidget);
         expect(
           tester
-              .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.search))
+              .widget<AppIconButton>(
+                find.widgetWithIcon(AppIconButton, CupertinoIcons.search),
+              )
               .focusNode
               ?.hasFocus,
           isTrue,
         );
 
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         expect(searchClose, findsOneWidget);
 
@@ -423,12 +453,10 @@ void main() {
         final button = tester.widget<DesktopBackButton>(
           find.byType(DesktopBackButton),
         );
-        final expectedTooltip = MaterialLocalizations.of(
-          tester.element(back),
-        ).backButtonTooltip;
+        final expectedTooltip = '返回';
         expect(button.tooltip, expectedTooltip);
         expect(button.label, '返回');
-        expect(find.byTooltip(expectedTooltip), findsOneWidget);
+        expect(findAppTooltip(expectedTooltip), findsOneWidget);
         expect(
           find.descendant(of: back, matching: find.text('返回')),
           findsOneWidget,
@@ -476,11 +504,13 @@ void main() {
         );
         expect(find.byKey(SessionActions.serverMenuKey), findsOneWidget);
 
-        String path() => GoRouter.of(
-          tester.element(find.byKey(AppShell.topBarKey)),
-        ).state.uri.path;
+        String path() =>
+            GoRouter.of(tester.element(find.byKey(AppShell.topBarKey)))
+                .state
+                .uri
+                .path;
 
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         expect(find.byKey(SearchOverlay.closeKey), findsOneWidget);
         // 关闭钮与搜索框同一行，不再另设一个效果相同的返回钮。
@@ -508,7 +538,7 @@ void main() {
         await tester.tap(find.byKey(CatalogKeys.library('view-movies')));
         await settle(tester);
         expect(path(), AppRoutes.library('view-movies'));
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await settle(tester);
@@ -516,17 +546,17 @@ void main() {
         expect(find.byType(LibraryPage), findsOneWidget);
         expect(path(), AppRoutes.library('view-movies'));
 
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         await tester.tap(find.byKey(SearchOverlay.closeKey));
         await settle(tester);
         expect(path(), AppRoutes.library('view-movies'));
 
-        await tester.tap(find.byTooltip('搜索'));
+        await tester.tap(findAppTooltip('搜索'));
         await settle(tester);
         expect(
           tester
-              .widget<IconButton>(find.byKey(SearchOverlay.closeKey))
+              .widget<AppIconButton>(find.byKey(SearchOverlay.closeKey))
               .onPressed,
           isNotNull,
         );
@@ -600,10 +630,13 @@ Future<AuthController> _connect(
 }
 
 Widget _l10nApp(Widget home) {
-  return MaterialApp(
+  return CupertinoTestApp(
     locale: const Locale('zh', 'CN'),
     supportedLocales: AppLocalizations.supportedLocales,
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
     home: home,
   );
 }

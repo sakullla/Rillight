@@ -1,12 +1,14 @@
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/jellyfin/jellyfin_client.dart';
 import 'package:rillight/plex/plex_client.dart';
+
 import 'capabilities.dart';
 import 'device.dart';
 import 'media_server_client.dart';
 
-typedef MediaServerBuilder =
-    MediaServerClient Function(ClientDeviceInfo device);
+typedef MediaServerBuilder = MediaServerClient Function(
+  ClientDeviceInfo device,
+);
 
 /// Application composition point. Unknown providers are never treated as Emby.
 class MediaServerProviders {

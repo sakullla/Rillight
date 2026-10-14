@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/media_server/media_source_format.dart';
 
 /// 片源菜单两行:规格标题 + 来源/体积补充。
@@ -10,7 +9,7 @@ class MediaSourceMenuTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final detail = view.detail;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxs),

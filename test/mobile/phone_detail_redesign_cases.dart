@@ -1,9 +1,10 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
@@ -12,17 +13,20 @@ import 'package:rillight/media_image/media_image.dart';
 
 const _minute = 60 * 10000000;
 
-Widget _phone(Widget child, {double width = 412, ThemeData? theme}) {
-  return MaterialApp(
+Widget _phone(Widget child, {double width = 412, AppUiThemeData? theme}) {
+  return CupertinoTestApp(
     locale: const Locale('zh'),
     supportedLocales: AppLocalizations.supportedLocales,
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
-    theme: theme ?? AppTheme.phoneDark(),
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
+    theme: theme ?? AppUiTheme.phoneDark(),
     home: PresentationScope(
       environment: PresentationEnvironment.phone,
       child: MediaQuery(
         data: MediaQueryData(size: Size(width, 900)),
-        child: Scaffold(body: child),
+        child: CupertinoPageScaffold(child: child),
       ),
     ),
   );
@@ -196,14 +200,14 @@ void main() {
               episodeTotal: 2,
             ),
           ),
-          theme: AppTheme.phoneLight(),
+          theme: AppUiTheme.phoneLight(),
         ),
       );
       await tester.pump();
       final icon = tester.widget<Icon>(
         find.byKey(const Key('phone-episode-current')),
       );
-      expect(icon.color, AppTheme.phoneLight().colorScheme.onPrimary);
+      expect(icon.color, AppUiTheme.phoneLight().colorScheme.onPrimary);
     });
 
     testWidgets('several seasons use tabs and do not repeat the name', (
@@ -283,19 +287,22 @@ void main() {
       expect(find.text('12.4 Mbps'), findsOneWidget);
       // 数值右对齐到卡片内边距。
       final value = tester.getRect(find.text('MKV'));
-      final width = tester.getSize(find.byType(Scaffold)).width;
+      final width = tester.getSize(find.byType(CupertinoPageScaffold)).width;
       expect(value.right, closeTo(width - 16 - 16, 1));
     });
 
     testWidgets('desktop keeps the short metadata section', (tester) async {
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoTestApp(
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          theme: AppTheme.dark(),
-          home: Scaffold(
-            body: EpisodeMetadataSection(item: item, source: source),
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          theme: AppUiTheme.dark(),
+          home: CupertinoPageScaffold(
+            child: EpisodeMetadataSection(item: item, source: source),
           ),
         ),
       );

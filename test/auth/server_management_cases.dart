@@ -1,13 +1,14 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -202,16 +203,19 @@ void main() {
 
       Future<void> pump(List<SavedServer> servers) {
         return tester.pumpWidget(
-          MaterialApp(
-            theme: AppTheme.dark(),
+          CupertinoTestApp(
+            theme: AppUiTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
-            home: Scaffold(
-              body: ServerSwitcherDialog(
+            home: CupertinoPageScaffold(
+              child: ServerSwitcherDialog(
                 servers: servers,
                 activeServerId: 'server-id-1',
                 activeLineId: 'line-1',
@@ -226,7 +230,7 @@ void main() {
               ),
             ),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),
@@ -283,16 +287,19 @@ void main() {
         _saved('server-id-$i', '服务器 $i', ['http://emby-$i.test:8096']),
     ];
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
-        home: Scaffold(
-          body: ServerSwitcherDialog(
+        home: CupertinoPageScaffold(
+          child: ServerSwitcherDialog(
             servers: servers,
             activeServerId: 'server-id-1',
             activeLineId: 'line-1',
@@ -307,7 +314,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -332,18 +339,21 @@ void main() {
   testWidgets(
     'switcher panel paints an opaque surface above background content in both themes',
     (tester) async {
-      Future<void> pump(ThemeData theme) {
+      Future<void> pump(AppUiThemeData theme) {
         return tester.pumpWidget(
-          MaterialApp(
+          CupertinoTestApp(
             theme: theme,
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
             localizationsDelegates: [
-              ...AppLocalizations.localizationsDelegates,
+              ...[
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
               ui.GlobalCupertinoLocalizations.delegate,
             ],
-            home: Scaffold(
-              body: Stack(
+            home: CupertinoPageScaffold(
+              child: Stack(
                 children: [
                   const Positioned.fill(
                     child: ColoredBox(color: Color(0xFF29486B)),
@@ -375,7 +385,7 @@ void main() {
               ),
             ),
             builder: (context, child) => ui.AppUiTheme(
-              data: Theme.of(context).brightness == Brightness.dark
+              data: AppUiTheme.of(context).brightness == Brightness.dark
                   ? ui.AppUiTheme.dark()
                   : ui.AppUiTheme.light(),
               child: child ?? const SizedBox.shrink(),
@@ -384,7 +394,7 @@ void main() {
         );
       }
 
-      for (final theme in [AppTheme.light(), AppTheme.dark()]) {
+      for (final theme in [AppUiTheme.light(), AppUiTheme.dark()]) {
         await pump(theme);
         await settle(tester);
         final scheme = theme.brightness == Brightness.dark

@@ -1,14 +1,15 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -56,16 +57,19 @@ void main() {
   });
 
   Widget wrap(Widget child) {
-    return MaterialApp(
+    return CupertinoTestApp(
       locale: const Locale('zh'),
       localizationsDelegates: [
-        ...AppLocalizations.localizationsDelegates,
+        ...[
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         ui.GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(body: child),
+      home: CupertinoPageScaffold(child: child),
       builder: (context, child) => ui.AppUiTheme(
-        data: Theme.of(context).brightness == Brightness.dark
+        data: AppUiTheme.of(context).brightness == Brightness.dark
             ? ui.AppUiTheme.dark()
             : ui.AppUiTheme.light(),
         child: child ?? const SizedBox.shrink(),
@@ -401,28 +405,33 @@ void main() {
         routes: [
           GoRoute(
             path: '/',
-            builder: (_, _) => Scaffold(body: PhoneHero(catalog: catalog)),
+            builder: (_, _) =>
+                CupertinoPageScaffold(child: PhoneHero(catalog: catalog)),
           ),
           for (final action in ['item', 'play'])
             GoRoute(
               path: '/$action/:id',
-              builder: (_, state) =>
-                  Scaffold(body: Text('$action ${state.pathParameters['id']}')),
+              builder: (_, state) => CupertinoPageScaffold(
+                child: Text('$action ${state.pathParameters['id']}'),
+              ),
             ),
         ],
       );
       addTearDown(router.dispose);
       await tester.pumpWidget(
-        MaterialApp.router(
+        CupertinoTestApp.router(
           routerConfig: router,
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),

@@ -442,6 +442,9 @@ VoidCallback showAppNotice(
 /// Capture before closing a route so feedback can survive its disposal.
 /// The root overlay and theme do not depend on the outgoing route's context.
 class AppNoticeHost {
+  AppNoticeHost.navigator(NavigatorState navigator, AppUiThemeData theme)
+    : _overlay = navigator.overlay!,
+      _theme = theme;
   AppNoticeHost.of(BuildContext context)
     : _overlay = Overlay.of(context, rootOverlay: true),
       _theme = AppUiTheme.of(context);

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 
 import 'ui/ui.dart' as app;
@@ -112,23 +112,14 @@ class AppearanceController extends ChangeNotifier {
 
   /// 生效主题:浅色/深色直接落;跟随系统时只有确认了浅色偏好才用浅色,
   /// 深色与「无法确认」都落深色。
-  ThemeMode get themeMode {
-    switch (_style) {
-      case AppearanceStyle.light:
-        return ThemeMode.light;
-      case AppearanceStyle.dark:
-        return ThemeMode.dark;
-      case AppearanceStyle.system:
-        return _systemChoice == SystemBrightnessChoice.light
-            ? ThemeMode.light
-            : ThemeMode.dark;
-    }
-  }
-
-  /// Design-system independent resolved brightness, including the existing
-  /// platform-specific fallback for an unknown system preference.
-  Brightness get brightness =>
-      themeMode == ThemeMode.light ? Brightness.light : Brightness.dark;
+  Brightness get brightness => switch (_style) {
+    AppearanceStyle.light => Brightness.light,
+    AppearanceStyle.dark => Brightness.dark,
+    AppearanceStyle.system =>
+      _systemChoice == SystemBrightnessChoice.light
+          ? Brightness.light
+          : Brightness.dark,
+  };
 
   /// 外观就绪:默认构造后等待持久化偏好与系统亮度判定完成(桌面/Android
   /// 启动前 await,避免先闪一种亮度再切换);失败/超时静默保持深色回落。
@@ -241,10 +232,9 @@ class AppearanceMenuButton extends StatelessWidget {
     final controller = AppearanceScope.maybeOf(context);
     final l10n = AppLocalizations.of(context);
     final style = controller?.style ?? AppearanceStyle.system;
-    // Until the application shell migrates, its Material theme cannot reach
-    // the independent Cupertino package. Bridge the resolved preference here,
-    // while preserving a migrated parent's palette and typography.
-    final brightness = controller?.brightness ?? Theme.of(context).brightness;
+    // Preserve local palettes; otherwise resolve the saved appearance preference.
+    final brightness =
+        controller?.brightness ?? app.AppUiTheme.of(context).brightness;
     final theme =
         app.AppUiTheme.maybeOf(context) ??
         (brightness == Brightness.dark

@@ -1,12 +1,13 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/library/shelf_sort.dart';
 
@@ -29,20 +30,22 @@ void main() {
       ShelfFilters? applied;
       var calls = 0;
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.phoneLight(),
+        CupertinoTestApp(
+          theme: AppUiTheme.phoneLight(),
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Builder(
-            builder: (context) => Scaffold(
-              body: ui.AppButton(
-                onPressed: () => showModalBottomSheet<void>(
+            builder: (context) => CupertinoPageScaffold(
+              child: ui.AppButton(
+                onPressed: () => showAppModalSheet<void>(
                   context: context,
-                  isScrollControlled: true,
                   builder: (_) => LibraryFilterPanel(
                     keyPrefix: 'filter',
                     initial: const ShelfFilters(),
@@ -60,7 +63,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -108,20 +111,23 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.dark(),
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
         locale: const Locale('zh'),
         localizationsDelegates: [
-          ...AppLocalizations.localizationsDelegates,
+          ...[
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
           ui.GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: Builder(
-          builder: (context) => Scaffold(
-            body: ui.AppButton(
-              onPressed: () => showDialog<void>(
+          builder: (context) => CupertinoPageScaffold(
+            child: ui.AppButton(
+              onPressed: () => showAppDialog<void>(
                 context: context,
-                builder: (_) => Dialog(
+                builder: (_) => AppModalFrame(
                   child: LibraryFilterPanel(
                     keyPrefix: 'filter',
                     typeFilterable: false,
@@ -135,7 +141,7 @@ void main() {
           ),
         ),
         builder: (context, child) => ui.AppUiTheme(
-          data: Theme.of(context).brightness == Brightness.dark
+          data: AppUiTheme.of(context).brightness == Brightness.dark
               ? ui.AppUiTheme.dark()
               : ui.AppUiTheme.light(),
           child: child ?? const SizedBox.shrink(),
@@ -169,20 +175,23 @@ void main() {
     for (final (view, width, compact, tall) in cases) {
       tester.view.physicalSize = view;
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.dark(),
+        CupertinoTestApp(
+          theme: AppUiTheme.dark(),
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Builder(
-            builder: (context) => Scaffold(
-              body: ui.AppButton(
-                onPressed: () => showDialog<void>(
+            builder: (context) => CupertinoPageScaffold(
+              child: ui.AppButton(
+                onPressed: () => showAppDialog<void>(
                   context: context,
-                  builder: (_) => Dialog(
+                  builder: (_) => AppModalFrame(
                     child: LibraryFilterPanel(
                       keyPrefix: 'filter',
                       typeFilterable: false,
@@ -196,7 +205,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),
@@ -230,11 +239,14 @@ void main() {
     ]) {
       tester.view.physicalSize = view;
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.dark(),
+        CupertinoTestApp(
+          theme: AppUiTheme.dark(),
           locale: const Locale('zh'),
           localizationsDelegates: [
-            ...AppLocalizations.localizationsDelegates,
+            ...[
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
@@ -247,7 +259,7 @@ void main() {
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
-            data: Theme.of(context).brightness == Brightness.dark
+            data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
             child: child ?? const SizedBox.shrink(),

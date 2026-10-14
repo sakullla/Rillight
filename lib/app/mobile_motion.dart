@@ -1,9 +1,9 @@
-import 'package:animations/animations.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/media_server/models.dart';
+
+enum PhoneAxisTransitionType { horizontal, vertical, scaled }
 
 /// 从首页带进剧集页或详情页的那张图。
 ///
@@ -28,7 +28,7 @@ abstract final class PhoneMotion {
 
   static const playerControlsKey = Key('phone-player-controls');
 
-  /// 路由转场时长档,Material Motion 校准区间 200–300ms。
+  /// 路由转场时长档,统一使用 200–300ms。
   ///
   /// 经 [AppMotion.durationOf] 求值;系统减少动效时转场即时完成。
   static const Duration pageTransition = Duration(milliseconds: 250);
@@ -116,7 +116,7 @@ abstract final class PhoneMotion {
     required BuildContext context,
     required GoRouterState state,
     required Widget child,
-    SharedAxisTransitionType type = SharedAxisTransitionType.vertical,
+    PhoneAxisTransitionType type = PhoneAxisTransitionType.vertical,
   }) {
     final duration = AppMotion.durationOf(context, pageTransition);
     return CustomTransitionPage<T>(
@@ -125,12 +125,32 @@ abstract final class PhoneMotion {
       reverseTransitionDuration: duration,
       child: child,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        return SharedAxisTransition(
-          animation: animation,
-          secondaryAnimation: secondaryAnimation,
-          transitionType: type,
-          fillColor: Theme.of(context).scaffoldBackgroundColor,
-          child: child,
+        if (duration == Duration.zero) return child;
+        final primary = animation.drive(CurveTween(curve: AppMotion.standard));
+        final secondary = secondaryAnimation.drive(
+          CurveTween(curve: AppMotion.exit),
+        );
+        return FadeTransition(
+          opacity: primary,
+          child: FadeTransition(
+            opacity: ReverseAnimation(secondary),
+            child: type == PhoneAxisTransitionType.scaled
+                ? ScaleTransition(
+                    scale: primary.drive(Tween(begin: .96, end: 1)),
+                    child: child,
+                  )
+                : SlideTransition(
+                    position: primary.drive(
+                      Tween<Offset>(
+                        begin: type == PhoneAxisTransitionType.horizontal
+                            ? const Offset(.04, 0)
+                            : const Offset(0, .04),
+                        end: Offset.zero,
+                      ),
+                    ),
+                    child: child,
+                  ),
+          ),
         );
       },
     );
@@ -149,11 +169,19 @@ abstract final class PhoneMotion {
       reverseTransitionDuration: duration,
       child: child,
       transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        return FadeThroughTransition(
-          animation: animation,
-          secondaryAnimation: secondaryAnimation,
-          fillColor: Theme.of(context).scaffoldBackgroundColor,
-          child: child,
+        if (duration == Duration.zero) return child;
+        return FadeTransition(
+          opacity: animation.drive(
+            CurveTween(curve: const Interval(.3, 1, curve: AppMotion.standard)),
+          ),
+          child: FadeTransition(
+            opacity: ReverseAnimation(
+              secondaryAnimation.drive(
+                CurveTween(curve: const Interval(0, .3, curve: AppMotion.exit)),
+              ),
+            ),
+            child: child,
+          ),
         );
       },
     );
@@ -188,18 +216,17 @@ abstract final class PhoneMotion {
     final reduced = MediaQuery.disableAnimationsOf(context);
     final enter = reduced ? Duration.zero : AppMotion.normal;
     final exit = reduced ? Duration.zero : AppMotion.fast;
-    return showModalBottomSheet<T>(
-      context: context,
-      isScrollControlled: isScrollControlled,
-      showDragHandle: showDragHandle,
-      useSafeArea: useSafeArea,
-      sheetAnimationStyle: AnimationStyle(
-        duration: enter,
-        reverseDuration: exit,
-        curve: reduced ? Curves.linear : AppMotion.emphasized,
-        reverseCurve: reduced ? Curves.linear : AppMotion.exit,
+    return Navigator.of(context).push<T>(
+      _PhonePanelRoute<T>(
+        builder: builder,
+        theme: AppUiTheme.of(context),
+        enter: enter,
+        exit: exit,
+        reduced: reduced,
+        isScrollControlled: isScrollControlled,
+        showDragHandle: showDragHandle,
+        useSafeArea: useSafeArea,
       ),
-      builder: builder,
     );
   }
 }
@@ -275,6 +302,126 @@ class _PhoneTabTransitionState extends State<PhoneTabTransition>
         end: Offset.zero,
       ).animate(_curve),
       child: RepaintBoundary(child: widget.child),
+    );
+  }
+}
+
+/// Cupertino panel route with the app's reduced-motion and dismissal policy.
+class _PhonePanelRoute<T> extends PopupRoute<T> {
+  _PhonePanelRoute({
+    required this.builder,
+    required this.theme,
+    required this.enter,
+    required this.exit,
+    required this.reduced,
+    required this.isScrollControlled,
+    required this.showDragHandle,
+    required this.useSafeArea,
+  });
+  final WidgetBuilder builder;
+  final AppUiThemeData theme;
+  final Duration enter, exit;
+  final bool reduced, isScrollControlled, showDragHandle, useSafeArea;
+  @override
+  Duration get transitionDuration => enter;
+  @override
+  Duration get reverseTransitionDuration => exit;
+  @override
+  bool get barrierDismissible => true;
+  @override
+  Color get barrierColor => const Color(0x66000000);
+  @override
+  String get barrierLabel => '关闭';
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
+    return AppUiTheme(
+      data: theme,
+      child: Builder(
+        builder: (context) => SafeArea(
+          top: useSafeArea,
+          left: useSafeArea,
+          right: useSafeArea,
+          bottom: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight:
+                      MediaQuery.sizeOf(context).height *
+                      (isScrollControlled ? 1 : 9 / 16),
+                ),
+                child: CupertinoPopupSurface(
+                  child: ColoredBox(
+                    color: theme.colorScheme.surface,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (showDragHandle)
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onVerticalDragEnd: (details) {
+                                if ((details.primaryVelocity ?? 0) > 100) {
+                                  Navigator.of(context).pop();
+                                }
+                              },
+                              child: SizedBox(
+                                height: 24,
+                                width: double.infinity,
+                                child: Center(
+                                  child: Container(
+                                    width: 36,
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.outline,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          Flexible(child: Builder(builder: builder)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (reduced) return child;
+    return SlideTransition(
+      position: animation
+          .drive(
+            CurveTween(
+              curve: animation.status == AnimationStatus.reverse
+                  ? AppMotion.exit
+                  : AppMotion.emphasized,
+            ),
+          )
+          .drive(Tween(begin: const Offset(0, 1), end: Offset.zero)),
+      child: child,
     );
   }
 }

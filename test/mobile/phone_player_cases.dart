@@ -1,17 +1,17 @@
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -100,7 +100,7 @@ void main() {
   }
 
   Future<void> closeOptions(WidgetTester tester) async {
-    final back = find.widgetWithText(TextButton, '返回');
+    final back = find.widgetWithText(AppButton, '返回');
     await tester.ensureVisible(back);
     await tester.pump();
     await tester.tap(back);
@@ -180,27 +180,29 @@ void main() {
             snapshotStore: MemoryPlaybackSessionSnapshotStore(),
             danmakuClient: danmakuClient,
           ),
-          child: MaterialApp(
+          child: CupertinoApp(
             locale: const Locale('zh', 'CN'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            theme: lightApp ? AppTheme.light() : AppTheme.dark(),
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            theme: lightApp
+                ? AppUiTheme.light().cupertino
+                : AppUiTheme.dark().cupertino,
             home: Builder(
-              builder: (context) => Scaffold(
-                body: TextButton(
+              builder: (context) => CupertinoPageScaffold(
+                child: AppButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => Theme(
-                          data: AppTheme.dark(),
-                          child: MobilePlayerPage(
-                            itemId: itemId,
-                            orientation: orientation,
-                            systemBars: systemBars,
-                            wakeLock: wakeLock,
-                            danmakuHasher: hasher,
-                            displayControl: display,
-                          ),
+                      CupertinoPageRoute<void>(
+                        builder: (_) => MobilePlayerPage(
+                          itemId: itemId,
+                          orientation: orientation,
+                          systemBars: systemBars,
+                          wakeLock: wakeLock,
+                          danmakuHasher: hasher,
+                          displayControl: display,
                         ),
                       ),
                     );
@@ -227,7 +229,8 @@ void main() {
       }
       await tester.pump(const Duration(milliseconds: 20));
     }
-    await tester.pump(const Duration(milliseconds: 400));
+    final route = ModalRoute.of(tester.element(find.byType(MobilePlayerPage)))!;
+    await tester.pump(route.transitionDuration);
     if (ready == null || ready.loading) fail('player did not become ready');
     return ready;
   }
@@ -334,11 +337,14 @@ void main() {
       final box = element.findRenderObject()! as RenderBox;
       final boundary = element
           .findAncestorRenderObjectOfType<RenderRepaintBoundary>()!;
-      final sliderTheme = SliderTheme.of(element);
-      final rect = sliderTheme.trackShape!.getPreferredRect(
-        parentBox: box,
-        sliderTheme: sliderTheme,
-        isEnabled: true,
+      final slider = tester.widget<PlayerSlider>(
+        find.byKey(const Key('mobile-player-seek')),
+      );
+      final rect = Rect.fromLTWH(
+        slider.padding.left,
+        box.size.height / 2 - 1.5,
+        box.size.width - slider.padding.horizontal,
+        3,
       );
       final point = box.localToGlobal(
         Offset(rect.left + rect.width * .4, rect.center.dy),
@@ -354,7 +360,7 @@ void main() {
       });
       expect(bytes, [0x69, 0x77, 0x83, 0xff]);
       backend.emitEvent(VideoEventKind.cacheSpeed, 0);
-      await tester.pump();
+      await settle(tester);
       expect(find.text('0 KB/s'), findsOneWidget);
       expect(controller.bufferSnapshot.ranges, isNotEmpty);
       await closePlayer(tester);
@@ -369,10 +375,10 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await settle(tester);
       final panel = find.byKey(const Key('mobile-player-options'));
-      expect(Theme.of(tester.element(panel)).brightness, Brightness.dark);
+      expect(AppUiTheme.of(tester.element(panel)).brightness, Brightness.dark);
       expect(
-        tester.widget<Material>(panel).color,
-        AppTheme.dark().colorScheme.surface,
+        (tester.widget<Container>(panel).decoration! as BoxDecoration).color,
+        AppUiTheme.dark().colorScheme.surface,
       );
       await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
       await settle(tester);
@@ -621,7 +627,12 @@ void main() {
       expect(orientation.calls, [PhoneOrientation.landscape]);
       expect(player.error, isNull);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
-      expect(find.byTooltip('关闭'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is AppTooltip && widget.message == '关闭',
+        ),
+        findsOneWidget,
+      );
 
       await closePlayer(tester);
       await tester.pump();
@@ -903,12 +914,12 @@ void main() {
         '0',
       );
       expect(find.textContaining('$hours:$minutes:$seconds'), findsOneWidget);
-      // 应用内音量 Slider 已移出控制层,收入"更多"面板(R10 能力不减)。
+      // 应用内音量 PlayerSlider 已移出控制层,收入"更多"面板(R10 能力不减)。
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       await enterSection(tester, 'picture');
-      final slider = tester.widget<Slider>(
+      final slider = tester.widget<PlayerSlider>(
         find.byKey(const Key('mobile-player-volume')),
       );
       slider.onChanged!(40);
@@ -1131,7 +1142,7 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
     expect(find.byKey(const Key('mobile-player-more')), findsNothing);
-    expect(find.byIcon(Icons.screen_rotation), findsNothing);
+    expect(find.byIcon(CupertinoIcons.rotate_right), findsNothing);
     expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
     final lockCenter = tester.getCenter(
       find.byKey(const Key('mobile-player-unlock')),
@@ -1260,7 +1271,7 @@ void main() {
       await tester.pump();
       expect(backend.volume, 0);
       await closeOptions(tester);
-      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.byType(CupertinoPopupSurface), findsNothing);
       await closePlayer(tester);
       expect(tester.takeException(), isNull);
     },
@@ -1297,7 +1308,7 @@ void main() {
       for (final source in current.mediaSources) {
         expect(
           tester
-              .widget<ListTile>(
+              .widget<AppListTile>(
                 find.byKey(ValueKey('mobile-source-${source.id}')),
               )
               .selected,
@@ -1417,7 +1428,7 @@ void main() {
       );
       expect(find.byType(PlaybackLineMenu), findsNothing);
       expect(find.text('正在切换来源…'), findsNothing);
-      await tester.tap(find.widgetWithText(TextButton, '返回'));
+      await tester.tap(find.widgetWithText(AppButton, '返回'));
       await tester.pump();
       await tester.binding.handlePopRoute();
       await tester.pump();
@@ -1445,10 +1456,10 @@ void main() {
               find.byKey(ValueKey('mobile-source-icon-$originalId')),
             )
             .icon,
-        Icons.hourglass_top,
+        CupertinoIcons.hourglass,
       );
-      expect(tester.widget<ListTile>(alternate).selected, isTrue);
-      expect(tester.widget<ListTile>(original).selected, isFalse);
+      expect(tester.widget<AppListTile>(alternate).selected, isTrue);
+      expect(tester.widget<AppListTile>(original).selected, isFalse);
       gate.complete();
       for (var i = 0; i < 40; i++) {
         await tester.pump(const Duration(milliseconds: 20));
@@ -1461,7 +1472,7 @@ void main() {
       expect(current.error, isNull);
       expect(find.byType(PlaybackLineMenu), findsNothing);
       expect(find.text('来源切换失败，原来源已恢复'), findsOneWidget);
-      await tester.tap(find.widgetWithText(TextButton, '返回'));
+      await tester.tap(find.widgetWithText(AppButton, '返回'));
       await tester.pump();
       expect(
         find.byKey(const Key('mobile-player-source-entry')),
@@ -1562,19 +1573,19 @@ void main() {
     expect(current.duration, Duration.zero);
     expect(
       tester
-          .widget<IconButton>(find.byKey(const Key('mobile-player-rewind')))
+          .widget<AppIconButton>(find.byKey(const Key('mobile-player-rewind')))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(find.byKey(const Key('mobile-player-forward')))
+          .widget<AppIconButton>(find.byKey(const Key('mobile-player-forward')))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<Slider>(find.byKey(const Key('mobile-player-seek')))
+          .widget<PlayerSlider>(find.byKey(const Key('mobile-player-seek')))
           .onChanged,
       isNull,
     );
@@ -1602,7 +1613,10 @@ void main() {
         .widget<FadeTransition>(
           find.descendant(
             of: find.byKey(PhoneMotion.playerControlsKey),
-            matching: find.byType(FadeTransition),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is FadeTransition && widget.child is ExcludeSemantics,
+            ),
           ),
         )
         .opacity
@@ -1689,10 +1703,15 @@ void main() {
       expect(_systemBarHidden(channelCalls), [true]);
       await orientation.settled;
       expect(orientation.calls, [PhoneOrientation.landscape]);
-      expect(find.byIcon(Icons.screen_rotation), findsNothing);
+      expect(find.byIcon(CupertinoIcons.rotate_right), findsNothing);
       expect(find.byKey(const Key('mobile-player-lock')), findsOneWidget);
       expect(find.byKey(const Key('mobile-player-more')), findsOneWidget);
-      expect(find.byTooltip('关闭'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is AppTooltip && widget.message == '关闭',
+        ),
+        findsOneWidget,
+      );
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -1748,7 +1767,9 @@ void main() {
       expect(toggle.left - rewind.right, greaterThanOrEqualTo(8 - 0.01));
       expect(forward.left - toggle.right, greaterThanOrEqualTo(8 - 0.01));
       for (final key in [
-        find.byTooltip('关闭'),
+        find.byWidgetPredicate(
+          (widget) => widget is AppTooltip && widget.message == '关闭',
+        ),
         find.byKey(const Key('mobile-player-lock')),
         find.byKey(const Key('mobile-player-more')),
       ]) {
@@ -1799,7 +1820,11 @@ void main() {
         contains('androidSdkInt'),
       );
 
-      final back = tester.getRect(find.byTooltip('关闭'));
+      final back = tester.getRect(
+        find.byWidgetPredicate(
+          (widget) => widget is AppTooltip && widget.message == '关闭',
+        ),
+      );
       final more = tester.getRect(find.byKey(const Key('mobile-player-more')));
       final rewind = tester.getRect(
         find.byKey(const Key('mobile-player-rewind')),
@@ -1884,7 +1909,15 @@ void main() {
         expect(picture.left, closeTo(0, 0.2));
         expect(picture.width, closeTo(size.width, 0.2));
         expect(picture.height, closeTo(size.height, 0.2));
-        final left = tester.getTopLeft(find.byTooltip('关闭')).dx - picture.left;
+        final left =
+            tester
+                .getTopLeft(
+                  find.byWidgetPredicate(
+                    (widget) => widget is AppTooltip && widget.message == '关闭',
+                  ),
+                )
+                .dx -
+            picture.left;
         await closePlayer(tester);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
@@ -1922,7 +1955,16 @@ void main() {
       wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       size: const Size(800, 360),
     );
-    expect(tester.getTopLeft(find.byTooltip('关闭')).dy, closeTo(24, 0.01));
+    expect(
+      tester
+          .getTopLeft(
+            find.byWidgetPredicate(
+              (widget) => widget is AppTooltip && widget.message == '关闭',
+            ),
+          )
+          .dy,
+      closeTo(24, 0.01),
+    );
     await closePlayer(tester);
   }, tags: ['integration']);
 
@@ -2079,7 +2121,7 @@ void main() {
           hasLength(1),
         );
         backend.emitEvent(VideoEventKind.cacheSpeed, 0);
-        await tester.pump();
+        await settle(tester);
         expect(find.text('0 KB/s'), findsOneWidget);
         expect(
           tester
@@ -2136,7 +2178,7 @@ void main() {
 
         backend.emitEvent(VideoEventKind.buffering, true);
         await tester.pump();
-        expect(find.byType(LinearProgressIndicator), findsNothing);
+        expect(find.byType(AppProgressBar), findsNothing);
         expect(find.text('正在缓冲…'), findsOneWidget);
         backend.emitEvent(VideoEventKind.buffering, false);
         await tester.pump();
@@ -2186,7 +2228,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 400));
         expect(find.text('来源'), findsNothing);
         expect(find.text('最高可用'), findsOneWidget);
-        expect(find.byType(ChoiceChip), findsNothing);
+        expect(find.byType(AppChoiceChip), findsNothing);
         await tester.binding.handlePopRoute();
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
@@ -2195,7 +2237,7 @@ void main() {
         await gesture.moveBy(const Offset(20, 0));
         await tester.pump(const Duration(seconds: 5));
         expect(current.controlsVisible, isTrue);
-        expect(tester.widget<Slider>(timeline).label, isNotEmpty);
+        expect(tester.widget<PlayerSlider>(timeline).label, isNotEmpty);
         await gesture.up();
         await tester.pump();
         expect(backend.position, greaterThan(Duration.zero));

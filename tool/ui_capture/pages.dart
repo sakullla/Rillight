@@ -1,7 +1,9 @@
+import '../../test/helpers/cupertino_test_app.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,7 +12,6 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
@@ -99,7 +100,12 @@ extension PageCaptures on CaptureSession {
       if (platform == 'desktop') {
         await tap(const Key('app-shell-aggregation'));
       } else if (platform == 'phone') {
-        await activate(find.byType(NavigationDestination).at(1));
+        await activate(
+          find.descendant(
+            of: find.byType(CupertinoTabBar),
+            matching: find.text('聚合'),
+          ),
+        );
       } else {
         await tap(const ValueKey('tv-nav-1'));
       }
@@ -109,7 +115,7 @@ extension PageCaptures on CaptureSession {
       if (platform != 'tv') {
         await tap(const Key('aggregation-source-management'));
         await save('aggregation-management');
-        await activate(find.widgetWithText(ListTile, '私密区域'));
+        await activate(find.widgetWithText(AppListTile, '私密区域'));
         await save('aggregation-pin-setup');
         await tester.enterText(find.byKey(const Key('private-pin')), '1234');
         await tester.enterText(
@@ -140,7 +146,7 @@ extension PageCaptures on CaptureSession {
           ),
         );
         await advance(1200);
-        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
         await advance(600);
         await activate(
           find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
@@ -151,15 +157,15 @@ extension PageCaptures on CaptureSession {
           find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
         );
         await save('aggregation-empty-scope');
-        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
         await advance(900);
-        await activate(find.widgetWithText(TextButton, '查找同源 · 2').first);
+        await activate(find.widgetWithText(AppButton, '查找同源 · 2').first);
         await advance(900);
         await save('aggregation-comparison');
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await advance(350);
         adapter.failAggregationMirror = true;
-        await activate(find.widgetWithText(FilterChip, '全部普通来源'));
+        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
         await advance(1000);
         await save('aggregation-partial-failure');
         adapter.failAggregationMirror = false;
@@ -167,7 +173,12 @@ extension PageCaptures on CaptureSession {
           // /aggregation 只有桌面路由;先回首页再经底部导航进聚合页。
           app.router.go('/');
           await advance(900);
-          await activate(find.byType(NavigationDestination).at(1));
+          await activate(
+            find.descendant(
+              of: find.byType(CupertinoTabBar),
+              matching: find.text('聚合'),
+            ),
+          );
         } else {
           app.router.go('/aggregation');
           await advance(900);
@@ -178,7 +189,12 @@ extension PageCaptures on CaptureSession {
         app.router.go('/search');
         await advance(700);
       } else if (platform == 'phone') {
-        await activate(find.byType(NavigationDestination).at(2));
+        await activate(
+          find.descendant(
+            of: find.byType(CupertinoTabBar),
+            matching: find.text('搜索'),
+          ),
+        );
       } else {
         await tap(const ValueKey('tv-nav-2'));
       }
@@ -197,7 +213,12 @@ extension PageCaptures on CaptureSession {
       app.router.go('/');
       await advance(400);
       if (platform == 'phone') {
-        await activate(find.byType(NavigationDestination).at(0));
+        await activate(
+          find.descendant(
+            of: find.byType(CupertinoTabBar),
+            matching: find.text('首页'),
+          ),
+        );
       }
       if (platform == 'tv') await tap(const ValueKey('tv-nav-0'));
     }
@@ -227,7 +248,12 @@ extension PageCaptures on CaptureSession {
         await save('home-customize');
         app.router.pop();
         await advance(400);
-        await activate(find.byType(NavigationDestination).at(1));
+        await activate(
+          find.descendant(
+            of: find.byType(CupertinoTabBar),
+            matching: find.text('聚合'),
+          ),
+        );
         await save('library-list');
       } else {
         await tap(const ValueKey('tv-nav-1'));
@@ -369,7 +395,7 @@ extension PageCaptures on CaptureSession {
       final album = find
           .descendant(
             of: find.byType(DetailAlbumStrip),
-            matching: find.byType(InkWell),
+            matching: find.byType(AppSurfaceAction),
           )
           .first;
       await activate(album);
@@ -403,10 +429,10 @@ extension PageCaptures on CaptureSession {
           expect(genres, findsOneWidget);
           await Scrollable.ensureVisible(tester.element(genres), alignment: .5);
           await advance(400);
-          final scheme = Theme.of(tester.element(genres)).colorScheme;
+          final scheme = AppUiTheme.of(tester.element(genres)).colorScheme;
           final base = scheme.brightness == Brightness.dark
-              ? AppTheme.dark().colorScheme
-              : AppTheme.light().colorScheme;
+              ? AppUiTheme.dark().colorScheme
+              : AppUiTheme.light().colorScheme;
           expect(
             scheme.primary,
             isNot(base.primary),
@@ -443,7 +469,7 @@ extension PageCaptures on CaptureSession {
           if (tone == 'fallback') await advance(500);
           await save('detail-palette-$tone');
           if (tone == 'fallback') {
-            final first = Theme.of(
+            final first = AppUiTheme.of(
               tester.element(find.byKey(const Key('phone-detail-banner'))),
             ).colorScheme;
             app.router.go('/item/movie-up');
@@ -452,7 +478,7 @@ extension PageCaptures on CaptureSession {
             await advance(900);
             await advance(500);
             await save('detail-palette-fallback-reentry');
-            final revisited = Theme.of(
+            final revisited = AppUiTheme.of(
               tester.element(find.byKey(const Key('phone-detail-banner'))),
             ).colorScheme;
             expect(revisited.surface, first.surface);
@@ -557,9 +583,14 @@ extension PageCaptures on CaptureSession {
   Future<void> searchPages(RillightApp app) async {
     await route(app, '/', 'search-entry');
     if (platform == 'desktop') {
-      await activate(find.byTooltip('搜索'));
+      await activate(findAppTooltip('搜索'));
     } else if (platform == 'phone') {
-      await activate(find.byType(NavigationDestination).at(2));
+      await activate(
+        find.descendant(
+          of: find.byType(CupertinoTabBar),
+          matching: find.text('搜索'),
+        ),
+      );
     } else {
       await tap(const ValueKey('tv-nav-2'));
       await activate(find.byKey(const Key('aggregation-keyword')));
@@ -624,12 +655,12 @@ extension PageCaptures on CaptureSession {
       await modal(PhoneMinePage.lineEditKey(id, lineId), 'server-edit-line');
       final selectedServerCard = find.ancestor(
         of: find.byKey(PhoneMinePage.serverDeleteKey(id)),
-        matching: find.byType(Card),
+        matching: find.byType(Column),
       );
       await activate(
         find.descendant(
-          of: selectedServerCard,
-          matching: find.byTooltip('修改显示名称'),
+          of: selectedServerCard.first,
+          matching: findAppTooltip('修改显示名称'),
         ),
       );
       await save('server-rename');

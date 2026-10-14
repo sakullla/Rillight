@@ -11,7 +11,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -148,7 +148,7 @@ void main() {
           find.byKey(const Key('phone-provider-management')),
           findsNothing,
         );
-        final manage = find.byType(Scaffold).first;
+        final manage = find.byType(CupertinoPageScaffold).first;
         final catalog = CatalogScope.of(tester.element(manage));
         await tester.runAsync(catalog.reload);
         expect(

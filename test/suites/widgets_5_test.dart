@@ -7,40 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'auth/change_password_test.dart',
-    caseEntrypoints['auth/change_password_cases.dart']!,
+    'aggregation/playback_runtime_test.dart [part 1]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#0']!,
   );
   group(
-    'auth/phone_server_manager_test.dart',
-    caseEntrypoints['auth/phone_server_manager_cases.dart']!,
+    'app/app_shell_top_bar_test.dart',
+    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
+  );
+  group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
+  group(
+    'catalog/catalog_browse_test.dart',
+    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
   );
   group(
-    'catalog/shelf_grid_scroll_rebuild_test.dart',
-    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
+    'catalog/item_detail_test.dart [part 2]',
+    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
   );
   group(
-    'home/hero_playback_actions_test.dart',
-    caseEntrypoints['home/hero_playback_actions_cases.dart']!,
+    'home/home_page_test.dart',
+    caseEntrypoints['home/home_page_cases.dart']!,
   );
   group(
-    'home/library_tiles_test.dart',
-    caseEntrypoints['home/library_tiles_cases.dart']!,
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 2]',
-    caseEntrypoints['library/source_detail_route_cases.dart#1']!,
-  );
-  group(
-    'mobile/phone_player_test.dart [part 3]',
-    caseEntrypoints['mobile/phone_player_cases.dart#2']!,
-  );
-  group(
-    'player/playback_image_release_test.dart',
-    caseEntrypoints['player/playback_image_release_cases.dart']!,
+    'mobile/phone_player_test.dart [part 2]',
+    caseEntrypoints['mobile/phone_player_cases.dart#1']!,
   );
   group(
     'player/playback_overlay_widgets_test.dart',
     caseEntrypoints['player/playback_overlay_widgets_cases.dart']!,
   );
-  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
 }

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -12,9 +12,9 @@ class TvAppearancePicker extends StatelessWidget {
   const TvAppearancePicker({super.key});
 
   static const _icons = {
-    AppearanceStyle.system: Icons.brightness_auto_rounded,
-    AppearanceStyle.light: Icons.light_mode_rounded,
-    AppearanceStyle.dark: Icons.dark_mode_rounded,
+    AppearanceStyle.system: CupertinoIcons.circle_lefthalf_fill,
+    AppearanceStyle.light: CupertinoIcons.sun_max,
+    AppearanceStyle.dark: CupertinoIcons.moon,
   };
 
   @override
@@ -32,7 +32,9 @@ class TvAppearancePicker extends StatelessWidget {
             key: Key('tv-appearance-${value.name}'),
             pill: true,
             selected: style == value,
-            leading: Icon(style == value ? Icons.check_rounded : _icons[value]),
+            leading: Icon(
+              style == value ? CupertinoIcons.check_mark : _icons[value],
+            ),
             onPressed: appearance == null
                 ? null
                 : () => appearance.setStyle(value),

@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
 
 /// hover/焦点卡片包装:指针悬停与键盘焦点显示同一套焦点环,
@@ -131,7 +130,7 @@ class _AppHoverCardState extends State<AppHoverCard> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
     final radius = widget.borderRadius ?? BorderRadius.circular(AppRadii.md);
     final highlighted = (_hovering && !_scrolling) || _focused;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -160,13 +159,13 @@ class _AppHoverCardState extends State<AppHoverCard> {
         border: Border.all(
           color: highlighted && widget.showRing
               ? colorScheme.primary
-              : Colors.transparent,
+              : const Color(0x00000000),
           width: widget.focusRingWidth,
         ),
       ),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
+      child: Container(
+        decoration: BoxDecoration(),
+        child: AppSurfaceAction(
           key: widget.inkKey,
           onTap: widget.onTap,
           onHover: _setHovering,
@@ -175,8 +174,6 @@ class _AppHoverCardState extends State<AppHoverCard> {
           autofocus: widget.autofocus,
           canRequestFocus: widget.onTap != null,
           borderRadius: radius,
-          splashFactory: NoSplash.splashFactory,
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           child: widget.child,
         ),
       ),

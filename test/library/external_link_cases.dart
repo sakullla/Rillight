@@ -1,13 +1,14 @@
+import '../helpers/cupertino_test_app.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -18,19 +19,19 @@ Widget _wrap(
   PresentationEnvironment environment = PresentationEnvironment.desktop,
 }) {
   // 桌面平台分支直达 launchUrl,避免测试默认 android 走进 webview。
-  return MaterialApp(
-    theme: AppTheme.dark().copyWith(platform: TargetPlatform.windows),
+  return CupertinoTestApp(
+    theme: AppUiTheme.dark(),
     localizationsDelegates: [
-      ...AppLocalizations.localizationsDelegates,
+      ...[AppLocalizations.delegate, ...GlobalCupertinoLocalizations.delegates],
       ui.GlobalCupertinoLocalizations.delegate,
     ],
     supportedLocales: AppLocalizations.supportedLocales,
     home: PresentationScope(
       environment: environment,
-      child: Scaffold(body: Center(child: child)),
+      child: CupertinoPageScaffold(child: Center(child: child)),
     ),
     builder: (context, child) => ui.AppUiTheme(
-      data: Theme.of(context).brightness == Brightness.dark
+      data: AppUiTheme.of(context).brightness == Brightness.dark
           ? ui.AppUiTheme.dark()
           : ui.AppUiTheme.light(),
       child: child ?? const SizedBox.shrink(),

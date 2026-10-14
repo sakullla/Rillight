@@ -1,6 +1,8 @@
+import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
+
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/desktop_gestures.dart';
 
@@ -11,7 +13,7 @@ void main() {
     final fullscreen = <bool>[];
     var seeks = 0;
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: DesktopPlaybackGestures(
           position: Duration.zero,
           duration: const Duration(minutes: 2),
@@ -42,7 +44,7 @@ void main() {
   ) async {
     var backs = 0;
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: DesktopNavigationGestures(
           onBack: () => backs++,
           child: const SizedBox.expand(),
@@ -73,7 +75,7 @@ void main() {
     final scroll = ScrollController();
     addTearDown(scroll.dispose);
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: DesktopNavigationGestures(
           onForward: () => forwards++,
           child: ListView(
@@ -106,7 +108,7 @@ void main() {
   ) async {
     final seeks = <Duration>[];
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: DesktopPlaybackGestures(
           position: const Duration(seconds: 50),
           duration: const Duration(minutes: 2),
@@ -144,7 +146,7 @@ void main() {
     final volumes = <int>[];
     var seeks = 0;
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoTestApp(
         home: DesktopPlaybackGestures(
           position: Duration.zero,
           duration: const Duration(minutes: 2),
