@@ -127,8 +127,9 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     context,
     auth: AuthScope.of(context),
     onSelect: (id, lineId) async {
-      final server = AuthScope.of(context).savedServers
-          .firstWhere((s) => s.id == id);
+      final server = AuthScope.of(
+        context,
+      ).savedServers.firstWhere((s) => s.id == id);
       setState(() => _select(server.copyWith(activeLineId: lineId)));
     },
     onAddServer: () {
@@ -609,8 +610,13 @@ class _PhoneServerChip extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: selected
-              ? scheme.primary.withValues(alpha: .1)
-              : scheme.surfaceContainerHigh,
+              ? scheme.primary.withValues(alpha: .12)
+              : scheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          border: Border.all(
+            color: selected ? scheme.primary : scheme.outlineVariant,
+            width: selected ? 1.5 : 1,
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(

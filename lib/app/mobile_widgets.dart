@@ -221,7 +221,10 @@ class PhonePosterCard extends StatelessWidget {
     final card = Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: MobilePressable(

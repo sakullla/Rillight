@@ -63,13 +63,33 @@ void main() {
       final floatingRect = tester.getRect(find.byType(CupertinoTabBar));
       expect(floatingRect.left, AppMobileNav.floatMargin);
       expect(floatingRect.right, 800 - AppMobileNav.floatMargin);
+      expect(floatingRect.height, AppMobileNav.floatingHeight);
       expect(floatingRect.bottom, lessThan(600));
 
       await pump(false);
       final dockedRect = tester.getRect(find.byType(CupertinoTabBar));
       expect(dockedRect.left, 0);
       expect(dockedRect.right, 800);
+      expect(dockedRect.height, AppMobileNav.dockedHeight);
       expect(dockedRect.bottom, 600);
     },
   );
+
+  testWidgets('floatingOf falls back to false without PhoneNavStyle ancestor', (
+    tester,
+  ) async {
+    late bool fallback;
+    await tester.pumpWidget(
+      CupertinoTestApp(
+        theme: AppUiTheme.dark(),
+        home: Builder(
+          builder: (context) {
+            fallback = PhoneNavStyle.floatingOf(context);
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    expect(fallback, isFalse);
+  });
 }

@@ -1,11 +1,14 @@
 import 'dart:async';
 
-import 'package:rillight/app/ui/ui.dart';
+import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/routes.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/home/catalog_scope.dart';
 
 Future<void> showPhoneServerManager(
   BuildContext context, {
@@ -21,6 +24,29 @@ Future<void> showPhoneServerManager(
     onAddServer: onAddServer,
     onCurrentLineChanged: onCurrentLineChanged,
   ),
+);
+
+Future<void> showPhoneServerManagerSheet(
+  BuildContext context,
+  AuthController auth,
+) => showPhoneServerManager(
+  context,
+  auth: auth,
+  onSelect: (serverId, lineId) async {
+    await auth.switchTo(serverId, lineId: lineId);
+    if (!context.mounted ||
+        !auth.isLoggedIn ||
+        auth.lineSwitchFailure != null) {
+      return;
+    }
+    await CatalogScope.maybeOf(context)?.reload();
+  },
+  onCurrentLineChanged: () async {
+    if (context.mounted) await CatalogScope.maybeOf(context)?.reload();
+  },
+  onAddServer: () {
+    if (context.mounted) context.push('${AppRoutes.connect}?add=1');
+  },
 );
 
 /// Touch management: server identity and connection addresses are separate.
@@ -263,7 +289,11 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
     return Container(
       decoration: BoxDecoration(
         color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: current ? scheme.primary : scheme.outlineVariant,
+          width: current ? 1.5 : 1,
+        ),
       ),
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(

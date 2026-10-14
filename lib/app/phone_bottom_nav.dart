@@ -47,7 +47,9 @@ class PhoneBottomNav extends StatelessWidget {
           child: CupertinoTabBar(
             activeColor: AppUiTheme.of(context).colorScheme.primary,
             inactiveColor: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
-            height: 72,
+            height: floating
+                ? AppMobileNav.floatingHeight
+                : AppMobileNav.dockedHeight,
             backgroundColor: const Color(0x00000000),
             currentIndex: index,
             onTap: onSelected,

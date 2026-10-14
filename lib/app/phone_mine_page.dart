@@ -9,13 +9,11 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
-import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/auth/session_actions.dart';
-import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_bindings.dart';
 
 /// 手机「我的」：当前身份、线路、倍速和弹幕来源。
@@ -69,36 +67,8 @@ class PhoneMinePage extends StatefulWidget {
 }
 
 class _PhoneMinePageState extends State<PhoneMinePage> {
-  /// 切换线路:成功后刷新目录。失败时保持当前线路、会话与已加载目录,
-  /// 原因经 [AuthController.lineSwitchFailure] 在页面顶部以错误行展示。
-  Future<void> _switchLine(String serverId, String lineId) async {
-    final auth = AuthScope.of(context);
-    await auth.switchTo(serverId, lineId: lineId);
-    if (!mounted || !auth.isLoggedIn || auth.lineSwitchFailure != null) {
-      return;
-    }
-    await _reloadCatalog();
-  }
-
-  Future<void> _reloadCatalog() async {
-    final catalog = CatalogScope.maybeOf(context);
-    if (catalog == null) {
-      return;
-    }
-    await catalog.reload();
-  }
-
-  Future<void> _lines() => showPhoneServerManager(
-    context,
-    auth: AuthScope.of(context),
-    onSelect: _switchLine,
-    onCurrentLineChanged: () async {
-      if (mounted) await _reloadCatalog();
-    },
-    onAddServer: () {
-      if (mounted) context.push('${AppRoutes.connect}?add=1');
-    },
-  );
+  Future<void> _lines() =>
+      showPhoneServerManagerSheet(context, AuthScope.of(context));
 
   Widget _group(
     BuildContext context, {
@@ -112,14 +82,16 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         if (title.isNotEmpty)
           Text(
             title,
-            style: AppUiTheme.of(context).textTheme.titleSmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: AppUiTheme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         if (title.isNotEmpty) const SizedBox(height: AppSpacing.xs),
         Container(
           decoration: BoxDecoration(
             color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
             borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: scheme.outlineVariant),
           ),
           margin: EdgeInsets.zero,
           child: Padding(
@@ -207,8 +179,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               embyFailureMessage(l10n, failure),
               key: PhoneMinePage.failureKey,
-              style: AppUiTheme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: scheme.error),
+              style: AppUiTheme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
             ),
           ],
           if (lineSwitchFailure != null) ...[
@@ -216,8 +189,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               l10n.lineSwitchFailed(lineSwitchFailure.detail),
               key: PhoneMinePage.lineSwitchFailureKey,
-              style: AppUiTheme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: scheme.error),
+              style: AppUiTheme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: scheme.error),
             ),
           ],
           const SizedBox(height: AppSpacing.xl),

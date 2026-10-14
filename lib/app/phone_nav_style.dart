@@ -123,7 +123,7 @@ class PhoneNavStyle extends InheritedNotifier<PhoneNavStyleController> {
   }
 
   static bool floatingOf(BuildContext context) =>
-      maybeOf(context)?.floating ?? true;
+      maybeOf(context)?.floating ?? false;
 }
 
 /// 包在手机路由外，让首页和「我的」共用同一个开关。

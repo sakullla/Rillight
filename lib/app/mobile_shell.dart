@@ -10,6 +10,7 @@ import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/player/android_session_recovery.dart';
@@ -17,6 +18,8 @@ import 'package:rillight/player/player_bindings.dart';
 
 class MobileShell extends StatefulWidget {
   const MobileShell({super.key});
+  static const serverPillKey = Key('mobile-shell-server-pill');
+
   @override
   State<MobileShell> createState() => _MobileShellState();
 }
@@ -62,8 +65,9 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         runtime: PlayerScope.of(context).runtime,
       );
       if (mounted && recovered) {
-        AppNoticeHost.of(context)
-            .show(AppLocalizations.of(context).mobilePreviousSession);
+        AppNoticeHost.of(
+          context,
+        ).show(AppLocalizations.of(context).mobilePreviousSession);
       }
     } catch (_) {
       if (mounted) setState(() => _recoveryFailed = true);
@@ -109,6 +113,14 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final immersive = _index == 0 && !_homeCovered;
     const hit = Size(AppSpacing.huge, AppSpacing.huge);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final server = auth.session?.server;
+    final serverName = server?.displayName.trim() ?? '';
+    final lineLabel = server?.activeLine?.hostLabel.trim() ?? '';
+    final pillLabel = serverName.isEmpty
+        ? l.phoneServerManagement
+        : (lineLabel.isEmpty ? serverName : '$serverName · $lineLabel');
     return PopScope(
       canPop: _index == 0,
       onPopInvokedWithResult: (popped, _) {
@@ -117,6 +129,72 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
       child: CupertinoPageScaffold(
         navigationBar: CupertinoNavigationBar(
           backgroundColor: immersive ? const Color(0x00000000) : null,
+          leading: Align(
+            alignment: Alignment.centerLeft,
+            widthFactor: 1,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 136),
+              child: AppSurfaceAction(
+                key: MobileShell.serverPillKey,
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => showPhoneServerManagerSheet(context, auth),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: immersive
+                        ? scheme.scrim.withValues(alpha: 0.42)
+                        : scheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: immersive
+                          ? const Color(0x33FFFFFF)
+                          : scheme.outlineVariant,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          CupertinoIcons.cube_box,
+                          size: 13,
+                          color: immersive
+                              ? const Color(0xFFFFFFFF)
+                              : scheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            pillLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: immersive
+                                  ? const Color(0xFFFFFFFF)
+                                  : scheme.onSurface,
+                              fontWeight: FontWeight.w600,
+                              height: 1.15,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(
+                          CupertinoIcons.chevron_down,
+                          size: 11,
+                          color: immersive
+                              ? const Color(0xCCFFFFFF)
+                              : scheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
           middle: Text(titles[_index]),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
@@ -143,7 +221,8 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
             Padding(
               padding: EdgeInsets.only(
                 bottom: !floating && !keyboardOpen
-                    ? 72 + MediaQuery.viewPaddingOf(context).bottom
+                    ? AppMobileNav.dockedHeight +
+                          MediaQuery.viewPaddingOf(context).bottom
                     : 0,
               ),
               child: NotificationListener<ScrollNotification>(
