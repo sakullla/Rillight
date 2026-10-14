@@ -7,10 +7,6 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/desktop_performance_host_test.dart',
-    caseEntrypoints['app/desktop_performance_host_cases.dart']!,
-  );
-  group(
     'auth/provider_connect_management_test.dart',
     caseEntrypoints['auth/provider_connect_management_cases.dart']!,
   );
@@ -19,14 +15,21 @@ void main() {
     caseEntrypoints['auth/server_management_cases.dart']!,
   );
   group(
+    'library/album_test.dart',
+    caseEntrypoints['library/album_cases.dart']!,
+  );
+  group(
     'mobile/mobile_flow_test.dart [part 1]',
     caseEntrypoints['mobile/mobile_flow_cases.dart#0']!,
   );
   group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'player/ended_navigation_test.dart',
+    caseEntrypoints['player/ended_navigation_cases.dart']!,
   );
-  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
+  group(
+    'player/player_window_test.dart',
+    caseEntrypoints['player/player_window_cases.dart']!,
+  );
   group(
     'widgets/liquid_glass_test.dart',
     caseEntrypoints['widgets/liquid_glass_cases.dart']!,

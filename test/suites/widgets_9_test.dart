@@ -7,39 +7,39 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'home/shelf_hover_clip_test.dart',
-    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+    'aggregation/presentation_test.dart [part 3]',
+    caseEntrypoints['aggregation/presentation_cases.dart#2']!,
   );
   group(
-    'library/person_works_test.dart',
-    caseEntrypoints['library/person_works_cases.dart']!,
+    'app/desktop_performance_host_test.dart',
+    caseEntrypoints['app/desktop_performance_host_cases.dart']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 3]',
-    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
+    'auth/line_management_test.dart',
+    caseEntrypoints['auth/line_management_cases.dart']!,
   );
   group(
-    'mobile/motion_behaviors_test.dart',
-    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
+    'catalog/item_detail_test.dart [part 2]',
+    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
   );
   group(
-    'player/danmaku/danmaku_renderer_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
+    'home/library_tiles_test.dart',
+    caseEntrypoints['home/library_tiles_cases.dart']!,
   );
   group(
-    'player/phone_presentation_lifecycle_test.dart',
-    caseEntrypoints['player/phone_presentation_lifecycle_cases.dart']!,
+    'mobile/phone_pages_test.dart [part 2]',
+    caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'player/player_cache_status_test.dart',
-    caseEntrypoints['player/player_cache_status_cases.dart']!,
+    'mobile/search_cached_refresh_test.dart',
+    caseEntrypoints['mobile/search_cached_refresh_cases.dart']!,
   );
   group(
-    'tv/tv_home_featured_test.dart',
-    caseEntrypoints['tv/tv_home_featured_cases.dart']!,
+    'player/desktop_player_page_test.dart',
+    caseEntrypoints['player/desktop_player_page_cases.dart']!,
   );
   group(
-    'widgets/poster_card_test.dart',
-    caseEntrypoints['widgets/poster_card_cases.dart']!,
+    'tv/tv_lan_pair_test.dart [part 3]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
   );
 }
