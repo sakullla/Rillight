@@ -3,8 +3,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:rillight/app/theme.dart';
+
+import 'ui/theme.dart';
+
 import 'package:rillight/auth/auth_scope.dart';
+
 import 'artwork_color_scope.dart';
+
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -49,7 +54,8 @@ class _ContentThemeState extends State<ContentTheme> {
 
   void _report(String itemId, String identity, Uint8List bytes) {
     if (itemId != widget.item?.id) return;
-    final brightness = Theme.of(context).brightness;
+    final brightness =
+        AppUiTheme.maybeOf(context)?.brightness ?? Theme.of(context).brightness;
     final token = '$identity/${brightness.name}';
     if (_identity == token) return;
     final base = brightness == Brightness.dark
@@ -81,7 +87,12 @@ class _ContentThemeState extends State<ContentTheme> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final uiTheme = AppUiTheme.maybeOf(context);
+    final theme = uiTheme == null
+        ? Theme.of(context)
+        : uiTheme.brightness == Brightness.dark
+        ? AppTheme.dark()
+        : AppTheme.light();
     final auth = AuthScope.maybeOf(context);
     final item = widget.item;
     final refs =
@@ -182,21 +193,59 @@ class _ContentThemeState extends State<ContentTheme> {
         ),
       ),
     );
+    final neutralScheme = AppColorScheme(
+      brightness: scheme.brightness,
+      primary: scheme.primary,
+      onPrimary: scheme.onPrimary,
+      primaryContainer: scheme.primaryContainer,
+      onPrimaryContainer: scheme.onPrimaryContainer,
+      secondary: scheme.secondary,
+      onSecondary: scheme.onSecondary,
+      secondaryContainer: scheme.secondaryContainer,
+      onSecondaryContainer: scheme.onSecondaryContainer,
+      tertiary: scheme.tertiary,
+      onTertiary: scheme.onTertiary,
+      tertiaryContainer: scheme.tertiaryContainer,
+      onTertiaryContainer: scheme.onTertiaryContainer,
+      error: scheme.error,
+      onError: scheme.onError,
+      errorContainer: scheme.errorContainer,
+      onErrorContainer: scheme.onErrorContainer,
+      surface: scheme.surface,
+      onSurface: scheme.onSurface,
+      onSurfaceVariant: scheme.onSurfaceVariant,
+      surfaceDim: scheme.surfaceDim,
+      surfaceBright: scheme.surfaceBright,
+      surfaceContainerLowest: scheme.surfaceContainerLowest,
+      surfaceContainerLow: scheme.surfaceContainerLow,
+      surfaceContainer: scheme.surfaceContainer,
+      surfaceContainerHigh: scheme.surfaceContainerHigh,
+      surfaceContainerHighest: scheme.surfaceContainerHighest,
+      outline: scheme.outline,
+      outlineVariant: scheme.outlineVariant,
+      scrim: scheme.scrim,
+      inverseSurface: scheme.inverseSurface,
+      onInverseSurface: scheme.onInverseSurface,
+      inversePrimary: scheme.inversePrimary,
+      shadow: scheme.shadow,
+      surfaceTint: scheme.surfaceTint,
+    );
     return AnimatedTheme(
       data: data,
       duration: sourceChanged
           ? Duration.zero
           : AppMotion.durationOf(context, AppMotion.slow),
-      child: ArtworkColorScope(
-        report: (itemId, identity, bytes) {
-          if (_owner == owner) _report(itemId, identity, bytes);
-        },
-        child: Builder(
-          builder: (context) => widget.fillSurface
-              ? ColoredBox(
-                  color: Theme.of(context).colorScheme.surface,
-                  child: widget.child,
-                )
+      child: AppUiTheme(
+        data: (uiTheme ?? AppUiThemeData(colorScheme: neutralScheme)).copyWith(
+          colorScheme: neutralScheme,
+          scaffoldBackgroundColor: neutralScheme.surface,
+        ),
+        child: ArtworkColorScope(
+          report: (itemId, identity, bytes) {
+            if (_owner == owner) _report(itemId, identity, bytes);
+          },
+          child: widget.fillSurface
+              ? ColoredBox(color: scheme.surface, child: widget.child)
               : widget.child,
         ),
       ),

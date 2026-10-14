@@ -1,5 +1,6 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -9,9 +10,49 @@ import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/ui/ui.dart' as app_ui;
 import 'package:rillight/media_image/media_image.dart';
 
 void main() {
+  for (final theme in [app_ui.AppUiTheme.light(), app_ui.AppUiTheme.dark()]) {
+    testWidgets(
+      'neutral Cupertino artwork palette preserves contrast in ${theme.brightness}',
+      (tester) async {
+        final base = theme.colorScheme;
+        final schemes = await tester.runAsync(
+          () async => [
+            for (final color in [
+              Colors.red,
+              Colors.blue,
+              Colors.green,
+              Colors.white,
+              Colors.black,
+            ])
+              await app_ui.contentPaletteFromBytes(
+                await _solidPng(color),
+                base,
+              ),
+            await app_ui.contentPaletteFromBytes(Uint8List(0), base),
+          ],
+        );
+        expect(schemes!.take(3).map((s) => s.primary).toSet(), hasLength(3));
+        for (final scheme in schemes) {
+          expect(scheme.error, base.error);
+          expect(scheme.brightness, base.brightness);
+          expect(_contrast(scheme.onPrimary, scheme.primary), greaterThan(4.5));
+          expect(_contrast(scheme.onSurface, scheme.surface), greaterThan(4.5));
+          expect(
+            _contrast(scheme.onSurfaceVariant, scheme.surface),
+            greaterThan(4.5),
+          );
+        }
+        for (final scheme in schemes.skip(3)) {
+          expect(scheme, same(base));
+        }
+      },
+    );
+  }
+
   testWidgets('episodes sharing a backdrop keep their resolved palette', (
     tester,
   ) async {

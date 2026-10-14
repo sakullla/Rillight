@@ -1,0 +1,513 @@
+import 'package:cupertino_ui/cupertino_ui.dart';
+
+import '../theme/palette.dart';
+
+/// Shared theme for desktop, phone and television interaction trees.
+class AppUiThemeData {
+  AppUiThemeData({
+    required this.colorScheme,
+    AppTextTheme? textTheme,
+    Color? scaffoldBackgroundColor,
+  }) : textTheme = textTheme ?? AppTextTheme.standard(colorScheme.onSurface),
+       scaffoldBackgroundColor =
+           scaffoldBackgroundColor ?? colorScheme.surfaceDim;
+
+  factory AppUiThemeData.fromTones(Tones tones, {bool phone = false}) =>
+      AppUiThemeData(
+        colorScheme: AppColorScheme.fromTones(tones),
+        textTheme: AppTextTheme.standard(tones.onSurface, phone: phone),
+      );
+
+  final AppColorScheme colorScheme;
+  final AppTextTheme textTheme;
+  final Color scaffoldBackgroundColor;
+  Brightness get brightness => colorScheme.brightness;
+  Color get dividerColor => colorScheme.outlineVariant;
+  Color get canvasColor => scaffoldBackgroundColor;
+  Color get disabledColor => colorScheme.onSurfaceVariant.withValues(alpha: .5);
+
+  AppUiThemeData copyWith({
+    AppColorScheme? colorScheme,
+    AppTextTheme? textTheme,
+    Color? scaffoldBackgroundColor,
+  }) => AppUiThemeData(
+    colorScheme: colorScheme ?? this.colorScheme,
+    textTheme: textTheme ?? this.textTheme,
+    scaffoldBackgroundColor:
+        scaffoldBackgroundColor ?? this.scaffoldBackgroundColor,
+  );
+
+  CupertinoThemeData get cupertino => CupertinoThemeData(
+    brightness: brightness,
+    primaryColor: colorScheme.primary,
+    primaryContrastingColor: colorScheme.onPrimary,
+    scaffoldBackgroundColor: scaffoldBackgroundColor,
+    barBackgroundColor: colorScheme.surfaceContainerLow,
+    textTheme: CupertinoTextThemeData(
+      primaryColor: colorScheme.primary,
+      textStyle: textTheme.bodyMedium!,
+      actionTextStyle: textTheme.labelLarge!.copyWith(
+        color: colorScheme.primary,
+      ),
+      navTitleTextStyle: textTheme.titleMedium!,
+      navLargeTitleTextStyle: textTheme.displaySmall!,
+      tabLabelTextStyle: textTheme.labelSmall!,
+    ),
+  );
+}
+
+class AppUiTheme extends StatelessWidget {
+  const AppUiTheme({super.key, required this.data, required this.child});
+  final AppUiThemeData data;
+  final Widget child;
+
+  static final AppUiThemeData _dark = AppUiThemeData.fromTones(
+    AppPalette.darkTones,
+  );
+  static final AppUiThemeData _light = AppUiThemeData.fromTones(
+    AppPalette.lightTones,
+  );
+  static AppUiThemeData dark() => _dark;
+  static AppUiThemeData light() => _light;
+  static AppUiThemeData phoneDark() =>
+      AppUiThemeData.fromTones(AppPalette.darkTones, phone: true);
+  static AppUiThemeData phoneLight() =>
+      AppUiThemeData.fromTones(AppPalette.lightTones, phone: true);
+  static AppUiThemeData tvDark() =>
+      AppUiThemeData.fromTones(AppPalette.tvDarkTones);
+  static AppUiThemeData tvLight() =>
+      AppUiThemeData.fromTones(AppPalette.tvLightTones);
+
+  static AppUiThemeData? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_UiThemeScope>()?.data;
+  static AppUiThemeData of(BuildContext context) =>
+      maybeOf(context) ??
+      (CupertinoTheme.brightnessOf(context) == Brightness.light
+          ? light()
+          : dark());
+
+  @override
+  Widget build(BuildContext context) => _UiThemeScope(
+    data: data,
+    child: CupertinoTheme(
+      data: data.cupertino,
+      child: DefaultTextStyle(
+        style: data.textTheme.bodyMedium!,
+        child: IconTheme(
+          data: IconThemeData(color: data.colorScheme.onSurface),
+          child: child,
+        ),
+      ),
+    ),
+  );
+}
+
+class _UiThemeScope extends InheritedWidget {
+  const _UiThemeScope({required this.data, required super.child});
+  final AppUiThemeData data;
+  @override
+  bool updateShouldNotify(_UiThemeScope oldWidget) => data != oldWidget.data;
+}
+
+/// Application colors independent of any design-system implementation.
+class AppColorScheme {
+  const AppColorScheme({
+    required this.brightness,
+    required this.primary,
+    required this.onPrimary,
+    required this.primaryContainer,
+    required this.onPrimaryContainer,
+    required this.secondary,
+    required this.onSecondary,
+    required this.secondaryContainer,
+    required this.onSecondaryContainer,
+    required this.tertiary,
+    required this.onTertiary,
+    required this.tertiaryContainer,
+    required this.onTertiaryContainer,
+    required this.error,
+    required this.onError,
+    required this.errorContainer,
+    required this.onErrorContainer,
+    required this.surface,
+    required this.onSurface,
+    required this.onSurfaceVariant,
+    required this.surfaceDim,
+    required this.surfaceBright,
+    required this.surfaceContainerLowest,
+    required this.surfaceContainerLow,
+    required this.surfaceContainer,
+    required this.surfaceContainerHigh,
+    required this.surfaceContainerHighest,
+    required this.outline,
+    required this.outlineVariant,
+    required this.scrim,
+    required this.inverseSurface,
+    required this.onInverseSurface,
+    required this.inversePrimary,
+    required this.shadow,
+    required this.surfaceTint,
+  });
+  final Brightness brightness;
+  final Color primary;
+  final Color onPrimary;
+  final Color primaryContainer;
+  final Color onPrimaryContainer;
+  final Color secondary;
+  final Color onSecondary;
+  final Color secondaryContainer;
+  final Color onSecondaryContainer;
+  final Color tertiary;
+  final Color onTertiary;
+  final Color tertiaryContainer;
+  final Color onTertiaryContainer;
+  final Color error;
+  final Color onError;
+  final Color errorContainer;
+  final Color onErrorContainer;
+  final Color surface;
+  final Color onSurface;
+  final Color onSurfaceVariant;
+  final Color surfaceDim;
+  final Color surfaceBright;
+  final Color surfaceContainerLowest;
+  final Color surfaceContainerLow;
+  final Color surfaceContainer;
+  final Color surfaceContainerHigh;
+  final Color surfaceContainerHighest;
+  final Color outline;
+  final Color outlineVariant;
+  final Color scrim;
+  final Color inverseSurface;
+  final Color onInverseSurface;
+  final Color inversePrimary;
+  final Color shadow;
+  final Color surfaceTint;
+  factory AppColorScheme.fromTones(Tones t) => AppColorScheme(
+    brightness: t.brightness,
+    primary: t.accent,
+    onPrimary: t.onAccent,
+    primaryContainer: t.accentContainer,
+    onPrimaryContainer: t.onAccentContainer,
+    secondary: t.secondary,
+    onSecondary: t.onSecondary,
+    secondaryContainer: t.secondaryContainer,
+    onSecondaryContainer: t.onSecondaryContainer,
+    tertiary: t.tertiary,
+    onTertiary: t.onTertiary,
+    tertiaryContainer: t.tertiaryContainer,
+    onTertiaryContainer: t.onTertiaryContainer,
+    error: t.error,
+    onError: t.onError,
+    errorContainer: t.errorContainer,
+    onErrorContainer: t.onErrorContainer,
+    surface: t.surfaceLow,
+    onSurface: t.onSurface,
+    onSurfaceVariant: t.onSurfaceVariant,
+    surfaceDim: t.base,
+    surfaceBright: t.surfaceBright,
+    surfaceContainerLowest: t.surfaceLowest,
+    surfaceContainerLow: t.surfaceLow,
+    surfaceContainer: t.surface,
+    surfaceContainerHigh: t.surfaceHigh,
+    surfaceContainerHighest: t.surfaceHighest,
+    outline: t.outline,
+    outlineVariant: t.outlineVariant,
+    scrim: t.scrim,
+    inverseSurface: t.inverseSurface,
+    onInverseSurface: t.onInverseSurface,
+    inversePrimary: t.inversePrimary,
+    shadow: t.scrim,
+    surfaceTint: const Color(0x00000000),
+  );
+  AppColorScheme copyWith({
+    Brightness? brightness,
+    Color? primary,
+    Color? onPrimary,
+    Color? primaryContainer,
+    Color? onPrimaryContainer,
+    Color? secondary,
+    Color? onSecondary,
+    Color? secondaryContainer,
+    Color? onSecondaryContainer,
+    Color? tertiary,
+    Color? onTertiary,
+    Color? tertiaryContainer,
+    Color? onTertiaryContainer,
+    Color? error,
+    Color? onError,
+    Color? errorContainer,
+    Color? onErrorContainer,
+    Color? surface,
+    Color? onSurface,
+    Color? onSurfaceVariant,
+    Color? surfaceDim,
+    Color? surfaceBright,
+    Color? surfaceContainerLowest,
+    Color? surfaceContainerLow,
+    Color? surfaceContainer,
+    Color? surfaceContainerHigh,
+    Color? surfaceContainerHighest,
+    Color? outline,
+    Color? outlineVariant,
+    Color? scrim,
+    Color? inverseSurface,
+    Color? onInverseSurface,
+    Color? inversePrimary,
+    Color? shadow,
+    Color? surfaceTint,
+  }) => AppColorScheme(
+    brightness: brightness ?? this.brightness,
+    primary: primary ?? this.primary,
+    onPrimary: onPrimary ?? this.onPrimary,
+    primaryContainer: primaryContainer ?? this.primaryContainer,
+    onPrimaryContainer: onPrimaryContainer ?? this.onPrimaryContainer,
+    secondary: secondary ?? this.secondary,
+    onSecondary: onSecondary ?? this.onSecondary,
+    secondaryContainer: secondaryContainer ?? this.secondaryContainer,
+    onSecondaryContainer: onSecondaryContainer ?? this.onSecondaryContainer,
+    tertiary: tertiary ?? this.tertiary,
+    onTertiary: onTertiary ?? this.onTertiary,
+    tertiaryContainer: tertiaryContainer ?? this.tertiaryContainer,
+    onTertiaryContainer: onTertiaryContainer ?? this.onTertiaryContainer,
+    error: error ?? this.error,
+    onError: onError ?? this.onError,
+    errorContainer: errorContainer ?? this.errorContainer,
+    onErrorContainer: onErrorContainer ?? this.onErrorContainer,
+    surface: surface ?? this.surface,
+    onSurface: onSurface ?? this.onSurface,
+    onSurfaceVariant: onSurfaceVariant ?? this.onSurfaceVariant,
+    surfaceDim: surfaceDim ?? this.surfaceDim,
+    surfaceBright: surfaceBright ?? this.surfaceBright,
+    surfaceContainerLowest:
+        surfaceContainerLowest ?? this.surfaceContainerLowest,
+    surfaceContainerLow: surfaceContainerLow ?? this.surfaceContainerLow,
+    surfaceContainer: surfaceContainer ?? this.surfaceContainer,
+    surfaceContainerHigh: surfaceContainerHigh ?? this.surfaceContainerHigh,
+    surfaceContainerHighest:
+        surfaceContainerHighest ?? this.surfaceContainerHighest,
+    outline: outline ?? this.outline,
+    outlineVariant: outlineVariant ?? this.outlineVariant,
+    scrim: scrim ?? this.scrim,
+    inverseSurface: inverseSurface ?? this.inverseSurface,
+    onInverseSurface: onInverseSurface ?? this.onInverseSurface,
+    inversePrimary: inversePrimary ?? this.inversePrimary,
+    shadow: shadow ?? this.shadow,
+    surfaceTint: surfaceTint ?? this.surfaceTint,
+  );
+}
+
+class AppTextTheme {
+  const AppTextTheme({
+    this.displayLarge,
+    this.displayMedium,
+    this.displaySmall,
+    this.headlineLarge,
+    this.headlineMedium,
+    this.headlineSmall,
+    this.titleLarge,
+    this.titleMedium,
+    this.titleSmall,
+    this.bodyLarge,
+    this.bodyMedium,
+    this.bodySmall,
+    this.labelLarge,
+    this.labelMedium,
+    this.labelSmall,
+  });
+  final TextStyle? displayLarge;
+  final TextStyle? displayMedium;
+  final TextStyle? displaySmall;
+  final TextStyle? headlineLarge;
+  final TextStyle? headlineMedium;
+  final TextStyle? headlineSmall;
+  final TextStyle? titleLarge;
+  final TextStyle? titleMedium;
+  final TextStyle? titleSmall;
+  final TextStyle? bodyLarge;
+  final TextStyle? bodyMedium;
+  final TextStyle? bodySmall;
+  final TextStyle? labelLarge;
+  final TextStyle? labelMedium;
+  final TextStyle? labelSmall;
+  factory AppTextTheme.standard(Color color, {bool phone = false}) {
+    TextStyle style(double size, FontWeight weight, double height) => TextStyle(
+      color: color,
+      fontSize: size,
+      fontWeight: weight,
+      height: height,
+      letterSpacing: 0,
+      fontFamily: "Segoe UI",
+      fontFamilyFallback: const [
+        "Microsoft YaHei UI",
+        "PingFang SC",
+        "Noto Sans SC",
+        "Noto Sans CJK SC",
+      ],
+    );
+    return AppTextTheme(
+      displayLarge: style(44, FontWeight.w700, 1.12),
+      displayMedium: style(36, FontWeight.w700, 1.18),
+      displaySmall: style(28, FontWeight.w600, 1.22),
+      headlineLarge: style(28, FontWeight.w600, 1.22),
+      headlineMedium: style(22, FontWeight.w600, 1.28),
+      headlineSmall: style(20, FontWeight.w600, 1.3),
+      titleLarge: style(phone ? 28 : 20, FontWeight.w600, 1.3),
+      titleMedium: style(phone ? 20 : 16, FontWeight.w600, 1.35),
+      titleSmall: style(phone ? 16 : 14, FontWeight.w600, 1.35),
+      bodyLarge: style(phone ? 17 : 16, FontWeight.w400, 1.5),
+      bodyMedium: style(phone ? 16 : 14, FontWeight.w400, 1.45),
+      bodySmall: style(13, FontWeight.w400, 1.4),
+      labelLarge: style(14, FontWeight.w600, 1.2),
+      labelMedium: style(13, FontWeight.w500, 1.2),
+      labelSmall: style(12, FontWeight.w500, 1.2),
+    );
+  }
+  AppTextTheme copyWith({
+    TextStyle? displayLarge,
+    TextStyle? displayMedium,
+    TextStyle? displaySmall,
+    TextStyle? headlineLarge,
+    TextStyle? headlineMedium,
+    TextStyle? headlineSmall,
+    TextStyle? titleLarge,
+    TextStyle? titleMedium,
+    TextStyle? titleSmall,
+    TextStyle? bodyLarge,
+    TextStyle? bodyMedium,
+    TextStyle? bodySmall,
+    TextStyle? labelLarge,
+    TextStyle? labelMedium,
+    TextStyle? labelSmall,
+  }) => AppTextTheme(
+    displayLarge: displayLarge ?? this.displayLarge,
+    displayMedium: displayMedium ?? this.displayMedium,
+    displaySmall: displaySmall ?? this.displaySmall,
+    headlineLarge: headlineLarge ?? this.headlineLarge,
+    headlineMedium: headlineMedium ?? this.headlineMedium,
+    headlineSmall: headlineSmall ?? this.headlineSmall,
+    titleLarge: titleLarge ?? this.titleLarge,
+    titleMedium: titleMedium ?? this.titleMedium,
+    titleSmall: titleSmall ?? this.titleSmall,
+    bodyLarge: bodyLarge ?? this.bodyLarge,
+    bodyMedium: bodyMedium ?? this.bodyMedium,
+    bodySmall: bodySmall ?? this.bodySmall,
+    labelLarge: labelLarge ?? this.labelLarge,
+    labelMedium: labelMedium ?? this.labelMedium,
+    labelSmall: labelSmall ?? this.labelSmall,
+  );
+  AppTextTheme apply({
+    Color? bodyColor,
+    Color? displayColor,
+    String? fontFamily,
+    List<String>? fontFamilyFallback,
+    double fontSizeFactor = 1,
+    double fontSizeDelta = 0,
+  }) => AppTextTheme(
+    displayLarge: displayLarge?.apply(
+      color: displayColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    displayMedium: displayMedium?.apply(
+      color: displayColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    displaySmall: displaySmall?.apply(
+      color: displayColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    headlineLarge: headlineLarge?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    headlineMedium: headlineMedium?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    headlineSmall: headlineSmall?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    titleLarge: titleLarge?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    titleMedium: titleMedium?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    titleSmall: titleSmall?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    bodyLarge: bodyLarge?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    bodyMedium: bodyMedium?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    bodySmall: bodySmall?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    labelLarge: labelLarge?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    labelMedium: labelMedium?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+    labelSmall: labelSmall?.apply(
+      color: bodyColor,
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFamilyFallback,
+      fontSizeFactor: fontSizeFactor,
+      fontSizeDelta: fontSizeDelta,
+    ),
+  );
+}

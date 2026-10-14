@@ -1,5 +1,8 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -8,6 +11,7 @@ import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/app/theme.dart';
+import 'package:rillight/app/ui/ui.dart' as ui;
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -29,6 +33,160 @@ double _contrast(Color a, Color b) {
 }
 
 void main() {
+  Widget cupertinoHost(Widget child, {ui.AppUiThemeData? theme}) =>
+      ui.CupertinoApp(
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: const [Locale('zh', 'CN')],
+        localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+        theme: (theme ?? ui.AppUiTheme.dark()).cupertino,
+        home: ui.AppUiTheme(
+          data: theme ?? ui.AppUiTheme.dark(),
+          child: ui.CupertinoPageScaffold(child: Center(child: child)),
+        ),
+      );
+
+  testWidgets(
+    'Cupertino tooltip remains inside the viewport at the right edge',
+    (tester) async {
+      await tester.pumpWidget(
+        cupertinoHost(
+          const Align(
+            alignment: Alignment.topRight,
+            child: ui.AppTooltip(message: '服务器连接与账户设置', child: Text('设置')),
+          ),
+        ),
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(find.text('设置')));
+      await tester.pump();
+      final rect = tester.getRect(find.text('服务器连接与账户设置'));
+      expect(rect.left, greaterThanOrEqualTo(0));
+      expect(rect.right, lessThanOrEqualTo(tester.view.physicalSize.width));
+      await mouse.removePointer();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'Cupertino form keeps initial, controller, validation and reset values',
+    (tester) async {
+      final form = GlobalKey<FormState>();
+      final controller = TextEditingController(text: '服务器');
+      addTearDown(controller.dispose);
+      String? saved;
+      Widget page({bool external = true}) => cupertinoHost(
+        Form(
+          key: form,
+          child: ui.AppTextField(
+            key: const Key('cupertino-field'),
+            controller: external ? controller : null,
+            initialValue: external ? null : '初始地址',
+            validator: (value) => value!.isEmpty ? '请输入地址' : null,
+            onSaved: (value) => saved = value,
+          ),
+        ),
+      );
+      await tester.pumpWidget(page());
+      expect(find.text('服务器'), findsOneWidget);
+      controller.text = '';
+      expect(form.currentState!.validate(), isFalse);
+      await tester.pump();
+      expect(find.text('请输入地址'), findsOneWidget);
+      controller.text = 'https://example.test';
+      expect(form.currentState!.validate(), isTrue);
+      form.currentState!.save();
+      expect(saved, 'https://example.test');
+      form.currentState!.reset();
+      await tester.pump();
+      expect(controller.text, '服务器');
+      await tester.pumpWidget(page(external: false));
+      expect(find.text('服务器'), findsOneWidget);
+      await tester.enterText(find.byType(ui.CupertinoTextField), '新地址');
+      form.currentState!.save();
+      expect(saved, '新地址');
+      form.currentState!.reset();
+      await tester.pump();
+      expect(find.text('初始地址'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Cupertino actions activate from keyboard and remote but respect disabled',
+    (tester) async {
+      final focus = FocusNode();
+      addTearDown(focus.dispose);
+      var count = 0;
+      Widget page(bool enabled) => cupertinoHost(
+        ui.AppButton(
+          focusNode: focus,
+          onPressed: enabled ? () => count++ : null,
+          child: const Text('播放'),
+        ),
+      );
+      await tester.pumpWidget(page(true));
+      focus.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      expect(count, 3);
+      await tester.pumpWidget(page(false));
+      await tester.tap(find.text('播放'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(count, 3);
+    },
+  );
+
+  testWidgets(
+    'Cupertino dialog captures local theme and Escape cancels without commit',
+    (tester) async {
+      final root = ui.AppUiTheme.light();
+      final local = ui.AppUiTheme.tvDark();
+      ui.AppUiThemeData? inside;
+      String? result = 'pending';
+      await tester.pumpWidget(
+        cupertinoHost(
+          ui.AppUiTheme(
+            data: local,
+            child: Builder(
+              builder: (context) => ui.AppButton(
+                onPressed: () async {
+                  result = await ui.showAppDialog<String>(
+                    context: context,
+                    builder: (context) {
+                      inside = ui.AppUiTheme.of(context);
+                      return ui.AppDialog(
+                        title: const Text('确认'),
+                        content: const Text('保持当前设置'),
+                        actions: [
+                          ui.AppButton(
+                            autofocus: true,
+                            onPressed: () => Navigator.of(context).pop('saved'),
+                            child: const Text('保存'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+          theme: root,
+        ),
+      );
+      await tester.tap(find.text('打开'));
+      await settle(tester);
+      expect(inside, same(local));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      expect(result, isNull);
+      expect(find.text('保存'), findsNothing);
+    },
+  );
+
   test('light theme keeps AA contrast for body text and controls', () {
     final scheme = AppTheme.light().colorScheme;
 

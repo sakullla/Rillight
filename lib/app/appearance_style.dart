@@ -3,6 +3,9 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'ui/ui.dart' as app;
+
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_settings.dart';
 
@@ -80,7 +83,7 @@ extension AppearanceStyleThemeMode on AppearanceStyle {
 /// 持久化复用 [PlayerSettingsStore] 通道(与播放器设置同一 JSON 文件,
 /// 合并写互不清除);读取失败/无偏好时保持 [AppearanceStyle.dark]。
 class AppearanceController extends ChangeNotifier {
-  AppearanceController({PlayerSettingsStore? store}) : _store = store {
+  AppearanceController({this._store}) {
     final injected = _store;
     if (injected != null) {
       _initialLoad = _applyStored(Future.value(injected));
@@ -122,6 +125,11 @@ class AppearanceController extends ChangeNotifier {
     }
   }
 
+  /// Design-system independent resolved brightness, including the existing
+  /// platform-specific fallback for an unknown system preference.
+  Brightness get brightness =>
+      themeMode == ThemeMode.light ? Brightness.light : Brightness.dark;
+
   /// 外观就绪:默认构造后等待持久化偏好与系统亮度判定完成(桌面/Android
   /// 启动前 await,避免先闪一种亮度再切换);失败/超时静默保持深色回落。
   Future<void> get ready {
@@ -129,9 +137,8 @@ class AppearanceController extends ChangeNotifier {
     if (initial != null) {
       return initial.then((_) => refreshSystemChoice());
     }
-    return _applyStored(
-      _ready ??= _openDefault(),
-    ).then((_) => refreshSystemChoice());
+    return _applyStored(_ready ??= _openDefault())
+        .then((_) => refreshSystemChoice());
   }
 
   /// 重新判定「跟随系统」的落点亮度;引擎亮度变化时由外壳调用。
@@ -147,9 +154,9 @@ class AppearanceController extends ChangeNotifier {
     String? nightMode;
     if (Platform.isAndroid) {
       try {
-        nightMode = await const MethodChannel(
-          'com.rillight/environment',
-        ).invokeMethod<String>('nightMode').timeout(_ioTimeout);
+        nightMode = await const MethodChannel('com.rillight/environment')
+            .invokeMethod<String>('nightMode')
+            .timeout(_ioTimeout);
       } catch (_) {}
     }
     return resolveSystemChoice(
@@ -234,17 +241,16 @@ class AppearanceMenuButton extends StatelessWidget {
     final controller = AppearanceScope.maybeOf(context);
     final l10n = AppLocalizations.of(context);
     final style = controller?.style ?? AppearanceStyle.system;
-    return PopupMenuButton<AppearanceStyle>(
+    return app.AppMenuButton<AppearanceStyle>(
       key: buttonKey ?? menuKey,
       tooltip: l10n.settingsAppearance,
-      icon: const Icon(Icons.brightness_6_outlined),
-      enabled: controller != null,
-      initialValue: style,
+      selected: style,
       onSelected: controller?.setStyle,
-      itemBuilder: (context) => [
+      items: [
         for (final value in AppearanceStyle.values)
-          PopupMenuItem(value: value, child: Text(value.label(l10n))),
+          app.AppMenuEntry(value: value, child: Text(value.label(l10n))),
       ],
+      child: const Icon(app.CupertinoIcons.circle_lefthalf_fill),
     );
   }
 }
