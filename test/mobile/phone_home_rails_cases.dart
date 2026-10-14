@@ -380,23 +380,34 @@ void main() {
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
-  for (final width in [360.0, 412.0]) {
+  for (final (width, height) in [
+    (360.0, 800.0),
+    (412.0, 915.0),
+    (360.0, 960.0),
+    (412.0, 960.0),
+  ]) {
     testWidgets(
-      'home rails peek one card and clear the nav at ${width.toInt()}dp',
+      'home rails peek one card and clear the nav at ${width.toInt()}x${height.toInt()}dp',
       (tester) async {
-        // 4:5 hero 更高:视口给到 960,首张横卡才能在不压缩横幅时完整露出导航之上。
-        await _pumpRails(tester, width: width, height: 960);
+        // 紧凑 PhoneHero 在 360x800、412x915 及 960 视口下都能无需滚动把「继续观看」首排横卡完整露在底部导航上方。
+        await _pumpRails(tester, width: width, height: height);
         _expectPeek(tester, width);
         final navTop = tester.getTopLeft(find.byType(PhoneBottomNav)).dy;
         final title = tester.getRect(find.text('继续观看'));
+        final card = tester.getRect(find.byKey(CatalogKeys.item('ep-1')));
         final picture = tester.getRect(
           find.descendant(
             of: find.byKey(CatalogKeys.item('ep-1')),
             matching: find.byType(AspectRatio),
           ),
         );
+        final cardTitle = tester.getRect(find.text('示例剧').first);
+        final cardMeta = tester.getRect(find.text('S1E1 · 第 1 集'));
         expect(title.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(picture.bottom, lessThanOrEqualTo(navTop + 0.5));
+        expect(cardTitle.bottom, lessThanOrEqualTo(navTop + 0.5));
+        expect(cardMeta.bottom, lessThanOrEqualTo(navTop + 0.5));
+        expect(card.bottom, lessThanOrEqualTo(navTop + 0.5));
         final badges = tester.getRect(find.byKey(phoneHomeBadgesKey('ep-1')));
         expect(badges.top, greaterThanOrEqualTo(picture.bottom - 0.5));
         final remove = tester.getRect(
@@ -410,8 +421,7 @@ void main() {
           lessThan(picture.width * picture.height * 0.5),
         );
         expect(
-          tester.getTopLeft(find.text('媒体库')).dy -
-              tester.getRect(find.byKey(CatalogKeys.item('ep-1'))).bottom,
+          tester.getTopLeft(find.text('媒体库')).dy - card.bottom,
           greaterThanOrEqualTo(16),
         );
 

@@ -372,7 +372,7 @@ class PhoneHomeSectionEditor extends StatelessWidget {
               : Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.md,
-                    AppSpacing.lg,
+                    AppSpacing.md,
                     AppSpacing.md,
                     0,
                   ),

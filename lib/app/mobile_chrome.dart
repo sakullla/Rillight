@@ -149,7 +149,7 @@ class _HomeLoading extends StatelessWidget {
                                       ? posterHeight
                                       : posterHeight * .88,
                                   borderRadius: BorderRadius.circular(
-                                    AppRadii.lg,
+                                    AppRadii.md,
                                   ),
                                   animated: animate,
                                 ),
@@ -161,20 +161,20 @@ class _HomeLoading extends StatelessWidget {
                     ),
                     const SizedBox(height: PhoneHero.posterGap),
                     SkeletonBlock(
-                      width: 72,
+                      width: 68,
+                      height: 11 * scale,
+                      animated: animate,
+                    ),
+                    const SizedBox(height: 6),
+                    SkeletonBlock(
+                      width: (width - 40) * .60,
+                      height: 20 * scale,
+                      animated: animate,
+                    ),
+                    const SizedBox(height: 6),
+                    SkeletonBlock(
+                      width: (width - 40) * .42,
                       height: 12 * scale,
-                      animated: animate,
-                    ),
-                    const SizedBox(height: 10),
-                    SkeletonBlock(
-                      width: (width - 48) * .62,
-                      height: 24 * scale,
-                      animated: animate,
-                    ),
-                    const SizedBox(height: 10),
-                    SkeletonBlock(
-                      width: (width - 48) * .42,
-                      height: 14 * scale,
                       animated: animate,
                     ),
                     const SizedBox(height: PhoneHero.actionsGap),
@@ -188,7 +188,7 @@ class _HomeLoading extends StatelessWidget {
                             flex: 3,
                             child: SkeletonBlock(
                               height: PhoneHero.actionsHeight,
-                              borderRadius: BorderRadius.circular(24),
+                              borderRadius: BorderRadius.circular(20),
                               animated: animate,
                             ),
                           ),
@@ -197,7 +197,7 @@ class _HomeLoading extends StatelessWidget {
                             flex: 2,
                             child: SkeletonBlock(
                               height: PhoneHero.actionsHeight,
-                              borderRadius: BorderRadius.circular(24),
+                              borderRadius: BorderRadius.circular(20),
                               animated: animate,
                             ),
                           ),
@@ -210,12 +210,12 @@ class _HomeLoading extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: AppSpacing.xl),
+        const SizedBox(height: AppSpacing.md),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: _SectionSkeleton(wide: true),
         ),
-        const SizedBox(height: AppSpacing.xl),
+        const SizedBox(height: AppSpacing.md),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: _SectionSkeleton(wide: false),

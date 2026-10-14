@@ -15,12 +15,12 @@ import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-/// 手机轮播:海报橱窗。
+/// 手机轮播:紧凑高质感海报橱窗。
 ///
 /// 当前条目的宣传图模糊后铺满整段并向下溶入页面底色,2:3 海报卡居中、邻卡
 /// 两侧露边并缩小压暗;标题、元信息与「播放 / 详情」固定在海报下方的页面
-/// 底色上,跟随主题取色,随翻页交叉淡化。竖屏手机的画面是海报而不是被压
-/// 成一条的 16:9 横图。触摸暂停的 7 秒自动轮播,圆点带倒计时。
+/// 底色上,跟随主题取色,随翻页交叉淡化。通过紧凑的垂直节奏与海报比例,
+/// 确保首屏完整露出下方「继续观看」横卡。触摸暂停的 7 秒自动轮播,圆点带倒计时。
 class PhoneHero extends StatefulWidget {
   const PhoneHero({
     super.key,
@@ -42,32 +42,32 @@ class PhoneHero extends StatefulWidget {
   static List<MediaItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
 
-  /// 顶栏到海报、海报到文字、文字到按钮、按钮到圆点的垂直节奏。
-  static const double topGap = 12;
-  static const double posterGap = 14;
-  static const double actionsGap = 12;
+  /// 顶栏到海报、海报到文字、文字到按钮、按钮到圆点的紧凑垂直节奏。
+  static const double topGap = 4;
+  static const double posterGap = 8;
+  static const double actionsGap = 8;
   static const double dotsGap = 0;
-  static const double sidePadding = 24;
-  static const double actionsHeight = 48;
+  static const double sidePadding = 20;
+  static const double actionsHeight = 40;
 
   /// 圆点行高即其 44 的触控目标高,不另加间距。
   static const double dotsHeight = 44;
 
   /// 相邻海报之间的间距;邻卡从这条缝两侧露出。
-  static const double posterSpacing = 16;
+  static const double posterSpacing = 14;
 
-  /// 海报占视口高的上限;矮视口整段随之收缩而不是裁切。
-  static const double posterViewportShare = .34;
+  /// 海报占视口高的上限;矮视口整段随之收缩而不是裁切,同时保证首屏露出继续观看行。
+  static const double posterViewportShare = .23;
 
-  /// 海报高:占屏宽 56% 的 2:3 海报,再被 [posterViewportShare] 封顶,
-  /// 夹在可读区间。
+  /// 海报高:占屏宽 42% 的 2:3 海报,再被 [posterViewportShare] 封顶,
+  /// 夹在紧凑可读区间。
   static double posterHeightFor(double width, {double? viewportHeight}) {
-    final byWidth = width * .56 * 1.5;
+    final byWidth = width * .42 * 1.5;
     final vh = viewportHeight;
     final byHeight = vh != null && vh.isFinite && vh > 0
         ? vh * posterViewportShare
         : double.infinity;
-    return math.min(byWidth, byHeight).clamp(180.0, 330.0);
+    return math.min(byWidth, byHeight).clamp(124.0, 204.0);
   }
 
   static double posterWidthFor(double width, {double? viewportHeight}) =>
@@ -76,15 +76,18 @@ class PhoneHero extends StatefulWidget {
   static double viewportFractionFor(double width, {double? viewportHeight}) =>
       width <= 0
       ? 1
-      : ((posterWidthFor(width, viewportHeight: viewportHeight) +
-                    posterSpacing) /
+      : (math.max(
+                  posterWidthFor(width, viewportHeight: viewportHeight) +
+                      posterSpacing,
+                  width * .52,
+                ) /
                 width)
             .clamp(.3, 1.0);
 
-  /// 文字区最小高:引导标签 + 两行标题 + 元信息行,标题不足两行时也占位,
+  /// 文字区最小高:引导标签 + 两行紧凑标题 + 元信息行,标题不足两行时也占位,
   /// 翻页时下方按钮不会上下跳。
   static double textBlockHeightFor(double textScale) =>
-      (16 + 6 + 22 * 1.2 * 2 + 6 + 20) * textScale;
+      (14 + 3 + 17 * 1.15 * 2 + 3 + 15) * textScale;
 
   /// 顶栏以下的内容高(骨架屏与首页布局估算用)。
   static double contentHeightFor(
@@ -253,8 +256,8 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
         // the height of the two-line title, so the layout does not move.
         final logo = theme.brightness == Brightness.dark
             ? Size(
-                math.min(width - PhoneHero.sidePadding * 2, 240),
-                22 * 1.2 * 2 * scale,
+                math.min(width - PhoneHero.sidePadding * 2, 220),
+                17 * 1.15 * 2 * scale,
               )
             : null;
         final neighbours = <MediaItem>{
@@ -359,13 +362,16 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
                     padding: const EdgeInsets.symmetric(
                       horizontal: PhoneHero.sidePadding,
                     ),
-                    child: HeroPlaybackActions(
-                      key: ValueKey('phone-hero-actions-${item.id}'),
-                      item: item,
-                      expand: true,
-                      catalog: widget.catalog,
-                      onDetails: () => _open(item),
-                      onResume: () => _play(item),
+                    child: SizedBox(
+                      height: PhoneHero.actionsHeight,
+                      child: HeroPlaybackActions(
+                        key: ValueKey('phone-hero-actions-${item.id}'),
+                        item: item,
+                        expand: true,
+                        catalog: widget.catalog,
+                        onDetails: () => _open(item),
+                        onResume: () => _play(item),
+                      ),
                     ),
                   ),
                   const SizedBox(height: PhoneHero.dotsGap),
@@ -431,7 +437,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     final l10n = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final dark = theme.brightness == Brightness.dark;
-    final radius = BorderRadius.circular(AppRadii.lg);
+    final radius = BorderRadius.circular(AppRadii.md);
     // A soft drop shadow lifts the centre poster off the ambient blur; a
     // hairline edge keeps dark posters from melting into a dark page.
     final card = DecoratedBox(
@@ -440,9 +446,9 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
         boxShadow: [
           BoxShadow(
             color: const Color(0xff000000)
-                .withValues(alpha: current ? .42 : .18),
-            blurRadius: current ? 28 : 12,
-            offset: Offset(0, current ? 14 : 6),
+                .withValues(alpha: current ? .44 : .18),
+            blurRadius: current ? 24 : 10,
+            offset: Offset(0, current ? 10 : 4),
           ),
         ],
       ),
@@ -454,8 +460,11 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
             borderRadius: radius,
             border: Border.all(
               color: dark
-                  ? const Color(0xffffffff).withValues(alpha: .10)
-                  : const Color(0xff000000).withValues(alpha: .06),
+                  ? const Color(0xffffffff)
+                        .withValues(alpha: current ? .16 : .08)
+                  : const Color(0xff000000)
+                        .withValues(alpha: current ? .10 : .05),
+              width: current ? 1.0 : 0.8,
             ),
           ),
           child: ColoredBox(
@@ -610,10 +619,10 @@ class _Caption extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         HeroKicker(label: heroKicker(l10n, item), onScrim: false),
-        const SizedBox(height: 6),
+        const SizedBox(height: 3),
         _title(theme),
         if (meta.isNotEmpty || item.communityRating != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 3),
           Row(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -624,14 +633,14 @@ class _Caption extends StatelessWidget {
                     meta.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
+                    style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
-                      height: 1.3,
+                      height: 1.2,
                     ),
                   ),
                 ),
               if (item.communityRating != null) ...[
-                if (meta.isNotEmpty) const SizedBox(width: 8),
+                if (meta.isNotEmpty) const SizedBox(width: 6),
                 HeroRatingBadge(rating: item.communityRating, onScrim: false),
               ],
             ],
@@ -647,9 +656,10 @@ class _Caption extends StatelessWidget {
       textAlign: TextAlign.center,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleLarge?.copyWith(
+      style: theme.textTheme.titleMedium?.copyWith(
+        fontSize: 17,
         fontWeight: FontWeight.w700,
-        height: 1.2,
+        height: 1.15,
       ),
     );
     final slot = logo;
