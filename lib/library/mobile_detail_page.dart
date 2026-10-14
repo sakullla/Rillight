@@ -52,6 +52,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   MediaItem? _previousEpisode;
   MediaServerException? _similarError;
   int _extrasRevision = 0;
+  String? _selectedSourceId;
   int? _audioStreamIndex;
   int? _subtitleStreamIndex;
   final _scroll = ScrollController();
@@ -222,11 +223,13 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             ?.permit
             .regionGeneration,
         // The displayed first source is a default, not an explicit choice.
-        // Only pin it when the user picked one of its tracks on this page.
+        // Only pin it when the user picked a version or one of its tracks on this page.
         mediaSourceId:
             !item.isSeries &&
-                (_audioStreamIndex != null || _subtitleStreamIndex != null)
-            ? controller.mediaSourceId
+                (_selectedSourceId != null ||
+                    _audioStreamIndex != null ||
+                    _subtitleStreamIndex != null)
+            ? (_selectedSourceId ?? controller.mediaSourceId)
             : null,
         autoResume:
             !fromStart && (position == null || position <= Duration.zero),
@@ -237,6 +240,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
     if (!mounted || !AuthScope.of(context).isLoggedIn) return;
     // Choices made inside the player are now authoritative on the next open.
+    _selectedSourceId = null;
     _audioStreamIndex = null;
     _subtitleStreamIndex = null;
     await controller.load();
@@ -414,8 +418,19 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     );
   }
 
+  void _selectSource(String id) {
+    final controller = _controller;
+    if (controller == null) return;
+    setState(() {
+      _selectedSourceId = id;
+      _audioStreamIndex = null;
+      _subtitleStreamIndex = null;
+    });
+    controller.selectSource(id);
+  }
+
   ItemMediaSource? _source(MediaItem item) {
-    final selected = _controller?.mediaSourceId;
+    final selected = _selectedSourceId ?? _controller?.mediaSourceId;
     for (final source in item.mediaSources) {
       if (source.id == selected) return source;
     }
@@ -709,6 +724,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           item: item,
                           similar: _similar,
                           mediaSource: _source(item),
+                          selectedSourceId: _source(item)?.id,
+                          onSelectSource: _selectSource,
                           selectedAudioIndex: _audioStreamIndex,
                           selectedSubtitleIndex: _subtitleStreamIndex,
                           onAudio: (index) =>
@@ -999,6 +1016,8 @@ class _PhoneItemDetail extends StatelessWidget {
     required this.item,
     required this.similar,
     required this.mediaSource,
+    this.selectedSourceId,
+    this.onSelectSource,
     required this.selectedAudioIndex,
     required this.selectedSubtitleIndex,
     required this.onAudio,
@@ -1012,6 +1031,8 @@ class _PhoneItemDetail extends StatelessWidget {
   final MediaItem item;
   final List<MediaItem> similar;
   final ItemMediaSource? mediaSource;
+  final String? selectedSourceId;
+  final ValueChanged<String>? onSelectSource;
   final int? selectedAudioIndex;
   final int? selectedSubtitleIndex;
   final ValueChanged<int> onAudio;
@@ -1029,6 +1050,16 @@ class _PhoneItemDetail extends StatelessWidget {
         if (plainOverview(item.overview) != null)
           EpisodeOverviewSection(overview: item.overview, compact: true),
         PhoneGenreChips(genres: item.genres, onTap: onOpenGenre),
+        EpisodeMediaStreamsSection(
+          source: mediaSource,
+          sources: item.mediaSources,
+          selectedSourceId: selectedSourceId,
+          onSelectSource: onSelectSource,
+          selectedAudioIndex: selectedAudioIndex,
+          selectedSubtitleIndex: selectedSubtitleIndex,
+          onAudio: onAudio,
+          onSubtitle: onSubtitle,
+        ),
         if (item.chapters.isNotEmpty)
           _ChapterStrip(
             itemId: item.id,
@@ -1037,13 +1068,6 @@ class _PhoneItemDetail extends StatelessWidget {
           ),
         EpisodePeopleSection(people: item.people),
         DetailAlbumStrip(item: item),
-        EpisodeMediaStreamsSection(
-          source: mediaSource,
-          selectedAudioIndex: selectedAudioIndex,
-          selectedSubtitleIndex: selectedSubtitleIndex,
-          onAudio: onAudio,
-          onSubtitle: onSubtitle,
-        ),
         EpisodeMetadataSection(item: item, source: mediaSource),
         DetailExternalLinks(links: item.externalUrls, title: item.name),
         if (similar.isNotEmpty)

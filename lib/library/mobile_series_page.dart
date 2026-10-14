@@ -639,14 +639,15 @@ class PhoneSeasonTab extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadii.md),
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(
           onTap: onPressed,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 56, minHeight: 40),
+            constraints: const BoxConstraints(minWidth: 56, minHeight: 36),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
               child: Center(
                 widthFactor: 1,
                 child: Text(
@@ -792,7 +793,7 @@ class MobileSeriesPage extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.md,
-            AppSpacing.xl,
+            AppSpacing.lg,
             AppSpacing.xs,
             AppSpacing.xs,
           ),
@@ -838,7 +839,7 @@ class MobileSeriesPage extends StatelessWidget {
       if (showSeasons)
         SizedBox(
           height:
-              40 *
+              36 *
               (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1, 2),
           child: DetachedHorizontalScroll(
             builder: (controller) => ListView.separated(
@@ -1090,7 +1091,7 @@ class _EpisodeRow extends StatelessWidget {
   final bool current;
   final VoidCallback onTap;
 
-  static const double _thumbWidth = 148;
+  static const double _thumbWidth = 128;
 
   @override
   Widget build(BuildContext context) {
@@ -1122,25 +1123,26 @@ class _EpisodeRow extends StatelessWidget {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.xs,
-        AppSpacing.xxs,
-        AppSpacing.xs,
-        AppSpacing.xxs,
-      ),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.xs, 2, AppSpacing.xs, 2),
       child: Container(
         decoration: BoxDecoration(
           color: current
               ? scheme.surfaceContainerHigh.withValues(alpha: .7)
               : const Color(0x00000000),
-          borderRadius: BorderRadius.circular(AppRadii.lg),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          border: current
+              ? Border.all(color: scheme.primary.withValues(alpha: .22))
+              : null,
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(
           key: CatalogKeys.episode(episode.id),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xs),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.xs,
+              vertical: 6,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1162,7 +1164,7 @@ class _EpisodeRow extends StatelessWidget {
                         children: [
                           title,
                           if (facts.isNotEmpty) ...[
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 3),
                             Text(
                               facts.join(' · '),
                               maxLines: 1,
@@ -1183,7 +1185,7 @@ class _EpisodeRow extends StatelessWidget {
 
                 if (overview != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: AppSpacing.xs),
+                    padding: const EdgeInsets.only(top: 6),
                     child: Text(
                       overview,
                       key: const Key('phone-episode-overview'),
@@ -1191,7 +1193,7 @@ class _EpisodeRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
-                        height: 1.45,
+                        height: 1.38,
                       ),
                     ),
                   ),

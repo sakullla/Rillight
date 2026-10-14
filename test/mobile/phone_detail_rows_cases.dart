@@ -1748,6 +1748,51 @@ void main() {
     expect(tinted, isEmpty);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'phone detail surfaces EpisodeMediaStreamsSection directly below overview and genres before chapters and cast',
+    (tester) async {
+      final harness = await _startDetail(
+        tester,
+        width: 412,
+        reduceMotion: true,
+        prepare: (server) {
+          final movie = server.items.firstWhere(
+            (item) => item.id == 'movie-inception',
+          );
+          movie.genres = const ['科幻', '动作'];
+          movie.people = const [
+            FakePerson(name: 'Cobb Actor', type: 'Actor', role: 'Cobb'),
+          ];
+        },
+      );
+      unawaited(harness.router.push('/item/movie-inception'));
+      await settle(tester);
+
+      final overview = find.byType(EpisodeOverviewSection);
+      final genres = find.byKey(PhoneGenreChips.rowKey);
+      final streams = find.byKey(EpisodeMediaStreamsSection.sectionKey);
+      final chapters = find.byKey(const Key('phone-chapter-strip'));
+      final cast = find.byKey(EpisodePeopleSection.sectionKey);
+
+      expect(overview, findsOneWidget);
+      expect(genres, findsOneWidget);
+      expect(streams, findsOneWidget);
+      expect(chapters, findsOneWidget);
+      expect(cast, findsOneWidget);
+
+      final genresBottom = tester.getRect(genres).bottom;
+      final streamsRect = tester.getRect(streams);
+      final chaptersTop = tester.getRect(chapters).top;
+      final castTop = tester.getRect(cast).top;
+
+      expect(streamsRect.top, greaterThanOrEqualTo(genresBottom));
+      expect(streamsRect.bottom, lessThanOrEqualTo(chaptersTop));
+      expect(chaptersTop, lessThanOrEqualTo(castTop));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
 
 void _expectOnScreen(Rect rect, double width, double height) {

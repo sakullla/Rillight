@@ -310,5 +310,100 @@ void main() {
       expect(find.text('2026-10-03'), findsOneWidget);
       expect(find.text('MKV'), findsNothing);
     });
+
+    testWidgets(
+      'EpisodeMediaStreamsSection shows version selector row on phone when multiple sources exist',
+      (tester) async {
+        const s1 = ItemMediaSource(
+          id: 'src-4k',
+          name: '4K HDR',
+          streams: [
+            ItemMediaStream(
+              index: 0,
+              type: 'Video',
+              codec: 'hevc',
+              height: 2160,
+            ),
+            ItemMediaStream(
+              index: 1,
+              type: 'Audio',
+              codec: 'truehd',
+              label: '国语杜比',
+              isDefault: true,
+            ),
+          ],
+        );
+        const s2 = ItemMediaSource(
+          id: 'src-1080p',
+          name: '1080p SDR',
+          streams: [
+            ItemMediaStream(
+              index: 0,
+              type: 'Video',
+              codec: 'h264',
+              height: 1080,
+            ),
+            ItemMediaStream(
+              index: 2,
+              type: 'Audio',
+              codec: 'aac',
+              label: '英语立体声',
+              isDefault: true,
+            ),
+          ],
+        );
+        String selectedId = s1.id;
+        await tester.pumpWidget(
+          PresentationScope(
+            environment: PresentationEnvironment.phone,
+            child: CupertinoTestApp(
+              locale: const Locale('zh'),
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                ...GlobalCupertinoLocalizations.delegates,
+              ],
+              theme: AppUiTheme.dark(),
+              home: StatefulBuilder(
+                builder: (context, setState) {
+                  final active = selectedId == s2.id ? s2 : s1;
+                  return CupertinoPageScaffold(
+                    child: EpisodeMediaStreamsSection(
+                      source: active,
+                      sources: const [s1, s2],
+                      selectedSourceId: selectedId,
+                      onSelectSource: (id) => setState(() => selectedId = id),
+                      onAudio: (_) {},
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        expect(
+          find.byKey(EpisodeMediaStreamsSection.phoneVersionRowKey),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('phone-detail-version-src-4k')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('phone-detail-version-src-1080p')),
+          findsOneWidget,
+        );
+        expect(find.text('国语杜比'), findsOneWidget);
+        expect(find.text('英语立体声'), findsNothing);
+
+        await tester.tap(
+          find.byKey(const ValueKey('phone-detail-version-src-1080p')),
+        );
+        await tester.pump();
+        expect(selectedId, 'src-1080p');
+        expect(find.text('英语立体声'), findsOneWidget);
+        expect(find.text('国语杜比'), findsNothing);
+      },
+    );
   });
 }

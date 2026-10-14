@@ -1050,6 +1050,9 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
   const EpisodeMediaStreamsSection({
     super.key,
     required this.source,
+    this.sources = const [],
+    this.selectedSourceId,
+    this.onSelectSource,
     this.selectedAudioIndex,
     this.selectedSubtitleIndex,
     this.onAudio,
@@ -1057,9 +1060,13 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
   });
 
   static const sectionKey = Key('episode-media-streams');
+  static const phoneVersionRowKey = Key('phone-detail-version-row');
 
   /// 当前选中的片源;为 null 或无流时分区整段隐藏。
   final ItemMediaSource? source;
+  final List<ItemMediaSource> sources;
+  final String? selectedSourceId;
+  final ValueChanged<String>? onSelectSource;
   final int? selectedAudioIndex;
   final int? selectedSubtitleIndex;
   final ValueChanged<int>? onAudio;
@@ -1105,7 +1112,8 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
           onSelected: onSubtitle,
         ),
     ];
-    if (groups.isEmpty) {
+    final hasMultipleSources = sources.length > 1;
+    if (groups.isEmpty && !hasMultipleSources) {
       return const SizedBox.shrink();
     }
     if (PresentationScope.isPhoneOf(context)) {
@@ -1115,6 +1123,9 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
           key: sectionKey,
           groups: groups,
           source: source,
+          sources: sources,
+          selectedSourceId: selectedSourceId ?? source.id,
+          onSelectSource: onSelectSource,
         ),
       );
     }
@@ -1347,10 +1358,16 @@ class _PhoneStreamCard extends StatelessWidget {
     super.key,
     required this.groups,
     required this.source,
+    this.sources = const [],
+    this.selectedSourceId,
+    this.onSelectSource,
   });
 
   final List<_StreamGroup> groups;
   final ItemMediaSource source;
+  final List<ItemMediaSource> sources;
+  final String? selectedSourceId;
+  final ValueChanged<String>? onSelectSource;
 
   ItemMediaStream? _stream(int index) =>
       source.streams.where((s) => s.index == index).firstOrNull;
@@ -1374,14 +1391,31 @@ class _PhoneStreamCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final hasMultipleSources = sources.length > 1;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHigh.withValues(alpha: .55),
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: .28)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (hasMultipleSources) ...[
+            _PhoneVersionRow(
+              key: EpisodeMediaStreamsSection.phoneVersionRowKey,
+              sources: sources,
+              selectedSourceId: selectedSourceId ?? source.id,
+              onSelectSource: onSelectSource,
+            ),
+            if (groups.isNotEmpty)
+              AppDivider(
+                height: 1,
+                indent: AppSpacing.md,
+                endIndent: AppSpacing.md,
+                color: scheme.outlineVariant.withValues(alpha: .5),
+              ),
+          ],
           for (var i = 0; i < groups.length; i++) ...[
             if (i > 0)
               AppDivider(
@@ -1457,6 +1491,136 @@ class _PhoneStreamCard extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PhoneVersionRow extends StatelessWidget {
+  const _PhoneVersionRow({
+    super.key,
+    required this.sources,
+    required this.selectedSourceId,
+    this.onSelectSource,
+  });
+
+  final List<ItemMediaSource> sources;
+  final String selectedSourceId;
+  final ValueChanged<String>? onSelectSource;
+
+  String _versionLabel(ItemMediaSource source) {
+    final raw = source.label.trim();
+    if (raw.isNotEmpty && raw.length <= 24) {
+      return raw;
+    }
+    final compact = source.presentation.compact.trim();
+    return compact.isNotEmpty ? compact : raw;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final l10n = AppLocalizations.of(context);
+    final height =
+        40 * (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Row(
+              children: [
+                Icon(
+                  CupertinoIcons.layers_alt,
+                  size: 18,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  l10n.mediaSource,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xxs),
+                Text(
+                  '${sources.length}',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurfaceVariant.withValues(alpha: .7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          SizedBox(
+            height: height,
+            child: DetachedHorizontalScroll(
+              builder: (controller) => ListView.separated(
+                controller: controller,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: sources.length,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(width: AppSpacing.xs),
+                itemBuilder: (context, index) {
+                  final item = sources[index];
+                  final selected = item.id == selectedSourceId;
+                  return Container(
+                    key: ValueKey('phone-detail-version-${item.id}'),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? scheme.primary.withValues(alpha: .16)
+                          : scheme.surface.withValues(alpha: .6),
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: AppSurfaceAction(
+                      onTap: onSelectSource == null
+                          ? null
+                          : () => onSelectSource!(item.id),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (selected) ...[
+                              Icon(
+                                CupertinoIcons.check_mark,
+                                size: 16,
+                                color: scheme.primary,
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 240),
+                              child: Text(
+                                _versionLabel(item),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: selected
+                                      ? scheme.primary
+                                      : scheme.onSurface,
+                                  fontWeight: selected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
         ],
       ),
     );

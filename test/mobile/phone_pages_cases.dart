@@ -1317,6 +1317,7 @@ void main() {
       double width = 360,
       double height = 800,
       double bottomInset = 0,
+      bool phonePresentation = false,
     }) async {
       tester.view.physicalSize = Size(width, height);
       tester.view.devicePixelRatio = 1;
@@ -1379,6 +1380,22 @@ void main() {
           ),
         ],
       );
+      Widget app = CupertinoTestApp.router(
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
+        theme: AppUiTheme.dark(),
+        routerConfig: router,
+      );
+      if (phonePresentation) {
+        app = PresentationScope(
+          environment: PresentationEnvironment.phone,
+          child: app,
+        );
+      }
       await tester.pumpWidget(
         AuthScope(
           controller: auth,
@@ -1390,16 +1407,7 @@ void main() {
                 snapshotStore: MemoryPlaybackSessionSnapshotStore(),
                 settingsStore: MemoryPlayerSettingsStore(),
               ),
-              child: CupertinoTestApp.router(
-                locale: const Locale('zh', 'CN'),
-                supportedLocales: AppLocalizations.supportedLocales,
-                localizationsDelegates: [
-                  AppLocalizations.delegate,
-                  ...GlobalCupertinoLocalizations.delegates,
-                ],
-                theme: AppUiTheme.dark(),
-                routerConfig: router,
-              ),
+              child: app,
             ),
           ),
         ),
@@ -1578,8 +1586,24 @@ void main() {
         expect(backend.position, Duration.zero);
         await closePlayer(tester);
 
-        await tester.ensureVisible(find.byKey(CatalogKeys.chapter(1)));
-        await tester.tap(find.byKey(CatalogKeys.chapter(1)));
+        final chapter = find.byKey(CatalogKeys.chapter(1));
+        final detailScroll = find.descendant(
+          of: find.byType(MobileDetailPage),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+          ),
+        );
+        final position = tester.state<ScrollableState>(detailScroll).position;
+        for (var attempt = 0; attempt < 8; attempt++) {
+          final rect = tester.getRect(chapter);
+          final viewport = tester.view.physicalSize.height;
+          if (rect.top >= 8 && rect.bottom <= viewport - 8) break;
+          position.jumpTo(
+            (position.pixels + 160).clamp(0.0, position.maxScrollExtent),
+          );
+          await tester.pump();
+        }
+        await tester.tap(chapter);
         await settle(tester);
         expect(backend.position, const Duration(minutes: 7));
         final extra =
@@ -1783,6 +1807,92 @@ void main() {
         expect(backend.subtitleIndex, 4);
         expect(server.lastPlaybackInfoBody?['AudioStreamIndex'], 3);
         expect(server.lastPlaybackInfoBody?['SubtitleStreamIndex'], 4);
+        await closePlayer(tester);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    cases.testWidgets(
+      'chosen media version on phone detail page is used when playback starts',
+      (tester) async {
+        final server = FakeEmbyServer();
+        final movie = server.items.firstWhere(
+          (item) => item.id == 'movie-inception',
+        );
+        movie.mediaStreams = const [
+          FakeMediaStream(
+            index: 0,
+            type: 'Video',
+            codec: 'hevc',
+            width: 3840,
+            height: 2160,
+          ),
+          FakeMediaStream(
+            index: 1,
+            type: 'Audio',
+            codec: 'truehd',
+            language: 'eng',
+            displayTitle: '英语原声',
+            isDefault: true,
+          ),
+        ];
+        movie.extraSources = const [
+          FakeMediaSource(
+            id: 'alternate-1080p',
+            name: '1080p SDR',
+            mediaStreams: [
+              FakeMediaStream(
+                index: 0,
+                type: 'Video',
+                codec: 'h264',
+                width: 1920,
+                height: 1080,
+              ),
+              FakeMediaStream(
+                index: 2,
+                type: 'Audio',
+                codec: 'aac',
+                language: 'chi',
+                displayTitle: '国语配音',
+                isDefault: true,
+              ),
+            ],
+          ),
+        ];
+        final (router, _) = await start(
+          tester,
+          server,
+          width: 412,
+          height: 2000,
+          phonePresentation: true,
+        );
+        await openItem(tester, router, 'movie-inception');
+
+        expect(
+          find.byKey(const Key('phone-detail-version-row')),
+          findsOneWidget,
+        );
+        final altChip = find.byKey(
+          const ValueKey('phone-detail-version-alternate-1080p'),
+        );
+        expect(altChip, findsOneWidget);
+        await tester.ensureVisible(altChip);
+        await tester.tap(altChip);
+        await settle(tester);
+
+        expect(find.textContaining('国语配音'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('mobile-detail-play')));
+        await settle(tester);
+        final page = tester.widget<MobilePlayerPage>(
+          find.byType(MobilePlayerPage),
+        );
+        final player = tester.state<MobilePlayerPageState>(
+          find.byType(MobilePlayerPage),
+        );
+        expect(page.mediaSourceId, 'alternate-1080p');
+        expect(player.controller?.activeMediaSourceId, 'alternate-1080p');
         await closePlayer(tester);
         expect(tester.takeException(), isNull);
       },

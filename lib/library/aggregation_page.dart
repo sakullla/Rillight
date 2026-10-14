@@ -1568,9 +1568,9 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(
-              AppSpacing.page,
-              desktop ? AppShell.topBarHeight + AppSpacing.sm : 8,
-              AppSpacing.page,
+              desktop ? AppSpacing.page : AppSpacing.md,
+              desktop ? AppShell.topBarHeight + AppSpacing.sm : 6,
+              desktop ? AppSpacing.page : AppSpacing.md,
               4,
             ),
             child: Row(
@@ -2189,6 +2189,12 @@ class _AggregationSearchState extends State<_AggregationSearch> {
               },
             ),
           );
+    final showBackButton =
+        !presentation.isDesktop &&
+        (presentation.isTv ||
+            ((ModalRoute.of(context)?.canPop ?? false) &&
+                context.findAncestorWidgetOfExactType<SearchRouteGuard>() ==
+                    null));
     return Container(
       decoration: BoxDecoration(),
       child: Column(
@@ -2197,16 +2203,16 @@ class _AggregationSearchState extends State<_AggregationSearch> {
           Padding(
             padding: EdgeInsets.fromLTRB(
               presentation.isDesktop ? AppSpacing.page : 16,
-              presentation.isDesktop && widget.clearOfDesktopBar ? 64 : 12,
+              presentation.isDesktop && widget.clearOfDesktopBar ? 64 : 8,
               presentation.isDesktop ? AppSpacing.md : 16,
-              8,
+              6,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    if (!presentation.isDesktop)
+                    if (showBackButton)
                       CupertinoNavigationBarBackButton(
                         onPressed: () => context.pop(),
                       ),
