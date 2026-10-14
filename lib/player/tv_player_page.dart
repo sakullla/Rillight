@@ -1244,7 +1244,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
 
   @override
   Widget build(BuildContext context) => AppUiTheme(
-    data: AppUiTheme.dark(),
+    // Playback stays dark even under a light application theme. Generate the
+    // TV roles directly because an ancestor TvStageTheme already owns its guard.
+    data: TvStageTheme.themeFor(AppUiTheme.tvDark(), TvDesign.scaleOf(context)),
     child: Builder(key: _presentationThemeKey, builder: _buildPlayer),
   );
 

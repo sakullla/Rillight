@@ -1,5 +1,12 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+import '../helpers/synthetic_source_fixture.dart';
+import '../helpers/image_cache_fixture.dart';
+
+import 'package:rillight/app/app.dart';
+import 'package:rillight/app/appearance_style.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/player/player_window_host.dart';
 
 import 'dart:async';
 
@@ -120,6 +127,185 @@ void main() {
     return tester
         .state<TvPlayerPageState>(find.byType(TvPlayerPage))
         .controller!;
+  }
+
+  for (final width in [960.0, 1280.0, 1920.0]) {
+    testWidgets(
+      'routed TV player and panels retain scaled dark theme at $width',
+      (tester) async {
+        isolateImageCache();
+        tester.view.physicalSize = Size(width, width * 9 / 16);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final server = FakeEmbyServer();
+        final auth = SyntheticSourceAuth(
+          adapter: FakeEmbyAdapter([server]),
+          device: const ClientDeviceInfo(
+            clientName: 'test',
+            deviceName: 'tv',
+            deviceId: 'tv-theme',
+            version: '1',
+          ),
+          libraryIds: {'view-movies', 'view-tv'},
+        );
+        await tester.runAsync(
+          () => auth.connect(
+            address: server.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
+          ),
+        );
+        final runtime = (await tester.runAsync(auth.runtime))!;
+        final appearance = AppearanceController(
+          store: MemoryPlayerSettingsStore(
+            const PlayerSettings(appearanceStyle: 'light'),
+          ),
+        );
+        await appearance.ready;
+        final app = RillightApp(
+          auth: auth,
+          appearance: appearance,
+          environment: PresentationEnvironment.tv,
+          playerBindings: PlayerBindings(
+            runtime: runtime,
+            createBackend: () => FakeVideoBackend(),
+            controlsHideAfter: const Duration(minutes: 10),
+            snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+            settingsStore: MemoryPlayerSettingsStore(),
+          ),
+        );
+        PlayerController? playing;
+        var finished = false;
+        Future<void> finishRoutedPlayer() async {
+          if (finished) return;
+          finished = true;
+          await tester.pumpWidget(const SizedBox.shrink());
+          var closed = false;
+          final cleanup = playing?.disposeAsync().then((_) => closed = true);
+          for (var frame = 0; frame < 80 && !closed; frame++) {
+            await tester.pump(const Duration(milliseconds: 50));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (cleanup != null) {
+            expect(
+              closed,
+              isTrue,
+              reason: 'Actual TV controller cleanup must complete',
+            );
+            await cleanup;
+          }
+          app.router.dispose();
+          await tester.runAsync(runtime.history.close);
+          appearance.dispose();
+          auth.dispose();
+        }
+
+        addTearDown(finishRoutedPlayer);
+        await tester.pumpWidget(app);
+        await settle(tester);
+        expect(appearance.brightness, Brightness.light);
+        unawaited(
+          app.router.push(
+            '/play/movie-inception',
+            extra: PlayerOpenRequest(
+              itemId: 'movie-inception',
+              autoResume: false,
+            ),
+          ),
+        );
+        await settle(tester);
+        final current = tester
+            .state<TvPlayerPageState>(find.byType(TvPlayerPage))
+            .controller!;
+        playing = current;
+        expect(current.loading, isFalse);
+        current.setControlsPinned(true);
+        final scale = width / 960;
+        void expectTheme(BuildContext context) {
+          final theme = AppUiTheme.of(context);
+          expect(theme.brightness, Brightness.dark);
+          expect(theme.tv, isTrue);
+          expect(
+            theme.textTheme.bodyMedium!.fontSize,
+            closeTo(13.5 * scale, .001),
+          );
+          expect(
+            theme.textTheme.headlineSmall!.fontSize,
+            closeTo(19 * scale, .001),
+          );
+          expect(
+            CupertinoTheme.of(context).textTheme.textStyle.fontSize,
+            closeTo(13.5 * scale, .001),
+          );
+        }
+
+        expectTheme(tester.element(find.byKey(const Key('tv-player-speed'))));
+        current.networkSlow = true;
+        current.notifyListeners();
+        await tester.pump();
+        final dismiss = find.byKey(const Key('tv-dismiss-network-hint'));
+        final buttonSurface = find.descendant(
+          of: dismiss,
+          matching: find.byType(AnimatedContainer),
+        );
+        Focus.of(tester.element(buttonSurface)).requestFocus();
+        await settle(tester);
+        final theme = AppUiTheme.of(tester.element(dismiss));
+        final decoration =
+            tester
+                    .widget<AnimatedContainer>(
+                      find.descendant(
+                        of: dismiss,
+                        matching: find.byType(AnimatedContainer),
+                      ),
+                    )
+                    .decoration!
+                as ShapeDecoration;
+        expect(decoration.color, theme.colorScheme.inverseSurface);
+        final icon = find.descendant(of: dismiss, matching: find.byType(Icon));
+        expect(
+          IconTheme.of(tester.element(icon)).color,
+          theme.colorScheme.onInverseSurface,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        await tester.pump();
+        expect(current.networkSlow, isFalse);
+        expect(dismiss, findsNothing);
+        await tester.tap(find.byKey(const Key('tv-player-speed')));
+        await settle(tester);
+        final panel = find.byKey(const Key('tv-player-panel'));
+        expectTheme(tester.element(panel));
+        final text = tester.widgetList<Text>(
+          find.descendant(of: panel, matching: find.byType(Text)),
+        );
+        expect(text.any((t) => t.style?.fontSize == 19 * scale), isTrue);
+        expect(text.any((t) => t.style?.fontSize == 13.5 * scale), isTrue);
+        final selected = find.byKey(const Key('tv-rate-1.0'));
+        final focusFill = tester
+            .widgetList<DecoratedBox>(
+              find.descendant(
+                of: selected,
+                matching: find.byType(DecoratedBox),
+              ),
+            )
+            .map((box) => box.decoration)
+            .whereType<BoxDecoration>();
+        expect(
+          focusFill.any((d) => d.color == theme.colorScheme.inverseSurface),
+          isTrue,
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        await settle(tester);
+        expect(current.playbackRate, isNot(1.0));
+        expect(tester.takeException(), isNull);
+        await finishRoutedPlayer();
+      },
+      tags: ['integration'],
+    );
   }
 
   testWidgets('TV idle controls hide while playback is rebuffering', (

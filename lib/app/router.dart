@@ -407,15 +407,12 @@ GoRouter createAppRouter({
               pageBuilder: (context, state) =>
                   _routePage(context, state, (context, state) {
                     final request = state.extra as PlayerOpenRequest?;
-                    return AppUiTheme(
-                      data: AppUiTheme.dark(),
-                      child: TvPlayerPage(
-                        routeLeaseKey: state.pageKey,
-                        sourceRequest: request,
-                        itemId: state.pathParameters['itemId']!,
-                        mediaSourceId: request?.mediaSourceId,
-                        autoResume: request?.autoResume ?? true,
-                      ),
+                    return TvPlayerPage(
+                      routeLeaseKey: state.pageKey,
+                      sourceRequest: request,
+                      itemId: state.pathParameters['itemId']!,
+                      mediaSourceId: request?.mediaSourceId,
+                      autoResume: request?.autoResume ?? true,
                     );
                   }, environment),
             ),
