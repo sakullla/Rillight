@@ -383,6 +383,23 @@ extension PageCaptures on CaptureSession {
           await save(name);
         }
       }
+      if (platform == 'tv') {
+        // TV detail mounts later ListView sections only as they approach the
+        // viewport. Scroll the actual page before reading or opening its album.
+        final page = find.descendant(
+          of: find.byKey(const PageStorageKey('tv-detail-movie-up')),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+          ),
+        );
+        expect(page, findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.byType(DetailAlbumStrip),
+          200,
+          scrollable: page,
+        );
+        await advance(300);
+      }
       expect(
         tester
             .widget<DetailAlbumStrip>(find.byType(DetailAlbumStrip))
