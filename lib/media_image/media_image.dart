@@ -1513,6 +1513,9 @@ class MediaImageCache {
   }
 
   /// 只读内存和磁盘,不发网络,也不等滚动空闲。
+  ///
+  /// 默认磁盘目录还没打开时不等待文件系统。可见海报要在滚动中先进入
+  /// 网络队列;目录打开后的读取交给 [load]。
   Future<Uint8List?> _readDiskCache({
     MediaImageSourcePolicy? policy,
     required String serverId,
@@ -1550,7 +1553,8 @@ class MediaImageCache {
     }
     if (policy?.allowsDisk == false) return null;
     if (!_diskResolved) {
-      await _ensureDiskStore();
+      unawaited(_ensureDiskStore());
+      return null;
     }
     if (policy?.isValid == false) return null;
     final disk = await _readDisk(cacheKey);
