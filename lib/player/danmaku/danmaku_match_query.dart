@@ -277,9 +277,8 @@ bool _looksLikeReleaseName(String name) {
     return false;
   }
   final lower = name.toLowerCase();
-  if (RegExp(
-    r'\.(mkv|mp4|avi|ts|m2ts|wmv|flv|webm|mov|iso|rmvb)$',
-  ).hasMatch(lower)) {
+  if (RegExp(r'\.(mkv|mp4|avi|ts|m2ts|wmv|flv|webm|mov|iso|rmvb)$')
+      .hasMatch(lower)) {
     return true;
   }
   if (RegExp(r's\d{1,2}e\d{1,3}', caseSensitive: false).hasMatch(name)) {

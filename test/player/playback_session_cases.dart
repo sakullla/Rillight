@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:rillight/emby/emby_codec.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -95,40 +96,37 @@ void main() {
   MediaItem episode(String id) =>
       decodeEmbyMediaItem({'Id': id, 'Type': 'Episode', 'Name': id});
 
-  test(
-    'prepared metadata retains fresh resume preferences without duplicate requests',
-    () async {
-      await controller.disposeAsync();
-      controller.dispose();
-      controller = PlayerController(
-        client: client,
-        itemId: 'movie-up',
-        backend: backend,
-        window: PlayerWindow(),
-        settingsStore: settings,
-        snapshotStore: snapshots,
-        startupData: Future.value(
-          PlayerStartupData(
-            decodeEmbyMediaItem({
-              'Id': 'movie-up',
-              'Type': 'Movie',
-              'UserData': {'PlaybackPositionTicks': 300000000},
-            }),
-            MediaUser(id: client.userId!, name: 'test', resumeRewindSeconds: 5),
-          ),
+  test('prepared metadata retains fresh resume preferences without duplicate requests', () async {
+    await controller.disposeAsync();
+    controller.dispose();
+    controller = PlayerController(
+      client: client,
+      itemId: 'movie-up',
+      backend: backend,
+      window: PlayerWindow(),
+      settingsStore: settings,
+      snapshotStore: snapshots,
+      startupData: Future.value(
+        PlayerStartupData(
+          decodeEmbyMediaItem({
+            'Id': 'movie-up',
+            'Type': 'Movie',
+            'UserData': {'PlaybackPositionTicks': 300000000},
+          }),
+          MediaUser(id: client.userId!, name: 'test', resumeRewindSeconds: 5),
         ),
-      );
-      final beforeUsers = client.userRequests;
-      await controller.start();
-      expect(controller.error, isNull);
-      expect(client.requestedItems, isEmpty);
-      expect(client.userRequests, beforeUsers);
-      expect(backend.openedStart, const Duration(seconds: 25));
-      await controller.start();
-      expect(client.requestedItems, ['movie-up']);
-      expect(client.userRequests, beforeUsers + 1);
-    },
-  );
+      ),
+    );
+    final beforeUsers = client.userRequests;
+    await controller.start();
+    expect(controller.error, isNull);
+    expect(client.requestedItems, isEmpty);
+    expect(client.userRequests, beforeUsers);
+    expect(backend.openedStart, const Duration(seconds: 25));
+    await controller.start();
+    expect(client.requestedItems, ['movie-up']);
+    expect(client.userRequests, beforeUsers + 1);
+  });
 
   test(
     'prepared metadata for another item falls back to fresh requests',
@@ -227,36 +225,33 @@ void main() {
 
   // 同一后台释放/恢复旅程的两个断言面合并:先验证正常恢复,
   // 再在同一控制器上验证换凭据后恢复被拒绝。
-  test(
-    'background release stops once, restores paused, and refuses new credentials',
-    () async {
-      await controller.start();
-      await controller.seekTo(const Duration(seconds: 20));
-      final oldSession = backend.sessionId;
-      await controller.suspendPlayback();
-      await controller.suspendPlayback();
-      expect(controller.backgroundReleased, isTrue);
-      expect(backend.isPlaying, isFalse);
-      expect(client.reports.where((r) => r.$1 == 'Stopped'), hasLength(1));
-      await controller.restorePlayback();
-      expect(backend.sessionId, isNot(oldSession));
-      expect(backend.openedStart, const Duration(seconds: 20));
-      expect(backend.openedPaused, isTrue);
-      expect(controller.isPlaying, isFalse);
-      expect(client.reports.where((r) => r.$1 == 'Playing'), hasLength(2));
+  test('background release stops once, restores paused, and refuses new credentials', () async {
+    await controller.start();
+    await controller.seekTo(const Duration(seconds: 20));
+    final oldSession = backend.sessionId;
+    await controller.suspendPlayback();
+    await controller.suspendPlayback();
+    expect(controller.backgroundReleased, isTrue);
+    expect(backend.isPlaying, isFalse);
+    expect(client.reports.where((r) => r.$1 == 'Stopped'), hasLength(1));
+    await controller.restorePlayback();
+    expect(backend.sessionId, isNot(oldSession));
+    expect(backend.openedStart, const Duration(seconds: 20));
+    expect(backend.openedPaused, isTrue);
+    expect(controller.isPlaying, isFalse);
+    expect(client.reports.where((r) => r.$1 == 'Playing'), hasLength(2));
 
-      await controller.suspendPlayback();
-      final count = backend.openCount;
-      client.attachSession(
-        baseUrl: client.baseUrl!,
-        accessToken: 'new-user-token',
-        userId: 'different-user',
-      );
-      await controller.restorePlayback();
-      expect(controller.sessionExpired, isTrue);
-      expect(backend.openCount, count);
-    },
-  );
+    await controller.suspendPlayback();
+    final count = backend.openCount;
+    client.attachSession(
+      baseUrl: client.baseUrl!,
+      accessToken: 'new-user-token',
+      userId: 'different-user',
+    );
+    await controller.restorePlayback();
+    expect(controller.sessionExpired, isTrue);
+    expect(backend.openCount, count);
+  });
 
   test(
     'ended background restore keeps ended UI until explicit zero replay',
@@ -348,38 +343,35 @@ void main() {
     },
   );
 
-  test(
-    'subtitle failure keeps actual preference and stale geometry cannot reach new session',
-    () async {
-      await controller.start();
-      await controller.updateSubtitleViewport(width: 360, height: 202.5);
-      backend.failPresentation = true;
-      await controller.setPhoneSubtitleSettings(
-        const PhoneSubtitleSettings(size: PhoneSubtitleSize.large),
-      );
-      expect(controller.phoneSubtitleSettings.size, PhoneSubtitleSize.standard);
-      expect(controller.subtitlePresentationError, isNotNull);
-      expect(
-        (await settings.read()).effectivePhoneSubtitles.size,
-        PhoneSubtitleSize.standard,
-      );
-      backend.failPresentation = false;
-      final oldSession = backend.sessionId;
-      await controller.playEpisode(episode('episode-friends-s1e1'));
-      await expectLater(
-        backend.setSubtitlePresentation(
-          const SubtitlePresentation(
-            displayWidth: 360,
-            displayHeight: 202.5,
-            fontSize: 40,
-          ),
-          sessionId: oldSession,
+  test('subtitle failure keeps actual preference and stale geometry cannot reach new session', () async {
+    await controller.start();
+    await controller.updateSubtitleViewport(width: 360, height: 202.5);
+    backend.failPresentation = true;
+    await controller.setPhoneSubtitleSettings(
+      const PhoneSubtitleSettings(size: PhoneSubtitleSize.large),
+    );
+    expect(controller.phoneSubtitleSettings.size, PhoneSubtitleSize.standard);
+    expect(controller.subtitlePresentationError, isNotNull);
+    expect(
+      (await settings.read()).effectivePhoneSubtitles.size,
+      PhoneSubtitleSize.standard,
+    );
+    backend.failPresentation = false;
+    final oldSession = backend.sessionId;
+    await controller.playEpisode(episode('episode-friends-s1e1'));
+    await expectLater(
+      backend.setSubtitlePresentation(
+        const SubtitlePresentation(
+          displayWidth: 360,
+          displayHeight: 202.5,
+          fontSize: 40,
         ),
-        throwsStateError,
-      );
-      expect(backend.subtitlePresentation!.fontSize, 20);
-    },
-  );
+        sessionId: oldSession,
+      ),
+      throwsStateError,
+    );
+    expect(backend.subtitlePresentation!.fontSize, 20);
+  });
 
   test(
     'immediate item switch preserves debounced volume and rate changes',
@@ -643,26 +635,20 @@ void main() {
     expect(controller.state.phase, PlaybackPhase.ended);
   });
 
-  test(
-    'failed track change neither commits selection nor saves or reports success',
-    () async {
-      await controller.start();
-      final original = controller.audioStreamIndex;
-      final before = await settings.read();
-      backend.failAudio = true;
-      await controller.setAudio(999);
-      expect(controller.audioStreamIndex, original);
-      expect(controller.trackFailure, contains('track failed'));
-      expect(
-        (await settings.read()).seriesPreferences,
-        before.seriesPreferences,
-      );
-      expect(
-        client.reports.where((e) => e.$2.eventName == 'AudioTrackChange'),
-        isEmpty,
-      );
-    },
-  );
+  test('failed track change neither commits selection nor saves or reports success', () async {
+    await controller.start();
+    final original = controller.audioStreamIndex;
+    final before = await settings.read();
+    backend.failAudio = true;
+    await controller.setAudio(999);
+    expect(controller.audioStreamIndex, original);
+    expect(controller.trackFailure, contains('track failed'));
+    expect((await settings.read()).seriesPreferences, before.seriesPreferences);
+    expect(
+      client.reports.where((e) => e.$2.eventName == 'AudioTrackChange'),
+      isEmpty,
+    );
+  });
 
   test(
     'a queued failed track keeps the previous successful mutation',
@@ -690,35 +676,32 @@ void main() {
     },
   );
 
-  test(
-    'rejected volume, rate, audio and subtitle restoration keeps ready media and warns',
-    () async {
-      for (final stage in ['volume', 'rate', 'audio', 'subtitle']) {
-        final opensBefore = backend.openCount;
-        final playingBefore = client.reports
-            .where((e) => e.$1 == 'Playing')
-            .length;
-        backend.failInitialization = stage;
-        await controller.start();
-        expect(backend.openCount, opensBefore + 1, reason: stage);
-        expect(backend.isPlaying, isTrue, reason: stage);
-        expect(controller.isPlaying, isTrue, reason: stage);
-        expect(controller.loading, isFalse, reason: stage);
-        expect(controller.error, isNull, reason: stage);
-        expect(controller.state.phase, PlaybackPhase.playing, reason: stage);
-        expect(controller.trackFailure, contains('$stage failed'));
-        expect(
-          client.reports.where((e) => e.$1 == 'Playing').length,
-          playingBefore + 1,
-          reason: stage,
-        );
-        backend.failInitialization = null;
-        await controller.start();
-        expect(controller.error, isNull, reason: stage);
-        expect(backend.isPlaying, isTrue, reason: stage);
-      }
-    },
-  );
+  test('rejected volume, rate, audio and subtitle restoration keeps ready media and warns', () async {
+    for (final stage in ['volume', 'rate', 'audio', 'subtitle']) {
+      final opensBefore = backend.openCount;
+      final playingBefore = client.reports
+          .where((e) => e.$1 == 'Playing')
+          .length;
+      backend.failInitialization = stage;
+      await controller.start();
+      expect(backend.openCount, opensBefore + 1, reason: stage);
+      expect(backend.isPlaying, isTrue, reason: stage);
+      expect(controller.isPlaying, isTrue, reason: stage);
+      expect(controller.loading, isFalse, reason: stage);
+      expect(controller.error, isNull, reason: stage);
+      expect(controller.state.phase, PlaybackPhase.playing, reason: stage);
+      expect(controller.trackFailure, contains('$stage failed'));
+      expect(
+        client.reports.where((e) => e.$1 == 'Playing').length,
+        playingBefore + 1,
+        reason: stage,
+      );
+      backend.failInitialization = null;
+      await controller.start();
+      expect(controller.error, isNull, reason: stage);
+      expect(backend.isPlaying, isTrue, reason: stage);
+    }
+  });
 
   test(
     'failed restored external subtitle keeps selection uncommitted',

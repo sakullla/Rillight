@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:rillight/media_server/resources.dart';
 
 import 'cache/cache_limits.dart';
@@ -250,9 +251,9 @@ class TransportWorkerFailure {
 
   factory TransportWorkerFailure.fromMessage(List<Object?> message) {
     final raw = message.firstOrNull?.toString() ?? '';
-    final named = RegExp(
-      r'^([A-Za-z_][A-Za-z_0-9]*(?:Exception|Error))\b',
-    ).firstMatch(raw)?.group(1);
+    final named = RegExp(r'^([A-Za-z_][A-Za-z_0-9]*(?:Exception|Error))\b')
+        .firstMatch(raw)
+        ?.group(1);
     final kind =
         named ?? (raw.startsWith('Bad state:') ? 'StateError' : 'unknown');
     final stack = message.length > 1 ? message[1]?.toString() ?? '' : '';

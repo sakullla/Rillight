@@ -18,46 +18,43 @@ Future<void> _until(bool Function() ready) async {
 }
 
 void main() {
-  test(
-    'hidden prepared engine is adopted once without another launch or premature activation',
-    () async {
-      final control = _ControlledProcess();
-      addTearDown(control.clean);
-      final preparing = control.prepare(executable: 'test');
-      await _until(() => control.endpoint != null);
-      expect(
-        jsonDecode(
-          await control.endpoint!.launchFile.readAsString(),
-        )['warmPlayer'],
-        isTrue,
-      );
-      await control.ready();
-      await preparing;
-      expect(control.activations, isEmpty);
-      expect(control.activationGrants, isEmpty);
-      final endpoint = control.endpoint;
-      control.cancelPendingSpawns();
-      final spawning = control.spawn(
-        executable: 'test',
-        arguments: '{"itemId":"selected"}',
-      );
-      Map<String, dynamic>? start;
-      while (start == null) {
-        start = await endpoint!.read('start');
-        await Future<void>.delayed(const Duration(milliseconds: 1));
-      }
-      expect(control.endpoint, same(endpoint));
-      expect(control.launchCount, 1);
-      expect(control.activationGrants, [42]);
-      expect(
-        jsonDecode(await endpoint!.launchFile.readAsString())['itemId'],
-        'selected',
-      );
-      await control.ready();
-      expect(await spawning, 42);
-      expect(control.activations, [42]);
-    },
-  );
+  test('hidden prepared engine is adopted once without another launch or premature activation', () async {
+    final control = _ControlledProcess();
+    addTearDown(control.clean);
+    final preparing = control.prepare(executable: 'test');
+    await _until(() => control.endpoint != null);
+    expect(
+      jsonDecode(
+        await control.endpoint!.launchFile.readAsString(),
+      )['warmPlayer'],
+      isTrue,
+    );
+    await control.ready();
+    await preparing;
+    expect(control.activations, isEmpty);
+    expect(control.activationGrants, isEmpty);
+    final endpoint = control.endpoint;
+    control.cancelPendingSpawns();
+    final spawning = control.spawn(
+      executable: 'test',
+      arguments: '{"itemId":"selected"}',
+    );
+    Map<String, dynamic>? start;
+    while (start == null) {
+      start = await endpoint!.read('start');
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+    expect(control.endpoint, same(endpoint));
+    expect(control.launchCount, 1);
+    expect(control.activationGrants, [42]);
+    expect(
+      jsonDecode(await endpoint!.launchFile.readAsString())['itemId'],
+      'selected',
+    );
+    await control.ready();
+    expect(await spawning, 42);
+    expect(control.activations, [42]);
+  });
 
   test('discard closes a hidden engine and clears its mailbox', () async {
     final control = _ControlledProcess();
@@ -322,34 +319,31 @@ void main() {
     },
   );
 
-  test(
-    'Windows termination waits on the original object and retains it until release',
-    () async {
-      final child = _FakeWindowsProcess(42)..exitOnTerminate = false;
-      final control = _WindowsControlWithFakeActivation(
-        pollInterval: const Duration(milliseconds: 1),
-        spawnProcess: ({required executable, required payloadPath}) {
-          _readyForWindowsChild(payloadPath, child.pid);
-          return child;
-        },
-      );
-      final pid = await control.spawn(executable: 'test', arguments: '{}');
-      expect(control.activationGrants, [pid]);
-      await expectLater(control.release(pid), throwsStateError);
-      expect(control.activePids, [pid]);
-      var terminated = false;
-      final killing = control.kill(pid).then((_) => terminated = true);
-      await Future<void>.delayed(Duration.zero);
-      expect(child.terminateCount, 1);
-      expect(child.closeCount, 0);
-      expect(terminated, isFalse);
-      child.alive = false;
-      await killing;
-      expect(child.closeCount, 0);
-      await control.release(pid);
-      expect(child.closeCount, 1);
-    },
-  );
+  test('Windows termination waits on the original object and retains it until release', () async {
+    final child = _FakeWindowsProcess(42)..exitOnTerminate = false;
+    final control = _WindowsControlWithFakeActivation(
+      pollInterval: const Duration(milliseconds: 1),
+      spawnProcess: ({required executable, required payloadPath}) {
+        _readyForWindowsChild(payloadPath, child.pid);
+        return child;
+      },
+    );
+    final pid = await control.spawn(executable: 'test', arguments: '{}');
+    expect(control.activationGrants, [pid]);
+    await expectLater(control.release(pid), throwsStateError);
+    expect(control.activePids, [pid]);
+    var terminated = false;
+    final killing = control.kill(pid).then((_) => terminated = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(child.terminateCount, 1);
+    expect(child.closeCount, 0);
+    expect(terminated, isFalse);
+    child.alive = false;
+    await killing;
+    expect(child.closeCount, 0);
+    await control.release(pid);
+    expect(child.closeCount, 1);
+  });
 
   test(
     'Windows failed startup retains its terminated handle until reconciliation',
@@ -373,28 +367,25 @@ void main() {
     },
   );
 
-  test(
-    'startup timeout terminates the child and preserves its snapshot for reconciliation',
-    () async {
-      final control = _ControlledProcess(
-        startupTimeout: const Duration(milliseconds: 5),
-      );
-      addTearDown(control.clean);
-      await expectLater(
-        control.spawn(executable: 'test', arguments: '{}'),
-        throwsA(
-          isA<PlayerProcessStartupException>().having(
-            (e) => e.cause,
-            'cause',
-            isA<TimeoutException>(),
-          ),
+  test('startup timeout terminates the child and preserves its snapshot for reconciliation', () async {
+    final control = _ControlledProcess(
+      startupTimeout: const Duration(milliseconds: 5),
+    );
+    addTearDown(control.clean);
+    await expectLater(
+      control.spawn(executable: 'test', arguments: '{}'),
+      throwsA(
+        isA<PlayerProcessStartupException>().having(
+          (e) => e.cause,
+          'cause',
+          isA<TimeoutException>(),
         ),
-      );
-      expect(control.alive, isFalse);
-      expect(control.killed, 1);
-      expect(control.activePids, [42]);
-    },
-  );
+      ),
+    );
+    expect(control.alive, isFalse);
+    expect(control.killed, 1);
+    expect(control.activePids, [42]);
+  });
 
   test(
     'cancelPendingSpawns interrupts readiness wait and kills only its child',
@@ -414,17 +405,16 @@ void main() {
     },
   );
 
-  test(
-    'an actual child process acknowledges ready, routes a command, and exits on close',
-    () async {
-      final root = await Directory.systemTemp.createTemp(
-        'rillight-process-test-',
-      );
-      final script = File('${root.path}/child.dart');
-      final protocolUri = File(
-        'lib/player/player_process_protocol.dart',
-      ).absolute.uri.toString();
-      await script.writeAsString('''
+  test('an actual child process acknowledges ready, routes a command, and exits on close', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'rillight-process-test-',
+    );
+    final script = File('${root.path}/child.dart');
+    final protocolUri = File('lib/player/player_process_protocol.dart')
+        .absolute
+        .uri
+        .toString();
+    await script.writeAsString('''
 import 'dart:convert';
 import 'dart:io';
 import ${jsonEncode(protocolUri)};
@@ -442,57 +432,53 @@ Future<void> main(List<String> args) async {
 }
 
 ''');
-      var executable = _dartExecutable();
-      final DesktopPlayerProcessControl control;
-      if (Platform.isWindows) {
-        executable = await _compiledChild(script);
-        control = WindowsPlayerProcessControl(
-          pollInterval: const Duration(milliseconds: 10),
-          startupTimeout: const Duration(seconds: 5),
-        );
-      } else {
-        control = _ActualChildProcess(script.path);
+    var executable = _dartExecutable();
+    final DesktopPlayerProcessControl control;
+    if (Platform.isWindows) {
+      executable = await _compiledChild(script);
+      control = WindowsPlayerProcessControl(
+        pollInterval: const Duration(milliseconds: 10),
+        startupTimeout: const Duration(seconds: 5),
+      );
+    } else {
+      control = _ActualChildProcess(script.path);
+    }
+    addTearDown(() async {
+      await control.terminateAll();
+      for (final pid in control.activePids) {
+        await control.release(pid);
       }
-      addTearDown(() async {
-        await control.terminateAll();
-        for (final pid in control.activePids) {
-          await control.release(pid);
-        }
-        await root.delete(recursive: true);
-      });
-      final child = await control.spawn(
+      await root.delete(recursive: true);
+    });
+    final child = await control.spawn(executable: executable, arguments: '{}');
+    expect(control.isAlive(child), isTrue);
+    var command = await control.consumeOpenItem(child);
+    for (var i = 0; i < 50 && command == null; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      command = await control.consumeOpenItem(child);
+    }
+    expect(command?.itemId, 'series-test');
+    expect(
+      await control.requestClose(child, const Duration(seconds: 2)),
+      isTrue,
+    );
+    expect(control.isAlive(child), isFalse);
+    await control.release(child);
+    if (Platform.isWindows) {
+      // Exercise real TerminateProcess/WaitForSingleObject as well as the
+      // graceful protocol path; both must retain ownership until release.
+      final secondChild = await control.spawn(
         executable: executable,
         arguments: '{}',
       );
-      expect(control.isAlive(child), isTrue);
-      var command = await control.consumeOpenItem(child);
-      for (var i = 0; i < 50 && command == null; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-        command = await control.consumeOpenItem(child);
-      }
-      expect(command?.itemId, 'series-test');
-      expect(
-        await control.requestClose(child, const Duration(seconds: 2)),
-        isTrue,
-      );
-      expect(control.isAlive(child), isFalse);
-      await control.release(child);
-      if (Platform.isWindows) {
-        // Exercise real TerminateProcess/WaitForSingleObject as well as the
-        // graceful protocol path; both must retain ownership until release.
-        final secondChild = await control.spawn(
-          executable: executable,
-          arguments: '{}',
-        );
-        await control.kill(secondChild);
-        expect(control.isAlive(secondChild), isFalse);
-        expect(control.activePids, [secondChild]);
-        await control.release(secondChild);
-        await control.release(secondChild);
-        expect(control.activePids, isEmpty);
-      }
-    },
-  );
+      await control.kill(secondChild);
+      expect(control.isAlive(secondChild), isFalse);
+      expect(control.activePids, [secondChild]);
+      await control.release(secondChild);
+      await control.release(secondChild);
+      expect(control.activePids, isEmpty);
+    }
+  });
 }
 
 /// Cache the build, never the test outcome. Both graceful and forced real

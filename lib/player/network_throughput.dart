@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// 把代理实际上游正文吞吐(字节/秒,约 1 秒窗口)格式化成播放器网速文案。
 ///
@@ -41,9 +41,9 @@ class NetworkSpeedReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = textStyle ?? Theme.of(context).textTheme.bodySmall;
+    final style = textStyle ?? AppUiTheme.of(context).textTheme.bodySmall;
     final resolved =
-        color ?? style?.color ?? Theme.of(context).colorScheme.onSurface;
+        color ?? style?.color ?? AppUiTheme.of(context).colorScheme.onSurface;
     final scale =
         MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 12) / 12;
     return Row(

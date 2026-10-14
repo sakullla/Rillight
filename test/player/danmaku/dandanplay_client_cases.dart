@@ -335,9 +335,8 @@ void main() {
         '{"errorCode":1000,"success":false,"errorMessage":"not found"}',
       ),
       throwsA(
-        _formatFailure(
-          DanmakuApiFailureKind.http,
-        ).having((e) => e.detail, 'detail', 'not found'),
+        _formatFailure(DanmakuApiFailureKind.http)
+            .having((e) => e.detail, 'detail', 'not found'),
       ),
     );
     expect(parseDanmakuComments('{"success":true}'), isEmpty);
@@ -357,9 +356,8 @@ void main() {
   test(
     'fetchComments at or above the isolate threshold returns identical results',
     () async {
-      final sync = await clientFor(
-        (options) => _officialCommentBody,
-      ).fetchComments(DandanplaySource.official, 100);
+      final sync = await clientFor((options) => _officialCommentBody)
+          .fetchComments(DandanplaySource.official, 100);
       final viaIsolate = await clientFor(
         (options) => _officialCommentBody,
         isolateParseThreshold: 0,

@@ -244,24 +244,21 @@ void main() {
     store = MemoryPlayerSettingsStore(_testOfficialAuth);
   });
 
-  test(
-    'manual search distinguishes failure from empty results and clears it on retry',
-    () async {
-      final controller = makeController();
-      addTearDown(controller.dispose);
-      await controller.startSession(context());
-      final status = controller.status;
-      client.searchError = const DanmakuApiException(
-        DanmakuApiFailureKind.unreachable,
-      );
-      expect(await controller.search('Show'), isEmpty);
-      expect(controller.searchFailure?.kind, DanmakuApiFailureKind.unreachable);
-      expect(controller.status, status);
-      client.searchError = null;
-      expect(await controller.search('No match'), isEmpty);
-      expect(controller.searchFailure, isNull);
-    },
-  );
+  test('manual search distinguishes failure from empty results and clears it on retry', () async {
+    final controller = makeController();
+    addTearDown(controller.dispose);
+    await controller.startSession(context());
+    final status = controller.status;
+    client.searchError = const DanmakuApiException(
+      DanmakuApiFailureKind.unreachable,
+    );
+    expect(await controller.search('Show'), isEmpty);
+    expect(controller.searchFailure?.kind, DanmakuApiFailureKind.unreachable);
+    expect(controller.status, status);
+    client.searchError = null;
+    expect(await controller.search('No match'), isEmpty);
+    expect(controller.searchFailure, isNull);
+  });
 
   test(
     'isConfigured requires official credentials or a custom server',
@@ -1214,79 +1211,76 @@ void main() {
     expect(client.commentCalls.map((c) => c.$2), [201]);
   });
 
-  test(
-    'match fileName covers basename, synthesis, movie year and season injection',
-    () {
-      // 保留发布式路径 basename。
-      expect(
-        danmakuMatchFileName(
-          pathBaseName: '无忧渡.S02E08.2160p.WEB-DL.mkv',
-          seriesTitle: '无忧渡',
-          episodeIndex: 8,
-          seasonIndex: 2,
-        ),
-        '无忧渡.S02E08.2160p.WEB-DL.mkv',
-      );
-      // 路径缺失时合成 SxxExx。
-      expect(
-        danmakuMatchFileName(
-          seriesTitle: '生万物',
-          title: '绣绣大婚当日遭抢亲',
-          seasonIndex: 2,
-          episodeIndex: 8,
-        ),
-        '生万物 S02E08',
-      );
-      expect(
-        danmakuMatchFileName(
-          seriesTitle: '生万物',
-          seasonIndex: 2,
-          episodeIndex: 8,
-          height: 2160,
-        ),
-        '生万物.S02E08.2160p',
-      );
-      // 电影名追加出品年份。
-      expect(
-        danmakuMatchFileName(title: '触不可及', productionYear: 2014),
-        '触不可及(2014)',
-      );
-      expect(
-        danmakuMatchFileName(
-          pathBaseName: '触不可及.mkv',
-          title: '触不可及',
-          productionYear: 2014,
-        ),
-        '触不可及(2014).mkv',
-      );
-      expect(
-        danmakuMatchFileName(
-          pathBaseName: '触不可及(2014).mkv',
-          productionYear: 2014,
-        ),
-        '触不可及(2014).mkv',
-      );
-      // 路径无季号时注入 SxxExx。
-      expect(
-        danmakuMatchFileName(
-          pathBaseName: '边境领主 第04集.mkv',
-          seriesTitle: '从零开始的边境领主',
-          seasonIndex: 4,
-          episodeIndex: 4,
-        ),
-        '从零开始的边境领主 S04E04',
-      );
-      expect(
-        danmakuMatchFileName(
-          pathBaseName: 'Show.S01E04.mkv',
-          seriesTitle: 'Show',
-          seasonIndex: 4,
-          episodeIndex: 4,
-        ),
-        'Show S04E04',
-      );
-    },
-  );
+  test('match fileName covers basename, synthesis, movie year and season injection', () {
+    // 保留发布式路径 basename。
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '无忧渡.S02E08.2160p.WEB-DL.mkv',
+        seriesTitle: '无忧渡',
+        episodeIndex: 8,
+        seasonIndex: 2,
+      ),
+      '无忧渡.S02E08.2160p.WEB-DL.mkv',
+    );
+    // 路径缺失时合成 SxxExx。
+    expect(
+      danmakuMatchFileName(
+        seriesTitle: '生万物',
+        title: '绣绣大婚当日遭抢亲',
+        seasonIndex: 2,
+        episodeIndex: 8,
+      ),
+      '生万物 S02E08',
+    );
+    expect(
+      danmakuMatchFileName(
+        seriesTitle: '生万物',
+        seasonIndex: 2,
+        episodeIndex: 8,
+        height: 2160,
+      ),
+      '生万物.S02E08.2160p',
+    );
+    // 电影名追加出品年份。
+    expect(
+      danmakuMatchFileName(title: '触不可及', productionYear: 2014),
+      '触不可及(2014)',
+    );
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '触不可及.mkv',
+        title: '触不可及',
+        productionYear: 2014,
+      ),
+      '触不可及(2014).mkv',
+    );
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '触不可及(2014).mkv',
+        productionYear: 2014,
+      ),
+      '触不可及(2014).mkv',
+    );
+    // 路径无季号时注入 SxxExx。
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: '边境领主 第04集.mkv',
+        seriesTitle: '从零开始的边境领主',
+        seasonIndex: 4,
+        episodeIndex: 4,
+      ),
+      '从零开始的边境领主 S04E04',
+    );
+    expect(
+      danmakuMatchFileName(
+        pathBaseName: 'Show.S01E04.mkv',
+        seriesTitle: 'Show',
+        seasonIndex: 4,
+        episodeIndex: 4,
+      ),
+      'Show S04E04',
+    );
+  });
 
   test('match ranking prefers year and rejects remake tags', () {
     const remake = DanmakuMatchCandidate(

@@ -1,5 +1,7 @@
 import '../helpers/case_shard.dart';
+
 import 'package:rillight/emby/emby_playback.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -313,55 +315,52 @@ void main() {
   }
 
   for (final closeEarly in [false, true]) {
-    cases.test(
-      'HTTP begins during cache initialization (close=$closeEarly)',
-      () async {
-        final initialized = Completer<SessionByteCache>();
-        final requested = Completer<void>();
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        final proxy = await _createProxy(cache: initialized.future);
-        final client = HttpClient();
-        server.listen((request) async {
-          requested.complete();
-          request.response.write('startup');
-          await request.response.close();
-        });
-        final response = (await client.getUrl(
-          proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
-        )).close();
-        try {
-          // A gate, rather than a timing comparison, proves the HTTP request
-          // reaches its origin before cache initialization is allowed to finish.
-          await requested.future.timeout(const Duration(seconds: 3));
-          expect(initialized.isCompleted, false);
-          final failedRead = closeEarly
-              ? response
-                    .then<void>((value) => value.drain<void>())
-                    .catchError((Object _) {})
-              : null;
-          final closing = closeEarly ? proxy.close() : null;
-          final cache = await SessionByteCache.open();
-          initialized.complete(cache);
-          if (closeEarly) {
-            await closing;
-            await failedRead;
-            expect(cache.diagnostics['closed'], true);
-          } else {
-            expect(
-              await (await response).transform(utf8.decoder).join(),
-              'startup',
-            );
-          }
-        } finally {
-          if (!initialized.isCompleted) {
-            initialized.complete(await SessionByteCache.open());
-          }
-          client.close(force: true);
-          await proxy.close();
-          await server.close(force: true);
+    cases.test('HTTP begins during cache initialization (close=$closeEarly)', () async {
+      final initialized = Completer<SessionByteCache>();
+      final requested = Completer<void>();
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final proxy = await _createProxy(cache: initialized.future);
+      final client = HttpClient();
+      server.listen((request) async {
+        requested.complete();
+        request.response.write('startup');
+        await request.response.close();
+      });
+      final response = (await client.getUrl(
+        proxy.register(Uri.parse('http://127.0.0.1:${server.port}/media')),
+      )).close();
+      try {
+        // A gate, rather than a timing comparison, proves the HTTP request
+        // reaches its origin before cache initialization is allowed to finish.
+        await requested.future.timeout(const Duration(seconds: 3));
+        expect(initialized.isCompleted, false);
+        final failedRead = closeEarly
+            ? response
+                  .then<void>((value) => value.drain<void>())
+                  .catchError((Object _) {})
+            : null;
+        final closing = closeEarly ? proxy.close() : null;
+        final cache = await SessionByteCache.open();
+        initialized.complete(cache);
+        if (closeEarly) {
+          await closing;
+          await failedRead;
+          expect(cache.diagnostics['closed'], true);
+        } else {
+          expect(
+            await (await response).transform(utf8.decoder).join(),
+            'startup',
+          );
         }
-      },
-    );
+      } finally {
+        if (!initialized.isCompleted) {
+          initialized.complete(await SessionByteCache.open());
+        }
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+      }
+    });
   }
 
   cases.test(
@@ -389,72 +388,67 @@ void main() {
     },
   );
 
-  cases.test(
-    'next-episode warm handoff keeps cache coverage and download speed after seek',
-    () async {
-      const kib = 1024;
-      const total = 512 * kib;
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final cache = await SessionByteCache.open();
-      final proxy = await _createProxy(cache: cache, sessionBuffering: true);
-      final client = HttpClient();
-      server.listen((request) async {
-        final range = MediaByteRange.resolve(
-          request.headers.value('range'),
-          total,
-        )!;
-        request.response.statusCode = 206;
-        request.response.headers.set(
-          'content-range',
-          'bytes ${range.start}-${range.end}/$total',
-        );
-        request.response.headers.set('etag', '"episode-two"');
-        request.response.contentLength = range.length;
-        request.response.add(
-          Uint8List(range.length)..fillRange(0, range.length, 9),
-        );
-        await request.response.close();
-      });
-      final origin = Uri.parse(
-        'http://127.0.0.1:${server.port}/episode-two.mp4',
+  cases.test('next-episode warm handoff keeps cache coverage and download speed after seek', () async {
+    const kib = 1024;
+    const total = 512 * kib;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final cache = await SessionByteCache.open();
+    final proxy = await _createProxy(cache: cache, sessionBuffering: true);
+    final client = HttpClient();
+    server.listen((request) async {
+      final range = MediaByteRange.resolve(
+        request.headers.value('range'),
+        total,
+      )!;
+      request.response.statusCode = 206;
+      request.response.headers.set(
+        'content-range',
+        'bytes ${range.start}-${range.end}/$total',
       );
-      final route = proxy.register(origin);
-      proxy.installWarmPrefix(
-        origin,
-        Uint8List(32 * kib)..fillRange(0, 32 * kib, 9),
-        etag: '"episode-two"',
-        totalBytes: total,
+      request.response.headers.set('etag', '"episode-two"');
+      request.response.contentLength = range.length;
+      request.response.add(
+        Uint8List(range.length)..fillRange(0, range.length, 9),
       );
-      Future<void> read(String range) async {
-        final request = await client.getUrl(route);
-        request.headers.set('range', range);
-        final response = await request.close();
-        expect(response.statusCode, 206);
-        await response.drain<void>();
-      }
+      await request.response.close();
+    });
+    final origin = Uri.parse('http://127.0.0.1:${server.port}/episode-two.mp4');
+    final route = proxy.register(origin);
+    proxy.installWarmPrefix(
+      origin,
+      Uint8List(32 * kib)..fillRange(0, 32 * kib, 9),
+      etag: '"episode-two"',
+      totalBytes: total,
+    );
+    Future<void> read(String range) async {
+      final request = await client.getUrl(route);
+      request.headers.set('range', range);
+      final response = await request.close();
+      expect(response.statusCode, 206);
+      await response.drain<void>();
+    }
 
-      try {
-        await read('bytes=0-${64 * kib - 1}');
-        await proxy.refreshTimeline(const Duration(minutes: 1));
-        expect(proxy.upstreamBytes, 32 * kib + 1);
-        expect(proxy.upstreamBytesPerSecond, greaterThan(0));
-        expect(proxy.diagnostics['cachedByteRanges'], [
-          {'start': 0, 'end': 64 * kib},
-        ]);
-        await read('bytes=${128 * kib}-${256 * kib - 1}');
-        await proxy.refreshTimeline(const Duration(minutes: 1));
-        expect(proxy.upstreamBytesPerSecond, greaterThan(0));
-        expect(proxy.diagnostics['cachedByteRanges'], [
-          {'start': 0, 'end': 64 * kib},
-          {'start': 128 * kib, 'end': 256 * kib},
-        ]);
-      } finally {
-        client.close(force: true);
-        await proxy.close();
-        await server.close(force: true);
-      }
-    },
-  );
+    try {
+      await read('bytes=0-${64 * kib - 1}');
+      await proxy.refreshTimeline(const Duration(minutes: 1));
+      expect(proxy.upstreamBytes, 32 * kib + 1);
+      expect(proxy.upstreamBytesPerSecond, greaterThan(0));
+      expect(proxy.diagnostics['cachedByteRanges'], [
+        {'start': 0, 'end': 64 * kib},
+      ]);
+      await read('bytes=${128 * kib}-${256 * kib - 1}');
+      await proxy.refreshTimeline(const Duration(minutes: 1));
+      expect(proxy.upstreamBytesPerSecond, greaterThan(0));
+      expect(proxy.diagnostics['cachedByteRanges'], [
+        {'start': 0, 'end': 64 * kib},
+        {'start': 128 * kib, 'end': 256 * kib},
+      ]);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
   cases.test(
     'warm handoff downloads ahead while the decoder is paused',
     () async {
@@ -548,9 +542,8 @@ void main() {
           await request.response.close();
           return;
         }
-        final match = RegExp(
-          r'^bytes=(\d+)-(\d+)$',
-        ).firstMatch(request.headers.value('range')!)!;
+        final match = RegExp(r'^bytes=(\d+)-(\d+)$')
+            .firstMatch(request.headers.value('range')!)!;
         final start = int.parse(match[1]!);
         final end = int.parse(match[2]!);
         request.response.statusCode = 206;
@@ -879,55 +872,52 @@ void main() {
     },
   );
 
-  cases.test(
-    'seek cancels zero-byte recovery without another upstream read',
-    () async {
-      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final proxy = await _createProxy();
-      final client = HttpClient();
-      final stalled = <Socket>[];
-      var requests = 0;
-      upstream.listen((request) async {
-        requests++;
-        request.response.headers.set('etag', '"stable"');
-        request.response.contentLength = 12;
-        final socket = await request.response.detachSocket(writeHeaders: true);
-        stalled.add(socket);
-        await socket.flush();
-      });
-      try {
-        final url = proxy.register(
-          Uri.parse('http://127.0.0.1:${upstream.port}/video'),
-        );
-        final responseFuture = (await client.getUrl(url)).close();
-        final deadline = DateTime.now().add(const Duration(seconds: 2));
-        while (requests == 0 && DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-        }
-        expect(requests, 1);
-        proxy.cancelPendingReads(preserveSubtitles: true);
-        try {
-          final response = await responseFuture.timeout(
-            const Duration(seconds: 2),
-          );
-          expect(response.statusCode, HttpStatus.badGateway);
-          await response.drain<void>();
-        } on Exception catch (error) {
-          if (error is TimeoutException) rethrow;
-          // A cancelled socket may close before the local 502 reaches the client.
-        }
-        expect(requests, 1);
-        expect(proxy.diagnostics['recoveryAttempts'], 0);
-      } finally {
-        client.close(force: true);
-        await proxy.close();
-        for (final socket in stalled) {
-          socket.destroy();
-        }
-        await upstream.close(force: true);
+  cases.test('seek cancels zero-byte recovery without another upstream read', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final proxy = await _createProxy();
+    final client = HttpClient();
+    final stalled = <Socket>[];
+    var requests = 0;
+    upstream.listen((request) async {
+      requests++;
+      request.response.headers.set('etag', '"stable"');
+      request.response.contentLength = 12;
+      final socket = await request.response.detachSocket(writeHeaders: true);
+      stalled.add(socket);
+      await socket.flush();
+    });
+    try {
+      final url = proxy.register(
+        Uri.parse('http://127.0.0.1:${upstream.port}/video'),
+      );
+      final responseFuture = (await client.getUrl(url)).close();
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (requests == 0 && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
       }
-    },
-  );
+      expect(requests, 1);
+      proxy.cancelPendingReads(preserveSubtitles: true);
+      try {
+        final response = await responseFuture.timeout(
+          const Duration(seconds: 2),
+        );
+        expect(response.statusCode, HttpStatus.badGateway);
+        await response.drain<void>();
+      } on Exception catch (error) {
+        if (error is TimeoutException) rethrow;
+        // A cancelled socket may close before the local 502 reaches the client.
+      }
+      expect(requests, 1);
+      expect(proxy.diagnostics['recoveryAttempts'], 0);
+    } finally {
+      client.close(force: true);
+      await proxy.close();
+      for (final socket in stalled) {
+        socket.destroy();
+      }
+      await upstream.close(force: true);
+    }
+  });
 
   cases.test('zero-byte recovery rejects an ignored Range', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -1393,9 +1383,8 @@ void main() {
             .where((line) => line.startsWith('http://'))
             .map(Uri.parse)
             .toList();
-        final first = get(
-          segments[0],
-        ).then((response) => response.drain<void>());
+        final first = get(segments[0])
+            .then((response) => response.drain<void>());
         await rejected.future.timeout(const Duration(seconds: 3));
         final deadline = DateTime.now().add(const Duration(seconds: 3));
         while (proxy.diagnostics['segmentPrefetchRefusal'] == null &&
@@ -1994,125 +1983,117 @@ void main() {
     },
   );
 
-  cases.test(
-    'busy integrity snapshot retains briefly then expires without degrading disk',
-    () async {
-      final fixture = await _CacheFixture.open(
-        disk: true,
-        sessionBuffering: true,
-        readAheadBytes: 2 * 1024 * 1024,
-        verifiedSnapshotTtl: const Duration(milliseconds: 1000),
-        integrityRecheck: const Duration(milliseconds: 40),
-      );
-      fixture.binaryBody = _paddedProgressiveMp4();
-      await fixture.readBytes('bytes=0-2097151');
-      await fixture.settle();
-      const duration = Duration(seconds: 4);
-      fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
-      for (var attempt = 0; attempt < 10; attempt++) {
-        await fixture.proxy.refreshTimeline(duration);
-        if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List)
-            .isNotEmpty) {
-          break;
-        }
+  cases.test('busy integrity snapshot retains briefly then expires without degrading disk', () async {
+    final fixture = await _CacheFixture.open(
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 2 * 1024 * 1024,
+      verifiedSnapshotTtl: const Duration(milliseconds: 1000),
+      integrityRecheck: const Duration(milliseconds: 40),
+    );
+    fixture.binaryBody = _paddedProgressiveMp4();
+    await fixture.readBytes('bytes=0-2097151');
+    await fixture.settle();
+    const duration = Duration(seconds: 4);
+    fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+    for (var attempt = 0; attempt < 10; attempt++) {
+      await fixture.proxy.refreshTimeline(duration);
+      if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isNotEmpty) {
+        break;
       }
-      expect(
-        fixture.proxy.bufferedEnd(
-          const Duration(seconds: 1),
-          const Duration(seconds: 2),
-        ),
-        duration,
-      );
-      await fixture.cache.resize(
-        memoryBytes: 1024 * 1024,
-        pendingBytes: 0,
-        diskBytes: 64 * 1024 * 1024,
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      await fixture.proxy.refreshTimeline(duration);
-      expect(
-        fixture.proxy.bufferedEnd(
-          const Duration(seconds: 1),
-          const Duration(seconds: 2),
-        ),
-        duration,
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
-      await fixture.proxy.refreshTimeline(duration);
-      expect(
-        fixture.proxy.bufferedEnd(
-          const Duration(seconds: 1),
-          const Duration(seconds: 2),
-        ),
+    }
+    expect(
+      fixture.proxy.bufferedEnd(
+        const Duration(seconds: 1),
         const Duration(seconds: 2),
-      );
-      expect(fixture.cache.diagnostics['degradation'], null);
-      await fixture.cache.close();
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      await fixture.proxy.refreshTimeline(duration);
-      expect(
-        fixture.proxy.bufferedEnd(
-          const Duration(seconds: 1),
-          const Duration(seconds: 2),
-        ),
+      ),
+      duration,
+    );
+    await fixture.cache.resize(
+      memoryBytes: 1024 * 1024,
+      pendingBytes: 0,
+      diskBytes: 64 * 1024 * 1024,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await fixture.proxy.refreshTimeline(duration);
+    expect(
+      fixture.proxy.bufferedEnd(
+        const Duration(seconds: 1),
         const Duration(seconds: 2),
-      );
-    },
-  );
+      ),
+      duration,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    await fixture.proxy.refreshTimeline(duration);
+    expect(
+      fixture.proxy.bufferedEnd(
+        const Duration(seconds: 1),
+        const Duration(seconds: 2),
+      ),
+      const Duration(seconds: 2),
+    );
+    expect(fixture.cache.diagnostics['degradation'], null);
+    await fixture.cache.close();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await fixture.proxy.refreshTimeline(duration);
+    expect(
+      fixture.proxy.bufferedEnd(
+        const Duration(seconds: 1),
+        const Duration(seconds: 2),
+      ),
+      const Duration(seconds: 2),
+    );
+  });
 
-  cases.test(
-    'same-length disk corruption withdraws a published timeline',
-    () async {
-      final fixture = await _CacheFixture.open(
-        memoryBytes: 0,
-        disk: true,
-        sessionBuffering: true,
-        readAheadBytes: 2 * 1024 * 1024,
-        integrityRecheck: const Duration(milliseconds: 40),
-      );
-      fixture.binaryBody = _paddedProgressiveMp4();
-      await fixture.readBytes('bytes=0-2097151');
-      await fixture.settle();
-      const duration = Duration(seconds: 4);
-      fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
-      // Integrity work is bounded per snapshot; the complete two-block range
-      // becomes visible after the verifier has visited both blocks.
-      for (var attempt = 0; attempt < 10; attempt++) {
-        await fixture.proxy.refreshTimeline(duration);
-        if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List)
-            .isNotEmpty) {
-          break;
-        }
+  cases.test('same-length disk corruption withdraws a published timeline', () async {
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 0,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 2 * 1024 * 1024,
+      integrityRecheck: const Duration(milliseconds: 40),
+    );
+    fixture.binaryBody = _paddedProgressiveMp4();
+    await fixture.readBytes('bytes=0-2097151');
+    await fixture.settle();
+    const duration = Duration(seconds: 4);
+    fixture.proxy.selectContainerTracks(videoTrackId: 1, audioTrackId: 2);
+    // Integrity work is bounded per snapshot; the complete two-block range
+    // becomes visible after the verifier has visited both blocks.
+    for (var attempt = 0; attempt < 10; attempt++) {
+      await fixture.proxy.refreshTimeline(duration);
+      if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isNotEmpty) {
+        break;
       }
-      expect(fixture.proxy.diagnostics['cachedTimeRanges'], isNotEmpty);
+    }
+    expect(fixture.proxy.diagnostics['cachedTimeRanges'], isNotEmpty);
 
-      final blocks = fixture.root!
-          .listSync(recursive: true, followLinks: false)
-          .whereType<File>()
-          .where((file) => file.path.endsWith('.block'))
-          .toList();
-      expect(blocks, isNotEmpty);
-      for (final block in blocks) {
-        final data = await block.readAsBytes();
-        data[0] ^= 0xff;
-        await block.writeAsBytes(data, flush: true);
-        // The worker memoizes only unchanged file metadata. Explicitly advance
-        // the mtime so this test is stable on filesystems with coarse timestamps.
-        await block.setLastModified(
-          DateTime.now().add(const Duration(seconds: 2)),
-        );
+    final blocks = fixture.root!
+        .listSync(recursive: true, followLinks: false)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.block'))
+        .toList();
+    expect(blocks, isNotEmpty);
+    for (final block in blocks) {
+      final data = await block.readAsBytes();
+      data[0] ^= 0xff;
+      await block.writeAsBytes(data, flush: true);
+      // The worker memoizes only unchanged file metadata. Explicitly advance
+      // the mtime so this test is stable on filesystems with coarse timestamps.
+      await block.setLastModified(
+        DateTime.now().add(const Duration(seconds: 2)),
+      );
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    for (var attempt = 0; attempt < 10; attempt++) {
+      await fixture.proxy.refreshTimeline(duration);
+      if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isEmpty) {
+        break;
       }
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      for (var attempt = 0; attempt < 10; attempt++) {
-        await fixture.proxy.refreshTimeline(duration);
-        if ((fixture.proxy.diagnostics['cachedTimeRanges'] as List).isEmpty) {
-          break;
-        }
-      }
-      expect(fixture.proxy.diagnostics['cachedTimeRanges'], isEmpty);
-      expect(fixture.cache.diagnostics['pendingBytes'], 0);
-    },
-  );
+    }
+    expect(fixture.proxy.diagnostics['cachedTimeRanges'], isEmpty);
+    expect(fixture.cache.diagnostics['pendingBytes'], 0);
+  });
 
   cases.test(
     'retry invalidates published timeline identity and ranges',
@@ -2210,9 +2191,8 @@ void main() {
       final client = HttpClient();
       try {
         final source = Uri.parse('http://127.0.0.1:${upstream.port}/media');
-        final response = await (await client.getUrl(
-          proxy.register(source),
-        )).close();
+        final response = await (await client.getUrl(proxy.register(source)))
+            .close();
         expect(response.statusCode, HttpStatus.unauthorized);
         await response.drain<void>();
         expect(
@@ -3064,40 +3044,36 @@ void main() {
     );
   }
 
-  cases.test(
-    'temporary future-range 403 resumes prefetch without losing cached playback',
-    () async {
-      const mib = 1024 * 1024;
-      final fixture = await _CacheFixture.open(
-        memoryBytes: 8 * mib,
-        waitForRetry: _shortRetry,
-        disk: true,
-        sessionBuffering: true,
-        readAheadBytes: 40 * mib,
-      );
-      fixture.binaryBody = Uint8List(40 * mib);
-      fixture.forbiddenOffset = 32 * mib;
-      await fixture.readBytes('bytes=0-${mib - 1}');
-      final rejected = DateTime.now().add(const Duration(seconds: 5));
-      while (fixture.proxy.diagnostics['lastUpstreamStatus'] != 403 &&
-          DateTime.now().isBefore(rejected)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      expect(fixture.proxy.diagnostics['lastUpstreamStatus'], 403);
-      expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
-      fixture.forbiddenOffset = null;
-      final resumed = DateTime.now().add(const Duration(seconds: 5));
-      while ((fixture.proxy.diagnostics['readAheadPublishedBytes'] as int? ??
-                  0) <
-              40 * mib &&
-          DateTime.now().isBefore(resumed)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      expect(fixture.proxy.diagnostics['readAheadPublishedBytes'], 40 * mib);
-      expect(fixture.proxy.diagnostics['readAheadFailed'], false);
-      expect(fixture.proxy.diagnostics['recoveryAttempts'], greaterThan(0));
-    },
-  );
+  cases.test('temporary future-range 403 resumes prefetch without losing cached playback', () async {
+    const mib = 1024 * 1024;
+    final fixture = await _CacheFixture.open(
+      memoryBytes: 8 * mib,
+      waitForRetry: _shortRetry,
+      disk: true,
+      sessionBuffering: true,
+      readAheadBytes: 40 * mib,
+    );
+    fixture.binaryBody = Uint8List(40 * mib);
+    fixture.forbiddenOffset = 32 * mib;
+    await fixture.readBytes('bytes=0-${mib - 1}');
+    final rejected = DateTime.now().add(const Duration(seconds: 5));
+    while (fixture.proxy.diagnostics['lastUpstreamStatus'] != 403 &&
+        DateTime.now().isBefore(rejected)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(fixture.proxy.diagnostics['lastUpstreamStatus'], 403);
+    expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+    fixture.forbiddenOffset = null;
+    final resumed = DateTime.now().add(const Duration(seconds: 5));
+    while ((fixture.proxy.diagnostics['readAheadPublishedBytes'] as int? ?? 0) <
+            40 * mib &&
+        DateTime.now().isBefore(resumed)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(fixture.proxy.diagnostics['readAheadPublishedBytes'], 40 * mib);
+    expect(fixture.proxy.diagnostics['readAheadFailed'], false);
+    expect(fixture.proxy.diagnostics['recoveryAttempts'], greaterThan(0));
+  });
 
   cases.test(
     'rejected read-ahead preserves cached bytes and reports demand failure',
@@ -3230,9 +3206,9 @@ void main() {
           proxy.register(Uri.parse('http://127.0.0.1:${server.port}/$path'));
       try {
         for (var i = 0; i < 8; i++) {
-          final response = await (await client.getUrl(
-            route('movie$i'),
-          )).close().timeout(const Duration(seconds: 2));
+          final response = await (await client.getUrl(route('movie$i')))
+              .close()
+              .timeout(const Duration(seconds: 2));
           expect(response.statusCode, 200);
           final received = Completer<void>();
           response.listen((bytes) {
@@ -3245,9 +3221,9 @@ void main() {
           proxy.diagnostics['proxyInFlightPeakBytes'],
           lessThanOrEqualTo(12 * 1024 * 1024),
         );
-        final overloaded = await (await client.getUrl(
-          route('tail'),
-        )).close().timeout(const Duration(seconds: 4));
+        final overloaded = await (await client.getUrl(route('tail')))
+            .close()
+            .timeout(const Duration(seconds: 4));
         expect(overloaded.statusCode, HttpStatus.serviceUnavailable);
         expect(proxy.diagnostics['admissionWaits'], 1);
         expect(proxy.diagnostics['admissionRejected'], 1);
@@ -3260,9 +3236,9 @@ void main() {
         }
         expect(proxy.diagnostics['activeRequests'], 0);
         expect(proxy.diagnostics['cacheWorkspaceBytes'], 0);
-        final tail = await (await client.getUrl(
-          route('tail'),
-        )).close().timeout(const Duration(seconds: 2));
+        final tail = await (await client.getUrl(route('tail')))
+            .close()
+            .timeout(const Duration(seconds: 2));
         expect(tail.statusCode, 200);
         expect(
           await tail.fold<int>(0, (total, bytes) => total + bytes.length),
@@ -3364,62 +3340,59 @@ void main() {
       expect(fixture.ranges.last, 'bytes=0-1048575');
     },
   );
-  cases.test(
-    'stable socket fragments aggregate into 4 MiB blocks without delaying output',
-    () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final client = HttpClient();
-      final cache = await SessionByteCache.open(
-        memoryLimitBytes: 32 * 1024 * 1024,
-      );
-      final proxy = await _createProxy(cache: cache);
-      final continueBody = Completer<void>();
-      const size = 8 * 1024 * 1024 + 32 * 1024;
-      server.listen((request) async {
-        request.response.headers.set('cache-control', 'max-age=600');
-        request.response.headers.set('etag', '"blocks"');
-        request.response.contentLength = size;
-        request.response.add(List.filled(64 * 1024, 7));
+  cases.test('stable socket fragments aggregate into 4 MiB blocks without delaying output', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final client = HttpClient();
+    final cache = await SessionByteCache.open(
+      memoryLimitBytes: 32 * 1024 * 1024,
+    );
+    final proxy = await _createProxy(cache: cache);
+    final continueBody = Completer<void>();
+    const size = 8 * 1024 * 1024 + 32 * 1024;
+    server.listen((request) async {
+      request.response.headers.set('cache-control', 'max-age=600');
+      request.response.headers.set('etag', '"blocks"');
+      request.response.contentLength = size;
+      request.response.add(List.filled(64 * 1024, 7));
+      await request.response.flush();
+      await continueBody.future;
+      for (var position = 64 * 1024; position < size; position += 32 * 1024) {
+        request.response.add(List.filled(32 * 1024, 7));
         await request.response.flush();
-        await continueBody.future;
-        for (var position = 64 * 1024; position < size; position += 32 * 1024) {
-          request.response.add(List.filled(32 * 1024, 7));
-          await request.response.flush();
-        }
-        await request.response.close();
-      });
-      try {
-        final uri = proxy.register(
-          Uri.parse('http://127.0.0.1:${server.port}/media'),
-        );
-        final response = await (await client.getUrl(uri)).close();
-        var received = 0;
-        await for (final bytes in response) {
-          if (received == 0) {
-            expect(cache.diagnostics['indexEntries'], 0);
-            continueBody.complete();
-          }
-          received += bytes.length;
-        }
-        await Future<void>.delayed(Duration.zero);
-        expect(received, size);
-        expect(cache.diagnostics['indexEntries'], 3);
-        expect(cache.diagnostics['memoryBytes'], size);
-        expect(
-          proxy.diagnostics['proxyInFlightPeakBytes'],
-          lessThanOrEqualTo(5 * 1024 * 1024),
-        );
-        final before = proxy.upstreamBytes;
-        await (await (await client.getUrl(uri)).close()).drain<void>();
-        expect(proxy.upstreamBytes, before);
-      } finally {
-        if (!continueBody.isCompleted) continueBody.complete();
-        client.close(force: true);
-        await proxy.close();
-        await server.close(force: true);
       }
-    },
-  );
+      await request.response.close();
+    });
+    try {
+      final uri = proxy.register(
+        Uri.parse('http://127.0.0.1:${server.port}/media'),
+      );
+      final response = await (await client.getUrl(uri)).close();
+      var received = 0;
+      await for (final bytes in response) {
+        if (received == 0) {
+          expect(cache.diagnostics['indexEntries'], 0);
+          continueBody.complete();
+        }
+        received += bytes.length;
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(received, size);
+      expect(cache.diagnostics['indexEntries'], 3);
+      expect(cache.diagnostics['memoryBytes'], size);
+      expect(
+        proxy.diagnostics['proxyInFlightPeakBytes'],
+        lessThanOrEqualTo(5 * 1024 * 1024),
+      );
+      final before = proxy.upstreamBytes;
+      await (await (await client.getUrl(uri)).close()).drain<void>();
+      expect(proxy.upstreamBytes, before);
+    } finally {
+      if (!continueBody.isCompleted) continueBody.complete();
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    }
+  });
   cases.test(
     'same ETag gap immediately applies tightened control before its next hit',
     () async {
@@ -3436,115 +3409,109 @@ void main() {
     },
   );
 
-  cases.test(
-    'complete 512KiB no-validator response reuses bounded disk and memory reads',
-    () async {
-      // 生产恒带 SessionByteCache,只保留磁盘路径;内存路径与路由封印注释
-      // 同理(见 4096-entry HLS 用例说明),是等价存储变体。
-      final fixture = await _CacheFixture.open(memoryBytes: 0, disk: true);
-      fixture.etag = null;
-      fixture.body = 'a' * (512 * 1024);
-      expect((await fixture.read(null)).$2, fixture.body);
-      await fixture.settle();
-      final before = fixture.proxy.upstreamBytes;
-      expect((await fixture.read(null)).$2, fixture.body);
-      expect(fixture.requests, 1);
-      expect(fixture.proxy.upstreamBytes, before);
-      await fixture.settle();
-      expect(
-        fixture.proxy.diagnostics['proxyInFlightPeakBytes'],
-        lessThanOrEqualTo(2 * 1024 * 1024),
-      );
-      expect(fixture.cache.diagnostics['protectedRanges'], 0);
-    },
-  );
+  cases.test('complete 512KiB no-validator response reuses bounded disk and memory reads', () async {
+    // 生产恒带 SessionByteCache,只保留磁盘路径;内存路径与路由封印注释
+    // 同理(见 4096-entry HLS 用例说明),是等价存储变体。
+    final fixture = await _CacheFixture.open(memoryBytes: 0, disk: true);
+    fixture.etag = null;
+    fixture.body = 'a' * (512 * 1024);
+    expect((await fixture.read(null)).$2, fixture.body);
+    await fixture.settle();
+    final before = fixture.proxy.upstreamBytes;
+    expect((await fixture.read(null)).$2, fixture.body);
+    expect(fixture.requests, 1);
+    expect(fixture.proxy.upstreamBytes, before);
+    await fixture.settle();
+    expect(
+      fixture.proxy.diagnostics['proxyInFlightPeakBytes'],
+      lessThanOrEqualTo(2 * 1024 * 1024),
+    );
+    expect(fixture.cache.diagnostics['protectedRanges'], 0);
+  });
 
   // cache=false 与 cache=true 走同一份路由封印/淘汰代码,生产恒带
   // SessionByteCache,这里只保留带缓存的完整路径。
-  cases.test(
-    '4096-entry >512KiB HLS keeps sealed first last and rewind routes',
-    () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final origin = Uri.parse('http://127.0.0.1:${server.port}');
-      var requests = 0;
-      final manifest =
-          '#EXTM3U\n${List.filled(9000, '# ${'x' * 60}\n').join()}${List.generate(4096, (i) => '#EXTINF:2,\nsegment$i.ts?api_key=secret\n').join()}#EXT-X-ENDLIST\n';
-      expect(utf8.encode(manifest).length, greaterThan(512 * 1024));
-      server.listen((request) async {
-        requests++;
-        final text = request.uri.path == '/index.m3u8'
-            ? manifest
-            : request.uri.path;
-        final bytes = utf8.encode(text);
-        request.response.contentLength = bytes.length;
-        request.response.headers.set('cache-control', 'max-age=3600');
-        request.response.add(bytes);
-        await request.response.close();
-      });
-      final cache = await SessionByteCache.open();
-      final proxy = await _createProxy(
-        origin: origin,
-        cache: cache,
-        headers: {'X-Emby-Token': 'secret'},
+  cases.test('4096-entry >512KiB HLS keeps sealed first last and rewind routes', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final origin = Uri.parse('http://127.0.0.1:${server.port}');
+    var requests = 0;
+    final manifest =
+        '#EXTM3U\n${List.filled(9000, '# ${'x' * 60}\n').join()}${List.generate(4096, (i) => '#EXTINF:2,\nsegment$i.ts?api_key=secret\n').join()}#EXT-X-ENDLIST\n';
+    expect(utf8.encode(manifest).length, greaterThan(512 * 1024));
+    server.listen((request) async {
+      requests++;
+      final text = request.uri.path == '/index.m3u8'
+          ? manifest
+          : request.uri.path;
+      final bytes = utf8.encode(text);
+      request.response.contentLength = bytes.length;
+      request.response.headers.set('cache-control', 'max-age=3600');
+      request.response.add(bytes);
+      await request.response.close();
+    });
+    final cache = await SessionByteCache.open();
+    final proxy = await _createProxy(
+      origin: origin,
+      cache: cache,
+      headers: {'X-Emby-Token': 'secret'},
+    );
+    final client = HttpClient();
+    addTearDown(() async {
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    });
+    Future<(int, String)> get(Uri url) async {
+      final response = await (await client.getUrl(url)).close();
+      return (
+        response.statusCode,
+        await response.transform(utf8.decoder).join(),
       );
-      final client = HttpClient();
-      addTearDown(() async {
-        client.close(force: true);
-        await proxy.close();
-        await server.close(force: true);
-      });
-      Future<(int, String)> get(Uri url) async {
-        final response = await (await client.getUrl(url)).close();
-        return (
-          response.statusCode,
-          await response.transform(utf8.decoder).join(),
-        );
-      }
+    }
 
-      final playlistRoute = proxy.register(origin.resolve('/index.m3u8'));
-      final result = await get(playlistRoute);
-      expect(result.$1, 200);
-      expect(result.$2, isNot(contains('secret')));
-      final routes = result.$2
-          .split('\n')
-          .where((line) => line.startsWith('http'))
-          .map(Uri.parse)
-          .toList();
-      expect(routes, hasLength(4096));
-      expect((await get(routes.first)).$2, '/segment0.ts');
-      expect((await get(routes.last)).$2, '/segment4095.ts');
-      // Distinct admitted resources evict cache metadata, never issued routes.
-      // 260 个微路由逐个串行往返是本用例的耗时主体;代理并发上限为 8,
-      // 按 8 个一批并发后断言不变。
-      final bulk = routes.skip(1).take(260).toList();
-      for (var i = 0; i < bulk.length; i += 8) {
-        final results = await Future.wait(bulk.skip(i).take(8).map(get));
-        for (final result in results) {
-          expect(result.$1, 200);
-        }
+    final playlistRoute = proxy.register(origin.resolve('/index.m3u8'));
+    final result = await get(playlistRoute);
+    expect(result.$1, 200);
+    expect(result.$2, isNot(contains('secret')));
+    final routes = result.$2
+        .split('\n')
+        .where((line) => line.startsWith('http'))
+        .map(Uri.parse)
+        .toList();
+    expect(routes, hasLength(4096));
+    expect((await get(routes.first)).$2, '/segment0.ts');
+    expect((await get(routes.last)).$2, '/segment4095.ts');
+    // Distinct admitted resources evict cache metadata, never issued routes.
+    // 260 个微路由逐个串行往返是本用例的耗时主体;代理并发上限为 8,
+    // 按 8 个一批并发后断言不变。
+    final bulk = routes.skip(1).take(260).toList();
+    for (var i = 0; i < bulk.length; i += 8) {
+      final results = await Future.wait(bulk.skip(i).take(8).map(get));
+      for (final result in results) {
+        expect(result.$1, 200);
       }
-      expect((await get(routes.first)).$2, '/segment0.ts');
-      expect(proxy.diagnostics['registeredResources'], lessThanOrEqualTo(256));
-      final prefetchSettled = DateTime.now().add(const Duration(seconds: 2));
-      while ((proxy.diagnostics['segmentPrefetchActive'] == true ||
-              proxy.diagnostics['activeSegmentPrefetchRequests'] != 0 ||
-              proxy.diagnostics['segmentPrefetchPending'] != 0) &&
-          DateTime.now().isBefore(prefetchSettled)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      final before = requests;
-      final segments = routes.first.pathSegments.toList();
-      final token = segments[1];
-      segments[1] = '${token[0] == 'A' ? 'B' : 'A'}${token.substring(1)}';
-      expect((await get(routes.first.replace(pathSegments: segments))).$1, 404);
-      expect(requests, before);
-      // 重新注册生成新 nonce;整份播放列表的再次拉取(200 + 新路由)由
-      // 'HLS refresh isolates reused URLs by sequence' 等价覆盖,此处不再
-      // 重复一次 512KiB 清单下载(本用例的次要耗时来源)。
-      final same = proxy.register(origin.resolve('/index.m3u8'));
-      expect(same, isNot(playlistRoute));
-    },
-  );
+    }
+    expect((await get(routes.first)).$2, '/segment0.ts');
+    expect(proxy.diagnostics['registeredResources'], lessThanOrEqualTo(256));
+    final prefetchSettled = DateTime.now().add(const Duration(seconds: 2));
+    while ((proxy.diagnostics['segmentPrefetchActive'] == true ||
+            proxy.diagnostics['activeSegmentPrefetchRequests'] != 0 ||
+            proxy.diagnostics['segmentPrefetchPending'] != 0) &&
+        DateTime.now().isBefore(prefetchSettled)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    final before = requests;
+    final segments = routes.first.pathSegments.toList();
+    final token = segments[1];
+    segments[1] = '${token[0] == 'A' ? 'B' : 'A'}${token.substring(1)}';
+    expect((await get(routes.first.replace(pathSegments: segments))).$1, 404);
+    expect(requests, before);
+    // 重新注册生成新 nonce;整份播放列表的再次拉取(200 + 新路由)由
+    // 'HLS refresh isolates reused URLs by sequence' 等价覆盖,此处不再
+    // 重复一次 512KiB 清单下载(本用例的次要耗时来源)。
+    final same = proxy.register(origin.resolve('/index.m3u8'));
+    expect(same, isNot(playlistRoute));
+  });
 
   cases.test(
     'If-Range change before a gap replaces the entire old range',
@@ -3559,34 +3526,31 @@ void main() {
     },
   );
 
-  cases.test(
-    'cached decoder prefix does not wait for a distant missing range',
-    () async {
-      final fixture = await _CacheFixture.open(sessionBuffering: true);
-      fixture.binaryBody = Uint8List(1024 * 1024)..fillRange(0, 1024 * 1024, 7);
-      await fixture.readBytes('bytes=0-262143');
-      await fixture.settle();
-      final requests = fixture.requests;
-      final request = await fixture.client.getUrl(fixture.url);
-      request.headers.set('range', 'bytes=65536-');
-      final response = await request.close();
-      expect(response.statusCode, HttpStatus.partialContent);
-      expect(
-        response.headers.value('content-range'),
-        'bytes 65536-262143/1048576',
-      );
-      final bytes = await response.fold<List<int>>(
-        [],
-        (all, chunk) => all..addAll(chunk),
-      );
-      expect(bytes.length, 196608);
-      expect(bytes.every((byte) => byte == 7), isTrue);
-      expect(fixture.requests, requests);
-      // The continuation validates and fetches only when the decoder asks for it.
-      await fixture.readBytes('bytes=262144-524287');
-      expect(fixture.ranges.last, 'bytes=262144-524287');
-    },
-  );
+  cases.test('cached decoder prefix does not wait for a distant missing range', () async {
+    final fixture = await _CacheFixture.open(sessionBuffering: true);
+    fixture.binaryBody = Uint8List(1024 * 1024)..fillRange(0, 1024 * 1024, 7);
+    await fixture.readBytes('bytes=0-262143');
+    await fixture.settle();
+    final requests = fixture.requests;
+    final request = await fixture.client.getUrl(fixture.url);
+    request.headers.set('range', 'bytes=65536-');
+    final response = await request.close();
+    expect(response.statusCode, HttpStatus.partialContent);
+    expect(
+      response.headers.value('content-range'),
+      'bytes 65536-262143/1048576',
+    );
+    final bytes = await response.fold<List<int>>(
+      [],
+      (all, chunk) => all..addAll(chunk),
+    );
+    expect(bytes.length, 196608);
+    expect(bytes.every((byte) => byte == 7), isTrue);
+    expect(fixture.requests, requests);
+    // The continuation validates and fetches only when the decoder asks for it.
+    await fixture.readBytes('bytes=262144-524287');
+    expect(fixture.ranges.last, 'bytes=262144-524287');
+  });
 
   cases.test(
     'seek cancels old requests and preserves published validated bytes',
@@ -3648,61 +3612,58 @@ void main() {
     },
   );
 
-  cases.test(
-    'HLS refresh isolates reused URLs by sequence and never caches keys',
-    () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final origin = Uri.parse('http://127.0.0.1:${server.port}');
-      var sequence = 1;
-      var keys = 0;
-      var manifests = 0;
-      server.listen((request) async {
-        request.response.headers.set('cache-control', 'max-age=3600');
-        request.response.headers.set('etag', '"fixed"');
-        final text = request.uri.path == '/index.m3u8'
-            ? '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:$sequence\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:2,\nsame.ts\n'
-            : request.uri.path == '/key'
-            ? 'key${++keys}'
-            : 'segment$sequence';
-        if (request.uri.path == '/index.m3u8') manifests++;
-        final bytes = utf8.encode(text);
-        request.response.contentLength = bytes.length;
-        request.response.add(bytes);
-        await request.response.close();
-      });
-      final proxy = await _createProxy(
-        origin: origin,
-        cache: await SessionByteCache.open(),
-      );
-      final client = HttpClient();
-      addTearDown(() async {
-        client.close(force: true);
-        await proxy.close();
-        await server.close(force: true);
-      });
-      Future<String> get(Uri uri) async => (await (await client.getUrl(
-        uri,
-      )).close()).transform(utf8.decoder).join();
-      final playlistUri = proxy.register(origin.resolve('/index.m3u8'));
-      final first = await get(playlistUri);
-      final firstSegment = Uri.parse(
-        first.split('\n').firstWhere((line) => line.startsWith('http')),
-      );
-      final key = Uri.parse(RegExp(r'URI="([^"]+)"').firstMatch(first)![1]!);
-      expect(await get(firstSegment), 'segment1');
-      expect(await get(key), 'key1');
-      expect(await get(key), 'key2');
-      sequence++;
-      final second = await get(playlistUri);
-      final secondSegment = Uri.parse(
-        second.split('\n').firstWhere((line) => line.startsWith('http')),
-      );
-      expect(secondSegment, isNot(firstSegment));
-      expect(await get(secondSegment), 'segment2');
-      expect(manifests, 2);
-      expect(proxy.stream, PlaybackCacheStream.conservative);
-    },
-  );
+  cases.test('HLS refresh isolates reused URLs by sequence and never caches keys', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final origin = Uri.parse('http://127.0.0.1:${server.port}');
+    var sequence = 1;
+    var keys = 0;
+    var manifests = 0;
+    server.listen((request) async {
+      request.response.headers.set('cache-control', 'max-age=3600');
+      request.response.headers.set('etag', '"fixed"');
+      final text = request.uri.path == '/index.m3u8'
+          ? '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:$sequence\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:2,\nsame.ts\n'
+          : request.uri.path == '/key'
+          ? 'key${++keys}'
+          : 'segment$sequence';
+      if (request.uri.path == '/index.m3u8') manifests++;
+      final bytes = utf8.encode(text);
+      request.response.contentLength = bytes.length;
+      request.response.add(bytes);
+      await request.response.close();
+    });
+    final proxy = await _createProxy(
+      origin: origin,
+      cache: await SessionByteCache.open(),
+    );
+    final client = HttpClient();
+    addTearDown(() async {
+      client.close(force: true);
+      await proxy.close();
+      await server.close(force: true);
+    });
+    Future<String> get(Uri uri) async => (await (await client.getUrl(
+      uri,
+    )).close()).transform(utf8.decoder).join();
+    final playlistUri = proxy.register(origin.resolve('/index.m3u8'));
+    final first = await get(playlistUri);
+    final firstSegment = Uri.parse(
+      first.split('\n').firstWhere((line) => line.startsWith('http')),
+    );
+    final key = Uri.parse(RegExp(r'URI="([^"]+)"').firstMatch(first)![1]!);
+    expect(await get(firstSegment), 'segment1');
+    expect(await get(key), 'key1');
+    expect(await get(key), 'key2');
+    sequence++;
+    final second = await get(playlistUri);
+    final secondSegment = Uri.parse(
+      second.split('\n').firstWhere((line) => line.startsWith('http')),
+    );
+    expect(secondSegment, isNot(firstSegment));
+    expect(await get(secondSegment), 'segment2');
+    expect(manifests, 2);
+    expect(proxy.stream, PlaybackCacheStream.conservative);
+  });
 
   cases.test('hybrid cache reuses full and overlapping byte ranges', () async {
     final fixture = await _CacheFixture.open();
@@ -3989,98 +3950,90 @@ void main() {
     expect(external.queryParameters, {'signature': 'cdn'});
   });
 
-  cases.test(
-    'redirects, HLS segments, keys and subtitles preserve UA and scope credentials',
-    () async {
-      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final upstreamUrl = Uri.parse('http://127.0.0.1:${upstream.port}');
-      final foreignUrl = Uri.parse('http://127.0.0.1:${foreign.port}');
-      final foreignRequests = <HttpRequest>[];
-      final authenticated = <String>[];
-      foreign.listen((request) async {
-        foreignRequests.add(request);
+  cases.test('redirects, HLS segments, keys and subtitles preserve UA and scope credentials', () async {
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final upstreamUrl = Uri.parse('http://127.0.0.1:${upstream.port}');
+    final foreignUrl = Uri.parse('http://127.0.0.1:${foreign.port}');
+    final foreignRequests = <HttpRequest>[];
+    final authenticated = <String>[];
+    foreign.listen((request) async {
+      foreignRequests.add(request);
+      request.response.write('resource');
+      await request.response.close();
+    });
+    upstream.listen((request) async {
+      if (request.headers.value('x-emby-token') == 'secret') {
+        authenticated.add(request.uri.path);
+      }
+      if (request.uri.path == '/redirect') {
+        request.response.statusCode = 302;
+        request.response.headers.set(
+          'location',
+          '$foreignUrl/file?api_key=secret',
+        );
+      } else if (request.uri.path == '/index.m3u8') {
+        request.response.headers.contentType = ContentType(
+          'application',
+          'vnd.apple.mpegurl',
+        );
+        request.response.write(
+          '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="$foreignUrl/key?api_key=secret"\n#EXTINF:2,\nsegment.ts\n#EXTINF:2,\n$foreignUrl/segment.ts?api_key=secret\n#EXT-X-ENDLIST\n',
+        );
+      } else {
         request.response.write('resource');
-        await request.response.close();
-      });
-      upstream.listen((request) async {
-        if (request.headers.value('x-emby-token') == 'secret') {
-          authenticated.add(request.uri.path);
-        }
-        if (request.uri.path == '/redirect') {
-          request.response.statusCode = 302;
-          request.response.headers.set(
-            'location',
-            '$foreignUrl/file?api_key=secret',
-          );
-        } else if (request.uri.path == '/index.m3u8') {
-          request.response.headers.contentType = ContentType(
-            'application',
-            'vnd.apple.mpegurl',
-          );
-          request.response.write(
-            '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="$foreignUrl/key?api_key=secret"\n#EXTINF:2,\nsegment.ts\n#EXTINF:2,\n$foreignUrl/segment.ts?api_key=secret\n#EXT-X-ENDLIST\n',
-          );
-        } else {
-          request.response.write('resource');
-        }
-        await request.response.close();
-      });
-      final proxy = await _createProxy(
-        origin: upstreamUrl,
-        headers: {
-          'X-Emby-Token': 'secret',
-          'Authorization': 'Emby Token="secret"',
-          'User-Agent': 'Custom UA',
-        },
-      );
-      final client = HttpClient();
-      addTearDown(() async {
-        client.close(force: true);
-        await proxy.close();
-        await upstream.close(force: true);
-        await foreign.close(force: true);
-      });
-      Future<String> get(Uri uri) async => utf8.decode(
-        await (await (await client.getUrl(
-          uri,
-        )).close()).fold<List<int>>([], (a, b) => a..addAll(b)),
-      );
-      expect(
-        await get(proxy.register(upstreamUrl.resolve('/redirect'))),
-        'resource',
-      );
-      final playlist = await get(
-        proxy.register(upstreamUrl.resolve('/index.m3u8')),
-      );
-      expect(playlist, isNot(contains('secret')));
-      final key = RegExp('URI="([^"]+)"').firstMatch(playlist)![1]!;
-      await get(Uri.parse(key));
-      for (final line
-          in playlist.split('\n').where((s) => s.startsWith('http'))) {
-        await get(Uri.parse(line));
       }
-      await get(proxy.register(upstreamUrl.resolve('/subtitle.ass')));
-      await get(proxy.register(foreignUrl.resolve('/subtitle.ass')));
-      await get(proxy.register(foreignUrl.resolve('/direct.mp4')));
-      expect(
-        authenticated,
-        containsAll([
-          '/redirect',
-          '/index.m3u8',
-          '/segment.ts',
-          '/subtitle.ass',
-        ]),
-      );
-      expect(foreignRequests.length, greaterThanOrEqualTo(3));
-      for (final request in foreignRequests) {
-        expect(request.headers.value('x-emby-token'), isNull);
-        expect(request.headers.value('authorization'), isNull);
-        expect(request.uri.query, isNot(contains('secret')));
-        expect(request.headers.value('user-agent'), 'Custom UA');
-      }
-    },
-  );
+      await request.response.close();
+    });
+    final proxy = await _createProxy(
+      origin: upstreamUrl,
+      headers: {
+        'X-Emby-Token': 'secret',
+        'Authorization': 'Emby Token="secret"',
+        'User-Agent': 'Custom UA',
+      },
+    );
+    final client = HttpClient();
+    addTearDown(() async {
+      client.close(force: true);
+      await proxy.close();
+      await upstream.close(force: true);
+      await foreign.close(force: true);
+    });
+    Future<String> get(Uri uri) async => utf8.decode(
+      await (await (await client.getUrl(
+        uri,
+      )).close()).fold<List<int>>([], (a, b) => a..addAll(b)),
+    );
+    expect(
+      await get(proxy.register(upstreamUrl.resolve('/redirect'))),
+      'resource',
+    );
+    final playlist = await get(
+      proxy.register(upstreamUrl.resolve('/index.m3u8')),
+    );
+    expect(playlist, isNot(contains('secret')));
+    final key = RegExp('URI="([^"]+)"').firstMatch(playlist)![1]!;
+    await get(Uri.parse(key));
+    for (final line
+        in playlist.split('\n').where((s) => s.startsWith('http'))) {
+      await get(Uri.parse(line));
+    }
+    await get(proxy.register(upstreamUrl.resolve('/subtitle.ass')));
+    await get(proxy.register(foreignUrl.resolve('/subtitle.ass')));
+    await get(proxy.register(foreignUrl.resolve('/direct.mp4')));
+    expect(
+      authenticated,
+      containsAll(['/redirect', '/index.m3u8', '/segment.ts', '/subtitle.ass']),
+    );
+    expect(foreignRequests.length, greaterThanOrEqualTo(3));
+    for (final request in foreignRequests) {
+      expect(request.headers.value('x-emby-token'), isNull);
+      expect(request.headers.value('authorization'), isNull);
+      expect(request.uri.query, isNot(contains('secret')));
+      expect(request.headers.value('user-agent'), 'Custom UA');
+    }
+  });
 
   cases.test('lagging transcode segment 404 retries and recovers', () async {
     final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -4374,9 +4327,8 @@ class _CacheFixture {
       await output.close();
       return;
     }
-    final range = RegExp(
-      r'^bytes=(\d+)-(\d*)$',
-    ).firstMatch(request.headers.value('range') ?? '');
+    final range = RegExp(r'^bytes=(\d+)-(\d*)$')
+        .firstMatch(request.headers.value('range') ?? '');
     final ifRange = request.headers.value('if-range');
     if (forbiddenOffset != null &&
         range != null &&

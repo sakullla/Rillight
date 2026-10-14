@@ -17,9 +17,8 @@ void main() {
       var active = 0;
       var peak = 0;
       server.listen((request) async {
-        final range = RegExp(
-          r'bytes=(\d+)-(\d*)',
-        ).firstMatch(request.headers.value('range') ?? '');
+        final range = RegExp(r'bytes=(\d+)-(\d*)')
+            .firstMatch(request.headers.value('range') ?? '');
         final start = range == null ? 0 : int.parse(range[1]!);
         final end = range == null || range[2]!.isEmpty
             ? total - 1

@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/player/player_host_command.dart';
@@ -9,26 +10,23 @@ void main() {
   setUp(() async => protocol = await PlayerProcessProtocol.create());
   tearDown(() async => protocol.dispose());
 
-  test(
-    'process-scoped detail command is consumed exactly once and preserves the season',
-    () async {
-      await PlayerHostOpenItem.write(
-        'series-friends',
-        protocol: protocol,
-        seasonId: 'season-2',
-      );
-      final command = await PlayerHostOpenItem.consume(
-        protocol: protocol,
-        expectedPid: pid,
-      );
-      expect(command?.itemId, 'series-friends');
-      expect(command?.seasonId, 'season-2');
-      expect(
-        await PlayerHostOpenItem.consume(protocol: protocol, expectedPid: pid),
-        isNull,
-      );
-    },
-  );
+  test('process-scoped detail command is consumed exactly once and preserves the season', () async {
+    await PlayerHostOpenItem.write(
+      'series-friends',
+      protocol: protocol,
+      seasonId: 'season-2',
+    );
+    final command = await PlayerHostOpenItem.consume(
+      protocol: protocol,
+      expectedPid: pid,
+    );
+    expect(command?.itemId, 'series-friends');
+    expect(command?.seasonId, 'season-2');
+    expect(
+      await PlayerHostOpenItem.consume(protocol: protocol, expectedPid: pid),
+      isNull,
+    );
+  });
   test(
     'detail IPC preserves the actual source account, library and generation',
     () async {

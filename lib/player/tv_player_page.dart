@@ -1,13 +1,15 @@
 import 'dart:async';
+
 import 'source_switch_menu.dart';
+
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/player/playback_title.dart';
 import 'package:rillight/player/playback_ended_panel.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/episode_browser.dart';
 import 'package:rillight/player/network_throughput.dart';
@@ -23,7 +25,9 @@ import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/playback_output_panel.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
+
 import 'player_window_host.dart';
+
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/subtitle_viewport.dart';
@@ -47,6 +51,8 @@ class TvPlayerPage extends StatefulWidget {
 }
 
 class TvPlayerPageState extends State<TvPlayerPage> {
+  final _presentationThemeKey = GlobalKey();
+
   PlayerController? controller;
   AndroidPlaybackLifecycle? _lifecycle;
   AuthController? _auth;
@@ -209,10 +215,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     if (!mounted || route == null || !route.isActive) return;
     final failed = controller?.progressSyncFailed == true;
     if (failed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).progressSyncFailedMain),
-        ),
+      showAppNotice(
+        context,
+        AppLocalizations.of(context).progressSyncFailedMain,
       );
     }
     // Keep system back blocked during cleanup. Enabling it before an explicit
@@ -345,34 +350,37 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     final origin = FocusManager.instance.primaryFocus;
     c.setControlsPinned(true);
     unawaited(c.loadEpisodeList());
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(
+      _presentationThemeKey.currentContext ?? context,
+    ).colorScheme;
     final screen = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     final panelWidth = math.min(460 * s, math.max(360 * s, screen.width * .42));
-    await showDialog<void>(
-      context: context,
+    await showAppDialog<void>(
+      context: _presentationThemeKey.currentContext!,
       useRootNavigator: false,
-      barrierColor: scheme.scrim.withValues(alpha: AppScrim.playerBarrier),
-      builder: (context) => Dialog(
+
+      builder: (context) => Align(
         alignment: Alignment.centerRight,
-        insetPadding: EdgeInsets.zero,
-        backgroundColor: scheme.surfaceContainer,
-        surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.horizontal(
-            left: Radius.circular(AppRadii.xl),
+        child: Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainer,
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(AppRadii.xl),
+            ),
           ),
-        ),
-        child: SizedBox(
-          width: panelWidth,
-          height: double.infinity,
-          child: SafeArea(
-            child: ListenableBuilder(
-              listenable: c,
-              builder: (context, _) => PlayerEpisodeBrowser(
-                controller: c,
-                tv: true,
-                onClose: () => Navigator.pop(context),
+          child: SizedBox(
+            width: panelWidth,
+            height: double.infinity,
+            child: SafeArea(
+              child: ListenableBuilder(
+                listenable: c,
+                builder: (context, _) => PlayerEpisodeBrowser(
+                  controller: c,
+                  tv: true,
+                  onClose: () => Navigator.pop(context),
+                ),
               ),
             ),
           ),
@@ -411,320 +419,334 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       _TvPanel.skip => l.playerSkipSettings,
       _TvPanel.output => l.playbackOutputSection,
     };
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(
+      _presentationThemeKey.currentContext ?? context,
+    ).colorScheme;
     final screen = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     final panelWidth = math.min(400 * s, math.max(320 * s, screen.width * .38));
-    await showDialog<void>(
-      context: context,
+    await showAppDialog<void>(
+      context: _presentationThemeKey.currentContext!,
       useRootNavigator: false,
-      barrierColor: scheme.scrim.withValues(alpha: AppScrim.playerBarrier),
-      builder: (context) => Dialog(
+
+      builder: (context) => Align(
         key: const Key('tv-player-panel'),
         alignment: Alignment.centerRight,
-        insetPadding: EdgeInsets.zero,
-        backgroundColor: scheme.surfaceContainer,
-        surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.horizontal(
-            left: Radius.circular(AppRadii.xl),
+        child: Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainer,
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(AppRadii.xl),
+            ),
           ),
-        ),
-        child: SizedBox(
-          width: panelWidth,
-          height: double.infinity,
-          child: SafeArea(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(24 * s, 24 * s, 24 * s, 20 * s),
-              child: DefaultTextStyle.merge(
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge!.copyWith(color: scheme.onSurface),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(color: scheme.onSurface),
-                    ),
-                    const SizedBox(height: 6),
-                    ListenableBuilder(
-                      listenable: c,
-                      builder: (context, _) => Text(
-                        _panelValue(c, panel, l),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
+          child: SizedBox(
+            width: panelWidth,
+            height: double.infinity,
+            child: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(24 * s, 24 * s, 24 * s, 20 * s),
+                child: DefaultTextStyle.merge(
+                  style: AppUiTheme.of(context).textTheme.bodyLarge!
+                      .copyWith(color: scheme.onSurface),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        title,
+                        style: AppUiTheme.of(context).textTheme.headlineSmall
+                            ?.copyWith(color: scheme.onSurface),
+                      ),
+                      const SizedBox(height: 6),
+                      ListenableBuilder(
+                        listenable: c,
+                        builder: (context, _) => Text(
+                          _panelValue(c, panel, l),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppUiTheme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ),
-                    ),
-                    SizedBox(height: 14 * s),
-                    Expanded(
-                      child: ListenableBuilder(
-                        listenable: c,
-                        builder: (context, _) => SingleChildScrollView(
-                          // Reserve the focused action's painted expansion
-                          // inside the scroll viewport, including wide TVs.
-                          padding: EdgeInsets.symmetric(
-                            horizontal:
-                                panelWidth * (TvAction.focusedScale - 1) / 2 +
-                                8,
-                            vertical: 6,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            spacing: 6 * s,
-                            children: [
-                              if (panel == _TvPanel.tracks) ...[
-                                if (c.canSwitchAudioTrack)
-                                  _panelLabel(l.audioTrack),
-                                if (c.canSwitchAudioTrack)
-                                  for (final track in c.selectableAudioTracks)
-                                    TvAction(
-                                      variant: TvActionVariant.tile,
-                                      key: ValueKey('audio-${track.index}'),
-                                      autofocus:
-                                          track.index == c.audioStreamIndex ||
-                                          (!c.selectableAudioTracks.any(
-                                                (t) =>
-                                                    t.index ==
-                                                    c.audioStreamIndex,
-                                              ) &&
-                                              track ==
-                                                  c
-                                                      .selectableAudioTracks
-                                                      .first),
-                                      selected:
-                                          c.audioStreamIndex == track.index,
-                                      onPressed: () =>
-                                          apply(() => c.setAudio(track.index)),
-                                      child: _choiceLabel(
-                                        track.label,
+                      SizedBox(height: 14 * s),
+                      Expanded(
+                        child: ListenableBuilder(
+                          listenable: c,
+                          builder: (context, _) => SingleChildScrollView(
+                            // Reserve the focused action's painted expansion
+                            // inside the scroll viewport, including wide TVs.
+                            padding: EdgeInsets.symmetric(
+                              horizontal:
+                                  panelWidth * (TvAction.focusedScale - 1) / 2 +
+                                  8,
+                              vertical: 6,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              spacing: 6 * s,
+                              children: [
+                                if (panel == _TvPanel.tracks) ...[
+                                  if (c.canSwitchAudioTrack)
+                                    _panelLabel(l.audioTrack),
+                                  if (c.canSwitchAudioTrack)
+                                    for (final track in c.selectableAudioTracks)
+                                      TvAction(
+                                        variant: TvActionVariant.tile,
+                                        key: ValueKey('audio-${track.index}'),
+                                        autofocus:
+                                            track.index == c.audioStreamIndex ||
+                                            (!c.selectableAudioTracks.any(
+                                                  (t) =>
+                                                      t.index ==
+                                                      c.audioStreamIndex,
+                                                ) &&
+                                                track ==
+                                                    c
+                                                        .selectableAudioTracks
+                                                        .first),
                                         selected:
                                             c.audioStreamIndex == track.index,
+                                        onPressed: () => apply(
+                                          () => c.setAudio(track.index),
+                                        ),
+                                        child: _choiceLabel(
+                                          track.label,
+                                          selected:
+                                              c.audioStreamIndex == track.index,
+                                        ),
                                       ),
-                                    ),
-                                if (c.canConfigureSubtitles) ...[
-                                  const SizedBox(height: 16),
-                                  _panelLabel(l.subtitleTrack),
-                                  TvAction(
-                                    variant: TvActionVariant.tile,
-                                    autofocus:
-                                        !c.canSwitchAudioTrack &&
-                                        (c.subtitleStreamIndex == null ||
-                                            !c.selectableSubtitleTracks.any(
-                                              (t) =>
-                                                  t.index ==
-                                                  c.subtitleStreamIndex,
-                                            )),
-                                    selected: c.subtitleStreamIndex == null,
-                                    onPressed: () =>
-                                        apply(() => c.setSubtitle(null)),
-                                    child: _choiceLabel(
-                                      l.subtitleOff,
-                                      selected: c.subtitleStreamIndex == null,
-                                    ),
-                                  ),
-                                  for (final track
-                                      in c.selectableSubtitleTracks)
+                                  if (c.canConfigureSubtitles) ...[
+                                    const SizedBox(height: 16),
+                                    _panelLabel(l.subtitleTrack),
                                     TvAction(
                                       variant: TvActionVariant.tile,
-                                      key: ValueKey('subtitle-${track.index}'),
                                       autofocus:
                                           !c.canSwitchAudioTrack &&
-                                          c.subtitleStreamIndex == track.index,
-                                      selected:
-                                          c.subtitleStreamIndex == track.index,
-                                      onPressed: () => apply(
-                                        () => c.setSubtitle(track.index),
-                                      ),
+                                          (c.subtitleStreamIndex == null ||
+                                              !c.selectableSubtitleTracks.any(
+                                                (t) =>
+                                                    t.index ==
+                                                    c.subtitleStreamIndex,
+                                              )),
+                                      selected: c.subtitleStreamIndex == null,
+                                      onPressed: () =>
+                                          apply(() => c.setSubtitle(null)),
                                       child: _choiceLabel(
-                                        track.label,
-                                        selected:
-                                            c.subtitleStreamIndex ==
-                                            track.index,
+                                        l.subtitleOff,
+                                        selected: c.subtitleStreamIndex == null,
                                       ),
                                     ),
-                                  if (c.canAdjustSubtitleSize) ...[
-                                    const SizedBox(height: 16),
-                                    _panelLabel(l.phoneSubtitleSize),
-                                    for (final size in PhoneSubtitleSize.values)
+                                    for (final track
+                                        in c.selectableSubtitleTracks)
                                       TvAction(
                                         variant: TvActionVariant.tile,
                                         key: ValueKey(
-                                          'tv-subtitle-size-${size.name}',
+                                          'subtitle-${track.index}',
                                         ),
+                                        autofocus:
+                                            !c.canSwitchAudioTrack &&
+                                            c.subtitleStreamIndex ==
+                                                track.index,
                                         selected:
-                                            !c
-                                                .phoneSubtitleSettings
-                                                .originalAss &&
-                                            c.phoneSubtitleSettings.size ==
-                                                size,
-                                        onPressed: () =>
-                                            c.setPhoneSubtitleSettings(
-                                              PhoneSubtitleSettings(
-                                                size: size,
-                                                originalAss: false,
-                                              ),
-                                            ),
+                                            c.subtitleStreamIndex ==
+                                            track.index,
+                                        onPressed: () => apply(
+                                          () => c.setSubtitle(track.index),
+                                        ),
                                         child: _choiceLabel(
-                                          switch (size) {
-                                            PhoneSubtitleSize.small =>
-                                              l.phoneSubtitleSmall,
-                                            PhoneSubtitleSize.standard =>
-                                              l.phoneSubtitleStandard,
-                                            PhoneSubtitleSize.large =>
-                                              l.phoneSubtitleLarge,
-                                            PhoneSubtitleSize.extraLarge =>
-                                              l.phoneSubtitleExtraLarge,
-                                          },
+                                          track.label,
+                                          selected:
+                                              c.subtitleStreamIndex ==
+                                              track.index,
+                                        ),
+                                      ),
+                                    if (c.canAdjustSubtitleSize) ...[
+                                      const SizedBox(height: 16),
+                                      _panelLabel(l.phoneSubtitleSize),
+                                      for (final size
+                                          in PhoneSubtitleSize.values)
+                                        TvAction(
+                                          variant: TvActionVariant.tile,
+                                          key: ValueKey(
+                                            'tv-subtitle-size-${size.name}',
+                                          ),
                                           selected:
                                               !c
                                                   .phoneSubtitleSettings
                                                   .originalAss &&
                                               c.phoneSubtitleSettings.size ==
                                                   size,
-                                        ),
-                                      ),
-                                    TvAction(
-                                      variant: TvActionVariant.tile,
-                                      key: const Key('tv-subtitle-original'),
-                                      selected:
-                                          c.phoneSubtitleSettings.originalAss,
-                                      onPressed: () =>
-                                          c.setPhoneSubtitleSettings(
-                                            PhoneSubtitleSettings(
-                                              size:
-                                                  c.phoneSubtitleSettings.size,
-                                              originalAss: !c
-                                                  .phoneSubtitleSettings
-                                                  .originalAss,
-                                            ),
+                                          onPressed: () =>
+                                              c.setPhoneSubtitleSettings(
+                                                PhoneSubtitleSettings(
+                                                  size: size,
+                                                  originalAss: false,
+                                                ),
+                                              ),
+                                          child: _choiceLabel(
+                                            switch (size) {
+                                              PhoneSubtitleSize.small =>
+                                                l.phoneSubtitleSmall,
+                                              PhoneSubtitleSize.standard =>
+                                                l.phoneSubtitleStandard,
+                                              PhoneSubtitleSize.large =>
+                                                l.phoneSubtitleLarge,
+                                              PhoneSubtitleSize.extraLarge =>
+                                                l.phoneSubtitleExtraLarge,
+                                            },
+                                            selected:
+                                                !c
+                                                    .phoneSubtitleSettings
+                                                    .originalAss &&
+                                                c.phoneSubtitleSettings.size ==
+                                                    size,
                                           ),
-                                      child: _choiceLabel(
-                                        l.phoneSubtitleOriginal,
+                                        ),
+                                      TvAction(
+                                        variant: TvActionVariant.tile,
+                                        key: const Key('tv-subtitle-original'),
                                         selected:
                                             c.phoneSubtitleSettings.originalAss,
+                                        onPressed: () =>
+                                            c.setPhoneSubtitleSettings(
+                                              PhoneSubtitleSettings(
+                                                size: c
+                                                    .phoneSubtitleSettings
+                                                    .size,
+                                                originalAss: !c
+                                                    .phoneSubtitleSettings
+                                                    .originalAss,
+                                              ),
+                                            ),
+                                        child: _choiceLabel(
+                                          l.phoneSubtitleOriginal,
+                                          selected: c
+                                              .phoneSubtitleSettings
+                                              .originalAss,
+                                        ),
                                       ),
-                                    ),
-                                  ] else
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 12),
-                                      child: Text(l.phoneSubtitleUnavailable),
-                                    ),
+                                    ] else
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 12),
+                                        child: Text(l.phoneSubtitleUnavailable),
+                                      ),
+                                  ],
                                 ],
-                              ],
-                              if (panel == _TvPanel.source)
-                                for (final source in c.mediaSources)
-                                  TvAction(
-                                    variant: TvActionVariant.tile,
-                                    key: ValueKey('source-${source.id}'),
-                                    autofocus:
-                                        source.id == c.activeMediaSourceId ||
-                                        (!c.mediaSources.any(
-                                              (s) =>
-                                                  s.id == c.activeMediaSourceId,
-                                            ) &&
-                                            source == c.mediaSources.first),
-                                    selected:
-                                        c.activeMediaSourceId == source.id,
-                                    onPressed: () => apply(
-                                      () => c.switchMediaVersion(source.id),
-                                    ),
-                                    child: _choiceLabel(
-                                      source.presentation.headline,
-                                      detail: source.presentation.detail,
+                                if (panel == _TvPanel.source)
+                                  for (final source in c.mediaSources)
+                                    TvAction(
+                                      variant: TvActionVariant.tile,
+                                      key: ValueKey('source-${source.id}'),
+                                      autofocus:
+                                          source.id == c.activeMediaSourceId ||
+                                          (!c.mediaSources.any(
+                                                (s) =>
+                                                    s.id ==
+                                                    c.activeMediaSourceId,
+                                              ) &&
+                                              source == c.mediaSources.first),
                                       selected:
                                           c.activeMediaSourceId == source.id,
+                                      onPressed: () => apply(
+                                        () => c.switchMediaVersion(source.id),
+                                      ),
+                                      child: _choiceLabel(
+                                        source.presentation.headline,
+                                        detail: source.presentation.detail,
+                                        selected:
+                                            c.activeMediaSourceId == source.id,
+                                      ),
                                     ),
-                                  ),
-                              if (panel == _TvPanel.quality)
-                                for (final bitrate in c.availableBitrates)
-                                  TvAction(
-                                    variant: TvActionVariant.tile,
-                                    key: ValueKey('tv-quality-$bitrate'),
-                                    autofocus:
-                                        bitrate == c.maxStreamingBitrate ||
-                                        (!c.availableBitrates.contains(
-                                              c.maxStreamingBitrate,
-                                            ) &&
-                                            bitrate ==
-                                                c.availableBitrates.first),
-                                    selected: c.maxStreamingBitrate == bitrate,
-                                    onPressed: () =>
-                                        apply(() => c.setMaxBitrate(bitrate)),
-                                    child: _choiceLabel(
-                                      playerQualityLabel(l, bitrate),
+                                if (panel == _TvPanel.quality)
+                                  for (final bitrate in c.availableBitrates)
+                                    TvAction(
+                                      variant: TvActionVariant.tile,
+                                      key: ValueKey('tv-quality-$bitrate'),
+                                      autofocus:
+                                          bitrate == c.maxStreamingBitrate ||
+                                          (!c.availableBitrates.contains(
+                                                c.maxStreamingBitrate,
+                                              ) &&
+                                              bitrate ==
+                                                  c.availableBitrates.first),
                                       selected:
                                           c.maxStreamingBitrate == bitrate,
+                                      onPressed: () =>
+                                          apply(() => c.setMaxBitrate(bitrate)),
+                                      child: _choiceLabel(
+                                        playerQualityLabel(l, bitrate),
+                                        selected:
+                                            c.maxStreamingBitrate == bitrate,
+                                      ),
                                     ),
-                                  ),
-                              if (panel == _TvPanel.skip) ...[
-                                TvAction(
-                                  variant: TvActionVariant.tile,
-                                  key: const Key('tv-skip-intro-enabled'),
-                                  autofocus: true,
-                                  selected: c.skipIntroEnabled,
-                                  onPressed: () => c.setSkipEnabled(
-                                    PlayerSkipKind.intro,
-                                    !c.skipIntroEnabled,
-                                  ),
-                                  child: _choiceLabel(
-                                    l.settingsSkipIntro,
-                                    selected: c.skipIntroEnabled,
-                                  ),
-                                ),
-                                TvAction(
-                                  variant: TvActionVariant.tile,
-                                  key: const Key('tv-skip-outro-enabled'),
-                                  selected: c.skipOutroEnabled,
-                                  onPressed: () => c.setSkipEnabled(
-                                    PlayerSkipKind.outro,
-                                    !c.skipOutroEnabled,
-                                  ),
-                                  child: _choiceLabel(
-                                    l.settingsSkipOutro,
-                                    selected: c.skipOutroEnabled,
-                                  ),
-                                ),
-                              ],
-                              if (panel == _TvPanel.output)
-                                PlaybackOutputPanelView(controller: c),
-                              if (panel == _TvPanel.speed)
-                                for (final rate in kPlaybackRateLadder)
+                                if (panel == _TvPanel.skip) ...[
                                   TvAction(
                                     variant: TvActionVariant.tile,
-                                    key: ValueKey('tv-rate-$rate'),
-                                    autofocus: rate == c.playbackRate,
-                                    selected: c.playbackRate == rate,
-                                    onPressed: () =>
-                                        apply(() => c.setRate(rate)),
+                                    key: const Key('tv-skip-intro-enabled'),
+                                    autofocus: true,
+                                    selected: c.skipIntroEnabled,
+                                    onPressed: () => c.setSkipEnabled(
+                                      PlayerSkipKind.intro,
+                                      !c.skipIntroEnabled,
+                                    ),
                                     child: _choiceLabel(
-                                      '${rate}x',
-                                      selected: c.playbackRate == rate,
+                                      l.settingsSkipIntro,
+                                      selected: c.skipIntroEnabled,
                                     ),
                                   ),
-                              if (c.playbackLineFailure != null)
-                                Text(
-                                  l.playbackLineFailed(c.playbackLineFailure!),
-                                  key: const Key('playback-line-failure'),
-                                ),
-                              if (c.trackFailure != null) Text(c.trackFailure!),
-                            ],
+                                  TvAction(
+                                    variant: TvActionVariant.tile,
+                                    key: const Key('tv-skip-outro-enabled'),
+                                    selected: c.skipOutroEnabled,
+                                    onPressed: () => c.setSkipEnabled(
+                                      PlayerSkipKind.outro,
+                                      !c.skipOutroEnabled,
+                                    ),
+                                    child: _choiceLabel(
+                                      l.settingsSkipOutro,
+                                      selected: c.skipOutroEnabled,
+                                    ),
+                                  ),
+                                ],
+                                if (panel == _TvPanel.output)
+                                  PlaybackOutputPanelView(controller: c),
+                                if (panel == _TvPanel.speed)
+                                  for (final rate in kPlaybackRateLadder)
+                                    TvAction(
+                                      variant: TvActionVariant.tile,
+                                      key: ValueKey('tv-rate-$rate'),
+                                      autofocus: rate == c.playbackRate,
+                                      selected: c.playbackRate == rate,
+                                      onPressed: () =>
+                                          apply(() => c.setRate(rate)),
+                                      child: _choiceLabel(
+                                        '${rate}x',
+                                        selected: c.playbackRate == rate,
+                                      ),
+                                    ),
+                                if (c.playbackLineFailure != null)
+                                  Text(
+                                    l.playbackLineFailed(
+                                      c.playbackLineFailure!,
+                                    ),
+                                    key: const Key('playback-line-failure'),
+                                  ),
+                                if (c.trackFailure != null)
+                                  Text(c.trackFailure!),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TvAction(
-                      variant: TvActionVariant.tile,
-                      key: const Key('tv-panel-back'),
-                      onPressed: () => Navigator.pop(context),
-                      child: Text(l.mobileBack),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      TvAction(
+                        variant: TvActionVariant.tile,
+                        key: const Key('tv-panel-back'),
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(l.mobileBack),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -810,7 +832,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         ),
         if (selected) ...[
           SizedBox(width: context.tvdp(10)),
-          const Icon(Icons.check_rounded),
+          const Icon(CupertinoIcons.check_mark),
         ],
       ],
     );
@@ -825,8 +847,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     ),
     child: Text(
       text,
-      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
+        color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
       ),
     ),
   );
@@ -858,7 +880,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                 Text(label),
               ],
             )
-          : Tooltip(message: label, child: Icon(icon)),
+          : AppTooltip(message: label, child: Icon(icon)),
     );
   }
 
@@ -915,8 +937,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
               children: [
                 Text(
                   _time(position),
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: Colors.white,
+                  style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
+                    color: CupertinoColors.white,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
@@ -924,8 +946,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   c.duration > Duration.zero
                       ? '${AppLocalizations.of(context).playerRemainingClock(_time(c.duration - position < Duration.zero ? Duration.zero : c.duration - position))}  /  ${_time(c.duration)}'
                       : _time(c.duration),
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: Colors.white70,
+                  style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
+                    color: const Color(0xb3ffffff),
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
@@ -946,13 +968,13 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     String status,
     bool ready,
   ) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final size = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     final gutter = tvSafeGutter(size.width);
     final vertical = tvSafeVertical(size.height);
     final secondary = theme.textTheme.bodyMedium?.copyWith(
-      color: Colors.white.withValues(alpha: .72),
+      color: CupertinoColors.white.withValues(alpha: .72),
     );
     return DecoratedBox(
       key: const Key('tv-player-gradient'),
@@ -961,12 +983,14 @@ class TvPlayerPageState extends State<TvPlayerPage> {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.black.withValues(alpha: AppScrim.of(context, AppScrim.top)),
-            Colors.black.withValues(alpha: 0),
-            Colors.black.withValues(
+            CupertinoColors.black.withValues(
+              alpha: AppScrim.of(context, AppScrim.top),
+            ),
+            CupertinoColors.black.withValues(alpha: 0),
+            CupertinoColors.black.withValues(
               alpha: AppScrim.of(context, AppScrim.playerBarSoft),
             ),
-            Colors.black.withValues(
+            CupertinoColors.black.withValues(
               alpha: AppScrim.of(context, AppScrim.playerBar),
             ),
           ],
@@ -978,7 +1002,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
           padding: EdgeInsets.fromLTRB(gutter, vertical, gutter, vertical),
           child: DefaultTextStyle.merge(
             style: (theme.textTheme.bodyMedium ?? const TextStyle()).copyWith(
-              color: Colors.white,
+              color: CupertinoColors.white,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1000,7 +1024,9 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleSmall?.copyWith(
-                                color: Colors.white.withValues(alpha: .78),
+                                color: CupertinoColors.white.withValues(
+                                  alpha: .78,
+                                ),
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -1012,7 +1038,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.headlineSmall?.copyWith(
-                              color: Colors.white,
+                              color: CupertinoColors.white,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -1021,10 +1047,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                             children: [
                               Icon(
                                 c.isPlaying
-                                    ? Icons.play_arrow_rounded
-                                    : Icons.pause_rounded,
+                                    ? CupertinoIcons.play_fill
+                                    : CupertinoIcons.pause_fill,
                                 size: 16 * s,
-                                color: Colors.white70,
+                                color: const Color(0xb3ffffff),
                               ),
                               SizedBox(width: 6 * s),
                               Flexible(
@@ -1042,19 +1068,19 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     SizedBox(width: 16 * s),
                     Padding(
                       padding: EdgeInsets.only(top: 10 * s, right: 14 * s),
-                      child: Tooltip(
+                      child: AppTooltip(
                         message: l.playerNetworkSpeedTooltip,
                         child: NetworkSpeedReadout(
                           key: const Key('tv-player-network-speed'),
                           bytesPerSecond: c.cacheSpeedBytesPerSec,
                           textStyle: theme.textTheme.labelMedium,
-                          color: Colors.white70,
+                          color: const Color(0xb3ffffff),
                         ),
                       ),
                     ),
                     _action(
                       'tv-player-close',
-                      Icons.close_rounded,
+                      CupertinoIcons.xmark,
                       l.closePlayer,
                       _close,
                     ),
@@ -1065,15 +1091,15 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     child: c.loading
                         ? SizedBox.square(
                             dimension: 44 * s,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 3 * s,
-                              color: Colors.white,
+                            child: CupertinoActivityIndicator(
+                              radius: 10 * s,
+                              color: CupertinoColors.white,
                             ),
                           )
                         : _failed
                         ? _action(
                             'tv-player-retry',
-                            Icons.refresh_rounded,
+                            CupertinoIcons.arrow_clockwise,
                             c.sessionExpired ? l.connect : l.retry,
                             c.sessionExpired
                                 ? () async {
@@ -1096,14 +1122,12 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                         Row(
                           children: [
                             Expanded(child: Text(l.networkSlowHint)),
-                            IconButton(
+                            AppIconButton(
                               key: const Key('tv-dismiss-network-hint'),
-                              tooltip: MaterialLocalizations.of(
-                                context,
-                              ).closeButtonTooltip,
-                              color: Colors.white,
+                              tooltip: '关闭',
+                              color: CupertinoColors.white,
                               onPressed: c.dismissNetworkSlowHint,
-                              icon: const Icon(Icons.close),
+                              icon: const Icon(CupertinoIcons.xmark),
                             ),
                           ],
                         ),
@@ -1133,8 +1157,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                           _action(
                             'tv-player-toggle',
                             c.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
+                                ? CupertinoIcons.pause_fill
+                                : CupertinoIcons.play_fill,
                             c.isPlaying ? l.pause : l.play,
                             ready ? c.togglePlay : null,
                             focusNode: _playFocus,
@@ -1146,7 +1170,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 if (c.canBrowseEpisodes)
                                   _action(
                                     'tv-player-episodes',
-                                    Icons.video_library_rounded,
+                                    CupertinoIcons.film,
                                     l.playerEpisodes,
                                     ready ? _openEpisodes : null,
                                   ),
@@ -1154,7 +1178,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     c.canConfigureSubtitles)
                                   _action(
                                     'tv-player-tracks',
-                                    Icons.subtitles_outlined,
+                                    CupertinoIcons.captions_bubble,
                                     c.canSwitchAudioTrack
                                         ? l.mobileTracks
                                         : l.subtitleTrack,
@@ -1165,7 +1189,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 if (c.canSwitchQuality)
                                   _action(
                                     'tv-player-quality',
-                                    Icons.high_quality_outlined,
+                                    CupertinoIcons.sparkles,
                                     l.quality,
                                     ready
                                         ? () => _panel(_TvPanel.quality)
@@ -1178,7 +1202,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 if (c.canSwitchMediaSource)
                                   _action(
                                     'tv-player-source',
-                                    Icons.video_library_outlined,
+                                    CupertinoIcons.film,
                                     l.mediaSource,
                                     ready
                                         ? () => _panel(_TvPanel.source)
@@ -1186,19 +1210,19 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   ),
                                 _action(
                                   'tv-player-skip',
-                                  Icons.fast_forward_rounded,
+                                  CupertinoIcons.forward_fill,
                                   l.playerSkipSettings,
                                   () => _panel(_TvPanel.skip),
                                 ),
                                 _action(
                                   'tv-player-speed',
-                                  Icons.speed_rounded,
+                                  CupertinoIcons.speedometer,
                                   '${c.playbackRate}x',
                                   ready ? () => _panel(_TvPanel.speed) : null,
                                 ),
                                 _action(
                                   'tv-player-output',
-                                  Icons.auto_awesome_outlined,
+                                  CupertinoIcons.sparkles,
                                   l.playbackOutputSection,
                                   () => _panel(_TvPanel.output),
                                 ),
@@ -1219,16 +1243,21 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AppUiTheme(
+    data: AppUiTheme.dark(),
+    child: Builder(key: _presentationThemeKey, builder: _buildPlayer),
+  );
+
+  Widget _buildPlayer(BuildContext context) {
     final c = controller!, l = AppLocalizations.of(context);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (popped, _) {
         if (!popped) _back();
       },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Focus(
+      child: CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.black,
+        child: Focus(
           focusNode: _surfaceFocus,
           skipTraversal: true,
           autofocus: true,
@@ -1249,7 +1278,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                   if (c.permissionRevoked) {
                     // Cover stale texture and semantics until the owned
                     // revocation cleanup exits this actual-source route.
-                    return const ColoredBox(color: Colors.black);
+                    return const ColoredBox(color: CupertinoColors.black);
                   }
                   if (c.playbackEnded &&
                       c.nextEpisode == null &&
@@ -1354,9 +1383,11 @@ class _TvPlaybackActionState extends State<_TvPlaybackAction> {
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null;
     final s = TvDesign.scaleOf(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final focused = _focused;
-    final foreground = focused && !widget.subtle ? Colors.black : Colors.white;
+    final foreground = focused && !widget.subtle
+        ? CupertinoColors.black
+        : CupertinoColors.white;
     return FocusableActionDetector(
       enabled: enabled,
       focusNode: widget.focusNode,
@@ -1391,15 +1422,15 @@ class _TvPlaybackActionState extends State<_TvPlaybackAction> {
             decoration: BoxDecoration(
               color: widget.subtle
                   ? (focused
-                        ? Colors.white.withValues(alpha: .12)
-                        : Colors.transparent)
+                        ? CupertinoColors.white.withValues(alpha: .12)
+                        : const Color(0x00000000))
                   : focused
-                  ? Colors.white
-                  : Colors.black.withValues(alpha: .34),
+                  ? CupertinoColors.white
+                  : CupertinoColors.black.withValues(alpha: .34),
               border: Border.all(
                 color: widget.subtle && focused
-                    ? Colors.white
-                    : Colors.transparent,
+                    ? CupertinoColors.white
+                    : const Color(0x00000000),
                 width: 2 * s,
               ),
               borderRadius: BorderRadius.circular(widget.subtle ? 12 * s : 999),

@@ -58,89 +58,83 @@ void main() {
   );
 
   for (final tagged in [true, false]) {
-    test(
-      'writer timeout does not hide verified byte coverage tagged=$tagged',
-      () async {
-        final root = await Directory.systemTemp.createTemp(
-          'rillight-writer-busy-',
+    test('writer timeout does not hide verified byte coverage tagged=$tagged', () async {
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-writer-busy-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 8 * 1024 * 1024,
+        diskTimeout: const Duration(milliseconds: 80),
+      );
+      final bytes = Uint8List(2 * 1024 * 1024 + 7);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) async {
+        request.response.contentLength = bytes.length;
+        if (tagged) request.response.headers.set('etag', '"writer-busy"');
+        request.response.add(bytes);
+        await request.response.close();
+      });
+      final proxy = await PlaybackHttpProxy.create(
+        cache: cache,
+        sessionBuffering: true,
+      );
+      final client = HttpClient();
+      RandomAccessFile? lock;
+      try {
+        final route = proxy.register(
+          Uri.parse('http://127.0.0.1:${server.port}/movie'),
         );
-        final cache = await SessionByteCache.open(
-          root: root,
-          memoryLimitBytes: 8 * 1024 * 1024,
-          diskTimeout: const Duration(milliseconds: 80),
+        await (await (await client.getUrl(route)).close()).drain<void>();
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while ((cache.diagnostics['pendingPublications'] as int) > 0 &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        expect(cache.diagnostics['degradation'], isNull);
+        await proxy.refreshTimeline(const Duration(seconds: 4));
+        final expected = proxy.diagnostics['cachedByteRanges'];
+        expect(expected, isNotEmpty);
+        await cache.put(
+          resource: 'playback',
+          generation: 1,
+          offset: 0,
+          bytes: Uint8List.fromList([1, 2, 3, 4]),
         );
-        final bytes = Uint8List(2 * 1024 * 1024 + 7);
-        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-        server.listen((request) async {
-          request.response.contentLength = bytes.length;
-          if (tagged) request.response.headers.set('etag', '"writer-busy"');
-          request.response.add(bytes);
-          await request.response.close();
-        });
-        final proxy = await PlaybackHttpProxy.create(
-          cache: cache,
-          sessionBuffering: true,
+        await cache.resize(
+          memoryBytes: 0,
+          pendingBytes: 24 * 1024 * 1024,
+          diskBytes: 2048 * 1024 * 1024,
         );
-        final client = HttpClient();
-        RandomAccessFile? lock;
-        try {
-          final route = proxy.register(
-            Uri.parse('http://127.0.0.1:${server.port}/movie'),
-          );
-          await (await (await client.getUrl(route)).close()).drain<void>();
-          final deadline = DateTime.now().add(const Duration(seconds: 5));
-          while ((cache.diagnostics['pendingPublications'] as int) > 0 &&
-              DateTime.now().isBefore(deadline)) {
-            await Future<void>.delayed(const Duration(milliseconds: 5));
-          }
-          expect(cache.diagnostics['degradation'], isNull);
-          await proxy.refreshTimeline(const Duration(seconds: 4));
-          final expected = proxy.diagnostics['cachedByteRanges'];
-          expect(expected, isNotEmpty);
-          await cache.put(
+        lock = File('${root.path}/quota.lock').openSync(mode: FileMode.append);
+        lock.lockSync(FileLock.exclusive);
+        await cache.put(
+          resource: 'unrelated',
+          generation: 1,
+          offset: 0,
+          bytes: Uint8List(4),
+        );
+        expect(cache.diagnostics['degradation'], 'disk-timeout');
+        expect(
+          cache.firstMissingOffset(
             resource: 'playback',
             generation: 1,
             offset: 0,
-            bytes: Uint8List.fromList([1, 2, 3, 4]),
-          );
-          await cache.resize(
-            memoryBytes: 0,
-            pendingBytes: 24 * 1024 * 1024,
-            diskBytes: 2048 * 1024 * 1024,
-          );
-          lock = File(
-            '${root.path}/quota.lock',
-          ).openSync(mode: FileMode.append);
-          lock.lockSync(FileLock.exclusive);
-          await cache.put(
-            resource: 'unrelated',
-            generation: 1,
-            offset: 0,
-            bytes: Uint8List(4),
-          );
-          expect(cache.diagnostics['degradation'], 'disk-timeout');
-          expect(
-            cache.firstMissingOffset(
-              resource: 'playback',
-              generation: 1,
-              offset: 0,
-              length: 4,
-            ),
-            isNull,
-          );
-          // A timed-out writer has not invalidated the existing immutable bytes.
-          expect(proxy.diagnostics['cachedByteRanges'], expected);
-        } finally {
-          lock?.unlockSync();
-          lock?.closeSync();
-          client.close(force: true);
-          await proxy.close();
-          await server.close(force: true);
-          await root.delete(recursive: true);
-        }
-      },
-      skip: !Platform.isWindows,
-    ); // Same-process record locks differ on POSIX.
+            length: 4,
+          ),
+          isNull,
+        );
+        // A timed-out writer has not invalidated the existing immutable bytes.
+        expect(proxy.diagnostics['cachedByteRanges'], expected);
+      } finally {
+        lock?.unlockSync();
+        lock?.closeSync();
+        client.close(force: true);
+        await proxy.close();
+        await server.close(force: true);
+        await root.delete(recursive: true);
+      }
+    }, skip: !Platform.isWindows); // Same-process record locks differ on POSIX.
   }
 
   for (final mode in ['indexed', 'opaque', 'response']) {

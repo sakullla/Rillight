@@ -93,17 +93,14 @@ void main() {
     expect(await first.parentExpired(), isTrue);
   });
 
-  test(
-    'failed-report snapshot survives mailbox cleanup without launch credentials',
-    () async {
-      await first.writeLaunch({'accessToken': 'secret'});
-      final snapshot = File('${first.directory.path}/snapshot.json');
-      await snapshot.writeAsString('{}');
-      await first.dispose(preserveSnapshot: true);
-      expect(await snapshot.exists(), isTrue);
-      expect(await first.launchFile.exists(), isFalse);
-    },
-  );
+  test('failed-report snapshot survives mailbox cleanup without launch credentials', () async {
+    await first.writeLaunch({'accessToken': 'secret'});
+    final snapshot = File('${first.directory.path}/snapshot.json');
+    await snapshot.writeAsString('{}');
+    await first.dispose(preserveSnapshot: true);
+    expect(await snapshot.exists(), isTrue);
+    expect(await first.launchFile.exists(), isFalse);
+  });
 
   test(
     'invalid session IDs and malformed messages do not become commands',

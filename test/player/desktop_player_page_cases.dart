@@ -1,11 +1,11 @@
 import '../helpers/widget_harness.dart';
+
 import 'package:rillight/media_server/device.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -96,11 +96,14 @@ void main() {
             snapshotStore: MemoryPlaybackSessionSnapshotStore(),
             settingsStore: MemoryPlayerSettingsStore(),
           ),
-          child: MaterialApp(
+          child: CupertinoApp(
             locale: const Locale('zh', 'CN'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
-            theme: AppTheme.dark(),
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            theme: AppUiTheme.dark().cupertino,
             home: PlayerPage(itemId: itemId, autoResume: false),
           ),
         ),

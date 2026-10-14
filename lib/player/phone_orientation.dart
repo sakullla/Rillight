@@ -1,7 +1,8 @@
 import 'package:flutter/services.dart';
 
-typedef PhoneOrientationRequest =
-    Future<void> Function(List<DeviceOrientation> orientations);
+typedef PhoneOrientationRequest = Future<void> Function(
+  List<DeviceOrientation> orientations,
+);
 
 /// Whether the picture itself is landscape.
 ///

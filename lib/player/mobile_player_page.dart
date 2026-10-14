@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/routes.dart';
@@ -24,7 +25,9 @@ import 'package:rillight/player/phone_player_gestures.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
+
 import 'player_window_host.dart';
+
 import 'package:rillight/player/next_episode_card.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
@@ -174,6 +177,8 @@ class PhoneSystemBars {
 
 class MobilePlayerPageState extends State<MobilePlayerPage>
     with WidgetsBindingObserver {
+  final _presentationThemeKey = GlobalKey();
+
   PlayerController? controller;
   AndroidPlaybackLifecycle? _lifecycle;
   AuthController? _auth;
@@ -193,6 +198,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   (PlayerController, Widget)? _hiddenControls;
   bool _fillFrame = false;
   VideoBackendPhonePresentation? _presentation;
+  VoidCallback? _dismissPipNotice;
   bool _pip = false;
   bool _pipSupported = false;
   bool _viewportScheduled = false;
@@ -208,11 +214,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     if (_pip != pip) {
       _pip = pip;
       if (pip) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        _dismissPipNotice?.call();
+        _dismissPipNotice = null;
         final route = ModalRoute.of(context);
-        Navigator.of(
-          context,
-        ).popUntil((candidate) => identical(candidate, route));
+        Navigator.of(context)
+            .popUntil((candidate) => identical(candidate, route));
         controller?.setControlsPinned(false);
       } else if (state['foreground'] == true) {
         unawaited(_bars?.reassert());
@@ -270,8 +276,10 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       accepted = await _presentation?.enterPictureInPicture() ?? false;
     } catch (_) {}
     if (!accepted && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).phonePipFailed)),
+      _dismissPipNotice?.call();
+      _dismissPipNotice = showAppNotice(
+        context,
+        AppLocalizations.of(context).phonePipFailed,
       );
     }
   }
@@ -571,10 +579,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     }
     final failed = controller?.progressSyncFailed == true;
     if (failed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).progressSyncFailedMain),
-        ),
+      showAppNotice(
+        context,
+        AppLocalizations.of(context).progressSyncFailedMain,
       );
     }
     // Keep system back blocked during cleanup. Enabling it before an explicit
@@ -610,10 +617,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     current.setControlsPinned(true);
     var openSearch = false;
     try {
-      await showModalBottomSheet<void>(
-        context: context,
+      await PhoneMotion.showBottomPanel<void>(
+        context: _presentationThemeKey.currentContext!,
         useSafeArea: true,
         isScrollControlled: true,
+        showDragHandle: true,
         builder: (sheetContext) {
           final height = MediaQuery.sizeOf(sheetContext).height * .75;
           return SizedBox(
@@ -657,10 +665,11 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     current.setControlsPinned(true);
     final keyword = _searchKeyword(danmaku, current);
     try {
-      await showModalBottomSheet<void>(
-        context: context,
+      await PhoneMotion.showBottomPanel<void>(
+        context: _presentationThemeKey.currentContext!,
         useSafeArea: true,
         isScrollControlled: true,
+        showDragHandle: true,
         builder: (context) =>
             _PhoneDanmakuSearch(danmaku: danmaku, initialKeyword: keyword),
       );
@@ -737,6 +746,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
 
   @override
   void dispose() {
+    _dismissPipNotice?.call();
     WidgetsBinding.instance.removeObserver(this);
     _auth?.removeListener(_authChanged);
     controller?.removeListener(_onPlayback);
@@ -765,7 +775,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     final l = AppLocalizations.of(context);
     return Center(
       child: c.loading
-          ? const CircularProgressIndicator()
+          ? const CupertinoActivityIndicator()
           : c.error != null || c.sessionExpired || c.disconnected
           ? SingleChildScrollView(
               padding: const EdgeInsets.all(24),
@@ -783,7 +793,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  FilledButton(
+                  AppButton(
                     onPressed: c.sessionExpired
                         ? () async {
                             await _close();
@@ -800,13 +810,18 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AppUiTheme(
+    data: AppUiTheme.dark(),
+    child: Builder(key: _presentationThemeKey, builder: _buildPlayer),
+  );
+
+  Widget _buildPlayer(BuildContext context) {
     final c = controller!;
     if (c.permissionRevoked) {
       // No revoked source controls or semantics survive the cleanup frame.
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
+      return CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.black,
+        child: Center(
           child: Text(AppLocalizations.of(context).aggregationPrivateLocked),
         ),
       );
@@ -833,9 +848,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       },
       child: LiquidGlassBackdrop(
         enabled: false,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
+        child: CupertinoPageScaffold(
+          backgroundColor: CupertinoColors.black,
+          child: Stack(
             fit: StackFit.expand,
             children: [
               c.backend.buildView(),
@@ -984,10 +999,12 @@ class _PhoneDanmakuFailure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Material(
+    return Container(
       key: const Key('mobile-danmaku-failure'),
-      color: Colors.black.withValues(alpha: 0.88),
-      borderRadius: BorderRadius.circular(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.black.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
@@ -998,12 +1015,12 @@ class _PhoneDanmakuFailure extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(
+                AppButton(
                   key: const Key('mobile-danmaku-off'),
                   onPressed: onDisable,
                   child: Text(l10n.danmaku),
                 ),
-                TextButton(
+                AppButton(
                   key: const Key('mobile-danmaku-retry'),
                   onPressed: onRetry,
                   child: Text(l10n.retry),
@@ -1075,26 +1092,26 @@ class _PhoneDanmakuSearchState extends State<_PhoneDanmakuSearch> {
           children: [
             Text(l10n.danmakuSearchTitle),
             const SizedBox(height: 8),
-            TextField(
+            AppTextField(
               key: DanmakuKeys.searchField,
               controller: _field,
               textInputAction: TextInputAction.search,
-              decoration: InputDecoration(hintText: l10n.danmakuSearchHint),
               onSubmitted: (_) => unawaited(_run()),
+              placeholder: l10n.danmakuSearchHint,
             ),
             Align(
               alignment: Alignment.centerRight,
-              child: IconButton(
+              child: AppIconButton(
                 key: DanmakuKeys.searchSubmit,
                 tooltip: l10n.danmakuSearch,
                 onPressed: _loading ? null : () => unawaited(_run()),
-                icon: const Icon(Icons.arrow_forward),
+                icon: const Icon(CupertinoIcons.arrow_right),
               ),
             ),
             Expanded(
               child: _loading
                   ? const Center(
-                      child: CircularProgressIndicator(
+                      child: CupertinoActivityIndicator(
                         key: DanmakuKeys.searchLoading,
                       ),
                     )
@@ -1107,13 +1124,13 @@ class _PhoneDanmakuSearchState extends State<_PhoneDanmakuSearch> {
                   : ListView(
                       children: [
                         for (final anime in _results)
-                          ExpansionTile(
+                          AppDisclosure(
                             key: DanmakuKeys.searchAnime(anime.animeId),
                             title: Text(anime.animeTitle),
                             initiallyExpanded: _results.length == 1,
                             children: [
                               for (final episode in anime.episodes)
-                                ListTile(
+                                AppListTile(
                                   key: DanmakuKeys.searchEpisode(
                                     episode.episodeId,
                                   ),

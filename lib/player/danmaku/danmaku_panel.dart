@@ -1,8 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
@@ -59,9 +58,9 @@ class DanmakuSearchError extends StatelessWidget {
             children: [
               Text(l.errorLoadFailed, textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              TextButton.icon(
+              AppButton.icon(
                 onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(CupertinoIcons.arrow_clockwise),
                 label: Text(l.retry),
               ),
             ],
@@ -89,7 +88,7 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
 
   Widget _buildCard(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final danmaku = widget.danmaku;
     final configured = danmaku.isConfigured;
@@ -179,9 +178,9 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
         child: LiquidGlass(
           kind: LiquidGlassKind.panel,
           width: width,
-          child: Material(
+          child: Container(
             key: DanmakuKeys.panel,
-            type: MaterialType.transparency,
+            decoration: BoxDecoration(color: const Color(0x00000000)),
             child: body,
           ),
         ),
@@ -192,8 +191,8 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
   Widget _chrome(
     BuildContext context, {
     required AppLocalizations l10n,
-    required ThemeData theme,
-    required ColorScheme scheme,
+    required AppUiThemeData theme,
+    required AppColorScheme scheme,
     required DanmakuController danmaku,
     required bool unreachable,
     required bool configured,
@@ -216,9 +215,9 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
             ),
             Transform.scale(
               scale: 0.82,
-              child: Switch.adaptive(
+              child: CupertinoSwitch(
                 key: DanmakuKeys.toggle,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+
                 value: danmaku.danmakuOn,
                 onChanged: (_) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -233,7 +232,7 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
             _HudIconButton(
               buttonKey: DanmakuKeys.search,
               tooltip: l10n.danmakuSearch,
-              icon: Icons.search_rounded,
+              icon: CupertinoIcons.search,
               onPressed: () {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   widget.onSearch();
@@ -241,8 +240,8 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
               },
             ),
             _HudIconButton(
-              tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-              icon: Icons.close_rounded,
+              tooltip: '关闭',
+              icon: CupertinoIcons.xmark,
               onPressed: () {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (context.mounted) {
@@ -283,7 +282,7 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
           ),
           Padding(
             padding: const EdgeInsets.only(top: 4, right: 8),
-            child: InkWell(
+            child: AppSurfaceAction(
               key: DanmakuKeys.advancedToggle,
               onTap: () {
                 setState(() => _advancedExpanded = !_advancedExpanded);
@@ -304,8 +303,8 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
                     ),
                     Icon(
                       _advancedExpanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
+                          ? CupertinoIcons.chevron_up
+                          : CupertinoIcons.chevron_down,
                       size: 18,
                       color: quiet,
                     ),
@@ -335,13 +334,12 @@ class _HudIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return IconButton(
+    final scheme = AppUiTheme.of(context).colorScheme;
+    return AppIconButton(
       key: buttonKey,
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
-      style: IconButton.styleFrom(
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+
+      style: AppButtonStyle(
         minimumSize: const Size(34, 34),
         padding: EdgeInsets.zero,
         foregroundColor: scheme.onSurface.withValues(alpha: 0.82),

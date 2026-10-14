@@ -1,9 +1,12 @@
+import 'package:rillight/player/buffered_ranges_track.dart';
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -107,17 +110,20 @@ void main() {
     MediaImage.debugResetCacheConfiguration();
   });
 
-  Widget subject(double fraction) => MaterialApp(
+  Widget subject(double fraction) => CupertinoApp(
     home: AuthScope(
       controller: auth,
-      child: Scaffold(
-        body: Center(
+      child: CupertinoPageScaffold(
+        child: Center(
           child: SizedBox(
             width: 400,
             child: SeekPreview(
               controller: controller,
               dragValue: fraction,
-              child: Slider(value: fraction, onChanged: (v) => selected = v),
+              child: PlayerSlider(
+                value: fraction,
+                onChanged: (v) => selected = v,
+              ),
             ),
           ),
         ),
@@ -179,7 +185,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byType(Image), findsNothing);
       expect(find.text('07:30'), findsOneWidget);
-      await tester.tap(find.byType(Slider));
+      await tester.tap(find.byType(PlayerSlider));
       expect(selected, closeTo(.5, .02));
       await tester.pumpWidget(const SizedBox.shrink());
     });

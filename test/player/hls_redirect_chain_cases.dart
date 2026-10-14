@@ -60,9 +60,8 @@ void main() {
               response.statusCode = redirect;
               response.headers.set('location', '../../cdn/chunk?$_signature');
             case '/cdn/chunk':
-              final range = RegExp(
-                r'^bytes=(\d+)-(\d+)$',
-              ).firstMatch(request.headers.value('range') ?? '');
+              final range = RegExp(r'^bytes=(\d+)-(\d+)$')
+                  .firstMatch(request.headers.value('range') ?? '');
               final start = range == null ? 0 : int.parse(range[1]!);
               final end = range == null ? 15 : int.parse(range[2]!);
               response.statusCode = range == null ? 200 : 206;

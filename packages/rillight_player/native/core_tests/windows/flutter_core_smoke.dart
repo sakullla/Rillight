@@ -4,7 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
@@ -276,10 +276,11 @@ class _SmokeAppState extends State<_SmokeApp> {
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    home: Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
+  Widget build(BuildContext context) => WidgetsApp(
+    color: const Color(0xff000000),
+    builder: (context, _) => ColoredBox(
+      color: const Color(0xff000000),
+      child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -289,13 +290,13 @@ class _SmokeAppState extends State<_SmokeApp> {
                 width: 640,
                 height: 360,
                 child: _textureId == null
-                    ? const ColoredBox(color: Colors.black)
+                    ? const ColoredBox(color: Color(0xff000000))
                     : Texture(textureId: _textureId!),
               ),
             ),
             Text(
               'frames=$_frames hardware=$_hardware error=$_error',
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(color: Color(0xffffffff)),
             ),
           ],
         ),

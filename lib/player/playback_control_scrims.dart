@@ -1,5 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// Video shading belongs behind comments, while interactive chrome belongs
 /// above them. Keeping these layers separate prevents controls fading in from
@@ -18,7 +17,7 @@ class PlaybackControlScrims extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scrim = Theme.of(context).colorScheme.scrim;
+    final scrim = AppUiTheme.of(context).colorScheme.scrim;
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
     return IgnorePointer(
       child: AnimatedOpacity(
@@ -38,7 +37,7 @@ class PlaybackControlScrims extends StatelessWidget {
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                     colors: [
-                      Colors.transparent,
+                      const Color(0x00000000),
                       scrim.withValues(
                         alpha: AppScrim.of(context, AppScrim.playerBarSoft),
                       ),
@@ -67,7 +66,7 @@ class PlaybackControlScrims extends StatelessWidget {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.transparent,
+                        const Color(0x00000000),
                         scrim.withValues(
                           alpha: AppScrim.of(context, AppScrim.playerBar),
                         ),

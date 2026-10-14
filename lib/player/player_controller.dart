@@ -1,6 +1,9 @@
 import 'package:rillight/player/playback_persistence.dart';
+
 import 'dart:async';
+
 import 'package:rillight/player/player_host_command.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -17,6 +20,7 @@ import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/playback_coordinator.dart';
 import 'package:rillight/player/playback_session.dart';
+
 import 'playback_runtime.dart';
 import 'player_bindings.dart'
     show
@@ -30,6 +34,7 @@ import '../auth/server_list_store.dart';
 import '../aggregation/history/history_writer.dart';
 import '../aggregation/identity/media_identity.dart';
 import '../aggregation/query/same_source_query.dart';
+
 import 'package:rillight/player/playback_switch_preflight.dart';
 export 'package:rillight/player/playback_switch_preflight.dart';
 import 'package:rillight/player/playback_state.dart';
@@ -163,14 +168,13 @@ class PlayerController extends ChangeNotifier {
     this.playbackLineSnapshot = const [],
     this.verifiedPlaybackServerId,
     this.nextPrefixFetch,
-    Future<PlayerStartupData?>? startupData,
+    this._startupData,
     PlaybackSessionSnapshotStore? snapshotStore,
   }) : recoveryTimeout = recoveryTimeout ?? const Duration(seconds: 45),
        recoveryOpenTimeout =
            recoveryOpenTimeout ??
            recoveryTimeout ??
            const Duration(seconds: 150),
-       _startupData = startupData,
        snapshotStore =
            snapshotStore ??
            FilePlaybackSessionSnapshotStore.forCurrentProcess() {
@@ -934,9 +938,8 @@ class PlayerController extends ChangeNotifier {
             return;
           }
           await Future.wait<void>([
-            _sourceRequest(
-              () => client.getItem(itemId),
-            ).then<void>((value) => loadedItem = value),
+            _sourceRequest(() => client.getItem(itemId))
+                .then<void>((value) => loadedItem = value),
             () async {
               try {
                 loadedUser = await _sourceRequest(client.getUser);

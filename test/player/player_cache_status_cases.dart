@@ -1,20 +1,24 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/network_throughput.dart';
 
 Widget host({num speed = 0, double fontSize = 12, double width = 400}) =>
-    MaterialApp(
+    CupertinoApp(
       locale: const Locale('zh'),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: [
+        AppLocalizations.delegate,
+        ...GlobalCupertinoLocalizations.delegates,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(
-        body: SizedBox(
+      home: CupertinoPageScaffold(
+        child: SizedBox(
           width: width,
           child: Builder(
-            builder: (context) => Tooltip(
+            builder: (context) => AppTooltip(
               message: AppLocalizations.of(context).playerNetworkSpeedTooltip,
               child: NetworkSpeedReadout(
                 bytesPerSecond: speed,

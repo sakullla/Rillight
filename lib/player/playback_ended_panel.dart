@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -26,30 +26,26 @@ class PlaybackEndedPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return ColoredBox(
-      color: Colors.black87,
+      color: const Color(0xdd000000),
       child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: EdgeInsets.all(tv ? 48 : 16),
             child: ConstrainedBox(
               constraints: BoxConstraints(maxWidth: tv ? 760 : 480),
-              child: Material(
+              child: Container(
                 key: PlayerKeys.playbackEnded,
-                color: scheme.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  side: BorderSide(color: scheme.outlineVariant),
-                ),
+                decoration: BoxDecoration(color: scheme.surfaceContainerLow),
                 child: Padding(
                   padding: EdgeInsets.all(tv ? 32 : 20),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        Icons.replay_rounded,
+                        CupertinoIcons.arrow_counterclockwise,
                         size: tv ? 48 : 32,
                         color: scheme.primary,
                       ),
@@ -86,20 +82,22 @@ class PlaybackEndedPanel extends StatelessWidget {
                               ? [
                                   TvAction(
                                     key: PlayerKeys.replay,
+
                                     focusNode: replayFocus,
                                     autofocus: true,
                                     onPressed: onReplay,
                                     child: _TvLabel(
-                                      Icons.replay_rounded,
+                                      CupertinoIcons.arrow_counterclockwise,
                                       l.replay,
                                     ),
                                   ),
                                   if (onViewSeries != null)
                                     TvAction(
                                       key: PlayerKeys.endedViewSeries,
+
                                       onPressed: onViewSeries,
                                       child: _TvLabel(
-                                        Icons.video_library_outlined,
+                                        CupertinoIcons.film,
                                         l.viewSeries,
                                       ),
                                     ),
@@ -107,33 +105,35 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     key: PlayerKeys.endedClose,
                                     onPressed: onClose,
                                     child: _TvLabel(
-                                      Icons.close_rounded,
+                                      CupertinoIcons.xmark,
                                       l.closePlayer,
                                     ),
                                   ),
                                 ]
                               : [
-                                  FilledButton.icon(
+                                  AppButton.icon(
                                     key: PlayerKeys.replay,
+                                    variant: AppButtonVariant.filled,
                                     onPressed: onReplay,
-                                    icon: const Icon(Icons.replay_rounded),
+                                    icon: const Icon(
+                                      CupertinoIcons.arrow_counterclockwise,
+                                    ),
                                     label: Text(l.replay),
                                   ),
                                   if (onViewSeries != null)
-                                    OutlinedButton.icon(
+                                    AppButton.icon(
                                       key: PlayerKeys.endedViewSeries,
+                                      variant: AppButtonVariant.outlined,
                                       onPressed: onViewSeries,
-                                      icon: const Icon(
-                                        Icons.video_library_outlined,
-                                      ),
+                                      icon: const Icon(CupertinoIcons.film),
                                       label: Text(l.viewSeries),
                                     ),
-                                  Tooltip(
+                                  AppTooltip(
                                     message: l.closePlayer,
-                                    child: OutlinedButton.icon(
+                                    child: AppButton.icon(
                                       key: PlayerKeys.endedClose,
                                       onPressed: onClose,
-                                      icon: const Icon(Icons.close_rounded),
+                                      icon: const Icon(CupertinoIcons.xmark),
                                       label: Text(l.closePlayer),
                                     ),
                                   ),

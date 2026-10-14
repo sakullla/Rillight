@@ -100,15 +100,14 @@ class MediaCachePolicy {
     final apparentAge = date == null
         ? 0
         : current.difference(date).inSeconds.clamp(0, 1 << 31);
-    final lifetimeMatch = RegExp(
-      r'(?:^|,)\s*max-age\s*=\s*"?(\d+)',
-    ).firstMatch(control);
+    final lifetimeMatch = RegExp(r'(?:^|,)\s*max-age\s*=\s*"?(\d+)')
+        .firstMatch(control);
     var lifetime = int.tryParse(lifetimeMatch?[1] ?? '') ?? 0;
     if (lifetimeMatch == null) {
       try {
-        lifetime = HttpDate.parse(
-          headers.value('expires') ?? '',
-        ).difference(date ?? current).inSeconds;
+        lifetime = HttpDate.parse(headers.value('expires') ?? '')
+            .difference(date ?? current)
+            .inSeconds;
       } catch (_) {}
     }
     // The playback-only opt-in permits temporary buffering, not a fresh HTTP

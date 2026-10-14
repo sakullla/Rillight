@@ -1,7 +1,10 @@
 import '../../helpers/widget_harness.dart';
 import '../../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
+
 import 'dart:ui' as ui;
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/player/danmaku/danmaku_controller.dart';
@@ -91,7 +94,7 @@ void main() {
       rate: 1,
     );
     final boundaryKey = GlobalKey();
-    Widget scene(bool visible) => MaterialApp(
+    Widget scene(bool visible) => CupertinoApp(
       home: Center(
         child: RepaintBoundary(
           key: boundaryKey,
@@ -101,7 +104,7 @@ void main() {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                const ColoredBox(color: Colors.black),
+                const ColoredBox(color: CupertinoColors.black),
                 PlaybackControlScrims(
                   visible: visible,
                   topExtent: 100,
@@ -119,9 +122,9 @@ void main() {
           boundaryKey.currentContext!.findRenderObject()!
               as RenderRepaintBoundary;
       final image = await boundary.toImage();
-      final data = (await image.toByteData(
-        format: ui.ImageByteFormat.rawRgba,
-      ))!.buffer.asUint8List();
+      final data = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!
+          .buffer
+          .asUint8List();
       var white = 0;
       for (var i = 0; i < image.width * 45 * 4; i += 4) {
         if (data[i] > 190 && data[i + 1] > 190 && data[i + 2] > 190) white++;

@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+
 import 'playback_runtime.dart';
 import '../media_server/playback.dart';
 import '../aggregation/history/history_models.dart';
@@ -12,23 +13,22 @@ import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/player/player_startup.dart';
 
-typedef PlaybackObservationSink =
-    Future<bool> Function(
-      PlaybackReport report,
-      WatchTimeline timeline,
-      int sequence, {
-      bool played,
-    });
+typedef PlaybackObservationSink = Future<bool> Function(
+  PlaybackReport report,
+  WatchTimeline timeline,
+  int sequence, {
+  bool played,
+});
 
-typedef PlaybackReportOutcomeSink =
-    Future<void> Function(
-      PlaybackReport report,
-      int observationSequence,
-      bool succeeded,
-    );
+typedef PlaybackReportOutcomeSink = Future<void> Function(
+  PlaybackReport report,
+  int observationSequence,
+  bool succeeded,
+);
 
-typedef PlaybackSwitchDispatcher =
-    Future<Map<String, dynamic>> Function(Map<String, dynamic> command);
+typedef PlaybackSwitchDispatcher = Future<Map<String, dynamic>> Function(
+  Map<String, dynamic> command,
+);
 
 class PlayerBindings {
   const PlayerBindings({

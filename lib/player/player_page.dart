@@ -1,13 +1,13 @@
 import 'dart:async';
+
 import 'package:rillight/player/player_host_command.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/desktop_gestures.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
@@ -429,11 +429,16 @@ class PlayerPageState extends State<PlayerPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AppUiTheme(
+    data: AppUiTheme.dark(),
+    child: Builder(builder: _buildPlayer),
+  );
+
+  Widget _buildPlayer(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final current = controller;
     if (current == null) {
-      return const ColoredBox(color: Colors.black);
+      return const ColoredBox(color: CupertinoColors.black);
     }
     return LiquidGlassBackdrop(
       enabled: false,
@@ -525,11 +530,11 @@ class PlayerPageState extends State<PlayerPage> {
             onSeek: current.seekTo,
             onVolume: current.setVolume,
             onFullScreen: current.window.setFullScreen,
-            child: Scaffold(
+            child: CupertinoPageScaffold(
               backgroundColor: _nativePresentation?.value == true
-                  ? Colors.transparent
-                  : Colors.black,
-              body: Listener(
+                  ? const Color(0x00000000)
+                  : CupertinoColors.black,
+              child: Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerSignal: (event) {
                   if (defaultTargetPlatform == TargetPlatform.macOS) return;
@@ -589,7 +594,7 @@ class PlayerPageState extends State<PlayerPage> {
                       if (current.loading)
                         const Positioned.fill(
                           child: IgnorePointer(
-                            child: ColoredBox(color: Colors.black),
+                            child: ColoredBox(color: CupertinoColors.black),
                           ),
                         ),
                       Positioned.fill(
@@ -642,16 +647,16 @@ class PlayerPageState extends State<PlayerPage> {
                               const SizedBox(
                                 width: 44,
                                 height: 44,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 3,
-                                ),
+                                child: CupertinoActivityIndicator(),
                               ),
                               const SizedBox(height: AppSpacing.md),
                               Text(
                                 l10n.playerLoading,
-                                style: Theme.of(context).textTheme.bodyMedium
+                                style: AppUiTheme.of(context)
+                                    .textTheme
+                                    .bodyMedium
                                     ?.copyWith(
-                                      color: Theme.of(context)
+                                      color: AppUiTheme.of(context)
                                           .colorScheme
                                           .onSurface
                                           .withValues(alpha: 0.7),
@@ -897,7 +902,7 @@ class _PlayerChromeBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l10n = AppLocalizations.of(context);
     final parts = playbackTitleParts(controller.item, fallback: '');
     final title = parts.title;
@@ -990,7 +995,7 @@ class _PlayerChromeBar extends StatelessWidget {
                         width: statusWidth,
                         child: Align(
                           alignment: Alignment.centerRight,
-                          child: Tooltip(
+                          child: AppTooltip(
                             message: l10n.playerNetworkSpeedTooltip,
                             child: NetworkSpeedReadout(
                               key: PlayerKeys.networkSpeed,
@@ -1015,8 +1020,8 @@ class _PlayerChromeBar extends StatelessWidget {
                       unawaited(controller.toggleAlwaysOnTop());
                     },
                     icon: controller.isAlwaysOnTop
-                        ? Icons.push_pin_rounded
-                        : Icons.push_pin_outlined,
+                        ? CupertinoIcons.pin_fill
+                        : CupertinoIcons.pin_fill,
                   ),
                   _PlayerChromeIconButton(
                     buttonKey: const Key('player-window-minimize'),
@@ -1025,18 +1030,16 @@ class _PlayerChromeBar extends StatelessWidget {
                     onPressed: () {
                       unawaited(controller.minimize());
                     },
-                    icon: Icons.remove_rounded,
+                    icon: CupertinoIcons.minus,
                   ),
                   _PlayerChromeIconButton(
                     buttonKey: const Key('player-window-close'),
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).closeButtonTooltip,
+                    tooltip: '关闭',
                     color: theme.colorScheme.onSurface,
                     onPressed: () {
                       unawaited(controller.close());
                     },
-                    icon: Icons.close_rounded,
+                    icon: CupertinoIcons.xmark,
                   ),
                 ],
               ),
@@ -1048,7 +1051,7 @@ class _PlayerChromeBar extends StatelessWidget {
   }
 }
 
-/// 播放窗顶栏按钮:与主窗口搜索/会话钮同高同字号,避免默认 48 点 IconButton
+/// 播放窗顶栏按钮:与主窗口搜索/会话钮同高同字号,避免默认 48 点 AppIconButton
 /// 在标题栏里画出一块大方块。
 class _PlayerChromeIconButton extends StatelessWidget {
   const _PlayerChromeIconButton({
@@ -1067,18 +1070,17 @@ class _PlayerChromeIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final foreground = color ?? scheme.onSurface;
-    return Tooltip(
+    return AppTooltip(
       message: tooltip,
-      preferBelow: true,
-      child: IconButton(
+      child: AppIconButton(
         key: buttonKey,
         onPressed: onPressed,
         padding: EdgeInsets.zero,
         constraints: kTitleBarIconConstraints,
-        visualDensity: VisualDensity.compact,
-        iconSize: 18,
+
+        size: 18,
         color: foreground,
         icon: Icon(icon),
       ),
@@ -1094,7 +1096,7 @@ class _PlaybackEndedOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final title = controller.item?.displayName ?? '';
     final seriesId = controller.item?.seriesId;
@@ -1116,13 +1118,17 @@ class _PlaybackEndedOverlay extends StatelessWidget {
             child: LiquidGlass(
               kind: LiquidGlassKind.panel,
               padding: const EdgeInsets.all(AppSpacing.xxl),
-              child: Material(
+              child: Container(
                 key: PlayerKeys.playbackEnded,
-                type: MaterialType.transparency,
+                decoration: BoxDecoration(color: const Color(0x00000000)),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.replay_rounded, size: 40, color: scheme.primary),
+                    Icon(
+                      CupertinoIcons.arrow_counterclockwise,
+                      size: 40,
+                      color: scheme.primary,
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       l10n.playbackEnded,
@@ -1147,26 +1153,30 @@ class _PlaybackEndedOverlay extends StatelessWidget {
                       spacing: AppSpacing.sm,
                       runSpacing: AppSpacing.sm,
                       children: [
-                        FilledButton.icon(
+                        AppButton.icon(
                           key: PlayerKeys.replay,
+                          variant: AppButtonVariant.filled,
                           onPressed: () => unawaited(controller.replay()),
-                          style: _endedActionStyle(theme, filled: true),
-                          icon: const Icon(Icons.replay_rounded),
+                          style: _endedActionStyle(theme),
+                          icon: const Icon(
+                            CupertinoIcons.arrow_counterclockwise,
+                          ),
                           label: Text(l10n.replay),
                         ),
                         if (hasSeries)
-                          OutlinedButton.icon(
+                          AppButton.icon(
                             key: PlayerKeys.endedViewSeries,
+                            variant: AppButtonVariant.outlined,
                             onPressed: controller.openEndedSeries,
                             style: _endedActionStyle(theme),
-                            icon: const Icon(Icons.video_library_outlined),
+                            icon: const Icon(CupertinoIcons.film),
                             label: Text(l10n.viewSeries),
                           ),
-                        OutlinedButton.icon(
+                        AppButton.icon(
                           key: PlayerKeys.endedClose,
                           onPressed: () => unawaited(controller.close()),
                           style: _endedActionStyle(theme),
-                          icon: const Icon(Icons.close_rounded),
+                          icon: const Icon(CupertinoIcons.xmark),
                           label: Text(l10n.closePlayer),
                         ),
                       ],
@@ -1182,7 +1192,7 @@ class _PlaybackEndedOverlay extends StatelessWidget {
   }
 }
 
-ButtonStyle _endedActionStyle(ThemeData theme, {bool filled = false}) {
+AppButtonStyle _endedActionStyle(AppUiThemeData theme) {
   final label = theme.textTheme.labelLarge?.copyWith(
     fontSize: 15,
     height: 1.25,
@@ -1194,20 +1204,7 @@ ButtonStyle _endedActionStyle(ThemeData theme, {bool filled = false}) {
     horizontal: AppSpacing.lg,
     vertical: AppSpacing.sm,
   );
-  if (filled) {
-    return FilledButton.styleFrom(
-      minimumSize: size,
-      padding: padding,
-      textStyle: label,
-      iconSize: 20,
-    );
-  }
-  return OutlinedButton.styleFrom(
-    minimumSize: size,
-    padding: padding,
-    textStyle: label,
-    iconSize: 20,
-  );
+  return AppButtonStyle(minimumSize: size, padding: padding, textStyle: label);
 }
 
 class _NextEpisodeBanner extends StatelessWidget {
@@ -1237,7 +1234,7 @@ class _NextEpisodeBanner extends StatelessWidget {
 }
 
 /// 播放到片头/片尾区间时右下角的跳过按钮:点击跳到区间终点。
-/// 用贴合文字的玻璃胶囊,不再套主题 [FilledButton],避免两侧空一截。
+/// 用贴合文字的玻璃胶囊,不再套主题 [AppButton],避免两侧空一截。
 class _SkipSegmentButton extends StatelessWidget {
   const _SkipSegmentButton({required this.controller});
 
@@ -1246,20 +1243,20 @@ class _SkipSegmentButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final segment = controller.activeSkipSegment!;
     return Positioned(
       right: AppSpacing.xl,
       bottom: controller.controlsVisible ? 112 : AppSpacing.xl,
-      child: Material(
+      child: Container(
         key: const Key('player-skip-segment'),
-        color: scheme.surface.withValues(alpha: 0.94),
-        elevation: 8,
-        shadowColor: Colors.black.withValues(alpha: 0.38),
-        borderRadius: BorderRadius.circular(999),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        decoration: BoxDecoration(
+          color: scheme.surface.withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: AppSurfaceAction(
           onTap: () => unawaited(controller.skipCurrentSegment()),
           child: Padding(
             padding: const EdgeInsets.symmetric(
@@ -1270,7 +1267,7 @@ class _SkipSegmentButton extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  Icons.fast_forward_rounded,
+                  CupertinoIcons.forward_fill,
                   size: 18,
                   color: scheme.primary,
                 ),
@@ -1301,7 +1298,7 @@ class _EpisodeOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Positioned(
       top: kPlayerChromeBarExtent,
       left: 0,
@@ -1332,16 +1329,10 @@ class _EpisodeOverlay extends StatelessWidget {
               MediaQuery.sizeOf(context).width - AppSpacing.md * 2,
               MediaQuery.sizeOf(context),
             ),
-            child: Material(
-              color: scheme.surfaceContainerHigh.withValues(alpha: .97),
-              elevation: 6,
-              shadowColor: Colors.black.withValues(alpha: .35),
+            child: Container(
               clipBehavior: Clip.antiAlias,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadii.lg),
-                side: BorderSide(
-                  color: scheme.outlineVariant.withValues(alpha: .5),
-                ),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh.withValues(alpha: .97),
               ),
               child: PlayerEpisodeBrowser(
                 controller: controller,
@@ -1364,7 +1355,7 @@ class _Banner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final dismiss = onDismiss;
     return Positioned(
@@ -1394,20 +1385,18 @@ class _Banner extends StatelessWidget {
                 Flexible(child: Text(text, style: theme.textTheme.bodyMedium)),
                 if (dismiss != null) ...[
                   const SizedBox(width: AppSpacing.xxs),
-                  IconButton(
+                  AppIconButton(
                     key: const Key('player-progress-sync-dismiss'),
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).closeButtonTooltip,
+                    tooltip: '关闭',
                     onPressed: dismiss,
-                    iconSize: 16,
-                    visualDensity: VisualDensity.compact,
+                    size: 16,
+
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints.tightFor(
                       width: 28,
                       height: 28,
                     ),
-                    icon: const Icon(Icons.close_rounded),
+                    icon: const Icon(CupertinoIcons.xmark),
                   ),
                 ],
               ],
@@ -1517,7 +1506,7 @@ class _SeekTimelineState extends State<_SeekTimeline> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l10n = AppLocalizations.of(context);
     final controller = widget.controller;
     final dragging = widget.dragging;
@@ -1546,38 +1535,34 @@ class _SeekTimelineState extends State<_SeekTimeline> {
         ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
-          child: SliderTheme(
-            data: _overlaySliderTheme(theme, thumbRadius: 6),
-            child: SeekPreview(
-              controller: controller,
-              dragValue: dragging ? widget.dragValue : null,
-              child: BufferedRangesTrack(
-                snapshot: controller.bufferSnapshot,
-                duration: controller.duration,
-                child: Slider(
-                  key: PlayerKeys.seekBar,
-                  value: value,
-                  onChanged: !seekEnabled
-                      ? null
-                      : (next) {
-                          if (!dragging) {
-                            widget.onDragStart(next);
-                          } else {
-                            widget.onDragUpdate(next);
-                          }
-                        },
-                  onChangeEnd: !seekEnabled ? null : widget.onDragEnd,
-                ),
+          child: SeekPreview(
+            controller: controller,
+            dragValue: dragging ? widget.dragValue : null,
+            child: BufferedRangesTrack(
+              snapshot: controller.bufferSnapshot,
+              duration: controller.duration,
+              child: PlayerSlider(
+                key: PlayerKeys.seekBar,
+                value: value,
+                onChanged: !seekEnabled
+                    ? null
+                    : (next) {
+                        if (!dragging) {
+                          widget.onDragStart(next);
+                        } else {
+                          widget.onDragUpdate(next);
+                        }
+                      },
+                onChangeEnd: !seekEnabled ? null : widget.onDragEnd,
               ),
             ),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
-        Tooltip(
+        AppTooltip(
           message: _remaining
               ? l10n.playerShowDuration
               : l10n.playerShowRemaining,
-          waitDuration: const Duration(milliseconds: 600),
           child: MouseRegion(
             cursor: seekEnabled ? SystemMouseCursors.click : MouseCursor.defer,
             child: GestureDetector(
@@ -1629,8 +1614,8 @@ class _ControlsRow extends StatelessWidget {
           iconSize: 30,
           filled: true,
           icon: controller.isPlaying
-              ? Icons.pause_rounded
-              : Icons.play_arrow_rounded,
+              ? CupertinoIcons.pause_fill
+              : CupertinoIcons.play_fill,
         ),
         const SizedBox(width: AppSpacing.xxs),
         _PlayerIconButton(
@@ -1641,7 +1626,7 @@ class _ControlsRow extends StatelessWidget {
                   controller.seekRelative(const Duration(seconds: -10)),
                 )
               : null,
-          icon: Icons.replay_10_rounded,
+          icon: CupertinoIcons.gobackward_10,
         ),
         _PlayerIconButton(
           key: const Key('player-forward'),
@@ -1651,7 +1636,7 @@ class _ControlsRow extends StatelessWidget {
                   controller.seekRelative(const Duration(seconds: 10)),
                 )
               : null,
-          icon: Icons.forward_10_rounded,
+          icon: CupertinoIcons.goforward_10,
         ),
         _VolumeControl(controller: controller),
         const Spacer(),
@@ -1665,7 +1650,7 @@ class _ControlsRow extends StatelessWidget {
             key: const Key('player-episodes'),
             tooltip: l10n.playerEpisodes,
             onPressed: onOpenEpisodes,
-            icon: Icons.video_library_rounded,
+            icon: CupertinoIcons.film,
           ),
         if (controller.canConfigureSubtitles)
           SubtitleTrackMenu(controller: controller),
@@ -1677,8 +1662,8 @@ class _ControlsRow extends StatelessWidget {
               : l10n.fullscreen,
           onPressed: controller.toggleFullScreen,
           icon: controller.isFullScreen
-              ? Icons.fullscreen_exit_rounded
-              : Icons.fullscreen_rounded,
+              ? CupertinoIcons.arrow_down_right_arrow_up_left
+              : CupertinoIcons.arrow_up_left_arrow_down_right,
         ),
       ],
     );
@@ -1695,14 +1680,14 @@ class _DanmakuButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return _PlayerIconButton(
       key: DanmakuKeys.menu,
       tooltip: l10n.danmaku,
       onPressed: onPressed,
       icon: danmaku.danmakuOn
-          ? Icons.chat_bubble_rounded
-          : Icons.chat_bubble_outline_rounded,
+          ? CupertinoIcons.chat_bubble_fill
+          : CupertinoIcons.chat_bubble,
       iconColor: danmaku.danmakuOn ? scheme.primary : null,
     );
   }
@@ -1717,17 +1702,17 @@ class _DanmakuMatchChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Positioned(
       left: AppSpacing.xl,
       bottom: 112,
       child: LiquidGlass(
         kind: LiquidGlassKind.pill,
-        child: Material(
+        child: Container(
           key: DanmakuKeys.matchChip,
-          type: MaterialType.transparency,
-          child: InkWell(
+          decoration: BoxDecoration(color: const Color(0x00000000)),
+          child: AppSurfaceAction(
             onTap: () {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 onSearch();
@@ -1743,7 +1728,7 @@ class _DanmakuMatchChip extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    Icons.subtitles_off_rounded,
+                    CupertinoIcons.captions_bubble,
                     size: 18,
                     color: scheme.onSurface,
                   ),
@@ -1771,7 +1756,7 @@ class _DanmakuSourceBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Positioned(
       left: 0,
@@ -1792,17 +1777,22 @@ class _DanmakuSourceBanner extends StatelessWidget {
               horizontal: AppSpacing.md,
               vertical: AppSpacing.sm,
             ),
-            child: Material(
+            child: Container(
               key: DanmakuKeys.sourceBanner,
-              type: MaterialType.transparency,
+              decoration: BoxDecoration(color: const Color(0x00000000)),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.wifi_off_rounded, size: 18, color: scheme.primary),
+                  Icon(
+                    CupertinoIcons.wifi_slash,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
                   const SizedBox(width: AppSpacing.xs),
                   Flexible(child: Text(l10n.danmakuCustomUnreachable)),
                   const SizedBox(width: AppSpacing.sm),
-                  FilledButton.tonal(
+                  AppButton(
+                    variant: AppButtonVariant.tinted,
                     key: DanmakuKeys.useOfficial,
                     onPressed: () => unawaited(controller.useOfficialSource()),
                     child: Text(l10n.danmakuUseOfficial),
@@ -1891,7 +1881,7 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final viewport = MediaQuery.sizeOf(context);
     final overlayWidth = viewport.width;
@@ -1923,11 +1913,9 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
             bottom: 0,
             right: 0,
             width: panelWidth,
-            child: Material(
+            child: Container(
               key: DanmakuKeys.searchPanel,
-              color: scheme.surfaceContainerHigh,
-              elevation: 8,
-              shadowColor: scheme.shadow,
+              decoration: BoxDecoration(color: scheme.surfaceContainerHigh),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.md,
@@ -1948,18 +1936,16 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                             ),
                           ),
                         ),
-                        IconButton(
-                          tooltip: MaterialLocalizations.of(
-                            context,
-                          ).closeButtonTooltip,
+                        AppIconButton(
+                          tooltip: '关闭',
                           color: scheme.onSurface,
                           onPressed: widget.onClose,
-                          icon: const Icon(Icons.close_rounded),
+                          icon: const Icon(CupertinoIcons.xmark),
                         ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    TextField(
+                    AppTextField(
                       key: DanmakuKeys.searchField,
                       controller: _field,
                       focusNode: _fieldFocus,
@@ -1968,37 +1954,19 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                       enableInteractiveSelection: true,
                       textInputAction: TextInputAction.search,
                       style: theme.textTheme.bodyMedium,
-                      decoration: InputDecoration(
-                        hintText: l10n.danmakuSearchHint,
-                        filled: true,
-                        fillColor: scheme.surfaceContainerHighest,
-                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                        suffixIcon: IconButton(
-                          key: DanmakuKeys.searchSubmit,
-                          tooltip: l10n.danmakuSearch,
-                          onPressed: () => unawaited(_runSearch()),
-                          icon: const Icon(Icons.arrow_forward_rounded),
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          borderSide: BorderSide(
-                            color: scheme.outline.withValues(alpha: 0.4),
-                          ),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.md,
-                          vertical: AppSpacing.sm,
-                        ),
-                      ),
                       onSubmitted: (_) => unawaited(_runSearch()),
+                      placeholder: l10n.danmakuSearchHint,
+                      prefix: const Icon(CupertinoIcons.search, size: 20),
+                      suffix: AppIconButton(
+                        key: DanmakuKeys.searchSubmit,
+                        tooltip: l10n.danmakuSearch,
+                        onPressed: () => unawaited(_runSearch()),
+                        icon: const Icon(CupertinoIcons.arrow_right),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                        vertical: AppSpacing.sm,
+                      ),
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Expanded(child: _results(l10n, theme, scheme)),
@@ -2012,13 +1980,14 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
     );
   }
 
-  Widget _results(AppLocalizations l10n, ThemeData theme, ColorScheme scheme) {
+  Widget _results(
+    AppLocalizations l10n,
+    AppUiThemeData theme,
+    AppColorScheme scheme,
+  ) {
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(
-          key: DanmakuKeys.searchLoading,
-          strokeWidth: 3,
-        ),
+        child: CupertinoActivityIndicator(key: DanmakuKeys.searchLoading),
       );
     }
     if (!_searched) {
@@ -2048,50 +2017,44 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
       itemCount: _animes.length,
       itemBuilder: (context, index) {
         final anime = _animes[index];
-        return Theme(
-          data: theme.copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            key: DanmakuKeys.searchAnime(anime.animeId),
-            dense: true,
-            initiallyExpanded: _animes.length == 1,
-            tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-            childrenPadding: const EdgeInsets.only(left: AppSpacing.md),
-            title: Text(
-              anime.animeTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleSmall,
-            ),
-            subtitle: anime.type == null
-                ? null
-                : Text(
-                    anime.type!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-            children: [
-              if (anime.episodes.isEmpty)
-                ListTile(
-                  dense: true,
-                  title: Text(
-                    l10n.danmakuNoMatch,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                )
-              else
-                for (final episode in anime.episodes)
-                  ListTile(
-                    dense: true,
-                    key: DanmakuKeys.searchEpisode(episode.episodeId),
-                    title: Text(episode.episodeTitle),
-                    onTap: () {
-                      unawaited(widget.danmaku.selectEpisode(anime, episode));
-                      widget.onClose();
-                    },
-                  ),
-            ],
+        return AppDisclosure(
+          key: DanmakuKeys.searchAnime(anime.animeId),
+          initiallyExpanded: _animes.length == 1,
+          tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          childrenPadding: const EdgeInsets.only(left: AppSpacing.md),
+          title: Text(
+            anime.animeTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall,
           ),
+          subtitle: anime.type == null
+              ? null
+              : Text(
+                  anime.type!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+          children: [
+            if (anime.episodes.isEmpty)
+              AppListTile(
+                title: Text(
+                  l10n.danmakuNoMatch,
+                  style: theme.textTheme.bodySmall,
+                ),
+              )
+            else
+              for (final episode in anime.episodes)
+                AppListTile(
+                  key: DanmakuKeys.searchEpisode(episode.episodeId),
+                  title: Text(episode.episodeTitle),
+                  onTap: () {
+                    unawaited(widget.danmaku.selectEpisode(anime, episode));
+                    widget.onClose();
+                  },
+                ),
+          ],
         );
       },
     );
@@ -2112,7 +2075,7 @@ class _VolumeControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final volume = controller.volume.clamp(0, PlayerSettings.volumeMax);
     final boosted = volume > 100;
@@ -2129,22 +2092,16 @@ class _VolumeControl extends StatelessWidget {
         ),
         SizedBox(
           width: _sliderWidth,
-          child: SliderTheme(
-            data: _overlaySliderTheme(theme, thumbRadius: 6).copyWith(
-              secondaryActiveTrackColor: scheme.primary,
-              trackShape: const _VolumeSliderTrackShape(unityFraction: unity),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              key: PlayerKeys.volume,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
-              value: volume.toDouble(),
-              min: 0,
-              max: PlayerSettings.volumeMax.toDouble(),
-              onChanged: (value) {
-                controller.setVolume(value.round());
-              },
-            ),
+          child: PlayerSlider(
+            key: PlayerKeys.volume,
+            unityFraction: unity,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
+            value: volume.toDouble(),
+            min: 0,
+            max: PlayerSettings.volumeMax.toDouble(),
+            onChanged: (value) {
+              controller.setVolume(value.round());
+            },
           ),
         ),
         SizedBox(
@@ -2154,9 +2111,8 @@ class _VolumeControl extends StatelessWidget {
             l10n.volumePercent(volume),
             maxLines: 1,
             textAlign: TextAlign.end,
-            style: _overlayTimeStyle(
-              theme,
-            )?.copyWith(color: boosted ? scheme.primary : scheme.onSurface),
+            style: _overlayTimeStyle(theme)
+                ?.copyWith(color: boosted ? scheme.primary : scheme.onSurface),
           ),
         ),
       ],
@@ -2166,71 +2122,18 @@ class _VolumeControl extends StatelessWidget {
 
 IconData _volumeIconForLevel(int volume) {
   if (volume <= 0) {
-    return Icons.volume_off_rounded;
+    return CupertinoIcons.speaker_slash_fill;
   }
   if (volume < 34) {
-    return Icons.volume_mute_rounded;
+    return CupertinoIcons.speaker_fill;
   }
   if (volume < 67) {
-    return Icons.volume_down_rounded;
+    return CupertinoIcons.speaker_1_fill;
   }
-  return Icons.volume_up_rounded;
+  return CupertinoIcons.speaker_3_fill;
 }
 
 /// 在 100%(0 dB)处画刻度,拖动时不量化,避免 5% 一格的粘滞感。
-class _VolumeSliderTrackShape extends RoundedRectSliderTrackShape {
-  const _VolumeSliderTrackShape({required this.unityFraction});
-
-  final double unityFraction;
-
-  @override
-  void paint(
-    PaintingContext context,
-    Offset offset, {
-    required RenderBox parentBox,
-    required SliderThemeData sliderTheme,
-    required Animation<double> enableAnimation,
-    required TextDirection textDirection,
-    required Offset thumbCenter,
-    Offset? secondaryOffset,
-    bool isDiscrete = false,
-    bool isEnabled = false,
-    double additionalActiveTrackHeight = 2,
-  }) {
-    super.paint(
-      context,
-      offset,
-      parentBox: parentBox,
-      sliderTheme: sliderTheme,
-      enableAnimation: enableAnimation,
-      textDirection: textDirection,
-      thumbCenter: thumbCenter,
-      secondaryOffset: secondaryOffset,
-      isDiscrete: isDiscrete,
-      isEnabled: isEnabled,
-      additionalActiveTrackHeight: additionalActiveTrackHeight,
-    );
-    final trackRect = getPreferredRect(
-      parentBox: parentBox,
-      offset: offset,
-      sliderTheme: sliderTheme,
-      isEnabled: isEnabled,
-      isDiscrete: isDiscrete,
-    );
-    final x = trackRect.left + trackRect.width * unityFraction.clamp(0.0, 1.0);
-    final paint = Paint()
-      ..color = (sliderTheme.activeTrackColor ?? const Color(0xFFFFFFFF))
-          .withValues(alpha: 0.78)
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round;
-    context.canvas.drawLine(
-      Offset(x, trackRect.center.dy - 5),
-      Offset(x, trackRect.center.dy + 5),
-      paint,
-    );
-  }
-}
-
 /// 控制层图标按钮:统一的暖白前景,供按钮行各处复用。
 class _PlayerIconButton extends StatelessWidget {
   const _PlayerIconButton({
@@ -2252,25 +2155,24 @@ class _PlayerIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     if (!filled) {
-      return IconButton(
+      return AppIconButton(
         tooltip: tooltip,
         onPressed: onPressed,
         color: iconColor ?? scheme.onSurface,
-        iconSize: iconSize,
+        size: iconSize,
         icon: Icon(icon),
       );
     }
-    return IconButton(
+    return AppIconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      iconSize: iconSize,
-      style: IconButton.styleFrom(
+      size: iconSize,
+      style: AppButtonStyle(
         foregroundColor: scheme.surface,
         backgroundColor: scheme.onSurface,
         disabledForegroundColor: scheme.surface.withValues(alpha: .45),
-        disabledBackgroundColor: scheme.onSurface.withValues(alpha: .28),
         fixedSize: const Size(46, 46),
       ),
       icon: Icon(icon),
@@ -2278,27 +2180,10 @@ class _PlayerIconButton extends StatelessWidget {
   }
 }
 
-TextStyle? _overlayTimeStyle(ThemeData theme) {
+TextStyle? _overlayTimeStyle(AppUiThemeData theme) {
   return theme.textTheme.labelMedium?.copyWith(
     color: theme.colorScheme.onSurface,
     fontFeatures: const [FontFeature.tabularFigures()],
-  );
-}
-
-SliderThemeData _overlaySliderTheme(
-  ThemeData theme, {
-  required double thumbRadius,
-}) {
-  final onSurface = theme.colorScheme.onSurface;
-  return theme.sliderTheme.copyWith(
-    trackHeight: 3,
-    activeTrackColor: onSurface,
-    secondaryActiveTrackColor: onSurface.withValues(alpha: 0.52),
-    inactiveTrackColor: onSurface.withValues(alpha: 0.22),
-    thumbColor: onSurface,
-    overlayColor: onSurface.withValues(alpha: 0.18),
-    thumbShape: RoundSliderThumbShape(enabledThumbRadius: thumbRadius),
-    overlayShape: RoundSliderOverlayShape(overlayRadius: thumbRadius * 2.2),
   );
 }
 

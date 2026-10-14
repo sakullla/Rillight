@@ -203,30 +203,27 @@ void main() {
     );
   });
 
-  test(
-    'Unqualified phone cannot claim Dolby Vision and Android TV stays unverified',
-    () {
-      final rows = parseCapabilityRows(capabilityRecordSection());
-      final phone = _row(rows, 'android-phone', 'native-dolby-vision');
-      expect(phone.status, '能力不支持');
-      expect(phone.evidence, contains('参考手机配置'));
-      expect(phone.evidence, contains('video/dolby-vision'));
-      expect(_row(rows, 'android-phone', 'profile5-rpu').status, '尚未验证');
-      expect(
-        _row(rows, 'android-phone', 'profile5-rpu').evidence,
-        contains('旧通过不沿用'),
-      );
-      expect(_row(rows, 'android-phone', 'physical-lock').status, '尚未验证');
-      expect(_row(rows, 'android-phone', 'frame-interval').status, '尚未验证');
+  test('Unqualified phone cannot claim Dolby Vision and Android TV stays unverified', () {
+    final rows = parseCapabilityRows(capabilityRecordSection());
+    final phone = _row(rows, 'android-phone', 'native-dolby-vision');
+    expect(phone.status, '能力不支持');
+    expect(phone.evidence, contains('参考手机配置'));
+    expect(phone.evidence, contains('video/dolby-vision'));
+    expect(_row(rows, 'android-phone', 'profile5-rpu').status, '尚未验证');
+    expect(
+      _row(rows, 'android-phone', 'profile5-rpu').evidence,
+      contains('旧通过不沿用'),
+    );
+    expect(_row(rows, 'android-phone', 'physical-lock').status, '尚未验证');
+    expect(_row(rows, 'android-phone', 'frame-interval').status, '尚未验证');
 
-      final television = rows.where((row) => row.platform == 'android-tv');
-      expect(television.map((row) => row.capability), coreCapabilities);
-      for (final row in television) {
-        expect(row.status, '尚未验证', reason: row.capability);
-        expect(row.evidence, '需在 Android TV 单独验证，不用手机结果顶替');
-      }
-    },
-  );
+    final television = rows.where((row) => row.platform == 'android-tv');
+    expect(television.map((row) => row.capability), coreCapabilities);
+    for (final row in television) {
+      expect(row.status, '尚未验证', reason: row.capability);
+      expect(row.evidence, '需在 Android TV 单独验证，不用手机结果顶替');
+    }
+  });
 
   test('historical Android failure is not the current candidate result', () {
     final rows = parseCapabilityRows(capabilityRecordSection());

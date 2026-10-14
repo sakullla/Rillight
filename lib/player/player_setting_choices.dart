@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/playback.dart';
@@ -121,7 +121,7 @@ class PlayerRateCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final foreground = scheme.onSurface;
     return Opacity(
       opacity: onPressed == null ? .45 : 1,
@@ -129,18 +129,20 @@ class PlayerRateCell extends StatelessWidget {
         button: true,
         selected: selected,
         enabled: onPressed != null,
-        child: Material(
-          color: selected
-              ? scheme.surfaceBright
-              : scheme.surfaceContainerHighest,
-          shape: StadiumBorder(
-            side: BorderSide(
-              color: selected ? scheme.onSurface : scheme.outlineVariant,
-              width: selected ? 1.5 : 1,
-            ),
-          ),
+        child: Container(
           clipBehavior: Clip.antiAlias,
-          child: InkWell(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(
+              color: selected
+                  ? scheme.onSurface.withValues(alpha: .7)
+                  : scheme.outlineVariant,
+            ),
+            color: selected
+                ? scheme.surfaceBright
+                : scheme.surfaceContainerHighest,
+          ),
+          child: AppSurfaceAction(
             onTap: onPressed,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -150,17 +152,22 @@ class PlayerRateCell extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (selected) ...[
-                      Icon(Icons.check_rounded, size: 16, color: foreground),
+                      Icon(
+                        CupertinoIcons.check_mark,
+                        size: 16,
+                        color: foreground,
+                      ),
                       const SizedBox(width: 4),
                     ],
                     Text(
                       label,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: foreground,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
+                      style: AppUiTheme.of(context).textTheme.labelLarge
+                          ?.copyWith(
+                            color: foreground,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
                     ),
                   ],
                 ),

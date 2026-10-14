@@ -1,4 +1,5 @@
 import '../helpers/case_shard.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -33,9 +34,8 @@ void main() {
         );
         fixture.proxy.cancelPendingReads();
         await old.cancel();
-        lock = File(
-          '${fixture.root.path}/quota.lock',
-        ).openSync(mode: FileMode.append);
+        lock = File('${fixture.root.path}/quota.lock')
+            .openSync(mode: FileMode.append);
         lock.lockSync(FileLock.exclusive);
         await fixture.proxy.cache!.put(
           resource: 'unrelated',
@@ -105,42 +105,39 @@ void main() {
     },
   );
 
-  cases.test(
-    'cached seek continues downloading beyond the old window on the same socket',
-    () async {
-      final fixture = await _Direct.open(length: 65 * _mib + 37);
-      try {
-        final old = await fixture.read();
-        expect(await old.moveNext(), isTrue);
-        await fixture.waitFor(
-          () =>
-              (fixture.proxy.diagnostics['responseReadAheadPublishedBytes']
-                  as int) >=
-              8 * _mib,
-        );
-        final downloaded = fixture.proxy.upstreamBytes;
-        fixture.proxy.cancelPendingReads();
-        await old.cancel();
-        final reader = await fixture.read(start: 2 * _mib);
-        var position = 2 * _mib;
-        while (position < 24 * _mib && await reader.moveNext()) {
-          position = _verify(reader.current, position);
-        }
-        await fixture.waitFor(
-          () => fixture.proxy.upstreamBytes > downloaded + _mib,
-        );
-        expect(fixture.requests, 1);
-        while (await reader.moveNext()) {
-          position = _verify(reader.current, position);
-        }
-        expect(position, fixture.length);
-        expect(fixture.requests, 1);
-        await reader.cancel();
-      } finally {
-        await fixture.close();
+  cases.test('cached seek continues downloading beyond the old window on the same socket', () async {
+    final fixture = await _Direct.open(length: 65 * _mib + 37);
+    try {
+      final old = await fixture.read();
+      expect(await old.moveNext(), isTrue);
+      await fixture.waitFor(
+        () =>
+            (fixture.proxy.diagnostics['responseReadAheadPublishedBytes']
+                as int) >=
+            8 * _mib,
+      );
+      final downloaded = fixture.proxy.upstreamBytes;
+      fixture.proxy.cancelPendingReads();
+      await old.cancel();
+      final reader = await fixture.read(start: 2 * _mib);
+      var position = 2 * _mib;
+      while (position < 24 * _mib && await reader.moveNext()) {
+        position = _verify(reader.current, position);
       }
-    },
-  );
+      await fixture.waitFor(
+        () => fixture.proxy.upstreamBytes > downloaded + _mib,
+      );
+      expect(fixture.requests, 1);
+      while (await reader.moveNext()) {
+        position = _verify(reader.current, position);
+      }
+      expect(position, fixture.length);
+      expect(fixture.requests, 1);
+      await reader.cancel();
+    } finally {
+      await fixture.close();
+    }
+  });
 
   cases.test(
     'seek reuses retained response bytes without an upstream request',
@@ -332,32 +329,29 @@ void main() {
     },
   );
 
-  cases.test(
-    'source renewal discards untagged buffered bytes and reads the new response',
-    () async {
-      final fixture = await _Direct.open();
-      try {
-        final old = await fixture.read();
-        expect(await old.moveNext(), isTrue);
-        await fixture.waitFor(() => fixture.proxy.upstreamBytes >= 8 * _mib);
-        fixture.proxy.cancelPendingReads();
-        await old.cancel();
-        fixture.revision = 19;
-        fixture.proxy.refreshSourceUrl(fixture.uri, fixture.origin);
-        const offset = 12 * _mib;
-        final reader = await fixture.read(start: offset);
-        var position = offset;
-        while (await reader.moveNext()) {
-          position = _verify(reader.current, position, revision: 19);
-        }
-        expect(position, fixture.length);
-        expect(fixture.requests, 2);
-        await reader.cancel();
-      } finally {
-        await fixture.close();
+  cases.test('source renewal discards untagged buffered bytes and reads the new response', () async {
+    final fixture = await _Direct.open();
+    try {
+      final old = await fixture.read();
+      expect(await old.moveNext(), isTrue);
+      await fixture.waitFor(() => fixture.proxy.upstreamBytes >= 8 * _mib);
+      fixture.proxy.cancelPendingReads();
+      await old.cancel();
+      fixture.revision = 19;
+      fixture.proxy.refreshSourceUrl(fixture.uri, fixture.origin);
+      const offset = 12 * _mib;
+      final reader = await fixture.read(start: offset);
+      var position = offset;
+      while (await reader.moveNext()) {
+        position = _verify(reader.current, position, revision: 19);
       }
-    },
-  );
+      expect(position, fixture.length);
+      expect(fixture.requests, 2);
+      await reader.cancel();
+    } finally {
+      await fixture.close();
+    }
+  });
 
   cases.test('pause and resume keep the original untagged response', () async {
     final fixture = await _Direct.open();

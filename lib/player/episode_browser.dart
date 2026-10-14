@@ -1,8 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/media_server/models.dart';
@@ -70,7 +69,7 @@ class PlayerEpisodeBrowser extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final seasons = controller.seasons;
     final currentSeason = seasons
@@ -153,21 +152,21 @@ class PlayerEpisodeBrowser extends StatelessWidget {
   }
 
   Widget _closeButton(BuildContext context) {
-    final tooltip = MaterialLocalizations.of(context).closeButtonTooltip;
+    final tooltip = '关闭';
     if (tv) {
       return TvAction(
         key: const Key('player-episodes-close'),
         variant: TvActionVariant.icon,
         onPressed: onClose,
-        child: const Icon(Icons.close_rounded),
+        child: const Icon(CupertinoIcons.xmark),
       );
     }
-    return IconButton(
+    return AppIconButton(
       key: const Key('player-episodes-close'),
       tooltip: tooltip,
-      color: Theme.of(context).colorScheme.onSurface,
+      color: AppUiTheme.of(context).colorScheme.onSurface,
       onPressed: onClose,
-      icon: const Icon(Icons.close_rounded),
+      icon: const Icon(CupertinoIcons.xmark),
     );
   }
 
@@ -187,7 +186,7 @@ class PlayerEpisodeBrowser extends StatelessWidget {
   Widget _body(
     BuildContext context,
     AppLocalizations l10n,
-    ColorScheme scheme,
+    AppColorScheme scheme,
     double extent,
   ) {
     if (controller.episodeListLoading && controller.episodes.isEmpty) {
@@ -205,12 +204,11 @@ class PlayerEpisodeBrowser extends StatelessWidget {
         children: [
           Text(
             l10n.playbackFailed,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+            style: AppUiTheme.of(context).textTheme.bodyMedium
+                ?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpacing.sm),
-          OutlinedButton(
+          AppButton(
             key: const Key('player-episodes-retry'),
             onPressed: () {
               unawaited(controller.loadEpisodeList());
@@ -258,7 +256,7 @@ class _SeasonMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final seasons = controller.seasons;
     var current = seasons.first;
@@ -268,24 +266,17 @@ class _SeasonMenu extends StatelessWidget {
         break;
       }
     }
-    return PopupMenuButton<String>(
+    return AppMenuButton<String>(
       key: const Key('player-season-picker'),
       tooltip: AppLocalizations.of(context).seasons,
       onSelected: (seasonId) {
         unawaited(controller.selectSeason(seasonId));
       },
-      initialValue: current.id,
-      constraints: () {
-        final viewport = MediaQuery.sizeOf(context);
-        final maxWidth = AppViewport.fit(280, viewport.width * 0.5, viewport);
-        final minWidth = AppViewport.dp(160, viewport);
-        return BoxConstraints(
-          minWidth: minWidth < maxWidth ? minWidth : maxWidth,
-          maxWidth: maxWidth,
-        );
-      }(),
-      padding: EdgeInsets.zero,
-      splashRadius: 20,
+      selected: current.id,
+      items: [
+        for (final season in seasons)
+          AppMenuEntry(value: season.id, child: Text(season.name)),
+      ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
         child: Row(
@@ -305,14 +296,10 @@ class _SeasonMenu extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(Icons.arrow_drop_down_rounded, color: scheme.onSurface),
+            Icon(CupertinoIcons.chevron_down, color: scheme.onSurface),
           ],
         ),
       ),
-      itemBuilder: (context) => [
-        for (final season in seasons)
-          PopupMenuItem(value: season.id, child: Text(season.name)),
-      ],
     );
   }
 }
@@ -373,7 +360,7 @@ class _EpisodeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final number = episode.indexNumber;
     final title = number == null ? episode.name : '$number. ${episode.name}';
@@ -456,17 +443,19 @@ class _EpisodeRow extends StatelessWidget {
         border: Border(
           left: BorderSide(
             width: 3,
-            color: isCurrent ? scheme.primary : Colors.transparent,
+            color: isCurrent ? scheme.primary : const Color(0x00000000),
           ),
         ),
       ),
       child: tv
           ? body
-          : Material(
-              color: isCurrent
-                  ? scheme.surfaceContainerHighest
-                  : Colors.transparent,
-              child: InkWell(
+          : Container(
+              decoration: BoxDecoration(
+                color: isCurrent
+                    ? scheme.surfaceContainerHighest
+                    : const Color(0x00000000),
+              ),
+              child: AppSurfaceAction(
                 key: Key('player-episode-${episode.id}'),
                 onTap: onTap,
                 child: body,
@@ -491,7 +480,7 @@ class _EpisodeThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadii.sm),
       child: SizedBox(
@@ -514,7 +503,7 @@ class _EpisodeThumb extends StatelessWidget {
               ColoredBox(
                 color: scheme.scrim.withValues(alpha: 0.42),
                 child: Icon(
-                  Icons.equalizer_rounded,
+                  CupertinoIcons.waveform,
                   color: scheme.onSurface,
                   size: 26,
                 ),
@@ -532,7 +521,7 @@ class _EpisodeThumb extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.all(2),
                       child: Icon(
-                        Icons.check_rounded,
+                        CupertinoIcons.check_mark,
                         size: 14,
                         color: scheme.onSurface,
                       ),
@@ -562,12 +551,14 @@ class _EpisodeProgressBar extends StatelessWidget {
     return SizedBox(
       height: 3,
       child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.45),
+        color: CupertinoColors.black.withValues(alpha: 0.45),
         child: Align(
           alignment: Alignment.centerLeft,
           child: FractionallySizedBox(
             widthFactor: value.clamp(0.0, 1.0),
-            child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+            child: ColoredBox(
+              color: AppUiTheme.of(context).colorScheme.primary,
+            ),
           ),
         ),
       ),
@@ -784,7 +775,7 @@ class _EpisodeListViewState extends State<_EpisodeListView> {
 
   @override
   Widget build(BuildContext context) {
-    return Scrollbar(
+    return CupertinoScrollbar(
       controller: _scroll,
       child: ListView.builder(
         key: const Key('player-episodes-list'),

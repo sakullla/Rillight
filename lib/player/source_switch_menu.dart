@@ -1,6 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/mobile_motion.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:flutter/services.dart';
 
@@ -92,11 +94,11 @@ class _PlaybackLineEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!focusable) {
-      return ListTile(
+      return AppListTile(
         key: const Key('player-playback-lines'),
-        leading: const Icon(Icons.alt_route),
+        leading: const Icon(CupertinoIcons.arrow_branch),
         title: Text(label),
-        trailing: const Icon(Icons.chevron_right_rounded),
+        trailing: const Icon(CupertinoIcons.chevron_right),
         onTap: onPressed,
       );
     }
@@ -149,7 +151,9 @@ class _FocusableLineButtonState extends State<_FocusableLineButton> {
             builder: (context) {
               // 与电视播放控制行同一外观:半透明黑底,聚焦反相为白底黑字。
               final s = TvDesign.scaleOf(context);
-              final foreground = _focused ? Colors.black : Colors.white;
+              final foreground = _focused
+                  ? CupertinoColors.black
+                  : CupertinoColors.white;
               return Container(
                 constraints: BoxConstraints(minHeight: 38 * s),
                 padding: EdgeInsets.symmetric(
@@ -158,20 +162,23 @@ class _FocusableLineButtonState extends State<_FocusableLineButton> {
                 ),
                 decoration: BoxDecoration(
                   color: _focused
-                      ? Colors.white
-                      : Colors.black.withValues(alpha: .34),
+                      ? CupertinoColors.white
+                      : CupertinoColors.black.withValues(alpha: .34),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.alt_route, size: 20 * s, color: foreground),
+                    Icon(
+                      CupertinoIcons.arrow_branch,
+                      size: 20 * s,
+                      color: foreground,
+                    ),
                     SizedBox(width: 6 * s),
                     Text(
                       widget.label,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelLarge?.copyWith(color: foreground),
+                      style: AppUiTheme.of(context).textTheme.labelLarge
+                          ?.copyWith(color: foreground),
                     ),
                   ],
                 ),
@@ -192,10 +199,10 @@ class _PlaybackLinePopup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
+    return AppIconButton(
       key: const Key('player-playback-lines'),
       tooltip: label,
-      icon: const Icon(Icons.alt_route),
+      icon: const Icon(CupertinoIcons.arrow_branch),
       onPressed: () => unawaited(_open(context)),
     );
   }
@@ -203,36 +210,27 @@ class _PlaybackLinePopup extends StatelessWidget {
   Future<void> _open(BuildContext context) async {
     final owner = Object();
     controller.setControlsPinned(true, owner: owner);
-    final box = context.findRenderObject()! as RenderBox;
-    final overlay =
-        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
-    final topLeft = box.localToGlobal(Offset.zero, ancestor: overlay);
-    final bottomRight = box.localToGlobal(
-      box.size.bottomRight(Offset.zero),
-      ancestor: overlay,
-    );
     final l10n = AppLocalizations.of(context);
     final lines = controller.playbackLines;
     try {
-      await showMenu<void>(
+      final selected = await showAppMenu<String>(
         context: context,
-        position: RelativeRect.fromRect(
-          Rect.fromPoints(topLeft, bottomRight),
-          Offset.zero & overlay.size,
-        ),
         items: [
           for (final line in lines)
-            PopupMenuItem<void>(
-              key: ValueKey('playback-line-${line.id}'),
-              onTap: () => unawaited(_pickLine(controller, line.id)),
-              child: _LineCaption(
-                label: playbackLineLabel(line),
-                current: controller.playbackLineIsCurrent(line),
-                currentLabel: l10n.playbackLineInUse,
+            AppMenuEntry(
+              value: line.id,
+              child: KeyedSubtree(
+                key: ValueKey('playback-line-${line.id}'),
+                child: _LineCaption(
+                  label: playbackLineLabel(line),
+                  current: controller.playbackLineIsCurrent(line),
+                  currentLabel: l10n.playbackLineInUse,
+                ),
               ),
             ),
         ],
       );
+      if (selected != null) await _pickLine(controller, selected);
     } finally {
       controller.setControlsPinned(false, owner: owner);
     }
@@ -245,9 +243,11 @@ Future<void> showPlaybackLineSheet(
 ) {
   final owner = Object();
   controller.setControlsPinned(true, owner: owner);
-  return showModalBottomSheet<void>(
+  return PhoneMotion.showBottomPanel<void>(
     context: context,
     showDragHandle: true,
+    useSafeArea: true,
+
     builder: (sheetContext) {
       final l10n = AppLocalizations.of(sheetContext);
       return SafeArea(
@@ -261,7 +261,7 @@ Future<void> showPlaybackLineSheet(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
                 child: Text(
                   l10n.playbackLine,
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: AppUiTheme.of(context).textTheme.titleLarge,
                 ),
               ),
               PlaybackLineMenu(controller: controller),
@@ -279,11 +279,11 @@ Future<void> showPlaybackLineDialog(
 ) {
   final owner = Object();
   controller.setControlsPinned(true, owner: owner);
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (dialogContext) {
       final l10n = AppLocalizations.of(dialogContext);
-      return AlertDialog(
+      return AppDialog(
         title: Text(l10n.playbackLine),
         content: SizedBox(
           width: 420,
@@ -367,7 +367,7 @@ class _LineTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return AppListTile(
       key: ValueKey('playback-line-$lineId'),
       autofocus: autofocus,
       selected: current,

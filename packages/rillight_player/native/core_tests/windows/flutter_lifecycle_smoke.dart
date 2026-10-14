@@ -3,7 +3,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 
 typedef _CreateNative = Pointer<Void> Function(Pointer<Utf8>);
@@ -33,8 +33,12 @@ Future<void> main() async {
   malloc.free(path);
   if (session.address == 0) exit(2);
   runApp(
-    const MaterialApp(
-      home: Scaffold(body: Center(child: Text('Closing'))),
+    WidgetsApp(
+      color: const Color(0xff000000),
+      builder: (context, _) => ColoredBox(
+        color: const Color(0xff000000),
+        child: Center(child: Text('Closing')),
+      ),
     ),
   );
   await WidgetsBinding.instance.endOfFrame;

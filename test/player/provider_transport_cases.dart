@@ -63,121 +63,118 @@ void main() {
     },
   );
 
-  test(
-    'transport isolate applies authorization on every HLS and subtitle hop',
-    () async {
-      final source = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final relay = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final sourceUrl = _origin(source);
-      final relayUrl = _origin(relay);
-      final foreignUrl = _origin(foreign);
-      final sourceRequests = <HttpRequest>[];
-      final relayRequests = <HttpRequest>[];
-      final foreignRequests = <HttpRequest>[];
-      final client = HttpClient();
-      final transport = await PlaybackTransportSession.start(
-        // Explicit resource authorization must replace ordinary session headers.
-        origin: sourceUrl,
-        headers: {'Authorization': 'ordinary-session-must-not-be-used'},
-        authorization: ResourceAuthorization(
-          headersByOrigin: {
-            sourceUrl.origin: {
-              'Authorization':
-                  'MediaBrowser DeviceId="playback-device", Token="jf-secret"',
-            },
-            relayUrl.origin: {'X-Plex-Token': 'relay-secret'},
+  test('transport isolate applies authorization on every HLS and subtitle hop', () async {
+    final source = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final relay = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final foreign = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final sourceUrl = _origin(source);
+    final relayUrl = _origin(relay);
+    final foreignUrl = _origin(foreign);
+    final sourceRequests = <HttpRequest>[];
+    final relayRequests = <HttpRequest>[];
+    final foreignRequests = <HttpRequest>[];
+    final client = HttpClient();
+    final transport = await PlaybackTransportSession.start(
+      // Explicit resource authorization must replace ordinary session headers.
+      origin: sourceUrl,
+      headers: {'Authorization': 'ordinary-session-must-not-be-used'},
+      authorization: ResourceAuthorization(
+        headersByOrigin: {
+          sourceUrl.origin: {
+            'Authorization':
+                'MediaBrowser DeviceId="playback-device", Token="jf-secret"',
           },
-          publicHeaders: {'User-Agent': 'Synthetic player'},
-        ),
-        readAheadBytes: 0,
-      );
-      addTearDown(() async {
-        client.close(force: true);
-        await transport.close();
-        await source.close(force: true);
-        await relay.close(force: true);
-        await foreign.close(force: true);
-      });
-      source.listen((request) async {
-        sourceRequests.add(request);
-        if (request.uri.path == '/master.m3u8') {
-          request.response.headers.contentType = ContentType(
-            'application',
-            'vnd.apple.mpegurl',
-          );
-          request.response.write(
-            '#EXTM3U\n'
-            '#EXT-X-KEY:METHOD=AES-128,URI="$foreignUrl/key?$_signedQuery&token=jf-secret"\n'
-            '#EXTINF:1,\n$relayUrl/segment?$_signedQuery&token=jf-secret\n'
-            '#EXT-X-ENDLIST\n',
-          );
-        } else {
-          request.response.statusCode = 302;
-          request.response.headers.set(
-            'location',
-            '$relayUrl${request.uri.path}?$_signedQuery&token=jf-secret',
-          );
-        }
-        await request.response.close();
-      });
-      relay.listen((request) async {
-        relayRequests.add(request);
+          relayUrl.origin: {'X-Plex-Token': 'relay-secret'},
+        },
+        publicHeaders: {'User-Agent': 'Synthetic player'},
+      ),
+      readAheadBytes: 0,
+    );
+    addTearDown(() async {
+      client.close(force: true);
+      await transport.close();
+      await source.close(force: true);
+      await relay.close(force: true);
+      await foreign.close(force: true);
+    });
+    source.listen((request) async {
+      sourceRequests.add(request);
+      if (request.uri.path == '/master.m3u8') {
+        request.response.headers.contentType = ContentType(
+          'application',
+          'vnd.apple.mpegurl',
+        );
+        request.response.write(
+          '#EXTM3U\n'
+          '#EXT-X-KEY:METHOD=AES-128,URI="$foreignUrl/key?$_signedQuery&token=jf-secret"\n'
+          '#EXTINF:1,\n$relayUrl/segment?$_signedQuery&token=jf-secret\n'
+          '#EXT-X-ENDLIST\n',
+        );
+      } else {
         request.response.statusCode = 302;
         request.response.headers.set(
           'location',
-          '$foreignUrl${request.uri.path}?$_signedQuery&token=relay-secret&old=jf-secret',
+          '$relayUrl${request.uri.path}?$_signedQuery&token=jf-secret',
         );
-        await request.response.close();
-      });
-      foreign.listen((request) async {
-        foreignRequests.add(request);
-        request.response.write('resource');
-        await request.response.close();
-      });
-      final playlist = await _get(
+      }
+      await request.response.close();
+    });
+    relay.listen((request) async {
+      relayRequests.add(request);
+      request.response.statusCode = 302;
+      request.response.headers.set(
+        'location',
+        '$foreignUrl${request.uri.path}?$_signedQuery&token=relay-secret&old=jf-secret',
+      );
+      await request.response.close();
+    });
+    foreign.listen((request) async {
+      foreignRequests.add(request);
+      request.response.write('resource');
+      await request.response.close();
+    });
+    final playlist = await _get(
+      client,
+      await transport.register(sourceUrl.resolve('/master.m3u8')),
+    );
+    expect(playlist, isNot(contains('jf-secret')));
+    final key = RegExp('URI="([^"]+)"').firstMatch(playlist)![1]!;
+    expect(await _get(client, Uri.parse(key)), 'resource');
+    for (final line
+        in playlist.split('\n').where((line) => line.startsWith('http'))) {
+      expect(await _get(client, Uri.parse(line)), 'resource');
+    }
+    expect(
+      await _get(
         client,
-        await transport.register(sourceUrl.resolve('/master.m3u8')),
-      );
-      expect(playlist, isNot(contains('jf-secret')));
-      final key = RegExp('URI="([^"]+)"').firstMatch(playlist)![1]!;
-      expect(await _get(client, Uri.parse(key)), 'resource');
-      for (final line
-          in playlist.split('\n').where((line) => line.startsWith('http'))) {
-        expect(await _get(client, Uri.parse(line)), 'resource');
-      }
-      expect(
-        await _get(
-          client,
-          await transport.register(
-            sourceUrl.resolve('/subtitle.srt'),
-            role: PlaybackResourceRole.subtitle,
-          ),
+        await transport.register(
+          sourceUrl.resolve('/subtitle.srt'),
+          role: PlaybackResourceRole.subtitle,
         ),
-        'resource',
+      ),
+      'resource',
+    );
+    for (final request in sourceRequests) {
+      expect(
+        request.headers.value('authorization'),
+        contains('playback-device'),
       );
-      for (final request in sourceRequests) {
-        expect(
-          request.headers.value('authorization'),
-          contains('playback-device'),
-        );
-        expect(request.headers.value('x-plex-token'), isNull);
-      }
-      expect(relayRequests, hasLength(2));
-      for (final request in relayRequests) {
-        expect(request.headers.value('authorization'), isNull);
-        expect(request.headers.value('x-plex-token'), 'relay-secret');
-        expect(request.uri.query, _signedQuery);
-      }
-      expect(foreignRequests, hasLength(3));
-      for (final request in foreignRequests) {
-        expect(request.headers.value('authorization'), isNull);
-        expect(request.headers.value('x-plex-token'), isNull);
-        expect(request.headers.value('user-agent'), 'Synthetic player');
-        expect(request.uri.query, _signedQuery);
-      }
-    },
-  );
+      expect(request.headers.value('x-plex-token'), isNull);
+    }
+    expect(relayRequests, hasLength(2));
+    for (final request in relayRequests) {
+      expect(request.headers.value('authorization'), isNull);
+      expect(request.headers.value('x-plex-token'), 'relay-secret');
+      expect(request.uri.query, _signedQuery);
+    }
+    expect(foreignRequests, hasLength(3));
+    for (final request in foreignRequests) {
+      expect(request.headers.value('authorization'), isNull);
+      expect(request.headers.value('x-plex-token'), isNull);
+      expect(request.headers.value('user-agent'), 'Synthetic player');
+      expect(request.uri.query, _signedQuery);
+    }
+  });
 
   for (final provider in ['emby', 'jellyfin', 'plex']) {
     test(

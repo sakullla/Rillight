@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -20,7 +20,7 @@ class NextEpisodeCard extends StatelessWidget {
     final offer = controller.nextEpisode;
     if (offer == null) return const SizedBox.shrink();
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final remaining = offer.remaining;
     final countdown = controller.nextEpisodeCountdown.inMilliseconds;
     return LayoutBuilder(
@@ -32,15 +32,10 @@ class NextEpisodeCard extends StatelessWidget {
         const ink = Color(0xF214161C);
         return SizedBox(
           width: width,
-          child: Material(
+          child: Container(
             key: PlayerKeys.nextEpisode,
-            color: ink,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: Color(0x24FFFFFF)),
-            ),
             clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(color: ink),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -87,7 +82,7 @@ class NextEpisodeCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.titleSmall?.copyWith(
-                                color: Colors.white,
+                                color: CupertinoColors.white,
                                 fontSize: 14,
                                 height: 1.25,
                                 fontWeight: FontWeight.w600,
@@ -97,50 +92,50 @@ class NextEpisodeCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton.icon(
+                      AppButton.icon(
                         key: PlayerKeys.nextEpisodePlay,
                         focusNode: playFocus,
                         onPressed: controller.playNextEpisode,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
+                        style: AppButtonStyle(
+                          backgroundColor: CupertinoColors.white,
+                          foregroundColor: CupertinoColors.black,
                           minimumSize: const Size(0, 40),
                           padding: const EdgeInsets.symmetric(horizontal: 12),
-                          visualDensity: VisualDensity.standard,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        icon: const Icon(Icons.skip_next_rounded, size: 20),
+                        icon: const Icon(
+                          CupertinoIcons.forward_end_fill,
+                          size: 20,
+                        ),
                         label: Text(l10n.nextEpisode),
                       ),
-                      IconButton(
+                      AppIconButton(
                         key: PlayerKeys.nextEpisodeCancel,
                         focusNode: cancelFocus,
                         tooltip: remaining == null
                             ? l10n.nextEpisodeKeepWatching
                             : l10n.nextEpisodeStay,
                         onPressed: controller.cancelNextEpisode,
-                        style: IconButton.styleFrom(
+                        style: AppButtonStyle(
                           foregroundColor: const Color(0xB3FFFFFF),
                           minimumSize: const Size(40, 40),
                           fixedSize: const Size(40, 40),
                           padding: EdgeInsets.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        icon: const Icon(Icons.close_rounded, size: 18),
+                        icon: const Icon(CupertinoIcons.xmark, size: 18),
                       ),
                     ],
                   ),
                 ),
                 if (remaining != null)
-                  LinearProgressIndicator(
+                  AppProgressBar(
                     value: countdown <= 0
                         ? 0
                         : (remaining.inMilliseconds / countdown).clamp(
                             0.0,
                             1.0,
                           ),
-                    minHeight: 2,
-                    color: Colors.white,
+                    height: 2,
+                    color: CupertinoColors.white,
                     backgroundColor: const Color(0x33FFFFFF),
                   ),
               ],

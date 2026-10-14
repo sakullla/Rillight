@@ -1,11 +1,14 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/region_access_fixture.dart';
 import '../helpers/image_cache_fixture.dart';
+
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/player/playback_runtime.dart';
+
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -285,7 +288,9 @@ void main() {
       expect(app.router.state.uri.path, '/item/movie-up');
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(
-        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        tester
+            .widget<AppSelectableText>(find.byKey(ItemDetailPage.titleKey))
+            .data,
         '飞屋环游记',
       );
 

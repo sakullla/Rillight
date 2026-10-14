@@ -1,4 +1,5 @@
 import 'package:rillight/media_server/resources.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -2146,9 +2147,9 @@ class PlaybackHttpProxy {
     }
     final jobs = owner == null
         ? _segmentPrefetchJobs.values.toList()
-        : [
-            _segmentPrefetchJobs[owner],
-          ].whereType<_SegmentPrefetchJob>().toList();
+        : [_segmentPrefetchJobs[owner]]
+              .whereType<_SegmentPrefetchJob>()
+              .toList();
     for (final job in jobs) {
       if (!clearPending && requeue) _queueSegmentPrefetch(job.next);
       job.cancel();
@@ -2443,9 +2444,8 @@ class PlaybackHttpProxy {
         'if-modified-since',
       ].any((h) => incoming.headers.value(h) != null) &&
       (incoming.headers.value('range') == null ||
-          RegExp(
-            r'^bytes=(\d*)-(\d*)$',
-          ).hasMatch(incoming.headers.value('range')!));
+          RegExp(r'^bytes=(\d*)-(\d*)$')
+              .hasMatch(incoming.headers.value('range')!));
 
   void _invalidate(String key, _Representation representation) {
     if (_byteIdentity == '$key:${representation.generation}') {
@@ -3799,10 +3799,8 @@ class PlaybackHttpProxy {
           final remaining = deadline.difference(DateTime.now());
           if (remaining <= Duration.zero) break;
           try {
-            await Future.any([
-              _requestReleased.future,
-              read.cancelledFuture,
-            ]).timeout(remaining);
+            await Future.any([_requestReleased.future, read.cancelledFuture])
+                .timeout(remaining);
           } on TimeoutException {
             break;
           }
@@ -3969,9 +3967,8 @@ class PlaybackHttpProxy {
               !_playbackActive &&
               incoming.method == 'GET' &&
               _roles[key] == PlaybackResourceRole.media
-          ? RegExp(
-              r'^bytes=(\d+)-(\d*)$',
-            ).firstMatch(incoming.headers.value('range') ?? '')
+          ? RegExp(r'^bytes=(\d+)-(\d*)$')
+                .firstMatch(incoming.headers.value('range') ?? '')
           : null;
       final startupStart = int.tryParse(startupRange?[1] ?? '');
       final startupEnd = int.tryParse(startupRange?[2] ?? '');
@@ -4219,9 +4216,8 @@ class PlaybackHttpProxy {
             ].contains(response.statusCode)) {
           int? rangeTotal;
           if (response.statusCode == HttpStatus.partialContent) {
-            final range = RegExp(
-              r'^bytes 0-(\d+)/(\d+)$',
-            ).firstMatch(response.headers.value('content-range') ?? '');
+            final range = RegExp(r'^bytes 0-(\d+)/(\d+)$')
+                .firstMatch(response.headers.value('content-range') ?? '');
             final completeRange =
                 range != null &&
                 int.parse(range[1]!) + 1 == int.parse(range[2]!);
@@ -4592,9 +4588,8 @@ class PlaybackHttpProxy {
                       final range = MediaContentRange.parse(
                         candidate.headers.value('content-range'),
                       );
-                      final candidateEtag = MediaCachePolicy(
-                        candidate.headers,
-                      ).strongEtag;
+                      final candidateEtag = MediaCachePolicy(candidate.headers)
+                          .strongEtag;
                       if (candidate.statusCode != HttpStatus.partialContent ||
                           range == null ||
                           range.start != bodyStart + received ||

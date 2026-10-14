@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -27,7 +27,7 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
         if (showHeading) ...[
           Text(
             l.phoneSubtitleSize,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: AppUiTheme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
         ],
@@ -49,8 +49,7 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
               ),
           ],
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
+        AppSwitchTile(
           key: const Key('phone-subtitle-original'),
           title: Text(l.phoneSubtitleOriginal),
           subtitle: Text(l.phoneSubtitleOriginalHint),
@@ -62,9 +61,9 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
         if (value.size != PhoneSubtitleSize.standard || value.originalAss)
           Align(
             alignment: Alignment.centerLeft,
-            child: TextButton.icon(
+            child: AppButton.icon(
               key: const Key('phone-subtitle-reset'),
-              icon: const Icon(Icons.restore_rounded),
+              icon: const Icon(CupertinoIcons.arrow_counterclockwise),
               onPressed: () => onChanged(const PhoneSubtitleSettings()),
               label: Text(l.settingsRestoreDefaults),
             ),
@@ -72,7 +71,7 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
         if (error != null)
           Text(
             error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
+            style: TextStyle(color: AppUiTheme.of(context).colorScheme.error),
           ),
       ],
     );

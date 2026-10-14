@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -389,12 +389,12 @@ class _OverlayView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final icon = switch (overlay.kind) {
-      _GestureOverlayKind.tapBack => Icons.replay_10,
-      _GestureOverlayKind.tapForward => Icons.forward_10,
-      _GestureOverlayKind.brightness => Icons.brightness_6,
-      _GestureOverlayKind.volume => Icons.volume_up,
-      _GestureOverlayKind.seek => Icons.schedule,
-      _GestureOverlayKind.unavailable => Icons.info_outline,
+      _GestureOverlayKind.tapBack => CupertinoIcons.gobackward_10,
+      _GestureOverlayKind.tapForward => CupertinoIcons.goforward_10,
+      _GestureOverlayKind.brightness => CupertinoIcons.sun_max_fill,
+      _GestureOverlayKind.volume => CupertinoIcons.speaker_3_fill,
+      _GestureOverlayKind.seek => CupertinoIcons.clock,
+      _GestureOverlayKind.unavailable => CupertinoIcons.info_circle,
     };
     final Widget? label = switch (overlay.kind) {
       _GestureOverlayKind.brightness || _GestureOverlayKind.volume => Text(
@@ -416,7 +416,7 @@ class _OverlayView extends StatelessWidget {
       key: const Key('mobile-player-gesture-overlay'),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
+        color: CupertinoColors.black.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(

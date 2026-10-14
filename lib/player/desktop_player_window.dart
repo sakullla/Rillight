@@ -1,11 +1,13 @@
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/provider_registry.dart';
 import 'package:rillight/player/playback_persistence.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
+
 import 'playback_runtime.dart';
 import '../aggregation/query/same_source_query.dart';
 import '../aggregation/query/aggregation_query.dart';
@@ -14,9 +16,9 @@ import 'playback_resolver.dart';
 import '../aggregation/history/history_writer.dart';
 import 'player_settings.dart';
 import '../auth/region_access.dart';
+
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/app/window_geometry.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -230,8 +232,9 @@ class PlayerWindowLaunch {
 }
 
 /// 按播放进程 pid 定位其会话快照存储。
-typedef PlaybackSnapshotStoreLocator =
-    PlaybackSessionSnapshotStore Function(int pid);
+typedef PlaybackSnapshotStoreLocator = PlaybackSessionSnapshotStore Function(
+  int pid,
+);
 
 typedef PlayerHostOpenItemConsumer =
     Future<PlayerHostOpenItemCommand?> Function();
@@ -248,14 +251,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     required this.auth,
     this.runtime,
     PlayerProcessControl? processControl,
-    PlaybackSnapshotStoreLocator? snapshotStoreForPid,
-    PlayerHostOpenItemConsumer? consumeOpenItem,
+    this._snapshotStoreForPid,
+    this._consumeOpenItem,
     this.closeTimeout = const Duration(seconds: 1),
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
-  }) : _control = processControl ?? createPlayerProcessControl(),
-       _snapshotStoreForPid = snapshotStoreForPid,
-       _consumeOpenItem = consumeOpenItem {
+  }) : _control = processControl ?? createPlayerProcessControl() {
     auth.addListener(_onAuth);
     auth.regionAccess.addRevocationHook(_revokePrivate);
     auth.regionAccess.addCleanupHook(_closePrivate);
@@ -873,14 +874,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           event['pid'] != pid ||
           event['generation'] != origin.permit.regionGeneration ||
           event['source'] is! Map ||
-          decodeSource(
-                Map<String, dynamic>.from(event['source'] as Map),
-              ).account !=
+          decodeSource(Map<String, dynamic>.from(event['source'] as Map))
+                  .account !=
               origin.source.account ||
           event['item'] !=
-              decodeSource(
-                Map<String, dynamic>.from(event['source'] as Map),
-              ).itemId ||
+              decodeSource(Map<String, dynamic>.from(event['source'] as Map))
+                  .itemId ||
           _privateRevoked) {
         throw StateError('Stale or foreign playback event');
       }
@@ -1027,9 +1026,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             actual.source.account.region != AccessRegion.private ||
             command['generation'] != actual.permit.regionGeneration ||
             command['source'] is! Map ||
-            decodeSource(
-                  Map<String, dynamic>.from(command['source'] as Map),
-                ).account !=
+            decodeSource(Map<String, dynamic>.from(command['source'] as Map))
+                    .account !=
                 actual.source.account) {
           throw StateError('Stale or unauthorized private lock');
         }
@@ -1072,9 +1070,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           command['pid'] != pid ||
           command['generation'] != actual.permit.regionGeneration ||
           command['source'] is! Map ||
-          decodeSource(
-                Map<String, dynamic>.from(command['source'] as Map),
-              ).account !=
+          decodeSource(Map<String, dynamic>.from(command['source'] as Map))
+                  .account !=
               actual.source.account ||
           _privateRevoked) {
         throw StateError('Stale playback switch command');
@@ -1317,7 +1314,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           actual.permit.requireValid();
           target.permit.requireValid();
           if (_pid != pid || !identical(_origin, actual) || _privateRevoked) {
-            throw StateError('Switch superseded');
+            throw StateError('CupertinoSwitch superseded');
           }
           _pendingSwitch = (
             target: target,
@@ -1612,14 +1609,11 @@ class PlayerWindowApp extends StatefulWidget {
   const PlayerWindowApp.testing({
     super.key,
     required this.launch,
-    required MediaServerClient client,
-    required PlayerBindings bindings,
-    required VoidCallback onExit,
-    DateTime Function()? clock,
-  }) : _client = client,
-       _bindings = bindings,
-       _onExit = onExit,
-       _clock = clock;
+    required MediaServerClient this._client,
+    required PlayerBindings this._bindings,
+    required VoidCallback this._onExit,
+    this._clock,
+  });
 
   final PlayerWindowLaunch launch;
   final MediaServerClient? _client;
@@ -1968,15 +1962,19 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                   File('${_launch.protocol!.directory.path}/snapshot.json'),
                 ),
         ),
-        child: MaterialApp(
+        child: CupertinoApp(
           title: _playerWindowTitle,
           debugShowCheckedModeBanner: false,
           locale: const Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          theme: AppTheme.dark(),
-          darkTheme: AppTheme.dark(),
-          themeMode: ThemeMode.dark,
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          theme: AppUiTheme.dark().cupertino,
+          builder: (context, child) =>
+              AppUiTheme(data: AppUiTheme.dark(), child: child!),
+
           home: PlayerPage(
             key: _playerKey,
             itemId: request.itemId,

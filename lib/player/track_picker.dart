@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -72,8 +71,10 @@ class TrackPickerOption {
 }
 
 /// 行构建签名:桌面默认用 [_PickerTile];手机端换成带单选图标的磁贴。
-typedef TrackPickerTileBuilder =
-    Widget Function(BuildContext context, TrackPickerOption option);
+typedef TrackPickerTileBuilder = Widget Function(
+  BuildContext context,
+  TrackPickerOption option,
+);
 
 /// 可搜索的选项列表:超阈值显示搜索框,列表懒构建且有界,
 /// 直接放进 Expanded/Flexible 等带高度约束的槽位。
@@ -162,8 +163,8 @@ class _TrackPickerListState extends State<TrackPickerList> {
             child: Center(
               child: Text(
                 l.searchNoResults,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                style: AppUiTheme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -222,37 +223,29 @@ class TrackPickerSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    return TextField(
+    final theme = AppUiTheme.of(context);
+    return AppTextField(
       key: kTrackPickerSearchKey,
       controller: controller,
       textInputAction: TextInputAction.search,
       style: theme.textTheme.bodyMedium,
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: l.filterSearchOptions,
-        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-        suffixIcon: ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) => controller.text.isEmpty
-              ? const SizedBox(width: 40)
-              : IconButton(
-                  tooltip: MaterialLocalizations.of(
-                    context,
-                  ).deleteButtonTooltip,
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  },
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                ),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-      ),
       onChanged: onChanged,
+      placeholder: l.filterSearchOptions,
+      prefix: const Icon(CupertinoIcons.search, size: 20),
+      suffix: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => controller.text.isEmpty
+            ? const SizedBox(width: 40)
+            : AppIconButton(
+                tooltip: '清除',
+                onPressed: () {
+                  controller.clear();
+                  onChanged('');
+                },
+                icon: const Icon(CupertinoIcons.xmark, size: 18),
+              ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     );
   }
 }
@@ -265,23 +258,16 @@ class _PickerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final selected = option.selected;
     return Padding(
       key: option.key == null ? null : ValueKey('option-shell-${option.key}'),
       padding: const EdgeInsets.only(bottom: 4),
       child: RevealSelected(
         selected: selected && option.reveal,
-        child: ListTile(
+        child: AppListTile(
           key: option.key,
           selected: selected,
-          selectedTileColor: scheme.surfaceBright,
-          selectedColor: scheme.onSurface,
-          iconColor: scheme.onSurfaceVariant,
-          textColor: scheme.onSurface,
-          shape: const StadiumBorder(),
-          minTileHeight: 44,
-          visualDensity: VisualDensity.compact,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12),
           leading: option.leading,
           title: option.title,
@@ -289,7 +275,11 @@ class _PickerTile extends StatelessWidget {
           trailing:
               option.trailing ??
               (selected
-                  ? Icon(Icons.check_rounded, size: 18, color: scheme.onSurface)
+                  ? Icon(
+                      CupertinoIcons.check_mark,
+                      size: 18,
+                      color: scheme.onSurface,
+                    )
                   : const SizedBox(width: 18)),
           onTap: option.onTap,
         ),
@@ -343,11 +333,11 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
     final l = AppLocalizations.of(context);
     final c = widget.controller;
-    return MenuAnchor(
+    return RawMenuAnchor(
       controller: _menu,
       childFocusNode: _buttonFocus,
       onOpen: () {
@@ -357,77 +347,90 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
         });
       },
       onClose: () => c.setControlsPinned(false, owner: _menu),
-      consumeOutsideTap: true,
-      style: MenuStyle(
-        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainer),
-        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-        elevation: const WidgetStatePropertyAll(16),
-        shadowColor: WidgetStatePropertyAll(scheme.scrim.withValues(alpha: .5)),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.xl),
-            side: BorderSide(color: scheme.outlineVariant),
-          ),
-        ),
-      ),
       builder: (context, menu, _) => ListenableBuilder(
         listenable: c,
-        builder: (context, _) => IconButton(
+        builder: (context, _) => AppIconButton(
           key: PlayerKeys.subtitle,
           focusNode: _buttonFocus,
           tooltip: l.subtitleTrack,
           color: scheme.onSurface,
           icon: Icon(
             c.subtitleStreamIndex == null
-                ? Icons.closed_caption_off_rounded
-                : Icons.closed_caption_rounded,
+                ? CupertinoIcons.captions_bubble
+                : CupertinoIcons.captions_bubble_fill,
           ),
           onPressed: () => menu.isOpen ? menu.close() : menu.open(),
         ),
       ),
-      menuChildren: [
-        ListenableBuilder(
-          listenable: c,
-          builder: (context, _) {
-            final width = math.min(
-              AppViewport.dp(420, screen),
-              math.max(280.0, screen.width - 48),
-            );
-            final height = math.min(
-              AppViewport.dp(520, screen),
-              math.max(240.0, screen.height - 160),
-            );
-            return SizedBox(
-              key: const Key('player-subtitle-panel'),
-              width: width,
-              height: height,
-              child: FocusScope(
-                node: _panelFocus,
-                onKeyEvent: (_, event) {
-                  if (event is KeyDownEvent &&
-                      event.logicalKey == LogicalKeyboardKey.escape) {
-                    _menu.close();
-                    _buttonFocus.requestFocus();
-                    return KeyEventResult.handled;
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: _panel(context, c.selectableSubtitleTracks),
-                ),
-              ),
-            );
+      consumeOutsideTaps: true,
+      overlayBuilder: (context, info) => Positioned(
+        right: 24,
+        bottom: 80,
+        child: TapRegion(
+          groupId: info.tapRegionGroupId,
+          onTapOutside: (_) {
+            _menu.close();
+            _buttonFocus.requestFocus();
           },
+          child: AppUiTheme(
+            data: AppUiTheme.dark(),
+            child: Container(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(AppRadii.xl),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListenableBuilder(
+                    listenable: c,
+                    builder: (context, _) {
+                      final width = math.min(
+                        AppViewport.dp(420, screen),
+                        math.max(280.0, screen.width - 48),
+                      );
+                      final height = math.min(
+                        AppViewport.dp(520, screen),
+                        math.max(240.0, screen.height - 160),
+                      );
+                      return SizedBox(
+                        key: const Key('player-subtitle-panel'),
+                        width: width,
+                        height: height,
+                        child: FocusScope(
+                          node: _panelFocus,
+                          onKeyEvent: (_, event) {
+                            if (event is KeyDownEvent &&
+                                event.logicalKey == LogicalKeyboardKey.escape) {
+                              _menu.close();
+                              _buttonFocus.requestFocus();
+                              return KeyEventResult.handled;
+                            }
+                            return KeyEventResult.ignored;
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0x00000000),
+                            ),
+                            child: _panel(context, c.selectableSubtitleTracks),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-      ],
+      ),
     );
   }
 
   Widget _panel(BuildContext context, List<MediaStreamInfo> tracks) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final c = widget.controller;
     final enabled = !c.loading;
@@ -456,16 +459,19 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                     ),
                   ),
                 ),
-              IconButton(
+              AppIconButton(
                 key: const Key('player-subtitle-close'),
                 onPressed: _menu.close,
-                tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-                icon: const Icon(Icons.close_rounded, size: 20),
+                tooltip: '关闭',
+                icon: const Icon(CupertinoIcons.xmark, size: 20),
               ),
             ],
           ),
         ),
-        Divider(height: 2, color: scheme.outlineVariant.withValues(alpha: .7)),
+        AppDivider(
+          height: 2,
+          color: scheme.outlineVariant.withValues(alpha: .7),
+        ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -503,7 +509,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
     );
   }
 
-  Widget? _meta(ThemeData theme, MediaStreamInfo track) {
+  Widget? _meta(AppUiThemeData theme, MediaStreamInfo track) {
     final meta = trackMetaLabel(AppLocalizations.of(context), track);
     if (meta.isEmpty) return null;
     return Text(

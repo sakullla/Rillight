@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:rillight/media_server/resources.dart';
 
 import 'cache_limits.dart';
@@ -23,13 +24,12 @@ class NextPrefixSlice {
   final int? totalBytes;
 }
 
-typedef NextPrefixFetch =
-    Future<NextPrefixSlice?> Function({
-      required Uri url,
-      required Map<String, String> headers,
-      required int start,
-      required int endInclusive,
-    });
+typedef NextPrefixFetch = Future<NextPrefixSlice?> Function({
+  required Uri url,
+  required Map<String, String> headers,
+  required int start,
+  required int endInclusive,
+});
 
 /// Holds at most [maxBytes] of the next episode in memory until the current
 /// transport is asked to play that item. It does not open a second disk session.

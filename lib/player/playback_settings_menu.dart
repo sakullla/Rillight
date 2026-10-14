@@ -1,13 +1,14 @@
 import 'dart:async';
+
 import 'source_switch_menu.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
 import 'package:rillight/player/playback_output_panel.dart';
 import 'package:rillight/player/playback_output_status.dart';
@@ -65,9 +66,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       await change();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).playbackFailed)),
-        );
+        showAppNotice(context, AppLocalizations.of(context).playbackFailed);
       }
     } finally {
       if (mounted) {
@@ -81,7 +80,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final screen = MediaQuery.sizeOf(context);
     // 宽窗口用左侧分类栏，七个分类一眼看全；窄窗口退回顶部横向分类条。
     final rail = screen.width >= 720;
@@ -90,11 +89,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       math.max(280.0, screen.width - 48),
     );
     final height = math.min(
-      AppViewport.dp(336, screen),
+      AppViewport.dp(rail ? 400 : 336, screen),
       math.max(240.0, screen.height - 220),
     );
     final l10n = AppLocalizations.of(context);
-    return MenuAnchor(
+    return RawMenuAnchor(
       controller: _menu,
       childFocusNode: _buttonFocus,
       onOpen: () {
@@ -104,60 +103,73 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
         });
       },
       onClose: () => widget.controller.setControlsPinned(false, owner: _menu),
-      consumeOutsideTap: true,
-      style: MenuStyle(
-        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-        backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainer),
-        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-        elevation: const WidgetStatePropertyAll(16),
-        shadowColor: WidgetStatePropertyAll(scheme.scrim.withValues(alpha: .5)),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.xl),
-            side: BorderSide(color: scheme.outlineVariant),
-          ),
-        ),
-      ),
       builder: (context, menu, _) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           PlaybackLineButton(controller: widget.controller),
-          IconButton(
+          AppIconButton(
             key: PlayerKeys.more,
             focusNode: _buttonFocus,
             tooltip: l10n.playerPlaybackSettings,
             color: scheme.onSurface,
-            icon: const Icon(Icons.settings_outlined),
+            icon: const Icon(CupertinoIcons.gear),
             onPressed: () => menu.isOpen ? menu.close() : menu.open(),
           ),
         ],
       ),
-      menuChildren: [
-        SizedBox(
-          key: const Key('player-settings-panel'),
-          width: width,
-          height: height,
-          child: FocusScope(
-            node: _panelFocus,
-            onKeyEvent: (_, event) {
-              if (event is KeyDownEvent &&
-                  event.logicalKey == LogicalKeyboardKey.escape) {
-                _menu.close();
-                _buttonFocus.requestFocus();
-                return KeyEventResult.handled;
-              }
-              return KeyEventResult.ignored;
-            },
-            child: Material(
-              type: MaterialType.transparency,
-              child: ListenableBuilder(
-                listenable: widget.controller,
-                builder: (context, _) => _panel(context, rail: rail),
+      consumeOutsideTaps: true,
+      overlayBuilder: (context, info) => Positioned(
+        right: 24,
+        bottom: 80,
+        child: TapRegion(
+          groupId: info.tapRegionGroupId,
+          onTapOutside: (_) {
+            _menu.close();
+            _buttonFocus.requestFocus();
+          },
+          child: AppUiTheme(
+            data: AppUiTheme.dark(),
+            child: Container(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(AppRadii.xl),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    key: const Key('player-settings-panel'),
+                    width: width,
+                    height: height,
+                    child: FocusScope(
+                      node: _panelFocus,
+                      onKeyEvent: (_, event) {
+                        if (event is KeyDownEvent &&
+                            event.logicalKey == LogicalKeyboardKey.escape) {
+                          _menu.close();
+                          _buttonFocus.requestFocus();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0x00000000),
+                        ),
+                        child: ListenableBuilder(
+                          listenable: widget.controller,
+                          builder: (context, _) => _panel(context, rail: rail),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 
@@ -200,46 +212,46 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
 
   Widget _panel(BuildContext context, {required bool rail}) {
     final c = widget.controller;
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context);
     final sections = <_SettingsSection, (String, IconData, Key)>{
       _SettingsSection.speed: (
         l10n.playbackRate,
-        Icons.speed_rounded,
+        CupertinoIcons.speedometer,
         PlayerKeys.speed,
       ),
       _SettingsSection.skip: (
         l10n.playerSkipSettings,
-        Icons.skip_next_rounded,
+        CupertinoIcons.forward_end_fill,
         const Key('player-skip-settings-section'),
       ),
       _SettingsSection.subtitles: (
         l10n.phoneSubtitleSize,
-        Icons.subtitles_rounded,
+        CupertinoIcons.captions_bubble,
         const Key('player-subtitle-size-section'),
       ),
       if (c.canSwitchAudioTrack)
         _SettingsSection.audio: (
           l10n.audioTrack,
-          Icons.audiotrack_rounded,
+          CupertinoIcons.music_note,
           PlayerKeys.audio,
         ),
       if (c.canSwitchQuality)
         _SettingsSection.quality: (
           l10n.quality,
-          Icons.high_quality_outlined,
+          CupertinoIcons.sparkles,
           PlayerKeys.quality,
         ),
       if (c.canSwitchMediaSource)
         _SettingsSection.source: (
           l10n.mediaSource,
-          Icons.video_library_outlined,
+          CupertinoIcons.film,
           PlayerKeys.mediaSource,
         ),
       _SettingsSection.output: (
         l10n.playbackOutputSection,
-        Icons.tune_rounded,
+        CupertinoIcons.slider_horizontal_3,
         const Key('player-output-section'),
       ),
     };
@@ -256,22 +268,19 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           selected: selected,
           child: Semantics(
             selected: selected,
-            child: TextButton.icon(
+            child: AppButton.icon(
               key: info.$3,
               onPressed: () => setState(() => _section = key),
               icon: Icon(info.$2, size: 16),
               label: Text(info.$1),
-              style: TextButton.styleFrom(
+              style: AppButtonStyle(
                 minimumSize: Size(rail ? double.infinity : 0, rail ? 40 : 36),
-                alignment: rail ? AlignmentDirectional.centerStart : null,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
                 foregroundColor: selected
                     ? scheme.onSurface
                     : scheme.onSurfaceVariant,
                 backgroundColor: selected
                     ? scheme.surfaceBright
-                    : Colors.transparent,
+                    : const Color(0x00000000),
                 shape: rail
                     ? RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -309,7 +318,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               ),
               if (value.isNotEmpty)
                 Flexible(
-                  child: Tooltip(
+                  child: AppTooltip(
                     message: value,
                     child: Text(
                       value,
@@ -383,11 +392,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                     ),
                   ),
                 ),
-                IconButton(
+                AppIconButton(
                   key: const Key('player-settings-close'),
                   onPressed: _menu.close,
-                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-                  icon: const Icon(Icons.close_rounded, size: 20),
+                  tooltip: '关闭',
+                  icon: const Icon(CupertinoIcons.xmark, size: 20),
                 ),
               ],
             ),
@@ -395,8 +404,8 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           SizedBox(
             height: 2,
             child: _pending || c.loading
-                ? const LinearProgressIndicator()
-                : Divider(
+                ? const AppLoadingBar()
+                : AppDivider(
                     height: 2,
                     color: scheme.outlineVariant.withValues(alpha: .7),
                   ),
@@ -407,9 +416,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(width: 148, child: categories(Axis.vertical)),
-                  VerticalDivider(
+                  SizedBox(
                     width: 1,
-                    color: scheme.outlineVariant.withValues(alpha: .7),
+                    child: ColoredBox(
+                      color: scheme.outlineVariant.withValues(alpha: .7),
+                    ),
                   ),
                   Expanded(child: body),
                 ],
@@ -482,7 +493,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   Widget? _trackMeta(BuildContext context, MediaStreamInfo track) {
     final meta = trackMetaLabel(AppLocalizations.of(context), track);
     if (meta.isEmpty) return null;
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return Text(
       meta,
       maxLines: 1,
@@ -539,7 +550,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
   }
 }
 
-class _CategoryScrollBehavior extends MaterialScrollBehavior {
+class _CategoryScrollBehavior extends CupertinoScrollBehavior {
   const _CategoryScrollBehavior();
 
   @override

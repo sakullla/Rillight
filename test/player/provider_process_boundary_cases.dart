@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/media_server/capabilities.dart';
@@ -16,67 +17,61 @@ const device = ClientDeviceInfo(
 );
 
 void main() {
-  test(
-    'pending cleanup snapshot is bounded, release-only and cannot recursively nest',
-    () {
-      final primary = PlaybackSessionSnapshot(
-        itemId: 'item',
-        mediaSourceId: 'version',
-        playSessionId: 'active',
-        position: const Duration(seconds: 33),
-        baseUrl: 'https://primary.test',
-        userId: 'primary',
-        timestamp: DateTime.utc(2026),
-      );
-      final child = PlaybackSessionSnapshot(
-        itemId: 'target',
-        mediaSourceId: 'other',
-        playSessionId: 'pending',
-        position: Duration.zero,
-        baseUrl: 'https://plex.test',
-        userId: 'child',
-        timestamp: DateTime.utc(2026),
-        serviceType: MediaServerType.plex,
-        cleanupOnly: true,
-      );
-      final saved = primary.withPendingCleanups([child]);
-      final decoded = PlaybackSessionSnapshot.fromJson(
-        jsonDecode(jsonEncode(saved.toJson())),
-      )!;
-      expect(decoded.playSessionId, 'active');
-      expect(decoded.position, const Duration(seconds: 33));
-      expect(decoded.pendingCleanups.single.playSessionId, 'pending');
-      expect(decoded.pendingCleanups.single.serviceType, MediaServerType.plex);
-      expect(decoded.pendingCleanups.single.cleanupOnly, isTrue);
-      expect(primary.pendingCleanups, isEmpty);
-      expect(
-        () => primary.withPendingCleanups([primary]),
-        throwsFormatException,
-      );
-      expect(
-        PlaybackSessionSnapshot.fromJson({
-          ...primary.toJson(),
-          'pendingCleanups': [
-            {
-              ...child.toJson(),
-              'pendingCleanups': [child.toJson()],
-            },
-          ],
-        }),
-        isNull,
-      );
-      expect(
-        PlaybackSessionSnapshot.fromJson({
-          ...primary.toJson(),
-          'pendingCleanups': List.filled(
-            PlaybackSessionSnapshot.maxPendingCleanups + 1,
-            child.toJson(),
-          ),
-        }),
-        isNull,
-      );
-    },
-  );
+  test('pending cleanup snapshot is bounded, release-only and cannot recursively nest', () {
+    final primary = PlaybackSessionSnapshot(
+      itemId: 'item',
+      mediaSourceId: 'version',
+      playSessionId: 'active',
+      position: const Duration(seconds: 33),
+      baseUrl: 'https://primary.test',
+      userId: 'primary',
+      timestamp: DateTime.utc(2026),
+    );
+    final child = PlaybackSessionSnapshot(
+      itemId: 'target',
+      mediaSourceId: 'other',
+      playSessionId: 'pending',
+      position: Duration.zero,
+      baseUrl: 'https://plex.test',
+      userId: 'child',
+      timestamp: DateTime.utc(2026),
+      serviceType: MediaServerType.plex,
+      cleanupOnly: true,
+    );
+    final saved = primary.withPendingCleanups([child]);
+    final decoded = PlaybackSessionSnapshot.fromJson(
+      jsonDecode(jsonEncode(saved.toJson())),
+    )!;
+    expect(decoded.playSessionId, 'active');
+    expect(decoded.position, const Duration(seconds: 33));
+    expect(decoded.pendingCleanups.single.playSessionId, 'pending');
+    expect(decoded.pendingCleanups.single.serviceType, MediaServerType.plex);
+    expect(decoded.pendingCleanups.single.cleanupOnly, isTrue);
+    expect(primary.pendingCleanups, isEmpty);
+    expect(() => primary.withPendingCleanups([primary]), throwsFormatException);
+    expect(
+      PlaybackSessionSnapshot.fromJson({
+        ...primary.toJson(),
+        'pendingCleanups': [
+          {
+            ...child.toJson(),
+            'pendingCleanups': [child.toJson()],
+          },
+        ],
+      }),
+      isNull,
+    );
+    expect(
+      PlaybackSessionSnapshot.fromJson({
+        ...primary.toJson(),
+        'pendingCleanups': List.filled(
+          PlaybackSessionSnapshot.maxPendingCleanups + 1,
+          child.toJson(),
+        ),
+      }),
+      isNull,
+    );
+  });
   for (final type in MediaServerType.values) {
     test(
       '${type.name} standalone factory and launch preserve provider identity',

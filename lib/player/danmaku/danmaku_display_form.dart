@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/player/buffered_ranges_track.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
@@ -41,13 +41,11 @@ class DanmakuDisplayForm extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             _BasicGroup(value: value, onChanged: onChanged, compact: false),
             const SizedBox(height: AppSpacing.md),
-            ExpansionTile(
+            AppDisclosure(
               key: const ValueKey('danmaku-advanced-settings'),
               title: Text(AppLocalizations.of(context).danmakuAdvanced),
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.only(bottom: 8),
-              shape: const Border(),
-              collapsedShape: const Border(),
               children: [
                 _AdvancedGroup(
                   value: value,
@@ -70,7 +68,7 @@ class _DanmakuPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Container(
       height: 116,
       clipBehavior: Clip.antiAlias,
@@ -86,7 +84,7 @@ class _DanmakuPreview extends StatelessWidget {
                 gradient: LinearGradient(
                   colors: [
                     scheme.primary.withValues(alpha: .16),
-                    Colors.transparent,
+                    const Color(0x00000000),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -107,11 +105,13 @@ class _DanmakuPreview extends StatelessWidget {
                 style: TextStyle(
                   color: value.colorful
                       ? const Color(0xffffd78c)
-                      : Colors.white,
+                      : CupertinoColors.white,
                   fontSize: 18 * value.fontScale,
                   fontWeight: FontWeight.w600,
                   shadows: value.outline
-                      ? const [Shadow(color: Colors.black, blurRadius: 3)]
+                      ? const [
+                          Shadow(color: CupertinoColors.black, blurRadius: 3),
+                        ]
                       : null,
                 ),
               ),
@@ -122,9 +122,8 @@ class _DanmakuPreview extends StatelessWidget {
             bottom: 14,
             child: Text(
               l10n.danmakuPreview,
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: Colors.white60),
+              style: AppUiTheme.of(context).textTheme.labelSmall
+                  ?.copyWith(color: const Color(0x99ffffff)),
             ),
           ),
         ],
@@ -147,101 +146,98 @@ class _BasicGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Theme(
-      data: _formTheme(context, compact),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _OpacityRow(
-            label: l10n.danmakuOpacity,
-            value: value.opacity,
-            compact: compact,
-            onChanged: (opacity) => onChanged(value.copyWith(opacity: opacity)),
-          ),
-          if (compact) const SizedBox(height: 6),
-          _SegmentedRow<double>(
-            key: DanmakuKeys.fontScale,
-            label: l10n.danmakuFontSize,
-            compact: compact,
-            value: value.fontScale,
-            segments: [
-              ButtonSegment(
-                value: kDanmakuFontScaleSteps[0],
-                label: Text(l10n.danmakuFontScaleSmall),
-              ),
-              ButtonSegment(
-                value: kDanmakuFontScaleSteps[1],
-                label: Text(l10n.danmakuFontScaleMedium),
-              ),
-              ButtonSegment(
-                value: kDanmakuFontScaleSteps[2],
-                label: Text(l10n.danmakuFontScaleLarge),
-              ),
-              ButtonSegment(
-                value: kDanmakuFontScaleSteps[3],
-                label: Text(l10n.danmakuFontScaleExtraLarge),
-              ),
-            ],
-            onChanged: (fontScale) =>
-                onChanged(value.copyWith(fontScale: fontScale)),
-          ),
-          if (compact) const SizedBox(height: 6),
-          _SegmentedRow<double>(
-            key: DanmakuKeys.speed,
-            label: l10n.danmakuSpeed,
-            compact: compact,
-            value: value.speed,
-            segments: [
-              ButtonSegment(
-                value: kDanmakuSpeedSteps[0],
-                label: Text(l10n.danmakuSpeedSlow),
-              ),
-              ButtonSegment(
-                value: kDanmakuSpeedSteps[1],
-                label: Text(l10n.danmakuSpeedNormal),
-              ),
-              ButtonSegment(
-                value: kDanmakuSpeedSteps[2],
-                label: Text(l10n.danmakuSpeedFast),
-              ),
-              ButtonSegment(
-                value: kDanmakuSpeedSteps[3],
-                label: Text(l10n.danmakuSpeedVeryFast),
-              ),
-            ],
-            onChanged: (speed) => onChanged(value.copyWith(speed: speed)),
-          ),
-          if (compact) const SizedBox(height: 6),
-          _SegmentedRow<double>(
-            key: DanmakuKeys.area,
-            label: l10n.danmakuDisplayArea,
-            compact: compact,
-            value: value.areaFraction,
-            segments: [
-              ButtonSegment(
-                value: kDanmakuAreaFractionSteps[0],
-                label: Text(l10n.danmakuAreaQuarter),
-              ),
-              ButtonSegment(
-                value: kDanmakuAreaFractionSteps[1],
-                label: Text(l10n.danmakuAreaHalf),
-              ),
-              ButtonSegment(
-                value: kDanmakuAreaFractionSteps[2],
-                label: Text(l10n.danmakuAreaThreeQuarters),
-              ),
-              ButtonSegment(
-                value: kDanmakuAreaFractionSteps[3],
-                label: Text(l10n.danmakuAreaFull),
-              ),
-            ],
-            onChanged: (areaFraction) =>
-                onChanged(value.copyWith(areaFraction: areaFraction)),
-          ),
-          if (compact) const SizedBox(height: 8),
-          _TypeRow(value: value, onChanged: onChanged, compact: compact),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _OpacityRow(
+          label: l10n.danmakuOpacity,
+          value: value.opacity,
+          compact: compact,
+          onChanged: (opacity) => onChanged(value.copyWith(opacity: opacity)),
+        ),
+        if (compact) const SizedBox(height: 6),
+        _SegmentedRow<double>(
+          key: DanmakuKeys.fontScale,
+          label: l10n.danmakuFontSize,
+          compact: compact,
+          value: value.fontScale,
+          segments: [
+            _DanmakuChoice(
+              value: kDanmakuFontScaleSteps[0],
+              label: Text(l10n.danmakuFontScaleSmall),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuFontScaleSteps[1],
+              label: Text(l10n.danmakuFontScaleMedium),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuFontScaleSteps[2],
+              label: Text(l10n.danmakuFontScaleLarge),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuFontScaleSteps[3],
+              label: Text(l10n.danmakuFontScaleExtraLarge),
+            ),
+          ],
+          onChanged: (fontScale) =>
+              onChanged(value.copyWith(fontScale: fontScale)),
+        ),
+        if (compact) const SizedBox(height: 6),
+        _SegmentedRow<double>(
+          key: DanmakuKeys.speed,
+          label: l10n.danmakuSpeed,
+          compact: compact,
+          value: value.speed,
+          segments: [
+            _DanmakuChoice(
+              value: kDanmakuSpeedSteps[0],
+              label: Text(l10n.danmakuSpeedSlow),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuSpeedSteps[1],
+              label: Text(l10n.danmakuSpeedNormal),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuSpeedSteps[2],
+              label: Text(l10n.danmakuSpeedFast),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuSpeedSteps[3],
+              label: Text(l10n.danmakuSpeedVeryFast),
+            ),
+          ],
+          onChanged: (speed) => onChanged(value.copyWith(speed: speed)),
+        ),
+        if (compact) const SizedBox(height: 6),
+        _SegmentedRow<double>(
+          key: DanmakuKeys.area,
+          label: l10n.danmakuDisplayArea,
+          compact: compact,
+          value: value.areaFraction,
+          segments: [
+            _DanmakuChoice(
+              value: kDanmakuAreaFractionSteps[0],
+              label: Text(l10n.danmakuAreaQuarter),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuAreaFractionSteps[1],
+              label: Text(l10n.danmakuAreaHalf),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuAreaFractionSteps[2],
+              label: Text(l10n.danmakuAreaThreeQuarters),
+            ),
+            _DanmakuChoice(
+              value: kDanmakuAreaFractionSteps[3],
+              label: Text(l10n.danmakuAreaFull),
+            ),
+          ],
+          onChanged: (areaFraction) =>
+              onChanged(value.copyWith(areaFraction: areaFraction)),
+        ),
+        if (compact) const SizedBox(height: 8),
+        _TypeRow(value: value, onChanged: onChanged, compact: compact),
+      ],
     );
   }
 }
@@ -262,97 +258,89 @@ class _AdvancedGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Theme(
-      data: _formTheme(context, compact),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _SwitchRow(
-            key: DanmakuKeys.preventOverlap,
-            title: l10n.danmakuPreventOverlap,
-            value: value.preventOverlap,
-            compact: compact,
-            onChanged: (preventOverlap) =>
-                onChanged(value.copyWith(preventOverlap: preventOverlap)),
-          ),
-          _SwitchRow(
-            key: DanmakuKeys.mergeDuplicates,
-            title: l10n.danmakuMergeDuplicates,
-            value: value.mergeDuplicates,
-            compact: compact,
-            onChanged: (mergeDuplicates) =>
-                onChanged(value.copyWith(mergeDuplicates: mergeDuplicates)),
-          ),
-          _SwitchRow(
-            key: DanmakuKeys.outline,
-            title: l10n.danmakuOutline,
-            value: value.outline,
-            compact: compact,
-            onChanged: (outline) => onChanged(value.copyWith(outline: outline)),
-          ),
-          _SwitchRow(
-            key: DanmakuKeys.followPlaybackRate,
-            title: l10n.danmakuFollowPlaybackRate,
-            value: value.followPlaybackRate,
-            compact: compact,
-            onChanged: (followPlaybackRate) => onChanged(
-              value.copyWith(followPlaybackRate: followPlaybackRate),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SwitchRow(
+          key: DanmakuKeys.preventOverlap,
+          title: l10n.danmakuPreventOverlap,
+          value: value.preventOverlap,
+          compact: compact,
+          onChanged: (preventOverlap) =>
+              onChanged(value.copyWith(preventOverlap: preventOverlap)),
+        ),
+        _SwitchRow(
+          key: DanmakuKeys.mergeDuplicates,
+          title: l10n.danmakuMergeDuplicates,
+          value: value.mergeDuplicates,
+          compact: compact,
+          onChanged: (mergeDuplicates) =>
+              onChanged(value.copyWith(mergeDuplicates: mergeDuplicates)),
+        ),
+        _SwitchRow(
+          key: DanmakuKeys.outline,
+          title: l10n.danmakuOutline,
+          value: value.outline,
+          compact: compact,
+          onChanged: (outline) => onChanged(value.copyWith(outline: outline)),
+        ),
+        _SwitchRow(
+          key: DanmakuKeys.followPlaybackRate,
+          title: l10n.danmakuFollowPlaybackRate,
+          value: value.followPlaybackRate,
+          compact: compact,
+          onChanged: (followPlaybackRate) =>
+              onChanged(value.copyWith(followPlaybackRate: followPlaybackRate)),
+        ),
+        _SegmentedRow<DanmakuDensity>(
+          key: DanmakuKeys.density,
+          label: l10n.danmakuDensity,
+          compact: compact,
+          value: value.density,
+          segments: [
+            _DanmakuChoice(
+              value: DanmakuDensity.auto,
+              label: Text(l10n.danmakuDensityAuto),
+            ),
+            _DanmakuChoice(
+              value: DanmakuDensity.sparse,
+              label: Text(l10n.danmakuDensitySparse),
+            ),
+            _DanmakuChoice(
+              value: DanmakuDensity.dense,
+              label: Text(l10n.danmakuDensityDense),
+            ),
+            _DanmakuChoice(
+              value: DanmakuDensity.unlimited,
+              label: Text(l10n.danmakuUnlimited),
+            ),
+          ],
+          onChanged: (density) => onChanged(value.copyWith(density: density)),
+        ),
+        _TimeOffsetRow(
+          value: value.timeOffset,
+          compact: compact,
+          onChanged: (timeOffset) =>
+              onChanged(value.copyWith(timeOffset: timeOffset)),
+        ),
+        _KeywordEditor(
+          keywords: value.blockedKeywords,
+          compact: compact,
+          onChanged: (blockedKeywords) =>
+              onChanged(value.copyWith(blockedKeywords: blockedKeywords)),
+        ),
+        if (showRestore)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AppButton.icon(
+              key: DanmakuKeys.restoreDefaults,
+              onPressed: () => onChanged(const DanmakuDisplaySettings()),
+              style: AppButtonStyle(),
+              icon: const Icon(CupertinoIcons.arrow_counterclockwise),
+              label: Text(l10n.danmakuRestoreDefaults),
             ),
           ),
-          _SegmentedRow<DanmakuDensity>(
-            key: DanmakuKeys.density,
-            label: l10n.danmakuDensity,
-            compact: compact,
-            value: value.density,
-            segments: [
-              ButtonSegment(
-                value: DanmakuDensity.auto,
-                label: Text(l10n.danmakuDensityAuto),
-              ),
-              ButtonSegment(
-                value: DanmakuDensity.sparse,
-                label: Text(l10n.danmakuDensitySparse),
-              ),
-              ButtonSegment(
-                value: DanmakuDensity.dense,
-                label: Text(l10n.danmakuDensityDense),
-              ),
-              ButtonSegment(
-                value: DanmakuDensity.unlimited,
-                label: Text(l10n.danmakuUnlimited),
-              ),
-            ],
-            onChanged: (density) => onChanged(value.copyWith(density: density)),
-          ),
-          _TimeOffsetRow(
-            value: value.timeOffset,
-            compact: compact,
-            onChanged: (timeOffset) =>
-                onChanged(value.copyWith(timeOffset: timeOffset)),
-          ),
-          _KeywordEditor(
-            keywords: value.blockedKeywords,
-            compact: compact,
-            onChanged: (blockedKeywords) =>
-                onChanged(value.copyWith(blockedKeywords: blockedKeywords)),
-          ),
-          if (showRestore)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                key: DanmakuKeys.restoreDefaults,
-                onPressed: () => onChanged(const DanmakuDisplaySettings()),
-                style: TextButton.styleFrom(
-                  visualDensity: compact
-                      ? VisualDensity.compact
-                      : VisualDensity.standard,
-                ),
-                icon: const Icon(Icons.settings_backup_restore_rounded),
-                label: Text(l10n.danmakuRestoreDefaults),
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -372,26 +360,14 @@ class _OpacityRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final slider = SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        overlayShape: SliderComponentShape.noOverlay,
-        trackHeight: compact ? 3 : 4,
-        thumbShape: RoundSliderThumbShape(enabledThumbRadius: compact ? 5 : 8),
-        activeTrackColor: compact ? scheme.onSurface : null,
-        inactiveTrackColor: compact
-            ? scheme.onSurface.withValues(alpha: 0.18)
-            : null,
-        thumbColor: compact ? scheme.onSurface : null,
-      ),
-      child: Slider(
-        key: DanmakuKeys.opacity,
-        value: value.clamp(kDanmakuOpacityMin, 1.0),
-        min: kDanmakuOpacityMin,
-        max: 1,
-        onChanged: onChanged,
-      ),
+    final slider = PlayerSlider(
+      key: DanmakuKeys.opacity,
+      value: value.clamp(kDanmakuOpacityMin, 1.0),
+      min: kDanmakuOpacityMin,
+      max: 1,
+      onChanged: onChanged,
     );
     final percent = Text(
       '${(value * 100).round()}%',
@@ -443,7 +419,7 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
   final String label;
   final bool compact;
   final T value;
-  final List<ButtonSegment<T>> segments;
+  final List<_DanmakuChoice<T>> segments;
   final ValueChanged<T> onChanged;
 
   @override
@@ -465,7 +441,7 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
         ),
       );
     }
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Column(
@@ -489,7 +465,7 @@ class _SegmentedRow<T extends Object> extends StatelessWidget {
   }
 }
 
-String _segmentLabel<T extends Object>(ButtonSegment<T> segment) {
+String _segmentLabel<T extends Object>(_DanmakuChoice<T> segment) {
   final label = segment.label;
   if (label is Text) {
     final data = label.data;
@@ -586,13 +562,15 @@ class _TypeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final selectedFill = scheme.onSurface.withValues(alpha: 0.92);
     final idleFill = scheme.onSurface.withValues(alpha: 0.08);
-    return Material(
-      color: selected ? selectedFill : idleFill,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(
+        color: selected ? selectedFill : idleFill,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: AppSurfaceAction(
         onTap: () => onSelected(!selected),
         borderRadius: BorderRadius.circular(999),
         child: Center(
@@ -600,7 +578,7 @@ class _TypeChip extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
               color: selected
                   ? scheme.surface
@@ -630,11 +608,10 @@ class _SwitchRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!compact) {
-      return SwitchListTile.adaptive(
+      return AppSwitchTile(
         title: Text(title),
         value: value,
         onChanged: onChanged,
-        contentPadding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       );
     }
     return SizedBox(
@@ -646,14 +623,10 @@ class _SwitchRow extends StatelessWidget {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelMedium,
+              style: AppUiTheme.of(context).textTheme.labelMedium,
             ),
           ),
-          Switch.adaptive(
-            value: value,
-            onChanged: onChanged,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
+          CupertinoSwitch(value: value, onChanged: onChanged),
         ],
       ),
     );
@@ -674,7 +647,7 @@ class _TimeOffsetRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final atMin = value <= -kDanmakuTimeOffsetMax;
     final atMax = value >= kDanmakuTimeOffsetMax;
     final seconds = value.inMilliseconds / 1000;
@@ -682,14 +655,14 @@ class _TimeOffsetRow extends StatelessWidget {
     final controls = Row(
       key: DanmakuKeys.timeOffset,
       children: [
-        IconButton(
+        AppIconButton(
           key: DanmakuKeys.timeOffsetMinus,
           tooltip: l10n.danmakuTimeOffsetStepDown,
-          visualDensity: VisualDensity.compact,
+
           onPressed: atMin
               ? null
               : () => onChanged(value - const Duration(milliseconds: 500)),
-          icon: const Icon(Icons.remove_rounded),
+          icon: const Icon(CupertinoIcons.minus),
         ),
         SizedBox(
           width: 56,
@@ -699,21 +672,21 @@ class _TimeOffsetRow extends StatelessWidget {
             style: theme.textTheme.labelLarge,
           ),
         ),
-        IconButton(
+        AppIconButton(
           key: DanmakuKeys.timeOffsetPlus,
           tooltip: l10n.danmakuTimeOffsetStepUp,
-          visualDensity: VisualDensity.compact,
+
           onPressed: atMax
               ? null
               : () => onChanged(value + const Duration(milliseconds: 500)),
-          icon: const Icon(Icons.add_rounded),
+          icon: const Icon(CupertinoIcons.add),
         ),
-        TextButton(
+        AppButton(
           key: DanmakuKeys.timeOffsetZero,
           onPressed: value == Duration.zero
               ? null
               : () => onChanged(Duration.zero),
-          style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+          style: AppButtonStyle(),
           child: Text(l10n.danmakuTimeOffsetZero),
         ),
       ],
@@ -810,8 +783,8 @@ class _KeywordEditorState extends State<_KeywordEditor> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final field = TextField(
+    final theme = AppUiTheme.of(context);
+    final field = AppTextField(
       key: DanmakuKeys.keywordInput,
       controller: _controller,
       focusNode: _focus,
@@ -819,17 +792,7 @@ class _KeywordEditorState extends State<_KeywordEditor> {
       textInputAction: TextInputAction.done,
       onEditingComplete: _commit,
       onSubmitted: (_) => _commit(),
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: l10n.danmakuKeywordHint,
-        filled: widget.compact,
-        border: widget.compact
-            ? OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-                borderSide: BorderSide.none,
-              )
-            : const OutlineInputBorder(),
-      ),
+      placeholder: l10n.danmakuKeywordHint,
     );
     final chips = Wrap(
       key: DanmakuKeys.keywords,
@@ -853,7 +816,7 @@ class _KeywordEditorState extends State<_KeywordEditor> {
             chips,
             const SizedBox(height: AppSpacing.xxs),
           ],
-          SizedBox(height: 36, child: field),
+          field,
         ],
       );
     }
@@ -883,12 +846,12 @@ class _HudChoiceBar<T extends Object> extends StatelessWidget {
   });
 
   final T value;
-  final List<ButtonSegment<T>> segments;
+  final List<_DanmakuChoice<T>> segments;
   final ValueChanged<T> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
       padding: const EdgeInsets.all(2),
@@ -901,12 +864,14 @@ class _HudChoiceBar<T extends Object> extends StatelessWidget {
           children: [
             for (final segment in segments)
               Expanded(
-                child: Material(
-                  color: segment.value == value
-                      ? scheme.onSurface.withValues(alpha: 0.92)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(999),
-                  child: InkWell(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: segment.value == value
+                        ? scheme.onSurface.withValues(alpha: 0.92)
+                        : const Color(0x00000000),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: AppSurfaceAction(
                     onTap: () => onChanged(segment.value),
                     borderRadius: BorderRadius.circular(999),
                     child: SizedBox(
@@ -927,7 +892,7 @@ class _HudChoiceBar<T extends Object> extends StatelessWidget {
                                   ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          child: segment.label ?? const SizedBox.shrink(),
+                          child: segment.label,
                         ),
                       ),
                     ),
@@ -954,26 +919,14 @@ class _CompactLabel extends StatelessWidget {
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: Theme.of(
-            context,
-          ).colorScheme.onSurface.withValues(alpha: 0.62),
+        style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
+          color: AppUiTheme.of(context).colorScheme.onSurface
+              .withValues(alpha: 0.62),
           fontWeight: FontWeight.w500,
         ),
       ),
     );
   }
-}
-
-ThemeData _formTheme(BuildContext context, bool compact) {
-  final theme = Theme.of(context);
-  if (!compact) {
-    return theme;
-  }
-  return theme.copyWith(
-    visualDensity: VisualDensity.compact,
-    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-  );
 }
 
 bool _sameKeywords(List<String> a, List<String> b) {
@@ -986,4 +939,10 @@ bool _sameKeywords(List<String> a, List<String> b) {
     }
   }
   return true;
+}
+
+class _DanmakuChoice<T> {
+  const _DanmakuChoice({required this.value, required this.label});
+  final T value;
+  final Widget label;
 }

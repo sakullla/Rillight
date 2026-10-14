@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+
 import '../aggregation/identity/media_identity.dart';
 
 class PlayerOpenRequest {

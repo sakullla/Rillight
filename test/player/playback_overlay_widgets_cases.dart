@@ -1,8 +1,12 @@
+import 'package:rillight/player/buffered_ranges_track.dart';
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:typed_data';
+
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -47,17 +51,15 @@ void main() {
   tearDown(() => controller.dispose());
 
   Widget app(Widget child, {Brightness brightness = Brightness.dark}) =>
-      MaterialApp(
+      CupertinoApp(
         locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.teal,
-            brightness: brightness,
-          ),
-        ),
-        home: Scaffold(body: Center(child: child)),
+        theme: CupertinoThemeData(brightness: brightness),
+        home: CupertinoPageScaffold(child: Center(child: child)),
       );
 
   testWidgets(
@@ -82,7 +84,7 @@ void main() {
       await tester.tap(find.byKey(PlayerKeys.mediaSource));
       await settle(tester);
       final selected = find.byWidgetPredicate(
-        (w) => w is ListTile && w.selected,
+        (w) => w is AppListTile && w.selected,
       );
       final content = find.byKey(
         const ValueKey('player-settings-content-source'),
@@ -267,7 +269,7 @@ void main() {
     expect(tester.widget<PlayerRateCell>(selected).selected, isTrue);
     expect(tester.widget<PlayerRateCell>(alternate).selected, isFalse);
     expect(find.text('最高可用'), findsNWidgets(2));
-    expect(find.byType(ListTile), findsNothing);
+    expect(find.byType(AppListTile), findsNothing);
     final panel = tester.getRect(
       find.byKey(const Key('player-settings-panel')),
     );
@@ -298,14 +300,14 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('player-rate-1.0')),
-          matching: find.byIcon(Icons.check_rounded),
+          matching: find.byIcon(CupertinoIcons.check_mark),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('player-rate-1.5')),
-          matching: find.byIcon(Icons.check_rounded),
+          matching: find.byIcon(CupertinoIcons.check_mark),
         ),
         findsNothing,
       );
@@ -318,14 +320,14 @@ void main() {
       expect(lastRate.bottom, lessThanOrEqualTo(panelRect.bottom + .5));
       expect(lastRate.top, greaterThanOrEqualTo(panelRect.top));
       expect(lastRate.height, selectedRate.height);
-      expect(find.byType(ExpansionTile), findsNothing);
+      expect(find.byType(AppDisclosure), findsNothing);
       expect(find.byKey(const Key('player-skip-intro-enabled')), findsNothing);
       final panelSize = tester.getSize(
         find.byKey(const Key('player-settings-panel')),
       );
       await tester.tap(find.byKey(const Key('player-skip-settings-section')));
       await settle(tester);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppDialog), findsNothing);
       await tester.tap(find.byKey(const Key('player-skip-intro-enabled')));
       await settle(tester);
       await tester.tap(find.byKey(const Key('player-skip-outro-enabled')));
@@ -563,14 +565,14 @@ void main() {
             width: 400,
             child: SeekPreview(
               controller: controller,
-              child: Slider(value: 0, onChanged: (_) {}),
+              child: PlayerSlider(value: 0, onChanged: (_) {}),
             ),
           ),
         ),
       );
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
-      await mouse.moveTo(tester.getCenter(find.byType(Slider)));
+      await mouse.moveTo(tester.getCenter(find.byType(PlayerSlider)));
       await tester.pump();
       expect(find.text('05:00'), findsOneWidget);
       expect(find.byType(Image), findsNothing);
@@ -592,7 +594,7 @@ void main() {
             child: SeekPreview(
               controller: controller,
               dragValue: .75,
-              child: Slider(value: .75, onChanged: (_) {}),
+              child: PlayerSlider(value: .75, onChanged: (_) {}),
             ),
           ),
         ),

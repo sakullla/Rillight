@@ -141,9 +141,8 @@ class HlsCacheIndex {
       }
       if (line.startsWith('#EXT-X-BYTERANGE:')) {
         if (pendingLength != null) return null;
-        final match = RegExp(
-          r'^(\d+)(?:@(\d+))?$',
-        ).firstMatch(line.substring(17));
+        final match = RegExp(r'^(\d+)(?:@(\d+))?$')
+            .firstMatch(line.substring(17));
         if (match == null) return null;
         pendingLength = int.tryParse(match.group(1)!);
         if (pendingLength == null || pendingLength <= 0) return null;

@@ -1,9 +1,11 @@
+import 'buffered_ranges_track.dart';
+
 import 'dart:ui' as ui;
 import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/media_server/resources.dart';
@@ -165,22 +167,13 @@ class _SeekPreviewState extends State<SeekPreview> {
         0.0,
         _image == null ? 88.0 : 176.0,
       );
-      final scheme = Theme.of(context).colorScheme;
+      final scheme = AppUiTheme.of(context).colorScheme;
       // Match the slider's actual padded track, rather than the entire widget.
-      final sliderTheme = SliderTheme.of(context);
-      final box = context.findRenderObject();
-      final rect = box is RenderBox && box.hasSize
-          ? sliderTheme.trackShape?.getPreferredRect(
-              parentBox: box,
-              sliderTheme: sliderTheme,
-              isEnabled: true,
-              isDiscrete: false,
-            )
-          : null;
-      final trackLeft = rect?.left ?? 24.0;
-      final trackWidth =
-          rect?.width ??
-          (constraints.maxWidth - 48).clamp(1.0, double.infinity);
+      const trackLeft = playerSliderInset;
+      final trackWidth = (constraints.maxWidth - playerSliderInset * 2).clamp(
+        1.0,
+        double.infinity,
+      );
       double logicalFraction(double dx) {
         final value = ((dx - trackLeft) / trackWidth).clamp(0.0, 1.0);
         return Directionality.of(context) == TextDirection.rtl
@@ -228,12 +221,13 @@ class _SeekPreviewState extends State<SeekPreview> {
                         ),
                 width: previewWidth,
                 child: IgnorePointer(
-                  child: Material(
+                  child: Container(
                     key: const Key('player-seek-preview'),
-                    color: scheme.surfaceContainerHigh,
-                    elevation: 6,
-                    borderRadius: BorderRadius.circular(8),
                     clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -255,7 +249,7 @@ class _SeekPreviewState extends State<SeekPreview> {
                           child: Text(
                             _clock(_position(fraction)),
                             key: const Key('player-seek-preview-time'),
-                            style: Theme.of(context).textTheme.labelLarge
+                            style: AppUiTheme.of(context).textTheme.labelLarge
                                 ?.copyWith(
                                   color: scheme.onSurface,
                                   fontFeatures: const [
@@ -328,9 +322,8 @@ Future<Uint8List> _previewBytes(PreviewFrame frame) async {
       picture.dispose();
     }
     try {
-      return (await cropped.toByteData(
-        format: ui.ImageByteFormat.png,
-      ))!.buffer.asUint8List();
+      return (await cropped.toByteData(format: ui.ImageByteFormat.png))!.buffer
+          .asUint8List();
     } finally {
       cropped.dispose();
     }

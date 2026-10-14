@@ -1,4 +1,5 @@
 import '../helpers/case_shard.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -334,48 +335,45 @@ class _RejectedAudioCoreDriver extends _CoreDriver {
 }
 
 void main() {
-  cases.test(
-    'remote Plex selection IDs map to negotiated output indices in both directions',
-    () async {
-      final temp = await Directory.systemTemp.createTemp(
-        'provider-output-indices-',
+  cases.test('remote Plex selection IDs map to negotiated output indices in both directions', () async {
+    final temp = await Directory.systemTemp.createTemp(
+      'provider-output-indices-',
+    );
+    final driver = _CoreDriver();
+    final backend = RillightVideoBackend(
+      mediaHeaderTimeout: const Duration(milliseconds: 800),
+      sourceStallTimeout: const Duration(milliseconds: 150),
+      waitForRetry: _retryImmediately,
+      createPlayer: () async => driver,
+      diskCacheDirectory: temp,
+      settingsStore: MemoryPlayerSettingsStore(),
+    );
+    try {
+      await backend.open(
+        VideoOpenRequest(
+          url: Uri.parse('http://127.0.0.1/movie'),
+          sessionId: 1,
+          mediaStreams: const [
+            MediaStreamInfo(
+              index: 721,
+              playbackIndex: 2,
+              type: 'Audio',
+              language: 'eng',
+            ),
+          ],
+        ),
       );
-      final driver = _CoreDriver();
-      final backend = RillightVideoBackend(
-        mediaHeaderTimeout: const Duration(milliseconds: 800),
-        sourceStallTimeout: const Duration(milliseconds: 150),
-        waitForRetry: _retryImmediately,
-        createPlayer: () async => driver,
-        diskCacheDirectory: temp,
-        settingsStore: MemoryPlayerSettingsStore(),
-      );
-      try {
-        await backend.open(
-          VideoOpenRequest(
-            url: Uri.parse('http://127.0.0.1/movie'),
-            sessionId: 1,
-            mediaStreams: const [
-              MediaStreamInfo(
-                index: 721,
-                playbackIndex: 2,
-                type: 'Audio',
-                language: 'eng',
-              ),
-            ],
-          ),
-        );
-        expect(driver.request!.streams.single.index, 2);
-        expect(backend.selectedAudioIndex, 721);
-        expect(backend.audioTrackSupported(721), true);
-        await backend.setAudioIndex(721);
-        expect(driver.lastArgs['index'], 2);
-        expect(backend.selectedAudioIndex, 721);
-      } finally {
-        await backend.dispose();
-        await temp.delete(recursive: true);
-      }
-    },
-  );
+      expect(driver.request!.streams.single.index, 2);
+      expect(backend.selectedAudioIndex, 721);
+      expect(backend.audioTrackSupported(721), true);
+      await backend.setAudioIndex(721);
+      expect(driver.lastArgs['index'], 2);
+      expect(backend.selectedAudioIndex, 721);
+    } finally {
+      await backend.dispose();
+      await temp.delete(recursive: true);
+    }
+  });
 
   late Directory isolatedCache;
   setUp(() async {
@@ -717,9 +715,8 @@ void main() {
       final held = <HttpResponse>[];
       final renewedStarts = <int>[];
       upstream.listen((request) async {
-        final match = RegExp(
-          r'^bytes=(\d+)-(\d+)$',
-        ).firstMatch(request.headers.value('range')!)!;
+        final match = RegExp(r'^bytes=(\d+)-(\d+)$')
+            .firstMatch(request.headers.value('range')!)!;
         final start = int.parse(match[1]!);
         final end = int.parse(match[2]!);
         if (request.uri.path == '/old' && start >= 65536) {
@@ -827,107 +824,99 @@ void main() {
     },
   );
 
-  cases.test(
-    'next episode with a warmed prefix publishes current cache and speed after seek',
-    () async {
-      const total = 512 * 1024;
-      final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      upstream.listen((request) async {
-        final match = RegExp(
-          r'^bytes=(\d+)-(\d+)$',
-        ).firstMatch(request.headers.value('range')!)!;
-        final start = int.parse(match[1]!);
-        final end = int.parse(match[2]!);
-        request.response.statusCode = 206;
-        request.response.headers.set(
-          'content-range',
-          'bytes $start-$end/$total',
-        );
-        request.response.headers.set('etag', '"${request.uri.path}"');
-        request.response.contentLength = end - start + 1;
-        request.response.add(List.filled(end - start + 1, 9));
-        await request.response.close();
-      });
-      final backend = RillightVideoBackend(
-        mediaHeaderTimeout: const Duration(milliseconds: 800),
-        sourceStallTimeout: const Duration(milliseconds: 150),
-        waitForRetry: _retryImmediately,
-        diskCacheDirectory: isolatedCache,
-        settingsStore: MemoryPlayerSettingsStore(),
-        createPlayer: () async => _WarmHandoffCoreDriver(),
-      );
-      final speeds = <(int, double)>[];
-      final snapshots = <BufferSnapshot>[];
-      final subscription = backend.events.listen((event) {
-        if (event.kind == VideoEventKind.cacheSpeed) {
-          speeds.add((event.sessionId, event.value as double));
-        }
-        if (event.kind == VideoEventKind.bufferSnapshot) {
-          snapshots.add(event.value as BufferSnapshot);
-        }
-      });
-      Future<void> waitFor(bool Function() condition) async {
-        final deadline = DateTime.now().add(const Duration(seconds: 5));
-        while (!condition() && DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-        }
-        expect(condition(), isTrue);
+  cases.test('next episode with a warmed prefix publishes current cache and speed after seek', () async {
+    const total = 512 * 1024;
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      final match = RegExp(r'^bytes=(\d+)-(\d+)$')
+          .firstMatch(request.headers.value('range')!)!;
+      final start = int.parse(match[1]!);
+      final end = int.parse(match[2]!);
+      request.response.statusCode = 206;
+      request.response.headers.set('content-range', 'bytes $start-$end/$total');
+      request.response.headers.set('etag', '"${request.uri.path}"');
+      request.response.contentLength = end - start + 1;
+      request.response.add(List.filled(end - start + 1, 9));
+      await request.response.close();
+    });
+    final backend = RillightVideoBackend(
+      mediaHeaderTimeout: const Duration(milliseconds: 800),
+      sourceStallTimeout: const Duration(milliseconds: 150),
+      waitForRetry: _retryImmediately,
+      diskCacheDirectory: isolatedCache,
+      settingsStore: MemoryPlayerSettingsStore(),
+      createPlayer: () async => _WarmHandoffCoreDriver(),
+    );
+    final speeds = <(int, double)>[];
+    final snapshots = <BufferSnapshot>[];
+    final subscription = backend.events.listen((event) {
+      if (event.kind == VideoEventKind.cacheSpeed) {
+        speeds.add((event.sessionId, event.value as double));
       }
+      if (event.kind == VideoEventKind.bufferSnapshot) {
+        snapshots.add(event.value as BufferSnapshot);
+      }
+    });
+    Future<void> waitFor(bool Function() condition) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (!condition() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(condition(), isTrue);
+    }
 
-      try {
-        await backend.open(
-          VideoOpenRequest(
-            sessionId: 1,
-            url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-one'),
-          ),
-        );
-        await waitFor(
-          () =>
-              snapshots.any((s) => s.sessionId == 1 && s.byteCoverage != null),
-        );
-        await backend.open(
-          VideoOpenRequest(
-            sessionId: 2,
-            url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-two'),
-            warmedPrefix: Uint8List(32768)..fillRange(0, 32768, 9),
-            warmedPrefixEtag: '"/episode-two"',
-            warmedPrefixTotalBytes: total,
-          ),
-        );
-        await waitFor(
-          () => snapshots.any(
-            (s) =>
-                s.sessionId == 2 &&
-                s.byteCoverage?.ranges.any(
-                      (r) => r.start == 0 && r.end >= 65536,
-                    ) ==
-                    true,
-          ),
-        );
-        await backend.seek(const Duration(seconds: 3));
-        await waitFor(
-          () => snapshots.any(
-            (s) =>
-                s.sessionId == 2 &&
-                s.byteCoverage?.ranges.any(
-                      // The continuous producer may already have cached
-                      // beyond the small seek response when diagnostics run.
-                      (r) => r.start <= 131072 && r.end >= 262144,
-                    ) ==
-                    true,
-          ),
-        );
-        expect(speeds.any((sample) => sample.$1 == 2 && sample.$2 > 0), isTrue);
-        final current = snapshots.last;
-        expect(current.sessionId, 2);
-        expect(current.byteCoverage!.ranges.first.start, 0);
-      } finally {
-        await subscription.cancel();
-        await backend.dispose();
-        await upstream.close(force: true);
-      }
-    },
-  );
+    try {
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 1,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-one'),
+        ),
+      );
+      await waitFor(
+        () => snapshots.any((s) => s.sessionId == 1 && s.byteCoverage != null),
+      );
+      await backend.open(
+        VideoOpenRequest(
+          sessionId: 2,
+          url: Uri.parse('http://127.0.0.1:${upstream.port}/episode-two'),
+          warmedPrefix: Uint8List(32768)..fillRange(0, 32768, 9),
+          warmedPrefixEtag: '"/episode-two"',
+          warmedPrefixTotalBytes: total,
+        ),
+      );
+      await waitFor(
+        () => snapshots.any(
+          (s) =>
+              s.sessionId == 2 &&
+              s.byteCoverage?.ranges.any(
+                    (r) => r.start == 0 && r.end >= 65536,
+                  ) ==
+                  true,
+        ),
+      );
+      await backend.seek(const Duration(seconds: 3));
+      await waitFor(
+        () => snapshots.any(
+          (s) =>
+              s.sessionId == 2 &&
+              s.byteCoverage?.ranges.any(
+                    // The continuous producer may already have cached
+                    // beyond the small seek response when diagnostics run.
+                    (r) => r.start <= 131072 && r.end >= 262144,
+                  ) ==
+                  true,
+        ),
+      );
+      expect(speeds.any((sample) => sample.$1 == 2 && sample.$2 > 0), isTrue);
+      final current = snapshots.last;
+      expect(current.sessionId, 2);
+      expect(current.byteCoverage!.ranges.first.start, 0);
+    } finally {
+      await subscription.cancel();
+      await backend.dispose();
+      await upstream.close(force: true);
+    }
+  });
   cases.test(
     'growing cache scans less often than download speed updates',
     () async {
@@ -935,9 +924,8 @@ void main() {
       const total = 32 * 1024 * 1024;
       final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       upstream.listen((request) async {
-        final match = RegExp(
-          r'^bytes=(\d+)-(\d+)$',
-        ).firstMatch(request.headers.value('range')!)!;
+        final match = RegExp(r'^bytes=(\d+)-(\d+)$')
+            .firstMatch(request.headers.value('range')!)!;
         final start = int.parse(match[1]!);
         final end = int.parse(match[2]!);
         request.response.statusCode = 206;

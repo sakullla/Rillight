@@ -1,10 +1,11 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+
 import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
@@ -492,9 +493,8 @@ void main() {
 
       await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
       final otherServerPid = control.lastPid;
-      await storeFor(
-        otherServerPid,
-      ).write(snapshotFor(auth, baseUrl: 'http://other.test:8096/'));
+      await storeFor(otherServerPid)
+          .write(snapshotFor(auth, baseUrl: 'http://other.test:8096/'));
       await host.close();
       expect(stoppedEvents(), isEmpty);
       expect(storeFor(otherServerPid).snapshot, isNotNull);
@@ -865,9 +865,10 @@ void main() {
         expect(host.current, isNull);
         expect(calls, contains('requestClose:$pid'));
         expect(
-          GoRouter.of(
-            tester.element(find.byKey(SessionActions.serverMenuKey)),
-          ).state.uri.path,
+          GoRouter.of(tester.element(find.byKey(SessionActions.serverMenuKey)))
+              .state
+              .uri
+              .path,
           '/',
         );
         expect(tester.takeException(), isNull);

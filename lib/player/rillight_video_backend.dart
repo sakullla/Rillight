@@ -36,15 +36,13 @@ class RillightVideoBackend extends VideoBackend
   // Native presentation is optional; the other platform views retain their
   // existing background and surface lifecycle.
   RillightVideoBackend({
-    PlayerSettingsStore? settingsStore,
+    this._settingsStore,
     CorePlayerFactory? createPlayer,
-    Directory? diskCacheDirectory,
+    this._diskCacheDirectory,
     this.mediaHeaderTimeout = const Duration(seconds: 45),
     this.sourceStallTimeout = const Duration(seconds: 15),
     this.waitForRetry,
-  }) : _settingsStore = settingsStore,
-       _createPlayer = createPlayer ?? CorePlayer.create,
-       _diskCacheDirectory = diskCacheDirectory,
+  }) : _createPlayer = createPlayer ?? CorePlayer.create,
        _player = Platform.isAndroid && createPlayer == null
            ? AndroidCorePlayer()
            : null;

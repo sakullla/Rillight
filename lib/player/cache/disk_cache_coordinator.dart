@@ -1140,9 +1140,8 @@ class _DiskStore {
       return {'error': 'disk-quota'};
     }
     final directory = Directory(_join(root.path, id))..createSync();
-    final lock = File(
-      _join(directory.path, 'lease.lock'),
-    ).openSync(mode: FileMode.append);
+    final lock = File(_join(directory.path, 'lease.lock'))
+        .openSync(mode: FileMode.append);
     try {
       lock.lockSync(FileLock.exclusive);
       final pendingOwner = File(_join(directory.path, 'owner.pending'));
@@ -1384,9 +1383,9 @@ class _DiskStore {
         tokens.any((token) => !_blockPattern.hasMatch(token))) {
       return {};
     }
-    if (_files(
-          lease.directory,
-        ).where((file) => _pinPattern.hasMatch(_name(file))).length >=
+    if (_files(lease.directory)
+            .where((file) => _pinPattern.hasMatch(_name(file)))
+            .length >=
         2) {
       return {};
     }

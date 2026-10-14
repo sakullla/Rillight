@@ -518,26 +518,23 @@ void main() {
     },
   );
 
-  test(
-    'local version switches immediately at the current position without preflight',
-    () async {
-      await controller.seekTo(const Duration(seconds: 35));
-      final requests = server.requests
-          .where((r) => r.contains('/PlaybackInfo'))
-          .length;
-      final opens = backend.openCount;
-      await controller.switchMediaVersion('alternate');
-      expect(controller.switchConfirmation, isNull);
-      expect(controller.activeMediaSourceId, 'alternate');
-      expect(backend.openCount, opens + 1);
-      expect(backend.openedStart, const Duration(seconds: 35));
-      expect(
-        server.requests.where((r) => r.contains('/PlaybackInfo')).length,
-        requests + 1,
-      );
-      expect(controller.error, isNull);
-    },
-  );
+  test('local version switches immediately at the current position without preflight', () async {
+    await controller.seekTo(const Duration(seconds: 35));
+    final requests = server.requests
+        .where((r) => r.contains('/PlaybackInfo'))
+        .length;
+    final opens = backend.openCount;
+    await controller.switchMediaVersion('alternate');
+    expect(controller.switchConfirmation, isNull);
+    expect(controller.activeMediaSourceId, 'alternate');
+    expect(backend.openCount, opens + 1);
+    expect(backend.openedStart, const Duration(seconds: 35));
+    expect(
+      server.requests.where((r) => r.contains('/PlaybackInfo')).length,
+      requests + 1,
+    );
+    expect(controller.error, isNull);
+  });
 
   test(
     'local version uses target audio default and disables unmatched subtitles',
@@ -1051,10 +1048,8 @@ void main() {
       expect(backend.openBegins, 2);
       backend.openGate!.complete();
       backend.openGate = null;
-      await Future.wait([
-        retry,
-        foreground,
-      ]).timeout(const Duration(seconds: 2));
+      await Future.wait([retry, foreground])
+          .timeout(const Duration(seconds: 2));
       expect(backend.openBegins, 3);
       expect(backend.maxConcurrentOpens, 1);
       final oldOpenEnd = backend.nativeOrder.indexOf('open-end-2');

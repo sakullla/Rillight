@@ -27,9 +27,8 @@ void main() {
     test(
       'resolves linked OS temporary ancestor and retains disk cleanup',
       () async {
-        final actual = await Directory(
-          '${sandbox.path}/actual/os-temp',
-        ).create(recursive: true);
+        final actual = await Directory('${sandbox.path}/actual/os-temp')
+            .create(recursive: true);
         final alias = Link('${sandbox.path}/os-alias');
         await _directoryLink(alias, actual.parent);
         final cacheRoot = cacheUnder(Directory('${alias.path}/os-temp'));

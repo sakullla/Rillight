@@ -395,8 +395,7 @@ void main() {
             'Container': 'strm',
             'SupportsDirectPlay': false,
             'SupportsDirectStream': true,
-            'DirectStreamUrl':
-                '/Videos/episode-strm/stream.strm?static=true&MediaSourceId=src-strm',
+            'DirectStreamUrl': '/Videos/episode-strm/stream.strm?static=true&MediaSourceId=src-strm',
             'TranscodingUrl': '/videos/episode-strm/master.m3u8',
           },
         ],
@@ -469,8 +468,7 @@ https://cdn.example.com/movie.mkv
             'Container': 'mkv',
             'SupportsDirectPlay': false,
             'SupportsDirectStream': true,
-            'DirectStreamUrl':
-                '/Videos/episode-strm/stream.mkv?static=true&MediaSourceId=src-probed',
+            'DirectStreamUrl': '/Videos/episode-strm/stream.mkv?static=true&MediaSourceId=src-probed',
             'TranscodingUrl': '/videos/episode-strm/master.m3u8',
           },
         ],
@@ -656,57 +654,53 @@ https://cdn.example.com/movie.mkv
     expect(otherScheme.queryParameters.containsKey('api_key'), isFalse);
   });
 
-  test(
-    'transcoding URL on a foreign host drops the token while same origin keeps it',
-    () {
-      final foreign = resolveEmbyPlayback(
-        info: decodeEmbyPlaybackInfo({
-          'PlaySessionId': 'play-foreign',
-          'MediaSources': [
-            {
-              'Id': 'src-foreign',
-              'Container': 'ts',
-              'SupportsDirectPlay': false,
-              'SupportsDirectStream': false,
-              'SupportsTranscoding': true,
-              'TranscodingUrl':
-                  'https://transcode.example.com/videos/movie/master.m3u8?MediaSourceId=src-foreign&api_key=$token',
-            },
-          ],
-        }),
-        baseUrl: Uri.parse(base),
-        accessToken: token,
-        itemId: 'movie',
-      );
-      expect(foreign, isNotNull);
-      expect(foreign!.isTranscode, isTrue);
-      expect(foreign.streamUrl.origin, 'https://transcode.example.com');
-      expect(foreign.streamUrl.queryParameters.containsKey('api_key'), isFalse);
-      expect(foreign.streamUrl.queryParameters['MediaSourceId'], 'src-foreign');
-      final own = resolveEmbyPlayback(
-        info: decodeEmbyPlaybackInfo({
-          'PlaySessionId': 'play-own',
-          'MediaSources': [
-            {
-              'Id': 'src-own',
-              'Container': 'ts',
-              'SupportsDirectPlay': false,
-              'SupportsDirectStream': false,
-              'SupportsTranscoding': true,
-              'TranscodingUrl':
-                  '/videos/movie/master.m3u8?MediaSourceId=src-own',
-            },
-          ],
-        }),
-        baseUrl: Uri.parse(base),
-        accessToken: token,
-        itemId: 'movie',
-      );
-      expect(own, isNotNull);
-      expect(own!.streamUrl.origin, Uri.parse(base).origin);
-      expect(own.streamUrl.queryParameters['api_key'], token);
-    },
-  );
+  test('transcoding URL on a foreign host drops the token while same origin keeps it', () {
+    final foreign = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
+        'PlaySessionId': 'play-foreign',
+        'MediaSources': [
+          {
+            'Id': 'src-foreign',
+            'Container': 'ts',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': false,
+            'SupportsTranscoding': true,
+            'TranscodingUrl':
+                'https://transcode.example.com/videos/movie/master.m3u8?MediaSourceId=src-foreign&api_key=$token',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'movie',
+    );
+    expect(foreign, isNotNull);
+    expect(foreign!.isTranscode, isTrue);
+    expect(foreign.streamUrl.origin, 'https://transcode.example.com');
+    expect(foreign.streamUrl.queryParameters.containsKey('api_key'), isFalse);
+    expect(foreign.streamUrl.queryParameters['MediaSourceId'], 'src-foreign');
+    final own = resolveEmbyPlayback(
+      info: decodeEmbyPlaybackInfo({
+        'PlaySessionId': 'play-own',
+        'MediaSources': [
+          {
+            'Id': 'src-own',
+            'Container': 'ts',
+            'SupportsDirectPlay': false,
+            'SupportsDirectStream': false,
+            'SupportsTranscoding': true,
+            'TranscodingUrl': '/videos/movie/master.m3u8?MediaSourceId=src-own',
+          },
+        ],
+      }),
+      baseUrl: Uri.parse(base),
+      accessToken: token,
+      itemId: 'movie',
+    );
+    expect(own, isNotNull);
+    expect(own!.streamUrl.origin, Uri.parse(base).origin);
+    expect(own.streamUrl.queryParameters['api_key'], token);
+  });
 
   test('strm source without remote path falls back to the static stream', () {
     final resolved = resolveEmbyPlayback(

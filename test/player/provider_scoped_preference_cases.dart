@@ -1,4 +1,5 @@
 import '../helpers/region_access_fixture.dart';
+
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -223,88 +224,82 @@ scopedFixture(FakePlex fake) async {
 }
 
 void main() {
-  test(
-    'saved exact second audio ID agrees across Plex transcode selection display and report',
-    () async {
-      final fake = FakePlex();
-      await fake.start();
-      addTearDown(fake.close);
-      final media = copyVersion(fake);
-      final part = (media['Part'] as List).first as Map;
-      final streams = part['Stream'] as List;
-      final firstAudio = Map<String, dynamic>.from(
-        streams.firstWhere((s) => (s as Map)['streamType'] == 2) as Map,
-      )..['title'] = 'Same stereo';
-      streams.removeWhere((s) => (s as Map)['streamType'] == 2);
-      streams.addAll([
-        firstAudio,
-        {...firstAudio, 'id': 14, 'selected': false},
-      ]);
-      fake.mediaVersions = [media];
-      await savedPreferencePlayer(
-        fake,
-        version: '7',
-        settings: const PlayerSeriesPreference(
-          mediaSourceId: '7',
-          audioStreamIndex: 14,
-          audioLanguage: 'eng',
-          audioTitle: 'Same stereo',
-          subtitleOff: true,
-          maxStreamingBitrate: 8000000,
-        ),
-        check: (player, reports, backend) async {
-          expect(
-            player.error,
-            isNull,
-            reason: '${player.loadFailure}; ${player.disconnectDetail}',
-          );
-          expect(player.resolved!.playMethod, PlayMethod.transcode);
-          expect(fake.selectedStreams['101']?['audioStreamID'], 14);
-          expect(player.audioStreamIndex, 14);
-          for (var n = 0; n < 50 && reports.isEmpty; n++) {
-            await Future<void>.delayed(const Duration(milliseconds: 10));
-          }
-          expect(reports, isNotEmpty);
-          expect(reports.last.audioStreamIndex, 14);
-        },
-      );
-    },
-  );
+  test('saved exact second audio ID agrees across Plex transcode selection display and report', () async {
+    final fake = FakePlex();
+    await fake.start();
+    addTearDown(fake.close);
+    final media = copyVersion(fake);
+    final part = (media['Part'] as List).first as Map;
+    final streams = part['Stream'] as List;
+    final firstAudio = Map<String, dynamic>.from(
+      streams.firstWhere((s) => (s as Map)['streamType'] == 2) as Map,
+    )..['title'] = 'Same stereo';
+    streams.removeWhere((s) => (s as Map)['streamType'] == 2);
+    streams.addAll([
+      firstAudio,
+      {...firstAudio, 'id': 14, 'selected': false},
+    ]);
+    fake.mediaVersions = [media];
+    await savedPreferencePlayer(
+      fake,
+      version: '7',
+      settings: const PlayerSeriesPreference(
+        mediaSourceId: '7',
+        audioStreamIndex: 14,
+        audioLanguage: 'eng',
+        audioTitle: 'Same stereo',
+        subtitleOff: true,
+        maxStreamingBitrate: 8000000,
+      ),
+      check: (player, reports, backend) async {
+        expect(
+          player.error,
+          isNull,
+          reason: '${player.loadFailure}; ${player.disconnectDetail}',
+        );
+        expect(player.resolved!.playMethod, PlayMethod.transcode);
+        expect(fake.selectedStreams['101']?['audioStreamID'], 14);
+        expect(player.audioStreamIndex, 14);
+        for (var n = 0; n < 50 && reports.isEmpty; n++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(reports, isNotEmpty);
+        expect(reports.last.audioStreamIndex, 14);
+      },
+    );
+  });
 
-  test(
-    'saved subtitle off bypasses forbidden default ASS burn before any decision',
-    () async {
-      final fake = FakePlex()
-        ..defaultSubtitleSelected = true
-        ..subtitleCodec = 'ass'
-        ..transcodeDenied = true;
-      await fake.start();
-      addTearDown(fake.close);
-      await savedPreferencePlayer(
-        fake,
-        version: '7',
-        settings: const PlayerSeriesPreference(
-          mediaSourceId: '7',
-          subtitleOff: true,
-        ),
-        check: (player, reports, backend) async {
-          expect(
-            player.error,
-            isNull,
-            reason: '${player.loadFailure}; ${player.disconnectDetail}',
-          );
-          expect(player.resolved!.playMethod, PlayMethod.directPlay);
-          expect(player.subtitleStreamIndex, isNull);
-          expect(backend.subtitleOff, isTrue);
-          expect(
-            fake.requests.where((r) => r.path.endsWith('/decision')),
-            isEmpty,
-          );
-          expect(fake.sessions, isEmpty);
-        },
-      );
-    },
-  );
+  test('saved subtitle off bypasses forbidden default ASS burn before any decision', () async {
+    final fake = FakePlex()
+      ..defaultSubtitleSelected = true
+      ..subtitleCodec = 'ass'
+      ..transcodeDenied = true;
+    await fake.start();
+    addTearDown(fake.close);
+    await savedPreferencePlayer(
+      fake,
+      version: '7',
+      settings: const PlayerSeriesPreference(
+        mediaSourceId: '7',
+        subtitleOff: true,
+      ),
+      check: (player, reports, backend) async {
+        expect(
+          player.error,
+          isNull,
+          reason: '${player.loadFailure}; ${player.disconnectDetail}',
+        );
+        expect(player.resolved!.playMethod, PlayMethod.directPlay);
+        expect(player.subtitleStreamIndex, isNull);
+        expect(backend.subtitleOff, isTrue);
+        expect(
+          fake.requests.where((r) => r.path.endsWith('/decision')),
+          isEmpty,
+        );
+        expect(fake.sessions, isEmpty);
+      },
+    );
+  });
 
   for (final failure in ['unsupported-video', 'missing-part']) {
     test(
@@ -349,109 +344,106 @@ void main() {
       },
     );
   }
-  test(
-    'scoped saved second version and quality preserve Part 2 resume and track intent',
-    () async {
-      final fake = FakePlex()
-        ..defaultSubtitleSelected = true
-        ..subtitleCodec = 'ass';
-      await fake.start();
-      addTearDown(fake.close);
-      final original = Map<String, dynamic>.from(
-        (fake.movie['Media'] as List).first as Map,
-      );
-      final alternate = Map<String, dynamic>.from(
-        jsonDecode(jsonEncode(original)) as Map,
-      )..['id'] = 8;
-      fake.mediaVersions = [original, alternate];
-      final fixture = await scopedFixture(fake);
-      final runtime = fixture.runtime;
-      final history = runtime.history;
-      final auth = runtime.auth;
-      final work = fixture.work;
-      final selected = SourceReference(
-        account: fixture.account,
-        itemId: '42',
-        mediaSourceId: '8',
-      );
-      await history.savePreference(
-        SourcePreference(
-          owner: work,
-          target: selected,
-          libraryId: 'section:1',
-          lineId: 'local',
-          settings: const PlayerSeriesPreference(
-            mediaSourceId: '8',
-            maxStreamingBitrate: 8000000,
-            audioStreamIndex: 22,
-            audioLanguage: 'eng',
-            subtitleOff: true,
-          ),
-        ),
-      );
-      final previous = await history.beginSession(
-        source: selected,
-        work: work,
+  test('scoped saved second version and quality preserve Part 2 resume and track intent', () async {
+    final fake = FakePlex()
+      ..defaultSubtitleSelected = true
+      ..subtitleCodec = 'ass';
+    await fake.start();
+    addTearDown(fake.close);
+    final original = Map<String, dynamic>.from(
+      (fake.movie['Media'] as List).first as Map,
+    );
+    final alternate = Map<String, dynamic>.from(
+      jsonDecode(jsonEncode(original)) as Map,
+    )..['id'] = 8;
+    fake.mediaVersions = [original, alternate];
+    final fixture = await scopedFixture(fake);
+    final runtime = fixture.runtime;
+    final history = runtime.history;
+    final auth = runtime.auth;
+    final work = fixture.work;
+    final selected = SourceReference(
+      account: fixture.account,
+      itemId: '42',
+      mediaSourceId: '8',
+    );
+    await history.savePreference(
+      SourcePreference(
+        owner: work,
+        target: selected,
         libraryId: 'section:1',
-      );
-      final observed = await history.observe(
-        session: previous,
-        eventSequence: 1,
-        positionTicks: 750000000,
-        actuallyPlaying: true,
-        timeline: const WatchTimeline(durationTicks: 1200000000),
-      );
-      history.endSession(previous);
-      final backend = FakeVideoBackend(duration: const Duration(seconds: 60));
-      final player = PlayerController(
-        client: auth.client,
-        itemId: '42',
-        backend: backend,
-        window: PlayerWindow(),
-        runtime: runtime,
-        // The history entry supplies only position; version, bitrate, and tracks
-        // must be recovered by the actual source-scoped preference consumer.
-        startPosition: Duration(microseconds: observed!.positionTicks ~/ 10),
-        openRequest: PlayerOpenRequest(
-          itemId: '42',
-          source: work,
-          libraryId: 'section:1',
+        lineId: 'local',
+        settings: const PlayerSeriesPreference(
+          mediaSourceId: '8',
+          maxStreamingBitrate: 8000000,
+          audioStreamIndex: 22,
+          audioLanguage: 'eng',
+          subtitleOff: true,
         ),
-        settingsStore: MemoryPlayerSettingsStore(),
-        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-      );
-      addTearDown(() async {
-        await player.disposeAsync();
-        player.dispose();
-      });
-      final before = fake.requests.length;
-      await player.start();
-      expect(
-        player.error,
-        isNull,
-        reason:
-            '${player.disconnectDetail}; ${player.loadFailure}; '
-            '${fake.requests.skip(before).map((r) => '${r.path} ${r.query}').toList()}',
-      );
-      expect(player.resolved!.mediaSource.id, '8');
-      expect(player.resolved!.partIndex, 1);
-      expect(player.position, const Duration(seconds: 75));
-      expect(player.resolved!.outputBitrate, 8000000);
-      expect(player.audioStreamIndex, 22);
-      expect(player.subtitleStreamIndex, isNull);
-      expect(backend.subtitleOff, isTrue);
-      final decisions = fake.requests
-          .skip(before)
-          .where((request) => request.path.endsWith('/decision'))
-          .toList();
-      expect(decisions, isNotEmpty);
-      final decision = decisions.last.query;
-      expect(decision['mediaIndex'], '1');
-      expect(decision['partIndex'], '1');
-      expect(decision['offset'], '15.0');
-      expect(fake.selectedStreams['102']?['audioStreamID'], 22);
-      expect(decision['subtitles'], 'none');
-      expect(decision['videoBitrate'], '8000');
-    },
-  );
+      ),
+    );
+    final previous = await history.beginSession(
+      source: selected,
+      work: work,
+      libraryId: 'section:1',
+    );
+    final observed = await history.observe(
+      session: previous,
+      eventSequence: 1,
+      positionTicks: 750000000,
+      actuallyPlaying: true,
+      timeline: const WatchTimeline(durationTicks: 1200000000),
+    );
+    history.endSession(previous);
+    final backend = FakeVideoBackend(duration: const Duration(seconds: 60));
+    final player = PlayerController(
+      client: auth.client,
+      itemId: '42',
+      backend: backend,
+      window: PlayerWindow(),
+      runtime: runtime,
+      // The history entry supplies only position; version, bitrate, and tracks
+      // must be recovered by the actual source-scoped preference consumer.
+      startPosition: Duration(microseconds: observed!.positionTicks ~/ 10),
+      openRequest: PlayerOpenRequest(
+        itemId: '42',
+        source: work,
+        libraryId: 'section:1',
+      ),
+      settingsStore: MemoryPlayerSettingsStore(),
+      snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+    );
+    addTearDown(() async {
+      await player.disposeAsync();
+      player.dispose();
+    });
+    final before = fake.requests.length;
+    await player.start();
+    expect(
+      player.error,
+      isNull,
+      reason:
+          '${player.disconnectDetail}; ${player.loadFailure}; '
+          '${fake.requests.skip(before).map((r) => '${r.path} ${r.query}').toList()}',
+    );
+    expect(player.resolved!.mediaSource.id, '8');
+    expect(player.resolved!.partIndex, 1);
+    expect(player.position, const Duration(seconds: 75));
+    expect(player.resolved!.outputBitrate, 8000000);
+    expect(player.audioStreamIndex, 22);
+    expect(player.subtitleStreamIndex, isNull);
+    expect(backend.subtitleOff, isTrue);
+    final decisions = fake.requests
+        .skip(before)
+        .where((request) => request.path.endsWith('/decision'))
+        .toList();
+    expect(decisions, isNotEmpty);
+    final decision = decisions.last.query;
+    expect(decision['mediaIndex'], '1');
+    expect(decision['partIndex'], '1');
+    expect(decision['offset'], '15.0');
+    expect(fake.selectedStreams['102']?['audioStreamID'], 22);
+    expect(decision['subtitles'], 'none');
+    expect(decision['videoBitrate'], '8000');
+  });
 }

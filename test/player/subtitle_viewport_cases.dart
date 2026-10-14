@@ -1,5 +1,6 @@
 import '../helpers/widget_harness.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -61,7 +62,7 @@ void main() {
     });
 
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoApp(
         home: Center(
           child: SizedBox(
             width: 800,

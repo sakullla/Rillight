@@ -142,8 +142,7 @@ class DanmakuGlyph {
 ///
 /// [widthMeasurer] 保留为测试可替换的宽度布局器;未注入时宽度取 Paragraph。
 class DanmakuGlyphCache {
-  DanmakuGlyphCache({DanmakuTextMeasurer? widthMeasurer})
-    : _widthMeasurer = widthMeasurer;
+  DanmakuGlyphCache({this._widthMeasurer});
 
   final DanmakuTextMeasurer? _widthMeasurer;
   final LinkedHashMap<DanmakuGlyphKey, DanmakuGlyph> _entries =

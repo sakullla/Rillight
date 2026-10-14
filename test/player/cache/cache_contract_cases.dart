@@ -1,5 +1,6 @@
 import '../../helpers/case_shard.dart';
 import '../../helpers/fake_time.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -178,8 +179,7 @@ void main() {
             expect(
               ranges.single.end,
               3 * block,
-              reason:
-                  'Verifying another resource must not discard immutable fingerprints',
+              reason: 'Verifying another resource must not discard immutable fingerprints',
             );
           }
         }
@@ -400,44 +400,41 @@ void main() {
       },
     );
 
-    cases.test(
-      'index deadline retains verified later clusters and retracts missing bytes',
-      () async {
-        final (bytes, positions, cuesPosition) = fixture();
-        Future<Uint8List?> read(int offset, int length) async =>
-            Uint8List.sublistView(bytes, offset, offset + length);
-        final index = (await MatroskaCacheIndex.load(
-          total: bytes.length,
-          read: read,
-        ))!;
-        final metadata = [
-          CachedByteRange(0, positions.first),
-          CachedByteRange(cuesPosition, bytes.length),
-        ];
-        final prior = await index.ranges(
-          [...metadata, CachedByteRange(positions[1], positions[2])],
-          const Duration(seconds: 30),
-          read: read,
-        );
-        expect(prior.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
-          (10, 20),
-        ]);
-        final timedOut = await index.ranges(
-          [CachedByteRange(0, bytes.length)],
-          const Duration(seconds: 30),
-          read: (_, _) async => throw TimeoutException('optional index budget'),
-        );
-        expect(timedOut.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
-          (10, 20),
-        ]);
-        final removed = await index.ranges(
-          [...metadata, CachedByteRange(positions[0], positions[1])],
-          const Duration(seconds: 30),
-          read: (_, _) async => throw TimeoutException('optional index budget'),
-        );
-        expect(removed, isEmpty);
-      },
-    );
+    cases.test('index deadline retains verified later clusters and retracts missing bytes', () async {
+      final (bytes, positions, cuesPosition) = fixture();
+      Future<Uint8List?> read(int offset, int length) async =>
+          Uint8List.sublistView(bytes, offset, offset + length);
+      final index = (await MatroskaCacheIndex.load(
+        total: bytes.length,
+        read: read,
+      ))!;
+      final metadata = [
+        CachedByteRange(0, positions.first),
+        CachedByteRange(cuesPosition, bytes.length),
+      ];
+      final prior = await index.ranges(
+        [...metadata, CachedByteRange(positions[1], positions[2])],
+        const Duration(seconds: 30),
+        read: read,
+      );
+      expect(prior.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
+        (10, 20),
+      ]);
+      final timedOut = await index.ranges(
+        [CachedByteRange(0, bytes.length)],
+        const Duration(seconds: 30),
+        read: (_, _) async => throw TimeoutException('optional index budget'),
+      );
+      expect(timedOut.map((r) => (r.start.inSeconds, r.end.inSeconds)), [
+        (10, 20),
+      ]);
+      final removed = await index.ranges(
+        [...metadata, CachedByteRange(positions[0], positions[1])],
+        const Duration(seconds: 30),
+        read: (_, _) async => throw TimeoutException('optional index budget'),
+      );
+      expect(removed, isEmpty);
+    });
 
     cases.test(
       'evicted metadata clears previously verified cluster coverage',
@@ -683,38 +680,35 @@ void main() {
       maxLength: length,
     );
 
-    cases.test(
-      'timeline availability drops evicted files without counting metadata as hits',
-      () async {
-        final cache = await open(memory: 0);
-        await put(cache, 0, [1, 2, 3, 4]);
-        var ranges = await cache.availableRanges(
+    cases.test('timeline availability drops evicted files without counting metadata as hits', () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, [1, 2, 3, 4]);
+      var ranges = await cache.availableRanges(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+      );
+      expect(ranges!.map((r) => (r.start, r.end)), [(0, 4)]);
+      expect(
+        (await cache.read(
           resource: 'secret-url-not-on-disk',
           generation: 1,
-        );
-        expect(ranges!.map((r) => (r.start, r.end)), [(0, 4)]);
-        expect(
-          (await cache.read(
-            resource: 'secret-url-not-on-disk',
-            generation: 1,
-            offset: 0,
-            countHit: false,
-          ))!.bytes,
-          [1, 2, 3, 4],
-        );
-        expect(cache.diagnostics['diskHitBytes'], 0);
-        final block = root
-            .listSync(recursive: true)
-            .whereType<File>()
-            .singleWhere((f) => f.path.endsWith('.block'));
-        await block.delete();
-        ranges = await cache.availableRanges(
-          resource: 'secret-url-not-on-disk',
-          generation: 1,
-        );
-        expect(ranges, isEmpty);
-      },
-    );
+          offset: 0,
+          countHit: false,
+        ))!.bytes,
+        [1, 2, 3, 4],
+      );
+      expect(cache.diagnostics['diskHitBytes'], 0);
+      final block = root
+          .listSync(recursive: true)
+          .whereType<File>()
+          .singleWhere((f) => f.path.endsWith('.block'));
+      await block.delete();
+      ranges = await cache.availableRanges(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+      );
+      expect(ranges, isEmpty);
+    });
 
     cases.test(
       'published disk blocks and reads retain continuous verified coverage',
@@ -767,34 +761,30 @@ void main() {
       },
     );
 
-    cases.test(
-      'verified ranges reject same-size mutations with restored modification time',
-      () async {
-        final cache = await open(memory: 0);
-        await put(cache, 0, [1, 2, 3, 4]);
-        Future<List<CachedByteRange>?> ranges() => cache.availableRanges(
-          resource: 'secret-url-not-on-disk',
-          generation: 1,
-          verifyChecksum: true,
-        );
-        expect(await ranges(), isNotEmpty);
-        final block = root
-            .listSync(recursive: true)
-            .whereType<File>()
-            .singleWhere((file) => file.path.endsWith('.block'));
-        final original = block.statSync();
-        // Mutate in a later filesystem timestamp tick so only ctime can
-        // reveal a same-size, restored-mtime rewrite.
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        block.writeAsBytesSync([4, 3, 2, 1]);
-        block.setLastModifiedSync(original.modified);
-        expect(block.lengthSync(), original.size);
-        expect(block.lastModifiedSync(), original.modified);
-        expect(block.statSync().changed, isNot(original.changed));
-        expect(await ranges(), isEmpty);
-      },
-      skip: Platform.isWindows,
-    );
+    cases.test('verified ranges reject same-size mutations with restored modification time', () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, [1, 2, 3, 4]);
+      Future<List<CachedByteRange>?> ranges() => cache.availableRanges(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        verifyChecksum: true,
+      );
+      expect(await ranges(), isNotEmpty);
+      final block = root
+          .listSync(recursive: true)
+          .whereType<File>()
+          .singleWhere((file) => file.path.endsWith('.block'));
+      final original = block.statSync();
+      // Mutate in a later filesystem timestamp tick so only ctime can
+      // reveal a same-size, restored-mtime rewrite.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      block.writeAsBytesSync([4, 3, 2, 1]);
+      block.setLastModifiedSync(original.modified);
+      expect(block.lengthSync(), original.size);
+      expect(block.lastModifiedSync(), original.modified);
+      expect(block.statSync().changed, isNot(original.changed));
+      expect(await ranges(), isEmpty);
+    }, skip: Platform.isWindows);
 
     cases.test(
       'CRC32 remains compatible with the standard known vector',
@@ -850,48 +840,45 @@ void main() {
       },
     );
 
-    cases.test(
-      'protected sequential playback reads each disk block once',
-      () async {
-        const blockSize = SessionByteCache.maxBlockBytes;
-        final cache = await open(
-          memory: 0,
-          disk: blockSize * 4,
-          pending: blockSize * 6,
-        );
-        await put(cache, 0, Uint8List(blockSize)..fillRange(0, blockSize, 7));
-        final lease = (await cache.protectRange(
-          resource: 'secret-url-not-on-disk',
-          generation: 1,
-          offset: 0,
-          length: blockSize,
-        ))!;
-        final watch = Stopwatch()..start();
-        for (var offset = 0; offset < blockSize; offset += 64 * 1024) {
-          final result = (await lease.read(offset))!;
-          expect(result.bytes.length, 64 * 1024);
-          expect(result.bytes.first, 7);
-          expect(result.bytes.last, 7);
-          result.bytes[0] = 99; // Response consumers own their slice.
-        }
-        watch.stop();
-        // Work counters, rather than timing assertions, are stable across hosts.
-        // ignore: avoid_print
-        print(
-          'lease stream: ${watch.elapsedMilliseconds} ms; '
-          '${cache.diagnostics["diskBlockReads"]} block reads; '
-          '${cache.diagnostics["diskBlockReadBytes"]} bytes',
-        );
-        expect(cache.diagnostics['diskBlockReads'], 1);
-        expect(cache.diagnostics['diskBlockReadBytes'], blockSize);
-        expect(
-          cache.diagnostics['pendingPeakBytes'],
-          lessThanOrEqualTo(blockSize * 6),
-        );
-        await lease.close();
-        expect(cache.diagnostics['pendingBytes'], 0);
-      },
-    );
+    cases.test('protected sequential playback reads each disk block once', () async {
+      const blockSize = SessionByteCache.maxBlockBytes;
+      final cache = await open(
+        memory: 0,
+        disk: blockSize * 4,
+        pending: blockSize * 6,
+      );
+      await put(cache, 0, Uint8List(blockSize)..fillRange(0, blockSize, 7));
+      final lease = (await cache.protectRange(
+        resource: 'secret-url-not-on-disk',
+        generation: 1,
+        offset: 0,
+        length: blockSize,
+      ))!;
+      final watch = Stopwatch()..start();
+      for (var offset = 0; offset < blockSize; offset += 64 * 1024) {
+        final result = (await lease.read(offset))!;
+        expect(result.bytes.length, 64 * 1024);
+        expect(result.bytes.first, 7);
+        expect(result.bytes.last, 7);
+        result.bytes[0] = 99; // Response consumers own their slice.
+      }
+      watch.stop();
+      // Work counters, rather than timing assertions, are stable across hosts.
+      // ignore: avoid_print
+      print(
+        'lease stream: ${watch.elapsedMilliseconds} ms; '
+        '${cache.diagnostics["diskBlockReads"]} block reads; '
+        '${cache.diagnostics["diskBlockReadBytes"]} bytes',
+      );
+      expect(cache.diagnostics['diskBlockReads'], 1);
+      expect(cache.diagnostics['diskBlockReadBytes'], blockSize);
+      expect(
+        cache.diagnostics['pendingPeakBytes'],
+        lessThanOrEqualTo(blockSize * 6),
+      );
+      await lease.close();
+      expect(cache.diagnostics['pendingBytes'], 0);
+    });
 
     cases.test(
       'lease reuses owned slices and releases scratch on block changes',
@@ -1090,36 +1077,33 @@ void main() {
       },
     );
 
-    cases.test(
-      'range acquisition detects an already missing disk block without pin leaks',
-      () async {
-        final cache = await open(memory: 0);
-        await put(cache, 0, [1, 2, 3, 4]);
-        await put(cache, 4, [5, 6, 7, 8]);
-        final block = root
+    cases.test('range acquisition detects an already missing disk block without pin leaks', () async {
+      final cache = await open(memory: 0);
+      await put(cache, 0, [1, 2, 3, 4]);
+      await put(cache, 4, [5, 6, 7, 8]);
+      final block = root
+          .listSync(recursive: true)
+          .whereType<File>()
+          .firstWhere((f) => f.path.endsWith('.block'));
+      await block.delete();
+      expect(
+        await cache.protectRange(
+          resource: 'secret-url-not-on-disk',
+          generation: 1,
+          offset: 0,
+          length: 8,
+        ),
+        isNull,
+      );
+      expect(cache.diagnostics['protectedRanges'], 0);
+      expect(
+        root
             .listSync(recursive: true)
             .whereType<File>()
-            .firstWhere((f) => f.path.endsWith('.block'));
-        await block.delete();
-        expect(
-          await cache.protectRange(
-            resource: 'secret-url-not-on-disk',
-            generation: 1,
-            offset: 0,
-            length: 8,
-          ),
-          isNull,
-        );
-        expect(cache.diagnostics['protectedRanges'], 0);
-        expect(
-          root
-              .listSync(recursive: true)
-              .whereType<File>()
-              .where((f) => f.path.endsWith('.pin')),
-          isEmpty,
-        );
-      },
-    );
+            .where((f) => f.path.endsWith('.pin')),
+        isEmpty,
+      );
+    });
 
     cases.test(
       'partial memory and disk hits preserve bytes and generation isolation',
@@ -1196,9 +1180,8 @@ void main() {
       if (!Platform.isWindows) return;
       final cache = await open(memory: 0);
       await put(cache, 0, [1, 2, 3, 4]);
-      final lock = File(
-        '${root.path}/quota.lock',
-      ).openSync(mode: FileMode.append);
+      final lock = File('${root.path}/quota.lock')
+          .openSync(mode: FileMode.append);
       lock.lockSync(FileLock.exclusive);
       try {
         await put(cache, 4, [5, 6, 7, 8]);
@@ -1285,27 +1268,24 @@ void main() {
       },
     );
 
-    cases.test(
-      'prefetch preserves alternating foreground blocks without pinning stale reads',
-      () async {
-        final cache = await open(memory: 8);
-        await put(cache, 0, [1, 2, 3, 4]);
-        await put(cache, 4, [5, 6, 7, 8]);
-        await read(cache, 0);
-        await read(cache, 4);
-        for (var offset = 8; offset < 24; offset += 4) {
-          await put(cache, offset, [9, 10, 11, 12]);
-          expect((await read(cache, 1))?.source, CacheReadSource.memory);
-          expect((await read(cache, 5))?.source, CacheReadSource.memory);
-        }
-        // New foreground demand still displaces the older read through LRU.
-        expect((await read(cache, 8))?.source, CacheReadSource.disk);
-        await put(cache, 24, [13, 14, 15, 16]);
-        expect((await read(cache, 9))?.source, CacheReadSource.memory);
+    cases.test('prefetch preserves alternating foreground blocks without pinning stale reads', () async {
+      final cache = await open(memory: 8);
+      await put(cache, 0, [1, 2, 3, 4]);
+      await put(cache, 4, [5, 6, 7, 8]);
+      await read(cache, 0);
+      await read(cache, 4);
+      for (var offset = 8; offset < 24; offset += 4) {
+        await put(cache, offset, [9, 10, 11, 12]);
+        expect((await read(cache, 1))?.source, CacheReadSource.memory);
         expect((await read(cache, 5))?.source, CacheReadSource.memory);
-        expect(cache.diagnostics['memoryPeakBytes'], lessThanOrEqualTo(8));
-      },
-    );
+      }
+      // New foreground demand still displaces the older read through LRU.
+      expect((await read(cache, 8))?.source, CacheReadSource.disk);
+      await put(cache, 24, [13, 14, 15, 16]);
+      expect((await read(cache, 9))?.source, CacheReadSource.memory);
+      expect((await read(cache, 5))?.source, CacheReadSource.memory);
+      expect(cache.diagnostics['memoryPeakBytes'], lessThanOrEqualTo(8));
+    });
 
     cases.test(
       'published usage includes fresh foreign mutations and trailing paths',
@@ -1341,38 +1321,34 @@ void main() {
       },
     );
 
-    cases.test(
-      'damaged ownership records are preserved and do not poison valid sessions',
-      () async {
-        final cache = await open(memory: 0, disk: 4096);
-        for (final entry in {
-          'a': '',
-          'b': '{',
-          'c': '{"format":false}',
-        }.entries) {
-          final directory = Directory('${root.path}/${entry.key * 32}')
-            ..createSync();
-          File('${directory.path}/owner.json').writeAsStringSync(entry.value);
-          File(
-            '${directory.path}/preserve.bin',
-          ).writeAsBytesSync(List.filled(100, 9));
-        }
-        final second = await open(memory: 0, disk: 4096);
-        expect(second.diagnostics['degradation'], isNull);
-        await put(cache, 0, [1, 2, 3]);
-        expect((await read(cache, 0))?.bytes, [1, 2, 3]);
-        expect(cache.diagnostics['diskBytes'], _actualBytes(root));
-        await cache.close();
-        await second.close();
-        expect(cache.diagnostics['cleanup'], 'complete');
-        expect(second.diagnostics['cleanup'], 'complete');
-        expect(root.listSync().whereType<Directory>().length, 3);
-        expect(
-          File('${root.path}/${'b' * 32}/owner.json').readAsStringSync(),
-          '{',
-        );
-      },
-    );
+    cases.test('damaged ownership records are preserved and do not poison valid sessions', () async {
+      final cache = await open(memory: 0, disk: 4096);
+      for (final entry in {
+        'a': '',
+        'b': '{',
+        'c': '{"format":false}',
+      }.entries) {
+        final directory = Directory('${root.path}/${entry.key * 32}')
+          ..createSync();
+        File('${directory.path}/owner.json').writeAsStringSync(entry.value);
+        File('${directory.path}/preserve.bin')
+            .writeAsBytesSync(List.filled(100, 9));
+      }
+      final second = await open(memory: 0, disk: 4096);
+      expect(second.diagnostics['degradation'], isNull);
+      await put(cache, 0, [1, 2, 3]);
+      expect((await read(cache, 0))?.bytes, [1, 2, 3]);
+      expect(cache.diagnostics['diskBytes'], _actualBytes(root));
+      await cache.close();
+      await second.close();
+      expect(cache.diagnostics['cleanup'], 'complete');
+      expect(second.diagnostics['cleanup'], 'complete');
+      expect(root.listSync().whereType<Directory>().length, 3);
+      expect(
+        File('${root.path}/${'b' * 32}/owner.json').readAsStringSync(),
+        '{',
+      );
+    });
   });
 
   group('session_read_ahead_test.dart', () {
@@ -1647,77 +1623,68 @@ void main() {
       );
     }
 
-    cases.test(
-      'consumed reclamation preserves initialization upcoming bytes and active leases',
-      () async {
-        const block = 64 * 1024;
-        final root = await Directory.systemTemp.createTemp(
-          'rillight-consumed-',
-        );
-        final cache = await SessionByteCache.open(
-          root: root,
-          memoryLimitBytes: 0,
-          diskLimitBytes: 8 * block,
-        );
-        CacheRangeLease? lease;
-        try {
-          for (var i = 0; i < 5; i++) {
-            await cache.put(
-              resource: 'movie',
-              generation: 1,
-              offset: i * block,
-              bytes: Uint8List(block)..fillRange(0, block, i),
-            );
-          }
-          lease = await cache.protectRange(
+    cases.test('consumed reclamation preserves initialization upcoming bytes and active leases', () async {
+      const block = 64 * 1024;
+      final root = await Directory.systemTemp.createTemp('rillight-consumed-');
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 0,
+        diskLimitBytes: 8 * block,
+      );
+      CacheRangeLease? lease;
+      try {
+        for (var i = 0; i < 5; i++) {
+          await cache.put(
             resource: 'movie',
             generation: 1,
-            offset: block,
-            length: block,
+            offset: i * block,
+            bytes: Uint8List(block)..fillRange(0, block, i),
           );
-          expect(lease, isNotNull);
-          await cache.discardBefore(
-            resource: 'movie',
-            generation: 1,
-            offset: 3 * block,
-            keepPrefixBytes: block,
-          );
-          for (final i in [0, 1, 3, 4]) {
-            expect(
-              await cache.read(
-                resource: 'movie',
-                generation: 1,
-                offset: i * block,
-              ),
-              isNotNull,
-            );
-          }
+        }
+        lease = await cache.protectRange(
+          resource: 'movie',
+          generation: 1,
+          offset: block,
+          length: block,
+        );
+        expect(lease, isNotNull);
+        await cache.discardBefore(
+          resource: 'movie',
+          generation: 1,
+          offset: 3 * block,
+          keepPrefixBytes: block,
+        );
+        for (final i in [0, 1, 3, 4]) {
           expect(
             await cache.read(
               resource: 'movie',
               generation: 1,
-              offset: 2 * block,
+              offset: i * block,
             ),
-            isNull,
+            isNotNull,
           );
-          await lease!.close();
-          await cache.discardBefore(
-            resource: 'movie',
-            generation: 1,
-            offset: 3 * block,
-            keepPrefixBytes: block,
-          );
-          expect(
-            await cache.read(resource: 'movie', generation: 1, offset: block),
-            isNull,
-          );
-        } finally {
-          await lease?.close();
-          await cache.close();
-          await root.delete(recursive: true);
         }
-      },
-    );
+        expect(
+          await cache.read(resource: 'movie', generation: 1, offset: 2 * block),
+          isNull,
+        );
+        await lease!.close();
+        await cache.discardBefore(
+          resource: 'movie',
+          generation: 1,
+          offset: 3 * block,
+          keepPrefixBytes: block,
+        );
+        expect(
+          await cache.read(resource: 'movie', generation: 1, offset: block),
+          isNull,
+        );
+      } finally {
+        await lease?.close();
+        await cache.close();
+        await root.delete(recursive: true);
+      }
+    });
     cases.test(
       'overlapping demux readers share prefetch without cancelling each other',
       () async {
@@ -2450,86 +2417,77 @@ void main() {
       },
     );
 
-    cases.test(
-      'paused consumer still prefetches bounded disk window and reads it back',
-      () async {
-        final root = await Directory.systemTemp.createTemp(
-          'rillight-read-ahead-',
-        );
-        final cache = await SessionByteCache.open(
-          root: root,
-          memoryLimitBytes: 256 * 1024,
-          diskLimitBytes: 8 * 1024 * 1024,
-        );
-        var downloads = 0;
-        var active = 0;
-        var peak = 0;
-        final ahead = SessionReadAhead(
-          cache: cache,
-          resource: 'media',
-          generation: 1,
-          total: 16 * 1024 * 1024,
-          aheadBytes: 2 * 1024 * 1024,
-          fetch: (start, end) async {
-            var cancelled = false;
-            Stream<List<int>> body() async* {
-              active++;
-              if (active > peak) peak = active;
-              try {
-                for (var p = start; p <= end && !cancelled; p += 64 * 1024) {
-                  final n = (end - p + 1).clamp(0, 64 * 1024);
-                  downloads += n;
-                  yield Uint8List.fromList(
-                    List.generate(n, (i) => (p + i) % 251),
-                  );
-                }
-              } finally {
-                active--;
+    cases.test('paused consumer still prefetches bounded disk window and reads it back', () async {
+      final root = await Directory.systemTemp.createTemp(
+        'rillight-read-ahead-',
+      );
+      final cache = await SessionByteCache.open(
+        root: root,
+        memoryLimitBytes: 256 * 1024,
+        diskLimitBytes: 8 * 1024 * 1024,
+      );
+      var downloads = 0;
+      var active = 0;
+      var peak = 0;
+      final ahead = SessionReadAhead(
+        cache: cache,
+        resource: 'media',
+        generation: 1,
+        total: 16 * 1024 * 1024,
+        aheadBytes: 2 * 1024 * 1024,
+        fetch: (start, end) async {
+          var cancelled = false;
+          Stream<List<int>> body() async* {
+            active++;
+            if (active > peak) peak = active;
+            try {
+              for (var p = start; p <= end && !cancelled; p += 64 * 1024) {
+                final n = (end - p + 1).clamp(0, 64 * 1024);
+                downloads += n;
+                yield Uint8List.fromList(
+                  List.generate(n, (i) => (p + i) % 251),
+                );
               }
+            } finally {
+              active--;
             }
+          }
 
-            return ReadAheadTransfer(body(), () => cancelled = true);
-          },
+          return ReadAheadTransfer(body(), () => cancelled = true);
+        },
+      );
+      final reader = StreamIterator(ahead.read(0, 16 * 1024 * 1024 - 1));
+      try {
+        expect(await reader.moveNext(), true);
+        expect(reader.current.first, 0);
+        // Do not pull the next event: this models mpv stopping after its small
+        // packet buffer fills, while the disk producer continues independently.
+        await until(
+          () =>
+              (ahead.diagnostics['readAheadPublishedBytes'] as int) >=
+              2 * 1024 * 1024,
         );
-        final reader = StreamIterator(ahead.read(0, 16 * 1024 * 1024 - 1));
-        try {
-          expect(await reader.moveNext(), true);
-          expect(reader.current.first, 0);
-          // Do not pull the next event: this models mpv stopping after its small
-          // packet buffer fills, while the disk producer continues independently.
-          await until(
-            () =>
-                (ahead.diagnostics['readAheadPublishedBytes'] as int) >=
-                2 * 1024 * 1024,
-          );
-          expect(downloads, 2 * 1024 * 1024);
-          expect(
-            cache.diagnostics['memoryBytes'],
-            lessThanOrEqualTo(256 * 1024),
-          );
-          expect(cache.diagnostics['diskBytes'], greaterThan(1024 * 1024));
-          await reader.cancel();
-          final before = downloads;
-          final bytes = await ahead
-              .read(0, 31)
-              .expand((chunk) => chunk)
-              .toList();
-          expect(bytes, List.generate(32, (i) => i));
-          expect(downloads, before);
-          expect(cache.diagnostics['diskHitBytes'], greaterThanOrEqualTo(32));
-          expect(peak, 1);
-          await ahead.close();
-          await cache.close();
-          expect(cache.diagnostics['diskBytes'], 0);
-          expect(root.listSync().whereType<Directory>(), isEmpty);
-        } finally {
-          await reader.cancel();
-          await ahead.close();
-          await cache.close();
-          await root.delete(recursive: true);
-        }
-      },
-    );
+        expect(downloads, 2 * 1024 * 1024);
+        expect(cache.diagnostics['memoryBytes'], lessThanOrEqualTo(256 * 1024));
+        expect(cache.diagnostics['diskBytes'], greaterThan(1024 * 1024));
+        await reader.cancel();
+        final before = downloads;
+        final bytes = await ahead.read(0, 31).expand((chunk) => chunk).toList();
+        expect(bytes, List.generate(32, (i) => i));
+        expect(downloads, before);
+        expect(cache.diagnostics['diskHitBytes'], greaterThanOrEqualTo(32));
+        expect(peak, 1);
+        await ahead.close();
+        await cache.close();
+        expect(cache.diagnostics['diskBytes'], 0);
+        expect(root.listSync().whereType<Directory>(), isEmpty);
+      } finally {
+        await reader.cancel();
+        await ahead.close();
+        await cache.close();
+        await root.delete(recursive: true);
+      }
+    });
 
     cases.test(
       'continuous prefetch reuses one request with bounded block publications',

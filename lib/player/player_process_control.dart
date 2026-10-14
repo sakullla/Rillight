@@ -459,9 +459,8 @@ class PosixPlayerProcessControl extends DesktopPlayerProcessControl {
     if (!Platform.isMacOS) return;
     // On macOS 14+, the active host must yield activation to its helper.
     // Calling windowManager.focus() in the helper alone cannot do that.
-    await const MethodChannel(
-      'rillight/window_activation',
-    ).invokeMethod<bool>('activatePlayer', {'pid': pid});
+    await const MethodChannel('rillight/window_activation')
+        .invokeMethod<bool>('activatePlayer', {'pid': pid});
   }
 
   @override

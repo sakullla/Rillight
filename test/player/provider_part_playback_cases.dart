@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_server/playback.dart';
@@ -11,6 +12,7 @@ import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/plex/plex_client.dart';
+
 import '../plex/fake_plex.dart';
 
 const device = ClientDeviceInfo(
@@ -309,51 +311,45 @@ void main() {
       expect((await snapshots.read())!.pendingCleanups, isEmpty);
     },
   );
-  test(
-    'pre-open snapshot is cleanup-only; failure retains it until original lease retry',
-    () async {
-      final snapshots = MemoryPlaybackSessionSnapshotStore();
-      backend.openGate = Completer<void>();
-      fake.failStops = true;
-      final value = player = PlayerController(
-        client: client,
+  test('pre-open snapshot is cleanup-only; failure retains it until original lease retry', () async {
+    final snapshots = MemoryPlaybackSessionSnapshotStore();
+    backend.openGate = Completer<void>();
+    fake.failStops = true;
+    final value = player = PlayerController(
+      client: client,
+      itemId: '42',
+      backend: backend,
+      window: PlayerWindow(),
+      autoResume: false,
+      openRequest: const PlayerOpenRequest(
         itemId: '42',
-        backend: backend,
-        window: PlayerWindow(),
-        autoResume: false,
-        openRequest: const PlayerOpenRequest(
-          itemId: '42',
-          subtitleOff: true,
-          maxStreamingBitrate: 8000000,
-        ),
-        settingsStore: MemoryPlayerSettingsStore(),
-        snapshotStore: snapshots,
-      );
-      final starting = value.start();
-      await until(() => backend.requests.isNotEmpty);
-      final before = await snapshots.read();
-      expect(before!.cleanupOnly, true);
-      expect(
-        fake.requests.where((r) => r.path.endsWith('/:/timeline')),
-        isEmpty,
-      );
-      backend.openGate!.completeError(StateError('synthetic decoder failure'));
-      await starting;
-      expect(value.error, isNotNull);
-      expect((await snapshots.read())!.playSessionId, before.playSessionId);
-      final decisions = fake.requests
-          .where((r) => r.path.endsWith('/decision'))
-          .length;
-      fake.failStops = false;
-      await value.retryResourceCleanup();
-      expect(await snapshots.read(), isNull);
-      expect(
-        fake.requests.where((r) => r.path.endsWith('/decision')).length,
-        decisions,
-      );
-      expect(fake.sessions, isEmpty);
-    },
-  );
+        subtitleOff: true,
+        maxStreamingBitrate: 8000000,
+      ),
+      settingsStore: MemoryPlayerSettingsStore(),
+      snapshotStore: snapshots,
+    );
+    final starting = value.start();
+    await until(() => backend.requests.isNotEmpty);
+    final before = await snapshots.read();
+    expect(before!.cleanupOnly, true);
+    expect(fake.requests.where((r) => r.path.endsWith('/:/timeline')), isEmpty);
+    backend.openGate!.completeError(StateError('synthetic decoder failure'));
+    await starting;
+    expect(value.error, isNotNull);
+    expect((await snapshots.read())!.playSessionId, before.playSessionId);
+    final decisions = fake.requests
+        .where((r) => r.path.endsWith('/decision'))
+        .length;
+    fake.failStops = false;
+    await value.retryResourceCleanup();
+    expect(await snapshots.read(), isNull);
+    expect(
+      fake.requests.where((r) => r.path.endsWith('/decision')).length,
+      decisions,
+    );
+    expect(fake.sessions, isEmpty);
+  });
   test(
     'an IntroStart without a real end never fabricates a skip interval',
     () async {
@@ -377,58 +373,51 @@ void main() {
       expect(value.activeSkipSegment, isNull);
     },
   );
-  test(
-    'different Part language presents actual choices; cancel preserves old playback',
-    () async {
-      final value = await start();
-      fake.secondAudioLanguage = 'jpn';
-      await value.seekTo(const Duration(seconds: 75));
-      expect(backend.openCount, 1);
-      expect(value.switchConfirmation!.audioNeedsChoice, true);
-      expect(value.switchConfirmation!.audioChoices.single.language, 'jpn');
-      await value.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
-      expect(backend.openCount, 1);
-      expect(value.position, const Duration(seconds: 10));
-      await value.seekTo(const Duration(seconds: 75));
-      await value.confirmMediaSourceSwitch(
-        SwitchResumeChoice.currentPosition,
-        audioIndex: 22,
-      );
-      expect(value.error, isNull, reason: value.disconnectDetail);
-      expect(value.resolved!.partIndex, 1);
-      expect(value.audioStreamIndex, 22);
-      expect(value.position, const Duration(seconds: 75));
-    },
-  );
-  test(
-    'revocation preserves failed cleanup evidence and retries without new authority',
-    () async {
-      final value = await start(bitrate: 8000000);
-      final sessionId = value.resolved!.playSessionId;
-      fake.failStops = true;
-      await value.revokeFromHost(reportStopped: false);
-      expect(client.hasSession, false);
-      final retained = await snapshots.read();
-      expect(retained!.playSessionId, sessionId);
-      expect(retained.cleanupOnly, true);
-      final count = fake.requests
-          .where((r) => r.path.endsWith('/decision'))
-          .length;
-      fake.failStops = false;
-      await value.retryResourceCleanup();
-      expect(await snapshots.read(), isNull);
-      expect(fake.sessions, isEmpty);
-      expect(
-        fake.requests.where((r) => r.path.endsWith('/decision')).length,
-        count,
-      );
-      expect(
-        fake.requests.where(
-          (r) =>
-              r.path.endsWith('/:/timeline') && r.query['state'] == 'stopped',
-        ),
-        isEmpty,
-      );
-    },
-  );
+  test('different Part language presents actual choices; cancel preserves old playback', () async {
+    final value = await start();
+    fake.secondAudioLanguage = 'jpn';
+    await value.seekTo(const Duration(seconds: 75));
+    expect(backend.openCount, 1);
+    expect(value.switchConfirmation!.audioNeedsChoice, true);
+    expect(value.switchConfirmation!.audioChoices.single.language, 'jpn');
+    await value.confirmMediaSourceSwitch(SwitchResumeChoice.cancel);
+    expect(backend.openCount, 1);
+    expect(value.position, const Duration(seconds: 10));
+    await value.seekTo(const Duration(seconds: 75));
+    await value.confirmMediaSourceSwitch(
+      SwitchResumeChoice.currentPosition,
+      audioIndex: 22,
+    );
+    expect(value.error, isNull, reason: value.disconnectDetail);
+    expect(value.resolved!.partIndex, 1);
+    expect(value.audioStreamIndex, 22);
+    expect(value.position, const Duration(seconds: 75));
+  });
+  test('revocation preserves failed cleanup evidence and retries without new authority', () async {
+    final value = await start(bitrate: 8000000);
+    final sessionId = value.resolved!.playSessionId;
+    fake.failStops = true;
+    await value.revokeFromHost(reportStopped: false);
+    expect(client.hasSession, false);
+    final retained = await snapshots.read();
+    expect(retained!.playSessionId, sessionId);
+    expect(retained.cleanupOnly, true);
+    final count = fake.requests
+        .where((r) => r.path.endsWith('/decision'))
+        .length;
+    fake.failStops = false;
+    await value.retryResourceCleanup();
+    expect(await snapshots.read(), isNull);
+    expect(fake.sessions, isEmpty);
+    expect(
+      fake.requests.where((r) => r.path.endsWith('/decision')).length,
+      count,
+    );
+    expect(
+      fake.requests.where(
+        (r) => r.path.endsWith('/:/timeline') && r.query['state'] == 'stopped',
+      ),
+      isEmpty,
+    );
+  });
 }

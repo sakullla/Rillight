@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -37,7 +37,7 @@ class _PlaybackOutputPanelState extends State<PlaybackOutputPanel> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final muted = theme.textTheme.bodySmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
@@ -107,7 +107,7 @@ class _PlaybackOutputPanelState extends State<PlaybackOutputPanel> {
     );
   }
 
-  Widget _line(String key, String label, String value, ThemeData theme) {
+  Widget _line(String key, String label, String value, AppUiThemeData theme) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Text(

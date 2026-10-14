@@ -1,10 +1,10 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -51,8 +51,8 @@ void main() {
           routes: [
             GoRoute(
               path: '/item/:id',
-              builder: (_, state) => Scaffold(
-                body: Text(
+              builder: (_, state) => CupertinoPageScaffold(
+                child: Text(
                   'item:${state.pathParameters['id']}:${state.uri.queryParameters['season']}',
                 ),
               ),
@@ -83,12 +83,15 @@ void main() {
                 settingsStore: MemoryPlayerSettingsStore(),
                 snapshotStore: MemoryPlaybackSessionSnapshotStore(),
               ),
-              child: MaterialApp.router(
+              child: CupertinoApp.router(
                 routerConfig: router,
-                theme: AppTheme.dark(),
+                theme: AppUiTheme.dark().cupertino,
                 locale: const Locale('zh'),
                 supportedLocales: AppLocalizations.supportedLocales,
-                localizationsDelegates: AppLocalizations.localizationsDelegates,
+                localizationsDelegates: [
+                  AppLocalizations.delegate,
+                  ...GlobalCupertinoLocalizations.delegates,
+                ],
               ),
             ),
           ),

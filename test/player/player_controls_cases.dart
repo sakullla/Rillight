@@ -1,16 +1,25 @@
+import 'package:rillight/player/buffered_ranges_track.dart';
+
 import '../helpers/widget_harness.dart';
+
 import 'package:rillight/player/playback_persistence.dart';
+
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_source_fixture.dart';
+
 import 'package:rillight/aggregation/query/aggregation_query.dart'
     show SourceReference;
 import 'package:rillight/player/playback_runtime.dart';
+
 import '../helpers/settle.dart';
+
 import 'dart:async';
+
 import 'package:rillight/player/player_host_command.dart';
+
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -304,7 +313,7 @@ void main() {
     expect(find.byType(PlayerPage), findsOneWidget);
     expect(
       tester
-          .widget<IconButton>(find.byKey(PlayerKeys.more))
+          .widget<AppIconButton>(find.byKey(PlayerKeys.more))
           .focusNode!
           .hasFocus,
       isTrue,
@@ -313,7 +322,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(
       tester
-          .widget<IconButton>(find.byKey(PlayerKeys.more))
+          .widget<AppIconButton>(find.byKey(PlayerKeys.more))
           .focusNode!
           .canRequestFocus,
       isFalse,
@@ -483,7 +492,9 @@ void main() {
     expect(find.textContaining('缓存'), findsNothing);
     expect(find.byKey(PlayerKeys.volumePercent), findsOneWidget);
     expect(find.text('100%'), findsOneWidget);
-    final volumeSlider = tester.widget<Slider>(find.byKey(PlayerKeys.volume));
+    final volumeSlider = tester.widget<PlayerSlider>(
+      find.byKey(PlayerKeys.volume),
+    );
     expect(volumeSlider.divisions, isNull);
     expect(volumeSlider.max, PlayerSettings.volumeMax.toDouble());
     expect(backend.openedUrl, isNotNull);
@@ -1018,74 +1029,68 @@ void main() {
     },
   );
 
-  test(
-    'close gives up on a hanging Stopped at its deadline and keeps the snapshot',
-    () async {
-      var closed = false;
-      final controller = await startStandaloneController(
-        onClose: () => closed = true,
-        stoppedTimeout: const Duration(milliseconds: 1),
-      );
-      addTearDown(controller.dispose);
-      expect(snapshots.snapshot, isNotNull);
+  test('close gives up on a hanging Stopped at its deadline and keeps the snapshot', () async {
+    var closed = false;
+    final controller = await startStandaloneController(
+      onClose: () => closed = true,
+      stoppedTimeout: const Duration(milliseconds: 1),
+    );
+    addTearDown(controller.dispose);
+    expect(snapshots.snapshot, isNotNull);
 
-      server.sessionsHold = Completer<void>();
-      addTearDown(() {
-        final hold = server.sessionsHold;
-        if (hold != null && !hold.isCompleted) {
-          hold.complete();
-        }
-      });
-
-      final closing = controller.close();
-      expect(closed, isFalse);
-      await closing;
-      expect(closed, isTrue);
-
-      // 1ms 上限可在 HTTP 到达假服务器前到期;close 仍必须返回。
-      // 在途 Stopped 随后被记录并挂起,超时按失败处理,快照保留。
-      for (var i = 0; i < 50 && stoppedEvents().isEmpty; i++) {
-        await Future<void>.delayed(Duration.zero);
+    server.sessionsHold = Completer<void>();
+    addTearDown(() {
+      final hold = server.sessionsHold;
+      if (hold != null && !hold.isCompleted) {
+        hold.complete();
       }
-      expect(stoppedEvents(), hasLength(1));
-      expect(snapshots.snapshot, isNotNull);
-      expect(controller.progressSyncFailed, isTrue);
-    },
-  );
+    });
 
-  test(
-    'consecutive progress report failures escalate to a persistent dismissible banner',
-    () async {
-      final controller = await startStandaloneController();
-      addTearDown(controller.dispose);
-      server.progressStatus = 500;
-      addTearDown(() => server.progressStatus = null);
+    final closing = controller.close();
+    expect(closed, isFalse);
+    await closing;
+    expect(closed, isTrue);
 
-      // 第一次失败:仍是短暂横幅。
-      await controller.seekTo(const Duration(seconds: 5));
-      expect(controller.progressSyncFailed, isTrue);
-      expect(controller.progressSyncPersistent, isFalse);
+    // 1ms 上限可在 HTTP 到达假服务器前到期;close 仍必须返回。
+    // 在途 Stopped 随后被记录并挂起,超时按失败处理,快照保留。
+    for (var i = 0; i < 50 && stoppedEvents().isEmpty; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(stoppedEvents(), hasLength(1));
+    expect(snapshots.snapshot, isNotNull);
+    expect(controller.progressSyncFailed, isTrue);
+  });
 
-      // 第二次连续失败:升级为持续横幅。
-      await controller.seekTo(const Duration(seconds: 8));
-      expect(controller.progressSyncFailed, isTrue);
-      expect(controller.progressSyncPersistent, isTrue);
+  test('consecutive progress report failures escalate to a persistent dismissible banner', () async {
+    final controller = await startStandaloneController();
+    addTearDown(controller.dispose);
+    server.progressStatus = 500;
+    addTearDown(() => server.progressStatus = null);
 
-      // 持续态可手动关闭,但失败计数保留:再失败仍按持续态显示。
-      controller.dismissProgressSyncBanner();
-      expect(controller.progressSyncFailed, isFalse);
-      expect(controller.progressSyncPersistent, isTrue);
-      await controller.seekTo(const Duration(seconds: 12));
-      expect(controller.progressSyncFailed, isTrue);
-      expect(controller.progressSyncPersistent, isTrue);
+    // 第一次失败:仍是短暂横幅。
+    await controller.seekTo(const Duration(seconds: 5));
+    expect(controller.progressSyncFailed, isTrue);
+    expect(controller.progressSyncPersistent, isFalse);
 
-      // 任一上报成功:横幅与持续态一并复位。
-      server.progressStatus = null;
-      await controller.seekTo(const Duration(seconds: 20));
-      expect(controller.progressSyncFailed, isFalse);
-      expect(controller.progressSyncPersistent, isFalse);
-    },
-  );
+    // 第二次连续失败:升级为持续横幅。
+    await controller.seekTo(const Duration(seconds: 8));
+    expect(controller.progressSyncFailed, isTrue);
+    expect(controller.progressSyncPersistent, isTrue);
+
+    // 持续态可手动关闭,但失败计数保留:再失败仍按持续态显示。
+    controller.dismissProgressSyncBanner();
+    expect(controller.progressSyncFailed, isFalse);
+    expect(controller.progressSyncPersistent, isTrue);
+    await controller.seekTo(const Duration(seconds: 12));
+    expect(controller.progressSyncFailed, isTrue);
+    expect(controller.progressSyncPersistent, isTrue);
+
+    // 任一上报成功:横幅与持续态一并复位。
+    server.progressStatus = null;
+    await controller.seekTo(const Duration(seconds: 20));
+    expect(controller.progressSyncFailed, isFalse);
+    expect(controller.progressSyncPersistent, isFalse);
+  });
 
   test(
     'close waits for an in-flight Stopped started by setMaxBitrate',
@@ -1273,16 +1278,16 @@ void main() {
     'network readout uses an inbound arrow instead of a download tray',
     (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: NetworkSpeedReadout(bytesPerSecond: 2.5 * 1024 * 1024),
+        const CupertinoApp(
+          home: CupertinoPageScaffold(
+            child: NetworkSpeedReadout(bytesPerSecond: 2.5 * 1024 * 1024),
           ),
         ),
       );
-      expect(find.byIcon(Icons.download_rounded), findsNothing);
-      expect(find.byIcon(Icons.download), findsNothing);
-      expect(find.byIcon(Icons.wifi), findsNothing);
-      expect(find.byIcon(Icons.speed), findsNothing);
+      expect(find.byIcon(CupertinoIcons.arrow_down_to_line), findsNothing);
+      expect(find.byIcon(CupertinoIcons.arrow_down_to_line), findsNothing);
+      expect(find.byIcon(CupertinoIcons.wifi), findsNothing);
+      expect(find.byIcon(CupertinoIcons.speedometer), findsNothing);
       expect(find.text('2.5 MB/s'), findsOneWidget);
       expect(
         find.byWidgetPredicate(
@@ -1395,11 +1400,16 @@ void main() {
         }),
       );
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoApp(
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          home: Scaffold(body: PlaybackSettingsMenu(controller: controller)),
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          home: CupertinoPageScaffold(
+            child: PlaybackSettingsMenu(controller: controller),
+          ),
         ),
       );
       await tester.tap(find.byKey(PlayerKeys.more));
@@ -1539,12 +1549,15 @@ void main() {
         }),
       );
       await tester.pumpWidget(
-        MaterialApp(
+        CupertinoApp(
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          home: Scaffold(
-            body: PhonePlayerControls(
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          home: CupertinoPageScaffold(
+            child: PhonePlayerControls(
               controller: controller,
               danmaku: null,
               interaction: interaction,
@@ -1564,11 +1577,11 @@ void main() {
       );
       await tester.ensureVisible(section);
       expect(
-        tester.widget<ListTile>(section).subtitle,
+        tester.widget<AppListTile>(section).subtitle,
         isA<Text>().having((text) => text.data, 'data', contains('SDR 映射')),
       );
       expect(
-        tester.widget<ListTile>(section).subtitle,
+        tester.widget<AppListTile>(section).subtitle,
         isA<Text>().having((text) => text.data, 'data', isNot(contains('杜比'))),
       );
       await tester.tap(section);

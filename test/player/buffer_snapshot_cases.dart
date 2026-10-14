@@ -1,9 +1,11 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/player/buffer_snapshot.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
@@ -136,6 +138,96 @@ void main() {
     expect(value(7, reason: 'unmapped').isKnown, isFalse);
   });
 
+  for (final direction in TextDirection.values) {
+    testWidgets('seek supports keyboard and accessible steps in $direction', (
+      tester,
+    ) async {
+      var value = .5;
+      var starts = 0;
+      var ends = 0;
+      await tester.pumpWidget(
+        CupertinoApp(
+          home: Directionality(
+            textDirection: direction,
+            child: Center(
+              child: SizedBox(
+                width: 320,
+                child: StatefulBuilder(
+                  builder: (context, update) => PlayerSlider(
+                    value: value,
+                    divisions: 10,
+                    onChangeStart: (_) => starts++,
+                    onChanged: (next) => update(() => value = next),
+                    onChangeEnd: (_) => ends++,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final slider = find.byType(PlayerSlider);
+      await tester.tap(slider);
+      await tester.pump();
+      expect(starts, 1);
+      expect(ends, 1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(value, closeTo(direction == TextDirection.ltr ? .6 : .4, .001));
+      final semantics = tester.widget<Semantics>(
+        find
+            .descendant(
+              of: slider,
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Semantics && widget.properties.slider == true,
+              ),
+            )
+            .first,
+      );
+      semantics.properties.onIncrease!();
+      await tester.pump();
+      expect(value, closeTo(direction == TextDirection.ltr ? .7 : .5, .001));
+      expect(starts, 3);
+      expect(ends, 3);
+    });
+  }
+
+  testWidgets('cancelled pointer does not seek or leave input occupied', (
+    tester,
+  ) async {
+    var starts = 0;
+    var ends = 0;
+    var changes = 0;
+    await tester.pumpWidget(
+      CupertinoApp(
+        home: Center(
+          child: SizedBox(
+            width: 320,
+            child: PlayerSlider(
+              value: .5,
+              onChangeStart: (_) => starts++,
+              onChanged: (_) => changes++,
+              onChangeEnd: (_) => ends++,
+            ),
+          ),
+        ),
+      ),
+    );
+    final slider = find.byType(PlayerSlider);
+    final gesture = await tester.startGesture(tester.getCenter(slider));
+    await gesture.cancel();
+    await tester.pump();
+    expect(starts, 0);
+    expect(changes, 0);
+    expect(ends, 0);
+    await tester.drag(slider, const Offset(50, 0));
+    await tester.pump();
+    expect(starts, 1);
+    expect(changes, greaterThan(0));
+    expect(ends, 1);
+  });
+
   testWidgets('buffered track leaves slider input available', (tester) async {
     var selected = 0.0;
     final snapshot = BufferSnapshot(
@@ -150,15 +242,15 @@ void main() {
       ],
     );
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Center(
+      CupertinoApp(
+        home: CupertinoPageScaffold(
+          child: Center(
             child: SizedBox(
               width: 300,
               child: BufferedRangesTrack(
                 snapshot: snapshot,
                 duration: const Duration(seconds: 10),
-                child: Slider(
+                child: PlayerSlider(
                   value: selected,
                   onChanged: (value) => selected = value,
                 ),
@@ -169,11 +261,11 @@ void main() {
       ),
     );
 
-    await tester.tapAt(tester.getCenter(find.byType(Slider)));
+    await tester.tapAt(tester.getCenter(find.byType(PlayerSlider)));
     expect(selected, closeTo(0.5, 0.1));
   });
 
-  for (final background in [Colors.black, Colors.white]) {
+  for (final background in [CupertinoColors.black, CupertinoColors.white]) {
     for (final direction in TextDirection.values) {
       testWidgets('seek pixels stay aligned on $background, $direction', (
         tester,
@@ -183,36 +275,29 @@ void main() {
         var snapshot = _pixelSnapshot();
         Future<void> showTrack() async {
           await tester.pumpWidget(
-            MaterialApp(
+            CupertinoApp(
               home: Center(
                 child: Directionality(
                   textDirection: direction,
                   child: RepaintBoundary(
                     key: boundaryKey,
-                    child: Material(
-                      color: background,
+                    child: Container(
+                      decoration: BoxDecoration(color: background),
                       child: SizedBox(
                         width: 320,
                         height: 80,
                         child: Center(
-                          child: SliderTheme(
-                            data: const SliderThemeData(
-                              thumbShape: RoundSliderThumbShape(
-                                enabledThumbRadius: 8,
+                          child: BufferedRangesTrack(
+                            snapshot: snapshot,
+                            duration: const Duration(seconds: 100),
+                            child: PlayerSlider(
+                              // Non-default padding catches fixed-inset paint.
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 40,
+                                vertical: 10,
                               ),
-                            ),
-                            child: BufferedRangesTrack(
-                              snapshot: snapshot,
-                              duration: const Duration(seconds: 100),
-                              child: Slider(
-                                // Non-default padding catches fixed-inset paint.
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 40,
-                                  vertical: 10,
-                                ),
-                                value: value,
-                                onChanged: (next) => value = next,
-                              ),
+                              value: value,
+                              onChanged: (next) => value = next,
                             ),
                           ),
                         ),
@@ -235,7 +320,10 @@ void main() {
                             ? 1 - fraction
                             : fraction))
                 .round();
-        expect(pixels.at(x(0.1), 40), Colors.white); // Played beats cache.
+        expect(
+          pixels.at(x(0.1), 40),
+          CupertinoColors.white,
+        ); // Played beats cache.
         expect(pixels.at(x(0.4), 40), const Color(0xff697783));
         expect(pixels.at(x(0.6), 40), const Color(0xff363c44)); // Real gap.
         expect(pixels.at(x(0.8), 40), const Color(0xff697783));
@@ -246,11 +334,11 @@ void main() {
         expect(pixels.at(x(0.91), 40), const Color(0xff363c44));
         expect(pixels.at(x(0.4), 37), const Color(0xff111820));
         // The thumb extends beyond the track, and cache cannot cover its center.
-        expect(pixels.at(x(0.25), 40), Colors.white);
-        expect(pixels.at(x(0.25), 35), Colors.white);
+        expect(pixels.at(x(0.25), 40), CupertinoColors.white);
+        expect(pixels.at(x(0.25), 35), CupertinoColors.white);
         expect(pixels.at(20, 40), background);
 
-        await tester.drag(find.byType(Slider), const Offset(40, 0));
+        await tester.drag(find.byType(PlayerSlider), const Offset(40, 0));
         expect(
           value,
           direction == TextDirection.ltr ? greaterThan(0.5) : lessThan(0.5),
@@ -262,7 +350,7 @@ void main() {
         final unknown = (await tester.runAsync(() => _capture(boundaryKey)))!;
         expect(unknown.at(x(0.4), 40), const Color(0xff363c44));
         expect(unknown.at(x(0.8), 40), const Color(0xff363c44));
-        expect(unknown.at(x(0.1), 40), Colors.white);
+        expect(unknown.at(x(0.1), 40), CupertinoColors.white);
       });
     }
   }
@@ -272,7 +360,7 @@ void main() {
   ) async {
     final boundaryKey = GlobalKey();
     await tester.pumpWidget(
-      MaterialApp(
+      CupertinoApp(
         home: Center(
           child: RepaintBoundary(
             key: boundaryKey,
@@ -289,7 +377,7 @@ void main() {
       ),
     );
     final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
-    expect(pixels.at(30, 3), Colors.white);
+    expect(pixels.at(30, 3), CupertinoColors.white);
     expect(pixels.at(120, 3), const Color(0xff697783));
     expect(pixels.at(180, 3), const Color(0xff363c44));
     expect(pixels.at(240, 3), const Color(0xff697783));
@@ -313,7 +401,7 @@ void main() {
       (tester) async {
         final boundaryKey = GlobalKey();
         await tester.pumpWidget(
-          MaterialApp(
+          CupertinoApp(
             home: Center(
               child: RepaintBoundary(
                 key: boundaryKey,
@@ -347,7 +435,7 @@ void main() {
           ),
         );
         final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
-        expect(pixels.at(30, 3), Colors.white);
+        expect(pixels.at(30, 3), CupertinoColors.white);
         expect(pixels.at(90, 3), const Color(0xff363c44));
         expect(pixels.at(120, 3), const Color(0xff697783));
         expect(pixels.at(240, 3), const Color(0xff363c44));
@@ -361,41 +449,37 @@ void main() {
     final boundaryKey = GlobalKey();
     for (final seconds in [4, 91]) {
       await tester.pumpWidget(
-        MaterialApp(
-          home: Material(
+        CupertinoApp(
+          home: Container(
+            decoration: BoxDecoration(color: const Color(0x00000000)),
             child: Center(
               child: RepaintBoundary(
                 key: boundaryKey,
                 child: SizedBox(
                   width: 740,
                   height: 40,
-                  child: SliderTheme(
-                    data: const SliderThemeData(
-                      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                  child: BufferedRangesTrack(
+                    snapshot: BufferSnapshot(
+                      sessionId: 1,
+                      resourceId: 'media',
+                      representationVersion: 'v1',
+                      trackVersion: 0,
+                      sequence: seconds,
+                      ranges: const [],
+                      unknownReason: 'containerTrackOrTimingUnknown',
+                      byteCoverage: BufferedByteCoverage(
+                        totalBytes: 100,
+                        ranges: [
+                          const BufferedByteRange(3, 11),
+                          if (seconds == 91) const BufferedByteRange(15, 32),
+                        ],
+                      ),
                     ),
-                    child: BufferedRangesTrack(
-                      snapshot: BufferSnapshot(
-                        sessionId: 1,
-                        resourceId: 'media',
-                        representationVersion: 'v1',
-                        trackVersion: 0,
-                        sequence: seconds,
-                        ranges: const [],
-                        unknownReason: 'containerTrackOrTimingUnknown',
-                        byteCoverage: BufferedByteCoverage(
-                          totalBytes: 100,
-                          ranges: [
-                            const BufferedByteRange(3, 11),
-                            if (seconds == 91) const BufferedByteRange(15, 32),
-                          ],
-                        ),
-                      ),
-                      duration: const Duration(minutes: 23, seconds: 40),
-                      child: Slider(
-                        padding: const EdgeInsets.symmetric(horizontal: 15),
-                        value: seconds / 1420,
-                        onChanged: (_) {},
-                      ),
+                    duration: const Duration(minutes: 23, seconds: 40),
+                    child: PlayerSlider(
+                      padding: const EdgeInsets.symmetric(horizontal: 15),
+                      value: seconds / 1420,
+                      onChanged: (_) {},
                     ),
                   ),
                 ),
@@ -407,8 +491,8 @@ void main() {
       await settle(tester);
       final pixels = (await tester.runAsync(() => _capture(boundaryKey)))!;
       final thumbX = (15 + seconds / 2).round();
-      expect(pixels.at(thumbX, 16), Colors.white);
-      expect(pixels.at(thumbX, 20), Colors.white);
+      expect(pixels.at(thumbX, 16), CupertinoColors.white);
+      expect(pixels.at(thumbX, 20), CupertinoColors.white);
       expect(
         pixels.at(thumbX + 10, 20),
         seconds == 91 ? const Color(0xff697783) : const Color(0xff363c44),
@@ -418,7 +502,7 @@ void main() {
         pixels.at(150, 20),
         seconds == 91 ? const Color(0xff697783) : const Color(0xff363c44),
       );
-      if (seconds == 91) expect(pixels.at(30, 20), Colors.white);
+      if (seconds == 91) expect(pixels.at(30, 20), CupertinoColors.white);
     }
   });
 }

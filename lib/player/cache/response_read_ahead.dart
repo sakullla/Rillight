@@ -17,14 +17,12 @@ class ResponseReadAhead {
     required int length,
     required int aheadBytes,
     required Stream<List<int>> source,
-    required void Function() cancelSource,
-    void Function()? releaseWorkspace,
+    required this._cancelSource,
+    this._releaseWorkspace,
   }) : _cache = cache,
        _resource = resource,
        _length = length,
-       _source = StreamIterator(source),
-       _cancelSource = cancelSource,
-       _releaseWorkspace = releaseWorkspace {
+       _source = StreamIterator(source) {
     _ahead = SessionReadAhead(
       cache: cache,
       resource: resource,

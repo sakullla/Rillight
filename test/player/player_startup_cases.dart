@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -51,38 +52,34 @@ const item = MediaItem(
 const user = MediaUser(id: 'user', name: 'User', resumeRewindSeconds: 5);
 
 void main() {
-  test(
-    'preparation overlaps business requests and serializes only user preferences',
-    () async {
-      final client = _Client();
-      final preparation = PlayerStartupPreparation(client, 'item');
-      expect(client.calls, ['item:item', 'user']);
-      client.item.complete(item);
-      client.user.complete(user);
-      final data = await preparation.payload;
-      expect(
-        decodeMediaItem(
-          Map<String, dynamic>.from(data['item'] as Map),
-        ).userData.playbackPosition,
-        const Duration(microseconds: 12),
-      );
-      expect(
-        (data['user'] as Map).keys,
-        unorderedEquals([
-          'id',
-          'name',
-          'enableNextEpisodeAutoPlay',
-          'resumeRewindSeconds',
-        ]),
-      );
-      expect(
-        decodeMediaUser(
-          Map<String, dynamic>.from(data['user'] as Map),
-        ).resumeRewindSeconds,
-        5,
-      );
-    },
-  );
+  test('preparation overlaps business requests and serializes only user preferences', () async {
+    final client = _Client();
+    final preparation = PlayerStartupPreparation(client, 'item');
+    expect(client.calls, ['item:item', 'user']);
+    client.item.complete(item);
+    client.user.complete(user);
+    final data = await preparation.payload;
+    expect(
+      decodeMediaItem(Map<String, dynamic>.from(data['item'] as Map))
+          .userData
+          .playbackPosition,
+      const Duration(microseconds: 12),
+    );
+    expect(
+      (data['user'] as Map).keys,
+      unorderedEquals([
+        'id',
+        'name',
+        'enableNextEpisodeAutoPlay',
+        'resumeRewindSeconds',
+      ]),
+    );
+    expect(
+      decodeMediaUser(Map<String, dynamic>.from(data['user'] as Map))
+          .resumeRewindSeconds,
+      5,
+    );
+  });
 
   test(
     'cancelled preparation and changed authentication discard late metadata',
