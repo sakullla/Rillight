@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -24,15 +24,14 @@ class SearchAction extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final l10n = AppLocalizations.of(context);
-        return IconButton(
+        return AppIconButton(
           focusNode: focusNode,
           tooltip: l10n.search,
           onPressed: () => openSearch(context),
           padding: EdgeInsets.zero,
           constraints: kTitleBarIconConstraints,
-          visualDensity: VisualDensity.compact,
-          iconSize: 18,
-          icon: const Icon(Icons.search),
+          size: 18,
+          icon: const Icon(CupertinoIcons.search),
         );
       },
     );

@@ -16,12 +16,17 @@ class AppDialog extends StatelessWidget {
     this.actions = const [],
     this.maxWidth = 520,
     this.padding = const EdgeInsets.all(24),
+    this.insetPadding = const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 24,
+    ),
   });
   final Widget? title;
   final Widget content;
   final List<Widget> actions;
   final double maxWidth;
   final EdgeInsetsGeometry padding;
+  final EdgeInsets insetPadding;
 
   @override
   Widget build(BuildContext context) {
@@ -29,10 +34,10 @@ class AppDialog extends StatelessWidget {
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          16,
-          24,
-          16,
-          24 + MediaQuery.viewInsetsOf(context).bottom,
+          insetPadding.left,
+          insetPadding.top,
+          insetPadding.right,
+          insetPadding.bottom + MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: Center(
           child: ConstrainedBox(
@@ -87,6 +92,44 @@ class AppDialog extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A bounded modal viewport for pages that own their scrolling and footer.
+class AppModalFrame extends StatelessWidget {
+  const AppModalFrame({
+    super.key,
+    required this.child,
+    this.backgroundColor,
+    this.insetPadding = const EdgeInsets.symmetric(
+      horizontal: 24,
+      vertical: 24,
+    ),
+    this.clipBehavior = Clip.antiAlias,
+  });
+  final Widget child;
+  final Color? backgroundColor;
+  final EdgeInsets insetPadding;
+  final Clip clipBehavior;
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      padding:
+          insetPadding +
+          EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: Center(
+        child: Container(
+          clipBehavior: clipBehavior,
+          decoration: BoxDecoration(
+            color:
+                backgroundColor ??
+                AppUiTheme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(AppRadii.xl),
+          ),
+          child: child,
+        ),
+      ),
+    ),
+  );
 }
 
 /// Captures local artwork/TV theme across the navigator boundary. Escape/back
@@ -152,7 +195,19 @@ Future<T?> showAppModalSheet<T>({
             padding: EdgeInsets.only(
               bottom: MediaQuery.viewInsetsOf(context).bottom,
             ),
-            child: Builder(builder: builder),
+            child: MediaQuery.removeViewInsets(
+              context: context,
+              removeBottom: true,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerLow,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                ),
+                child: Builder(builder: builder),
+              ),
+            ),
           ),
         ),
       ),
@@ -162,12 +217,14 @@ Future<T?> showAppModalSheet<T>({
 
 class AppMenuEntry<T> {
   const AppMenuEntry({
+    this.key,
     required this.value,
     required this.child,
     this.enabled = true,
     this.destructive = false,
   });
   final T value;
+  final Key? key;
   final Widget child;
   final bool enabled, destructive;
 }
@@ -177,17 +234,19 @@ Future<T?> showAppMenu<T>({
   required List<AppMenuEntry<T>> items,
   T? selected,
   String? title,
+  RelativeRect? position,
+  BoxConstraints? constraints,
 }) => showAppDialog<T>(
   context: context,
-  builder: (context) => AppDialog(
-    maxWidth: 400,
-    title: title == null ? null : Text(title),
-    content: Column(
+  builder: (context) {
+    final content = Column(
+      key: const Key('app-menu-content'),
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final entry in items)
           AppButton(
+            key: entry.key,
             autofocus:
                 entry.enabled &&
                 (entry.value == selected ||
@@ -206,16 +265,84 @@ Future<T?> showAppMenu<T>({
               ],
             ),
           ),
+        if (position != null)
+          AppButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
       ],
-    ),
-    actions: [
-      AppButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
-      ),
-    ],
-  ),
+    );
+    if (position != null) {
+      return Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.arrowDown): NextFocusIntent(),
+          SingleActivator(LogicalKeyboardKey.arrowUp): PreviousFocusIntent(),
+        },
+        child: CustomSingleChildLayout(
+          delegate: _AppMenuLayout(position, constraints),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(
+                color: AppUiTheme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(6),
+              child: content,
+            ),
+          ),
+        ),
+      );
+    }
+    return AppDialog(
+      maxWidth: constraints?.maxWidth ?? 400,
+      title: title == null ? null : Text(title),
+      content: content,
+      actions: [
+        AppButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  },
 );
+
+class _AppMenuLayout extends SingleChildLayoutDelegate {
+  _AppMenuLayout(this.position, this.constraints);
+  final RelativeRect position;
+  final BoxConstraints? constraints;
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints parent) {
+    final width = (constraints?.maxWidth ?? 360).clamp(
+      0.0,
+      (parent.maxWidth - 16).clamp(0.0, double.infinity),
+    );
+    return BoxConstraints(
+      minWidth: width,
+      maxWidth: width,
+      maxHeight: (parent.maxHeight - 16).clamp(0, double.infinity),
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) => Offset(
+    position.left.clamp(
+      8.0,
+      (size.width - childSize.width - 8).clamp(8.0, double.infinity),
+    ),
+    position.top.clamp(
+      8.0,
+      (size.height - childSize.height - 8).clamp(8.0, double.infinity),
+    ),
+  );
+  @override
+  bool shouldRelayout(_AppMenuLayout oldDelegate) =>
+      oldDelegate.position != position ||
+      oldDelegate.constraints != constraints;
+}
 
 class AppMenuButton<T> extends StatelessWidget {
   const AppMenuButton({
@@ -239,11 +366,14 @@ class AppMenuButton<T> extends StatelessWidget {
       onPressed: onSelected == null
           ? null
           : () async {
+              final box = context.findRenderObject()! as RenderBox;
+              final origin = box.localToGlobal(Offset(0, box.size.height));
               final result = await showAppMenu<T>(
                 context: context,
                 items: items,
                 selected: selected,
                 title: title,
+                position: RelativeRect.fromLTRB(origin.dx, origin.dy, 0, 0),
               );
               if (result != null) onSelected?.call(result);
             },
@@ -294,36 +424,56 @@ class AppDropdown<T> extends StatelessWidget {
 
 /// App-local transient feedback. Disposal cancels the timer and removes the
 /// entry, including when the navigation tree disappears before the timeout.
-void showAppNotice(
+VoidCallback showAppNotice(
   BuildContext context,
   String message, {
+  Key? key,
   String? actionLabel,
   VoidCallback? onAction,
   Duration duration = const Duration(seconds: 4),
 }) {
   final overlay = Overlay.of(context, rootOverlay: true);
   final theme = AppUiTheme.of(context);
+  final noticeKey = GlobalKey<_NoticeState>();
+  var removed = false;
   late OverlayEntry entry;
   entry = OverlayEntry(
     builder: (context) => _Notice(
+      key: noticeKey,
       theme: theme,
       message: message,
+      messageKey: key,
       actionLabel: actionLabel,
       onAction: onAction,
       duration: duration,
       dismiss: () {
+        if (removed) return;
+        removed = true;
         entry.remove();
         entry.dispose();
       },
     ),
   );
   overlay.insert(entry);
+  return () {
+    if (removed) return;
+    final notice = noticeKey.currentState;
+    if (notice != null) {
+      notice._dismiss();
+    } else {
+      removed = true;
+      entry.remove();
+      entry.dispose();
+    }
+  };
 }
 
 class _Notice extends StatefulWidget {
   const _Notice({
+    super.key,
     required this.theme,
     required this.message,
+    this.messageKey,
     this.actionLabel,
     this.onAction,
     required this.duration,
@@ -331,6 +481,7 @@ class _Notice extends StatefulWidget {
   });
   final AppUiThemeData theme;
   final String message;
+  final Key? messageKey;
   final String? actionLabel;
   final VoidCallback? onAction;
   final Duration duration;
@@ -363,6 +514,7 @@ class _NoticeState extends State<_Notice> {
 
   @override
   Widget build(BuildContext context) => Positioned(
+    key: const Key('app-notice'),
     left: 16,
     right: 16,
     bottom: 16 + MediaQuery.paddingOf(context).bottom,
@@ -384,7 +536,7 @@ class _NoticeState extends State<_Notice> {
                   Expanded(
                     child: Semantics(
                       liveRegion: true,
-                      child: Text(widget.message),
+                      child: Text(widget.message, key: widget.messageKey),
                     ),
                   ),
                   if (widget.actionLabel != null)

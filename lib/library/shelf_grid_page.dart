@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +9,6 @@ import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/desktop_scroll.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
@@ -805,9 +804,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
               onNotification: (notification) {
                 if (notification.depth == 0 &&
                     notification.metrics.axis == Axis.vertical) {
-                  HomeScrollNotification(
-                    notification.metrics.pixels > 40,
-                  ).dispatch(context);
+                  HomeScrollNotification(notification.metrics.pixels > 40)
+                      .dispatch(context);
                 }
                 return false;
               },
@@ -885,9 +883,8 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                                   onRemoveFromResume: widget.source == 'resume'
                                       ? (entry) {
                                           unawaited(
-                                            CatalogScope.of(
-                                              context,
-                                            ).hideFromResume(entry),
+                                            CatalogScope.of(context)
+                                                .hideFromResume(entry),
                                           );
                                           setState(() {
                                             _items = [
@@ -908,7 +905,7 @@ class _ShelfGridPageState extends State<ShelfGridPage> {
                       const SliverToBoxAdapter(
                         child: Padding(
                           padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                          child: Center(child: CircularProgressIndicator()),
+                          child: Center(child: CupertinoActivityIndicator()),
                         ),
                       ),
                   ],
@@ -954,14 +951,15 @@ class CatalogInlineFailure extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline),
+          const Icon(CupertinoIcons.info_circle),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(message, maxLines: 3, overflow: TextOverflow.ellipsis),
           ),
-          TextButton(
+          AppButton(
             key: retryKey,
             onPressed: onRetry,
+            variant: AppButtonVariant.plain,
             child: Text(l10n.retry),
           ),
         ],
@@ -1054,8 +1052,8 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
+    final textTheme = AppUiTheme.of(context).textTheme;
     final heading =
         titleOverride ??
         (showTitle && title.isNotEmpty
@@ -1099,7 +1097,7 @@ class _Header extends StatelessWidget {
                 ),
               ),
               if (onRefresh != null)
-                IconButton(
+                AppIconButton(
                   key: gridRefreshKey,
                   tooltip: l10n.refresh,
                   color: colorScheme.onSurfaceVariant,
@@ -1108,9 +1106,9 @@ class _Header extends StatelessWidget {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CupertinoActivityIndicator(),
                         )
-                      : const Icon(Icons.refresh_rounded),
+                      : const Icon(CupertinoIcons.arrow_clockwise),
                 ),
             ],
           ),
@@ -1130,17 +1128,16 @@ class _Header extends StatelessWidget {
                 ),
               if (serverOrder) Text(l10n.providerServerOrder),
               if (showSort) ...[
-                PopupMenuButton<CatalogSort>(
+                AppMenuButton<CatalogSort>(
                   key: CatalogKeys.sortBy,
                   tooltip: l10n.sortBy,
-                  initialValue: sort,
+                  selected: sort,
                   onSelected: onSort,
-                  itemBuilder: (context) => [
+                  items: [
                     for (final option in options)
-                      CheckedPopupMenuItem<CatalogSort>(
+                      AppMenuEntry<CatalogSort>(
                         key: CatalogKeys.sortOption(option.sortBy),
                         value: option,
-                        checked: option == sort,
                         child: Text(option.label(l10n)),
                       ),
                   ],
@@ -1154,7 +1151,7 @@ class _Header extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            Icons.sort,
+                            CupertinoIcons.sort_down,
                             size: 18,
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -1162,7 +1159,7 @@ class _Header extends StatelessWidget {
                           Text(sort.label(l10n), style: textTheme.labelLarge),
                           const SizedBox(width: AppSpacing.xxs),
                           Icon(
-                            Icons.arrow_drop_down,
+                            CupertinoIcons.chevron_down,
                             color: colorScheme.onSurfaceVariant,
                           ),
                         ],
@@ -1186,9 +1183,11 @@ class _HeaderChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(AppRadii.md),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppUiTheme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
       clipBehavior: Clip.antiAlias,
       child: child,
     );
@@ -1214,8 +1213,8 @@ class _FilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
+    final textTheme = AppUiTheme.of(context).textTheme;
     final chips = <Widget>[
       if (typeFilterable && filters.type != CatalogTypeFilter.all)
         _activeChip(
@@ -1250,9 +1249,9 @@ class _FilterBar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _HeaderChip(
-          child: Tooltip(
+          child: AppTooltip(
             message: l10n.libraryFilter,
-            child: InkWell(
+            child: AppSurfaceAction(
               key: gridFilterMenuKey,
               borderRadius: BorderRadius.circular(AppRadii.md),
               onTap: () => _openPanel(context),
@@ -1265,7 +1264,7 @@ class _FilterBar extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.filter_list_rounded,
+                      CupertinoIcons.line_horizontal_3_decrease,
                       size: 18,
                       color: filters.isNotEmpty
                           ? colorScheme.primary
@@ -1281,20 +1280,22 @@ class _FilterBar extends StatelessWidget {
         ),
         ...chips,
         if (filters.isNotEmpty)
-          IconButton(
+          AppIconButton(
             key: gridFilterClearKey,
             tooltip: l10n.libraryFilterClear,
-            visualDensity: VisualDensity.compact,
             onPressed: () => onChanged(const ShelfFilters()),
-            icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+            icon: const Icon(
+              CupertinoIcons.line_horizontal_3_decrease,
+              size: 18,
+            ),
           ),
       ],
     );
   }
 
-  Future<void> _openPanel(BuildContext context) => showDialog<void>(
+  Future<void> _openPanel(BuildContext context) => showAppDialog<void>(
     context: context,
-    builder: (dialogContext) => Dialog(
+    builder: (dialogContext) => AppModalFrame(
       clipBehavior: Clip.antiAlias,
       child: LibraryFilterPanel(
         key: gridFilterPanelKey,
@@ -1306,9 +1307,10 @@ class _FilterBar extends StatelessWidget {
         years: yearOptions,
         genres: genreOptions,
         loadGenres: () {
-          final uri = GoRouter.maybeOf(
-            context,
-          )?.routeInformationProvider.value.uri;
+          final uri = GoRouter.maybeOf(context)
+              ?.routeInformationProvider
+              .value
+              .uri;
           final parentId = uri?.pathSegments.firstOrNull == 'library'
               ? uri!.pathSegments.last
               : uri?.queryParameters['parentId'];

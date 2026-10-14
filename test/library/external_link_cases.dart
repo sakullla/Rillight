@@ -1,4 +1,7 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -17,11 +20,20 @@ Widget _wrap(
   // 桌面平台分支直达 launchUrl,避免测试默认 android 走进 webview。
   return MaterialApp(
     theme: AppTheme.dark().copyWith(platform: TargetPlatform.windows),
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    localizationsDelegates: [
+      ...AppLocalizations.localizationsDelegates,
+      ui.GlobalCupertinoLocalizations.delegate,
+    ],
     supportedLocales: AppLocalizations.supportedLocales,
     home: PresentationScope(
       environment: environment,
       child: Scaffold(body: Center(child: child)),
+    ),
+    builder: (context, child) => ui.AppUiTheme(
+      data: Theme.of(context).brightness == Brightness.dark
+          ? ui.AppUiTheme.dark()
+          : ui.AppUiTheme.light(),
+      child: child ?? const SizedBox.shrink(),
     ),
   );
 }
@@ -98,7 +110,7 @@ void main() {
     expect(find.text('外部链接'), findsOneWidget);
     expect(find.text('IMDb'), findsOneWidget);
     expect(find.text('TMDB'), findsOneWidget);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('hides the whole section without resolvable links', (
     tester,
@@ -115,7 +127,7 @@ void main() {
     );
     expect(find.text('外部链接'), findsNothing);
     expect(find.text('Bad'), findsNothing);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('keeps text, label marks and background monochrome', (
     tester,
@@ -138,22 +150,24 @@ void main() {
     );
 
     final context = tester.element(find.byType(DetailExternalLinks));
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = ui.AppUiTheme.of(context).colorScheme;
 
-    // 名称文字单色,不用品牌色。
     final name = tester.widget<Text>(find.text('TMDB'));
     expect(name.style?.color, scheme.onSurfaceVariant);
-    // 文字型短标同样单色。
+
     final label = tester.widget<Text>(find.text('maze'));
     expect(label.style?.color, scheme.onSurfaceVariant);
-    // 中性底。
-    final material = tester.widget<Material>(
+
+    final material = tester.widget<Container>(
       find.byKey(
         const ValueKey('external-link-https://www.themoviedb.org/movie/489'),
       ),
     );
-    expect(material.color, scheme.surfaceContainerHigh);
-    // 整区任何文字都不铺品牌色。
+    expect(
+      (material.decoration! as BoxDecoration).color,
+      scheme.surfaceContainerHigh,
+    );
+
     for (final mark in ProviderMark.values) {
       expect(
         find.byWidgetPredicate(
@@ -163,7 +177,7 @@ void main() {
         reason: '${mark.name} brand color must not tint text',
       );
     }
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('shows a visible hint when the platform refuses to launch', (
     tester,
@@ -194,9 +208,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.byType(SnackBar), findsOneWidget);
+    expect(find.byKey(const Key('app-notice')), findsOneWidget);
     expect(find.text('外部链接 · 加载失败'), findsOneWidget);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('shows a visible hint when launching throws', (tester) async {
     const channel = MethodChannel('plugins.flutter.io/url_launcher');
@@ -229,8 +243,8 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(tester.takeException(), isNull);
-    expect(find.byType(SnackBar), findsOneWidget);
-  });
+    expect(find.byKey(const Key('app-notice')), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('tv link buttons join the dpad focus sequence and open', (
     tester,
@@ -275,10 +289,9 @@ void main() {
       findsOneWidget,
     );
 
-    // 确认键触发打开;平台拒绝时落入失败提示而非崩溃。
-    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select, platform: 'android');
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
-    expect(find.byType(SnackBar), findsOneWidget);
-  });
+    expect(find.byKey(const Key('app-notice')), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

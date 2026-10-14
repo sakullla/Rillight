@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 
 /// 搜索、片库和「更多」共用的筛选入口。
@@ -25,14 +24,14 @@ class CatalogFilterButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final active = watch != null;
-    return IconButton(
+    return AppIconButton(
       key: buttonKey,
       tooltip: l10n.libraryFilter,
       onPressed: () =>
           showCatalogWatchFilter(context, watch: watch, onChanged: onChanged),
       icon: Icon(
-        Icons.filter_list,
-        color: active ? Theme.of(context).colorScheme.primary : null,
+        CupertinoIcons.line_horizontal_3_decrease,
+        color: active ? AppUiTheme.of(context).colorScheme.primary : null,
       ),
     );
   }
@@ -43,9 +42,8 @@ Future<void> showCatalogWatchFilter(
   required String? watch,
   required ValueChanged<String?> onChanged,
 }) {
-  return showModalBottomSheet<void>(
+  return showAppModalSheet<void>(
     context: context,
-    useSafeArea: true,
     builder: (context) {
       final l10n = AppLocalizations.of(context);
       return Padding(
@@ -61,7 +59,7 @@ Future<void> showCatalogWatchFilter(
           children: [
             Text(
               l10n.libraryFilterWatch,
-              style: Theme.of(context).textTheme.titleLarge,
+              style: AppUiTheme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: AppSpacing.md),
             Wrap(

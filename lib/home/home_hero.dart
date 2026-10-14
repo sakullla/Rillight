@@ -1,9 +1,9 @@
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
@@ -109,7 +109,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   /// 全出血舞台的底缘渐隐就是和下一条货架的间距,不再另加底边距。
   bool get _fadesIntoPage => _stage;
 
-  bool get _gallery => Theme.of(context).brightness == Brightness.light;
+  bool get _gallery => AppUiTheme.of(context).brightness == Brightness.light;
 
   EdgeInsets get _outerPadding => _stage
       ? EdgeInsets.only(bottom: _fadesIntoPage ? 0 : AppSpacing.md)
@@ -184,22 +184,18 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             final content = compact
                 ? _compactSlides(context, item, items, index, width)
                 : _stageLayers(context, item, items, index, width);
-            final theme = Theme.of(context);
-            return Material(
+            final theme = AppUiTheme.of(context);
+            return Container(
+              decoration: BoxDecoration(
+                color: theme.brightness == Brightness.light
+                    ? theme.scaffoldBackgroundColor
+                    : const Color(0xff000000),
+              ),
               key: const Key('home-hero-card'),
-              color: theme.brightness == Brightness.light
-                  ? theme.scaffoldBackgroundColor
-                  : Colors.black,
-              shape: RoundedRectangleBorder(borderRadius: _radius),
               clipBehavior: Clip.antiAlias,
-              child: InkWell(
+              child: AppSurfaceAction(
                 key: const Key('home-hero-details-target'),
                 onTap: () => context.push(AppRoutes.item(item.id)),
-                // 整幅画面就是入口:悬停与按下不在大图上蒙一层灰,
-                // 只保留键盘焦点高亮。
-                hoverColor: Colors.transparent,
-                highlightColor: Colors.transparent,
-                splashFactory: NoSplash.splashFactory,
                 child: GestureDetector(
                   onHorizontalDragEnd: items.length > 1
                       ? (details) => _onSwipe(details, items.length)
@@ -242,7 +238,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     int index,
     double width,
   ) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final artwork = heroArtworkSources(
       item,
       series: widget.catalog.latestSeries.items,
@@ -469,7 +465,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
           child: _chevron(
             key: CatalogKeys.heroPrev,
             tooltip: l10n.scrollLeft,
-            icon: Icons.chevron_left_rounded,
+            icon: CupertinoIcons.chevron_left,
             extent: _controlExtent,
             onPressed: () => _select(index - 1, items.length),
           ),
@@ -485,7 +481,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             onSelect: (i) => _select(i, items.length),
             onScrim: !_gallery,
             activeColor: _gallery
-                ? Theme.of(context).colorScheme.primary
+                ? AppUiTheme.of(context).colorScheme.primary
                 : null,
           ),
         ),
@@ -495,7 +491,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
           child: _chevron(
             key: CatalogKeys.heroNext,
             tooltip: l10n.scrollRight,
-            icon: Icons.chevron_right_rounded,
+            icon: CupertinoIcons.chevron_right,
             extent: _controlExtent,
             onPressed: () => _select(index + 1, items.length),
           ),
@@ -520,7 +516,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     final requestWidth = _requestWidth(context, width);
     final actions = _actions(context, item);
     final light = _gallery && layout == HeroLayout.fullBleed;
-    final fade = light ? Theme.of(context).scaffoldBackgroundColor : null;
+    final fade = light ? AppUiTheme.of(context).scaffoldBackgroundColor : null;
     final text = HeroTextBlock(
       item: item,
       compact: true,
@@ -597,7 +593,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         child: _chevron(
           key: CatalogKeys.heroPrev,
           tooltip: l10n.scrollLeft,
-          icon: Icons.chevron_left_rounded,
+          icon: CupertinoIcons.chevron_left,
           onPressed: () => _select(index - 1, items.length),
         ),
       ),
@@ -606,7 +602,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         child: _chevron(
           key: CatalogKeys.heroNext,
           tooltip: l10n.scrollRight,
-          icon: Icons.chevron_right_rounded,
+          icon: CupertinoIcons.chevron_right,
           onPressed: () => _select(index + 1, items.length),
         ),
       ),
@@ -620,7 +616,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
             onSelect: (i) => _select(i, items.length),
             onScrim: !_gallery,
             activeColor: _gallery
-                ? Theme.of(context).colorScheme.primary
+                ? AppUiTheme.of(context).colorScheme.primary
                 : null,
           ),
         ),
@@ -635,28 +631,28 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     required VoidCallback onPressed,
     double extent = 48,
   }) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = _gallery;
-    return IconButton(
+    return AppIconButton(
       key: key,
       tooltip: tooltip,
       onPressed: onPressed,
-      iconSize: 26,
-      style: IconButton.styleFrom(
+      size: 26,
+      style: AppButtonStyle(
         minimumSize: Size.square(extent),
         fixedSize: Size.square(extent),
         padding: EdgeInsets.zero,
         backgroundColor: light
             ? scheme.surfaceContainerLowest
-            : Colors.black.withValues(alpha: .42),
-        foregroundColor: light ? scheme.onSurface : Colors.white,
+            : const Color(0xff000000).withValues(alpha: .42),
+        foregroundColor: light ? scheme.onSurface : const Color(0xffffffff),
         hoverColor: light
             ? scheme.onSurface.withValues(alpha: .06)
-            : Colors.white.withValues(alpha: .14),
+            : const Color(0xffffffff).withValues(alpha: .14),
         side: BorderSide(
           color: light
               ? scheme.outlineVariant
-              : Colors.white.withValues(alpha: .16),
+              : const Color(0xffffffff).withValues(alpha: .16),
         ),
       ),
       icon: Icon(icon),
@@ -664,7 +660,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   }
 
   Widget _paperFrame(Widget child) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
@@ -686,13 +682,13 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
   }
 
   Widget _dotPill(Widget dots) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = _gallery;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: light
             ? scheme.surfaceContainerLowest
-            : Colors.black.withValues(alpha: .32),
+            : const Color(0xff000000).withValues(alpha: .32),
         borderRadius: BorderRadius.circular(99),
         border: light ? Border.all(color: scheme.outlineVariant) : null,
       ),

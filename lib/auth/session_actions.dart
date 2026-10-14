@@ -1,9 +1,10 @@
 import 'source_management.dart';
 import 'provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
+
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
@@ -54,14 +55,13 @@ class SessionActions extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SettingsAction(),
-            IconButton(
+            AppIconButton(
               key: serverMenuKey,
               tooltip: '${_chipLabel(server)}\n${l10n.switchServer}',
               padding: EdgeInsets.zero,
               constraints: kTitleBarIconConstraints,
-              visualDensity: VisualDensity.compact,
-              iconSize: 18,
-              icon: const Icon(Icons.person_outline),
+              size: 18,
+              icon: const Icon(CupertinoIcons.person),
               onPressed: () => _openSwitcher(context, auth),
             ),
           ],
@@ -72,7 +72,7 @@ class SessionActions extends StatelessWidget {
 
   Future<void> _openSwitcher(BuildContext context, AuthController auth) async {
     final playerHost = PlayerWindowScope.maybeOf(context);
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (dialogContext) {
         return ListenableBuilder(
@@ -137,7 +137,7 @@ class SessionActions extends StatelessWidget {
                   return;
                 }
                 unawaited(
-                  showDialog<void>(
+                  showAppDialog<void>(
                     context: context,
                     builder: (_) => ChangePasswordDialog(auth: auth),
                   ),
@@ -229,7 +229,7 @@ class SessionActions extends StatelessWidget {
 
   /// 切换服务器/线路:成功后才停播、刷新目录并回首页。目标线路不可达或
   /// 身份不一致时保持原线路、原会话与正在进行的播放,不刷新目录、不离开
-  /// 当前页面,只以 SnackBar 展示 lineSwitchFailure 的原因。
+  /// 当前页面,只以临时提示展示 lineSwitchFailure 的原因。
   Future<void> _switchTo(
     BuildContext context,
     AuthController auth,
@@ -252,13 +252,10 @@ class SessionActions extends StatelessWidget {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-          key: SessionActions.lineSwitchFailureKey,
-          content: Text(
-            AppLocalizations.of(context).lineSwitchFailed(failure.detail),
-          ),
-        ),
+      showAppNotice(
+        context,
+        AppLocalizations.of(context).lineSwitchFailed(failure.detail),
+        key: SessionActions.lineSwitchFailureKey,
       );
       return;
     }

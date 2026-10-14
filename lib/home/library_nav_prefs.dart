@@ -138,7 +138,7 @@ class FileLibraryNavStore implements LibraryNavStore {
 }
 
 class LibraryNavController extends ChangeNotifier {
-  LibraryNavController({LibraryNavStore? store}) : _store = store;
+  LibraryNavController({this._store});
 
   LibraryNavStore? _store;
   String? _serverId;

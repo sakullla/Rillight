@@ -1,6 +1,10 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:rillight/auth/source_management.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -249,7 +253,7 @@ void main() {
 
         await tester.tap(find.byKey(const Key('provider-home-user')));
         await settle(tester);
-        await tester.tap(find.text('Child').last);
+        await tester.tap(find.text('Child').first);
         await settle(tester);
         await tester.enterText(
           find.byKey(const Key('provider-home-pin')),
@@ -267,7 +271,11 @@ void main() {
         expect(
           find.descendant(
             of: find.byType(ProviderConnectDialog),
-            matching: find.byType(OutlinedButton),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is ui.AppButton &&
+                  widget.variant == ui.AppButtonVariant.outlined,
+            ),
           ),
           findsNothing,
         );
@@ -280,14 +288,37 @@ void main() {
         );
         await tester.tap(find.byKey(const Key('provider-home-switch')));
         await waitUntil(
-          () => find.byType(OutlinedButton).evaluate().isNotEmpty,
+          () => find
+              .byWidgetPredicate(
+                (widget) =>
+                    widget is ui.AppButton &&
+                    widget.variant == ui.AppButtonVariant.outlined,
+              )
+              .evaluate()
+              .isNotEmpty,
         );
-        await tester.ensureVisible(find.byType(OutlinedButton).first);
-        await tester.tap(find.byType(OutlinedButton).first);
+        await tester.ensureVisible(
+          find
+              .byWidgetPredicate(
+                (widget) =>
+                    widget is ui.AppButton &&
+                    widget.variant == ui.AppButtonVariant.outlined,
+              )
+              .first,
+        );
+        await tester.tap(
+          find
+              .byWidgetPredicate(
+                (widget) =>
+                    widget is ui.AppButton &&
+                    widget.variant == ui.AppButtonVariant.outlined,
+              )
+              .first,
+        );
         await waitUntil(
           () =>
               find.byKey(const Key('provider-finish')).evaluate().isNotEmpty &&
-              find.byType(LinearProgressIndicator).evaluate().isEmpty,
+              find.byType(ui.AppLoadingBar).evaluate().isEmpty,
         );
         await tester.tap(find.byKey(const Key('provider-finish')));
         await waitUntil(
@@ -318,7 +349,7 @@ void main() {
           ),
           findsNothing,
         );
-        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(ui.AppDialog), findsNothing);
         expect(auth.session, isNull);
         expect(
           app.router.routeInformationProvider.value.uri.path,

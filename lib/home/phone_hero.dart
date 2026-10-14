@@ -1,12 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/featured_items.dart';
@@ -226,7 +225,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     final index = _index % items.length;
     final item = items[index];
     _report(item);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final viewport = MediaQuery.sizeOf(context).height;
     final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
@@ -430,7 +429,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   }) {
     final current = page == index;
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final dark = theme.brightness == Brightness.dark;
     final radius = BorderRadius.circular(AppRadii.lg);
     // A soft drop shadow lifts the centre poster off the ambient blur; a
@@ -440,7 +439,8 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
         borderRadius: radius,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: current ? .42 : .18),
+            color: const Color(0xff000000)
+                .withValues(alpha: current ? .42 : .18),
             blurRadius: current ? 28 : 12,
             offset: Offset(0, current ? 14 : 6),
           ),
@@ -454,8 +454,8 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
             borderRadius: radius,
             border: Border.all(
               color: dark
-                  ? Colors.white.withValues(alpha: .10)
-                  : Colors.black.withValues(alpha: .06),
+                  ? const Color(0xffffffff).withValues(alpha: .10)
+                  : const Color(0xff000000).withValues(alpha: .06),
             ),
           ),
           child: ColoredBox(
@@ -509,9 +509,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     );
     if (!mounted) return;
     if (target == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(l10n.noPlayableStream)));
+      showAppNotice(context, l10n.noPlayableStream);
       return;
     }
     await context.push<void>(
@@ -603,7 +601,7 @@ class _Caption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l10n = AppLocalizations.of(context);
     final meta = heroMetaLabels(l10n, item);
     return Column(
@@ -643,7 +641,7 @@ class _Caption extends StatelessWidget {
     );
   }
 
-  Widget _title(ThemeData theme) {
+  Widget _title(AppUiThemeData theme) {
     final text = Text(
       heroTitle(item),
       textAlign: TextAlign.center,

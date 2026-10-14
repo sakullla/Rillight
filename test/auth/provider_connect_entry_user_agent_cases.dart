@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
@@ -55,15 +58,23 @@ void main() {
                 controller: auth,
                 child: MaterialApp.router(
                   routerConfig: router,
-                  localizationsDelegates:
-                      AppLocalizations.localizationsDelegates,
+                  localizationsDelegates: [
+                    ...AppLocalizations.localizationsDelegates,
+                    ui.GlobalCupertinoLocalizations.delegate,
+                  ],
                   supportedLocales: AppLocalizations.supportedLocales,
+                  builder: (context, child) => ui.AppUiTheme(
+                    data: Theme.of(context).brightness == Brightness.dark
+                        ? ui.AppUiTheme.dark()
+                        : ui.AppUiTheme.light(),
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),
           );
           await settle(tester);
-          expect(find.byType(AlertDialog), findsNothing);
+          expect(find.byType(ui.AppDialog), findsNothing);
           final jellyfin = find.byKey(const Key('login-provider-jellyfin'));
           await tester.ensureVisible(jellyfin);
           await tester.tap(jellyfin);
@@ -72,7 +83,7 @@ void main() {
             find.byKey(const Key('provider-password-submit')),
             findsOneWidget,
           );
-          expect(find.byType(AlertDialog), findsNothing);
+          expect(find.byType(ui.AppDialog), findsNothing);
           final plex = find.byKey(const Key('login-provider-plex'));
           await tester.ensureVisible(plex);
           await tester.tap(plex);
@@ -81,7 +92,7 @@ void main() {
             find.byKey(const Key('provider-password-submit')),
             findsNothing,
           );
-          expect(find.byType(AlertDialog), findsNothing);
+          expect(find.byType(ui.AppDialog), findsNothing);
           final input = find.byKey(const Key('provider-user-agent'));
           expect(input, findsOneWidget);
           final controller =

@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_controller.dart';
 
 /// 电视主动开启的一次性局域网辅助连接。
@@ -17,11 +17,10 @@ class TvLanAssist extends ChangeNotifier {
   TvLanAssist({
     this.lifetime = const Duration(minutes: 3),
     this.phoneGrace = const Duration(seconds: 2),
-    InternetAddress? bindAddress,
+    this._bindAddress,
     this.advertiseHost,
     Random? random,
-  }) : _bindAddress = bindAddress,
-       _random = random ?? Random.secure();
+  }) : _random = random ?? Random.secure();
 
   final Duration lifetime;
 

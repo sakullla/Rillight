@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -189,13 +192,22 @@ void main() {
           theme: AppTheme.dark(),
           locale: const Locale('zh'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           home: Scaffold(
             body: LibraryCountsPanel(
               counts: counts,
               loading: loading,
               failure: failure,
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         );
       }
@@ -282,8 +294,17 @@ void main() {
               theme: AppTheme.dark(),
               locale: const Locale('zh'),
               supportedLocales: AppLocalizations.supportedLocales,
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              localizationsDelegates: [
+                ...AppLocalizations.localizationsDelegates,
+                ui.GlobalCupertinoLocalizations.delegate,
+              ],
               home: const Scaffold(body: PhoneMinePage()),
+              builder: (context, child) => ui.AppUiTheme(
+                data: Theme.of(context).brightness == Brightness.dark
+                    ? ui.AppUiTheme.dark()
+                    : ui.AppUiTheme.light(),
+                child: child ?? const SizedBox.shrink(),
+              ),
             ),
           ),
         ),

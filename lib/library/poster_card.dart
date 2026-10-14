@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -114,16 +113,15 @@ class PosterCard extends StatelessWidget {
               _Caption(
                 text: title,
                 width: width,
-                style: Theme.of(context).textTheme.titleSmall,
+                style: AppUiTheme.of(context).textTheme.titleSmall,
               ),
               if (subtitle.isNotEmpty)
                 _Caption(
                   text: subtitle,
                   width: width,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.72),
+                  style: AppUiTheme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppUiTheme.of(context).colorScheme.onSurface
+                        .withValues(alpha: 0.72),
                   ),
                 ),
             ],
@@ -179,8 +177,10 @@ class EpisodeThumbCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   color: selected || highlighted
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.surfaceContainerHighest,
+                      ? AppUiTheme.of(context).colorScheme.primary
+                      : AppUiTheme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadii.sm - 3),
@@ -223,15 +223,17 @@ class EpisodeThumbCard extends StatelessWidget {
                             child: DecoratedBox(
                               key: Key('episode-thumb-played-${item.id}'),
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
+                                color: AppUiTheme.of(context)
+                                    .colorScheme
+                                    .primary,
                                 shape: BoxShape.circle,
                               ),
                               child: const Padding(
                                 padding: EdgeInsets.all(2),
                                 child: Icon(
-                                  Icons.check_rounded,
+                                  CupertinoIcons.check_mark,
                                   size: 14,
-                                  color: Colors.white,
+                                  color: Color(0xffffffff),
                                 ),
                               ),
                             ),
@@ -245,9 +247,9 @@ class EpisodeThumbCard extends StatelessWidget {
               _Caption(
                 text: title,
                 width: width,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                style: AppUiTheme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: selected ? FontWeight.w700 : null,
-                  color: Theme.of(context).colorScheme.onSurface,
+                  color: AppUiTheme.of(context).colorScheme.onSurface,
                 ),
               ),
             ],
@@ -275,7 +277,7 @@ class SeasonPosterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final height = width * 3 / 2;
-    final colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = AppUiTheme.of(context).colorScheme;
     return SizedBox(
       width: width,
       child: _HoverHighlight(
@@ -330,10 +332,12 @@ class SeasonPosterCard extends StatelessWidget {
                                   ),
                                   child: Text(
                                     '${item.childCount}',
-                                    style: Theme.of(context)
+                                    style: AppUiTheme.of(context)
                                         .textTheme
                                         .labelMedium
-                                        ?.copyWith(color: Colors.white),
+                                        ?.copyWith(
+                                          color: const Color(0xffffffff),
+                                        ),
                                   ),
                                 ),
                               ),
@@ -360,7 +364,7 @@ class SeasonPosterCard extends StatelessWidget {
               _Caption(
                 text: item.name,
                 width: width,
-                style: Theme.of(context).textTheme.bodySmall,
+                style: AppUiTheme.of(context).textTheme.bodySmall,
               ),
             ],
           );
@@ -385,9 +389,8 @@ class _Caption extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: width,
-      child: Tooltip(
+      child: AppTooltip(
         message: text,
-        waitDuration: const Duration(milliseconds: 400),
         child: Text(
           text,
           maxLines: 1,
@@ -465,7 +468,7 @@ class _PosterRevealOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final light = scheme.brightness == Brightness.light;
     final meta = <String>[
@@ -491,9 +494,9 @@ class _PosterRevealOverlay extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     stops: const [0, 0.6, 1],
                     colors: [
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.08),
-                      Colors.black.withValues(
+                      const Color(0x00000000),
+                      const Color(0xff000000).withValues(alpha: 0.08),
+                      const Color(0xff000000).withValues(
                         alpha: showMeta && meta.isNotEmpty ? 0.62 : 0,
                       ),
                     ],
@@ -507,31 +510,31 @@ class _PosterRevealOverlay extends StatelessWidget {
                         alignment: Alignment.topRight,
                         child: Padding(
                           padding: const EdgeInsets.all(AppSpacing.xs),
-                          child: IconButton(
+                          child: AppIconButton(
                             key: CatalogKeys.removeFromResume(item.id),
                             tooltip: l10n.removeFromResume,
                             onPressed: () => onRemoveFromResume!(item),
-                            style: IconButton.styleFrom(
+                            style: AppButtonStyle(
                               backgroundColor: light
                                   ? scheme.surfaceContainerLowest
-                                  : Colors.black.withValues(alpha: 0.55),
+                                  : const Color(0xff000000)
+                                        .withValues(alpha: 0.55),
                               foregroundColor: light
                                   ? scheme.onSurface
-                                  : Colors.white,
+                                  : const Color(0xffffffff),
                               side: light
                                   ? BorderSide(color: scheme.outlineVariant)
                                   : null,
                               minimumSize: const Size(32, 32),
                               padding: const EdgeInsets.all(AppSpacing.xxs),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            icon: const Icon(Icons.close_rounded, size: 18),
+                            icon: const Icon(CupertinoIcons.xmark, size: 18),
                           ),
                         ),
                       ),
                     if (item.isPlayable)
                       Center(
-                        child: IconButton(
+                        child: AppIconButton(
                           key: playKey,
                           tooltip: l10n.play,
                           onPressed: () async {
@@ -546,23 +549,20 @@ class _PosterRevealOverlay extends StatelessWidget {
                               await host.open(request);
                             } catch (_) {
                               if (!context.mounted) return;
-                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                                SnackBar(content: Text(l10n.playbackFailed)),
-                              );
+                              showAppNotice(context, l10n.playbackFailed);
                             }
                           },
-                          style: IconButton.styleFrom(
+                          style: AppButtonStyle(
                             backgroundColor: light
                                 ? scheme.primary
-                                : Colors.white,
+                                : const Color(0xffffffff),
                             foregroundColor: light
                                 ? scheme.onPrimary
-                                : Colors.black,
+                                : const Color(0xff000000),
                             padding: const EdgeInsets.all(AppSpacing.sm),
                             minimumSize: const Size(52, 52),
-                            elevation: light ? 2 : 4,
                           ),
-                          icon: const Icon(Icons.play_arrow_rounded, size: 32),
+                          icon: const Icon(CupertinoIcons.play_fill, size: 32),
                         ),
                       ),
                     if (showMeta && meta.isNotEmpty)
@@ -605,7 +605,8 @@ class _PosterRevealOverlay extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.center,
                                   style: theme.textTheme.labelMedium?.copyWith(
-                                    color: Colors.white.withValues(alpha: 0.92),
+                                    color: const Color(0xffffffff)
+                                        .withValues(alpha: 0.92),
                                   ),
                                 ),
                         ),
@@ -637,12 +638,14 @@ class _ResumeProgressBar extends StatelessWidget {
       child: SizedBox(
         height: 3,
         child: ColoredBox(
-          color: Colors.black.withValues(alpha: 0.45),
+          color: const Color(0xff000000).withValues(alpha: 0.45),
           child: Align(
             alignment: Alignment.centerLeft,
             child: FractionallySizedBox(
               widthFactor: value.clamp(0.0, 1.0),
-              child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+              child: ColoredBox(
+                color: AppUiTheme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         ),

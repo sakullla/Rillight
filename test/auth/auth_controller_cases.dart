@@ -1,4 +1,5 @@
 import 'configured_source.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -263,9 +264,8 @@ void main() {
     expect(auth.isLoggedIn, isTrue);
     expect(auth.session!.accessToken, isNot(expired));
     expect(
-      (await credentials.read(
-        configuredSourceId(auth, server.serverId),
-      ))?.accessToken,
+      (await credentials.read(configuredSourceId(auth, server.serverId)))
+          ?.accessToken,
       auth.session!.accessToken,
     );
     expect(auth.failure, isNull);
@@ -308,9 +308,8 @@ void main() {
     expect(auth.failure?.kind, MediaServerFailureKind.sessionExpired);
     expect(auth.prefill?.id, configuredSourceId(auth, server.serverId));
     expect(
-      (await credentials.read(
-        configuredSourceId(auth, server.serverId),
-      ))?.username,
+      (await credentials.read(configuredSourceId(auth, server.serverId)))
+          ?.username,
       'alice',
     );
   });
@@ -343,9 +342,8 @@ void main() {
     expect(auth.session?.server.verifiedServerId, 'server-id-2');
     expect(secondToken, isNot(firstToken));
     expect(
-      (await credentials.read(
-        configuredSourceId(auth, 'server-id-1'),
-      ))?.accessToken,
+      (await credentials.read(configuredSourceId(auth, 'server-id-1')))
+          ?.accessToken,
       firstToken,
     );
 
@@ -381,9 +379,8 @@ void main() {
 
       expect(auth.isLoggedIn, isTrue);
       expect(
-        (await fallback.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.accessToken,
+        (await fallback.read(configuredSourceId(auth, server.serverId)))
+            ?.accessToken,
         isNotEmpty,
       );
     },

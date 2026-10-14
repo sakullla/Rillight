@@ -266,9 +266,8 @@ class ProviderConnectController extends ChangeNotifier {
     if (existing != null && resource.server.id != existing!.verifiedServerId) {
       throw StateError('Server identity mismatch');
     }
-    final secret = await CloudCredentialStore(
-      auth.credentials,
-    ).readCredential(resource.resourceCredentialRef);
+    final secret = await CloudCredentialStore(auth.credentials)
+        .readCredential(resource.resourceCredentialRef);
     _authorization!.requireValid();
     _guard(epoch);
     final id = _authorization!.id;

@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:rillight/emby/emby_codec.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
@@ -14,8 +17,10 @@ import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_controller.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_hero.dart';
+
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/player/player_window_host.dart';
 
@@ -129,12 +134,20 @@ void main() {
         MaterialApp.router(
           theme: AppTheme.phoneDark(),
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           routerConfig: router,
-          builder: (context, child) => AuthScope(
-            controller: auth,
-            child: CatalogScope(controller: catalog, child: child!),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: ((context, child) => AuthScope(
+              controller: auth,
+              child: CatalogScope(controller: catalog, child: child!),
+            ))(context, child),
           ),
         ),
       );
@@ -172,7 +185,10 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: AuthScope(
             controller: auth,
@@ -191,6 +207,12 @@ void main() {
                 ),
               ),
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );
@@ -226,7 +248,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: PlayerWindowScope(
           host: host,
@@ -239,10 +264,16 @@ void main() {
             ),
           ),
         ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
     final resume = find.byKey(const ValueKey('hero-resume-episode'));
-    final info = find.widgetWithText(OutlinedButton, '详情');
+    final info = find.widgetWithText(ui.AppButton, '详情');
     expect(tester.getTopLeft(resume).dy, tester.getTopLeft(info).dy);
     // 可续播条目也只写「播放」:轮播不展示用户使用记录。
     expect(find.descendant(of: resume, matching: find.text('播放')), findsOne);
@@ -271,7 +302,10 @@ void main() {
       MaterialApp(
         theme: AppTheme.light(),
         locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: PlayerWindowScope(
           host: host,
@@ -281,20 +315,23 @@ void main() {
             ),
           ),
         ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
-    final play = tester.widget<FilledButton>(
+    final play = tester.widget<ui.AppButton>(
       find.byKey(const ValueKey('hero-resume-movie')),
     );
-    expect(
-      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      AppTheme.light().colorScheme.primary,
-    );
-    final details = tester.widget<OutlinedButton>(
-      find.widgetWithText(OutlinedButton, '详情'),
+    expect(play.style?.backgroundColor, AppTheme.light().colorScheme.primary);
+    final details = tester.widget<ui.AppButton>(
+      find.widgetWithText(ui.AppButton, '详情'),
     );
     expect(
-      details.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      details.style?.foregroundColor,
       AppTheme.light().colorScheme.onSurface,
     );
   });
@@ -311,7 +348,10 @@ void main() {
       MaterialApp(
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: PlayerWindowScope(
           host: host,
@@ -321,14 +361,17 @@ void main() {
             ),
           ),
         ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
-    final play = tester.widget<FilledButton>(
+    final play = tester.widget<ui.AppButton>(
       find.byKey(const ValueKey('hero-resume-movie')),
     );
-    expect(
-      play.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      Colors.white,
-    );
+    expect(play.style?.backgroundColor, Colors.white);
   });
 }

@@ -1,11 +1,13 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
+
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
 import 'aggregation_page.dart';
 import '../app/l10n/app_localizations.dart';
+
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/source_sessions.dart';
@@ -336,7 +338,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       return KeyedSubtree(key: ValueKey(_authIdentity), child: widget.child);
     }
     if (origin == null || !origin.permit.isValid) {
-      if (!_resolved) return const Center(child: CircularProgressIndicator());
+      if (!_resolved) return const Center(child: CupertinoActivityIndicator());
       final l = AppLocalizations.of(context);
       return Center(
         child: Text(

@@ -32,106 +32,97 @@ Future<void> _discovered(ProviderConnectController controller) async {
 }
 
 void main() {
-  test(
-    'Plex UA is saved, modified and cleared through authorization and media',
-    () async {
-      final fake = FakePlex()..authorized = true;
-      await fake.start();
-      final requests = <RequestOptions>[];
-      final dio = Dio()
-        ..interceptors.add(
-          InterceptorsWrapper(
-            onRequest: (request, handler) {
-              requests.add(request);
-              handler.next(request);
-            },
-          ),
-        );
-      final credentials = MemoryCredentialStore();
-      final cloud = CloudCredentialStore(credentials);
-      final auth = AuthController(
-        client: PlexClient(device: _device, dio: dio),
-        credentials: credentials,
-        servers: MemoryServerListStore(),
-        providerClientFactory: (_) => PlexClient(device: _device, dio: dio),
-        plexAuthentication: PlexAuthentication(
-          device: _device,
-          dio: dio,
-          accountUrl: fake.url,
-          homeUrl: fake.url,
-          readCredential: cloud.readCredential,
-          writeCredential: cloud.writeCredential,
-          deleteCredential: cloud.deleteCredential,
+  test('Plex UA is saved, modified and cleared through authorization and media', () async {
+    final fake = FakePlex()..authorized = true;
+    await fake.start();
+    final requests = <RequestOptions>[];
+    final dio = Dio()
+      ..interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (request, handler) {
+            requests.add(request);
+            handler.next(request);
+          },
         ),
       );
-      try {
-        for (final ua in ['Custom-Plex/1', 'Custom-Plex/2', '']) {
-          requests.clear();
-          final previous = auth.savedServers.firstOrNull;
-          final controller = ProviderConnectController(
-            pollInterval: const Duration(milliseconds: 10),
-            auth: auth,
-            existing: previous,
+    final credentials = MemoryCredentialStore();
+    final cloud = CloudCredentialStore(credentials);
+    final auth = AuthController(
+      client: PlexClient(device: _device, dio: dio),
+      credentials: credentials,
+      servers: MemoryServerListStore(),
+      providerClientFactory: (_) => PlexClient(device: _device, dio: dio),
+      plexAuthentication: PlexAuthentication(
+        device: _device,
+        dio: dio,
+        accountUrl: fake.url,
+        homeUrl: fake.url,
+        readCredential: cloud.readCredential,
+        writeCredential: cloud.writeCredential,
+        deleteCredential: cloud.deleteCredential,
+      ),
+    );
+    try {
+      for (final ua in ['Custom-Plex/1', 'Custom-Plex/2', '']) {
+        requests.clear();
+        final previous = auth.savedServers.firstOrNull;
+        final controller = ProviderConnectController(
+          pollInterval: const Duration(milliseconds: 10),
+          auth: auth,
+          existing: previous,
+        );
+        expect(controller.userAgent, previous?.userAgent ?? '');
+        controller.userAgent = ua;
+        controller.reset(MediaServerType.plex);
+        try {
+          await controller.authorize('');
+          await _discovered(controller);
+          // Home exchange and resource rediscovery use the same configured UA.
+          await controller.selectHome(controller.users.last, '1234');
+          expect(controller.failure, isNull);
+          final resource = controller.resources.single;
+          await controller.selectResource(resource, resource.connections.first);
+          expect(controller.failure, isNull);
+          controller.selectedLibraries.addAll(controller.libraries.keys);
+          await controller.finish();
+          expect(controller.failure, isNull);
+          expect(
+            auth.savedServers.single.normalizedUserAgent,
+            normalizeUserAgent(ua),
           );
-          expect(controller.userAgent, previous?.userAgent ?? '');
-          controller.userAgent = ua;
-          controller.reset(MediaServerType.plex);
-          try {
-            await controller.authorize('');
-            await _discovered(controller);
-            // Home exchange and resource rediscovery use the same configured UA.
-            await controller.selectHome(controller.users.last, '1234');
-            expect(controller.failure, isNull);
-            final resource = controller.resources.single;
-            await controller.selectResource(
-              resource,
-              resource.connections.first,
-            );
-            expect(controller.failure, isNull);
-            controller.selectedLibraries.addAll(controller.libraries.keys);
-            await controller.finish();
-            expect(controller.failure, isNull);
+          final client = auth.client;
+          expect(await client.getPrimaryImage('42'), fake.imageBytes);
+          final info = await client.getPlaybackInfo(itemId: '42');
+          final playback = client.resolvePlayback(info: info, itemId: '42')!;
+          final expected = resolveUserAgent(ua, _device);
+          expect(
+            playback.authorization!.headersFor(fake.url)['User-Agent'],
+            expected,
+          );
+          await info.resources?.release();
+          expect(
+            requests.any((r) => r.uri.path.endsWith('/api/v2/user')),
+            isTrue,
+          );
+          expect(requests.any((r) => r.uri.path.endsWith('/identity')), isTrue);
+          expect(requests.any((r) => r.uri.path.contains('/thumb/')), isTrue);
+          for (final request in requests) {
             expect(
-              auth.savedServers.single.normalizedUserAgent,
-              normalizeUserAgent(ua),
-            );
-            final client = auth.client;
-            expect(await client.getPrimaryImage('42'), fake.imageBytes);
-            final info = await client.getPlaybackInfo(itemId: '42');
-            final playback = client.resolvePlayback(info: info, itemId: '42')!;
-            final expected = resolveUserAgent(ua, _device);
-            expect(
-              playback.authorization!.headersFor(fake.url)['User-Agent'],
+              request.headers['User-Agent'],
               expected,
+              reason: request.uri.path,
             );
-            await info.resources?.release();
-            expect(
-              requests.any((r) => r.uri.path.endsWith('/api/v2/user')),
-              isTrue,
-            );
-            expect(
-              requests.any((r) => r.uri.path.endsWith('/identity')),
-              isTrue,
-            );
-            expect(requests.any((r) => r.uri.path.contains('/thumb/')), isTrue);
-            for (final request in requests) {
-              expect(
-                request.headers['User-Agent'],
-                expected,
-                reason: request.uri.path,
-              );
-            }
-          } finally {
-            controller.dispose();
           }
+        } finally {
+          controller.dispose();
         }
-      } finally {
-        auth.dispose();
-        dio.close(force: true);
-        await fake.close();
       }
-    },
-  );
+    } finally {
+      auth.dispose();
+      dio.close(force: true);
+      await fake.close();
+    }
+  });
 
   test('Jellyfin reauthentication explicitly clears an existing UA', () async {
     final fake = JellyfinFakeServer();

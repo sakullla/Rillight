@@ -1,13 +1,15 @@
+import 'package:flutter/foundation.dart';
+
 import 'dart:io';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -15,7 +17,9 @@ import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/provider_marks.dart';
+
 import 'detail_source_scope.dart';
+
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -87,7 +91,7 @@ class DetailGenreRow extends StatelessWidget {
       );
     }
     if (dense) {
-      final theme = Theme.of(context);
+      final theme = AppUiTheme.of(context);
       final scheme = theme.colorScheme;
       return Wrap(
         key: const Key('detail-genre-pills'),
@@ -95,15 +99,12 @@ class DetailGenreRow extends StatelessWidget {
         runSpacing: AppSpacing.xs,
         children: [
           for (final genre in genres)
-            Material(
-              color: scheme.onSurface.withValues(alpha: .08),
-              shape: StadiumBorder(
-                side: BorderSide(
-                  color: scheme.onSurface.withValues(alpha: .16),
-                ),
+            Container(
+              decoration: BoxDecoration(
+                color: scheme.onSurface.withValues(alpha: .08),
               ),
               clipBehavior: Clip.antiAlias,
-              child: InkWell(
+              child: AppSurfaceAction(
                 onTap: () => openGenreShelf(context, item, genre),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -130,8 +131,8 @@ class DetailGenreRow extends StatelessWidget {
         runSpacing: AppSpacing.xs,
         children: [
           for (final genre in genres)
-            ActionChip(
-              label: Text(genre),
+            AppButton(
+              child: Text(genre),
               onPressed: () => openGenreShelf(context, item, genre),
             ),
         ],
@@ -205,7 +206,7 @@ class DetailExternalLinks extends StatelessWidget {
         children: [
           Text(
             l10n.externalLinks,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: AppUiTheme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.sm),
           Wrap(
@@ -232,7 +233,7 @@ class _ExternalLinkButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = link.name.isEmpty ? link.url : link.name;
     final mark = ProviderMark.match(link.name, link.url);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final name = mark?.shortName ?? label;
     // 低调化:文字/短标/缺省图标统一 onSurfaceVariant 单色,
     // 品牌色只保留在 16px 图形标志的 tint,不再给文字铺色。
@@ -250,12 +251,12 @@ class _ExternalLinkButton extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.xs),
         ] else ...[
-          Icon(Icons.link, size: 16, color: scheme.onSurfaceVariant),
+          Icon(CupertinoIcons.link, size: 16, color: scheme.onSurfaceVariant),
           const SizedBox(width: AppSpacing.xs),
         ],
         Text(
           name,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          style: AppUiTheme.of(context).textTheme.labelLarge?.copyWith(
             color: scheme.onSurfaceVariant,
             fontWeight: FontWeight.w600,
           ),
@@ -278,23 +279,22 @@ class _ExternalLinkButton extends StatelessWidget {
                   color: IconTheme.of(context).color,
                 ),
               )
-            : const Icon(Icons.link_rounded),
+            : const Icon(CupertinoIcons.link),
         onPressed: () => _open(context),
         child: Text(name),
       );
     }
-    return Tooltip(
+    return AppTooltip(
       message: label,
-      child: Material(
+      child: Container(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(AppRadii.sm),
+        ),
         key: ValueKey('external-link-${link.url}'),
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(AppRadii.sm),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        child: AppSurfaceAction(
           onTap: () => _open(context),
-          // 悬停/焦点仅轻微提亮,不出现高饱和色块。
-          hoverColor: scheme.onSurface.withValues(alpha: 0.06),
-          focusColor: scheme.onSurface.withValues(alpha: 0.08),
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.sm,
@@ -313,12 +313,12 @@ class _ExternalLinkButton extends StatelessWidget {
       _showFailure(context);
       return;
     }
-    final platform = Theme.of(context).platform;
+    final platform = defaultTargetPlatform;
     final mobile =
         platform == TargetPlatform.android || platform == TargetPlatform.iOS;
     if (mobile) {
       await Navigator.of(context).push(
-        MaterialPageRoute<void>(
+        CupertinoPageRoute<void>(
           builder: (context) => ExternalLinkPage(
             title: link.name.isEmpty ? uri.host : link.name,
             uri: uri,
@@ -344,13 +344,7 @@ class _ExternalLinkButton extends StatelessWidget {
 
   void _showFailure(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('${l10n.externalLinks} · ${l10n.errorLoadFailed}'),
-        ),
-      );
+    showAppNotice(context, '${l10n.externalLinks} · ${l10n.errorLoadFailed}');
   }
 }
 
@@ -393,20 +387,24 @@ class _ExternalLinkPageState extends State<ExternalLinkPage> {
       return;
     }
     _backgroundApplied = true;
-    _controller.setBackgroundColor(Theme.of(context).colorScheme.surface);
+    _controller.setBackgroundColor(AppUiTheme.of(context).colorScheme.surface);
   }
 
   @override
   Widget build(BuildContext context) {
-    final surface = Theme.of(context).colorScheme.surface;
-    return Scaffold(
-      appBar: AppBar(leading: const BackButton(), title: Text(widget.title)),
-      body: ColoredBox(
+    final surface = AppUiTheme.of(context).colorScheme.surface;
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        transitionBetweenRoutes: false,
+        leading: const CupertinoNavigationBarBackButton(),
+        middle: Text(widget.title),
+      ),
+      child: ColoredBox(
         color: surface,
         child: Stack(
           children: [
             WebViewWidget(controller: _controller),
-            if (_loading) const Center(child: CircularProgressIndicator()),
+            if (_loading) const Center(child: CupertinoActivityIndicator()),
           ],
         ),
       ),
@@ -496,7 +494,7 @@ class DetailAlbumStrip extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     // 桌面和电视由调用方包好页面边距；手机直接排在页面上，标题取页面边距，
     // 横条贴边滚动、首张与标题对齐。
     final inset = PresentationScope.isPhoneOf(context)
@@ -547,7 +545,7 @@ class DetailAlbumStrip extends StatelessWidget {
       source.dispose();
       return;
     }
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       useRootNavigator: false,
       builder: (context) => _AlbumViewer(
@@ -689,10 +687,12 @@ class _AlbumRailState extends State<_AlbumRail> {
               separatorBuilder: (context, index) =>
                   const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, index) {
-                return Material(
+                return Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
+                  ),
                   clipBehavior: Clip.antiAlias,
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: InkWell(
+                  child: AppSurfaceAction(
                     onTap: () => widget.onOpen(index),
                     borderRadius: BorderRadius.circular(AppRadii.sm),
                     child: SizedBox(
@@ -720,7 +720,7 @@ class _AlbumRailState extends State<_AlbumRail> {
             child: ScrimIconButton(
               key: CatalogKeys.shelfScrollLeft(CatalogKeys.shelfAlbum),
               tooltip: l10n.scrollLeft,
-              icon: const Icon(Icons.chevron_left),
+              icon: const Icon(CupertinoIcons.chevron_left),
               onPressed: () => _page(-1),
             ),
           ),
@@ -730,7 +730,7 @@ class _AlbumRailState extends State<_AlbumRail> {
             child: ScrimIconButton(
               key: CatalogKeys.shelfScrollRight(CatalogKeys.shelfAlbum),
               tooltip: l10n.scrollRight,
-              icon: const Icon(Icons.chevron_right),
+              icon: const Icon(CupertinoIcons.chevron_right),
               onPressed: () => _page(1),
             ),
           ),
@@ -739,7 +739,7 @@ class _AlbumRailState extends State<_AlbumRail> {
   }
 }
 
-class _AlbumScrollBehavior extends MaterialScrollBehavior {
+class _AlbumScrollBehavior extends CupertinoScrollBehavior {
   const _AlbumScrollBehavior();
 
   @override
@@ -831,27 +831,28 @@ class _AlbumStillState extends State<_AlbumStill> {
         if (snapshot.hasError) {
           final l10n = AppLocalizations.of(context);
           return Center(
-            child: TextButton.icon(
+            child: AppButton.icon(
               onPressed: () {
                 final next = _load();
                 setState(() {
                   _bytes = next;
                 });
               },
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(CupertinoIcons.arrow_clockwise),
               label: Text('${l10n.errorLoadFailed} · ${l10n.retry}'),
+              variant: AppButtonVariant.plain,
             ),
           );
         }
         final bytes = snapshot.data;
         if (bytes == null || bytes.isEmpty) {
           return ColoredBox(
-            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
             child: const Center(
               child: SizedBox(
                 width: 24,
                 height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CupertinoActivityIndicator(),
               ),
             ),
           );
@@ -966,15 +967,11 @@ class _AlbumViewerState extends State<_AlbumViewer> {
         ).saveTo(location.path);
       }
       if (mounted && widget.source.valid) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(l10n.albumDownloadSaved)));
+        showAppNotice(context, l10n.albumDownloadSaved);
       }
     } catch (_) {
       if (mounted && widget.source.valid) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(l10n.albumDownloadFailed)));
+        showAppNotice(context, l10n.albumDownloadFailed);
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1008,15 +1005,15 @@ class _AlbumViewerState extends State<_AlbumViewer> {
   @override
   Widget build(BuildContext context) {
     if (!widget.source.valid) return const SizedBox.shrink();
-    final light = Theme.of(context).brightness == Brightness.light;
+    final light = AppUiTheme.of(context).brightness == Brightness.light;
     final frame = _frame(context, light: light);
     if (light) return frame;
-    return Theme(data: ThemeData.dark(useMaterial3: true), child: frame);
+    return AppUiTheme(data: AppUiTheme.dark(), child: frame);
   }
 
   Widget _frame(BuildContext context, {required bool light}) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final size = MediaQuery.sizeOf(context);
     final phone = PresentationScope.isPhoneOf(context);
     final inset = light
@@ -1027,8 +1024,8 @@ class _AlbumViewerState extends State<_AlbumViewer> {
             phone ? 12 : 0,
           )
         : const EdgeInsets.all(16);
-    final ink = light ? scheme.onSurface : Colors.white;
-    final headerInk = light ? scheme.onSurface : Colors.white70;
+    final ink = light ? scheme.onSurface : const Color(0xffffffff);
+    final headerInk = light ? scheme.onSurface : const Color(0xb3ffffff);
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
@@ -1050,8 +1047,8 @@ class _AlbumViewerState extends State<_AlbumViewer> {
       },
       child: Focus(
         autofocus: true,
-        child: Dialog(
-          backgroundColor: light ? null : Colors.black,
+        child: AppModalFrame(
+          backgroundColor: light ? null : const Color(0xff000000),
           insetPadding: inset,
           clipBehavior: Clip.antiAlias,
           child: SizedBox(
@@ -1069,34 +1066,33 @@ class _AlbumViewerState extends State<_AlbumViewer> {
                           style: TextStyle(color: headerInk),
                         ),
                       ),
-                      TextButton.icon(
+                      AppButton.icon(
                         onPressed: _saving ? null : _download,
-                        style: TextButton.styleFrom(foregroundColor: ink),
+                        style: AppButtonStyle(foregroundColor: ink),
                         icon: _saving
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: CupertinoActivityIndicator(),
                               )
-                            : const Icon(Icons.download_rounded),
+                            : const Icon(CupertinoIcons.arrow_down_to_line),
                         label: Text(l10n.albumDownload),
+                        variant: AppButtonVariant.plain,
                       ),
-                      IconButton(
+                      AppIconButton(
                         color: ink,
-                        tooltip: MaterialLocalizations.of(
-                          context,
-                        ).closeButtonTooltip,
+                        tooltip: '关闭',
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close_rounded),
+                        icon: const Icon(CupertinoIcons.xmark),
                       ),
                     ],
                   ),
                 ),
                 Expanded(
                   child: ColoredBox(
-                    color: light ? scheme.surfaceContainerHigh : Colors.black,
+                    color: light
+                        ? scheme.surfaceContainerHigh
+                        : const Color(0xff000000),
                     child: Stack(
                       children: [
                         PageView.builder(
@@ -1126,7 +1122,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
                               child: _turnPage(
                                 light: light,
                                 tooltip: l10n.albumPrevious,
-                                icon: Icons.chevron_left_rounded,
+                                icon: CupertinoIcons.chevron_left,
                                 onPressed: () => _pages.previousPage(
                                   duration: const Duration(milliseconds: 200),
                                   curve: Curves.easeOut,
@@ -1142,7 +1138,7 @@ class _AlbumViewerState extends State<_AlbumViewer> {
                               child: _turnPage(
                                 light: light,
                                 tooltip: l10n.albumNext,
-                                icon: Icons.chevron_right_rounded,
+                                icon: CupertinoIcons.chevron_right,
                                 onPressed: () => _pages.nextPage(
                                   duration: const Duration(milliseconds: 200),
                                   curve: Curves.easeOut,
@@ -1169,17 +1165,17 @@ class _AlbumViewerState extends State<_AlbumViewer> {
     required VoidCallback onPressed,
   }) {
     if (!light) {
-      return IconButton.filledTonal(
+      return AppIconButton(
         tooltip: tooltip,
         onPressed: onPressed,
         icon: Icon(icon),
       );
     }
-    final scheme = Theme.of(context).colorScheme;
-    return IconButton(
+    final scheme = AppUiTheme.of(context).colorScheme;
+    return AppIconButton(
       tooltip: tooltip,
       onPressed: onPressed,
-      style: IconButton.styleFrom(
+      style: AppButtonStyle(
         backgroundColor: scheme.surfaceContainerLowest,
         foregroundColor: scheme.onSurface,
         side: BorderSide(color: scheme.outlineVariant),

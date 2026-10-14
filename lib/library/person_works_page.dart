@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -11,7 +11,6 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
@@ -168,7 +167,7 @@ class _PersonDesktopWorks extends StatelessWidget {
           child: Text(
             name,
             key: PersonWorksPage.titleKey,
-            style: Theme.of(context).textTheme.headlineMedium,
+            style: AppUiTheme.of(context).textTheme.headlineMedium,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -262,7 +261,7 @@ class _PersonDesktopWorks extends StatelessWidget {
                   const SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.only(bottom: AppSpacing.xxl),
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: CupertinoActivityIndicator()),
                     ),
                   ),
               ],
@@ -302,16 +301,17 @@ class _PersonPhoneWorks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        transitionBetweenRoutes: false,
+        middle: Text(
           name,
           key: PersonWorksPage.titleKey,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
       ),
-      body: _body(context, l10n),
+      child: _body(context, l10n),
     );
   }
 
@@ -373,11 +373,12 @@ class _PersonPhoneWorks extends StatelessWidget {
               else if (works.hasMore)
                 SliverToBoxAdapter(
                   child: Center(
-                    child: TextButton(
+                    child: AppButton(
                       key: PersonWorksPage.loadMoreKey,
                       onPressed: works.loadingMore
                           ? null
                           : () => unawaited(works.loadMore()),
+                      variant: AppButtonVariant.plain,
                       child: Text(l10n.episodesLoadMore),
                     ),
                   ),
@@ -386,7 +387,7 @@ class _PersonPhoneWorks extends StatelessWidget {
                 const SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.all(AppSpacing.md),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: Center(child: CupertinoActivityIndicator()),
                   ),
                 ),
             ],
@@ -513,11 +514,7 @@ class _PersonTvWorks extends StatelessWidget {
                 child: SizedBox(key: PersonWorksPage.titleKey, height: 0),
               ),
               if (works.loading && works.items.isEmpty)
-                box(
-                  const LinearProgressIndicator(
-                    key: PersonWorksPage.loadingKey,
-                  ),
-                ),
+                box(const AppLoadingBar(key: PersonWorksPage.loadingKey)),
               if (showFailure)
                 box(
                   TvFailure(
@@ -576,7 +573,7 @@ class _PersonTvWorks extends StatelessWidget {
                       child: TvAction(
                         key: PersonWorksPage.loadMoreKey,
                         pill: true,
-                        leading: const Icon(Icons.expand_more_rounded),
+                        leading: const Icon(CupertinoIcons.chevron_down),
                         onPressed: works.loadingMore
                             ? null
                             : () => unawaited(works.loadMore()),

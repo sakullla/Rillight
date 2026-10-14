@@ -2,11 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -52,9 +51,9 @@ class HeroKicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final color = onScrim
-        ? Colors.white.withValues(alpha: .82)
+        ? const Color(0xffffffff).withValues(alpha: .82)
         : theme.colorScheme.primary;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -104,16 +103,22 @@ class HeroRatingBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final value = rating;
     if (value == null) return const SizedBox.shrink();
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
+        const Icon(
+          CupertinoIcons.star_fill,
+          size: 15,
+          color: Color(0xffffc107),
+        ),
         const SizedBox(width: 3),
         Text(
           value.toStringAsFixed(1),
           style: theme.textTheme.bodySmall?.copyWith(
-            color: onScrim ? Colors.white : theme.colorScheme.onSurface,
+            color: onScrim
+                ? const Color(0xffffffff)
+                : theme.colorScheme.onSurface,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -178,7 +183,7 @@ class HeroScrim extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0x59000000), Colors.transparent],
+                        colors: [Color(0x59000000), Color(0x00000000)],
                       ),
                     ),
                   ),
@@ -202,7 +207,7 @@ class HeroScrim extends StatelessWidget {
                   colors: [
                     Color(0xB3000000),
                     Color(0x59000000),
-                    Colors.transparent,
+                    Color(0x00000000),
                   ],
                 ),
               ),
@@ -214,7 +219,7 @@ class HeroScrim extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 stops: leading ? const [.3, .68, 1] : const [0, .45, 1],
                 colors: const [
-                  Colors.transparent,
+                  Color(0x00000000),
                   Color(0x8C000000),
                   Color(0xD9000000),
                 ],
@@ -242,7 +247,7 @@ class HeroScrim extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0x59000000), Colors.transparent],
+                      colors: [Color(0x59000000), Color(0x00000000)],
                     ),
                   ),
                 ),
@@ -293,7 +298,7 @@ class HeroTextBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l10n = AppLocalizations.of(context);
     final meta = heroMetaLabels(l10n, item);
     final overview = showOverview ? plainOverview(item.overview) : null;
@@ -305,10 +310,10 @@ class HeroTextBlock extends StatelessWidget {
     final ink = theme.colorScheme.onSurface;
     final metaColor = onPaper
         ? theme.colorScheme.onSurfaceVariant
-        : Colors.white70;
+        : const Color(0xb3ffffff);
     final overviewColor = onPaper
         ? ink.withValues(alpha: .78)
-        : Colors.white.withValues(alpha: .78);
+        : const Color(0xffffffff).withValues(alpha: .78);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -368,13 +373,13 @@ class HeroTextBlock extends StatelessWidget {
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: style?.copyWith(
-        color: onPaper ? ink : Colors.white,
+        color: onPaper ? ink : const Color(0xffffffff),
         fontWeight: FontWeight.w700,
         height: 1.15,
         letterSpacing: large ? -.2 : null,
         shadows: onPaper
             ? null
-            : const [Shadow(blurRadius: 12, color: Colors.black54)],
+            : const [Shadow(blurRadius: 12, color: Color(0x8a000000))],
       ),
     );
     final logoWidth = logoMaxWidth;
@@ -412,7 +417,7 @@ class HeroDots extends StatelessWidget {
   final ValueChanged<int>? onSelect;
   final bool onScrim;
 
-  /// 选中长条的颜色。为空时遮罩上用白,页面上用 [ColorScheme.secondary]。
+  /// 选中长条的颜色。为空时遮罩上用白,页面上用 [AppColorScheme.secondary]。
   final Color? activeColor;
 
   final ValueListenable<int?>? cycle;
@@ -424,10 +429,11 @@ class HeroDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final selected = activeColor ?? (onScrim ? Colors.white : scheme.secondary);
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final selected =
+        activeColor ?? (onScrim ? const Color(0xffffffff) : scheme.secondary);
     final resting = onScrim
-        ? Colors.white.withValues(alpha: .38)
+        ? const Color(0xffffffff).withValues(alpha: .38)
         : scheme.onSurface.withValues(alpha: .22);
     final select = onSelect;
     final extent = select == null ? 16.0 : 44.0;
@@ -474,8 +480,8 @@ class HeroDots extends StatelessWidget {
           ),
       ],
     );
-    return Material(
-      type: MaterialType.transparency,
+    return Container(
+      decoration: BoxDecoration(),
       child: select == null ? ExcludeFocus(child: dots) : dots,
     );
   }
@@ -486,7 +492,7 @@ class HeroDots extends StatelessWidget {
     required Widget child,
   }) {
     if (onTap == null) return KeyedSubtree(key: key, child: child);
-    return InkResponse(key: key, onTap: onTap, child: child);
+    return AppSurfaceAction(key: key, onTap: onTap, child: child);
   }
 }
 
@@ -742,10 +748,10 @@ class _HeroPosterSpotlightState extends State<HeroPosterSpotlight> {
         ? const SizedBox.shrink()
         : AspectRatio(
             aspectRatio: 2 / 3,
-            child: Material(
-              elevation: 8,
-              shadowColor: Colors.black87,
-              borderRadius: BorderRadius.circular(AppRadii.md),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+              ),
               clipBehavior: Clip.antiAlias,
               child: Image.memory(
                 _resolved!.bytes,

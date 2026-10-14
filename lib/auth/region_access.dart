@@ -89,11 +89,10 @@ typedef RegionCleanup = Future<void> Function(RestrictedStopPermit permit);
 
 class RegionAccessController extends ChangeNotifier {
   RegionAccessController({
-    PinVerifier? verifier,
+    this._verifier,
     DateTime Function()? clock,
     Future<PinVerifier> Function(String)? createVerifier,
-  }) : _verifier = verifier,
-       _createVerifier = createVerifier ?? PinVerifier.create,
+  }) : _createVerifier = createVerifier ?? PinVerifier.create,
        _clock = clock ?? DateTime.now;
   PinVerifier? _verifier;
   final Future<PinVerifier> Function(String) _createVerifier;

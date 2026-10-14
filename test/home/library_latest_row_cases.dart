@@ -1,4 +1,7 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -78,12 +81,21 @@ void main() {
         controller: auth,
         child: CatalogScope(
           controller: catalog,
-          child: const MaterialApp(
+          child: MaterialApp(
             locale: Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             home: Scaffold(
               body: LibraryLatestData(library: _library, builder: _names),
+            ),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
             ),
           ),
         ),

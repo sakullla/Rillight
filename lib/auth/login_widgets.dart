@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 import '../app/l10n/app_localizations.dart';
-import '../app/theme/tokens.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/emby_mark.dart';
 import '../media_server/capabilities.dart';
@@ -81,13 +80,13 @@ class _JellyfinMarkPainter extends CustomPainter {
     canvas.drawPath(
       mark,
       Paint()
-        ..color = Colors.white
+        ..color = const Color(0xffffffff)
         ..style = PaintingStyle.fill,
     );
     canvas.drawPath(
       outer,
       Paint()
-        ..color = Colors.white
+        ..color = const Color(0xffffffff)
         ..style = PaintingStyle.stroke
         ..strokeJoin = StrokeJoin.round
         ..strokeWidth = size.shortestSide * 0.05,
@@ -133,7 +132,7 @@ class LoginBrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Container(
       width: size,
       height: size,
@@ -153,7 +152,7 @@ class LoginBrandMark extends StatelessWidget {
         ],
       ),
       child: Icon(
-        Icons.play_arrow_rounded,
+        CupertinoIcons.play_fill,
         color: scheme.onPrimary,
         size: size * .62,
       ),
@@ -184,7 +183,7 @@ class ProviderSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
     const types = MediaServerType.values;
@@ -227,9 +226,8 @@ class ProviderSwitcher extends StatelessWidget {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: dark ? .28 : .08,
-                          ),
+                          color: const Color(0xff000000)
+                              .withValues(alpha: dark ? .28 : .08),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -277,16 +275,16 @@ class _ProviderSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final enabled = onTap != null;
     return Semantics(
       button: true,
       selected: selected,
       enabled: enabled,
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
+      child: Container(
+        decoration: BoxDecoration(),
+        child: AppSurfaceAction(
           onTap: onTap,
           borderRadius: BorderRadius.circular(AppRadii.md - 2),
           child: Opacity(
@@ -388,7 +386,7 @@ class ProviderHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l = AppLocalizations.of(context);
     return AnimatedSwitcher(
       duration: AppMotion.durationOf(context),
@@ -419,7 +417,7 @@ class LoginErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Semantics(
       liveRegion: true,
@@ -438,7 +436,7 @@ class LoginErrorBanner extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
-                Icons.error_outline_rounded,
+                CupertinoIcons.exclamationmark_circle,
                 size: 20,
                 color: scheme.onErrorContainer,
               ),
@@ -481,8 +479,7 @@ class BusyLabel extends StatelessWidget {
       children: [
         SizedBox.square(
           dimension: 16,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
+          child: CupertinoActivityIndicator(
             color: DefaultTextStyle.of(context).style.color,
           ),
         ),
@@ -499,11 +496,11 @@ class LoginOrDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Row(
       children: [
-        Expanded(child: Divider(color: scheme.outlineVariant)),
+        Expanded(child: AppDivider(color: scheme.outlineVariant)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
           child: Text(
@@ -513,7 +510,7 @@ class LoginOrDivider extends StatelessWidget {
             ),
           ),
         ),
-        Expanded(child: Divider(color: scheme.outlineVariant)),
+        Expanded(child: AppDivider(color: scheme.outlineVariant)),
       ],
     );
   }
@@ -545,7 +542,7 @@ class _LoginAdvancedSectionState extends State<LoginAdvancedSection> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final duration = AppMotion.durationOf(context);
     return Column(
@@ -553,9 +550,9 @@ class _LoginAdvancedSectionState extends State<LoginAdvancedSection> {
       children: [
         Align(
           alignment: Alignment.centerLeft,
-          child: TextButton.icon(
+          child: AppButton.icon(
             key: widget.toggleKey,
-            style: TextButton.styleFrom(
+            style: AppButtonStyle(
               foregroundColor: scheme.onSurfaceVariant,
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),
@@ -566,11 +563,12 @@ class _LoginAdvancedSectionState extends State<LoginAdvancedSection> {
             icon: AnimatedRotation(
               turns: _expanded ? .25 : 0,
               duration: duration,
-              child: const Icon(Icons.chevron_right_rounded, size: 20),
+              child: const Icon(CupertinoIcons.chevron_right, size: 20),
             ),
             label: Text(
               widget.title ?? AppLocalizations.of(context).loginAdvanced,
             ),
+            variant: AppButtonVariant.plain,
           ),
         ),
         AnimatedSize(

@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -380,15 +383,24 @@ void main() {
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         home: Builder(
-          builder: (context) => TextButton(
+          builder: (context) => ui.AppButton(
             key: const Key('open-line-dialog'),
             onPressed: () async {
               result = await showLineAddressDialog(context);
             },
             child: const Text('open'),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -397,12 +409,12 @@ void main() {
     await settle(tester);
 
     // 只有地址输入,没有 User-Agent 输入项。
-    expect(find.byType(TextField), findsOneWidget);
+    expect(find.byType(ui.AppTextField), findsOneWidget);
     expect(find.text('User-Agent'), findsNothing);
     // 添加模式:地址为空时不可提交。
     expect(
       tester
-          .widget<FilledButton>(find.byKey(LineAddressDialog.submitKey))
+          .widget<ui.AppButton>(find.byKey(LineAddressDialog.submitKey))
           .onPressed,
       isNull,
     );
@@ -424,9 +436,12 @@ void main() {
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         home: Builder(
-          builder: (context) => TextButton(
+          builder: (context) => ui.AppButton(
             key: const Key('open-line-dialog'),
             onPressed: () async {
               result = await showLineAddressDialog(
@@ -437,6 +452,12 @@ void main() {
             child: const Text('open'),
           ),
         ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
 
@@ -444,7 +465,7 @@ void main() {
     await settle(tester);
     expect(
       tester
-          .widget<TextField>(find.byKey(LineAddressDialog.fieldKey))
+          .widget<ui.AppTextField>(find.byKey(LineAddressDialog.fieldKey))
           .controller!
           .text,
       'http://line-lan.test:8096',
@@ -507,7 +528,10 @@ void main() {
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         home: Scaffold(
           body: ServerSwitcherDialog(
             servers: [
@@ -526,6 +550,12 @@ void main() {
             onDeleteLine: (serverId, line) =>
                 deletedLines.add((serverId, line)),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -659,12 +689,21 @@ void main() {
             theme: AppTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             home: Scaffold(
               body: CatalogScope(
                 controller: catalog,
                 child: const PhoneMinePage(),
               ),
+            ),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
             ),
           ),
         ),
@@ -707,7 +746,7 @@ void main() {
     await sheetTap(find.byKey(PhoneMinePage.lineEditKey(serverId, wanLine.id)));
     expect(
       tester
-          .widget<TextField>(find.byKey(LineAddressDialog.fieldKey))
+          .widget<ui.AppTextField>(find.byKey(LineAddressDialog.fieldKey))
           .controller!
           .text,
       wan.baseUrl.toString(),
@@ -750,7 +789,7 @@ void main() {
     final last = auth.savedServers.single.lines.single;
     expect(
       tester
-          .widget<IconButton>(
+          .widget<ui.AppIconButton>(
             find.byKey(PhoneMinePage.lineDeleteKey(serverId, last.id)),
           )
           .onPressed,

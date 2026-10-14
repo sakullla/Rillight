@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/l10n/app_localizations.dart';
@@ -51,7 +51,7 @@ class _ProviderLoginFormState extends State<ProviderLoginForm> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final tv = PresentationScope.maybeOf(context)?.isTv == true;
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l = AppLocalizations.of(context);
     final ValueChanged<MediaServerType>? onChanged = auth.isBusy
         ? null
@@ -75,8 +75,8 @@ class _ProviderLoginFormState extends State<ProviderLoginForm> {
     final wrap = widget.wrapForm;
     if (tv) {
       final s = TvDesign.scaleOf(context);
-      return Material(
-        type: MaterialType.transparency,
+      return Container(
+        decoration: BoxDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -94,8 +94,8 @@ class _ProviderLoginFormState extends State<ProviderLoginForm> {
         ),
       );
     }
-    return Material(
-      type: MaterialType.transparency,
+    return Container(
+      decoration: BoxDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

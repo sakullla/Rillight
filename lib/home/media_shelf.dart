@@ -1,10 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -84,7 +83,7 @@ class MediaShelf extends StatefulWidget {
   static double heroClearanceFor(BuildContext context, double screenWidth) {
     final title = lineHeightOf(
       context,
-      Theme.of(context).textTheme.titleMedium,
+      AppUiTheme.of(context).textTheme.titleMedium,
     );
     final image = wideCardWidthFor(screenWidth) * 9 / 16;
     final labels = wideLabelExtentFor(context, customCard: false);
@@ -183,7 +182,7 @@ class MediaShelf extends StatefulWidget {
     BuildContext context, {
     required bool customCard,
   }) {
-    final textTheme = Theme.of(context).textTheme;
+    final textTheme = AppUiTheme.of(context).textTheme;
     final title = lineHeightOf(context, textTheme.titleSmall);
     if (customCard) {
       return AppSpacing.xs + title;
@@ -195,7 +194,7 @@ class MediaShelf extends StatefulWidget {
   /// 续播进度画在封面上，不另占标题行。
   static double posterLabelExtentFor(BuildContext context) {
     return AppSpacing.xs +
-        lineHeightOf(context, Theme.of(context).textTheme.titleSmall);
+        lineHeightOf(context, AppUiTheme.of(context).textTheme.titleSmall);
   }
 
   @override
@@ -371,27 +370,26 @@ class _MediaShelfState extends State<MediaShelf> {
                 Expanded(
                   child: Text(
                     widget.title,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: AppUiTheme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 if (widget.headerAction != null) widget.headerAction!,
                 if (widget.onMore != null && widget.error == null)
-                  TextButton.icon(
+                  AppButton.icon(
                     key: CatalogKeys.shelfMore(widget.shelfId),
                     onPressed: widget.onMore,
-                    iconAlignment: IconAlignment.end,
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      foregroundColor: Theme.of(
-                        context,
-                      ).colorScheme.onSurfaceVariant,
-                      textStyle: Theme.of(context).textTheme.labelLarge,
+                    style: AppButtonStyle(
+                      foregroundColor: AppUiTheme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant,
+                      textStyle: AppUiTheme.of(context).textTheme.labelLarge,
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.sm,
                       ),
                     ),
-                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                    icon: const Icon(CupertinoIcons.arrow_right, size: 16),
                     label: Text(l10n.more),
+                    variant: AppButtonVariant.plain,
                   ),
               ],
             ),
@@ -410,8 +408,9 @@ class _MediaShelfState extends State<MediaShelf> {
                     ),
                   ),
                   if (widget.onRetry != null)
-                    TextButton(
+                    AppButton(
                       onPressed: widget.onRetry,
+                      variant: AppButtonVariant.plain,
                       child: Text(l10n.retry),
                     ),
                 ],
@@ -561,7 +560,7 @@ class _MediaShelfState extends State<MediaShelf> {
                                   widget.shelfId,
                                 ),
                                 tooltip: l10n.scrollLeft,
-                                icon: Icons.chevron_left,
+                                icon: CupertinoIcons.chevron_left,
                                 onPressed: () => _page(-1),
                               ),
                             ),
@@ -579,7 +578,7 @@ class _MediaShelfState extends State<MediaShelf> {
                                   widget.shelfId,
                                 ),
                                 tooltip: l10n.scrollRight,
-                                icon: Icons.chevron_right,
+                                icon: CupertinoIcons.chevron_right,
                                 onPressed: () => _page(1),
                               ),
                             ),
@@ -647,7 +646,7 @@ class _EnsureVisibleOnFocusState extends State<_EnsureVisibleOnFocus> {
   }
 }
 
-class _ShelfScrollBehavior extends MaterialScrollBehavior {
+class _ShelfScrollBehavior extends CupertinoScrollBehavior {
   const _ShelfScrollBehavior();
 
   @override

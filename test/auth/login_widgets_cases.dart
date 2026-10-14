@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -9,10 +12,19 @@ import 'package:rillight/media_server/models.dart';
 import 'package:rillight/player/playback_title.dart';
 
 Widget _app(Widget child) => MaterialApp(
-  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  localizationsDelegates: [
+    ...AppLocalizations.localizationsDelegates,
+    ui.GlobalCupertinoLocalizations.delegate,
+  ],
   supportedLocales: AppLocalizations.supportedLocales,
   home: Scaffold(
     body: Center(child: SizedBox(width: 400, child: child)),
+  ),
+  builder: (context, child) => ui.AppUiTheme(
+    data: Theme.of(context).brightness == Brightness.dark
+        ? ui.AppUiTheme.dark()
+        : ui.AppUiTheme.light(),
+    child: child ?? const SizedBox.shrink(),
   ),
 );
 

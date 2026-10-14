@@ -1,11 +1,14 @@
 import 'package:rillight/media_server/media_server_client.dart';
+
 import 'dart:async';
+
 import 'package:rillight/app/app_shell.dart';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+
 import '../aggregation/query/aggregation_query.dart';
 import '../aggregation/view/server_sections.dart';
 import '../aggregation/query/same_source_query.dart';
@@ -18,7 +21,6 @@ import '../auth/source_management.dart';
 import '../app/l10n/app_localizations.dart';
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
-import '../app/theme/tokens.dart';
 import '../app/tv_top_nav.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/app_empty_view.dart';
@@ -56,9 +58,10 @@ class RegionAggregationGate extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(AppLocalizations.of(context).aggregationPrivateLocked),
-                FilledButton(
+                AppButton(
                   onPressed: () =>
                       showPrivateAccess(context, AuthScope.of(context)),
+                  variant: AppButtonVariant.filled,
                   child: Text(AppLocalizations.of(context).privateUnlock),
                 ),
               ],
@@ -77,7 +80,7 @@ class RegionAggregationGate extends StatelessWidget {
 class PrivateRegionButton extends StatelessWidget {
   const PrivateRegionButton({super.key});
   @override
-  Widget build(BuildContext context) => IconButton(
+  Widget build(BuildContext context) => AppIconButton(
     key: const Key('aggregation-private-entry'),
     tooltip: AppLocalizations.of(context).aggregationPrivate,
     onPressed: () async {
@@ -89,7 +92,7 @@ class PrivateRegionButton extends StatelessWidget {
         context.push('/private');
       }
     },
-    icon: const Icon(Icons.lock_outline),
+    icon: const Icon(CupertinoIcons.lock),
   );
 }
 
@@ -365,7 +368,8 @@ class _AggregationPageState extends State<AggregationPage> {
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
       },
-      child: Material(
+      child: Container(
+        decoration: BoxDecoration(),
         child: FocusTraversalGroup(
           child: PageStorage(
             bucket: _pageStorage,
@@ -390,16 +394,18 @@ class _AggregationPageState extends State<AggregationPage> {
                             Row(
                               children: [
                                 if (GoRouter.of(context).canPop())
-                                  BackButton(onPressed: () => context.pop()),
+                                  CupertinoNavigationBarBackButton(
+                                    onPressed: () => context.pop(),
+                                  ),
                                 Expanded(
                                   child: Text(
                                     widget.search ? l.search : l.aggregation,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.headlineSmall,
+                                    style: AppUiTheme.of(context)
+                                        .textTheme
+                                        .headlineSmall,
                                   ),
                                 ),
-                                IconButton(
+                                AppIconButton(
                                   key: const Key(
                                     'aggregation-source-management',
                                   ),
@@ -408,15 +414,17 @@ class _AggregationPageState extends State<AggregationPage> {
                                     context,
                                     region: widget.region,
                                   ),
-                                  icon: const Icon(Icons.tune),
+                                  icon: const Icon(
+                                    CupertinoIcons.slider_horizontal_3,
+                                  ),
                                 ),
                                 if (widget.region == AccessRegion.private)
-                                  IconButton(
+                                  AppIconButton(
                                     tooltip: l.privateLock,
-                                    onPressed: () => AuthScope.of(
-                                      context,
-                                    ).regionAccess.lock(),
-                                    icon: const Icon(Icons.lock),
+                                    onPressed: () =>
+                                        AuthScope.of(context).regionAccess
+                                            .lock(),
+                                    icon: const Icon(CupertinoIcons.lock),
                                   ),
                                 if (widget.region == AccessRegion.ordinary)
                                   const PrivateRegionButton(),
@@ -433,25 +441,23 @@ class _AggregationPageState extends State<AggregationPage> {
                               ),
                             if (widget.search &&
                                 !PresentationScope.of(context).isTv)
-                              TextField(
+                              AppTextField(
                                 focusNode: widget.searchFocusNode,
                                 key: const Key('aggregation-keyword'),
                                 controller: _keyword,
-                                decoration: InputDecoration(
-                                  labelText: l.search,
-                                  suffixIcon: IconButton(
-                                    tooltip: l.search,
-                                    onPressed: _start,
-                                    icon: const Icon(Icons.search),
-                                  ),
-                                ),
                                 onSubmitted: (_) => _start(),
+                                label: l.search,
+                                suffix: AppIconButton(
+                                  tooltip: l.search,
+                                  onPressed: _start,
+                                  icon: const Icon(CupertinoIcons.search),
+                                ),
                               ),
                             Wrap(
                               spacing: 8,
                               runSpacing: 4,
                               children: [
-                                FilterChip(
+                                AppChoiceChip(
                                   label: Text(
                                     widget.region == AccessRegion.ordinary
                                         ? l.aggregationAllSources
@@ -464,7 +470,7 @@ class _AggregationPageState extends State<AggregationPage> {
                                   },
                                 ),
                                 for (final server in servers)
-                                  FilterChip(
+                                  AppChoiceChip(
                                     key: ValueKey(
                                       'aggregation-source-${server.id}',
                                     ),
@@ -486,7 +492,7 @@ class _AggregationPageState extends State<AggregationPage> {
                                   ),
                               ],
                             ),
-                            ExpansionTile(
+                            AppDisclosure(
                               key: const PageStorageKey(
                                 'aggregation-library-panel',
                               ),
@@ -497,7 +503,7 @@ class _AggregationPageState extends State<AggregationPage> {
                                     spacing: 8,
                                     children: [
                                       for (final library in server.libraryIds)
-                                        FilterChip(
+                                        AppChoiceChip(
                                           key: ValueKey(
                                             'aggregation-library-${server.id}-$library',
                                           ),
@@ -535,22 +541,22 @@ class _AggregationPageState extends State<AggregationPage> {
                               spacing: 12,
                               runSpacing: 8,
                               children: [
-                                DropdownButton<String>(
+                                AppDropdown<String>(
                                   value: _type ?? '',
                                   items: [
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: '',
                                       child: Text(l.aggregationAllTypes),
                                     ),
-                                    const DropdownMenuItem(
+                                    const AppMenuEntry(
                                       value: 'Movie',
                                       child: Text('电影'),
                                     ),
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: 'Episode',
                                       child: Text(l.episodesRow),
                                     ),
-                                    const DropdownMenuItem(
+                                    const AppMenuEntry(
                                       value: 'Series',
                                       child: Text('剧集'),
                                     ),
@@ -562,15 +568,15 @@ class _AggregationPageState extends State<AggregationPage> {
                                     _start();
                                   },
                                 ),
-                                DropdownButton<bool>(
+                                AppDropdown<bool>(
                                   value: _played,
                                   hint: Text(l.aggregationAllWatching),
                                   items: const [
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: true,
                                       child: Text('已看'),
                                     ),
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: false,
                                       child: Text('未看'),
                                     ),
@@ -580,31 +586,32 @@ class _AggregationPageState extends State<AggregationPage> {
                                     _start();
                                   },
                                 ),
-                                TextButton(
+                                AppButton(
                                   onPressed: () {
                                     setState(() => _played = null);
                                     _start();
                                   },
+                                  variant: AppButtonVariant.plain,
                                   child: Text(l.aggregationAllWatching),
                                 ),
-                                DropdownButton<String>(
+                                AppDropdown<String>(
                                   value: _sort,
                                   items: const [
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: 'SortName',
                                       child: Text('标题'),
                                     ),
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: 'ProductionYear',
                                       child: Text('年份'),
                                     ),
-                                    DropdownMenuItem(
+                                    AppMenuEntry(
                                       value: 'DateCreated',
                                       child: Text('最近更新'),
                                     ),
                                   ],
                                   onChanged: (value) {
-                                    setState(() => _sort = value!);
+                                    setState(() => _sort = value);
                                     _start();
                                   },
                                 ),
@@ -624,17 +631,15 @@ class _AggregationPageState extends State<AggregationPage> {
                                             _start();
                                           },
                                         )
-                                      : TextField(
+                                      : AppTextField(
                                           key: const Key('aggregation-year'),
                                           controller: _yearController,
-                                          decoration: const InputDecoration(
-                                            labelText: '年份',
-                                          ),
                                           keyboardType: TextInputType.number,
                                           onSubmitted: (value) {
                                             _year = int.tryParse(value);
                                             _start();
                                           },
+                                          label: '年份',
                                         ),
                                 ),
                                 SizedBox(
@@ -651,20 +656,18 @@ class _AggregationPageState extends State<AggregationPage> {
                                             _start();
                                           },
                                         )
-                                      : TextField(
+                                      : AppTextField(
                                           key: const Key('aggregation-genre'),
                                           controller: _genreController,
-                                          decoration: const InputDecoration(
-                                            labelText: '流派',
-                                          ),
                                           onSubmitted: (value) {
                                             _genre = value;
                                             _start();
                                           },
+                                          label: '流派',
                                         ),
                                 ),
                                 if (!widget.search) ...[
-                                  ChoiceChip(
+                                  AppChoiceChip(
                                     label: Text(l.aggregation),
                                     selected: _mode == QueryMode.browse,
                                     onSelected: (_) {
@@ -672,7 +675,7 @@ class _AggregationPageState extends State<AggregationPage> {
                                       _start();
                                     },
                                   ),
-                                  ChoiceChip(
+                                  AppChoiceChip(
                                     label: Text(l.aggregationContinue),
                                     selected:
                                         _mode == QueryMode.continueWatching,
@@ -681,7 +684,7 @@ class _AggregationPageState extends State<AggregationPage> {
                                       _start();
                                     },
                                   ),
-                                  ChoiceChip(
+                                  AppChoiceChip(
                                     label: Text(l.aggregationRecent),
                                     selected: _mode == QueryMode.recent,
                                     onSelected: (_) {
@@ -728,14 +731,16 @@ class _AggregationPageState extends State<AggregationPage> {
                               if (_mode == QueryMode.continueWatching)
                                 for (final record
                                     in query.localContinueWatching)
-                                  ListTile(
+                                  AppListTile(
                                     title: Text(l.aggregationLocalRecord),
                                     subtitle: Text(
                                       '${record.source.itemId} · ${record.positionTicks ~/ 10000000}s · ${record.remoteStatus.name}',
                                     ),
-                                    trailing: IconButton(
+                                    trailing: AppIconButton(
                                       tooltip: l.aggregationResumeActual,
-                                      icon: const Icon(Icons.play_arrow),
+                                      icon: const Icon(
+                                        CupertinoIcons.play_fill,
+                                      ),
                                       onPressed: () =>
                                           _resumeRecord(context, record),
                                     ),
@@ -752,8 +757,6 @@ class _AggregationPageState extends State<AggregationPage> {
                                                 )
                                                 .firstOrNull
                                                 ?.item ??
-                                            // Records without a currently loaded DTO still navigate
-                                            // by the recorded source, never by the selected auth.
                                             MediaItem(
                                               id: record.source.itemId,
                                               name: l.aggregationLocalRecord,
@@ -845,7 +848,7 @@ class _AggregationPageState extends State<AggregationPage> {
       return;
     }
     final scope = query.scope;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       useRootNavigator: false,
       builder: (context) => AnimatedBuilder(
@@ -864,7 +867,7 @@ class _AggregationPageState extends State<AggregationPage> {
               )
               .toList();
           return _DialogKeyboard(
-            child: AlertDialog(
+            child: AppDialog(
               title: Text(
                 AppLocalizations.of(context).aggregationRemoteConflict,
               ),
@@ -873,7 +876,7 @@ class _AggregationPageState extends State<AggregationPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     for (final record in allowed)
-                      ListTile(
+                      AppListTile(
                         title: Text(
                           '${services.where((s) => s.id == record.source.account.configuredServerId).firstOrNull?.displayName ?? ''} · ${record.positionTicks ~/ 10000000}s',
                         ),
@@ -889,11 +892,10 @@ class _AggregationPageState extends State<AggregationPage> {
                 ),
               ),
               actions: [
-                TextButton(
+                AppButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: Text(
-                    MaterialLocalizations.of(context).closeButtonLabel,
-                  ),
+                  variant: AppButtonVariant.plain,
+                  child: Text('关闭'),
                 ),
               ],
             ),
@@ -918,7 +920,7 @@ class _AggregationPageState extends State<AggregationPage> {
         ),
       ),
     );
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       useRootNavigator: false,
       builder: (context) => _ComparisonDialog(controller: controller),
@@ -928,9 +930,8 @@ class _AggregationPageState extends State<AggregationPage> {
 }
 
 void _resumeRecord(BuildContext context, WatchRecord record) {
-  final permit = AuthScope.of(
-    context,
-  ).sources.permit(record.source.account, libraryId: record.libraryId);
+  final permit = AuthScope.of(context).sources
+      .permit(record.source.account, libraryId: record.libraryId);
   if (!permit.isValid) return;
   final request = PlayerOpenRequest(
     itemId: record.source.itemId,
@@ -1027,18 +1028,20 @@ class _SourceStatus extends StatelessWidget {
         const SizedBox(
           width: 16,
           height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2),
+          child: CupertinoActivityIndicator(),
         ),
       if (source.failed)
-        TextButton(
+        AppButton(
           onPressed: retry,
+          variant: AppButtonVariant.plain,
           child: Text(AppLocalizations.of(context).aggregationRetry),
         ),
       if (source.hasMore &&
           !source.failed &&
           source.status != SourceQueryStatus.loading)
-        TextButton(
+        AppButton(
           onPressed: more,
+          variant: AppButtonVariant.plain,
           child: Text(AppLocalizations.of(context).aggregationMore),
         ),
     ],
@@ -1073,9 +1076,8 @@ class _QueryCardState extends State<_QueryCard> {
   Future<void> _resolve() async {
     try {
       final item = widget.item;
-      final permit = AuthScope.of(
-        context,
-      ).sources.permit(item.reference.account, libraryId: item.libraryId);
+      final permit = AuthScope.of(context).sources
+          .permit(item.reference.account, libraryId: item.libraryId);
       final client = await permit.dispatch(
         (c) async => c.withRequestGuard(permit.requireValid),
       );
@@ -1115,7 +1117,7 @@ class _QueryCardState extends State<_QueryCard> {
       child: Column(
         children: [
           Expanded(
-            child: InkWell(
+            child: AppSurfaceAction(
               onTap: widget.open,
               child: AspectRatio(
                 aspectRatio: 2 / 3,
@@ -1123,16 +1125,18 @@ class _QueryCardState extends State<_QueryCard> {
               ),
             ),
           ),
-          TextButton(
+          AppButton(
             onPressed: widget.open,
+            variant: AppButtonVariant.plain,
             child: Text(
               widget.item.item.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          TextButton(
+          AppButton(
             onPressed: widget.compare,
+            variant: AppButtonVariant.plain,
             child: Text(
               '${AppLocalizations.of(context).aggregationSources} · ${widget.count}',
             ),
@@ -1196,7 +1200,7 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
           scope: QueryScope(region: origin.source.account.region),
         ),
       );
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         useRootNavigator: false,
         builder: (context) =>
@@ -1204,10 +1208,9 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
       );
     } catch (_) {
       if (mounted && origin.permit.isValid) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(AppLocalizations.of(context).aggregationAllFailed),
-          ),
+        showAppNotice(
+          context,
+          AppLocalizations.of(context).aggregationAllFailed,
         );
       }
     } finally {
@@ -1226,8 +1229,8 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
         .project(origin.source.account.region)
         .where((s) => s.id == origin.source.account.configuredServerId)
         .firstOrNull;
-    return Material(
-      borderRadius: BorderRadius.circular(12),
+    return Container(
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -1241,10 +1244,11 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            FilledButton.icon(
+            AppButton.icon(
               onPressed: _loading ? null : _show,
-              icon: const Icon(Icons.compare_arrows),
+              icon: const Icon(CupertinoIcons.arrow_left_right),
               label: Text(AppLocalizations.of(context).aggregationSources),
+              variant: AppButtonVariant.filled,
             ),
           ],
         ),
@@ -1291,8 +1295,9 @@ class _ComparisonDialog extends StatelessWidget {
         controller.origin!.reference.account.region,
       );
       return _DialogKeyboard(
-        child: AlertDialog(
+        child: AppDialog(
           title: Text(l.aggregationSources),
+          maxWidth: 688,
           content: SizedBox(
             width: 640,
             child: SingleChildScrollView(
@@ -1318,7 +1323,7 @@ class _ComparisonDialog extends StatelessWidget {
                       more: () => controller.loadMore(source.key),
                     ),
                   for (final comparison in controller.comparisons)
-                    ListTile(
+                    AppListTile(
                       title: Text(
                         '${comparison.decision.confirmed ? l.aggregationConfirmed : l.aggregationCandidate} · ${comparison.source.item.name}',
                       ),
@@ -1330,9 +1335,10 @@ class _ComparisonDialog extends StatelessWidget {
                           episode != null &&
                               comparison.decision.confirmed &&
                               comparison.source.item.isSeries
-                          ? TextButton(
+                          ? AppButton(
                               onPressed: () =>
                                   _lookupEpisode(context, comparison.source),
+                              variant: AppButtonVariant.plain,
                               child: Text(l.aggregationEpisodeLookup),
                             )
                           : null,
@@ -1342,7 +1348,7 @@ class _ComparisonDialog extends StatelessWidget {
                       },
                     ),
                   for (final result in controller.episodes)
-                    ListTile(
+                    AppListTile(
                       title: Text(
                         result.lookup.status == EpisodeLookupStatus.missing
                             ? l.aggregationMissingEpisode
@@ -1358,7 +1364,7 @@ class _ComparisonDialog extends StatelessWidget {
                       trailing:
                           result.lookup.status ==
                               EpisodeLookupStatus.queryFailed
-                          ? TextButton(
+                          ? AppButton(
                               onPressed: () => _lookupEpisode(
                                 context,
                                 controller.comparisons
@@ -1368,6 +1374,7 @@ class _ComparisonDialog extends StatelessWidget {
                                     )
                                     .source,
                               ),
+                              variant: AppButtonVariant.plain,
                               child: Text(l.aggregationRetry),
                             )
                           : null,
@@ -1400,9 +1407,10 @@ class _ComparisonDialog extends StatelessWidget {
             ),
           ),
           actions: [
-            TextButton(
+            AppButton(
               onPressed: () => Navigator.pop(context),
-              child: Text(MaterialLocalizations.of(context).closeButtonLabel),
+              variant: AppButtonVariant.plain,
+              child: Text('关闭'),
             ),
           ],
         ),
@@ -1479,7 +1487,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
   }
 
   Widget _segments(AppLocalizations l) {
-    final track = Theme.of(context).colorScheme.surfaceContainerHigh;
+    final track = AppUiTheme.of(context).colorScheme.surfaceContainerHigh;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: track.withValues(alpha: 0.55),
@@ -1517,23 +1525,22 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     _AggregationSegment value,
   ) {
     final selected = _segment == value;
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    return TextButton(
+    return AppButton(
       key: Key(keyName),
       onPressed: () => setState(() => _segment = value),
-      style: TextButton.styleFrom(
+      style: AppButtonStyle(
         foregroundColor: selected ? scheme.onSurface : scheme.onSurfaceVariant,
-        backgroundColor: selected ? scheme.surface : Colors.transparent,
+        backgroundColor: selected ? scheme.surface : const Color(0x00000000),
         textStyle: theme.textTheme.labelLarge?.copyWith(
           fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
         ),
-        visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         minimumSize: const Size(0, 32),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: const StadiumBorder(),
       ),
+      variant: AppButtonVariant.plain,
       child: Text(label),
     );
   }
@@ -1554,7 +1561,8 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     if (PresentationScope.of(context).isTv) {
       return _tvBuild(context, loader, servers, rows);
     }
-    return Material(
+    return Container(
+      decoration: BoxDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1573,14 +1581,14 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
                     child: _segments(l),
                   ),
                 ),
-                IconButton(
+                AppIconButton(
                   key: const Key('aggregation-source-management'),
                   tooltip: l.sourceManagement,
                   onPressed: () => showSourceManagement(
                     context,
                     region: AccessRegion.ordinary,
                   ),
-                  icon: const Icon(Icons.tune),
+                  icon: const Icon(CupertinoIcons.slider_horizontal_3),
                 ),
                 const PrivateRegionButton(),
               ],
@@ -1600,7 +1608,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
   ) {
     final l = AppLocalizations.of(context);
     if (loader == null || (loader.loading && servers.isEmpty)) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: CupertinoActivityIndicator());
     }
     if (servers.isEmpty) {
       return AppEmptyView(
@@ -1700,19 +1708,19 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             l.resumePlay,
             'aggregation-segment-continue',
             _AggregationSegment.continueWatching,
-            Icons.history_rounded,
+            CupertinoIcons.clock,
           ),
           segment(
             l.filterFavorite,
             'aggregation-segment-favorites',
             _AggregationSegment.favorites,
-            Icons.favorite_border_rounded,
+            CupertinoIcons.heart,
           ),
           segment(
             l.libraries,
             'aggregation-segment-libraries',
             _AggregationSegment.libraries,
-            Icons.video_library_outlined,
+            CupertinoIcons.rectangle_stack,
           ),
         ],
       ),
@@ -1721,13 +1729,13 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     if (loader == null || (loader.loading && servers.isEmpty)) {
       body = SizedBox(
         height: 260 * s,
-        child: const Center(child: CircularProgressIndicator()),
+        child: const Center(child: CupertinoActivityIndicator()),
       );
     } else if (servers.isEmpty) {
       body = SizedBox(
         height: 300 * s,
         child: TvEmptyState(
-          icon: Icons.dns_outlined,
+          icon: CupertinoIcons.rectangle_stack,
           message: '没有已登录的服务器',
           action: TvAction(
             emphasized: true,
@@ -1752,8 +1760,8 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
         ],
       );
     }
-    return Material(
-      type: MaterialType.transparency,
+    return Container(
+      decoration: BoxDecoration(),
       child: MediaImageScrollListener(
         child: ListView(
           key: PageStorageKey('aggregation-$_segment'),
@@ -1956,9 +1964,10 @@ class _AggregationSearchState extends State<_AggregationSearch> {
 
   void _serversChanged() {
     if (_term.isEmpty || !mounted) return;
-    final ids = AuthScope.of(
-      context,
-    ).sources.project(AccessRegion.ordinary).map((server) => server.id).toSet();
+    final ids = AuthScope.of(context).sources
+        .project(AccessRegion.ordinary)
+        .map((server) => server.id)
+        .toSet();
     final next = [
       for (final row in _rows)
         if (ids.contains(row.serverId)) row,
@@ -2055,9 +2064,10 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         if (row.serverId != server.id) row,
     ];
     if (hit != null) next.add(hit);
-    final order = AuthScope.of(
-      context,
-    ).sources.project(AccessRegion.ordinary).map((item) => item.id).toList();
+    final order = AuthScope.of(context).sources
+        .project(AccessRegion.ordinary)
+        .map((item) => item.id)
+        .toList();
     final byId = {for (final row in next) row.serverId: row};
     setState(() {
       _rows = [
@@ -2129,9 +2139,8 @@ class _AggregationSearchState extends State<_AggregationSearch> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final presentation = PresentationScope.of(context);
-    final servers = AuthScope.of(
-      context,
-    ).sources.project(AccessRegion.ordinary);
+    final servers = AuthScope.of(context).sources
+        .project(AccessRegion.ordinary);
     final visible = [
       for (final row in _rows)
         if (row.items.isNotEmpty || row.error != null || row.loading) row,
@@ -2145,52 +2154,47 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             controller: _keyword,
             onSubmitted: _submit,
           )
-        : TextField(
+        : AppTextField(
             key: const Key('aggregation-keyword'),
             focusNode: widget.focusNode,
             controller: _keyword,
             autofocus: widget.focusNode == null,
             textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: l.searchHint,
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: _keyword,
-                builder: (context, value, _) {
-                  // 输入即搜，不再单设提交按钮；查询中以转圈代替清除钮。
-                  if (_searching && value.text.isNotEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(15),
-                      child: SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-                  if (value.text.isEmpty) return const SizedBox.shrink();
-                  return IconButton(
-                    key: const Key('aggregation-search-clear'),
-                    tooltip: MaterialLocalizations.of(
-                      context,
-                    ).deleteButtonTooltip,
-                    onPressed: () {
-                      _keyword.clear();
-                      _submit();
-                      widget.focusNode?.requestFocus();
-                    },
-                    icon: const Icon(Icons.close_rounded),
-                  );
-                },
-              ),
-            ),
             onSubmitted: (_) => _submit(),
+            placeholder: l.searchHint,
+            prefix: const Icon(CupertinoIcons.search),
+            suffix: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _keyword,
+              builder: (context, value, _) {
+                if (_searching && value.text.isNotEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(15),
+                    child: SizedBox.square(
+                      dimension: 18,
+                      child: CupertinoActivityIndicator(),
+                    ),
+                  );
+                }
+                if (value.text.isEmpty) return const SizedBox.shrink();
+                return AppIconButton(
+                  key: const Key('aggregation-search-clear'),
+                  tooltip: '删除',
+                  onPressed: () {
+                    _keyword.clear();
+                    _submit();
+                    widget.focusNode?.requestFocus();
+                  },
+                  icon: const Icon(CupertinoIcons.xmark),
+                );
+              },
+            ),
           );
-    return Material(
+    return Container(
+      decoration: BoxDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            // 桌面搜索框与下方结果分区同取 24 页边距，左缘对齐。
             padding: EdgeInsets.fromLTRB(
               presentation.isDesktop ? AppSpacing.page : 16,
               presentation.isDesktop && widget.clearOfDesktopBar ? 64 : 12,
@@ -2203,32 +2207,31 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                 Row(
                   children: [
                     if (!presentation.isDesktop)
-                      BackButton(onPressed: () => context.pop()),
+                      CupertinoNavigationBarBackButton(
+                        onPressed: () => context.pop(),
+                      ),
                     Expanded(child: field),
                     if (servers.isNotEmpty) ...[
                       const SizedBox(width: AppSpacing.xxs),
-                      IconButton(
+                      AppIconButton(
                         key: const Key('aggregation-search-filters'),
                         tooltip: l.searchServerFilter,
-                        isSelected: _filtersOpen || _servers != null,
                         onPressed: () =>
                             setState(() => _filtersOpen = !_filtersOpen),
                         icon: Icon(
-                          Icons.filter_list_rounded,
+                          CupertinoIcons.line_horizontal_3_decrease,
                           color: _servers == null
                               ? null
-                              : Theme.of(context).colorScheme.primary,
+                              : AppUiTheme.of(context).colorScheme.primary,
                         ),
                       ),
                     ],
                     if (widget.onClose != null)
-                      IconButton(
+                      AppIconButton(
                         key: SearchOverlay.closeKey,
-                        tooltip: MaterialLocalizations.of(
-                          context,
-                        ).closeButtonTooltip,
+                        tooltip: '关闭',
                         onPressed: widget.onClose,
-                        icon: const Icon(Icons.close_rounded),
+                        icon: const Icon(CupertinoIcons.xmark),
                       ),
                   ],
                 ),
@@ -2296,7 +2299,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                   key: const Key('aggregation-keyword'),
                   autofocus: true,
                   pill: true,
-                  leading: const Icon(Icons.search_rounded),
+                  leading: const Icon(CupertinoIcons.search),
                   label: l.searchHint,
                   controller: _keyword,
                   onSubmitted: _submit,
@@ -2308,7 +2311,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                   key: const Key('aggregation-search-filters'),
                   pill: true,
                   selected: _filtersOpen || _servers != null,
-                  leading: const Icon(Icons.filter_list_rounded),
+                  leading: const Icon(
+                    CupertinoIcons.line_horizontal_3_decrease,
+                  ),
                   onPressed: () => setState(() => _filtersOpen = !_filtersOpen),
                   child: Text(l.searchServerFilter),
                 ),
@@ -2328,8 +2333,8 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                     selected: chosen(server.id),
                     leading: Icon(
                       chosen(server.id)
-                          ? Icons.check_rounded
-                          : Icons.add_rounded,
+                          ? CupertinoIcons.check_mark
+                          : CupertinoIcons.plus,
                     ),
                     onPressed: () =>
                         _toggleServer(servers, server.id, !chosen(server.id)),
@@ -2346,20 +2351,20 @@ class _AggregationSearchState extends State<_AggregationSearch> {
       body = SizedBox(
         height: 280 * s,
         child: TvEmptyState(
-          icon: Icons.search_rounded,
+          icon: CupertinoIcons.search,
           message: l.searchEmptyQuery,
         ),
       );
     } else if (_searching && visible.isEmpty) {
       body = SizedBox(
         height: 260 * s,
-        child: const Center(child: CircularProgressIndicator()),
+        child: const Center(child: CupertinoActivityIndicator()),
       );
     } else if (visible.isEmpty) {
       body = SizedBox(
         height: 280 * s,
         child: TvEmptyState(
-          icon: Icons.search_off_rounded,
+          icon: CupertinoIcons.search,
           message: l.searchNoResults,
         ),
       );
@@ -2374,7 +2379,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                 failed == visible.length
                     ? l.aggregationAllFailed
                     : l.aggregationPartialFailure,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: TextStyle(
+                  color: AppUiTheme.of(context).colorScheme.error,
+                ),
               ),
             ),
           for (final row in visible)
@@ -2388,11 +2395,11 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                       ? null
                       : Text(
                           '${row.items.length}',
-                          style: Theme.of(context).textTheme.labelMedium
+                          style: AppUiTheme.of(context).textTheme.labelMedium
                               ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
+                                color: AppUiTheme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                         ),
                   padding: EdgeInsets.fromLTRB(gutter, 14 * s, gutter, 0),
@@ -2425,8 +2432,8 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         ],
       );
     }
-    return Material(
-      type: MaterialType.transparency,
+    return Container(
+      decoration: BoxDecoration(),
       child: ListView(
         key: const PageStorageKey('aggregation-search'),
         padding: EdgeInsets.only(bottom: tvSafeVertical(size.height)),
@@ -2439,16 +2446,16 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     final l = AppLocalizations.of(context);
     if (_term.isEmpty) {
       return AppEmptyView(
-        icon: Icons.search_rounded,
+        icon: CupertinoIcons.search,
         message: l.searchEmptyQuery,
       );
     }
     if (_searching && visible.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: CupertinoActivityIndicator());
     }
     if (visible.isEmpty) {
       return AppEmptyView(
-        icon: Icons.search_off_rounded,
+        icon: CupertinoIcons.search,
         message: l.searchNoResults,
       );
     }

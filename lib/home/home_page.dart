@@ -1,12 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -127,20 +126,19 @@ class _HomePageState extends State<HomePage> {
       return null;
     }
     // 与「更多」同一层级的次要色，不和分区标题抢视线。
-    return IconButton(
+    return AppIconButton(
       key: homeRefreshKey,
       tooltip: l10n.refresh,
-      visualDensity: VisualDensity.compact,
-      iconSize: 20,
-      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      size: 20,
+      color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
       onPressed: _refreshing ? null : _refresh,
       icon: _refreshing
           ? const SizedBox(
               width: 18,
               height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: CupertinoActivityIndicator(),
             )
-          : const Icon(Icons.refresh_rounded),
+          : const Icon(CupertinoIcons.arrow_clockwise),
     );
   }
 
@@ -305,9 +303,8 @@ class _HomePageState extends State<HomePage> {
           onNotification: (notification) {
             if (notification.depth == 0 &&
                 notification.metrics.axis == Axis.vertical) {
-              HomeScrollNotification(
-                notification.metrics.pixels > 24,
-              ).dispatch(context);
+              HomeScrollNotification(notification.metrics.pixels > 24)
+                  .dispatch(context);
             }
             return false;
           },

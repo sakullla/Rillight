@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -125,24 +128,28 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(HomeHero),
-          matching: find.widgetWithText(OutlinedButton, '详情'),
+          matching: find.widgetWithText(ui.AppButton, '详情'),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
           of: find.byType(HomeHero),
-          matching: find.byType(FilledButton),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is ui.AppButton &&
+                widget.variant == ui.AppButtonVariant.filled,
+          ),
         ),
         findsOneWidget,
       );
       expect(
         tester.widget(find.byKey(CatalogKeys.heroPrev)),
-        isA<IconButton>(),
+        isA<ui.AppIconButton>(),
       );
       expect(
         tester.widget(find.byKey(CatalogKeys.heroNext)),
-        isA<IconButton>(),
+        isA<ui.AppIconButton>(),
       );
       expect(find.byKey(CatalogKeys.heroDot(3)), findsOneWidget);
       expect(find.byKey(CatalogKeys.heroDot(4)), findsNothing);
@@ -153,7 +160,12 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const Key('home-hero-card')),
-          matching: find.byType(TextButton),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is ui.AppButton &&
+                widget.variant == ui.AppButtonVariant.plain &&
+                widget.child is Text,
+          ),
         ),
         findsNothing,
       );
@@ -326,7 +338,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('zh', 'CN'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         theme: AppTheme.dark(),
         home: ValueListenableBuilder<bool>(
@@ -344,6 +359,12 @@ void main() {
               onTap: (_) {},
             ),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -366,7 +387,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('zh', 'CN'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         theme: AppTheme.dark(),
         home: Scaffold(
@@ -379,9 +403,18 @@ void main() {
               detail: '货架加载失败',
             ),
             onRetry: () => retried += 1,
-            headerAction: const Icon(Icons.refresh, key: homeRefreshKey),
+            headerAction: const Icon(
+              ui.CupertinoIcons.arrow_clockwise,
+              key: homeRefreshKey,
+            ),
             onTap: _ignoreItem,
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -412,7 +445,10 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             locale: const Locale('zh', 'CN'),
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             supportedLocales: AppLocalizations.supportedLocales,
             theme: AppTheme.dark(),
             home: Scaffold(
@@ -426,6 +462,12 @@ void main() {
                 ],
                 onTap: _ignoreItem,
               ),
+            ),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
             ),
           ),
         );

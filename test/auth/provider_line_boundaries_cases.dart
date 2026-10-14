@@ -1,4 +1,5 @@
 import '../helpers/region_access_fixture.dart';
+
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -126,28 +127,25 @@ void main() {
     },
   );
 
-  test(
-    'cancelled Emby prelogin drops its late response and publishes no credential',
-    () async {
-      final login = ProviderConnectController(
-        pollInterval: const Duration(milliseconds: 10),
-        auth: auth,
-      );
-      adapter.gate = Completer<void>();
-      final pending = login.password(
-        primary.baseUrl.toString(),
-        'alice',
-        'correct-horse',
-      );
-      await adapter.arrived.future;
-      login.dispose();
-      adapter.gate!.complete();
-      await pending;
-      expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
-      expect(auth.session, isNull);
-      expect(auth.client.hasSession, isFalse);
-    },
-  );
+  test('cancelled Emby prelogin drops its late response and publishes no credential', () async {
+    final login = ProviderConnectController(
+      pollInterval: const Duration(milliseconds: 10),
+      auth: auth,
+    );
+    adapter.gate = Completer<void>();
+    final pending = login.password(
+      primary.baseUrl.toString(),
+      'alice',
+      'correct-horse',
+    );
+    await adapter.arrived.future;
+    login.dispose();
+    adapter.gate!.complete();
+    await pending;
+    expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+    expect(auth.session, isNull);
+    expect(auth.client.hasSession, isFalse);
+  });
 
   test(
     'Emby prelogin guard cloning preserves both authority guards and transport',

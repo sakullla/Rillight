@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -9,7 +9,6 @@ import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/models.dart';
@@ -256,7 +255,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         final topInset = sectionChildren != null && !bannerLeads
             ? MediaQuery.viewPaddingOf(context).top + 56 + AppSpacing.md
             : 0.0;
-        final page = RefreshIndicator(
+        final page = AppRefresh(
           onRefresh: () => catalog.reload(showCachedFirst: false),
           child: ListView.builder(
             key: const PageStorageKey('mobile-home-scroll'),
@@ -366,7 +365,7 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final label = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -382,7 +381,10 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
         if (onMore != null)
-          Icon(Icons.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+          Icon(
+            CupertinoIcons.chevron_right,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
       ],
     );
     // 区块之间的垂直节奏由首页统一负责，标题只留与卡片的下间距。
@@ -392,9 +394,9 @@ class _SectionTitle extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: onMore == null
             ? label
-            : Material(
-                type: MaterialType.transparency,
-                child: InkWell(
+            : Container(
+                decoration: BoxDecoration(),
+                child: AppSurfaceAction(
                   key: moreKey,
                   onTap: onMore,
                   borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -502,7 +504,7 @@ class _WideCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final light = scheme.brightness == Brightness.light;
     final progress = item.playbackProgress;
@@ -519,9 +521,11 @@ class _WideCard extends StatelessWidget {
       padding: const EdgeInsets.only(right: AppSpacing.xs),
       child: SizedBox(
         width: width,
-        child: Material(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
+          ),
           clipBehavior: Clip.antiAlias,
           child: MobilePressable(
             key: CatalogKeys.item(item.id),
@@ -547,21 +551,19 @@ class _WideCard extends StatelessWidget {
                         if (item.canResume)
                           Positioned.fill(
                             child: Center(
-                              child: IconButton(
+                              child: AppIconButton(
                                 key: Key('phone-resume-play-${item.id}'),
                                 tooltip: l10n.resumePlay,
-                                style: IconButton.styleFrom(
+                                style: AppButtonStyle(
                                   minimumSize: const Size(48, 48),
                                   fixedSize: const Size(48, 48),
                                   padding: EdgeInsets.zero,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
                                   backgroundColor: light
                                       ? scheme.primary
-                                      : Colors.white,
+                                      : const Color(0xffffffff),
                                   foregroundColor: light
                                       ? scheme.onPrimary
-                                      : Colors.black,
+                                      : const Color(0xff000000),
                                   shape: const CircleBorder(),
                                 ),
                                 onPressed: () => context.push<void>(
@@ -571,7 +573,7 @@ class _WideCard extends StatelessWidget {
                                     autoResume: true,
                                   ),
                                 ),
-                                icon: const Icon(Icons.play_arrow_rounded),
+                                icon: const Icon(CupertinoIcons.play_fill),
                               ),
                             ),
                           ),
@@ -594,7 +596,8 @@ class _WideCard extends StatelessWidget {
                                       ? scheme.inverseSurface.withValues(
                                           alpha: 0.28,
                                         )
-                                      : Colors.black.withValues(alpha: 0.45),
+                                      : const Color(0xff000000)
+                                            .withValues(alpha: 0.45),
                                   child: FractionallySizedBox(
                                     alignment: Alignment.centerLeft,
                                     widthFactor: progress.clamp(0.0, 1.0),
@@ -608,7 +611,7 @@ class _WideCard extends StatelessWidget {
                           Positioned(
                             top: 0,
                             right: 0,
-                            child: Tooltip(
+                            child: AppTooltip(
                               message: l10n.removeFromResume,
                               child: GestureDetector(
                                 key: CatalogKeys.removeFromResume(item.id),
@@ -634,11 +637,11 @@ class _WideCard extends StatelessWidget {
                                         width: 28,
                                         height: 28,
                                         child: Icon(
-                                          Icons.close_rounded,
+                                          CupertinoIcons.xmark,
                                           size: 16,
                                           color: light
                                               ? scheme.onSurface
-                                              : Colors.white,
+                                              : const Color(0xffffffff),
                                         ),
                                       ),
                                     ),
@@ -675,7 +678,7 @@ class _WideCard extends StatelessWidget {
                           height: 1.2,
                         ),
                       ),
-                      // 进度百分比由角标承载,页脚只保留季集/集名或年份。
+
                       if (meta.isNotEmpty)
                         Text(
                           meta,
@@ -716,7 +719,7 @@ class _PhoneLibraryEntry extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final screen = MediaQuery.sizeOf(context).width;
     // 与继续观看横卡同宽：一屏一张多，露出下一张。
     final cardWidth = phoneHomeWideCardWidth(screen);
@@ -780,7 +783,7 @@ class _PhoneLibraryEntry extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     color: hasImage
-                                        ? Colors.white
+                                        ? const Color(0xffffffff)
                                         : theme.colorScheme.onSurface,
                                     fontWeight: FontWeight.w600,
                                     height: 1.2,

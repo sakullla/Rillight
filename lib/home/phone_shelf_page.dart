@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/emby/catalog_cache.dart';
@@ -423,19 +422,23 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final title = _title(l10n);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          if (_filterable)
-            CatalogFilterButton(
-              watch: _watch,
-              onChanged: _selectWatch,
-              buttonKey: const Key('phone-shelf-filter'),
-            ),
-        ],
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        transitionBetweenRoutes: false,
+        middle: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_filterable)
+              CatalogFilterButton(
+                watch: _watch,
+                onChanged: _selectWatch,
+                buttonKey: const Key('phone-shelf-filter'),
+              ),
+          ],
+        ),
       ),
-      body: _body(l10n),
+      child: _body(l10n),
     );
   }
 
@@ -487,8 +490,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
             ),
             scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
             slivers: [
-              if (_refreshing)
-                const SliverToBoxAdapter(child: LinearProgressIndicator()),
+              if (_refreshing) const SliverToBoxAdapter(child: AppLoadingBar()),
               if (_refreshError != null)
                 SliverToBoxAdapter(
                   child: MobileFailureState(
@@ -547,15 +549,14 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
               else if (_hasMore && _refreshError == null)
                 SliverToBoxAdapter(
                   child: Center(
-                    child: TextButton(
+                    child: AppButton(
                       key: PhoneShelfPage.loadMoreKey,
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
+                      style: AppButtonStyle(minimumSize: const Size(48, 48)),
                       onPressed:
                           _loadingMore || _refreshing || _refreshError != null
                           ? null
                           : () => unawaited(_loadMore()),
+                      variant: AppButtonVariant.plain,
                       child: Text(l10n.episodesLoadMore),
                     ),
                   ),
@@ -564,7 +565,7 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                 const SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.all(AppSpacing.md),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: Center(child: CupertinoActivityIndicator()),
                   ),
                 ),
             ],

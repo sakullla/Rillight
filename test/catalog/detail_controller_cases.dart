@@ -99,9 +99,8 @@ void main() {
         await episodesReady.future.timeout(const Duration(seconds: 5));
         expect(controller.seasonsLoading, isTrue);
         int episodeRequests() => server.requests.where((entry) {
-          final query = Uri.parse(
-            entry.substring(entry.indexOf(' ') + 1),
-          ).queryParameters;
+          final query = Uri.parse(entry.substring(entry.indexOf(' ') + 1))
+              .queryParameters;
           return query['ParentId'] == 'season-friends-1' &&
               query['IncludeItemTypes'] == 'Episode';
         }).length;

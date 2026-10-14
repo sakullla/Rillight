@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -56,13 +59,22 @@ void main() {
         try {
           await tester.pumpWidget(
             MaterialApp(
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              localizationsDelegates: [
+                ...AppLocalizations.localizationsDelegates,
+                ui.GlobalCupertinoLocalizations.delegate,
+              ],
               supportedLocales: AppLocalizations.supportedLocales,
               home: AuthScope(
                 controller: auth,
                 child: override
                     ? ShelfClientOverride(client: client, child: page)
                     : page,
+              ),
+              builder: (context, child) => ui.AppUiTheme(
+                data: Theme.of(context).brightness == Brightness.dark
+                    ? ui.AppUiTheme.dark()
+                    : ui.AppUiTheme.light(),
+                child: child ?? const SizedBox.shrink(),
               ),
             ),
           );

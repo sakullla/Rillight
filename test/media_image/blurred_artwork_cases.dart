@@ -1,4 +1,7 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
+
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -36,6 +39,13 @@ Widget _subject(Uint8List bytes, {double width = 1600, double height = 800}) =>
           height: height,
           child: BlurredArtwork(bytes: bytes, sigma: 32, opacity: .5),
         ),
+      ),
+      localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+      builder: (context, child) => ui.AppUiTheme(
+        data: Theme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: child ?? const SizedBox.shrink(),
       ),
     );
 

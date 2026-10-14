@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -29,11 +32,14 @@ void main() {
         MaterialApp(
           theme: AppTheme.phoneLight(),
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Builder(
             builder: (context) => Scaffold(
-              body: TextButton(
+              body: ui.AppButton(
                 onPressed: () => showModalBottomSheet<void>(
                   context: context,
                   isScrollControlled: true,
@@ -52,6 +58,12 @@ void main() {
                 child: const Text('open'),
               ),
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );
@@ -99,11 +111,14 @@ void main() {
       MaterialApp(
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: Builder(
           builder: (context) => Scaffold(
-            body: TextButton(
+            body: ui.AppButton(
               onPressed: () => showDialog<void>(
                 context: context,
                 builder: (_) => Dialog(
@@ -118,6 +133,12 @@ void main() {
               child: const Text('open'),
             ),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -151,11 +172,14 @@ void main() {
         MaterialApp(
           theme: AppTheme.dark(),
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Builder(
             builder: (context) => Scaffold(
-              body: TextButton(
+              body: ui.AppButton(
                 onPressed: () => showDialog<void>(
                   context: context,
                   builder: (_) => Dialog(
@@ -170,6 +194,12 @@ void main() {
                 child: const Text('open'),
               ),
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );
@@ -203,7 +233,10 @@ void main() {
         MaterialApp(
           theme: AppTheme.dark(),
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Center(
             child: LibraryFilterPanel(
@@ -212,6 +245,12 @@ void main() {
               initial: const ShelfFilters(),
               onApply: (_, _) {},
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );

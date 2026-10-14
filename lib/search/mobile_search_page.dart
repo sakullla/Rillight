@@ -1,13 +1,12 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart' hide SearchController;
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/models.dart';
@@ -62,9 +61,8 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
   }
 
   void _remember(String value) {
-    PageStorage.maybeOf(
-      context,
-    )?.writeState(context, value, identifier: _termId);
+    PageStorage.maybeOf(context)
+        ?.writeState(context, value, identifier: _termId);
   }
 
   void _onChanged(String value) {
@@ -110,7 +108,7 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
           child: Row(
             children: [
               Expanded(
-                child: TextField(
+                child: AppTextField(
                   key: const Key('mobile-search-field'),
                   controller: _text,
                   focusNode: _focus,
@@ -118,34 +116,30 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
                   scrollPadding: const EdgeInsets.all(20),
                   onSubmitted: (_) => _submit(),
                   onChanged: _onChanged,
-                  decoration: InputDecoration(
-                    hintText: l.searchHint,
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: _text,
-                      builder: (context, value, _) => Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (value.text.isNotEmpty)
-                            IconButton(
-                              key: const Key('mobile-search-clear'),
-                              tooltip: MaterialLocalizations.of(
-                                context,
-                              ).deleteButtonTooltip,
-                              onPressed: () {
-                                _text.clear();
-                                _onChanged('');
-                                _focus.requestFocus();
-                              },
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          IconButton(
-                            tooltip: l.search,
-                            onPressed: _submit,
-                            icon: const Icon(Icons.arrow_forward_rounded),
+                  placeholder: l.searchHint,
+                  prefix: const Icon(CupertinoIcons.search),
+                  suffix: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _text,
+                    builder: (context, value, _) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (value.text.isNotEmpty)
+                          AppIconButton(
+                            key: const Key('mobile-search-clear'),
+                            tooltip: '删除',
+                            onPressed: () {
+                              _text.clear();
+                              _onChanged('');
+                              _focus.requestFocus();
+                            },
+                            icon: const Icon(CupertinoIcons.xmark),
                           ),
-                        ],
-                      ),
+                        AppIconButton(
+                          tooltip: l.search,
+                          onPressed: _submit,
+                          icon: const Icon(CupertinoIcons.arrow_right),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -214,7 +208,7 @@ class _SearchBody extends StatelessWidget {
         onAction: onFocusQuery,
       );
     }
-    return RefreshIndicator(
+    return AppRefresh(
       onRefresh: () => c.submit(c.term),
       child: MediaImageScrollListener(
         child: LayoutBuilder(
@@ -234,7 +228,7 @@ class _SearchBody extends StatelessWidget {
                   slivers: [
                     if (c.refreshingFirstPage)
                       const SliverToBoxAdapter(
-                        child: LinearProgressIndicator(
+                        child: AppLoadingBar(
                           key: Key('mobile-search-refreshing'),
                         ),
                       ),
@@ -252,9 +246,7 @@ class _SearchBody extends StatelessWidget {
                       width: constraints.maxWidth - AppSpacing.md * 2,
                     ),
                     if (c.loadingMore)
-                      const SliverToBoxAdapter(
-                        child: LinearProgressIndicator(),
-                      ),
+                      const SliverToBoxAdapter(child: AppLoadingBar()),
                     if (c.pageError != null)
                       SliverToBoxAdapter(
                         child: _PageFailure(
@@ -267,15 +259,16 @@ class _SearchBody extends StatelessWidget {
                         c.hasMore &&
                         c.liveFirstPageReady)
                       SliverToBoxAdapter(
-                        child: FilledButton(
+                        child: AppButton(
                           key: const Key('mobile-search-load-more'),
-                          style: FilledButton.styleFrom(
+                          style: AppButtonStyle(
                             minimumSize: const Size(
                               AppSpacing.huge,
                               AppSpacing.huge,
                             ),
                           ),
                           onPressed: c.loadingMore ? null : c.loadMore,
+                          variant: AppButtonVariant.filled,
                           child: Text(label.mobileLoadMore),
                         ),
                       ),
@@ -344,12 +337,13 @@ class _PageFailure extends StatelessWidget {
           children: [
             Text(message),
             const SizedBox(height: 8),
-            FilledButton(
+            AppButton(
               key: retryKey,
-              style: FilledButton.styleFrom(
+              style: AppButtonStyle(
                 minimumSize: const Size(AppSpacing.huge, AppSpacing.huge),
               ),
               onPressed: onRetry,
+              variant: AppButtonVariant.filled,
               child: Text(l.retry),
             ),
           ],

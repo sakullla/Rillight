@@ -1,4 +1,7 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/case_shard.dart';
+
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -193,13 +196,22 @@ void main() {
       MaterialApp(
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         theme: AppTheme.dark(),
         home: Scaffold(
           body: AuthScope(
             controller: auth,
             child: const ItemDetailPage(itemId: _series),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -378,7 +390,7 @@ void main() {
     final toggle = find.byKey(CatalogKeys.episodePlayed(id));
     await tester.ensureVisible(toggle);
     await tester.pump();
-    expect(tester.widget<IconButton>(toggle).tooltip, '标记已看');
+    expect(tester.widget<ui.AppIconButton>(toggle).tooltip, '标记已看');
 
     await tester.tap(toggle);
     await settle(tester);
@@ -392,7 +404,7 @@ void main() {
     );
     expect(
       tester
-          .widget<IconButton>(find.byKey(CatalogKeys.episodePlayed(id)))
+          .widget<ui.AppIconButton>(find.byKey(CatalogKeys.episodePlayed(id)))
           .tooltip,
       '标记未看',
     );
@@ -412,9 +424,8 @@ void main() {
       detailRequests.every(
         (request) =>
             request.contains('People') ||
-            Uri.parse(
-                  request.substring(request.indexOf(' ') + 1),
-                ).queryParameters['Fields'] ==
+            Uri.parse(request.substring(request.indexOf(' ') + 1))
+                    .queryParameters['Fields'] ==
                 MediaServerClient.itemFields,
       ),
       isTrue,
@@ -606,7 +617,7 @@ void main() {
           .first;
       await tester.scrollUntilVisible(more, 600, scrollable: pageScroll);
       expect(more, findsOneWidget);
-      expect(tester.widget(more), isA<OutlinedButton>());
+      expect(tester.widget(more), isA<ui.AppButton>());
       expect(
         find.descendant(of: more, matching: find.text('加载更多')),
         findsOneWidget,

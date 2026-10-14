@@ -1,11 +1,16 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
 import '../helpers/region_access_fixture.dart';
+
 import 'package:dio/dio.dart';
 import 'package:rillight/player/playback_persistence.dart';
 import 'package:rillight/emby/emby_codec.dart';
+
 import 'dart:async';
 import 'dart:io';
+
 import 'package:rillight/player/source_switch_menu.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_host_command.dart';
@@ -27,6 +32,7 @@ import 'package:rillight/aggregation/query/aggregation_query.dart';
 import 'package:rillight/aggregation/query/same_source_query.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_process_control.dart';
+
 import '../player/fake_player_process_control.dart';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -848,9 +854,18 @@ void main() {
       });
       await tester.pumpWidget(
         MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(body: SourceSwitchButton(controller: controller)),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       );
       expect(find.text('手动切换'), findsNothing);
@@ -891,61 +906,55 @@ void main() {
     },
   );
 
-  cases.test(
-    'Playing and native open do not commit history; real advancement does, even if progress fails',
-    () async {
-      await setup();
-      await controller.start();
-      expect(controller.error, isNull);
-      expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
-      expect(controller.activeMediaSourceId, isNull);
-      (controller.client as _Client).failProgress = true;
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 5));
-      await _eventually(
-        () => runtime.history.records(AccessRegion.ordinary).isNotEmpty,
-      );
-      expect(controller.activeMediaSourceId, 'v');
-      expect(
-        runtime.history.records(AccessRegion.ordinary).single.positionTicks,
-        5 * kLegacyTicksPerSecond,
-      );
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 8));
-      await Future<void>.delayed(Duration.zero);
-      await controller.close();
-      expect(
-        runtime.history.records(AccessRegion.ordinary).single.positionTicks,
-        8 * kLegacyTicksPerSecond,
-      );
-      expect(reports.last.itemId, 'movie');
-    },
-  );
+  cases.test('Playing and native open do not commit history; real advancement does, even if progress fails', () async {
+    await setup();
+    await controller.start();
+    expect(controller.error, isNull);
+    expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
+    expect(controller.activeMediaSourceId, isNull);
+    (controller.client as _Client).failProgress = true;
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 5));
+    await _eventually(
+      () => runtime.history.records(AccessRegion.ordinary).isNotEmpty,
+    );
+    expect(controller.activeMediaSourceId, 'v');
+    expect(
+      runtime.history.records(AccessRegion.ordinary).single.positionTicks,
+      5 * kLegacyTicksPerSecond,
+    );
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 8));
+    await Future<void>.delayed(Duration.zero);
+    await controller.close();
+    expect(
+      runtime.history.records(AccessRegion.ordinary).single.positionTicks,
+      8 * kLegacyTicksPerSecond,
+    );
+    expect(reports.last.itemId, 'movie');
+  });
 
-  cases.test(
-    'aggregation item plays from the server session when its library is not checked',
-    () async {
-      await setup();
-      await runtime.registry.configureScope(
-        'a',
-        participates: true,
-        libraryIds: {},
-      );
-      final origin = await runtime.resolve(
-        PlayerOpenRequest(
-          itemId: 'movie',
-          libraryId: 'library',
-          source: SourceReference(account: account, itemId: 'movie'),
-        ),
-      );
-      expect(origin.permit.sessionOnly, isTrue);
-      expect(origin.libraryId, 'library');
-      expect(
-        (await origin.permit.dispatch((client) => client.getItem('movie'))).id,
-        'movie',
-      );
-      final session = await runtime.begin(origin, 'v');
-      expect(session.permit.sessionOnly, isTrue);
-    },
-  );
+  cases.test('aggregation item plays from the server session when its library is not checked', () async {
+    await setup();
+    await runtime.registry.configureScope(
+      'a',
+      participates: true,
+      libraryIds: {},
+    );
+    final origin = await runtime.resolve(
+      PlayerOpenRequest(
+        itemId: 'movie',
+        libraryId: 'library',
+        source: SourceReference(account: account, itemId: 'movie'),
+      ),
+    );
+    expect(origin.permit.sessionOnly, isTrue);
+    expect(origin.libraryId, 'library');
+    expect(
+      (await origin.permit.dispatch((client) => client.getItem('movie'))).id,
+      'movie',
+    );
+    final session = await runtime.begin(origin, 'v');
+    expect(session.permit.sessionOnly, isTrue);
+  });
 
   cases.test('membership proof is cached across repeated resolves', () async {
     await setup();
@@ -1072,39 +1081,36 @@ void main() {
     },
   );
 
-  cases.test(
-    'line identity failure keeps current source and credentials; mirror preserves pause and position',
-    () async {
-      await setup();
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      final original = controller.origin;
-      await expectLater(controller.switchLine('wrong'), throwsStateError);
-      expect(controller.origin, same(original));
-      await controller.togglePlay();
-      await controller.switchLine('mirror');
-      expect(controller.client.baseUrl?.host, 'mirror');
-      expect(backend.openedStart, const Duration(seconds: 12));
-      expect(backend.openedPaused, isTrue);
-      expect(controller.activeOrigin, same(original));
-      expect(controller.pendingLineId, 'mirror');
-      await controller.togglePlay();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
-      await _eventually(() => controller.activeLineId == 'mirror');
-      expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
-      expect(
-        auth.sources.project(AccessRegion.ordinary).first.activeLineId,
-        'line',
-      );
-      final remembered = runtime.preference(
-        controller.origin!,
-        controller.item!,
-        controller.mediaSources,
-      );
-      expect(remembered.preference?.lineId, isNot('mirror'));
-    },
-  );
+  cases.test('line identity failure keeps current source and credentials; mirror preserves pause and position', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    final original = controller.origin;
+    await expectLater(controller.switchLine('wrong'), throwsStateError);
+    expect(controller.origin, same(original));
+    await controller.togglePlay();
+    await controller.switchLine('mirror');
+    expect(controller.client.baseUrl?.host, 'mirror');
+    expect(backend.openedStart, const Duration(seconds: 12));
+    expect(backend.openedPaused, isTrue);
+    expect(controller.activeOrigin, same(original));
+    expect(controller.pendingLineId, 'mirror');
+    await controller.togglePlay();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
+    await _eventually(() => controller.activeLineId == 'mirror');
+    expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
+    expect(
+      auth.sources.project(AccessRegion.ordinary).first.activeLineId,
+      'line',
+    );
+    final remembered = runtime.preference(
+      controller.origin!,
+      controller.item!,
+      controller.mediaSources,
+    );
+    expect(remembered.preference?.lineId, isNot('mirror'));
+  });
 
   cases.test('line open failure continues on the original line', () async {
     await setup();
@@ -1126,56 +1132,53 @@ void main() {
     );
   });
 
-  cases.test(
-    'in-process line switch restores the shared address when stop or dispose fails',
-    () async {
-      for (final failure in ['stop', 'dispose']) {
-        final reports = <PlaybackReport>[];
-        final client = _Client(reports);
-        client.attachSession(
-          baseUrl: Uri.parse('https://a'),
-          accessToken: 'token',
-          userId: 'user',
-          userAgent: 'Rillight',
-        );
-        final video = _Backend();
-        final playing = PlayerController(
-          client: client,
-          itemId: 'movie',
-          backend: video,
-          window: PlayerWindow(),
-          settingsStore: MemoryPlayerSettingsStore(),
-          snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-          progressInterval: const Duration(milliseconds: 30),
-          playbackLineSnapshot: const [
-            ServerLine(id: 'line', address: 'https://a'),
-            ServerLine(id: 'mirror', address: 'https://mirror'),
-          ],
-          verifiedPlaybackServerId: 'a',
-        );
-        try {
-          await playing.start();
-          await playing.switchLine('mirror');
-          expect(client.baseUrl?.host, 'mirror');
-          if (failure == 'stop') {
-            video.failStop = true;
-          } else {
-            video.failDispose = true;
-          }
-          await playing.close();
-          expect(client.baseUrl?.host, 'a');
-          expect(client.accessToken, 'token');
-          expect(client.userId, 'user');
-          expect(client.customUserAgent, 'Rillight');
-        } finally {
-          try {
-            await playing.disposeAsync();
-          } catch (_) {}
-          playing.dispose();
+  cases.test('in-process line switch restores the shared address when stop or dispose fails', () async {
+    for (final failure in ['stop', 'dispose']) {
+      final reports = <PlaybackReport>[];
+      final client = _Client(reports);
+      client.attachSession(
+        baseUrl: Uri.parse('https://a'),
+        accessToken: 'token',
+        userId: 'user',
+        userAgent: 'Rillight',
+      );
+      final video = _Backend();
+      final playing = PlayerController(
+        client: client,
+        itemId: 'movie',
+        backend: video,
+        window: PlayerWindow(),
+        settingsStore: MemoryPlayerSettingsStore(),
+        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+        progressInterval: const Duration(milliseconds: 30),
+        playbackLineSnapshot: const [
+          ServerLine(id: 'line', address: 'https://a'),
+          ServerLine(id: 'mirror', address: 'https://mirror'),
+        ],
+        verifiedPlaybackServerId: 'a',
+      );
+      try {
+        await playing.start();
+        await playing.switchLine('mirror');
+        expect(client.baseUrl?.host, 'mirror');
+        if (failure == 'stop') {
+          video.failStop = true;
+        } else {
+          video.failDispose = true;
         }
+        await playing.close();
+        expect(client.baseUrl?.host, 'a');
+        expect(client.accessToken, 'token');
+        expect(client.userId, 'user');
+        expect(client.customUserAgent, 'Rillight');
+      } finally {
+        try {
+          await playing.disposeAsync();
+        } catch (_) {}
+        playing.dispose();
       }
-    },
-  );
+    }
+  });
 
   cases.test(
     'in-process line switch restores the shared address when close stop hangs',
@@ -1260,62 +1263,56 @@ void main() {
     },
   );
 
-  cases.test(
-    'lock freezes latest real position, clears presentation and rejects snapshots after unlock',
-    () async {
-      await setup(private: true);
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 17));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await Future<void>.delayed(const Duration(milliseconds: 40));
-      final snapshot = await snapshots.read();
-      expect(snapshot, isNotNull);
-      await auth.regionAccess.lock();
-      expect(controller.resolved, isNull);
-      expect(controller.activeOrigin, isNull);
-      expect(controller.activeMediaSourceId, isNull);
-      expect(backend.isPlaying, isFalse);
-      expect(
-        reports.last.position.inMicroseconds * 10,
-        17 * kLegacyTicksPerSecond,
-      );
-      expect(await snapshots.read(), isNull);
-      expect(await runtime.recoverSnapshot(snapshot!), isFalse);
-      await auth.regionAccess.unlock('1234');
-      await runtime.registry.acquireAccount(
-        'a',
-        region: AccessRegion.private,
-        libraryId: 'library',
-      );
-      expect(await runtime.recoverSnapshot(snapshot), isFalse);
-      final count = reports.length;
-      await expectLater(controller.restoreOriginalSource(), throwsStateError);
-      expect(reports.length, count);
-    },
-  );
+  cases.test('lock freezes latest real position, clears presentation and rejects snapshots after unlock', () async {
+    await setup(private: true);
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 17));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    final snapshot = await snapshots.read();
+    expect(snapshot, isNotNull);
+    await auth.regionAccess.lock();
+    expect(controller.resolved, isNull);
+    expect(controller.activeOrigin, isNull);
+    expect(controller.activeMediaSourceId, isNull);
+    expect(backend.isPlaying, isFalse);
+    expect(
+      reports.last.position.inMicroseconds * 10,
+      17 * kLegacyTicksPerSecond,
+    );
+    expect(await snapshots.read(), isNull);
+    expect(await runtime.recoverSnapshot(snapshot!), isFalse);
+    await auth.regionAccess.unlock('1234');
+    await runtime.registry.acquireAccount(
+      'a',
+      region: AccessRegion.private,
+      libraryId: 'library',
+    );
+    expect(await runtime.recoverSnapshot(snapshot), isFalse);
+    final count = reports.length;
+    await expectLater(controller.restoreOriginalSource(), throwsStateError);
+    expect(reports.length, count);
+  });
 
-  cases.test(
-    'version confirmation keeps intent and language and commits only after resumed viewing',
-    () async {
-      await setup();
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 20));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await controller.togglePlay();
-      await controller.switchMediaSource('v2');
-      expect(controller.switchConfirmation, isNotNull);
-      await controller.confirmMediaSourceSwitch(
-        SwitchResumeChoice.currentPosition,
-      );
-      expect(backend.openedPaused, isTrue);
-      expect(backend.openedStart, const Duration(seconds: 20));
-      expect(controller.audioStreamIndex, 7);
-      expect(controller.activeMediaSourceId, 'v');
-      await controller.togglePlay();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 21));
-      await _eventually(() => controller.activeMediaSourceId == 'v2');
-    },
-  );
+  cases.test('version confirmation keeps intent and language and commits only after resumed viewing', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 20));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await controller.togglePlay();
+    await controller.switchMediaSource('v2');
+    expect(controller.switchConfirmation, isNotNull);
+    await controller.confirmMediaSourceSwitch(
+      SwitchResumeChoice.currentPosition,
+    );
+    expect(backend.openedPaused, isTrue);
+    expect(backend.openedStart, const Duration(seconds: 20));
+    expect(controller.audioStreamIndex, 7);
+    expect(controller.activeMediaSourceId, 'v');
+    await controller.togglePlay();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 21));
+    await _eventually(() => controller.activeMediaSourceId == 'v2');
+  });
 
   cases.test(
     'mirror episode picker retains line, pause, bitrate and report ownership',
@@ -1402,21 +1399,18 @@ void main() {
     );
   }
 
-  cases.test(
-    'finish-current picker records played before remote failures and keeps playback intent',
-    () async {
-      await setup(itemId: 'episode1');
-      await controller.start();
-      (controller.client as _Client).failStopped = true;
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 119));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await controller.playEpisode(await controller.client.getItem('episode2'));
-      expect(runtime.history.records(account.region).single.played, isTrue);
-      expect(controller.itemId, 'episode2');
-      expect(controller.loading, isFalse);
-      expect(backend.openedPaused, isFalse);
-    },
-  );
+  cases.test('finish-current picker records played before remote failures and keeps playback intent', () async {
+    await setup(itemId: 'episode1');
+    await controller.start();
+    (controller.client as _Client).failStopped = true;
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 119));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await controller.playEpisode(await controller.client.getItem('episode2'));
+    expect(runtime.history.records(account.region).single.played, isTrue);
+    expect(controller.itemId, 'episode2');
+    expect(controller.loading, isFalse);
+    expect(backend.openedPaused, isFalse);
+  });
 
   cases.test(
     'natural EOF persists local played even when Stopped fails',
@@ -1440,150 +1434,144 @@ void main() {
     },
   );
 
-  cases.test(
-    'fresh ordinary recovery only cleans original session and retries transient failure',
-    () async {
-      await setup();
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await Future<void>.delayed(const Duration(milliseconds: 40));
-      final saved = (await snapshots.read())!;
-      final freshReports = <PlaybackReport>[];
-      var failCleanup = true;
-      final freshRegistry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
-        store: MemoryServerListStore(
-          ServerListSnapshot(
-            servers: runtime.registry.project(AccessRegion.ordinary),
-          ),
+  cases.test('fresh ordinary recovery only cleans original session and retries transient failure', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    final saved = (await snapshots.read())!;
+    final freshReports = <PlaybackReport>[];
+    var failCleanup = true;
+    final freshRegistry = SourceSessionRegistry(
+      access: TestRegionAccessController(),
+      store: MemoryServerListStore(
+        ServerListSnapshot(
+          servers: runtime.registry.project(AccessRegion.ordinary),
         ),
-        credentials: MemoryCredentialStore({
-          'a': const StoredCredentials(
-            accessToken: 'token',
-            userId: 'user',
-            username: 'test',
-          ),
-        }),
-        createClient: () => _Client(freshReports)
-          ..failPublic = true
-          ..failStopped = failCleanup,
-      );
-      await freshRegistry.load();
-      final freshAuth = AuthController(
-        regionAccess: TestRegionAccessController(),
-        client: _Client(freshReports),
-        sources: freshRegistry,
-        credentials: MemoryCredentialStore(),
-        servers: MemoryServerListStore(),
-      );
-      final fresh = PlaybackRuntime(
-        auth: freshAuth,
-        history: await HistoryWriter.open(
-          registry: freshRegistry,
-          store: MemoryHistoryStore(),
+      ),
+      credentials: MemoryCredentialStore({
+        'a': const StoredCredentials(
+          accessToken: 'token',
+          userId: 'user',
+          username: 'test',
         ),
-      );
-      addTearDown(() async {
-        await fresh.history.close();
-        freshAuth.dispose();
-      });
-      final store = MemoryPlaybackSessionSnapshotStore();
-      await store.write(saved);
-      await expectLater(
-        recoverAndroidSession(freshAuth.client, store, runtime: fresh),
-        throwsStateError,
-      );
-      expect(await store.read(), isNotNull);
-      expect(
-        freshRegistry.sessionAccount(
-          'a',
-          region: AccessRegion.ordinary,
-          libraryId: 'library',
-        ),
-        isNull,
-      );
-      await expectLater(
-        recoverAndroidSession(freshAuth.client, store, runtime: fresh),
-        throwsStateError,
-      );
-      expect(await store.read(), isNotNull);
-      failCleanup = false;
-      expect(
-        await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
-        isTrue,
-      );
-      expect(await store.read(), isNull);
-      expect(
-        freshRegistry.sessionAccount(
-          'a',
-          region: AccessRegion.ordinary,
-          libraryId: 'library',
-        ),
-        isNull,
-      );
-      expect(
-        freshReports.last.position.inMicroseconds * 10,
-        saved.position.inMicroseconds * 10,
-      );
-    },
-  );
+      }),
+      createClient: () => _Client(freshReports)
+        ..failPublic = true
+        ..failStopped = failCleanup,
+    );
+    await freshRegistry.load();
+    final freshAuth = AuthController(
+      regionAccess: TestRegionAccessController(),
+      client: _Client(freshReports),
+      sources: freshRegistry,
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    final fresh = PlaybackRuntime(
+      auth: freshAuth,
+      history: await HistoryWriter.open(
+        registry: freshRegistry,
+        store: MemoryHistoryStore(),
+      ),
+    );
+    addTearDown(() async {
+      await fresh.history.close();
+      freshAuth.dispose();
+    });
+    final store = MemoryPlaybackSessionSnapshotStore();
+    await store.write(saved);
+    await expectLater(
+      recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+      throwsStateError,
+    );
+    expect(await store.read(), isNotNull);
+    expect(
+      freshRegistry.sessionAccount(
+        'a',
+        region: AccessRegion.ordinary,
+        libraryId: 'library',
+      ),
+      isNull,
+    );
+    await expectLater(
+      recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+      throwsStateError,
+    );
+    expect(await store.read(), isNotNull);
+    failCleanup = false;
+    expect(
+      await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+      isTrue,
+    );
+    expect(await store.read(), isNull);
+    expect(
+      freshRegistry.sessionAccount(
+        'a',
+        region: AccessRegion.ordinary,
+        libraryId: 'library',
+      ),
+      isNull,
+    );
+    expect(
+      freshReports.last.position.inMicroseconds * 10,
+      saved.position.inMicroseconds * 10,
+    );
+  });
 
-  cases.test(
-    'fresh private registry rejects prior snapshot without acquisition even after unlock',
-    () async {
-      await setup(private: true);
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await Future<void>.delayed(const Duration(milliseconds: 40));
-      final saved = (await snapshots.read())!;
-      final access = TestRegionAccessController();
-      await access.setPin('1234', '1234', (_) async {});
-      await access.unlock('1234');
-      var acquisitions = 0;
-      final registry = SourceSessionRegistry(
-        access: access,
-        store: MemoryServerListStore(
-          ServerListSnapshot(
-            servers: runtime.registry.project(AccessRegion.private),
-          ),
+  cases.test('fresh private registry rejects prior snapshot without acquisition even after unlock', () async {
+    await setup(private: true);
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    final saved = (await snapshots.read())!;
+    final access = TestRegionAccessController();
+    await access.setPin('1234', '1234', (_) async {});
+    await access.unlock('1234');
+    var acquisitions = 0;
+    final registry = SourceSessionRegistry(
+      access: access,
+      store: MemoryServerListStore(
+        ServerListSnapshot(
+          servers: runtime.registry.project(AccessRegion.private),
         ),
-        credentials: MemoryCredentialStore(),
-        createClient: () {
-          acquisitions++;
-          return _Client([]);
-        },
-      );
-      await registry.load();
-      final freshAuth = AuthController(
-        regionAccess: TestRegionAccessController(),
-        client: _Client([]),
-        sources: registry,
-        credentials: MemoryCredentialStore(),
-        servers: MemoryServerListStore(),
-      );
-      final fresh = PlaybackRuntime(
-        auth: freshAuth,
-        history: await HistoryWriter.open(
-          registry: registry,
-          store: MemoryHistoryStore(),
-        ),
-      );
-      addTearDown(() async {
-        await fresh.history.close();
-        freshAuth.dispose();
-      });
-      final store = MemoryPlaybackSessionSnapshotStore();
-      await store.write(saved);
-      expect(
-        await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
-        isFalse,
-      );
-      expect(await store.read(), isNull);
-      expect(acquisitions, 0);
-    },
-  );
+      ),
+      credentials: MemoryCredentialStore(),
+      createClient: () {
+        acquisitions++;
+        return _Client([]);
+      },
+    );
+    await registry.load();
+    final freshAuth = AuthController(
+      regionAccess: TestRegionAccessController(),
+      client: _Client([]),
+      sources: registry,
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    final fresh = PlaybackRuntime(
+      auth: freshAuth,
+      history: await HistoryWriter.open(
+        registry: registry,
+        store: MemoryHistoryStore(),
+      ),
+    );
+    addTearDown(() async {
+      await fresh.history.close();
+      freshAuth.dispose();
+    });
+    final store = MemoryPlaybackSessionSnapshotStore();
+    await store.write(saved);
+    expect(
+      await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+      isFalse,
+    );
+    expect(await store.read(), isNull);
+    expect(acquisitions, 0);
+  });
 
   for (final acceptNext in [true, false]) {
     cases.testWidgets(
@@ -1807,33 +1795,30 @@ void main() {
     );
   }
 
-  cases.test(
-    'cross-server failed target keeps old history and restores original only under its permit',
-    () async {
-      await setup();
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      final original = controller.origin;
-      await controller.switchConfirmedSource(await candidate(), 'v2');
-      expect(controller.origin, same(original));
-      backend.failNextOpen = true;
-      await controller.confirmMediaSourceSwitch(
-        SwitchResumeChoice.currentPosition,
-      );
-      expect(controller.error, isNotNull);
-      expect(controller.activeOrigin, same(original));
-      expect(
-        runtime.history.records(account.region).single.source.account,
-        account,
-      );
-      expect(reports.single.playSessionId, 'play-a-movie');
-      await controller.restoreOriginalSource();
-      expect(controller.origin, same(original));
-      expect(backend.openedStart, const Duration(seconds: 9));
-      expect(controller.client.baseUrl?.host, 'a');
-    },
-  );
+  cases.test('cross-server failed target keeps old history and restores original only under its permit', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    final original = controller.origin;
+    await controller.switchConfirmedSource(await candidate(), 'v2');
+    expect(controller.origin, same(original));
+    backend.failNextOpen = true;
+    await controller.confirmMediaSourceSwitch(
+      SwitchResumeChoice.currentPosition,
+    );
+    expect(controller.error, isNotNull);
+    expect(controller.activeOrigin, same(original));
+    expect(
+      runtime.history.records(account.region).single.source.account,
+      account,
+    );
+    expect(reports.single.playSessionId, 'play-a-movie');
+    await controller.restoreOriginalSource();
+    expect(controller.origin, same(original));
+    expect(backend.openedStart, const Duration(seconds: 9));
+    expect(controller.client.baseUrl?.host, 'a');
+  });
 
   cases.test(
     'target actual viewing commits target account, never a matched copy',
@@ -1868,53 +1853,47 @@ void main() {
     },
   );
 
-  cases.test(
-    'lock retires an in-flight target open before publishing locked; no late resurrection',
-    () async {
-      await setup(private: true);
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await controller.switchConfirmedSource(await candidate(), 'v2');
-      backend.openGate = Completer<void>();
-      final entered = backend.openEntered = Completer<void>();
-      final switching = controller.confirmMediaSourceSwitch(
-        SwitchResumeChoice.currentPosition,
-      );
-      await entered.future;
-      final locking = auth.regionAccess.lock();
-      backend.openGate!.complete();
-      await Future.wait([locking, switching]);
-      expect(backend.isPlaying, isFalse);
-      expect(controller.activeOrigin, isNull);
-      expect(controller.switchConfirmation, isNull);
-      expect(await snapshots.read(), isNull);
-      await expectLater(controller.restoreOriginalSource(), throwsStateError);
-      expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
-    },
-  );
+  cases.test('lock retires an in-flight target open before publishing locked; no late resurrection', () async {
+    await setup(private: true);
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await controller.switchConfirmedSource(await candidate(), 'v2');
+    backend.openGate = Completer<void>();
+    final entered = backend.openEntered = Completer<void>();
+    final switching = controller.confirmMediaSourceSwitch(
+      SwitchResumeChoice.currentPosition,
+    );
+    await entered.future;
+    final locking = auth.regionAccess.lock();
+    backend.openGate!.complete();
+    await Future.wait([locking, switching]);
+    expect(backend.isPlaying, isFalse);
+    expect(controller.activeOrigin, isNull);
+    expect(controller.switchConfirmation, isNull);
+    expect(await snapshots.read(), isNull);
+    await expectLater(controller.restoreOriginalSource(), throwsStateError);
+    expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
+  });
 
-  cases.test(
-    'scope removal stops ordinary native session and forbids restore and snapshot dispatch',
-    () async {
-      await setup();
-      await controller.start();
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
-      await _eventually(() => controller.activeMediaSourceId != null);
-      await runtime.registry.configureScope(
-        'a',
-        participates: false,
-        libraryIds: {'library'},
-      );
-      await _eventually(() => !backend.isPlaying);
-      expect(controller.permissionRevoked, isTrue);
-      expect(controller.activeOrigin, isNull);
-      // Native retirement and resource cleanup are independent futures.
-      await _eventually(() => snapshots.snapshot == null);
-      expect(await snapshots.read(), isNull);
-      await expectLater(controller.restoreOriginalSource(), throwsStateError);
-    },
-  );
+  cases.test('scope removal stops ordinary native session and forbids restore and snapshot dispatch', () async {
+    await setup();
+    await controller.start();
+    backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
+    await _eventually(() => controller.activeMediaSourceId != null);
+    await runtime.registry.configureScope(
+      'a',
+      participates: false,
+      libraryIds: {'library'},
+    );
+    await _eventually(() => !backend.isPlaying);
+    expect(controller.permissionRevoked, isTrue);
+    expect(controller.activeOrigin, isNull);
+    // Native retirement and resource cleanup are independent futures.
+    await _eventually(() => snapshots.snapshot == null);
+    expect(await snapshots.read(), isNull);
+    await expectLater(controller.restoreOriginalSource(), throwsStateError);
+  });
 
   Future<DesktopPlayerWindowHost> desktop(_IpcControl ipc) async {
     final host = DesktopPlayerWindowHost(
@@ -2179,32 +2158,29 @@ void main() {
     );
   }
 
-  cases.test(
-    'desktop close rechecks revoked lease before delivering a queued detail command',
-    () async {
-      await setup(itemId: 'episode1');
-      await controller.start();
-      final ipc = _IpcControl();
-      final host = await desktop(ipc);
-      var routed = false;
-      host.onOpenItemRoute = (_, {seasonId, command}) => routed = true;
-      ipc.openDetail = controller.endedSeriesCommand;
-      ipc.requestCloseHold = Completer<void>();
-      final closing = host.close();
-      await _eventually(
-        () => ipc.calls.any((c) => c.startsWith('requestClose:')),
-      );
-      await runtime.registry.configureScope(
-        'a',
-        participates: false,
-        libraryIds: {},
-      );
-      ipc.requestCloseHold!.complete();
-      await closing;
-      expect(routed, isFalse);
-      expect(controller.endedSeriesCommand, isNull);
-    },
-  );
+  cases.test('desktop close rechecks revoked lease before delivering a queued detail command', () async {
+    await setup(itemId: 'episode1');
+    await controller.start();
+    final ipc = _IpcControl();
+    final host = await desktop(ipc);
+    var routed = false;
+    host.onOpenItemRoute = (_, {seasonId, command}) => routed = true;
+    ipc.openDetail = controller.endedSeriesCommand;
+    ipc.requestCloseHold = Completer<void>();
+    final closing = host.close();
+    await _eventually(
+      () => ipc.calls.any((c) => c.startsWith('requestClose:')),
+    );
+    await runtime.registry.configureScope(
+      'a',
+      participates: false,
+      libraryIds: {},
+    );
+    ipc.requestCloseHold!.complete();
+    await closing;
+    expect(routed, isFalse);
+    expect(controller.endedSeriesCommand, isNull);
+  });
 
   Map<String, dynamic> event(
     _IpcControl ipc,
@@ -2224,66 +2200,59 @@ void main() {
     'version': 'v',
     'position': 10 * kLegacyTicksPerSecond,
     'actuallyPlaying': true,
-    'timeline': const WatchTimeline(
-      durationTicks: 120 * kLegacyTicksPerSecond,
-    ).toJson(),
+    'timeline': const WatchTimeline(durationTicks: 120 * kLegacyTicksPerSecond)
+        .toJson(),
   };
 
-  cases.test(
-    'desktop main writer validates source/generation and rejects old IPC sequences',
-    () async {
-      await setup();
-      final ipc = _IpcControl();
-      await desktop(ipc);
+  cases.test('desktop main writer validates source/generation and rejects old IPC sequences', () async {
+    await setup();
+    final ipc = _IpcControl();
+    await desktop(ipc);
+    ipc.event = event(ipc, 1);
+    await _eventually(() => ipc.receipt != null);
+    expect(ipc.receipt!['accepted'], isTrue);
+    expect(runtime.history.records(account.region), hasLength(1));
+    ipc.receipt = null;
+    ipc.event = event(ipc, 1);
+    await _eventually(() => ipc.receipt != null);
+    expect(ipc.receipt!['accepted'], isFalse);
+    ipc.receipt = null;
+    ipc.event = event(ipc, 2, generation: -1);
+    await _eventually(() => ipc.receipt != null);
+    expect(ipc.receipt!['accepted'], isFalse);
+    expect(runtime.history.records(account.region).single.eventSequence, 1);
+    ipc.receipt = null;
+    ipc.event = event(ipc, 3)..['played'] = true;
+    await _eventually(() => ipc.receipt != null);
+    expect(ipc.receipt!['accepted'], isTrue);
+    expect(runtime.history.records(account.region).single.played, isTrue);
+  });
+
+  cases.test('desktop slow observation verification acknowledges pending and keeps heartbeat alive', () async {
+    await setup();
+    final ipc = _IpcControl();
+    await desktop(ipc);
+    final owner =
+        (await runtime.resolve(controller.openRequest!)).client as _Client;
+    final gate = Completer<void>();
+    owner.playbackGate = gate.future;
+    try {
       ipc.event = event(ipc, 1);
+      await _eventually(() => ipc.pendingReceipt != null);
+      expect(ipc.pendingReceipt!['sequence'], 1);
+      expect(ipc.receipt, isNull);
+      final before = ipc.heartbeats;
+      await _eventually(() => ipc.heartbeats > before);
+      expect(ipc.receipt, isNull);
+      gate.complete();
       await _eventually(() => ipc.receipt != null);
       expect(ipc.receipt!['accepted'], isTrue);
       expect(runtime.history.records(account.region), hasLength(1));
-      ipc.receipt = null;
-      ipc.event = event(ipc, 1);
-      await _eventually(() => ipc.receipt != null);
-      expect(ipc.receipt!['accepted'], isFalse);
-      ipc.receipt = null;
-      ipc.event = event(ipc, 2, generation: -1);
-      await _eventually(() => ipc.receipt != null);
-      expect(ipc.receipt!['accepted'], isFalse);
-      expect(runtime.history.records(account.region).single.eventSequence, 1);
-      ipc.receipt = null;
-      ipc.event = event(ipc, 3)..['played'] = true;
-      await _eventually(() => ipc.receipt != null);
-      expect(ipc.receipt!['accepted'], isTrue);
-      expect(runtime.history.records(account.region).single.played, isTrue);
-    },
-  );
-
-  cases.test(
-    'desktop slow observation verification acknowledges pending and keeps heartbeat alive',
-    () async {
-      await setup();
-      final ipc = _IpcControl();
-      await desktop(ipc);
-      final owner =
-          (await runtime.resolve(controller.openRequest!)).client as _Client;
-      final gate = Completer<void>();
-      owner.playbackGate = gate.future;
-      try {
-        ipc.event = event(ipc, 1);
-        await _eventually(() => ipc.pendingReceipt != null);
-        expect(ipc.pendingReceipt!['sequence'], 1);
-        expect(ipc.receipt, isNull);
-        final before = ipc.heartbeats;
-        await _eventually(() => ipc.heartbeats > before);
-        expect(ipc.receipt, isNull);
-        gate.complete();
-        await _eventually(() => ipc.receipt != null);
-        expect(ipc.receipt!['accepted'], isTrue);
-        expect(runtime.history.records(account.region), hasLength(1));
-      } finally {
-        if (!gate.isCompleted) gate.complete();
-        owner.playbackGate = null;
-      }
-    },
-  );
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      owner.playbackGate = null;
+    }
+  });
 
   cases.test(
     'desktop account replacement drains the retiring child context',
@@ -2388,73 +2357,68 @@ void main() {
     },
   );
 
-  cases.test(
-    'desktop line RPC preflights without changing active and launches paused target only on confirm',
-    () async {
-      await setup();
-      final ipc = _IpcControl();
-      final host = await desktop(ipc);
-      final envelope = {
-        'pid': ipc.lastPid,
-        'source': encodeSource(controller.openRequest!.source!),
-        'generation': PlayerWindowLaunch.fromArguments(
-          ipc.spawnedArguments.single,
-        ).regionGeneration,
-      };
-      ipc.command = {
-        ...envelope,
-        'sequence': 1,
-        'action': 'inspect',
-        'line': 'wrong',
-        'item': 'movie',
-        'version': 'v',
-        'position': 10 * kLegacyTicksPerSecond,
-        'paused': true,
-        'bitrate': 80000000,
-        'audio': 1,
-      };
-      await _eventually(() => ipc.switchReply != null);
-      expect(ipc.switchReply!['accepted'], isFalse);
-      expect(ipc.spawnedArguments, hasLength(1));
-      ipc.switchReply = null;
-      ipc.command = {
-        ...ipc.command ?? {},
-        ...envelope,
-        'sequence': 2,
-        'action': 'inspect',
-        'line': 'mirror',
-        'item': 'movie',
-        'version': 'v',
-        'position': 10 * kLegacyTicksPerSecond,
-        'paused': true,
-        'bitrate': 80000000,
-        'audio': 1,
-      };
-      await _eventually(() => ipc.switchReply != null);
-      expect(ipc.switchReply!['accepted'], isTrue);
-      expect(ipc.spawnedArguments, hasLength(1));
-      ipc.switchReply = null;
-      ipc.command = {
-        ...envelope,
-        'sequence': 3,
-        'action': 'confirm',
-        'choice': 'currentPosition',
-      };
-      await _eventually(() => ipc.spawnedArguments.length == 2);
-      final launch = PlayerWindowLaunch.fromArguments(
-        ipc.spawnedArguments.last,
-      );
-      expect(Uri.parse(launch.baseUrl).host, 'mirror');
-      expect(launch.request.startPaused, isTrue);
-      expect(
-        launch.request.startPosition,
-        Duration(microseconds: (10 * kLegacyTicksPerSecond) ~/ 10),
-      );
-      expect(launch.request.audioStreamIndex, 1);
-      expect(launch.request.maxStreamingBitrate, 80000000);
-      expect(host.current?.source?.account, account);
-    },
-  );
+  cases.test('desktop line RPC preflights without changing active and launches paused target only on confirm', () async {
+    await setup();
+    final ipc = _IpcControl();
+    final host = await desktop(ipc);
+    final envelope = {
+      'pid': ipc.lastPid,
+      'source': encodeSource(controller.openRequest!.source!),
+      'generation': PlayerWindowLaunch.fromArguments(
+        ipc.spawnedArguments.single,
+      ).regionGeneration,
+    };
+    ipc.command = {
+      ...envelope,
+      'sequence': 1,
+      'action': 'inspect',
+      'line': 'wrong',
+      'item': 'movie',
+      'version': 'v',
+      'position': 10 * kLegacyTicksPerSecond,
+      'paused': true,
+      'bitrate': 80000000,
+      'audio': 1,
+    };
+    await _eventually(() => ipc.switchReply != null);
+    expect(ipc.switchReply!['accepted'], isFalse);
+    expect(ipc.spawnedArguments, hasLength(1));
+    ipc.switchReply = null;
+    ipc.command = {
+      ...ipc.command ?? {},
+      ...envelope,
+      'sequence': 2,
+      'action': 'inspect',
+      'line': 'mirror',
+      'item': 'movie',
+      'version': 'v',
+      'position': 10 * kLegacyTicksPerSecond,
+      'paused': true,
+      'bitrate': 80000000,
+      'audio': 1,
+    };
+    await _eventually(() => ipc.switchReply != null);
+    expect(ipc.switchReply!['accepted'], isTrue);
+    expect(ipc.spawnedArguments, hasLength(1));
+    ipc.switchReply = null;
+    ipc.command = {
+      ...envelope,
+      'sequence': 3,
+      'action': 'confirm',
+      'choice': 'currentPosition',
+    };
+    await _eventually(() => ipc.spawnedArguments.length == 2);
+    final launch = PlayerWindowLaunch.fromArguments(ipc.spawnedArguments.last);
+    expect(Uri.parse(launch.baseUrl).host, 'mirror');
+    expect(launch.request.startPaused, isTrue);
+    expect(
+      launch.request.startPosition,
+      Duration(microseconds: (10 * kLegacyTicksPerSecond) ~/ 10),
+    );
+    expect(launch.request.audioStreamIndex, 1);
+    expect(launch.request.maxStreamingBitrate, 80000000);
+    expect(host.current?.source?.account, account);
+  });
 
   for (final failure in [
     'spawn threw',
@@ -2582,56 +2546,53 @@ void main() {
     }
   }
 
-  cases.test(
-    'desktop lock redacts a saved failed-switch transaction and late startup error',
-    () async {
-      await setup(private: true);
-      final ipc = _IpcControl();
-      final host = await desktop(ipc);
-      final envelope = {
-        'pid': ipc.lastPid,
-        'source': encodeSource(controller.openRequest!.source!),
-        'generation': host.current!.regionGeneration,
-      };
-      ipc.command = {
-        ...envelope,
-        'sequence': 1,
-        'action': 'inspect',
-        'line': 'mirror',
-        'item': 'movie',
-        'version': 'v',
-        'position': 10 * kLegacyTicksPerSecond,
-        'paused': true,
-        'bitrate': 80000000,
-        'audio': 1,
-      };
-      await _eventually(() => ipc.switchReply != null);
-      expect(ipc.switchReply!['accepted'], isTrue);
-      ipc.spawnHold = Completer<void>();
-      ipc.startupFailure = 'late ready timeout';
-      ipc.command = {
-        ...envelope,
-        'sequence': 2,
-        'action': 'confirm',
-        'choice': 'currentPosition',
-      };
-      await _eventually(() => ipc.spawnedArguments.length == 2);
-      final locking = auth.regionAccess.lock(
-        budget: const Duration(milliseconds: 100),
-      );
-      expect(host.switchFailure, isNull);
-      expect(host.canRestoreOriginal, isFalse);
-      ipc.spawnHold!.complete();
-      await locking;
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(host.switchFailure, isNull);
-      expect(host.current, isNull);
-      await auth.regionAccess.unlock('1234');
-      await expectLater(host.restoreOriginalSource(), throwsStateError);
-      expect(ipc.spawnedArguments, hasLength(2));
-      expect(reports, isEmpty);
-    },
-  );
+  cases.test('desktop lock redacts a saved failed-switch transaction and late startup error', () async {
+    await setup(private: true);
+    final ipc = _IpcControl();
+    final host = await desktop(ipc);
+    final envelope = {
+      'pid': ipc.lastPid,
+      'source': encodeSource(controller.openRequest!.source!),
+      'generation': host.current!.regionGeneration,
+    };
+    ipc.command = {
+      ...envelope,
+      'sequence': 1,
+      'action': 'inspect',
+      'line': 'mirror',
+      'item': 'movie',
+      'version': 'v',
+      'position': 10 * kLegacyTicksPerSecond,
+      'paused': true,
+      'bitrate': 80000000,
+      'audio': 1,
+    };
+    await _eventually(() => ipc.switchReply != null);
+    expect(ipc.switchReply!['accepted'], isTrue);
+    ipc.spawnHold = Completer<void>();
+    ipc.startupFailure = 'late ready timeout';
+    ipc.command = {
+      ...envelope,
+      'sequence': 2,
+      'action': 'confirm',
+      'choice': 'currentPosition',
+    };
+    await _eventually(() => ipc.spawnedArguments.length == 2);
+    final locking = auth.regionAccess.lock(
+      budget: const Duration(milliseconds: 100),
+    );
+    expect(host.switchFailure, isNull);
+    expect(host.canRestoreOriginal, isFalse);
+    ipc.spawnHold!.complete();
+    await locking;
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(host.switchFailure, isNull);
+    expect(host.current, isNull);
+    await auth.regionAccess.unlock('1234');
+    await expectLater(host.restoreOriginalSource(), throwsStateError);
+    expect(ipc.spawnedArguments, hasLength(2));
+    expect(reports, isEmpty);
+  });
 
   cases.test(
     'desktop lock closes private helper and does not reconcile an old snapshot',

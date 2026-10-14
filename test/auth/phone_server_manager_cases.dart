@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -61,16 +64,23 @@ Future<void> _pump(
     MaterialApp(
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(
-          context,
-        ).copyWith(textScaler: TextScaler.linear(scale)),
-        child: child!,
+      localizationsDelegates: [
+        ...AppLocalizations.localizationsDelegates,
+        ui.GlobalCupertinoLocalizations.delegate,
+      ],
+      builder: (context, child) => ui.AppUiTheme(
+        data: Theme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: ((context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(scale)),
+          child: child!,
+        ))(context, child),
       ),
       home: Scaffold(
         body: Builder(
-          builder: (context) => TextButton(
+          builder: (context) => ui.AppButton(
             onPressed: () => showPhoneServerManager(
               context,
               auth: auth,

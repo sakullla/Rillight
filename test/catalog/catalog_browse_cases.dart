@@ -1,10 +1,15 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/auth/auth_controller.dart';
+
 import '../helpers/synthetic_source_fixture.dart';
+
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/media_server/device.dart';
@@ -159,7 +164,14 @@ void main() {
     (tester) async {
       await pumpLoggedIn(tester);
 
-      expect(find.byTooltip('灯川测试\n切换服务器'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              (widget is ui.AppTooltip && widget.message == '灯川测试\n切换服务器') ||
+              (widget is Tooltip && widget.message == '灯川测试\n切换服务器'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.byKey(AppShell.topBarKey), findsOneWidget);
       expect(find.byKey(AppShell.homeNavKey), findsOneWidget);
@@ -270,7 +282,9 @@ void main() {
       await tester.tap(movie);
       await settle(tester);
       expect(
-        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        tester
+            .widget<ui.AppSelectableText>(find.byKey(ItemDetailPage.titleKey))
+            .data,
         'Inception',
       );
       expect(
@@ -295,10 +309,10 @@ void main() {
       expect(find.textContaining('已看 40%'), findsNothing);
       expect(
         tester
-            .widget<LinearProgressIndicator>(
+            .widget<ui.AppLoadingBar>(
               find.descendant(
                 of: find.byKey(CatalogKeys.resumeProgress),
-                matching: find.byType(LinearProgressIndicator),
+                matching: find.byType(ui.AppLoadingBar),
               ),
             )
             .value,
@@ -320,7 +334,9 @@ void main() {
       await tester.tap(find.text('老友记'));
       await settle(tester);
       expect(
-        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        tester
+            .widget<ui.AppSelectableText>(find.byKey(ItemDetailPage.titleKey))
+            .data,
         '老友记',
       );
       expect(find.byKey(EpisodeOverviewSection.textKey), findsOneWidget);
@@ -373,7 +389,9 @@ void main() {
       await tapBelowTopBar(tester, find.byKey(CatalogKeys.seriesLink));
       await settle(tester);
       expect(
-        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        tester
+            .widget<ui.AppSelectableText>(find.byKey(ItemDetailPage.titleKey))
+            .data,
         '老友记',
       );
 
@@ -403,7 +421,13 @@ void main() {
       final beforeSearch = server.requests
           .where((request) => request.contains('SearchTerm='))
           .length;
-      await tester.tap(find.byTooltip('搜索'));
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) =>
+              (widget is ui.AppTooltip && widget.message == '搜索') ||
+              (widget is Tooltip && widget.message == '搜索'),
+        ),
+      );
       await settle(tester);
       expect(find.byKey(const Key('aggregation-keyword')), findsOneWidget);
       expect(find.text('输入片名后搜索'), findsOneWidget);
@@ -443,14 +467,22 @@ void main() {
       await settle(tester);
       expect(find.byKey(SearchOverlay.closeKey), findsNothing);
       expect(
-        tester.widget<SelectableText>(find.byKey(ItemDetailPage.titleKey)).data,
+        tester
+            .widget<ui.AppSelectableText>(find.byKey(ItemDetailPage.titleKey))
+            .data,
         'Inception',
       );
 
       await _tapDetailBack(tester);
       await settle(tester);
       server.searchStatus = 500;
-      await tester.tap(find.byTooltip('搜索'));
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) =>
+              (widget is ui.AppTooltip && widget.message == '搜索') ||
+              (widget is Tooltip && widget.message == '搜索'),
+        ),
+      );
       await settle(tester);
       await tester.enterText(
         find.byKey(const Key('aggregation-keyword')),

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -115,9 +115,8 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
       _error = null;
     });
     try {
-      final session = await AuthScope.of(
-        context,
-      ).sources.authenticate(serverId);
+      final session = await AuthScope.of(context).sources
+          .authenticate(serverId);
       if (!mounted || attempt != _attempt) return;
       final views = await session.client.getViews();
       if (!mounted || attempt != _attempt) return;
@@ -161,8 +160,8 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
     if (_loading || client == null || account == null) {
       if (tv) return _tvPending(context, _title, _error, _load);
       if (_error != null) {
-        return Scaffold(
-          body: AppErrorView(
+        return CupertinoPageScaffold(
+          child: AppErrorView(
             message: catalogFailureMessage(
               AppLocalizations.of(context),
               _error!,
@@ -171,7 +170,9 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
           ),
         );
       }
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const CupertinoPageScaffold(
+        child: Center(child: CupertinoActivityIndicator()),
+      );
     }
     if (tv) {
       return scopeServerPosters(
@@ -190,8 +191,8 @@ class _ServerLibraryPageState extends State<ServerLibraryPage> {
         ),
       );
     }
-    return Scaffold(
-      body: scopeServerPosters(
+    return CupertinoPageScaffold(
+      child: scopeServerPosters(
         account: account,
         serverId: widget.serverId,
         libraryId: widget.viewId,
@@ -250,9 +251,8 @@ class _ServerResumePageState extends State<ServerResumePage> {
       _error = null;
     });
     try {
-      final session = await AuthScope.of(
-        context,
-      ).sources.authenticate(widget.serverId);
+      final session = await AuthScope.of(context).sources
+          .authenticate(widget.serverId);
       if (!mounted || attempt != _attempt) return;
       setState(() {
         _client = session.client;
@@ -288,8 +288,8 @@ class _ServerResumePageState extends State<ServerResumePage> {
         );
       }
       if (_error != null) {
-        return Scaffold(
-          body: AppErrorView(
+        return CupertinoPageScaffold(
+          child: AppErrorView(
             message: catalogFailureMessage(
               AppLocalizations.of(context),
               _error!,
@@ -298,7 +298,9 @@ class _ServerResumePageState extends State<ServerResumePage> {
           ),
         );
       }
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const CupertinoPageScaffold(
+        child: Center(child: CupertinoActivityIndicator()),
+      );
     }
     if (tv) {
       return scopeServerPosters(
@@ -312,8 +314,8 @@ class _ServerResumePageState extends State<ServerResumePage> {
         ),
       );
     }
-    return Scaffold(
-      body: scopeServerPosters(
+    return CupertinoPageScaffold(
+      child: scopeServerPosters(
         account: account,
         serverId: widget.serverId,
         child: ShelfClientOverride(
@@ -340,7 +342,7 @@ Widget _tvPending(
   return TvFrame(
     title: title,
     child: error == null
-        ? const Center(child: CircularProgressIndicator())
+        ? const Center(child: CupertinoActivityIndicator())
         : Padding(
             padding: EdgeInsets.symmetric(horizontal: padding.left),
             child: Align(

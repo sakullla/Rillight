@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'ui/ui.dart' as ui;
+
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/desktop_performance_host.dart';
@@ -65,8 +68,10 @@ class RillightApp extends StatelessWidget {
                       debugShowCheckedModeBanner: false,
                       locale: const Locale('zh', 'CN'),
                       supportedLocales: AppLocalizations.supportedLocales,
-                      localizationsDelegates:
-                          AppLocalizations.localizationsDelegates,
+                      localizationsDelegates: [
+                        ...AppLocalizations.localizationsDelegates,
+                        ui.GlobalCupertinoLocalizations.delegate,
+                      ],
                       theme: environment.isTv
                           ? AppTheme.tvLight()
                           : AppTheme.phoneLight(),
@@ -74,11 +79,20 @@ class RillightApp extends StatelessWidget {
                           ? AppTheme.tvDark()
                           : AppTheme.phoneDark(),
                       // TV 每条路由(含弹窗)共用按画布换算的字号与弹窗样式。
-                      builder: environment.isTv
-                          ? (context, child) => TvStageTheme(
-                              child: child ?? const SizedBox.shrink(),
-                            )
-                          : null,
+                      builder: (context, child) => ui.AppUiTheme(
+                        data: environment.isTv
+                            ? (appearance.brightness == Brightness.dark
+                                  ? ui.AppUiTheme.tvDark()
+                                  : ui.AppUiTheme.tvLight())
+                            : (appearance.brightness == Brightness.dark
+                                  ? ui.AppUiTheme.phoneDark()
+                                  : ui.AppUiTheme.phoneLight()),
+                        child: environment.isTv
+                            ? TvStageTheme(
+                                child: child ?? const SizedBox.shrink(),
+                              )
+                            : child ?? const SizedBox.shrink(),
+                      ),
                       themeMode: mode,
                       scrollBehavior: environment.isTv
                           ? null
@@ -117,23 +131,31 @@ class RillightApp extends StatelessWidget {
               debugShowCheckedModeBanner: false,
               locale: const Locale('zh', 'CN'),
               supportedLocales: AppLocalizations.supportedLocales,
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              localizationsDelegates: [
+                ...AppLocalizations.localizationsDelegates,
+                ui.GlobalCupertinoLocalizations.delegate,
+              ],
               theme: AppTheme.light(),
               darkTheme: AppTheme.dark(),
               themeMode: mode,
               routerConfig: router,
               builder: (context, child) {
-                return DesktopPerformanceHost(
-                  child: PlayerScope(
-                    bindings: playerBindings,
-                    child: PlayerWindowScope(
-                      host: windowHost,
-                      child: _PlayerHostNoticeListener(
+                return ui.AppUiTheme(
+                  data: appearance.brightness == Brightness.dark
+                      ? ui.AppUiTheme.dark()
+                      : ui.AppUiTheme.light(),
+                  child: DesktopPerformanceHost(
+                    child: PlayerScope(
+                      bindings: playerBindings,
+                      child: PlayerWindowScope(
                         host: windowHost,
-                        child: _PlayerWindowLayer(
+                        child: _PlayerHostNoticeListener(
                           host: windowHost,
-                          router: router,
-                          child: child ?? const SizedBox.shrink(),
+                          child: _PlayerWindowLayer(
+                            host: windowHost,
+                            router: router,
+                            child: child ?? const SizedBox.shrink(),
+                          ),
                         ),
                       ),
                     ),
@@ -385,15 +407,14 @@ class _PlayerWindowLayer extends StatelessWidget {
                                       await host.restoreOriginalSource();
                                     } catch (_) {
                                       if (!context.mounted) return;
-                                      ScaffoldMessenger.maybeOf(
-                                        context,
-                                      )?.showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            l10n.desktopSourceRestoreFailed,
-                                          ),
-                                        ),
-                                      );
+                                      ScaffoldMessenger.maybeOf(context)
+                                          ?.showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                l10n.desktopSourceRestoreFailed,
+                                              ),
+                                            ),
+                                          );
                                     }
                                   },
                             child: Text(l10n.switchRestore),

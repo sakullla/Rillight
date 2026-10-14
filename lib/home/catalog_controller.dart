@@ -304,9 +304,9 @@ class CatalogController extends ChangeNotifier {
       );
     }
     try {
-      final items = parseCatalogPage(
-        await network,
-      ).items.where((item) => item.isResumeMedia).toList();
+      final items = parseCatalogPage(await network).items
+          .where((item) => item.isResumeMedia)
+          .toList();
       fresh = true;
       if (gen != _loadGen) {
         return;
@@ -347,9 +347,9 @@ class CatalogController extends ChangeNotifier {
       );
     }
     try {
-      final items = parseCatalogPage(
-        await network,
-      ).items.where((item) => item.isEpisode).toList();
+      final items = parseCatalogPage(await network).items
+          .where((item) => item.isEpisode)
+          .toList();
       fresh = true;
       if (gen != _loadGen) {
         return;
@@ -405,9 +405,9 @@ class CatalogController extends ChangeNotifier {
       );
     }
     try {
-      final items = parseCatalogPage(
-        await network,
-      ).items.where((item) => item.isMovie).toList();
+      final items = parseCatalogPage(await network).items
+          .where((item) => item.isMovie)
+          .toList();
       fresh = true;
       if (gen != _loadGen) {
         return;
@@ -457,9 +457,9 @@ class CatalogController extends ChangeNotifier {
       );
     }
     try {
-      final items = parseCatalogPage(
-        await network,
-      ).items.where((item) => item.isSeries).toList();
+      final items = parseCatalogPage(await network).items
+          .where((item) => item.isSeries)
+          .toList();
       fresh = true;
       if (gen != _loadGen) {
         return;

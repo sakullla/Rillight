@@ -1,5 +1,7 @@
 import '../helpers/region_access_fixture.dart';
+
 import 'package:dio/dio.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -179,32 +181,26 @@ Future<WatchRecord?> _observe(
 );
 
 void main() {
-  test(
-    'actual local observation commits before failed report; reports only actual source',
-    () async {
-      final f = await _fixture();
-      final s = await f.begin(f.a);
-      expect(await _observe(f, s, 0, 20, playing: false), isNull);
-      expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-      final record = (await _observe(f, s, 1, 30))!;
-      var requests = 0;
-      await f.writer.synchronize(record, (client, actual) async {
-        requests++;
-        expect(client.userId, f.a.userId);
-        expect(actual.source.account, f.a);
-        expect(
-          f.writer.records(AccessRegion.ordinary).single.positionTicks,
-          30,
-        );
-        throw StateError('remote failed');
-      });
-      expect(requests, 1);
-      final saved = f.writer.records(AccessRegion.ordinary).single;
-      expect(saved.remoteStatus, RemoteSyncStatus.failed);
-      expect(saved.positionTicks, 30);
-      expect(saved.timeline.edition, 'cut');
-    },
-  );
+  test('actual local observation commits before failed report; reports only actual source', () async {
+    final f = await _fixture();
+    final s = await f.begin(f.a);
+    expect(await _observe(f, s, 0, 20, playing: false), isNull);
+    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    final record = (await _observe(f, s, 1, 30))!;
+    var requests = 0;
+    await f.writer.synchronize(record, (client, actual) async {
+      requests++;
+      expect(client.userId, f.a.userId);
+      expect(actual.source.account, f.a);
+      expect(f.writer.records(AccessRegion.ordinary).single.positionTicks, 30);
+      throw StateError('remote failed');
+    });
+    expect(requests, 1);
+    final saved = f.writer.records(AccessRegion.ordinary).single;
+    expect(saved.remoteStatus, RemoteSyncStatus.failed);
+    expect(saved.positionTicks, 30);
+    expect(saved.timeline.edition, 'cut');
+  });
 
   test(
     'reject out of order, ended and superseded sessions, including IPC ids',
@@ -337,81 +333,70 @@ void main() {
     },
   );
 
-  test(
-    'remote unknown/equal timestamps conflict, not max position or response order',
-    () async {
-      final f = await _fixture();
-      RemoteWatch remote(
-        SourceAccount a,
-        int pos, {
-        DateTime? at,
-        bool trusted = false,
-      }) => RemoteWatch(
-        source: f.source(a),
-        work: f.source(a, version: null),
-        libraryId: 'library',
-        positionTicks: pos,
-        playedAt: at,
-        timeTrusted: trusted,
-      );
-      ResumeChoice resolve(List<RemoteWatch> candidates) =>
-          f.writer.resolveResume(
-            region: AccessRegion.ordinary,
-            index: f.index(),
-            anchor: f.source(f.a, version: null),
-            remote: candidates,
-          );
-      final unknown = [remote(f.a, 900), remote(f.b, 10)];
-      expect(resolve(unknown).kind, ResumeKind.conflict);
-      expect(resolve(unknown.reversed.toList()).conflicts, hasLength(2));
-      final at = DateTime.utc(2026);
-      expect(
-        resolve([
-          remote(f.a, 900, at: at, trusted: true),
-          remote(f.b, 10, at: at, trusted: true),
-        ]).kind,
-        ResumeKind.conflict,
-      );
-      expect(
-        resolve([
-          remote(f.a, 900, at: at, trusted: true),
-          remote(
-            f.b,
-            10,
-            at: at.add(const Duration(seconds: 1)),
-            trusted: true,
-          ),
-        ]).remote!.source.account,
-        f.b,
-      );
-    },
-  );
+  test('remote unknown/equal timestamps conflict, not max position or response order', () async {
+    final f = await _fixture();
+    RemoteWatch remote(
+      SourceAccount a,
+      int pos, {
+      DateTime? at,
+      bool trusted = false,
+    }) => RemoteWatch(
+      source: f.source(a),
+      work: f.source(a, version: null),
+      libraryId: 'library',
+      positionTicks: pos,
+      playedAt: at,
+      timeTrusted: trusted,
+    );
+    ResumeChoice resolve(List<RemoteWatch> candidates) =>
+        f.writer.resolveResume(
+          region: AccessRegion.ordinary,
+          index: f.index(),
+          anchor: f.source(f.a, version: null),
+          remote: candidates,
+        );
+    final unknown = [remote(f.a, 900), remote(f.b, 10)];
+    expect(resolve(unknown).kind, ResumeKind.conflict);
+    expect(resolve(unknown.reversed.toList()).conflicts, hasLength(2));
+    final at = DateTime.utc(2026);
+    expect(
+      resolve([
+        remote(f.a, 900, at: at, trusted: true),
+        remote(f.b, 10, at: at, trusted: true),
+      ]).kind,
+      ResumeKind.conflict,
+    );
+    expect(
+      resolve([
+        remote(f.a, 900, at: at, trusted: true),
+        remote(f.b, 10, at: at.add(const Duration(seconds: 1)), trusted: true),
+      ]).remote!.source.account,
+      f.b,
+    );
+  });
 
-  test(
-    'restart retains sequence, sync status, exact source and timeline, not active sessions',
-    () async {
-      final store = MemoryHistoryStore();
-      final f = await _fixture(store: store);
-      final session = await f.begin(f.a);
-      final record = (await _observe(f, session, 8, 99))!;
-      await f.writer.synchronize(record, (_, _) async {
-        throw StateError('offline');
-      });
-      await f.writer.close();
-      f.writer = await HistoryWriter.open(registry: f.registry, store: store);
-      expect(f.writer.sessionById(session.id), isNull);
-      final saved = f.writer.records(AccessRegion.ordinary).single;
-      expect(saved.source, record.source);
-      expect(saved.remoteStatus, RemoteSyncStatus.failed);
-      expect(saved.timeline.durationTicks, 1000);
-      final next = await f.begin(f.a);
-      expect(next.id, isNot(session.id));
-      expect(
-        (await _observe(f, next, 0, 3))!.localOrder,
-        greaterThan(record.localOrder),
-      );
-    },
-  );
+  test('restart retains sequence, sync status, exact source and timeline, not active sessions', () async {
+    final store = MemoryHistoryStore();
+    final f = await _fixture(store: store);
+    final session = await f.begin(f.a);
+    final record = (await _observe(f, session, 8, 99))!;
+    await f.writer.synchronize(record, (_, _) async {
+      throw StateError('offline');
+    });
+    await f.writer.close();
+    f.writer = await HistoryWriter.open(registry: f.registry, store: store);
+    expect(f.writer.sessionById(session.id), isNull);
+    final saved = f.writer.records(AccessRegion.ordinary).single;
+    expect(saved.source, record.source);
+    expect(saved.remoteStatus, RemoteSyncStatus.failed);
+    expect(saved.timeline.durationTicks, 1000);
+    final next = await f.begin(f.a);
+    expect(next.id, isNot(session.id));
+    expect(
+      (await _observe(f, next, 0, 3))!.localOrder,
+      greaterThan(record.localOrder),
+    );
+  });
 
   test(
     'disk failure leaves prior snapshot and allows same event retry',
@@ -462,43 +447,40 @@ void main() {
     },
   );
 
-  test(
-    'removed line and unavailable account are explicit, with allowed alternatives',
-    () async {
-      final f = await _fixture();
-      final owner = f.source(f.a, version: null);
-      await f.writer.savePreference(f.pref(f.a));
-      final snapshot = await f.registry.ordinaryStore.load();
-      await f.registry.ordinaryStore.save(
-        ServerListSnapshot(
-          servers: [
-            for (final server in snapshot.servers)
-              if (server.id == 'a')
-                server.copyWith(
-                  lines: [
-                    const ServerLine(id: 'replacement', address: 'https://a'),
-                  ],
-                  activeLineId: 'replacement',
-                )
-              else
-                server,
-          ],
-        ),
-      );
-      PreferenceResolution resolve() => f.writer.resolvePreference(
-        owner: owner,
-        region: AccessRegion.ordinary,
-        candidates: [f.candidate(f.a), f.candidate(f.b)],
-      );
-      expect(resolve().failure, PreferenceFailure.lineRemoved);
-      expect(resolve().selected, isNull);
-      await f.writer.savePreference(f.pref(f.a, line: 'replacement'));
-      final commit = await f.registry.beginOrdinaryCredentials('a');
-      await f.registry.commitOrdinaryCredentials(commit, null);
-      expect(resolve().failure, PreferenceFailure.accountUnavailable);
-      expect(resolve().allowedCandidates.single.source.account, f.b);
-    },
-  );
+  test('removed line and unavailable account are explicit, with allowed alternatives', () async {
+    final f = await _fixture();
+    final owner = f.source(f.a, version: null);
+    await f.writer.savePreference(f.pref(f.a));
+    final snapshot = await f.registry.ordinaryStore.load();
+    await f.registry.ordinaryStore.save(
+      ServerListSnapshot(
+        servers: [
+          for (final server in snapshot.servers)
+            if (server.id == 'a')
+              server.copyWith(
+                lines: [
+                  const ServerLine(id: 'replacement', address: 'https://a'),
+                ],
+                activeLineId: 'replacement',
+              )
+            else
+              server,
+        ],
+      ),
+    );
+    PreferenceResolution resolve() => f.writer.resolvePreference(
+      owner: owner,
+      region: AccessRegion.ordinary,
+      candidates: [f.candidate(f.a), f.candidate(f.b)],
+    );
+    expect(resolve().failure, PreferenceFailure.lineRemoved);
+    expect(resolve().selected, isNull);
+    await f.writer.savePreference(f.pref(f.a, line: 'replacement'));
+    final commit = await f.registry.beginOrdinaryCredentials('a');
+    await f.registry.commitOrdinaryCredentials(commit, null);
+    expect(resolve().failure, PreferenceFailure.accountUnavailable);
+    expect(resolve().allowedCandidates.single.source.account, f.b);
+  });
 
   test(
     'preference persistence survives restart and rejects cross-region writes',
@@ -542,167 +524,155 @@ void main() {
     },
   );
 
-  test(
-    'next episode resolves fresh concrete version; missing label stays uncertain',
-    () async {
-      final f = await _fixture();
-      final owner = f.source(f.a, version: null);
-      await f.writer.savePreference(f.pref(f.a));
-      final next = f.candidate(
-        f.a,
-        item: 'episode-2',
-        version: 'different-version-id',
-      );
-      final index = WorkIndex()
-        ..upsert([
-          WorkSource(
-            reference: owner,
-            type: 'Series',
-            title: 'series',
-            providerIds: const {'tmdb': '1'},
-          ),
-        ]);
-      final intended = EpisodeSource(
-        reference: next.source.item,
-        series: owner,
-        season: 1,
-        episode: 2,
-        isSpecial: false,
-        numberingScheme: 'aired',
-      );
-      final lookup = locateEpisode(
-        series: index.groupFor(owner)!,
-        origin: intended,
-        targetAccount: f.a,
-        available: [intended],
-      );
-      final lookups = {f.a: lookup};
-      expect(lookup.status, EpisodeLookupStatus.confirmed);
-      expect(
-        f.writer
-            .resolvePreference(
-              owner: owner,
-              region: AccessRegion.ordinary,
-              candidates: [next],
-              nextEpisode: true,
-            )
-            .selected,
-        isNull,
-      );
-      final result = f.writer.resolvePreference(
-        owner: owner,
-        region: AccessRegion.ordinary,
-        candidates: [next],
-        nextEpisode: true,
-        episodeLookups: lookups,
-      );
-      expect(result.selected!.source.itemId, 'episode-2');
-      expect(result.selected!.source.mediaSourceId, 'different-version-id');
-      expect(
-        f.writer
-            .resolvePreference(
-              owner: owner,
-              region: AccessRegion.ordinary,
-              candidates: [PreferenceCandidate(next.source, 'library')],
-              nextEpisode: true,
-              episodeLookups: lookups,
-            )
-            .failure,
-        PreferenceFailure.versionUncertain,
-      );
-      expect(
-        f.writer
-            .resolvePreference(
-              owner: owner,
-              region: AccessRegion.ordinary,
-              candidates: [next],
-            )
-            .failure,
-        PreferenceFailure.targetMissing,
-      );
-    },
-  );
+  test('next episode resolves fresh concrete version; missing label stays uncertain', () async {
+    final f = await _fixture();
+    final owner = f.source(f.a, version: null);
+    await f.writer.savePreference(f.pref(f.a));
+    final next = f.candidate(
+      f.a,
+      item: 'episode-2',
+      version: 'different-version-id',
+    );
+    final index = WorkIndex()
+      ..upsert([
+        WorkSource(
+          reference: owner,
+          type: 'Series',
+          title: 'series',
+          providerIds: const {'tmdb': '1'},
+        ),
+      ]);
+    final intended = EpisodeSource(
+      reference: next.source.item,
+      series: owner,
+      season: 1,
+      episode: 2,
+      isSpecial: false,
+      numberingScheme: 'aired',
+    );
+    final lookup = locateEpisode(
+      series: index.groupFor(owner)!,
+      origin: intended,
+      targetAccount: f.a,
+      available: [intended],
+    );
+    final lookups = {f.a: lookup};
+    expect(lookup.status, EpisodeLookupStatus.confirmed);
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: owner,
+            region: AccessRegion.ordinary,
+            candidates: [next],
+            nextEpisode: true,
+          )
+          .selected,
+      isNull,
+    );
+    final result = f.writer.resolvePreference(
+      owner: owner,
+      region: AccessRegion.ordinary,
+      candidates: [next],
+      nextEpisode: true,
+      episodeLookups: lookups,
+    );
+    expect(result.selected!.source.itemId, 'episode-2');
+    expect(result.selected!.source.mediaSourceId, 'different-version-id');
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: owner,
+            region: AccessRegion.ordinary,
+            candidates: [PreferenceCandidate(next.source, 'library')],
+            nextEpisode: true,
+            episodeLookups: lookups,
+          )
+          .failure,
+      PreferenceFailure.versionUncertain,
+    );
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: owner,
+            region: AccessRegion.ordinary,
+            candidates: [next],
+          )
+          .failure,
+      PreferenceFailure.targetMissing,
+    );
+  });
 
-  test(
-    'ordinary projection never includes unlocked private records, preferences or remote',
-    () async {
-      final f = await _fixture(privateB: true);
-      final s = await f.begin(f.b);
-      await _observe(f, s, 0, 10);
-      await f.writer.savePreference(f.pref(f.b));
-      expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-      expect(f.writer.records(AccessRegion.private), hasLength(1));
-      final result = f.writer.resolvePreference(
-        owner: f.source(f.b, version: null),
-        region: AccessRegion.ordinary,
-        candidates: [f.candidate(f.b)],
-      );
-      expect(result.failure, PreferenceFailure.wrongRegion);
-      expect(result.preference, isNull);
-      expect(result.allowedCandidates, isEmpty);
-    },
-  );
+  test('ordinary projection never includes unlocked private records, preferences or remote', () async {
+    final f = await _fixture(privateB: true);
+    final s = await f.begin(f.b);
+    await _observe(f, s, 0, 10);
+    await f.writer.savePreference(f.pref(f.b));
+    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    expect(f.writer.records(AccessRegion.private), hasLength(1));
+    final result = f.writer.resolvePreference(
+      owner: f.source(f.b, version: null),
+      region: AccessRegion.ordinary,
+      candidates: [f.candidate(f.b)],
+    );
+    expect(result.failure, PreferenceFailure.wrongRegion);
+    expect(result.preference, isNull);
+    expect(result.allowedCandidates, isEmpty);
+  });
 
-  test(
-    'lock revokes sessions and clears preferences; unlocking does not resurrect them',
-    () async {
-      final f = await _fixture(privateB: true);
-      final s = await f.begin(f.b);
-      await _observe(f, s, 0, 10);
-      await f.writer.savePreference(f.pref(f.b));
-      await f.access.lock();
-      expect(await _observe(f, s, 1, 50), isNull);
-      expect(f.writer.records(AccessRegion.private), isEmpty);
-      final locked = f.writer.resolvePreference(
-        owner: f.source(f.b, version: null),
-        region: AccessRegion.private,
-        candidates: [f.candidate(f.b)],
-      );
-      expect(locked.failure, PreferenceFailure.regionLocked);
-      expect(locked.preference, isNull);
-      expect(await f.access.unlock('1234'), isTrue);
-      await f.registry.authenticate('b');
-      expect(
-        f.writer
-            .resolvePreference(
-              owner: f.source(f.b, version: null),
-              region: AccessRegion.private,
-              candidates: [f.candidate(f.b)],
-            )
-            .failure,
-        PreferenceFailure.notConfigured,
-      );
-      expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-    },
-  );
+  test('lock revokes sessions and clears preferences; unlocking does not resurrect them', () async {
+    final f = await _fixture(privateB: true);
+    final s = await f.begin(f.b);
+    await _observe(f, s, 0, 10);
+    await f.writer.savePreference(f.pref(f.b));
+    await f.access.lock();
+    expect(await _observe(f, s, 1, 50), isNull);
+    expect(f.writer.records(AccessRegion.private), isEmpty);
+    final locked = f.writer.resolvePreference(
+      owner: f.source(f.b, version: null),
+      region: AccessRegion.private,
+      candidates: [f.candidate(f.b)],
+    );
+    expect(locked.failure, PreferenceFailure.regionLocked);
+    expect(locked.preference, isNull);
+    expect(await f.access.unlock('1234'), isTrue);
+    await f.registry.authenticate('b');
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: f.source(f.b, version: null),
+            region: AccessRegion.private,
+            candidates: [f.candidate(f.b)],
+          )
+          .failure,
+      PreferenceFailure.notConfigured,
+    );
+    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+  });
 
-  test(
-    'service migration purges actual records and preferences before membership change',
-    () async {
-      final f = await _fixture();
-      await f.access.setPin('1234', '1234', (_) async {});
-      await f.access.unlock('1234');
-      final s = await f.begin(f.a);
-      await _observe(f, s, 0, 20);
-      await f.writer.savePreference(f.pref(f.a));
-      await f.registry.move('a', AccessRegion.private);
-      expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-      expect(await _observe(f, s, 1, 40), isNull);
-      await f.registry.move('a', AccessRegion.ordinary);
-      await f.registry.authenticate('a');
-      expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-      expect(
-        f.writer
-            .resolvePreference(
-              owner: f.source(f.a, version: null),
-              region: AccessRegion.ordinary,
-              candidates: [f.candidate(f.a)],
-            )
-            .failure,
-        PreferenceFailure.notConfigured,
-      );
-    },
-  );
+  test('service migration purges actual records and preferences before membership change', () async {
+    final f = await _fixture();
+    await f.access.setPin('1234', '1234', (_) async {});
+    await f.access.unlock('1234');
+    final s = await f.begin(f.a);
+    await _observe(f, s, 0, 20);
+    await f.writer.savePreference(f.pref(f.a));
+    await f.registry.move('a', AccessRegion.private);
+    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    expect(await _observe(f, s, 1, 40), isNull);
+    await f.registry.move('a', AccessRegion.ordinary);
+    await f.registry.authenticate('a');
+    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: f.source(f.a, version: null),
+            region: AccessRegion.ordinary,
+            candidates: [f.candidate(f.a)],
+          )
+          .failure,
+      PreferenceFailure.notConfigured,
+    );
+  });
 
   test(
     'legacy concrete version resolves normally before and after restart',
@@ -863,111 +833,102 @@ void main() {
     },
   );
 
-  test(
-    'legacy ids migrate only with complete unique attribution; consumed id cannot revive',
-    () async {
-      final f = await _fixture();
-      const settings = PlayerSeriesPreference(
-        audioLanguage: 'zh',
-        mediaSourceName: 'cut',
-      );
-      expect(
-        await f.writer.migrateLegacy(
-          seriesId: 'movie',
-          settings: settings,
-          candidates: [f.candidate(f.a)],
-          inventoryComplete: false,
-        ),
-        PreferenceFailure.ambiguousLegacy,
-      );
-      expect(
-        await f.writer.migrateLegacy(
-          seriesId: 'movie',
-          settings: settings,
-          candidates: [f.candidate(f.a), f.candidate(f.b)],
-          inventoryComplete: true,
-        ),
-        PreferenceFailure.ambiguousLegacy,
-      );
-      expect(
-        await f.writer.migrateLegacy(
-          seriesId: 'movie',
-          settings: settings,
-          candidates: [f.candidate(f.a)],
-          inventoryComplete: true,
-        ),
-        isNull,
-      );
-      await f.access.setPin('1234', '1234', (_) async {});
-      await f.access.unlock('1234');
-      await f.registry.move('a', AccessRegion.private);
-      await f.registry.move('a', AccessRegion.ordinary);
-      await f.registry.authenticate('a');
-      await f.writer.close();
-      f.writer = await HistoryWriter.open(
-        registry: f.registry,
-        store: f.writer.store,
-      );
-      expect(
-        await f.writer.migrateLegacy(
-          seriesId: 'movie',
-          settings: settings,
-          candidates: [f.candidate(f.a)],
-          inventoryComplete: true,
-        ),
-        PreferenceFailure.notConfigured,
-      );
-    },
-  );
+  test('legacy ids migrate only with complete unique attribution; consumed id cannot revive', () async {
+    final f = await _fixture();
+    const settings = PlayerSeriesPreference(
+      audioLanguage: 'zh',
+      mediaSourceName: 'cut',
+    );
+    expect(
+      await f.writer.migrateLegacy(
+        seriesId: 'movie',
+        settings: settings,
+        candidates: [f.candidate(f.a)],
+        inventoryComplete: false,
+      ),
+      PreferenceFailure.ambiguousLegacy,
+    );
+    expect(
+      await f.writer.migrateLegacy(
+        seriesId: 'movie',
+        settings: settings,
+        candidates: [f.candidate(f.a), f.candidate(f.b)],
+        inventoryComplete: true,
+      ),
+      PreferenceFailure.ambiguousLegacy,
+    );
+    expect(
+      await f.writer.migrateLegacy(
+        seriesId: 'movie',
+        settings: settings,
+        candidates: [f.candidate(f.a)],
+        inventoryComplete: true,
+      ),
+      isNull,
+    );
+    await f.access.setPin('1234', '1234', (_) async {});
+    await f.access.unlock('1234');
+    await f.registry.move('a', AccessRegion.private);
+    await f.registry.move('a', AccessRegion.ordinary);
+    await f.registry.authenticate('a');
+    await f.writer.close();
+    f.writer = await HistoryWriter.open(
+      registry: f.registry,
+      store: f.writer.store,
+    );
+    expect(
+      await f.writer.migrateLegacy(
+        seriesId: 'movie',
+        settings: settings,
+        candidates: [f.candidate(f.a)],
+        inventoryComplete: true,
+      ),
+      PreferenceFailure.notConfigured,
+    );
+  });
 
-  test(
-    'revocation during disk IO rejects result and remote dispatch; cleanup removes pending preferences',
-    () async {
-      final store = _FailingStore();
-      final f = await _fixture(store: store, privateB: true);
-      final s = await f.begin(f.b);
-      store.started = Completer<void>();
-      store.gate = Completer<void>();
-      final started = store.started!.future;
-      final observing = _observe(f, s, 1, 80);
-      final rejected = expectLater(observing, throwsStateError);
-      await started;
-      final locking = f.access.lock();
-      expect(f.writer.records(AccessRegion.private), isEmpty);
-      store.gate!.complete();
-      await rejected;
-      await locking;
-      expect(f.writer.sessionById(s.id), isNull);
-    },
-  );
+  test('revocation during disk IO rejects result and remote dispatch; cleanup removes pending preferences', () async {
+    final store = _FailingStore();
+    final f = await _fixture(store: store, privateB: true);
+    final s = await f.begin(f.b);
+    store.started = Completer<void>();
+    store.gate = Completer<void>();
+    final started = store.started!.future;
+    final observing = _observe(f, s, 1, 80);
+    final rejected = expectLater(observing, throwsStateError);
+    await started;
+    final locking = f.access.lock();
+    expect(f.writer.records(AccessRegion.private), isEmpty);
+    store.gate!.complete();
+    await rejected;
+    await locking;
+    expect(f.writer.sessionById(s.id), isNull);
+  });
 
-  test(
-    'failed lock cleanup still evicts preference in memory and on next locked restart',
-    () async {
-      final store = _FailingStore();
-      final f = await _fixture(store: store, privateB: true);
-      await f.writer.savePreference(f.pref(f.b));
-      store.fail = true;
-      await f.access.lock();
-      expect(await f.access.unlock('1234'), isTrue);
-      await f.registry.authenticate('b');
-      expect(
-        f.writer
-            .resolvePreference(
-              owner: f.source(f.b, version: null),
-              region: AccessRegion.private,
-              candidates: [f.candidate(f.b)],
-            )
-            .preference,
-        isNull,
-      );
-      store.fail = false;
-      await f.access.lock();
-      await f.writer.close();
-      f.writer = await HistoryWriter.open(registry: f.registry, store: store);
-      expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-    },
-  );
+  test('failed lock cleanup still evicts preference in memory and on next locked restart', () async {
+    final store = _FailingStore();
+    final f = await _fixture(store: store, privateB: true);
+    await f.writer.savePreference(f.pref(f.b));
+    store.fail = true;
+    await f.access.lock();
+    expect(await f.access.unlock('1234'), isTrue);
+    await f.registry.authenticate('b');
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: f.source(f.b, version: null),
+            region: AccessRegion.private,
+            candidates: [f.candidate(f.b)],
+          )
+          .preference,
+      isNull,
+    );
+    store.fail = false;
+    await f.access.lock();
+    await f.writer.close();
+    f.writer = await HistoryWriter.open(registry: f.registry, store: store);
+    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+  });
 
   test(
     'file atomic replacement, restart and exclusive main-process ownership',

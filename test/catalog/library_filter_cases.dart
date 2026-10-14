@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -80,9 +83,10 @@ class _FilteringEmbyServer extends FakeEmbyServer {
     final types = _splitValues(q['IncludeItemTypes']);
     final filters = _splitValues(q['Filters']);
     final genres = _splitValues(q['Genres']);
-    final years = _splitValues(
-      q['Years'],
-    ).map(int.tryParse).whereType<int>().toSet();
+    final years = _splitValues(q['Years'])
+        .map(int.tryParse)
+        .whereType<int>()
+        .toSet();
 
     var matched = items.where((item) {
       if (types.isNotEmpty && !types.contains(item.type)) {
@@ -314,7 +318,7 @@ void main() {
     expect(find.byType(ShelfGridPage), findsOneWidget);
     final before = posterNames(tester);
     await openFilters(tester);
-    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(ui.AppChoiceChip), findsNothing);
     expect(find.byType(OptionPill), findsWidgets);
     await tester.tap(
       find.byKey(const Key('catalog-grid-filter-section-watch')),

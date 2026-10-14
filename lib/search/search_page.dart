@@ -1,10 +1,9 @@
-import 'package:flutter/material.dart' hide SearchController;
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -162,53 +161,47 @@ class _SearchPageState extends State<SearchPage> {
       child: Row(
         children: [
           Expanded(
-            child: TextField(
+            child: AppTextField(
               key: CatalogKeys.searchField,
               controller: _query,
               focusNode: widget.focusNode,
               autofocus: widget.autofocus,
               textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: l10n.searchHint,
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _query,
-                  builder: (context, value, _) {
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (value.text.isNotEmpty)
-                          IconButton(
-                            key: const Key('catalog-search-clear'),
-                            tooltip: MaterialLocalizations.of(
-                              context,
-                            ).deleteButtonTooltip,
-                            onPressed: () {
-                              _query.clear();
-                              _submit('');
-                            },
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        IconButton(
-                          key: CatalogKeys.searchSubmit,
-                          tooltip: l10n.search,
-                          onPressed: _loading ? null : () => _submit(),
-                          icon: _loading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.arrow_forward_rounded),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
               onSubmitted: (value) => _submit(value),
+              placeholder: l10n.searchHint,
+              prefix: const Icon(CupertinoIcons.search),
+              suffix: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _query,
+                builder: (context, value, _) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (value.text.isNotEmpty)
+                        AppIconButton(
+                          key: const Key('catalog-search-clear'),
+                          tooltip: '删除',
+                          onPressed: () {
+                            _query.clear();
+                            _submit('');
+                          },
+                          icon: const Icon(CupertinoIcons.xmark),
+                        ),
+                      AppIconButton(
+                        key: CatalogKeys.searchSubmit,
+                        tooltip: l10n.search,
+                        onPressed: _loading ? null : () => _submit(),
+                        icon: _loading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CupertinoActivityIndicator(),
+                              )
+                            : const Icon(CupertinoIcons.arrow_right),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
           CatalogFilterButton(
@@ -272,12 +265,15 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
     if (!_searched) {
-      return AppEmptyView(icon: Icons.search, message: l10n.searchEmptyQuery);
+      return AppEmptyView(
+        icon: CupertinoIcons.search,
+        message: l10n.searchEmptyQuery,
+      );
     }
     if (_items.isEmpty) {
       return AppEmptyView(
         key: CatalogKeys.searchNoResults,
-        icon: Icons.search_off,
+        icon: CupertinoIcons.search,
         message: l10n.searchNoResults,
       );
     }
@@ -285,7 +281,7 @@ class _SearchPageState extends State<SearchPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_search.refreshingFirstPage)
-          const LinearProgressIndicator(key: Key('search-refreshing')),
+          const AppLoadingBar(key: Key('search-refreshing')),
         if (_error != null)
           CatalogInlineFailure(
             message: searchFailureMessage(l10n, _error!),
@@ -325,7 +321,7 @@ class _SearchPageState extends State<SearchPage> {
                       itemBuilder: (context, index) {
                         if (index >= _items.length) {
                           return const Center(
-                            child: CircularProgressIndicator(),
+                            child: CupertinoActivityIndicator(),
                           );
                         }
                         final item = _items[index];

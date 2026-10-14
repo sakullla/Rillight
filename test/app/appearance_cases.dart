@@ -83,7 +83,9 @@ void main() {
         );
         await tester.tap(find.byKey(AppearanceMenuButton.menuKey));
         await settle(tester);
-        final dialog = tester.element(find.byType(ui.AppDialog));
+        final dialog = tester.element(
+          find.byKey(const Key('app-menu-content')),
+        );
         expect(ui.AppUiTheme.of(dialog).brightness, brightness);
         expect(ui.CupertinoTheme.brightnessOf(dialog), brightness);
         await tester.tap(find.text('取消'));

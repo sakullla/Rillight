@@ -104,45 +104,42 @@ void main() {
     }
   }
 
-  test(
-    'provider switch replaces captured detail client and discards old catalog/search responses',
-    () async {
-      final catalog = CatalogController(auth: auth);
-      final search = SearchController(auth: auth, cache: catalog.cache);
-      final oldId = emby.items.firstWhere((i) => i.type == 'Movie').id;
-      final detail = DetailController(
-        auth: auth,
-        cache: catalog.cache,
-        itemId: oldId,
-      );
-      final gate = Completer<void>();
-      adapter.hold = gate;
-      final oldSearch = search.submit('movie');
-      final oldDetail = detail.load();
-      final oldCatalog = catalog.reload();
-      await adapter.arrived.future;
-      await selectJellyfin();
-      adapter.hold = null;
-      gate.complete();
-      await Future.wait([oldSearch, oldDetail, oldCatalog]);
-      expect(detail.repository.client.serviceType, MediaServerType.jellyfin);
-      expect(detail.item, isNull);
-      expect(search.items, isEmpty);
-      await search.submit('测试');
-      await catalog.reload();
-      expect(search.items.map((i) => i.id), contains('movie-1'));
-      expect(catalog.latestMovies.items.map((i) => i.id).toList(), ['movie-1']);
-      expect(
-        jellyfin.requests.any(
-          (r) => r.path.endsWith('/Items') && r.query['searchTerm'] == '测试',
-        ),
-        isTrue,
-      );
-      detail.dispose();
-      search.dispose();
-      catalog.dispose();
-    },
-  );
+  test('provider switch replaces captured detail client and discards old catalog/search responses', () async {
+    final catalog = CatalogController(auth: auth);
+    final search = SearchController(auth: auth, cache: catalog.cache);
+    final oldId = emby.items.firstWhere((i) => i.type == 'Movie').id;
+    final detail = DetailController(
+      auth: auth,
+      cache: catalog.cache,
+      itemId: oldId,
+    );
+    final gate = Completer<void>();
+    adapter.hold = gate;
+    final oldSearch = search.submit('movie');
+    final oldDetail = detail.load();
+    final oldCatalog = catalog.reload();
+    await adapter.arrived.future;
+    await selectJellyfin();
+    adapter.hold = null;
+    gate.complete();
+    await Future.wait([oldSearch, oldDetail, oldCatalog]);
+    expect(detail.repository.client.serviceType, MediaServerType.jellyfin);
+    expect(detail.item, isNull);
+    expect(search.items, isEmpty);
+    await search.submit('测试');
+    await catalog.reload();
+    expect(search.items.map((i) => i.id), contains('movie-1'));
+    expect(catalog.latestMovies.items.map((i) => i.id).toList(), ['movie-1']);
+    expect(
+      jellyfin.requests.any(
+        (r) => r.path.endsWith('/Items') && r.query['searchTerm'] == '测试',
+      ),
+      isTrue,
+    );
+    detail.dispose();
+    search.dispose();
+    catalog.dispose();
+  });
 
   test(
     'logout discards pending catalog rows and selected-source previews',
@@ -164,34 +161,27 @@ void main() {
     },
   );
 
-  test(
-    'selected session survives aggregation scope but Home/relogin authority revokes pending requests',
-    () async {
-      await selectJellyfin();
-      final id = auth.session!.server.id;
-      await auth.sources.configureScope(
-        id,
-        participates: false,
-        libraryIds: {},
-      );
-      expect(auth.isLoggedIn, isTrue);
-      expect((await auth.client.getItem('movie-1')).id, 'movie-1');
-      final old = auth.client;
-      final gate = Completer<void>();
-      jellyfin.delay = gate;
-      jellyfin.arrived = Completer<void>();
-      final request = old.getItem('movie-1');
-      final rejection = expectLater(request, throwsA(anything));
-      await jellyfin.arrived!.future;
-      final attempt = await auth.sources.beginAuthorization(
-        serviceType: MediaServerType.jellyfin,
-        region: AccessRegion.ordinary,
-        configuredServerId: id,
-      );
-      expect(auth.isLoggedIn, isFalse);
-      gate.complete();
-      await rejection;
-      attempt.cancel();
-    },
-  );
+  test('selected session survives aggregation scope but Home/relogin authority revokes pending requests', () async {
+    await selectJellyfin();
+    final id = auth.session!.server.id;
+    await auth.sources.configureScope(id, participates: false, libraryIds: {});
+    expect(auth.isLoggedIn, isTrue);
+    expect((await auth.client.getItem('movie-1')).id, 'movie-1');
+    final old = auth.client;
+    final gate = Completer<void>();
+    jellyfin.delay = gate;
+    jellyfin.arrived = Completer<void>();
+    final request = old.getItem('movie-1');
+    final rejection = expectLater(request, throwsA(anything));
+    await jellyfin.arrived!.future;
+    final attempt = await auth.sources.beginAuthorization(
+      serviceType: MediaServerType.jellyfin,
+      region: AccessRegion.ordinary,
+      configuredServerId: id,
+    );
+    expect(auth.isLoggedIn, isFalse);
+    gate.complete();
+    await rejection;
+    attempt.cancel();
+  });
 }

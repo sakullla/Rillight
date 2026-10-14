@@ -3,10 +3,9 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/media_image/blurred_artwork.dart';
@@ -371,7 +370,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
   @override
   Widget build(BuildContext context) {
     if (widget.prefetch) return _buildPrefetch();
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -451,7 +450,7 @@ class _HeroArtworkState extends State<HeroArtwork> {
         fit: StackFit.expand,
         children: [
           _blurredFill(bytes, opacity: .5, sigma: 32),
-          const ColoredBox(color: Colors.black54),
+          const ColoredBox(color: Color(0x8a000000)),
         ],
       ),
     );

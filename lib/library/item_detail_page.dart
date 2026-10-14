@@ -3,13 +3,12 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/backdrop_scrim.dart';
 import 'package:rillight/app/widgets/media_source_menu_tile.dart';
@@ -769,7 +768,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       return;
     }
     final currentNumber = _item?.isEpisode == true ? _item?.indexNumber : null;
-    final selected = await showDialog<int>(
+    final selected = await showAppDialog<int>(
       context: context,
       builder: (context) => _EpisodeNumberPicker(
         total: total,
@@ -955,9 +954,9 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           itemId: itemId,
           source: DetailSourceScope.command(context, itemId)?.source,
           libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
-          regionGeneration: DetailSourceScope.maybeOf(
-            context,
-          )?.permit.regionGeneration,
+          regionGeneration: DetailSourceScope.maybeOf(context)
+              ?.permit
+              .regionGeneration,
           autoResume: !fromBeginning && startPosition == null,
           mediaSourceId: _item?.id == itemId && _pickedMediaSource
               ? _mediaSourceId
@@ -975,9 +974,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString(), key: PlayerKeys.windowError)),
-      );
+      showAppNotice(context, error.toString(), key: PlayerKeys.windowError);
     }
   }
 
@@ -1057,11 +1054,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         }
       });
       if (_item?.id != target.id) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error.toString(), key: PlayerKeys.windowError),
-          ),
-        );
+        showAppNotice(context, error.toString());
       }
     }
   }
@@ -1488,7 +1481,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ),
     ];
     return ContentTheme(
-      item: Theme.of(context).brightness == Brightness.light
+      item: AppUiTheme.of(context).brightness == Brightness.light
           ? artwork
           : backdrop,
       preferBackdrop: !item.isEpisode,
@@ -1497,9 +1490,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         onNotification: (notification) {
           if (notification.depth == 0 &&
               notification.metrics.axis == Axis.vertical) {
-            HomeScrollNotification(
-              notification.metrics.pixels > 24,
-            ).dispatch(context);
+            HomeScrollNotification(notification.metrics.pixels > 24)
+                .dispatch(context);
           }
           return false;
         },
@@ -1658,7 +1650,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final labelHeight = MediaShelf.lineHeightOf(
       context,
       theme.textTheme.labelLarge,
@@ -1717,7 +1709,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
                         CatalogKeys.shelfChapters,
                       ),
                       tooltip: l10n.scrollLeft,
-                      icon: const Icon(Icons.chevron_left),
+                      icon: const Icon(CupertinoIcons.chevron_left),
                       onPressed: () => _page(-1),
                     ),
                   ),
@@ -1729,7 +1721,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
                         CatalogKeys.shelfChapters,
                       ),
                       tooltip: l10n.scrollRight,
-                      icon: const Icon(Icons.chevron_right),
+                      icon: const Icon(CupertinoIcons.chevron_right),
                       onPressed: () => _page(1),
                     ),
                   ),
@@ -1743,7 +1735,7 @@ class _ChapterStripState extends State<_ChapterStrip> {
 }
 
 /// 桌面鼠标左键可以拖动章节条。竖直滚轮仍交给外层详情页。
-class _ChapterScrollBehavior extends MaterialScrollBehavior {
+class _ChapterScrollBehavior extends CupertinoScrollBehavior {
   const _ChapterScrollBehavior();
 
   @override
@@ -1775,17 +1767,19 @@ class _ChapterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
     final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
     // 16:9 章节图卡:左下角时间码角标,图下一行章节名;无图画主色渐变与序号。
     return SizedBox(
       width: width,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: InkWell(
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0x00000000),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: AppSurfaceAction(
           onTap: onTap,
           borderRadius: BorderRadius.circular(AppRadii.md),
           child: Column(
@@ -1824,7 +1818,7 @@ class _ChapterTile extends StatelessWidget {
                             child: Text(
                               chapterClock(chapter.startPosition),
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: Colors.white,
+                                color: const Color(0xffffffff),
                                 fontFeatures: const [
                                   FontFeature.tabularFigures(),
                                 ],
@@ -1936,11 +1930,12 @@ class _EpisodeShelfActions extends StatelessWidget {
             onSelected: onSelectSeason,
           ),
         if (onLocate != null)
-          TextButton.icon(
+          AppButton.icon(
             key: CatalogKeys.locateEpisode,
             onPressed: onLocate,
-            icon: const Icon(Icons.apps_rounded, size: 18),
+            icon: const Icon(CupertinoIcons.square_grid_2x2, size: 18),
             label: Text(l10n.pickEpisode),
+            variant: AppButtonVariant.plain,
           ),
       ],
     );
@@ -2026,16 +2021,14 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final ranges = <(int, int)>[];
     for (var start = 1; start <= widget.total; start += _pageSize) {
       final end = math.min(start + _pageSize - 1, widget.total);
       ranges.add((start, end));
     }
     final viewport = MediaQuery.sizeOf(context);
-    return AlertDialog(
-      backgroundColor: theme.colorScheme.surface,
-      surfaceTintColor: Colors.transparent,
+    return AppDialog(
       title: Text(l10n.pickEpisode),
       content: SizedBox(
         width: AppViewport.fit(420, viewport.width - 80, viewport),
@@ -2043,40 +2036,32 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
+            AppTextField(
               controller: _jump,
               autofocus: true,
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.go,
               onSubmitted: (_) => _submitJump(),
-              decoration: InputDecoration(
-                hintText: l10n.jumpToEpisodeHint,
-                isDense: true,
-                suffixIcon: IconButton(
-                  tooltip: l10n.pickEpisode,
-                  onPressed: _submitJump,
-                  icon: const Icon(Icons.arrow_forward_rounded),
-                ),
+              placeholder: l10n.jumpToEpisodeHint,
+              suffix: AppIconButton(
+                tooltip: l10n.pickEpisode,
+                onPressed: _submitJump,
+                icon: const Icon(CupertinoIcons.arrow_right),
               ),
             ),
             if (ranges.length > 1) ...[
               const SizedBox(height: AppSpacing.sm),
               Align(
                 alignment: Alignment.centerLeft,
-                child: PopupMenuButton<int>(
+                child: AppMenuButton<int>(
                   key: CatalogKeys.episodeRange,
                   tooltip: l10n.pickEpisode,
-                  initialValue: _rangeStart,
-                  constraints: const BoxConstraints(
-                    minWidth: 160,
-                    maxHeight: 320,
-                  ),
+                  selected: _rangeStart,
                   onSelected: _loadRange,
-                  itemBuilder: (context) => [
+                  items: [
                     for (final range in ranges)
-                      CheckedPopupMenuItem(
+                      AppMenuEntry(
                         value: range.$1,
-                        checked: range.$1 == _rangeStart,
                         child: Text('${range.$1}-${range.$2}'),
                       ),
                   ],
@@ -2092,7 +2077,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                           '$_rangeStart-${math.min(_rangeStart + _pageSize - 1, widget.total)}',
                           style: theme.textTheme.labelLarge,
                         ),
-                        const Icon(Icons.arrow_drop_down, size: 20),
+                        const Icon(CupertinoIcons.chevron_down, size: 20),
                       ],
                     ),
                   ),
@@ -2102,7 +2087,7 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
             const SizedBox(height: AppSpacing.sm),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Center(child: CupertinoActivityIndicator())
                   : ListView.builder(
                       itemCount: _page.length,
                       itemBuilder: (context, index) {
@@ -2110,9 +2095,8 @@ class _EpisodeNumberPickerState extends State<_EpisodeNumberPicker> {
                         final number =
                             episode.indexNumber ?? (index + _rangeStart);
                         final selected = number == widget.current;
-                        return ListTile(
+                        return AppListTile(
                           selected: selected,
-                          dense: true,
                           leading: Text(
                             '$number',
                             style: theme.textTheme.titleSmall?.copyWith(
@@ -2156,22 +2140,25 @@ class _SeasonJump extends StatelessWidget {
         break;
       }
     }
-    return PopupMenuButton<String>(
+    return AppMenuButton<String>(
       key: CatalogKeys.seasonPicker,
       tooltip: AppLocalizations.of(context).seasons,
-      initialValue: seasonId,
+      selected: seasonId,
       onSelected: onSelected,
-      itemBuilder: (context) => [
+      items: [
         for (final season in seasons)
-          PopupMenuItem(value: season.id, child: Text(season.name)),
+          AppMenuEntry(value: season.id, child: Text(season.name)),
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(current.name, style: Theme.of(context).textTheme.labelLarge),
-            const Icon(Icons.arrow_drop_down, size: 20),
+            Text(
+              current.name,
+              style: AppUiTheme.of(context).textTheme.labelLarge,
+            ),
+            const Icon(CupertinoIcons.chevron_down, size: 20),
           ],
         ),
       ),
@@ -2188,7 +2175,7 @@ class _SeriesLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final style = theme.textTheme.titleSmall?.copyWith(
       color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
       fontWeight: FontWeight.w600,
@@ -2201,9 +2188,9 @@ class _SeriesLink extends StatelessWidget {
         style: style,
       );
     }
-    return Tooltip(
+    return AppTooltip(
       message: AppLocalizations.of(context).viewSeries,
-      child: TextButton.icon(
+      child: AppButton.icon(
         key: CatalogKeys.seriesLink,
         onPressed: () => context.push(
           DetailSourceScope.itemLocation(
@@ -2217,21 +2204,19 @@ class _SeriesLink extends StatelessWidget {
             seasonId: seasonId,
           ),
         ),
-        style: TextButton.styleFrom(
+        style: AppButtonStyle(
           foregroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.9),
           padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
           minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: VisualDensity.compact,
         ),
-        icon: const Icon(Icons.chevron_right_rounded, size: 18),
-        iconAlignment: IconAlignment.end,
+        icon: const Icon(CupertinoIcons.chevron_right, size: 18),
         label: Text(
           name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: style,
         ),
+        variant: AppButtonVariant.plain,
       ),
     );
   }
@@ -2397,7 +2382,7 @@ class _DetailHeader extends StatelessWidget {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final viewportHeight = MediaQuery.sizeOf(context).height;
-        final light = Theme.of(context).brightness == Brightness.light;
+        final light = AppUiTheme.of(context).brightness == Brightness.light;
         // 浅色头部不铺背景图，没有画面可看就不留半屏空白。
         final billboard = !item.isSeries && !light;
         final minHeight =
@@ -2418,7 +2403,7 @@ class _DetailHeader extends StatelessWidget {
                 Positioned.fill(
                   child: light
                       ? ColoredBox(
-                          color: Theme.of(context).scaffoldBackgroundColor,
+                          color: AppUiTheme.of(context).scaffoldBackgroundColor,
                         )
                       : BackdropScrim(
                           textBandWidthFactor: 1,
@@ -2556,7 +2541,7 @@ class _DetailPoster extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final episode = item.isEpisode;
     final series = item.isSeries || item.isSeason;
     final light = scheme.brightness == Brightness.light;
@@ -2638,7 +2623,7 @@ class _DetailInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final seriesName = item.seriesName;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2650,13 +2635,9 @@ class _DetailInfo extends StatelessWidget {
             seriesId: seriesId ?? item.seriesId,
             seasonId: item.seasonId ?? item.parentId,
           ),
-        SelectableText(
+        AppSelectableText(
           item.name,
           key: ItemDetailPage.titleKey,
-          // 不设 minLines 时多行 SelectableText 恒占满 maxLines 的高度，
-          // 单行标题下方会空出一整行。
-          minLines: 1,
-          maxLines: 2,
           style:
               (compact
                       ? theme.textTheme.headlineLarge
@@ -2731,8 +2712,8 @@ class _MetaRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final theme = Theme.of(context);
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final theme = AppUiTheme.of(context);
     // 取色主题的 primaryContainer 与前景色有时几乎同色，集标会看不清。
     // 改用半透明前景色底，压在任何剧照上都读得出。
     final style = theme.textTheme.labelMedium?.copyWith(
@@ -2761,9 +2742,9 @@ class _MetaRow extends StatelessWidget {
       if (onTap == null) {
         return body;
       }
-      return Tooltip(
+      return AppTooltip(
         message: tooltip ?? l10n.pickEpisode,
-        child: InkWell(
+        child: AppSurfaceAction(
           key: key ?? CatalogKeys.locateEpisode,
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
@@ -2854,7 +2835,7 @@ class _MetaRow extends StatelessWidget {
                   child: SizedBox(
                     key: CatalogKeys.resumeProgress,
                     width: 200,
-                    child: LinearProgressIndicator(
+                    child: AppLoadingBar(
                       value: item.playbackProgress.clamp(0, 1),
                       minHeight: 4,
                       color: scheme.primary,
@@ -2893,8 +2874,8 @@ ItemMediaSource? _headerSource(MediaItem item, String? id) {
 /// PopupMenuButton 把 null 当成取消,字幕关闭用哨兵值再映回 null。
 const _subtitleOffToken = -1;
 
-ButtonStyle _detailGhostButtonStyle(ColorScheme scheme) {
-  return OutlinedButton.styleFrom(
+AppButtonStyle _detailGhostButtonStyle(AppColorScheme scheme) {
+  return AppButtonStyle(
     foregroundColor: scheme.onSurface,
     side: BorderSide(color: scheme.onSurface.withValues(alpha: 0.22)),
     minimumSize: const Size(0, 48),
@@ -2943,7 +2924,7 @@ class _DetailActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final audios = _audioChoices(item, mediaSourceId);
     final subtitles = _subtitleChoices(item, mediaSourceId);
     final sourceId =
@@ -2986,41 +2967,45 @@ class _DetailActions extends StatelessWidget {
               : l10n.playEpisode(playCode));
     final primary = <Widget>[
       if (onPlay != null)
-        FilledButton.icon(
+        AppButton.icon(
           key: PlayerKeys.open,
           onPressed: onPlay,
-          style: FilledButton.styleFrom(
+          style: AppButtonStyle(
             minimumSize: const Size(0, 48),
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.xxl,
               vertical: AppSpacing.sm,
             ),
           ),
-          icon: const Icon(Icons.play_arrow_rounded, size: 26),
+          icon: const Icon(CupertinoIcons.play_fill, size: 26),
           label: Text(playLabel),
+          variant: AppButtonVariant.filled,
         ),
       if (onPlayFromStart != null)
-        OutlinedButton(
+        AppButton(
           key: PlayerKeys.resumeFromStart,
           onPressed: onPlayFromStart,
           style: ghost,
+          variant: AppButtonVariant.outlined,
           child: Text(l10n.playFromStart),
         ),
       if (onOpenPreviousEpisode != null)
-        OutlinedButton.icon(
+        AppButton.icon(
           key: CatalogKeys.previousEpisode,
           onPressed: onOpenPreviousEpisode,
           style: ghost,
-          icon: const Icon(Icons.skip_previous_rounded),
+          icon: const Icon(CupertinoIcons.backward_end_fill),
           label: Text(l10n.previousEpisode),
+          variant: AppButtonVariant.outlined,
         ),
       if (onOpenNextEpisode != null)
-        OutlinedButton.icon(
+        AppButton.icon(
           key: CatalogKeys.nextEpisode,
           onPressed: onOpenNextEpisode,
           style: ghost,
-          icon: const Icon(Icons.skip_next_rounded),
+          icon: const Icon(CupertinoIcons.forward_end_fill),
           label: Text(l10n.nextEpisode),
+          variant: AppButtonVariant.outlined,
         ),
     ];
     final viewport = MediaQuery.sizeOf(context);
@@ -3033,8 +3018,8 @@ class _DetailActions extends StatelessWidget {
         tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
         icon: Icon(
           played
-              ? Icons.check_circle_rounded
-              : Icons.check_circle_outline_rounded,
+              ? CupertinoIcons.checkmark_circle_fill
+              : CupertinoIcons.checkmark_circle,
           color: played ? scheme.primary : null,
         ),
         onPressed: busyPlayed ? null : () => onPlayedChanged(!played),
@@ -3044,7 +3029,7 @@ class _DetailActions extends StatelessWidget {
           menuKey: CatalogKeys.mediaSource,
           initialValue: sourceId,
           tooltip: '${l10n.mediaSource} · $sourceLabel',
-          icon: Icons.movie_filter_outlined,
+          icon: CupertinoIcons.film,
           constraints: BoxConstraints(
             minWidth: sourceMenuMin < sourceMenuMax
                 ? sourceMenuMin
@@ -3053,9 +3038,8 @@ class _DetailActions extends StatelessWidget {
           ),
           items: [
             for (final source in item.mediaSources)
-              CheckedPopupMenuItem(
+              AppMenuEntry(
                 value: source.id,
-                checked: source.id == sourceId,
                 child: MediaSourceMenuTile(view: source.presentation),
               ),
           ],
@@ -3066,12 +3050,11 @@ class _DetailActions extends StatelessWidget {
           menuKey: CatalogKeys.detailAudio,
           initialValue: audioStreamIndex,
           tooltip: '${l10n.audioTrack} · $audioLabel',
-          icon: Icons.graphic_eq_rounded,
+          icon: CupertinoIcons.waveform,
           items: [
             for (final stream in audios)
-              CheckedPopupMenuItem(
+              AppMenuEntry(
                 value: stream.index,
-                checked: stream.index == audioStreamIndex,
                 child: Text(stream.label ?? '#${stream.index}'),
               ),
           ],
@@ -3082,17 +3065,15 @@ class _DetailActions extends StatelessWidget {
           menuKey: CatalogKeys.detailSubtitle,
           initialValue: subtitleStreamIndex ?? _subtitleOffToken,
           tooltip: '${l10n.subtitleTrack} · $subtitleLabel',
-          icon: Icons.subtitles_outlined,
+          icon: CupertinoIcons.captions_bubble,
           items: [
-            CheckedPopupMenuItem<int>(
+            AppMenuEntry<int>(
               value: _subtitleOffToken,
-              checked: subtitleStreamIndex == null,
               child: Text(l10n.subtitleOff),
             ),
             for (final stream in subtitles)
-              CheckedPopupMenuItem<int>(
+              AppMenuEntry<int>(
                 value: stream.index,
-                checked: stream.index == subtitleStreamIndex,
                 child: Text(stream.label ?? '#${stream.index}'),
               ),
           ],
@@ -3132,7 +3113,7 @@ Widget _detailToolButton(
   required Widget icon,
   required VoidCallback? onPressed,
 }) {
-  final scheme = Theme.of(context).colorScheme;
+  final scheme = AppUiTheme.of(context).colorScheme;
   if (scheme.brightness != Brightness.light) {
     return ScrimIconButton(
       key: key,
@@ -3142,18 +3123,18 @@ Widget _detailToolButton(
       onPressed: onPressed,
     );
   }
-  return IconButton(
+  return AppIconButton(
     key: key,
     tooltip: tooltip,
     onPressed: onPressed,
     icon: icon,
-    iconSize: ScrimIconButtonSize.large.iconSize,
+    size: ScrimIconButtonSize.large.iconSize,
     padding: EdgeInsets.zero,
     constraints: BoxConstraints.tightFor(
       width: ScrimIconButtonSize.large.dimension,
       height: ScrimIconButtonSize.large.dimension,
     ),
-    style: IconButton.styleFrom(
+    style: AppButtonStyle(
       backgroundColor: scheme.surfaceContainerLowest,
       foregroundColor: scheme.onSurface,
       disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.38),
@@ -3161,8 +3142,6 @@ Widget _detailToolButton(
       shape: const CircleBorder(),
       fixedSize: Size.square(ScrimIconButtonSize.large.dimension),
       minimumSize: Size.square(ScrimIconButtonSize.large.dimension),
-      maximumSize: Size.square(ScrimIconButtonSize.large.dimension),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     ),
   );
 }
@@ -3183,7 +3162,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
   final Key? menuKey;
   final String tooltip;
   final IconData icon;
-  final List<PopupMenuEntry<T>> items;
+  final List<AppMenuEntry<T>> items;
   final ValueChanged<T> onSelected;
   final BoxConstraints? constraints;
 
@@ -3201,12 +3180,12 @@ class _DetailMenuButton<T> extends StatelessWidget {
       ),
       Offset.zero & overlay.size,
     );
-    final value = await showMenu<T>(
+    final value = await showAppMenu<T>(
       context: context,
+      items: items,
       position: position,
       constraints: constraints,
-      items: items,
-      initialValue: initialValue,
+      selected: initialValue,
     );
     if (value != null) {
       onSelected(value);

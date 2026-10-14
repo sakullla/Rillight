@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/search/search_page.dart';
 
@@ -45,7 +44,9 @@ class SearchOverlayBarrier extends StatelessWidget {
           duration: AppMotion.durationOf(context, AppMotion.fast),
           curve: AppMotion.standard,
           child: SizedBox.expand(
-            child: ColoredBox(color: Colors.black.withValues(alpha: dim)),
+            child: ColoredBox(
+              color: const Color(0xff000000).withValues(alpha: dim),
+            ),
           ),
         ),
       ),
@@ -56,7 +57,7 @@ class SearchOverlayBarrier extends StatelessWidget {
 /// 全屏搜索覆盖层:复用 [SearchPage] 的查询、结果与 50 条/600px 分页。
 ///
 /// 由 [openSearch] 打开,不作为主导航页壳;Esc 或关闭按钮退出。
-/// 输入与结果是阅读面,用实色 [Material] 铺满,不走液态玻璃,避免首页
+/// 输入与结果是阅读面,用实色表面铺满,不走液态玻璃,避免首页
 /// hero 透上来把标题和输入框衬花。关闭钮与搜索框同一行,避开窗口铬。
 class SearchOverlay extends StatelessWidget {
   const SearchOverlay({super.key, required this.onClose, this.queryFocusNode});
@@ -69,7 +70,7 @@ class SearchOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final hasChrome =
         context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
     final leading = hasChrome ? windowChromeLeadingInset() : 0.0;
@@ -88,9 +89,9 @@ class SearchOverlay extends StatelessWidget {
         bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClose},
         child: Focus(
           autofocus: true,
-          child: Material(
+          child: Container(
+            decoration: BoxDecoration(color: theme.colorScheme.surface),
             key: overlayKey,
-            color: theme.colorScheme.surface,
             child: Padding(
               padding: EdgeInsets.only(
                 left: leading + AppSpacing.page,
@@ -100,11 +101,11 @@ class SearchOverlay extends StatelessWidget {
               child: SearchPage(
                 autofocus: true,
                 focusNode: queryFocusNode,
-                trailing: IconButton(
+                trailing: AppIconButton(
                   key: closeKey,
-                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                  tooltip: '关闭',
                   onPressed: onClose,
-                  icon: const Icon(Icons.close_rounded),
+                  icon: const Icon(CupertinoIcons.xmark),
                 ),
               ),
             ),

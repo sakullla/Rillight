@@ -1,6 +1,10 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:rillight/emby/emby_codec.dart';
+
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -60,6 +64,13 @@ void main() {
             ),
           ),
         ),
+        localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       );
       await tester.pumpWidget(subject());
       await _pumpUntil(tester, () => resolved != null);
@@ -102,6 +113,13 @@ void main() {
           onResolved: (data) => resolved = data,
         ),
       ),
+      localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+      builder: (context, child) => ui.AppUiTheme(
+        data: Theme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
     await tester.pumpWidget(subject());
     await _pumpUntil(tester, () => resolved != null);
@@ -124,37 +142,29 @@ void main() {
     expect(resolved, isNull);
     await tester.pumpWidget(const SizedBox());
   });
-  test(
-    'season posters fall back to the series endpoint without a missing-image request',
-    () {
-      const series = MediaItem(
-        id: 'series',
-        name: '',
-        type: 'Series',
-        primaryImageTag: 'series-poster',
+  test('season posters fall back to the series endpoint without a missing-image request', () {
+    const series = MediaItem(
+      id: 'series',
+      name: '',
+      type: 'Series',
+      primaryImageTag: 'series-poster',
+    );
+    for (final tag in <String?>[null, 'season-poster', 'series-poster']) {
+      final season = seasonArtworkItem(
+        MediaItem(id: 'season', name: '', type: 'Season', primaryImageTag: tag),
+        series,
       );
-      for (final tag in <String?>[null, 'season-poster', 'series-poster']) {
-        final season = seasonArtworkItem(
-          MediaItem(
-            id: 'season',
-            name: '',
-            type: 'Season',
-            primaryImageTag: tag,
-          ),
-          series,
-        );
-        final refs = season.imageCandidates();
-        expect(refs.last.itemId, 'series');
-        expect(refs.last.tag, 'series-poster');
-        expect(refs.last.type, 'Primary');
-        if (tag == 'season-poster') {
-          expect(refs.map((r) => r.itemId), ['season', 'series']);
-        } else {
-          expect(refs.length, 1);
-        }
+      final refs = season.imageCandidates();
+      expect(refs.last.itemId, 'series');
+      expect(refs.last.tag, 'series-poster');
+      expect(refs.last.type, 'Primary');
+      if (tag == 'season-poster') {
+        expect(refs.map((r) => r.itemId), ['season', 'series']);
+      } else {
+        expect(refs.length, 1);
       }
-    },
-  );
+    }
+  });
 
   const episode = MediaItem(
     id: 'episode',
@@ -301,8 +311,17 @@ void main() {
         child: MaterialApp.router(
           routerConfig: router,
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );
@@ -365,7 +384,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: Scaffold(
           body: Column(
             children: [
@@ -374,9 +393,16 @@ void main() {
             ],
           ),
         ),
+        localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
-    expect(find.byIcon(Icons.star_rounded), findsOneWidget);
+    expect(find.byIcon(ui.CupertinoIcons.star_fill), findsOneWidget);
     expect(find.text('8.8'), findsOneWidget);
   });
 
@@ -404,7 +430,10 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: MediaQuery(
             data: const MediaQueryData(
@@ -414,6 +443,12 @@ void main() {
             child: Scaffold(
               body: SingleChildScrollView(child: PhoneHero(catalog: catalog)),
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );
@@ -446,7 +481,10 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(
@@ -460,6 +498,12 @@ void main() {
                   ? PhoneHero(catalog: catalog)
                   : HomeHero(catalog: catalog),
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );

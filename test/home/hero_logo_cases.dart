@@ -1,5 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
+
 import 'package:rillight/emby/emby_codec.dart';
+
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -79,9 +83,8 @@ void main() {
     addTearDown(client.clearSession);
     for (final request in [plain, featured]) {
       await executeCatalogRequest(client, request);
-      final query = Uri.parse(
-        server.requests.last.split(' ').last,
-      ).queryParameters;
+      final query = Uri.parse(server.requests.last.split(' ').last)
+          .queryParameters;
       final imageTypes = query['EnableImageTypes']!.split(',');
       expect(imageTypes, containsAll(['Primary', 'Backdrop', 'Thumb']));
       expect(imageTypes.contains('Logo'), identical(request, featured));
@@ -92,12 +95,19 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: HeroLogo(
           item: item,
           fallback: fallback,
           maxWidth: 400,
           maxHeight: 120,
+        ),
+        localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -124,6 +134,13 @@ void main() {
           prefetch: prefetch,
         ),
       ),
+    ),
+    localizationsDelegates: ui.GlobalCupertinoLocalizations.delegates,
+    builder: (context, child) => ui.AppUiTheme(
+      data: Theme.of(context).brightness == Brightness.dark
+          ? ui.AppUiTheme.dark()
+          : ui.AppUiTheme.light(),
+      child: child ?? const SizedBox.shrink(),
     ),
   );
 

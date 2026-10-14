@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/models.dart';
@@ -86,20 +86,14 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
         );
         if (!mounted) return;
         if (target == null) {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            SnackBar(
-              content: Text(AppLocalizations.of(context).noPlayableStream),
-            ),
-          );
+          showAppNotice(context, AppLocalizations.of(context).noPlayableStream);
           return;
         }
         await host.open(PlayerOpenRequest(itemId: target.id, autoResume: true));
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text(AppLocalizations.of(context).playbackFailed)),
-        );
+        showAppNotice(context, AppLocalizations.of(context).playbackFailed);
       }
     } finally {
       if (mounted) setState(() => _opening = false);
@@ -109,67 +103,71 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final expand = widget.expand;
     // 深色桌面/TV 的按钮压在遮罩上,前景固定白。浅色桌面/TV 落在纸色说明卡上,
     // 播放用强调色,详情用描边。手机版式两种主题都跟随页面底色。
     final onScrim = !expand && scheme.brightness != Brightness.light;
-    final play = FilledButton.icon(
+    final play = AppButton.icon(
       key: ValueKey('hero-resume-${widget.item.id}'),
       onPressed: _opening ? null : _resume,
       icon: _opening
           ? const SizedBox(
               width: 18,
               height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: CupertinoActivityIndicator(),
             )
-          : const Icon(Icons.play_arrow_rounded, size: 22),
+          : const Icon(CupertinoIcons.play_fill, size: 22),
       label: Text(
         l10n.play,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        // 只加粗,字族与中文回退仍走主题;整段替换 textStyle 会在
-        // 手机上把「播放」画成方框。
+
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
-      style: FilledButton.styleFrom(
+      style: AppButtonStyle(
         minimumSize: const Size(0, 48),
         backgroundColor: onScrim
-            ? Colors.white
+            ? const Color(0xffffffff)
             : expand
             ? null
             : scheme.primary,
         foregroundColor: onScrim
-            ? Colors.black
+            ? const Color(0xff000000)
             : expand
             ? null
             : scheme.onPrimary,
       ),
+      variant: AppButtonVariant.filled,
     );
     final details = expand
-        ? FilledButton.tonal(
+        ? AppButton(
             onPressed: widget.onDetails,
-            style: FilledButton.styleFrom(
+            style: AppButtonStyle(
               minimumSize: const Size(0, 48),
               backgroundColor: scheme.surfaceContainerHighest,
               foregroundColor: scheme.onSurface,
             ),
+            variant: AppButtonVariant.tinted,
             child: Text(l10n.details),
           )
-        : OutlinedButton(
+        : AppButton(
             onPressed: widget.onDetails,
-            style: OutlinedButton.styleFrom(
+            style: AppButtonStyle(
               minimumSize: const Size(0, 48),
-              foregroundColor: onScrim ? Colors.white : scheme.onSurface,
+              foregroundColor: onScrim
+                  ? const Color(0xffffffff)
+                  : scheme.onSurface,
               backgroundColor: onScrim
-                  ? Colors.white.withValues(alpha: .16)
+                  ? const Color(0xffffffff).withValues(alpha: .16)
                   : scheme.surfaceContainerLowest,
               side: BorderSide(
                 color: onScrim
-                    ? Colors.white.withValues(alpha: .28)
+                    ? const Color(0xffffffff).withValues(alpha: .28)
                     : scheme.outline,
               ),
             ),
+            variant: AppButtonVariant.outlined,
             child: Text(l10n.details),
           );
     if (expand) {

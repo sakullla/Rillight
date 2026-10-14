@@ -1,6 +1,8 @@
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/media_server_client.dart';
+
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../auth/region_access.dart';
@@ -357,9 +359,9 @@ class HistoryWriter implements Listenable {
     }
     final group = index.groupFor(anchor);
     if (group == null) return const ResumeChoice(ResumeKind.empty);
-    final local = records(
-      region,
-    ).where((r) => identical(index.groupFor(r.work), group)).firstOrNull;
+    final local = records(region)
+        .where((r) => identical(index.groupFor(r.work), group))
+        .firstOrNull;
     if (local != null) return ResumeChoice(ResumeKind.local, local: local);
     final candidates = remote
         .where(

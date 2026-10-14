@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// Rasterize static artwork blur once at thumbnail size, then scale the result.
 /// A small Image.cacheWidth alone does not bound an ImageFiltered layer: that
@@ -55,7 +55,7 @@ class BlurredArtwork extends StatelessWidget {
             height: size.height,
             fit: BoxFit.fill,
             filterQuality: FilterQuality.low,
-            color: Colors.white.withValues(alpha: opacity),
+            color: const Color(0xffffffff).withValues(alpha: opacity),
             colorBlendMode: BlendMode.modulate,
             errorBuilder: (_, _, _) => const SizedBox.expand(),
           );

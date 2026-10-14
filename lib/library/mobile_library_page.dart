@@ -1,11 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -180,10 +179,8 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
     }
     final years = [..._years]..sort((a, b) => b.compareTo(a));
     final genres = [..._genres]..sort();
-    await showModalBottomSheet<void>(
+    await showAppModalSheet<void>(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
       builder: (context) => LibraryFilterPanel(
         keyPrefix: 'phone-library',
         capabilities: controller.auth.client.capabilities,
@@ -235,46 +232,55 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final controller = _controller!;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_libraryTitle(l10n), key: const Key('phone-library-title')),
-        actions: [
-          // 没有筛选条件时用安静的中性底;有条件时转为强调色,一眼看出列表已被筛过。
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: ListenableBuilder(
-              listenable: controller,
-              builder: (context, _) {
-                final scheme = Theme.of(context).colorScheme;
-                final active = _hasCriteria(controller);
-                return FilledButton.tonalIcon(
-                  key: const Key('phone-library-filter'),
-                  onPressed: _openFilters,
-                  style: active
-                      ? null
-                      : FilledButton.styleFrom(
-                          backgroundColor: scheme.surfaceContainerHigh,
-                          foregroundColor: scheme.onSurface,
-                        ),
-                  icon: Icon(
-                    active ? Icons.filter_alt_rounded : Icons.tune_rounded,
-                    size: 20,
-                  ),
-                  label: Text(l10n.libraryFilter),
-                );
-              },
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        transitionBetweenRoutes: false,
+        middle: Text(
+          _libraryTitle(l10n),
+          key: const Key('phone-library-title'),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) {
+                  final scheme = AppUiTheme.of(context).colorScheme;
+                  final active = _hasCriteria(controller);
+                  return AppButton.icon(
+                    key: const Key('phone-library-filter'),
+                    onPressed: _openFilters,
+                    style: active
+                        ? null
+                        : AppButtonStyle(
+                            backgroundColor: scheme.surfaceContainerHigh,
+                            foregroundColor: scheme.onSurface,
+                          ),
+                    icon: Icon(
+                      active
+                          ? CupertinoIcons.line_horizontal_3_decrease
+                          : CupertinoIcons.slider_horizontal_3,
+                      size: 20,
+                    ),
+                    label: Text(l10n.libraryFilter),
+                    variant: AppButtonVariant.tinted,
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-      body: SafeArea(
+      child: SafeArea(
         child: ListenableBuilder(
           listenable: controller,
           builder: (context, _) => LayoutBuilder(
             builder: (context, constraints) {
               final gridWidth = constraints.maxWidth - AppSpacing.md * 2;
               return MediaImageScrollListener(
-                child: RefreshIndicator(
+                child: AppRefresh(
                   onRefresh: controller.load,
                   child: CustomScrollView(
                     controller: _scroll,
@@ -302,7 +308,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
                                   (controller.loading &&
                                       controller.items.isNotEmpty))
                                 const SliverToBoxAdapter(
-                                  child: LinearProgressIndicator(),
+                                  child: AppLoadingBar(),
                                 ),
                               if (controller.error != null)
                                 SliverToBoxAdapter(
@@ -342,9 +348,9 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
                                 SliverToBoxAdapter(
                                   child: Align(
                                     alignment: Alignment.center,
-                                    child: FilledButton(
+                                    child: AppButton(
                                       key: const Key('phone-library-more'),
-                                      style: FilledButton.styleFrom(
+                                      style: AppButtonStyle(
                                         minimumSize: const Size(48, 48),
                                       ),
                                       onPressed:
@@ -352,6 +358,7 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
                                               controller.loadingMore
                                           ? null
                                           : () => controller.load(more: true),
+                                      variant: AppButtonVariant.filled,
                                       child: Text(l10n.mobileLoadMore),
                                     ),
                                   ),
@@ -388,27 +395,44 @@ class _ActiveFilters extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           if (controller.sortBy != controller.defaultSort.sortBy)
-            Chip(
+            Container(
               key: const Key('phone-library-active-sort'),
-              label: Text(_sortLabel(l10n, controller.sortBy)),
-              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(_sortLabel(l10n, controller.sortBy)),
             ),
           if (controller.type == 'Movie')
-            Chip(
+            Container(
               key: const Key('phone-library-active-type'),
-              label: Text(l10n.mobileMovies),
-              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(l10n.mobileMovies),
             ),
           if (controller.type == 'Series')
-            Chip(
+            Container(
               key: const Key('phone-library-active-type'),
-              label: Text(l10n.mobileSeries),
-              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(l10n.mobileSeries),
             ),
           if (controller.watch != null)
-            Chip(
+            Container(
               key: const Key('phone-library-active-watch'),
-              label: Text(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
                 CatalogWatchFilter.values
                     .firstWhere(
                       (value) => value.param == controller.watch,
@@ -416,25 +440,33 @@ class _ActiveFilters extends StatelessWidget {
                     )
                     .label,
               ),
-              visualDensity: VisualDensity.compact,
             ),
           if (controller.year != null)
-            Chip(
+            Container(
               key: const Key('phone-library-active-year'),
-              label: Text(controller.years.join('、')),
-              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(controller.years.join('、')),
             ),
           if (controller.genre != null)
-            Chip(
+            Container(
               key: const Key('phone-library-active-genre'),
-              label: Text(controller.genres.join("、")),
-              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppUiTheme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(controller.genres.join("、")),
             ),
           if (_hasCriteria(controller) && controller.items.isNotEmpty)
-            TextButton(
+            AppButton(
               key: const Key('phone-library-reset'),
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              style: AppButtonStyle(minimumSize: const Size(48, 48)),
               onPressed: onClear,
+              variant: AppButtonVariant.plain,
               child: Text(l10n.libraryFilterClear),
             ),
         ],

@@ -1,9 +1,15 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/case_shard.dart';
 import '../helpers/region_access_fixture.dart';
+
 import 'dart:async';
+
 import 'package:dio/dio.dart';
+
 import 'dart:ui' as ui;
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,10 +53,13 @@ import 'package:rillight/player/tv_player_page.dart';
 import 'package:rillight/player/desktop_player_window.dart';
 import 'package:rillight/player/player_process_control.dart';
 import 'package:rillight/player/player_process_protocol.dart';
+
 import 'dart:convert';
+
 import 'package:rillight/library/tv_detail_page.dart';
 import 'package:rillight/auth/source_management.dart';
 import 'package:rillight/player/source_switch_menu.dart';
+
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/synthetic_mailbox.dart';
@@ -136,9 +145,9 @@ class _IsolatedHelperControl extends DesktopPlayerProcessControl {
 
   @override
   Future<int> launch(String executable, String payloadPath) async {
-    final json =
-        jsonDecode(await File(payloadPath).readAsString())
-            as Map<String, dynamic>;
+    final json = jsonDecode(
+      await File(payloadPath).readAsString(),
+    ) as Map<String, dynamic>;
     final launch = PlayerWindowLaunch.fromJson(json);
     // Flutter copies native assets into build/native_assets before each test
     // invocation. Windows cannot replace a DLL loaded by the parent suite.
@@ -446,9 +455,8 @@ Future<void> _openOwnedDetail(
 
 Future<Uint8List> _png(Color color) async {
   final recorder = ui.PictureRecorder();
-  Canvas(
-    recorder,
-  ).drawRect(const Rect.fromLTWH(0, 0, 8, 8), Paint()..color = color);
+  Canvas(recorder)
+      .drawRect(const Rect.fromLTWH(0, 0, 8, 8), Paint()..color = color);
   final picture = recorder.endRecording();
   final image = await picture.toImage(8, 8);
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
@@ -599,7 +607,9 @@ void main() {
       await tester.ensureVisible(album);
       await _settle(tester);
       await tester.tap(
-        find.descendant(of: album, matching: find.byType(InkWell)).first,
+        find
+            .descendant(of: album, matching: find.byType(ui.AppSurfaceAction))
+            .first,
       );
       await _settle(tester);
       final directory = Directory.systemTemp.createTempSync('t6-revoked-save-');
@@ -628,7 +638,7 @@ void main() {
       chooser.complete(output.path);
       await _settle(tester);
       expect(output.existsSync(), isFalse);
-      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(ui.AppModalFrame), findsNothing);
       expect(find.text('图片已保存'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -714,7 +724,12 @@ void main() {
         await _settle(tester);
         if (environment.isTv) {
           final focus = find
-              .descendant(of: check, matching: find.byType(Focus))
+              .descendant(
+                of: check,
+                matching: find.byWidgetPredicate(
+                  (widget) => widget is Focus && widget.canRequestFocus,
+                ),
+              )
               .first;
           Focus.of(
             tester.element(
@@ -734,7 +749,10 @@ void main() {
             .firstWhere((s) => s.id == f.aId);
         expect(updated.lines.last.checkStatus, 'available');
         expect(updated.lines.last.checkedAt, isNotNull);
-        final tile = find.ancestor(of: check, matching: find.byType(ListTile));
+        final tile = find.ancestor(
+          of: check,
+          matching: find.byType(ui.AppListTile),
+        );
         expect(
           find.descendant(
             of: tile,
@@ -1192,11 +1210,13 @@ void main() {
             .setMockMethodCallHandler(saveChannel, null),
       );
       await tester.tap(
-        find.descendant(of: album, matching: find.byType(InkWell)).first,
+        find
+            .descendant(of: album, matching: find.byType(ui.AppSurfaceAction))
+            .first,
       );
       await _settle(tester);
       final fullImages = find.descendant(
-        of: find.byType(Dialog),
+        of: find.byType(ui.AppModalFrame),
         matching: find.byType(Image),
       );
       expect(fullImages, findsWidgets);
@@ -1211,12 +1231,14 @@ void main() {
       final saved = find
           .ancestor(
             of: find.text('下载原图'),
-            matching: find.byWidgetPredicate((widget) => widget is TextButton),
+            matching: find.byWidgetPredicate(
+              (widget) => widget is ui.AppButton,
+            ),
           )
           .first;
       for (
         var turn = 0;
-        turn < 100 && tester.widget<TextButton>(saved).onPressed == null;
+        turn < 100 && tester.widget<ui.AppButton>(saved).onPressed == null;
         turn++
       ) {
         await tester.runAsync(
@@ -1224,17 +1246,19 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 20), EnginePhase.paint);
       }
-      expect(tester.widget<TextButton>(saved).onPressed, isNotNull);
+      expect(tester.widget<ui.AppButton>(saved).onPressed, isNotNull);
       final written = await tester.runAsync(output.readAsBytes);
       expect(written, orderedEquals(f.b.itemImageBytes!));
-      await tester.tap(find.byIcon(Icons.close_rounded).last);
+      await tester.tap(find.byIcon(ui.CupertinoIcons.xmark).last);
       await _settle(tester);
       f.b.holdItemImage = Completer<void>();
       await tester.tap(
-        find.descendant(of: album, matching: find.byType(InkWell)).first,
+        find
+            .descendant(of: album, matching: find.byType(ui.AppSurfaceAction))
+            .first,
       );
       await _settle(tester);
-      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(ui.AppModalFrame), findsOneWidget);
       expect(
         f.b.requests.any(
           (r) => r.contains('/Images/Backdrop/0') && !r.contains('MaxWidth'),
@@ -1254,7 +1278,7 @@ void main() {
       );
       f.b.holdItemImage!.complete();
       await _settle(tester);
-      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(ui.AppModalFrame), findsNothing);
       for (final provider in thumbnailProviders) {
         expect(
           PaintingBinding.instance.imageCache.containsKey(provider),
@@ -1313,7 +1337,7 @@ void main() {
       );
       expect(find.byKey(const Key('aggregation-private-entry')), findsNothing);
       expect(find.text('查找同源'), findsNothing);
-      expect(find.byType(FilterChip), findsNothing);
+      expect(find.byType(ui.AppChoiceChip), findsNothing);
       await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
       await _settle(tester);
       expect(find.text('来源 A'), findsOneWidget);
@@ -1346,7 +1370,7 @@ void main() {
 
       await openSearch();
       final input = find.byKey(const Key('aggregation-keyword'));
-      expect(tester.widget<TextField>(input).focusNode?.hasFocus, isTrue);
+      expect(tester.widget<ui.AppTextField>(input).focusNode?.hasFocus, isTrue);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _settle(tester);
       expect(input, findsNothing);
@@ -1356,7 +1380,7 @@ void main() {
       await _settle(tester);
       expect(find.text('来源 A'), findsOneWidget);
       expect(find.text('来源 B'), findsOneWidget);
-      expect(find.byType(FilterChip), findsNothing);
+      expect(find.byType(ui.AppChoiceChip), findsNothing);
       expect(find.text('媒体库范围'), findsNothing);
       await tester.ensureVisible(find.text('合成作品').last);
       await tester.pump();
@@ -1374,142 +1398,133 @@ void main() {
     },
     tags: ['integration'],
   );
-  cases.test(
-    'writer notifies committed records only; failed storage and failing observer cannot corrupt observation order',
-    () async {
-      final store = _ControlledHistoryStore();
-      final f = _Fixture();
-      await f.open(historyStore: store);
-      addTearDown(f.close);
-      final account = await f.auth.sources.acquireAccount(
-        f.bId,
-        region: AccessRegion.ordinary,
-        libraryId: 'view-movies',
-      );
-      final source = SourceReference(
-        account: account,
-        itemId: 'shared-id',
-        mediaSourceId: 'v',
-      );
-      final session = await f.history.beginSession(
-        source: source,
-        work: source.item,
-        libraryId: 'view-movies',
-      );
-      var notifications = 0;
-      f.history.addListener(() => notifications++);
-      store.fail = true;
-      await expectLater(
-        f.history.observe(
-          session: session,
-          eventSequence: 1,
-          positionTicks: 10,
-          actuallyPlaying: true,
-          timeline: const WatchTimeline(durationTicks: 100),
-        ),
-        throwsStateError,
-      );
-      expect(notifications, 0);
-      expect(f.history.records(AccessRegion.ordinary), isEmpty);
-      store.fail = false;
-      expect(
-        await f.history.observe(
-          session: session,
-          eventSequence: 1,
-          positionTicks: 10,
-          actuallyPlaying: true,
-          timeline: const WatchTimeline(durationTicks: 100),
-        ),
-        isNotNull,
-      );
-      expect(notifications, 1);
-      final previous = FlutterError.onError;
-      f.history.addListener(() => throw StateError('synthetic observer'));
-      FlutterError.onError = (_) =>
-          throw StateError('synthetic observer reporter');
-      try {
-        expect(
-          await f.history.observe(
-            session: session,
-            eventSequence: 2,
-            positionTicks: 20,
-            actuallyPlaying: true,
-            timeline: const WatchTimeline(durationTicks: 100),
-          ),
-          isNotNull,
-        );
-        expect(
-          await f.history.observe(
-            session: session,
-            eventSequence: 2,
-            positionTicks: 30,
-            actuallyPlaying: true,
-            timeline: const WatchTimeline(durationTicks: 100),
-          ),
-          isNull,
-        );
-        expect(
-          f.history.records(AccessRegion.ordinary).single.eventSequence,
-          2,
-        );
-        expect(notifications, 2);
-      } finally {
-        FlutterError.onError = previous;
-      }
-    },
-  );
-
-  cases.test(
-    'writer close drains accepted storage without late notifications and rejects new observations',
-    () async {
-      final store = _ControlledHistoryStore();
-      final f = _Fixture();
-      await f.open(historyStore: store);
-      addTearDown(f.close);
-      final account = await f.auth.sources.acquireAccount(
-        f.bId,
-        region: AccessRegion.ordinary,
-        libraryId: 'view-movies',
-      );
-      final source = SourceReference(
-        account: account,
-        itemId: 'shared-id',
-        mediaSourceId: 'v',
-      );
-      final session = await f.history.beginSession(
-        source: source,
-        work: source.item,
-        libraryId: 'view-movies',
-      );
-      var notifications = 0;
-      f.history.addListener(() => notifications++);
-      store.gate = Completer<void>();
-      store.entered = Completer<void>();
-      final accepted = f.history.observe(
+  cases.test('writer notifies committed records only; failed storage and failing observer cannot corrupt observation order', () async {
+    final store = _ControlledHistoryStore();
+    final f = _Fixture();
+    await f.open(historyStore: store);
+    addTearDown(f.close);
+    final account = await f.auth.sources.acquireAccount(
+      f.bId,
+      region: AccessRegion.ordinary,
+      libraryId: 'view-movies',
+    );
+    final source = SourceReference(
+      account: account,
+      itemId: 'shared-id',
+      mediaSourceId: 'v',
+    );
+    final session = await f.history.beginSession(
+      source: source,
+      work: source.item,
+      libraryId: 'view-movies',
+    );
+    var notifications = 0;
+    f.history.addListener(() => notifications++);
+    store.fail = true;
+    await expectLater(
+      f.history.observe(
         session: session,
         eventSequence: 1,
         positionTicks: 10,
         actuallyPlaying: true,
         timeline: const WatchTimeline(durationTicks: 100),
-      );
-      await store.entered!.future;
-      final closing = f.history.close();
-      store.gate!.complete();
-      await accepted;
-      await closing;
-      expect(notifications, 0);
-      await expectLater(
-        f.history.observe(
+      ),
+      throwsStateError,
+    );
+    expect(notifications, 0);
+    expect(f.history.records(AccessRegion.ordinary), isEmpty);
+    store.fail = false;
+    expect(
+      await f.history.observe(
+        session: session,
+        eventSequence: 1,
+        positionTicks: 10,
+        actuallyPlaying: true,
+        timeline: const WatchTimeline(durationTicks: 100),
+      ),
+      isNotNull,
+    );
+    expect(notifications, 1);
+    final previous = FlutterError.onError;
+    f.history.addListener(() => throw StateError('synthetic observer'));
+    FlutterError.onError = (_) =>
+        throw StateError('synthetic observer reporter');
+    try {
+      expect(
+        await f.history.observe(
           session: session,
           eventSequence: 2,
           positionTicks: 20,
           actuallyPlaying: true,
           timeline: const WatchTimeline(durationTicks: 100),
         ),
-        throwsStateError,
+        isNotNull,
       );
-    },
-  );
+      expect(
+        await f.history.observe(
+          session: session,
+          eventSequence: 2,
+          positionTicks: 30,
+          actuallyPlaying: true,
+          timeline: const WatchTimeline(durationTicks: 100),
+        ),
+        isNull,
+      );
+      expect(f.history.records(AccessRegion.ordinary).single.eventSequence, 2);
+      expect(notifications, 2);
+    } finally {
+      FlutterError.onError = previous;
+    }
+  });
+
+  cases.test('writer close drains accepted storage without late notifications and rejects new observations', () async {
+    final store = _ControlledHistoryStore();
+    final f = _Fixture();
+    await f.open(historyStore: store);
+    addTearDown(f.close);
+    final account = await f.auth.sources.acquireAccount(
+      f.bId,
+      region: AccessRegion.ordinary,
+      libraryId: 'view-movies',
+    );
+    final source = SourceReference(
+      account: account,
+      itemId: 'shared-id',
+      mediaSourceId: 'v',
+    );
+    final session = await f.history.beginSession(
+      source: source,
+      work: source.item,
+      libraryId: 'view-movies',
+    );
+    var notifications = 0;
+    f.history.addListener(() => notifications++);
+    store.gate = Completer<void>();
+    store.entered = Completer<void>();
+    final accepted = f.history.observe(
+      session: session,
+      eventSequence: 1,
+      positionTicks: 10,
+      actuallyPlaying: true,
+      timeline: const WatchTimeline(durationTicks: 100),
+    );
+    await store.entered!.future;
+    final closing = f.history.close();
+    store.gate!.complete();
+    await accepted;
+    await closing;
+    expect(notifications, 0);
+    await expectLater(
+      f.history.observe(
+        session: session,
+        eventSequence: 2,
+        positionTicks: 20,
+        actuallyPlaying: true,
+        timeline: const WatchTimeline(durationTicks: 100),
+      ),
+      throwsStateError,
+    );
+  });
 
   for (final environment in [
     PresentationEnvironment.desktop,
@@ -1558,7 +1573,7 @@ void main() {
         );
         expect(find.text('查找同源'), findsNothing);
         expect(find.text('媒体库范围'), findsNothing);
-        expect(find.byType(FilterChip), findsNothing);
+        expect(find.byType(ui.AppChoiceChip), findsNothing);
         await tester.tap(
           find.byKey(const Key('aggregation-segment-libraries')),
         );
@@ -1655,7 +1670,14 @@ void main() {
             .map((card) => card.item.productionYear),
         containsAll([2010, 2011]),
       );
-      expect(find.byTooltip('从本机记录的实际来源继续'), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              (widget is ui.AppTooltip && widget.message == '从本机记录的实际来源继续') ||
+              (widget is Tooltip && widget.message == '从本机记录的实际来源继续'),
+        ),
+        findsNothing,
+      );
       final poster = find.descendant(
         of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
         matching: find.text('合成作品'),
@@ -1665,9 +1687,10 @@ void main() {
       await tester.tap(poster);
       await _settle(tester);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(find.byType(ItemDetailPage)),
-        )!.source.account.configuredServerId,
+        DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
+            .source
+            .account
+            .configuredServerId,
         f.bId,
       );
       expect(host.current, isNull);
@@ -1717,9 +1740,10 @@ void main() {
       await _settle(tester);
       expect(find.text('B续播来源'), findsOneWidget);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(find.byType(ItemDetailPage)),
-        )!.source.account.configuredServerId,
+        DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
+            .source
+            .account
+            .configuredServerId,
         f.bId,
       );
       expect(f.auth.session!.server.id, f.aId);
@@ -1926,14 +1950,14 @@ void main() {
         serverId: f.aId,
         itemId: 'shared-id',
       );
-      await tester.tap(find.widgetWithText(FilledButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
       expect(find.textContaining('待辨认候选'), findsOneWidget);
       expect(find.textContaining('已确认来源'), findsNothing);
       expect(find.textContaining('未知'), findsWidgets);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _settle(tester);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(ui.AppDialog), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -1991,7 +2015,7 @@ void main() {
         ),
       );
       await _settle(tester);
-      await tester.tap(find.widgetWithText(FilledButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
       expect(find.textContaining('已确认来源'), findsOneWidget);
       await tester.tap(find.text('查找此集'));
@@ -2068,12 +2092,12 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('合成作品'));
       await _settle(tester);
-      await tester.tap(find.widgetWithText(FilledButton, '查找同源'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(ui.AppDialog), findsOneWidget);
       await tester.runAsync(() => f.auth.regionAccess.lock());
       await _settle(tester);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(ui.AppDialog), findsNothing);
       expect(find.textContaining('私密来源名'), findsNothing);
       expect(
         app.router.routeInformationProvider.value.uri.path,
@@ -2560,28 +2584,24 @@ void main() {
         const codec = SourceRouteExtraCodec();
         Object? restore(Object? extra) =>
             codec.decode(jsonDecode(jsonEncode(codec.encode(extra))));
-        final detail =
-            restore(
-                  PlayerHostOpenItemCommand(
-                    itemId: 'shared-id',
-                    source: source.item,
-                    libraryId: 'view-movies',
-                    regionGeneration: generation,
-                  ),
-                )
-                as PlayerHostOpenItemCommand;
-        final request =
-            restore(
-                  PlayerOpenRequest(
-                    itemId: 'shared-id',
-                    source: source,
-                    libraryId: 'view-movies',
-                    regionGeneration: generation,
-                    mediaSourceId: 'private-version',
-                    startPosition: Duration(microseconds: 70000000 ~/ 10),
-                  ),
-                )
-                as PlayerOpenRequest;
+        final detail = restore(
+          PlayerHostOpenItemCommand(
+            itemId: 'shared-id',
+            source: source.item,
+            libraryId: 'view-movies',
+            regionGeneration: generation,
+          ),
+        ) as PlayerHostOpenItemCommand;
+        final request = restore(
+          PlayerOpenRequest(
+            itemId: 'shared-id',
+            source: source,
+            libraryId: 'view-movies',
+            regionGeneration: generation,
+            mediaSourceId: 'private-version',
+            startPosition: Duration(microseconds: 70000000 ~/ 10),
+          ),
+        ) as PlayerOpenRequest;
         final backend = FakeVideoBackend();
         final app = f.app(environment, backend: backend);
         await tester.pumpWidget(app);
@@ -2619,24 +2639,22 @@ void main() {
         await _settle(tester);
         expect(app.router.state.uri.path.startsWith('/play/'), isFalse);
         expect(backend.openCount, 0);
-        final forged =
-            restore(
-                  PlayerOpenRequest(
-                    itemId: 'shared-id',
-                    source: SourceReference(
-                      account: SourceAccount(
-                        region: AccessRegion.private,
-                        configuredServerId: account.configuredServerId,
-                        verifiedServerId: 'forged-server',
-                        userId: account.userId,
-                      ),
-                      itemId: 'shared-id',
-                    ),
-                    libraryId: 'view-movies',
-                    regionGeneration: f.auth.regionAccess.generation,
-                  ),
-                )
-                as PlayerOpenRequest;
+        final forged = restore(
+          PlayerOpenRequest(
+            itemId: 'shared-id',
+            source: SourceReference(
+              account: SourceAccount(
+                region: AccessRegion.private,
+                configuredServerId: account.configuredServerId,
+                verifiedServerId: 'forged-server',
+                userId: account.userId,
+              ),
+              itemId: 'shared-id',
+            ),
+            libraryId: 'view-movies',
+            regionGeneration: f.auth.regionAccess.generation,
+          ),
+        ) as PlayerOpenRequest;
         app.router.go('/play/shared-id', extra: forged);
         await _settle(tester);
         expect(app.router.state.uri.path.startsWith('/play/'), isFalse);
@@ -2680,9 +2698,10 @@ void main() {
       await _settle(tester);
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(find.byType(ItemDetailPage)),
-        )!.source.account.configuredServerId,
+        DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
+            .source
+            .account
+            .configuredServerId,
         f.bId,
       );
       final account = (await tester.runAsync(
@@ -2709,9 +2728,10 @@ void main() {
       );
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(find.byType(ItemDetailPage)),
-        )!.source.account.configuredServerId,
+        DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
+            .source
+            .account
+            .configuredServerId,
         f.aId,
       );
       expect(tester.takeException(), isNull);
@@ -2734,7 +2754,7 @@ void main() {
       app.router.go('/search');
       await _settle(tester);
       expect(find.text('输入片名后搜索'), findsOneWidget);
-      expect(find.byType(FilterChip), findsNothing);
+      expect(find.byType(ui.AppChoiceChip), findsNothing);
       expect(find.text('媒体库范围'), findsNothing);
       expect(find.byKey(const Key('aggregation-year')), findsNothing);
       expect(find.byKey(const Key('aggregation-genre')), findsNothing);
@@ -2769,7 +2789,9 @@ void main() {
       expect(find.byKey(ValueKey('aggregation-source-${f.bId}')), findsNothing);
       expect(
         tester
-            .widget<TextField>(find.byKey(const Key('aggregation-keyword')))
+            .widget<ui.AppTextField>(
+              find.byKey(const Key('aggregation-keyword')),
+            )
             .controller!
             .text,
         '合成',
@@ -2798,10 +2820,10 @@ void main() {
     await _settle(tester);
     app.router.go('/search');
     await _settle(tester);
-    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(ui.AppChoiceChip), findsNothing);
     await tester.tap(find.byKey(const Key('aggregation-search-filters')));
     await _settle(tester);
-    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(ui.AppChoiceChip), findsNothing);
     expect(find.byType(OptionPill), findsWidgets);
     expect(
       find.byKey(ValueKey('aggregation-search-server-${f.aId}')),
@@ -2830,7 +2852,7 @@ void main() {
     expect(find.byKey(ValueKey('aggregation-search-${f.bId}')), findsNothing);
     await tester.tap(find.byKey(const Key('aggregation-search-filters')));
     await _settle(tester);
-    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(ui.AppChoiceChip), findsNothing);
     expect(find.text('来源 A'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -2905,9 +2927,10 @@ void main() {
       );
       expect(gridImage, findsWidgets);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(gridImage.first),
-        )!.source.account.configuredServerId,
+        DetailSourceScope.maybeOf(tester.element(gridImage.first))!
+            .source
+            .account
+            .configuredServerId,
         f.bId,
       );
       expect(
@@ -3004,9 +3027,10 @@ void main() {
       );
       expect(find.byType(SourceComparisonAction), findsNothing);
       expect(
-        DetailSourceScope.maybeOf(
-          tester.element(find.byType(ItemDetailPage)),
-        )!.source.account.configuredServerId,
+        DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
+            .source
+            .account
+            .configuredServerId,
         f.bId,
       );
       await tester.runAsync(() => f.auth.selectSavedServer(f.aId));
@@ -3033,9 +3057,10 @@ String _posterServer(WidgetTester tester, String shelfKey) {
     matching: find.byType(MediaImage),
   );
   expect(image, findsWidgets);
-  return DetailSourceScope.maybeOf(
-    tester.element(image.first),
-  )!.source.account.configuredServerId;
+  return DetailSourceScope.maybeOf(tester.element(image.first))!
+      .source
+      .account
+      .configuredServerId;
 }
 
 /// Explicit subprocess regression; see tool/test_execution/README.md.
@@ -3094,7 +3119,7 @@ void desktopProcessMain() {
         serverId: f.bId,
         itemId: 'shared-id',
       );
-      final play = find.widgetWithText(FilledButton, '播放').first;
+      final play = find.widgetWithText(ui.AppButton, '播放').first;
       await tester.ensureVisible(play);
       await tester.tap(play);
       final positions = <int>[];
@@ -3224,8 +3249,8 @@ void desktopProcessMain() {
       await tester.pump();
       await tester.tap(find.text('合成作品'));
       await _settle(tester);
-      await tester.ensureVisible(find.widgetWithText(FilledButton, '播放').first);
-      await tester.tap(find.widgetWithText(FilledButton, '播放').first);
+      await tester.ensureVisible(find.widgetWithText(ui.AppButton, '播放').first);
+      await tester.tap(find.widgetWithText(ui.AppButton, '播放').first);
       // Include the helper's native asset/Flutter compilation budget, then
       // allow its first observation to reach the parent.
       final privateHelperDeadline = DateTime.now().add(
@@ -3292,9 +3317,9 @@ void desktopProcessMain() {
           ...invalidLocks[index],
         };
         await tester.runAsync(
-          () => File(
-            '${privateEndpoint.directory.path}/lock-request.json',
-          ).writeAsString(jsonEncode(command)),
+          () =>
+              File('${privateEndpoint.directory.path}/lock-request.json')
+                  .writeAsString(jsonEncode(command)),
         );
         Map<String, dynamic>? receipt;
         final receiptDeadline = DateTime.now().add(const Duration(seconds: 4));

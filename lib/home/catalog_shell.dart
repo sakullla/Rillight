@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/home/catalog_controller.dart';

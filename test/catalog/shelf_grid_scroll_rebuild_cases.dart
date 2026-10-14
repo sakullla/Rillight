@@ -1,6 +1,7 @@
 import '../helpers/widget_harness.dart';
 import '../helpers/image_cache_fixture.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -12,6 +13,7 @@ import 'package:rillight/media_image/media_image.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/synthetic_source_fixture.dart';
+
 import 'package:rillight/home/catalog_keys.dart';
 
 const _device = ClientDeviceInfo(

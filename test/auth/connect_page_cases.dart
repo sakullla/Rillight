@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import 'configured_source.dart';
 import '../helpers/image_cache_fixture.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
@@ -97,7 +100,7 @@ void main() {
         username: 'alice',
         password: 'wrong',
       );
-      await tester.tap(find.byKey(ConnectFormKeys.submit));
+      await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
       await _settle(tester);
 
       expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
@@ -109,7 +112,7 @@ void main() {
         find.byKey(ConnectFormKeys.password),
         'correct-horse',
       );
-      await tester.tap(find.byKey(ConnectFormKeys.submit));
+      await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
       await _settle(tester);
 
       expect(find.byKey(ConnectFormKeys.submit), findsNothing);
@@ -137,7 +140,7 @@ void main() {
 
       expect(
         tester
-            .widget<TextField>(find.byKey(ConnectFormKeys.address))
+            .widget<ui.AppTextField>(find.byKey(ConnectFormKeys.address))
             .controller
             ?.text,
         server.baseUrl.toString(),
@@ -187,7 +190,7 @@ void main() {
     await _tapVisible(tester, find.byKey(Key('saved-line-${wanLine.id}')));
     expect(
       tester
-          .widget<TextField>(find.byKey(ConnectFormKeys.address))
+          .widget<ui.AppTextField>(find.byKey(ConnectFormKeys.address))
           .controller
           ?.text,
       wan.baseUrl.toString(),
@@ -195,13 +198,16 @@ void main() {
 
     await _tapVisible(tester, find.byKey(Key('saved-line-${lanLine.id}')));
     final lanTile = find.byKey(Key('saved-line-${lanLine.id}'));
-    final tileFill = tester.widget<Material>(
-      find.ancestor(of: lanTile, matching: find.byType(Material)).first,
+    final tileFill = tester.widget<Container>(
+      find.ancestor(of: lanTile, matching: find.byType(Container)).first,
     );
-    expect(tileFill.color?.a, closeTo(0.35, 0.01));
+    expect(
+      (tileFill.decoration! as BoxDecoration).color?.a,
+      closeTo(0.35, 0.01),
+    );
     expect(
       tester
-          .widget<TextField>(find.byKey(ConnectFormKeys.address))
+          .widget<ui.AppTextField>(find.byKey(ConnectFormKeys.address))
           .controller
           ?.text,
       server.baseUrl.toString(),
@@ -213,7 +219,7 @@ void main() {
       find.byKey(ConnectFormKeys.password),
       'correct-horse',
     );
-    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
     await _settle(tester);
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
@@ -240,7 +246,7 @@ void main() {
       find.byKey(ConnectFormKeys.userAgent),
       '  CustomUA/1.0  ',
     );
-    await tester.tap(find.byKey(ConnectFormKeys.submit));
+    await _tapVisible(tester, find.byKey(ConnectFormKeys.submit));
     await _settle(tester);
 
     expect(auth.isLoggedIn, isTrue);
@@ -268,7 +274,7 @@ void main() {
     await _tapVisible(tester, find.byKey(ConnectFormKeys.more));
     expect(
       tester
-          .widget<TextField>(find.byKey(ConnectFormKeys.userAgent))
+          .widget<ui.AppTextField>(find.byKey(ConnectFormKeys.userAgent))
           .controller
           ?.text,
       'CustomUA/1.0',

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 /// 资料站标志。能用 simple-icons（CC0）的用图形；TheTVDB 用站点标志。

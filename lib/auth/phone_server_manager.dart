@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
@@ -13,11 +13,8 @@ Future<void> showPhoneServerManager(
   required Future<void> Function(String serverId, String lineId) onSelect,
   required VoidCallback onAddServer,
   Future<void> Function()? onCurrentLineChanged,
-}) => showModalBottomSheet<void>(
+}) => showAppModalSheet<void>(
   context: context,
-  isScrollControlled: true,
-  useSafeArea: true,
-  showDragHandle: true,
   builder: (_) => PhoneServerManager(
     auth: auth,
     onSelect: onSelect,
@@ -118,31 +115,31 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
   Future<void> _rename(SavedServer server) async {
     final l = AppLocalizations.of(context);
     var value = server.nickname ?? '';
-    final name = await showDialog<String>(
+    final name = await showAppDialog<String>(
       context: context,
-      builder: (dialog) => AlertDialog(
+      builder: (dialog) => AppDialog(
         title: Text(l.phoneRenameServer),
-        content: TextFormField(
+        content: AppTextField(
           key: const Key('phone-server-name'),
           initialValue: value,
           onChanged: (text) => value = text,
           autofocus: true,
           maxLength: 80,
           textInputAction: TextInputAction.done,
-          decoration: InputDecoration(
-            labelText: l.phoneServerName,
-            hintText: server.name,
-            helperText: l.phoneServerNameHint,
-          ),
-          onFieldSubmitted: (value) => Navigator.pop(dialog, value),
+          label: l.phoneServerName,
+          placeholder: server.name,
+          helperText: l.phoneServerNameHint,
+          onSubmitted: (value) => Navigator.pop(dialog, value),
         ),
         actions: [
-          TextButton(
+          AppButton(
             onPressed: () => Navigator.pop(dialog),
+            variant: AppButtonVariant.plain,
             child: Text(l.cancelAction),
           ),
-          FilledButton(
+          AppButton(
             onPressed: () => Navigator.pop(dialog, value),
+            variant: AppButtonVariant.filled,
             child: Text(l.lineAddressSave),
           ),
         ],
@@ -156,33 +153,35 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
   Future<void> _delete(SavedServer server) async {
     final l = AppLocalizations.of(context), auth = widget.auth;
     final current = auth.session?.server.id == server.id;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
-      builder: (dialog) => AlertDialog(
+      builder: (dialog) => AppDialog(
         title: Text(l.deleteServer),
         content: Text(
           '${l.deleteServerConfirmMessage(server.displayName)}'
           '${current ? '\n\n${l.phoneDeleteCurrentServerHint}' : ''}',
         ),
         actions: [
-          TextButton(
+          AppButton(
             key: const Key('phone-mine-server-delete-cancel'),
             onPressed: () => Navigator.pop(dialog, false),
+            variant: AppButtonVariant.plain,
             child: Text(l.cancelAction),
           ),
-          FilledButton(
+          AppButton(
             key: const Key('phone-mine-server-delete-confirm'),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialog).colorScheme.error,
+            style: AppButtonStyle(
+              backgroundColor: AppUiTheme.of(dialog).colorScheme.error,
             ),
             onPressed: () => Navigator.pop(dialog, true),
+            variant: AppButtonVariant.filled,
             child: Text(l.deleteServerConfirm),
           ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
+    final noticeContext = Navigator.of(context, rootNavigator: true).context;
     await _act(() async {
       final stored = await auth.credentials.read(server.id);
       // Close before auth redirects; never pop the new login route afterwards.
@@ -195,17 +194,12 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
         });
         return;
       }
-      if (!messenger.mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(l.phoneServerDeleted(server.displayName)),
-          action: SnackBarAction(
-            label: l.undoAction,
-            onPressed: () {
-              unawaited(auth.restoreSavedServer(server, stored));
-            },
-          ),
-        ),
+      if (!noticeContext.mounted) return;
+      showAppNotice(
+        noticeContext,
+        l.phoneServerDeleted(server.displayName),
+        actionLabel: l.undoAction,
+        onAction: () => unawaited(auth.restoreSavedServer(server, stored)),
       );
     });
   }
@@ -216,13 +210,15 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
         auth.session?.server.id == server.id &&
         auth.session?.server.activeLineId == line.id;
     final disabled = _busy || auth.isBusy;
-    return ListTile(
+    return AppListTile(
       key: Key('phone-mine-line-${line.id}'),
       selected: selected,
       contentPadding: EdgeInsets.zero,
       leading: Icon(
-        selected ? Icons.radio_button_checked : Icons.radio_button_off,
-        color: selected ? Theme.of(context).colorScheme.primary : null,
+        selected
+            ? CupertinoIcons.largecircle_fill_circle
+            : CupertinoIcons.circle,
+        color: selected ? AppUiTheme.of(context).colorScheme.primary : null,
       ),
       title: Text(line.hostLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
@@ -234,18 +230,18 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
+          AppIconButton(
             key: Key('phone-mine-line-edit-${server.id}-${line.id}'),
             tooltip: l.editLine,
-            icon: const Icon(Icons.edit_outlined),
+            icon: const Icon(CupertinoIcons.pencil),
             onPressed: disabled
                 ? null
                 : () => unawaited(_editLine(server, line)),
           ),
-          IconButton(
+          AppIconButton(
             key: Key('phone-mine-line-delete-${server.id}-${line.id}'),
             tooltip: l.deleteLine,
-            icon: const Icon(Icons.link_off),
+            icon: const Icon(CupertinoIcons.link),
             onPressed: disabled || server.lines.length <= 1
                 ? null
                 : () => unawaited(
@@ -262,11 +258,15 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
 
   Widget _server(SavedServer server) {
     final l = AppLocalizations.of(context),
-        scheme = Theme.of(context).colorScheme;
+        scheme = AppUiTheme.of(context).colorScheme;
     final current = widget.auth.session?.server.id == server.id;
     final expanded = _expanded == server.id || _search.text.trim().isNotEmpty;
     final disabled = _busy || widget.auth.isBusy;
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+      ),
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -278,7 +278,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                 ServerTypeMark(type: server.serviceType, size: 40),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: InkWell(
+                  child: AppSurfaceAction(
                     borderRadius: BorderRadius.circular(8),
                     onTap: () =>
                         setState(() => _expanded = expanded ? null : server.id),
@@ -291,7 +291,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                             server.displayName,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleMedium,
+                            style: AppUiTheme.of(context).textTheme.titleMedium,
                           ),
                           Text(
                             server.username,
@@ -308,37 +308,38 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                     ),
                   ),
                 ),
-                IconButton(
+                AppIconButton(
                   tooltip: l.phoneRenameServer,
-                  icon: const Icon(Icons.drive_file_rename_outline),
+                  icon: const Icon(CupertinoIcons.pencil),
                   onPressed: disabled ? null : () => unawaited(_rename(server)),
                 ),
-                IconButton(
+                AppIconButton(
                   key: Key('phone-mine-server-delete-${server.id}'),
                   tooltip: l.deleteServer,
-                  icon: Icon(Icons.delete_outline, color: scheme.error),
+                  icon: Icon(CupertinoIcons.trash, color: scheme.error),
                   onPressed: disabled ? null : () => unawaited(_delete(server)),
                 ),
               ],
             ),
             if (expanded) ...[
-              const Divider(),
+              const AppDivider(),
               for (final line in server.lines) _line(server, line),
-              TextButton.icon(
+              AppButton.icon(
                 key: Key('phone-mine-line-add-${server.id}'),
                 onPressed: disabled ? null : () => unawaited(_editLine(server)),
-                icon: const Icon(Icons.add_link),
+                icon: const Icon(CupertinoIcons.link),
                 label: Text(l.addLine),
+                variant: AppButtonVariant.plain,
               ),
             ] else
-              ListTile(
+              AppListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(
                   server.activeLine?.hostLabel ?? '',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                trailing: const Icon(Icons.expand_more),
+                trailing: const Icon(CupertinoIcons.chevron_down),
                 onTap: () => setState(() => _expanded = server.id),
               ),
           ],
@@ -377,41 +378,38 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                       Expanded(
                         child: Text(
                           l.phoneServerManagement,
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: AppUiTheme.of(context).textTheme.titleLarge,
                         ),
                       ),
-                      IconButton(
+                      AppIconButton(
                         tooltip: l.cancelAction,
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close),
+                        icon: const Icon(CupertinoIcons.xmark),
                       ),
                     ],
                   ),
-                  TextField(
+                  AppTextField(
                     key: PhoneServerManager.searchKey,
                     controller: _search,
                     onChanged: (_) => setState(() {}),
                     textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: l.searchServers,
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: query.isEmpty
-                          ? null
-                          : IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () => setState(() => _search.clear()),
-                            ),
-                    ),
+                    placeholder: l.searchServers,
+                    prefix: const Icon(CupertinoIcons.search),
+                    suffix: query.isEmpty
+                        ? null
+                        : AppIconButton(
+                            icon: const Icon(CupertinoIcons.xmark),
+                            onPressed: () => setState(() => _search.clear()),
+                          ),
                   ),
-                  if (_busy || widget.auth.isBusy)
-                    const LinearProgressIndicator(),
+                  if (_busy || widget.auth.isBusy) const AppLoadingBar(),
                   if (_failure != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
                         _failure!,
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                          color: AppUiTheme.of(context).colorScheme.error,
                         ),
                       ),
                     ),
@@ -425,7 +423,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        TextButton(
+                        AppButton(
                           onPressed: _busy
                               ? null
                               : () => unawaited(
@@ -439,6 +437,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                                     }
                                   }),
                                 ),
+                          variant: AppButtonVariant.plain,
                           child: Text(l.undoAction),
                         ),
                       ],
@@ -463,7 +462,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
-                    child: FilledButton.icon(
+                    child: AppButton.icon(
                       key: PhoneServerManager.addKey,
                       onPressed: _busy || widget.auth.isBusy
                           ? null
@@ -471,8 +470,9 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                               Navigator.pop(context);
                               widget.onAddServer();
                             },
-                      icon: const Icon(Icons.add),
+                      icon: const Icon(CupertinoIcons.plus),
                       label: Text(l.mobileAddServer),
+                      variant: AppButtonVariant.filled,
                     ),
                   ),
                 ],

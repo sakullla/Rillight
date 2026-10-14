@@ -1,5 +1,5 @@
 import 'package:rillight/media_server/server_address.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/errors.dart';
 
@@ -23,7 +23,7 @@ Future<String?> showLineAddressDialog(
   BuildContext context, {
   String? initialAddress,
 }) {
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
     builder: (_) => LineAddressDialog(initialAddress: initialAddress),
   );
@@ -61,9 +61,9 @@ class _LineAddressDialogState extends State<LineAddressDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return AlertDialog(
+    return AppDialog(
       title: Text(widget.initialAddress == null ? l10n.addLine : l10n.editLine),
-      content: TextField(
+      content: AppTextField(
         key: LineAddressDialog.fieldKey,
         controller: _address,
         autofocus: true,
@@ -74,25 +74,25 @@ class _LineAddressDialogState extends State<LineAddressDialog> {
         onChanged: (_) {
           if (_invalid) setState(() => _invalid = false);
         },
-        decoration: InputDecoration(
-          labelText: l10n.extraLineAddress,
-          hintText: l10n.serverAddressHint,
-          errorText: _invalid ? l10n.errorInvalidAddress : null,
-        ),
+        label: l10n.extraLineAddress,
+        placeholder: l10n.serverAddressHint,
+        errorText: _invalid ? l10n.errorInvalidAddress : null,
       ),
       actions: [
-        TextButton(
+        AppButton(
           onPressed: () => Navigator.of(context).pop(),
+          variant: AppButtonVariant.plain,
           child: Text(l10n.cancelAction),
         ),
         ListenableBuilder(
           listenable: _address,
           builder: (context, _) {
-            return FilledButton(
+            return AppButton(
               key: LineAddressDialog.submitKey,
               onPressed: _address.text.trim().isEmpty
                   ? null
                   : () => _submit(context),
+              variant: AppButtonVariant.filled,
               child: Text(l10n.lineAddressSave),
             );
           },

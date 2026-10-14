@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme.dart';
 import 'package:rillight/media_server/models.dart';
 
 /// 首页区块。片库入口和每个片库的最近添加都能单独开关、排序。
@@ -155,7 +154,7 @@ class FilePhoneHomeSectionStore implements PhoneHomeSectionStore {
 
 /// 首页与「我的」共用一份顺序。文件按服务器分开，不读写片库钉选。
 class PhoneHomeSectionController extends ChangeNotifier {
-  PhoneHomeSectionController({PhoneHomeSectionStore? store}) : _store = store;
+  PhoneHomeSectionController({this._store});
 
   static PhoneHomeSectionController? _app;
 
@@ -319,7 +318,7 @@ class PhoneHomeSectionEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final order = controller.orderedIds(libraries);
     final names = {for (final library in libraries) library.id: library.name};
     final shown = [
@@ -330,65 +329,73 @@ class PhoneHomeSectionEditor extends StatelessWidget {
       for (final id in order)
         if (controller.isHidden(id)) id,
     ];
-    return ReorderableListView(
-      header: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.md,
-          AppSpacing.sm,
-          AppSpacing.md,
-          AppSpacing.xs,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              l10n.phoneHomeEditHint,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.xs,
             ),
-            const SizedBox(height: AppSpacing.lg),
-            Text(l10n.phoneHomeShown, style: theme.textTheme.titleSmall),
-          ],
-        ),
-      ),
-      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
-      buildDefaultDragHandles: false,
-      onReorderItem: (oldIndex, newIndex) {
-        unawaited(controller.reorderVisible(oldIndex, newIndex, libraries));
-      },
-      footer: hidden.isEmpty
-          ? null
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.lg,
-                AppSpacing.md,
-                0,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(l10n.phoneHomeHidden, style: theme.textTheme.titleSmall),
-                  const SizedBox(height: AppSpacing.xs),
-                  for (final id in hidden)
-                    _row(
-                      context,
-                      id: id,
-                      label: _label(l10n, id, names),
-                      draggable: false,
-                    ),
-                ],
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.phoneHomeEditHint,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Text(l10n.phoneHomeShown, style: theme.textTheme.titleSmall),
+              ],
             ),
-      children: [
-        for (var index = 0; index < shown.length; index++)
-          _row(
+          ),
+        ),
+        SliverReorderableList(
+          itemCount: shown.length,
+          onReorderItem: (oldIndex, newIndex) {
+            unawaited(controller.reorderVisible(oldIndex, newIndex, libraries));
+          },
+          itemBuilder: (context, index) => _row(
             context,
             id: shown[index],
             label: _label(l10n, shown[index], names),
             index: index,
           ),
+        ),
+        SliverToBoxAdapter(
+          child: hidden.isEmpty
+              ? null
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.phoneHomeHidden,
+                        style: theme.textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      for (final id in hidden)
+                        _row(
+                          context,
+                          id: id,
+                          label: _label(l10n, id, names),
+                          draggable: false,
+                        ),
+                    ],
+                  ),
+                ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
       ],
     );
   }
@@ -416,15 +423,15 @@ class PhoneHomeSectionEditor extends StatelessWidget {
     int? index,
     bool draggable = true,
   }) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final visible = !controller.isHidden(id);
     final handle = Icon(
-      Icons.drag_handle,
+      CupertinoIcons.line_horizontal_3,
       color: theme.colorScheme.onSurfaceVariant,
     );
-    return Material(
+    return Container(
+      decoration: BoxDecoration(color: const Color(0x00000000)),
       key: tileKey(id),
-      color: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
         child: Row(
@@ -450,7 +457,7 @@ class PhoneHomeSectionEditor extends StatelessWidget {
                 ),
               ),
             ),
-            Switch(
+            CupertinoSwitch(
               key: visibleKey(id),
               value: visible,
               onChanged: (value) => controller.setVisible(id, value),

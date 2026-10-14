@@ -2,9 +2,10 @@ import 'provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
 import '../app/presentation_environment.dart';
 import '../app/tv_widgets.dart';
+
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 
 import '../app/l10n/app_localizations.dart';
@@ -19,7 +20,7 @@ Future<void> showSourceManagement(
   AccessRegion region = AccessRegion.ordinary,
 }) {
   final auth = AuthScope.of(context);
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (_) => SourceManagement(auth: auth, region: region),
   );
@@ -96,7 +97,7 @@ class _SourceManagementState extends State<SourceManagement> {
 
   Future<String?> _text(String title, String initial, String sourceId) async {
     final controller = TextEditingController(text: initial);
-    final result = await showDialog<String>(
+    final result = await showAppDialog<String>(
       context: context,
       builder: (dialog) => _RegionDialogBoundary(
         access: widget.auth.regionAccess,
@@ -104,22 +105,24 @@ class _SourceManagementState extends State<SourceManagement> {
         registry: registry,
         sourceId: sourceId,
         onRevoked: controller.clear,
-        child: AlertDialog(
+        child: AppDialog(
           title: Text(title),
           content: PresentationScope.maybeOf(context)?.isTv == true
               ? TvInput(label: title, controller: controller, autofocus: true)
-              : TextField(
+              : AppTextField(
                   key: const Key('source-text-value'),
                   controller: controller,
                   autofocus: true,
                 ),
           actions: [
-            TextButton(
+            AppButton(
               onPressed: () => Navigator.pop(dialog),
+              variant: AppButtonVariant.plain,
               child: Text(AppLocalizations.of(context).cancelAction),
             ),
-            FilledButton(
+            AppButton(
               onPressed: () => Navigator.pop(dialog, controller.text),
+              variant: AppButtonVariant.filled,
               child: Text(AppLocalizations.of(context).lineAddressSave),
             ),
           ],
@@ -150,23 +153,25 @@ class _SourceManagementState extends State<SourceManagement> {
     String message,
   ) async {
     final l = AppLocalizations.of(context);
-    return await showDialog<bool>(
+    return await showAppDialog<bool>(
           context: context,
           builder: (dialog) => _RegionDialogBoundary(
             access: widget.auth.regionAccess,
             region: widget.region,
             registry: registry,
             sourceId: server.id,
-            child: AlertDialog(
+            child: AppDialog(
               title: Text(title),
               content: Text(message),
               actions: [
-                TextButton(
+                AppButton(
                   onPressed: () => Navigator.pop(dialog, false),
+                  variant: AppButtonVariant.plain,
                   child: Text(l.cancelAction),
                 ),
-                FilledButton(
+                AppButton(
                   onPressed: () => Navigator.pop(dialog, true),
+                  variant: AppButtonVariant.filled,
                   child: Text(title),
                 ),
               ],
@@ -236,17 +241,19 @@ class _SourceManagementState extends State<SourceManagement> {
 
   Future<void> _move(SavedServer server) async {
     final l = AppLocalizations.of(context);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
-      builder: (dialog) => AlertDialog(
+      builder: (dialog) => AppDialog(
         content: Text(l.sourceMoveWarning),
         actions: [
-          TextButton(
+          AppButton(
             onPressed: () => Navigator.pop(dialog),
+            variant: AppButtonVariant.plain,
             child: Text(l.cancelAction),
           ),
-          FilledButton(
+          AppButton(
             onPressed: () => Navigator.pop(dialog, true),
+            variant: AppButtonVariant.filled,
             child: Text(l.lineAddressSave),
           ),
         ],
@@ -268,23 +275,23 @@ class _SourceManagementState extends State<SourceManagement> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     if (!widget.auth.regionAccess.allows(widget.region)) {
-      return AlertDialog(content: Text(l.aggregationPrivateLocked));
+      return AppDialog(content: Text(l.aggregationPrivateLocked));
     }
     final servers = registry.project(widget.region);
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
       },
-      child: AlertDialog(
+      child: AppDialog(
         title: Text(l.sourceManagement),
         content: SizedBox(
           width: 600,
           height: MediaQuery.sizeOf(context).height * .65,
           child: ListView(
             children: [
-              OutlinedButton.icon(
+              AppButton.icon(
                 key: const Key('source-add-provider'),
-                icon: const Icon(Icons.add),
+                icon: const Icon(CupertinoIcons.plus),
                 label: Text(l.providerConnectEntry),
                 onPressed: _busy
                     ? null
@@ -296,13 +303,14 @@ class _SourceManagementState extends State<SourceManagement> {
                         );
                         if (mounted) setState(() {});
                       },
+                variant: AppButtonVariant.outlined,
               ),
-              if (_busy) const LinearProgressIndicator(),
+              if (_busy) const AppLoadingBar(),
               if (_error != null)
                 Text(_error!, key: const Key('source-management-error')),
               if (widget.region == AccessRegion.ordinary)
-                ListTile(
-                  leading: const Icon(Icons.lock_outline),
+                AppListTile(
+                  leading: const Icon(CupertinoIcons.lock),
                   title: Text(l.aggregationPrivate),
                   onTap: _busy
                       ? null
@@ -312,13 +320,13 @@ class _SourceManagementState extends State<SourceManagement> {
                         },
                 ),
               for (var index = 0; index < servers.length; index++) ...[
-                ListTile(
+                AppListTile(
                   title: Text(servers[index].displayName),
                   subtitle: Text(
                     '${servers[index].serviceType.name} · ${servers[index].username} · ${servers[index].checkStatus} · ${servers[index].checkedAt?.toLocal().toString() ?? '—'}',
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.arrow_upward),
+                  trailing: AppIconButton(
+                    icon: const Icon(CupertinoIcons.arrow_up),
                     onPressed: _busy || index == 0
                         ? null
                         : () => _act(() {
@@ -329,7 +337,7 @@ class _SourceManagementState extends State<SourceManagement> {
                           }),
                   ),
                 ),
-                SwitchListTile(
+                AppSwitchTile(
                   key: Key('source-participates-${servers[index].id}'),
                   title: Text(l.sourceParticipates),
                   value: servers[index].participates,
@@ -347,26 +355,29 @@ class _SourceManagementState extends State<SourceManagement> {
                 Wrap(
                   spacing: 8,
                   children: [
-                    TextButton(
+                    AppButton(
                       key: Key('source-add-line-${servers[index].id}'),
                       onPressed: _busy
                           ? null
                           : () => _editAddress(servers[index]),
+                      variant: AppButtonVariant.plain,
                       child: Text(l.addLine),
                     ),
-                    TextButton(
+                    AppButton(
                       key: Key('source-logout-${servers[index].id}'),
                       onPressed: _busy ? null : () => _logout(servers[index]),
+                      variant: AppButtonVariant.plain,
                       child: Text(l.logout),
                     ),
-                    TextButton(
+                    AppButton(
                       key: Key('source-delete-${servers[index].id}'),
                       onPressed: _busy
                           ? null
                           : () => _logout(servers[index], remove: true),
+                      variant: AppButtonVariant.plain,
                       child: Text(l.deleteServer),
                     ),
-                    TextButton(
+                    AppButton(
                       onPressed: _busy
                           ? null
                           : () => _act(() async {
@@ -377,28 +388,32 @@ class _SourceManagementState extends State<SourceManagement> {
                                 _libraries[servers[index].id] = values;
                               }
                             }),
+                      variant: AppButtonVariant.plain,
                       child: Text(l.sourceDiscoverLibraries),
                     ),
                     if (servers[index].serviceType == MediaServerType.plex)
-                      TextButton(
+                      AppButton(
                         onPressed: _busy
                             ? null
                             : () => _login(servers[index].id, home: true),
+                        variant: AppButtonVariant.plain,
                         child: Text(l.providerHomeManage),
                       ),
-                    TextButton(
+                    AppButton(
                       onPressed: _busy ? null : () => _login(servers[index].id),
+                      variant: AppButtonVariant.plain,
                       child: Text(l.sourceIndependentLogin),
                     ),
-                    TextButton(
+                    AppButton(
                       onPressed: _busy
                           ? null
                           : () => _act(() async {
                               await registry.check(servers[index].id);
                             }),
+                      variant: AppButtonVariant.plain,
                       child: Text(l.sourceManualCheck),
                     ),
-                    TextButton(
+                    AppButton(
                       onPressed: _busy
                           ? null
                           : () async {
@@ -414,11 +429,13 @@ class _SourceManagementState extends State<SourceManagement> {
                                 );
                               }
                             },
+                      variant: AppButtonVariant.plain,
                       child: Text(l.phoneRenameServer),
                     ),
                     if (widget.auth.regionAccess.allows(AccessRegion.private))
-                      TextButton(
+                      AppButton(
                         onPressed: _busy ? null : () => _move(servers[index]),
+                        variant: AppButtonVariant.plain,
                         child: Text(
                           widget.region == AccessRegion.ordinary
                               ? l.sourceMovePrivate
@@ -434,7 +451,7 @@ class _SourceManagementState extends State<SourceManagement> {
                                 id: id,
                             })
                         .entries)
-                  CheckboxListTile(
+                  AppSwitchTile(
                     title: Text(entry.value),
                     value: servers[index].libraryIds.contains(entry.key),
                     onChanged: _busy
@@ -452,13 +469,13 @@ class _SourceManagementState extends State<SourceManagement> {
                           }),
                   ),
                 for (final line in servers[index].lines)
-                  ListTile(
+                  AppListTile(
                     title: Text(line.nickname ?? line.hostLabel),
                     subtitle: Text(
                       '${line.checkStatus} · ${line.checkedAt?.toLocal().toString() ?? '—'}',
                     ),
-                    leading: IconButton(
-                      icon: const Icon(Icons.arrow_upward),
+                    leading: AppIconButton(
+                      icon: const Icon(CupertinoIcons.arrow_up),
                       onPressed: _busy || servers[index].lines.first == line
                           ? null
                           : () => _act(() {
@@ -477,11 +494,11 @@ class _SourceManagementState extends State<SourceManagement> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
+                        AppIconButton(
                           key: Key(
                             'source-line-check-${servers[index].id}-${line.id}',
                           ),
-                          icon: const Icon(Icons.network_check),
+                          icon: const Icon(CupertinoIcons.wifi),
                           tooltip: l.sourceManualCheck,
                           onPressed: _busy
                               ? null
@@ -492,8 +509,8 @@ class _SourceManagementState extends State<SourceManagement> {
                                   );
                                 }),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
+                        AppIconButton(
+                          icon: const Icon(CupertinoIcons.pencil),
                           tooltip: l.sourceRenameLine,
                           onPressed: _busy
                               ? null
@@ -521,39 +538,42 @@ class _SourceManagementState extends State<SourceManagement> {
                   Wrap(
                     spacing: 8,
                     children: [
-                      TextButton.icon(
+                      AppButton.icon(
                         key: Key(
                           'source-edit-line-${servers[index].id}-${line.id}',
                         ),
-                        icon: const Icon(Icons.edit_outlined),
+                        icon: const Icon(CupertinoIcons.pencil),
                         onPressed: _busy
                             ? null
                             : () => _editAddress(servers[index], line),
                         label: Text(
                           '${l.editLine} · ${line.nickname ?? line.hostLabel}',
                         ),
+                        variant: AppButtonVariant.plain,
                       ),
-                      TextButton.icon(
+                      AppButton.icon(
                         key: Key(
                           'source-delete-line-${servers[index].id}-${line.id}',
                         ),
-                        icon: const Icon(Icons.delete_outline),
+                        icon: const Icon(CupertinoIcons.trash),
                         onPressed: _busy || servers[index].lines.length < 2
                             ? null
                             : () => _removeLine(servers[index], line),
                         label: Text(l.deleteLine),
+                        variant: AppButtonVariant.plain,
                       ),
                     ],
                   ),
-                const Divider(),
+                const AppDivider(),
               ],
             ],
           ),
         ),
         actions: [
-          TextButton(
+          AppButton(
             key: const Key('source-management-close'),
             onPressed: () => Navigator.pop(context),
+            variant: AppButtonVariant.plain,
             child: Text(l.cancelAction),
           ),
         ],
@@ -623,13 +643,13 @@ class _RegionDialogBoundaryState extends State<_RegionDialogBoundary> {
   Widget build(BuildContext context) =>
       !_revoked && widget.access.allows(widget.region)
       ? widget.child
-      : AlertDialog(
+      : AppDialog(
           content: Text(AppLocalizations.of(context).aggregationPrivateLocked),
         );
 }
 
 Future<void> showPrivateAccess(BuildContext context, AuthController auth) =>
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (_) => PrivateAccessDialog(auth: auth),
     );
@@ -690,62 +710,66 @@ class _PrivateAccessDialogState extends State<PrivateAccessDialog> {
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
       },
-      child: AlertDialog(
+      child: AppDialog(
         title: Text(l.aggregationPrivate),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (!access.allows(AccessRegion.private)) ...[
-              TextField(
+              AppTextField(
                 key: const Key('private-pin'),
                 controller: _pin,
                 obscureText: true,
                 autofocus: true,
                 keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: l.privatePin),
                 onSubmitted: (_) => _submit(),
+                label: l.privatePin,
               ),
               if (!access.hasPin)
-                TextField(
+                AppTextField(
                   key: const Key('private-pin-confirm'),
                   controller: _confirmation,
                   obscureText: true,
                   keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: l.privateConfirmPin),
+                  label: l.privateConfirmPin,
                 ),
             ],
-            if (_busy) const LinearProgressIndicator(),
+            if (_busy) const AppLoadingBar(),
             if (_error != null)
               Text(_error!, key: const Key('private-pin-error')),
           ],
         ),
         actions: [
-          TextButton(
+          AppButton(
             key: const Key('private-pin-cancel'),
             onPressed: _busy ? null : () => Navigator.pop(context),
+            variant: AppButtonVariant.plain,
             child: Text(l.cancelAction),
           ),
           if (access.allows(AccessRegion.private)) ...[
-            TextButton(
+            AppButton(
               onPressed: () {
                 Navigator.pop(context);
                 unawaited(access.lock());
               },
+              variant: AppButtonVariant.plain,
               child: Text(l.privateLock),
             ),
-            FilledButton(
+            AppButton(
               onPressed: () {
                 Navigator.pop(context);
                 unawaited(
                   showSourceManagement(context, region: AccessRegion.private),
                 );
               },
+              variant: AppButtonVariant.filled,
               child: Text(l.sourceManagement),
             ),
           ] else
-            FilledButton(
+            AppButton(
               key: const Key('private-unlock'),
               onPressed: _busy ? null : _submit,
+              variant: AppButtonVariant.filled,
               child: Text(access.hasPin ? l.privateUnlock : l.privateSetPin),
             ),
         ],

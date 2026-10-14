@@ -1,6 +1,8 @@
 import '../media_server/server_address.dart';
+
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/media_server_client.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -226,14 +228,15 @@ class ManualCheckResult {
 }
 
 typedef SourceClientFactory = MediaServerClient Function();
-typedef SessionIdentityVerifier =
-    Future<void> Function(
-      SavedServer server,
-      StoredCredentials credentials,
-      MediaServerClient client,
-    );
-typedef MembershipCleanup =
-    Future<void> Function(SourceAccount? account, String serverId);
+typedef SessionIdentityVerifier = Future<void> Function(
+  SavedServer server,
+  StoredCredentials credentials,
+  MediaServerClient client,
+);
+typedef MembershipCleanup = Future<void> Function(
+  SourceAccount? account,
+  String serverId,
+);
 
 /// The captured compensation authority was retired. Unlike transport failures,
 /// retrying this old operation must not reacquire authorization.

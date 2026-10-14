@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/tv_top_nav.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -224,14 +223,14 @@ class _TvHomePageState extends State<TvHomePage> {
                   TvAction(
                     key: const Key('tv-home-display'),
                     pill: true,
-                    leading: const Icon(Icons.tune_rounded),
+                    leading: const Icon(CupertinoIcons.slider_horizontal_3),
                     onPressed: () => showTvSectionEditor(context),
                     child: Text(l.phoneHomeEdit),
                   ),
                   SizedBox(width: 10 * s),
                   TvAction(
                     pill: true,
-                    leading: const Icon(Icons.refresh_rounded),
+                    leading: const Icon(CupertinoIcons.arrow_clockwise),
                     onPressed: () => c.reload(showCachedFirst: false),
                     child: Text(l.mobileRefresh),
                   ),
@@ -333,11 +332,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
       final target = await resolveHeroPlayTarget(context, item);
       if (!mounted) return;
       if (target == null) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(
-            content: Text(AppLocalizations.of(context).noPlayableStream),
-          ),
-        );
+        showAppNotice(context, AppLocalizations.of(context).noPlayableStream);
         return;
       }
       await context.push(
@@ -358,7 +353,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
     final index = _index % items.length;
     final item = items[index];
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final viewSize = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     // 舞台约占视口高 72%,第一行内容的标题在首屏露头。
@@ -386,7 +381,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
       width: viewSize.width,
       height: height,
       child: ColoredBox(
-        color: light ? page : Colors.black,
+        color: light ? page : const Color(0xff000000),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -496,7 +491,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                           key: TvHomeKeys.featuredPlay,
                           emphasized: true,
                           pill: true,
-                          leading: const Icon(Icons.play_arrow_rounded),
+                          leading: const Icon(CupertinoIcons.play_fill),
                           onPressed: () => _play(item),
                           child: Text(l.play),
                         ),
@@ -504,7 +499,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         TvAction(
                           key: TvHomeKeys.featuredOpen,
                           pill: true,
-                          leading: const Icon(Icons.info_outline_rounded),
+                          leading: const Icon(CupertinoIcons.info_circle),
                           onPressed: () =>
                               context.push(AppRoutes.item(item.id)),
                           child: Text(l.details),
@@ -529,7 +524,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         key: TvHomeKeys.featuredPrev,
                         variant: TvActionVariant.icon,
                         onPressed: () => _go(-1),
-                        child: const Icon(Icons.chevron_left_rounded),
+                        child: const Icon(CupertinoIcons.chevron_left),
                       ),
                       SizedBox(width: 12 * s),
                       _TvPagerDots(index: index, count: items.length),
@@ -539,7 +534,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         style: theme.textTheme.labelMedium?.copyWith(
                           color: light
                               ? theme.colorScheme.onSurfaceVariant
-                              : Colors.white.withValues(alpha: .75),
+                              : const Color(0xffffffff).withValues(alpha: .75),
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
@@ -548,7 +543,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         key: TvHomeKeys.featuredNext,
                         variant: TvActionVariant.icon,
                         onPressed: () => _go(1),
-                        child: const Icon(Icons.chevron_right_rounded),
+                        child: const Icon(CupertinoIcons.chevron_right),
                       ),
                     ],
                   ),
@@ -568,7 +563,7 @@ class _TvPagerDots extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = TvDesign.scaleOf(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final duration = AppMotion.durationOf(context, AppMotion.normal);
     return Row(
@@ -586,7 +581,8 @@ class _TvPagerDots extends StatelessWidget {
                   ? (i == index
                         ? scheme.primary
                         : scheme.outline.withValues(alpha: .55))
-                  : Colors.white.withValues(alpha: i == index ? .95 : .4),
+                  : const Color(0xffffffff)
+                        .withValues(alpha: i == index ? .95 : .4),
               borderRadius: BorderRadius.circular(3 * s),
             ),
           ),
@@ -610,7 +606,7 @@ class _TvFeaturedCopy extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!light) return TvDarkStage(child: child);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final s = TvDesign.scaleOf(context);
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -657,16 +653,16 @@ class _TvFeaturedCaption extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = TvDesign.scaleOf(context);
     final meta = heroMetaLabels(l, item);
     final overview = plainOverview(item.overview);
-    final ink = onPaper ? scheme.onSurface : Colors.white;
+    final ink = onPaper ? scheme.onSurface : const Color(0xffffffff);
     final muted = onPaper
         ? scheme.onSurfaceVariant
-        : Colors.white.withValues(alpha: .82);
-    const shadow = [Shadow(blurRadius: 12, color: Colors.black54)];
+        : const Color(0xffffffff).withValues(alpha: .82);
+    const shadow = [Shadow(blurRadius: 12, color: Color(0x8a000000))];
     final title = Text(
       heroTitle(item),
       maxLines: 2,
@@ -697,7 +693,7 @@ class _TvFeaturedCaption extends StatelessWidget {
               style: theme.textTheme.labelMedium?.copyWith(
                 color: onPaper
                     ? scheme.onSurface
-                    : Colors.white.withValues(alpha: .85),
+                    : const Color(0xffffffff).withValues(alpha: .85),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -721,7 +717,7 @@ class _TvFeaturedCaption extends StatelessWidget {
             children: [
               if (item.communityRating case final rating?) ...[
                 Icon(
-                  Icons.star_rounded,
+                  CupertinoIcons.star_fill,
                   size: 16 * s,
                   color: const Color(0xFFFFC94D),
                 ),
@@ -753,7 +749,7 @@ class _TvFeaturedCaption extends StatelessWidget {
             style: theme.textTheme.bodyMedium?.copyWith(
               color: onPaper
                   ? scheme.onSurface.withValues(alpha: .78)
-                  : Colors.white.withValues(alpha: .75),
+                  : const Color(0xffffffff).withValues(alpha: .75),
             ),
           ),
         ],

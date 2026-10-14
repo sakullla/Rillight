@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -106,9 +109,8 @@ void main() {
         isNull,
       );
       expect(
-        (await credentials.read(
-          configuredSourceId(auth, second.serverId),
-        ))?.accessToken,
+        (await credentials.read(configuredSourceId(auth, second.serverId)))
+            ?.accessToken,
         token,
       );
       final snapshot = await servers.load();
@@ -121,62 +123,59 @@ void main() {
     },
   );
 
-  test(
-    'deleting the current server signs out, drops credentials and cannot re-enter',
-    () async {
-      final credentials = MemoryCredentialStore();
-      final servers = MemoryServerListStore();
-      final auth = controller(credentials: credentials, servers: servers);
-      await auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      await auth.connect(
-        address: second.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      final token = auth.session!.accessToken;
+  test('deleting the current server signs out, drops credentials and cannot re-enter', () async {
+    final credentials = MemoryCredentialStore();
+    final servers = MemoryServerListStore();
+    final auth = controller(credentials: credentials, servers: servers);
+    await auth.connect(
+      address: server.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    await auth.connect(
+      address: second.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    final token = auth.session!.accessToken;
 
-      await auth.deleteServer(configuredSourceId(auth, second.serverId));
+    await auth.deleteServer(configuredSourceId(auth, second.serverId));
 
-      // 会话结束、client 卸载:播放页面随之回到登录页。
-      expect(auth.isLoggedIn, isFalse);
-      expect(auth.session, isNull);
-      expect(auth.prefill, isNull);
-      expect(auth.client.baseUrl, isNull);
-      expect(auth.client.accessToken, isNull);
-      // 已存凭据被清除,不能凭其直接进入。
-      expect(
-        await credentials.read(configuredSourceId(auth, second.serverId)),
-        isNull,
-      );
-      expect(auth.savedServers.map((item) => item.id), [
-        configuredSourceId(auth, server.serverId),
-      ]);
-      final snapshot = await servers.load();
-      expect(snapshot.lastServerId, isNull);
+    // 会话结束、client 卸载:播放页面随之回到登录页。
+    expect(auth.isLoggedIn, isFalse);
+    expect(auth.session, isNull);
+    expect(auth.prefill, isNull);
+    expect(auth.client.baseUrl, isNull);
+    expect(auth.client.accessToken, isNull);
+    // 已存凭据被清除,不能凭其直接进入。
+    expect(
+      await credentials.read(configuredSourceId(auth, second.serverId)),
+      isNull,
+    );
+    expect(auth.savedServers.map((item) => item.id), [
+      configuredSourceId(auth, server.serverId),
+    ]);
+    final snapshot = await servers.load();
+    expect(snapshot.lastServerId, isNull);
 
-      // 同一份存储重启后不会自动进入被删服务器。
-      final revived = controller(credentials: credentials, servers: servers);
-      await revived.restore();
-      expect(revived.isLoggedIn, isFalse);
-      expect(revived.prefill, isNull);
+    // 同一份存储重启后不会自动进入被删服务器。
+    final revived = controller(credentials: credentials, servers: servers);
+    await revived.restore();
+    expect(revived.isLoggedIn, isFalse);
+    expect(revived.prefill, isNull);
 
-      // 服务器端账号仍在,可重新登录。
-      await revived.connect(
-        address: second.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      expect(revived.isLoggedIn, isTrue);
-      expect(revived.session?.server.verifiedServerId, second.serverId);
-      expect(revived.session?.accessToken, isNot(token));
-      auth.dispose();
-      revived.dispose();
-    },
-  );
+    // 服务器端账号仍在,可重新登录。
+    await revived.connect(
+      address: second.baseUrl.toString(),
+      username: 'alice',
+      password: 'correct-horse',
+    );
+    expect(revived.isLoggedIn, isTrue);
+    expect(revived.session?.server.verifiedServerId, second.serverId);
+    expect(revived.session?.accessToken, isNot(token));
+    auth.dispose();
+    revived.dispose();
+  });
 
   test('deleting an unknown server id is a no-op', () async {
     final servers = MemoryServerListStore(
@@ -207,7 +206,10 @@ void main() {
             theme: AppTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             home: Scaffold(
               body: ServerSwitcherDialog(
                 servers: servers,
@@ -223,6 +225,12 @@ void main() {
                 onDeleteLine: (_, _) {},
               ),
             ),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         );
       }
@@ -237,7 +245,7 @@ void main() {
         find.byKey(ServerSwitcherDialog.deleteKey('server-id-2')),
       );
       await settle(tester);
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(ui.AppDialog), findsOneWidget);
       expect(find.textContaining('第二台'), findsWidgets);
       await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
       await settle(tester);
@@ -279,7 +287,10 @@ void main() {
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         home: Scaffold(
           body: ServerSwitcherDialog(
             servers: servers,
@@ -294,6 +305,12 @@ void main() {
             onEditLine: (_, _) {},
             onDeleteLine: (_, _) {},
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -321,9 +338,11 @@ void main() {
             theme: theme,
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             home: Scaffold(
-              // 模拟详情页背景:海报占位与简介露出在切换面板之外。
               body: Stack(
                 children: [
                   const Positioned.fill(
@@ -355,6 +374,12 @@ void main() {
                 ],
               ),
             ),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         );
       }
@@ -362,14 +387,16 @@ void main() {
       for (final theme in [AppTheme.light(), AppTheme.dark()]) {
         await pump(theme);
         await settle(tester);
-        final scheme = theme.colorScheme;
+        final scheme = theme.brightness == Brightness.dark
+            ? ui.AppUiTheme.dark().colorScheme
+            : ui.AppUiTheme.light().colorScheme;
 
         // 面板底色来自 colorScheme 且完全不透明:背景海报/简介/播放控件
         // 被面板完全隔开,不会透到服务器名/地址/搜索/添加/退出的文字层。
-        final panel = tester.widget<Material>(
+        final panel = tester.widget<Container>(
           find.byKey(ServerSwitcherDialog.panelKey),
         );
-        final panelColor = panel.color!;
+        final panelColor = (panel.decoration! as BoxDecoration).color!;
         expect(panelColor, scheme.surface);
         expect(panelColor.a, 1.0);
 

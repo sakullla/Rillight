@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/services.dart';
 
@@ -5,6 +7,65 @@ import '../theme/tokens.dart';
 import 'theme.dart';
 
 enum AppButtonVariant { plain, filled, tinted, outlined }
+
+/// Reusable app action appearance, independent of a design library's states.
+class AppButtonStyle {
+  const AppButtonStyle({
+    this.padding,
+    this.minimumSize,
+    this.fixedSize,
+    this.foregroundColor,
+    this.backgroundColor,
+    this.disabledForegroundColor,
+    this.hoverColor,
+    this.side,
+    this.shape,
+    this.textStyle,
+  });
+  final EdgeInsetsGeometry? padding;
+  final Size? minimumSize, fixedSize;
+  final Color? foregroundColor,
+      backgroundColor,
+      disabledForegroundColor,
+      hoverColor;
+  final BorderSide? side;
+  final OutlinedBorder? shape;
+  final TextStyle? textStyle;
+}
+
+/// Selectable read-only text with an owned controller that follows its value.
+class AppSelectableText extends StatefulWidget {
+  const AppSelectableText(this.data, {super.key, this.style});
+  final String data;
+  final TextStyle? style;
+  @override
+  State<AppSelectableText> createState() => _AppSelectableTextState();
+}
+
+class _AppSelectableTextState extends State<AppSelectableText> {
+  late final _controller = TextEditingController(text: widget.data);
+  @override
+  void didUpdateWidget(AppSelectableText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data != widget.data) _controller.text = widget.data;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => CupertinoTextField(
+    controller: _controller,
+    style: widget.style,
+    readOnly: true,
+    maxLines: null,
+    decoration: null,
+    padding: EdgeInsets.zero,
+  );
+}
 
 /// One focus owner for pointer, keyboard and remote activation. Cupertino's
 /// button supplies pointer feedback; the outer focus also handles select/space.
@@ -22,7 +83,31 @@ class AppButton extends StatefulWidget {
     this.semanticLabel,
     this.onFocusChange,
     this.minimumSize = const Size(44, 44),
+    this.style,
   });
+  AppButton.icon({
+    super.key,
+    required Widget icon,
+    required Widget label,
+    this.onPressed,
+    this.variant = AppButtonVariant.plain,
+    this.focusNode,
+    this.autofocus = false,
+    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    this.color,
+    this.foregroundColor,
+    this.semanticLabel,
+    this.onFocusChange,
+    this.minimumSize = const Size(44, 44),
+    this.style,
+  }) : child = Row(
+         mainAxisSize: MainAxisSize.min,
+         children: [
+           icon,
+           const SizedBox(width: 8),
+           Flexible(child: label),
+         ],
+       );
   final Widget child;
   final VoidCallback? onPressed;
   final AppButtonVariant variant;
@@ -33,6 +118,7 @@ class AppButton extends StatefulWidget {
   final String? semanticLabel;
   final ValueChanged<bool>? onFocusChange;
   final Size minimumSize;
+  final AppButtonStyle? style;
   @override
   State<AppButton> createState() => _AppButtonState();
 }
@@ -47,14 +133,18 @@ class _AppButtonState extends State<AppButton> {
     final filled = widget.variant == AppButtonVariant.filled;
     final background =
         widget.color ??
+        widget.style?.backgroundColor ??
         switch (widget.variant) {
           AppButtonVariant.filled => colors.primary,
           AppButtonVariant.tinted => colors.primaryContainer,
           _ => const Color(0x00000000),
         };
     final foreground = enabled
-        ? widget.foregroundColor ?? (filled ? colors.onPrimary : colors.primary)
-        : colors.onSurfaceVariant.withValues(alpha: .5);
+        ? widget.foregroundColor ??
+              widget.style?.foregroundColor ??
+              (filled ? colors.onPrimary : colors.primary)
+        : widget.style?.disabledForegroundColor ??
+              colors.onSurfaceVariant.withValues(alpha: .5);
     return FocusableActionDetector(
       enabled: enabled,
       focusNode: widget.focusNode,
@@ -86,33 +176,45 @@ class _AppButtonState extends State<AppButton> {
         label: widget.semanticLabel,
         child: AnimatedContainer(
           duration: AppMotion.durationOf(context, AppMotion.fast),
-          decoration: BoxDecoration(
+          constraints: widget.style?.fixedSize == null
+              ? null
+              : BoxConstraints.tight(widget.style!.fixedSize!),
+          decoration: ShapeDecoration(
             color: !enabled && filled
                 ? colors.surfaceContainerHigh
+                : _hovered
+                ? widget.style?.hoverColor ?? background
                 : background,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(
-              width: _focused ? 2 : 1,
-              color: _focused
-                  ? colors.primary
-                  : widget.variant == AppButtonVariant.outlined
-                  ? colors.outline
-                  : _hovered
-                  ? colors.outlineVariant
-                  : const Color(0x00000000),
-            ),
+            shape:
+                (widget.style?.shape ??
+                        RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadii.md),
+                        ))
+                    .copyWith(
+                      side: BorderSide(
+                        width: _focused ? 2 : widget.style?.side?.width ?? 1,
+                        color: _focused
+                            ? colors.primary
+                            : widget.style?.side?.color ??
+                                  (widget.variant == AppButtonVariant.outlined
+                                      ? colors.outline
+                                      : _hovered
+                                      ? colors.outlineVariant
+                                      : const Color(0x00000000)),
+                      ),
+                    ),
           ),
           child: ExcludeFocus(
             child: CupertinoButton(
-              padding: widget.padding,
-              minimumSize: widget.minimumSize,
+              padding: widget.style?.padding ?? widget.padding,
+              minimumSize: widget.style?.minimumSize ?? widget.minimumSize,
               onPressed: widget.onPressed,
               child: IconTheme(
                 data: IconThemeData(color: foreground, size: 20),
                 child: DefaultTextStyle(
-                  style: theme.textTheme.labelLarge!.copyWith(
-                    color: foreground,
-                  ),
+                  style:
+                      (widget.style?.textStyle ?? theme.textTheme.labelLarge!)
+                          .copyWith(color: foreground),
                   textAlign: TextAlign.center,
                   child: widget.child,
                 ),
@@ -136,6 +238,10 @@ class AppIconButton extends StatelessWidget {
     this.color,
     this.size = 20,
     this.padding = const EdgeInsets.all(10),
+    this.minimumSize = const Size(44, 44),
+    this.backgroundColor,
+    this.style,
+    this.constraints,
   });
   final Widget icon;
   final VoidCallback? onPressed;
@@ -145,6 +251,10 @@ class AppIconButton extends StatelessWidget {
   final Color? color;
   final double size;
   final EdgeInsetsGeometry padding;
+  final Size minimumSize;
+  final Color? backgroundColor;
+  final AppButtonStyle? style;
+  final BoxConstraints? constraints;
   @override
   Widget build(BuildContext context) {
     final button = AppButton(
@@ -153,15 +263,21 @@ class AppIconButton extends StatelessWidget {
       autofocus: autofocus,
       padding: padding,
       foregroundColor: color,
+      color: backgroundColor,
+      style: style,
+      minimumSize: minimumSize,
       semanticLabel: tooltip,
       child: IconTheme.merge(
         data: IconThemeData(size: size),
         child: icon,
       ),
     );
-    return tooltip == null
+    final bounded = constraints == null
         ? button
-        : AppTooltip(message: tooltip!, child: button);
+        : ConstrainedBox(constraints: constraints!, child: button);
+    return tooltip == null
+        ? bounded
+        : AppTooltip(message: tooltip!, child: bounded);
   }
 }
 
@@ -177,6 +293,21 @@ class AppTooltip extends StatefulWidget {
 class _AppTooltipState extends State<AppTooltip> {
   final _portal = OverlayPortalController();
   final _anchor = GlobalKey();
+  Timer? _timer;
+  void _showTouch() {
+    _timer?.cancel();
+    _portal.show();
+    _timer = Timer(const Duration(seconds: 2), () {
+      if (mounted) _portal.hide();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => MouseRegion(
     key: _anchor,
@@ -217,7 +348,7 @@ class _AppTooltipState extends State<AppTooltip> {
           ),
         );
       },
-      child: widget.child,
+      child: GestureDetector(onLongPress: _showTouch, child: widget.child),
     ),
   );
 }
@@ -255,20 +386,25 @@ class AppTextField extends FormField<String> {
     String? initialValue,
     String? label,
     String? placeholder,
+    String? helperText,
+    String? errorText,
     Widget? prefix,
     Widget? suffix,
-    FocusNode? focusNode,
+    this.focusNode,
     bool autofocus = false,
     bool obscureText = false,
     super.enabled = true,
     bool readOnly = false,
     int? maxLines = 1,
     int? minLines,
+    int? maxLength,
+    EdgeInsets scrollPadding = const EdgeInsets.all(20),
     TextInputType? keyboardType,
     TextInputAction? textInputAction,
     ValueChanged<String>? onChanged,
     ValueChanged<String>? onSubmitted,
     VoidCallback? onTap,
+    VoidCallback? onEditingComplete,
     List<TextInputFormatter>? inputFormatters,
     TextStyle? style,
     EdgeInsetsGeometry padding = const EdgeInsets.all(12),
@@ -278,6 +414,7 @@ class AppTextField extends FormField<String> {
     Iterable<String>? autofillHints,
     bool autocorrect = true,
     bool enableSuggestions = true,
+    bool enableInteractiveSelection = true,
   }) : assert(controller == null || initialValue == null),
        super(
          initialValue: controller?.text ?? initialValue ?? '',
@@ -302,12 +439,15 @@ class AppTextField extends FormField<String> {
                  readOnly: readOnly,
                  maxLines: maxLines,
                  minLines: minLines,
+                 maxLength: maxLength,
+                 scrollPadding: scrollPadding,
                  keyboardType: keyboardType,
                  textInputAction: textInputAction,
                  inputFormatters: inputFormatters,
                  autofillHints: autofillHints,
                  autocorrect: autocorrect,
                  enableSuggestions: enableSuggestions,
+                 enableInteractiveSelection: enableInteractiveSelection,
                  placeholder: placeholder,
                  prefix: prefix,
                  suffix: suffix,
@@ -326,14 +466,26 @@ class AppTextField extends FormField<String> {
                  },
                  onSubmitted: onSubmitted,
                  onTap: onTap,
+                 onEditingComplete: onEditingComplete,
                ),
-               if (field.errorText != null)
+               if (helperText != null)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 6),
+                   child: Text(
+                     helperText,
+                     style: TextStyle(
+                       color: colors.onSurfaceVariant,
+                       fontSize: 13,
+                     ),
+                   ),
+                 ),
+               if (field.errorText != null || errorText != null)
                  Padding(
                    padding: const EdgeInsets.only(top: 6),
                    child: Semantics(
                      liveRegion: true,
                      child: Text(
-                       field.errorText!,
+                       field.errorText ?? errorText!,
                        style: TextStyle(color: colors.error, fontSize: 13),
                      ),
                    ),
@@ -344,6 +496,7 @@ class AppTextField extends FormField<String> {
        );
 
   final TextEditingController? controller;
+  final FocusNode? focusNode;
 
   @override
   FormFieldState<String> createState() => _AppTextFieldState();
@@ -449,11 +602,13 @@ class AppListTile extends StatelessWidget {
       horizontal: 16,
       vertical: 10,
     ),
+    this.autofocus = false,
   });
   final Widget? leading, subtitle, trailing;
   final Widget title;
   final VoidCallback? onTap;
   final bool enabled, selected;
+  final bool autofocus;
   final EdgeInsetsGeometry contentPadding;
   @override
   Widget build(BuildContext context) {
@@ -486,6 +641,7 @@ class AppListTile extends StatelessWidget {
       child: onTap == null
           ? Padding(padding: contentPadding, child: content)
           : AppButton(
+              autofocus: autofocus,
               onPressed: enabled ? onTap : null,
               padding: contentPadding,
               color: selected ? theme.colorScheme.primaryContainer : null,
@@ -512,6 +668,8 @@ class AppSwitchTile extends StatelessWidget {
   Widget build(BuildContext context) => AppListTile(
     title: title,
     subtitle: subtitle,
+    enabled: onChanged != null,
+    onTap: onChanged == null ? null : () => onChanged!(!value),
     trailing: CupertinoSwitch(value: value, onChanged: onChanged),
   );
 }
@@ -576,4 +734,273 @@ class AppProgressBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Clickable content keeps its original layout and typography; one focus node
+/// owns mouse, keyboard and remote activation.
+class AppSurfaceAction extends StatefulWidget {
+  const AppSurfaceAction({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.onLongPress,
+    this.onSecondaryTapDown,
+    this.onHover,
+    this.onFocusChange,
+    this.focusNode,
+    this.autofocus = false,
+    this.canRequestFocus = true,
+    this.borderRadius,
+    this.mouseCursor,
+    this.onDoubleTap,
+  });
+  final Widget child;
+  final VoidCallback? onTap, onLongPress, onDoubleTap;
+  final GestureTapDownCallback? onSecondaryTapDown;
+  final ValueChanged<bool>? onHover, onFocusChange;
+  final FocusNode? focusNode;
+  final bool autofocus, canRequestFocus;
+  final BorderRadius? borderRadius;
+  final MouseCursor? mouseCursor;
+  @override
+  State<AppSurfaceAction> createState() => _AppSurfaceActionState();
+}
+
+class _AppSurfaceActionState extends State<AppSurfaceAction> {
+  bool _focused = false;
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null || widget.onLongPress != null;
+    return FocusableActionDetector(
+      focusNode: widget.focusNode,
+      autofocus: widget.autofocus,
+      enabled: enabled && widget.canRequestFocus,
+      onFocusChange: (value) {
+        setState(() => _focused = value);
+        widget.onFocusChange?.call(value);
+      },
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+      },
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) {
+            widget.onTap?.call();
+            return null;
+          },
+        ),
+      },
+      child: MouseRegion(
+        cursor:
+            widget.mouseCursor ??
+            (enabled ? SystemMouseCursors.click : SystemMouseCursors.basic),
+        onEnter: (_) => widget.onHover?.call(true),
+        onExit: (_) => widget.onHover?.call(false),
+        child: Semantics(
+          button: true,
+          enabled: enabled,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            onDoubleTap: widget.onDoubleTap,
+            onSecondaryTapDown: widget.onSecondaryTapDown,
+            child: DecoratedBox(
+              position: DecorationPosition.foreground,
+              decoration: BoxDecoration(
+                borderRadius: widget.borderRadius,
+                border: _focused
+                    ? Border.all(
+                        color: AppUiTheme.of(context).colorScheme.primary,
+                        width: 2,
+                      )
+                    : null,
+              ),
+              child: widget.child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AppLoadingBar extends StatelessWidget {
+  const AppLoadingBar({
+    super.key,
+    this.value,
+    this.color,
+    this.backgroundColor,
+    this.minHeight = 4,
+    this.borderRadius,
+  });
+  final double? value;
+  final double minHeight;
+  final Color? color, backgroundColor;
+  final BorderRadiusGeometry? borderRadius;
+  @override
+  Widget build(BuildContext context) => value == null
+      ? SizedBox(
+          height: minHeight < 16 ? 16 : minHeight,
+          child: Center(
+            child: CupertinoActivityIndicator(radius: 7, color: color),
+          ),
+        )
+      : AppProgressBar(
+          value: value!,
+          height: minHeight,
+          color: color,
+          backgroundColor: backgroundColor,
+        );
+}
+
+class AppDisclosure extends StatefulWidget {
+  const AppDisclosure({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.leading,
+    this.trailing,
+    this.children = const [],
+    this.initiallyExpanded = false,
+    this.onExpansionChanged,
+    this.tilePadding = const EdgeInsets.all(12),
+    this.childrenPadding = EdgeInsets.zero,
+    this.backgroundColor,
+  });
+  final Widget title;
+  final Widget? subtitle, leading, trailing;
+  final List<Widget> children;
+  final bool initiallyExpanded;
+  final ValueChanged<bool>? onExpansionChanged;
+  final EdgeInsetsGeometry tilePadding, childrenPadding;
+  final Color? backgroundColor;
+  @override
+  State<AppDisclosure> createState() => _AppDisclosureState();
+}
+
+class _AppDisclosureState extends State<AppDisclosure> {
+  late bool _expanded = widget.initiallyExpanded;
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: widget.backgroundColor ?? const Color(0x00000000),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Semantics(
+          expanded: _expanded,
+          child: AppListTile(
+            title: widget.title,
+            subtitle: widget.subtitle,
+            leading: widget.leading,
+            contentPadding: widget.tilePadding,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.trailing != null) widget.trailing!,
+                Icon(
+                  _expanded
+                      ? CupertinoIcons.chevron_up
+                      : CupertinoIcons.chevron_down,
+                  size: 16,
+                ),
+              ],
+            ),
+            onTap: () {
+              setState(() => _expanded = !_expanded);
+              widget.onExpansionChanged?.call(_expanded);
+            },
+          ),
+        ),
+        if (_expanded)
+          Padding(
+            padding: widget.childrenPadding,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: widget.children,
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// Pull-to-refresh for existing list and grid scroll trees. Keeps their scroll
+/// controller and viewport mounted while a Cupertino activity indicator runs.
+class AppRefresh extends StatefulWidget {
+  const AppRefresh({super.key, required this.onRefresh, required this.child});
+  final Future<void> Function() onRefresh;
+  final Widget child;
+  @override
+  State<AppRefresh> createState() => _AppRefreshState();
+}
+
+class _AppRefreshState extends State<AppRefresh> {
+  double _pull = 0;
+  bool _busy = false;
+  Future<void> _refresh() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onRefresh();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _pull = 0;
+        });
+      }
+    }
+  }
+
+  bool _notify(ScrollNotification n) {
+    if (n.depth != 0 || n.metrics.axis != Axis.vertical || _busy) return false;
+    if (n is OverscrollNotification &&
+        n.dragDetails != null &&
+        n.overscroll < 0) {
+      setState(() => _pull = (_pull - n.overscroll).clamp(0, 120));
+    } else if (n is ScrollUpdateNotification &&
+        n.dragDetails != null &&
+        n.metrics.pixels < n.metrics.minScrollExtent) {
+      setState(
+        () => _pull = (n.metrics.minScrollExtent - n.metrics.pixels).clamp(
+          0,
+          120,
+        ),
+      );
+    } else if (n is ScrollUpdateNotification &&
+        n.dragDetails != null &&
+        _pull > 0 &&
+        (n.scrollDelta ?? 0) > 0) {
+      setState(() => _pull = (_pull - n.scrollDelta!).clamp(0, 120));
+    } else if (n is ScrollEndNotification) {
+      if (_pull >= 64) {
+        _refresh();
+      } else if (_pull != 0) {
+        setState(() => _pull = 0);
+      }
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      NotificationListener<ScrollNotification>(
+        onNotification: _notify,
+        child: widget.child,
+      ),
+      if (_busy || _pull > 0)
+        Positioned(
+          top: 12,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(child: CupertinoActivityIndicator(animating: _busy)),
+          ),
+        ),
+    ],
+  );
 }

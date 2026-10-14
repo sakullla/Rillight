@@ -1,5 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
+
+import 'ui/ui.dart' as ui;
+
 import 'package:rillight/media_image/media_image.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/player/player_bindings.dart';
@@ -129,8 +133,15 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
         debugShowCheckedModeBanner: false,
         locale: const Locale('zh', 'CN'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         theme: AppTheme.dark(),
+        builder: (context, child) => ui.AppUiTheme(
+          data: ui.AppUiTheme.dark(),
+          child: child ?? const SizedBox.shrink(),
+        ),
         home: Builder(
           builder: (context) {
             final l10n = AppLocalizations.of(context);

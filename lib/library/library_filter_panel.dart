@@ -1,8 +1,7 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/library/shelf_sort.dart';
@@ -80,11 +79,11 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   List<(String, String, IconData)> _sections(AppLocalizations l) => [
     if (widget.typeFilterable)
-      ('type', l.libraryFilterType, Icons.video_library_outlined),
-    ('watch', l.libraryFilterWatch, Icons.visibility_outlined),
-    ('genre', l.libraryFilterGenre, Icons.category_outlined),
-    ('year', l.libraryFilterYear, Icons.calendar_month_outlined),
-    if (_sort != null) ('sort', l.mobileSort, Icons.sort_rounded),
+      ('type', l.libraryFilterType, CupertinoIcons.rectangle_stack),
+    ('watch', l.libraryFilterWatch, CupertinoIcons.eye),
+    ('genre', l.libraryFilterGenre, CupertinoIcons.square_grid_2x2),
+    ('year', l.libraryFilterYear, CupertinoIcons.calendar),
+    if (_sort != null) ('sort', l.mobileSort, CupertinoIcons.sort_down),
   ];
   void _chooseSection(String section) {
     setState(() {
@@ -97,7 +96,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context), theme = Theme.of(context);
+    final l = AppLocalizations.of(context), theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
     final wide = widget.television || size.width >= 700;
@@ -131,9 +130,11 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       child: SizedBox(
         width: width,
         height: height,
-        child: Material(
-          color: scheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(24),
+        child: Container(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(24),
+          ),
           clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
@@ -141,7 +142,10 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 padding: const EdgeInsets.fromLTRB(24, 20, 12, 12),
                 child: Row(
                   children: [
-                    Icon(Icons.tune_rounded, color: scheme.onSurface),
+                    Icon(
+                      CupertinoIcons.slider_horizontal_3,
+                      color: scheme.onSurface,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -162,11 +166,11 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                       ),
                     ),
                     if (!widget.television)
-                      IconButton(
+                      AppIconButton(
                         key: _key('cancel'),
                         tooltip: l.libraryFilterCancel,
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(Icons.close_rounded),
+                        icon: const Icon(CupertinoIcons.xmark),
                       ),
                   ],
                 ),
@@ -209,7 +213,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                     ],
                   ),
                 ),
-              const Divider(height: 1),
+              const AppDivider(height: 1),
               Expanded(
                 child: wide
                     ? Row(
@@ -225,7 +229,12 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                               ],
                             ),
                           ),
-                          const VerticalDivider(width: 1),
+                          SizedBox(
+                            width: 1,
+                            child: ColoredBox(
+                              color: AppUiTheme.of(context).dividerColor,
+                            ),
+                          ),
                           Expanded(child: _options(context)),
                         ],
                       )
@@ -249,7 +258,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                         ],
                       ),
               ),
-              const Divider(height: 1),
+              const AppDivider(height: 1),
               SafeArea(
                 top: false,
                 child: Padding(
@@ -282,21 +291,23 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                           ),
                         ),
                       ] else ...[
-                        TextButton(
+                        AppButton(
                           key: _key('clear'),
                           onPressed: _reset,
+                          variant: AppButtonVariant.plain,
                           child: Text(l.filterReset),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
-                          child: FilledButton.icon(
+                          child: AppButton.icon(
                             key: _key('apply'),
                             onPressed: _apply,
-                            style: FilledButton.styleFrom(
+                            style: AppButtonStyle(
                               minimumSize: const Size(48, 48),
                             ),
-                            icon: const Icon(Icons.check_rounded),
+                            icon: const Icon(CupertinoIcons.check_mark),
                             label: Text(l.filterApply),
+                            variant: AppButtonVariant.filled,
                           ),
                         ),
                       ],
@@ -328,7 +339,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   Widget _category((String, String, IconData) entry, {required bool wide}) {
     final selected = _section == entry.$1;
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     if (widget.television) {
       return TvAction(
         key: _key('section-${entry.$1}'),
@@ -344,11 +355,12 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
         ),
       );
     }
-    final style = TextButton.styleFrom(
-      alignment: wide ? Alignment.centerLeft : Alignment.center,
+    final style = AppButtonStyle(
       padding: EdgeInsets.symmetric(horizontal: wide ? 16 : 10),
       minimumSize: const Size(48, 48),
-      backgroundColor: selected ? scheme.primaryContainer : Colors.transparent,
+      backgroundColor: selected
+          ? scheme.primaryContainer
+          : const Color(0x00000000),
       foregroundColor: selected
           ? scheme.onPrimaryContainer
           : scheme.onSurfaceVariant,
@@ -359,17 +371,19 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
       child: Padding(
         padding: EdgeInsets.only(right: wide ? 0 : 4, bottom: wide ? 8 : 0),
         child: wide
-            ? TextButton.icon(
+            ? AppButton.icon(
                 key: _key('section-${entry.$1}'),
                 onPressed: () => _chooseSection(entry.$1),
                 style: style,
                 icon: Icon(entry.$3, size: 20),
                 label: Text(entry.$2),
+                variant: AppButtonVariant.plain,
               )
-            : TextButton(
+            : AppButton(
                 key: _key('section-${entry.$1}'),
                 onPressed: () => _chooseSection(entry.$1),
                 style: style,
+                variant: AppButtonVariant.plain,
                 child: Text(entry.$2),
               ),
       ),
@@ -377,7 +391,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
   }
 
   Widget _options(BuildContext context) {
-    final l = AppLocalizations.of(context), theme = Theme.of(context);
+    final l = AppLocalizations.of(context), theme = AppUiTheme.of(context);
     final label = _sections(l).firstWhere((s) => s.$1 == _section).$2;
     final searchable = _section == 'year' || _section == 'genre';
     final query = _search.text.trim().toLowerCase();
@@ -474,20 +488,18 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 onSubmitted: () => setState(() {}),
               )
             else
-              TextField(
+              AppTextField(
                 controller: _search,
                 onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  hintText: l.filterSearchOptions,
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: query.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: l.filterReset,
-                          onPressed: () => setState(_search.clear),
-                          icon: const Icon(Icons.close),
-                        ),
-                ),
+                placeholder: l.filterSearchOptions,
+                prefix: const Icon(CupertinoIcons.search),
+                suffix: query.isEmpty
+                    ? null
+                    : AppIconButton(
+                        tooltip: l.filterReset,
+                        onPressed: () => setState(_search.clear),
+                        icon: const Icon(CupertinoIcons.xmark),
+                      ),
               ),
             const SizedBox(height: 8),
             Text(
@@ -497,13 +509,13 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
               ),
             ),
           ],
-          if (_section == 'genre' && _loadingGenres)
-            const LinearProgressIndicator(),
+          if (_section == 'genre' && _loadingGenres) const AppLoadingBar(),
           if (_section == 'genre' && _genreFailed)
-            TextButton.icon(
+            AppButton.icon(
               onPressed: _loadGenres,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(CupertinoIcons.arrow_clockwise),
               label: Text(l.retry),
+              variant: AppButtonVariant.plain,
             ),
           const SizedBox(height: 12),
           Expanded(
@@ -524,7 +536,8 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                           child: Row(
                             children: [
                               Expanded(child: Text(option.$2)),
-                              if (option.$3) const Icon(Icons.check, size: 20),
+                              if (option.$3)
+                                const Icon(CupertinoIcons.check_mark, size: 20),
                             ],
                           ),
                         ),

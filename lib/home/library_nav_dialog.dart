@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/library_nav_prefs.dart';
@@ -10,15 +9,14 @@ Future<String?> showMoreLibrariesDialog({
   required BuildContext context,
   required List<MediaItem> libraries,
 }) {
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
     builder: (context) {
-      final theme = Theme.of(context);
+      final theme = AppUiTheme.of(context);
       final l10n = AppLocalizations.of(context);
       final viewport = MediaQuery.sizeOf(context);
-      return Dialog(
+      return AppModalFrame(
         backgroundColor: theme.colorScheme.surface,
-        elevation: 0,
         child: LiquidGlass(
           kind: LiquidGlassKind.panel,
           child: ConstrainedBox(
@@ -50,7 +48,7 @@ Future<String?> showMoreLibrariesDialog({
                     itemCount: libraries.length,
                     itemBuilder: (context, index) {
                       final library = libraries[index];
-                      return ListTile(
+                      return AppListTile(
                         key: Key('overflow-more-${library.id}'),
                         title: Text(library.name),
                         onTap: () => Navigator.of(context).pop(library.id),
@@ -73,7 +71,7 @@ Future<void> showLibraryNavDialog({
   required LibraryNavController nav,
   required int maxPinned,
 }) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) {
       return _LibraryNavDialog(
@@ -175,10 +173,8 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     final pinnedLibraries = _pinnedLibraries;
     final unchecked = _uncheckedLibraries;
     final viewport = MediaQuery.sizeOf(context);
-    return AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      elevation: 0,
-      contentPadding: EdgeInsets.zero,
+    return AppDialog(
+      padding: EdgeInsets.zero,
       content: LiquidGlass(
         kind: LiquidGlassKind.panel,
         padding: const EdgeInsets.fromLTRB(
@@ -195,12 +191,12 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
             children: [
               Text(
                 l10n.customizeNav,
-                style: Theme.of(context).textTheme.titleLarge,
+                style: AppUiTheme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(
                 l10n.customizeNavHint(widget.maxPinned),
-                style: Theme.of(context).textTheme.bodySmall,
+                style: AppUiTheme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: AppSpacing.sm),
               Expanded(
@@ -234,20 +230,20 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
+                  AppButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: Text(
-                      MaterialLocalizations.of(context).cancelButtonLabel,
-                    ),
+                    variant: AppButtonVariant.plain,
+                    child: Text(AppLocalizations.of(context).cancelAction),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  FilledButton(
+                  AppButton(
                     onPressed: () async {
                       await widget.nav.savePinned(_pinned);
                       if (context.mounted) {
                         Navigator.of(context).pop();
                       }
                     },
+                    variant: AppButtonVariant.filled,
                     child: Text(l10n.saveNav),
                   ),
                 ],
@@ -266,12 +262,15 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
     int count,
   ) {
     final l10n = AppLocalizations.of(context);
-    return Material(
+    return Container(
+      decoration: BoxDecoration(),
       key: ValueKey(library.id),
-      type: MaterialType.transparency,
       child: Row(
         children: [
-          Checkbox(value: true, onChanged: (_) => _setPinned(false, library)),
+          CupertinoCheckbox(
+            value: true,
+            onChanged: (_) => _setPinned(false, library),
+          ),
           Expanded(
             child: ReorderableDragStartListener(
               index: index,
@@ -285,26 +284,26 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
                       child: Text(library.name),
                     ),
                   ),
-                  IconButton(
+                  AppIconButton(
                     key: Key('nav-pin-up-${library.id}'),
                     tooltip: l10n.moveNavUp,
                     onPressed: index <= 0 ? null : () => _movePinned(index, -1),
-                    icon: const Icon(Icons.arrow_upward, size: 18),
+                    icon: const Icon(CupertinoIcons.arrow_up, size: 18),
                   ),
-                  IconButton(
+                  AppIconButton(
                     key: Key('nav-pin-down-${library.id}'),
                     tooltip: l10n.moveNavDown,
                     onPressed: index >= count - 1
                         ? null
                         : () => _movePinned(index, 1),
-                    icon: const Icon(Icons.arrow_downward, size: 18),
+                    icon: const Icon(CupertinoIcons.arrow_down, size: 18),
                   ),
                   const Padding(
                     padding: EdgeInsets.only(
                       left: AppSpacing.xs,
                       right: AppSpacing.sm,
                     ),
-                    child: Icon(Icons.drag_handle, size: 18),
+                    child: Icon(CupertinoIcons.line_horizontal_3, size: 18),
                   ),
                 ],
               ),
@@ -316,11 +315,10 @@ class _LibraryNavDialogState extends State<_LibraryNavDialog> {
   }
 
   Widget _uncheckedRow(BuildContext context, MediaItem library) {
-    return ListTile(
+    return AppListTile(
       key: ValueKey(library.id),
-      dense: true,
       contentPadding: EdgeInsets.zero,
-      leading: Checkbox(
+      leading: CupertinoCheckbox(
         value: false,
         onChanged: _pinned.length >= widget.maxPinned
             ? null

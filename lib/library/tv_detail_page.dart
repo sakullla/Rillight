@@ -1,10 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -105,9 +104,9 @@ class _TvDetailPageState extends State<TvDetailPage> {
           itemId: target.id,
           source: DetailSourceScope.command(context, target.id)?.source,
           libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
-          regionGeneration: DetailSourceScope.maybeOf(
-            context,
-          )?.permit.regionGeneration,
+          regionGeneration: DetailSourceScope.maybeOf(context)
+              ?.permit
+              .regionGeneration,
           mediaSourceId: c.item?.isSeries == true ? null : c.mediaSourceId,
           autoResume: !fromStart,
         ),
@@ -129,9 +128,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
     final ok = await c.togglePlayed();
     if (!mounted || !ok) return;
     final l = AppLocalizations.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(next ? l.markPlayed : l.markUnplayed)),
-    );
+    showAppNotice(context, next ? l.markPlayed : l.markUnplayed);
   }
 
   void _loadNeighbors(MediaItem item) {
@@ -265,7 +262,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
                                     pill: true,
                                     selected: c.mediaSourceId == option.id,
                                     leading: c.mediaSourceId == option.id
-                                        ? const Icon(Icons.check_rounded)
+                                        ? const Icon(CupertinoIcons.check_mark)
                                         : null,
                                     onPressed: () => c.selectSource(option.id),
                                     child: Text(option.name ?? option.id),
@@ -316,7 +313,9 @@ class _TvDetailPageState extends State<TvDetailPage> {
                             child: TvAction(
                               key: const Key('tv-detail-refresh'),
                               pill: true,
-                              leading: const Icon(Icons.refresh_rounded),
+                              leading: const Icon(
+                                CupertinoIcons.arrow_clockwise,
+                              ),
                               onPressed: c.load,
                               child: Text(l.mobileRefresh),
                             ),
@@ -347,7 +346,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         emphasized: true,
         autofocus: true,
         pill: true,
-        leading: const Icon(Icons.play_arrow_rounded),
+        leading: const Icon(CupertinoIcons.play_fill),
         onPressed:
             !_playBusy && target != null && (target.isMovie || target.isEpisode)
             ? _play
@@ -357,7 +356,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
       if (target?.canResume == true)
         TvAction(
           pill: true,
-          leading: const Icon(Icons.replay_rounded),
+          leading: const Icon(CupertinoIcons.arrow_counterclockwise),
           onPressed: _playBusy ? null : () => _play(fromStart: true),
           child: Text(l.playFromStart),
         ),
@@ -365,7 +364,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         TvAction(
           key: CatalogKeys.previousEpisode,
           pill: true,
-          leading: const Icon(Icons.skip_previous_rounded),
+          leading: const Icon(CupertinoIcons.backward_end_fill),
           onPressed: () => _openEpisode(_previous!),
           child: Text(l.previousEpisode),
         ),
@@ -373,7 +372,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         TvAction(
           key: CatalogKeys.nextEpisode,
           pill: true,
-          leading: const Icon(Icons.skip_next_rounded),
+          leading: const Icon(CupertinoIcons.forward_end_fill),
           onPressed: () => _openEpisode(_next!),
           child: Text(l.nextEpisode),
         ),
@@ -383,8 +382,8 @@ class _TvDetailPageState extends State<TvDetailPage> {
           pill: true,
           leading: Icon(
             item.userData.played
-                ? Icons.remove_done_rounded
-                : Icons.done_all_rounded,
+                ? CupertinoIcons.xmark_circle
+                : CupertinoIcons.checkmark_alt,
           ),
           onPressed: c.playedBusy ? null : _togglePlayed,
           child: Text(item.userData.played ? l.markUnplayed : l.markPlayed),
@@ -424,7 +423,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
             Builder(
               builder: (context) => Text(
                 l.playerEpisodes,
-                style: Theme.of(context).textTheme.titleLarge,
+                style: AppUiTheme.of(context).textTheme.titleLarge,
               ),
             ),
             SizedBox(width: 18 * s),
@@ -473,7 +472,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
             builder: (context) => Text(
               l.mobileEmpty,
               style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -716,7 +715,7 @@ class _TvDetailBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final size = MediaQuery.sizeOf(context);
     final page = theme.scaffoldBackgroundColor;
     return Stack(
@@ -787,7 +786,7 @@ class _TvDetailHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final l = AppLocalizations.of(context);
     final size = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
@@ -802,13 +801,13 @@ class _TvDetailHeader extends StatelessWidget {
         '${item.childCount} ${l.seasons}',
     ];
     final badges = item.isSeries ? const <String>[] : mediaTechBadges(source);
-    const shadow = [Shadow(blurRadius: 12, color: Colors.black54)];
+    const shadow = [Shadow(blurRadius: 12, color: Color(0x8a000000))];
     final titleText = Text(
       item.name,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.displaySmall?.copyWith(
-        color: Colors.white,
+        color: const Color(0xffffffff),
         shadows: shadow,
       ),
     );
@@ -826,7 +825,7 @@ class _TvDetailHeader extends StatelessWidget {
                 TvAction(
                   key: CatalogKeys.seriesLink,
                   variant: TvActionVariant.ghost,
-                  trailing: const Icon(Icons.chevron_right_rounded),
+                  trailing: const Icon(CupertinoIcons.chevron_right),
                   onPressed: () => context.push(
                     DetailSourceScope.itemLocation(
                       context,
@@ -862,7 +861,7 @@ class _TvDetailHeader extends StatelessWidget {
                   children: [
                     if (rating != null) ...[
                       Icon(
-                        Icons.star_rounded,
+                        CupertinoIcons.star_fill,
                         size: 16 * s,
                         color: const Color(0xFFFFC94D),
                       ),
@@ -870,7 +869,7 @@ class _TvDetailHeader extends StatelessWidget {
                       Text(
                         rating.toStringAsFixed(1),
                         style: theme.textTheme.labelLarge?.copyWith(
-                          color: Colors.white,
+                          color: const Color(0xffffffff),
                         ),
                       ),
                       SizedBox(width: 12 * s),
@@ -885,7 +884,7 @@ class _TvDetailHeader extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: .82),
+                          color: const Color(0xffffffff).withValues(alpha: .82),
                         ),
                       ),
                     ),
@@ -905,7 +904,7 @@ class _TvDetailHeader extends StatelessWidget {
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: .78),
+                      color: const Color(0xffffffff).withValues(alpha: .78),
                     ),
                   ),
                 ),
@@ -936,14 +935,16 @@ class _TvBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(3 * s),
-        border: Border.all(color: Colors.white.withValues(alpha: .6)),
+        border: Border.all(
+          color: const Color(0xffffffff).withValues(alpha: .6),
+        ),
       ),
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 5 * s, vertical: 1 * s),
         child: Text(
           label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: Colors.white.withValues(alpha: .9),
+          style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
+            color: const Color(0xffffffff).withValues(alpha: .9),
             fontWeight: FontWeight.w700,
             letterSpacing: .3,
           ),
@@ -962,7 +963,7 @@ class _TvResumeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     final remaining = remainingLabel(l, item);
     final code = item.isEpisode ? seasonEpisodeCode(item) : null;
@@ -974,11 +975,11 @@ class _TvResumeBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(2 * s),
           child: SizedBox(
             width: 180 * s,
-            child: LinearProgressIndicator(
+            child: AppLoadingBar(
               value: item.playbackProgress.clamp(0, 1),
               minHeight: 3 * s,
               color: theme.colorScheme.primary,
-              backgroundColor: Colors.white.withValues(alpha: .22),
+              backgroundColor: const Color(0xffffffff).withValues(alpha: .22),
             ),
           ),
         ),
@@ -987,7 +988,7 @@ class _TvResumeBar extends StatelessWidget {
           Text(
             [?code, remaining].join(' · '),
             style: theme.textTheme.labelLarge?.copyWith(
-              color: Colors.white.withValues(alpha: .82),
+              color: const Color(0xffffffff).withValues(alpha: .82),
             ),
           ),
         ],
@@ -1003,7 +1004,7 @@ class _TvStreamInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     return Column(
       key: EpisodeMediaStreamsSection.sectionKey,
@@ -1048,9 +1049,8 @@ class _TvDetailSkeleton extends StatelessWidget {
     final size = MediaQuery.sizeOf(context);
     final s = TvDesign.scaleOf(context);
     final gutter = tvSafeGutter(size.width);
-    final color = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: .07);
+    final color = AppUiTheme.of(context).colorScheme.onSurface
+        .withValues(alpha: .07);
     Widget bone(double w, double h) => Container(
       width: w,
       height: h,

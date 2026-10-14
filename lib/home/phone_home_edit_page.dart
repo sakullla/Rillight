@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -35,10 +35,13 @@ class _PhoneHomeEditPageState extends State<PhoneHomeEditPage> {
     final l10n = AppLocalizations.of(context);
     final catalog = CatalogScope.of(context);
     final sections = PhoneHomeSectionController.app();
-    return Scaffold(
+    return CupertinoPageScaffold(
       key: PhoneHomeEditPage.pageKey,
-      appBar: AppBar(title: Text(l10n.phoneHomeEdit)),
-      body: ListenableBuilder(
+      navigationBar: CupertinoNavigationBar(
+        transitionBetweenRoutes: false,
+        middle: Text(l10n.phoneHomeEdit),
+      ),
+      child: ListenableBuilder(
         listenable: Listenable.merge([sections, catalog]),
         builder: (context, _) {
           return PhoneHomeSectionEditor(

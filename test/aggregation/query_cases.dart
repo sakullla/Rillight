@@ -1,4 +1,5 @@
 import '../helpers/region_access_fixture.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -159,53 +160,48 @@ Future<void> _until(bool Function() predicate) async {
 
 void main() {
   late _Fixture f;
-  test(
-    'nextup uses allowed-library endpoint, keeps zero progress, pages and rejects late revoked response',
-    () async {
-      await f.open();
-      f.a.items = (request) async {
-        final p = request.uri.queryParameters;
-        expect(request.uri.path, endsWith('/Shows/NextUp'));
-        expect(p['ParentId'], 'library');
-        expect(p['Filters'], isNull);
-        final start = int.parse(p['StartIndex']!);
-        return _page([
-          _movie('episode-$start', type: 'Episode', provider: null),
-        ], total: 3);
-      };
-      await f.query.start(
-        QueryScope(
-          region: AccessRegion.ordinary,
-          serverIds: {'a'},
-          mode: QueryMode.nextUp,
-          pageSize: 1,
-        ),
-      );
-      expect(f.query.items.map((i) => i.item.id), ['episode-0']);
-      await f.query.loadMoreServer('a');
-      expect(
-        f.query.items.map((i) => i.item.id),
-        containsAll(['episode-0', 'episode-1']),
-      );
-      final arrived = Completer<void>();
-      final gate = Completer<void>();
-      f.a.items = (_) async {
-        arrived.complete();
-        await gate.future;
-        return _page([
-          _movie('late', type: 'Episode', provider: null),
-        ], total: 3);
-      };
-      final pending = f.query.loadMoreServer('a');
-      await arrived.future;
-      await f.access.setPin('1234', '1234', (_) async {});
-      await f.access.unlock('1234');
-      await f.registry.move('a', AccessRegion.private);
-      gate.complete();
-      await pending;
-      expect(f.query.items, isEmpty);
-    },
-  );
+  test('nextup uses allowed-library endpoint, keeps zero progress, pages and rejects late revoked response', () async {
+    await f.open();
+    f.a.items = (request) async {
+      final p = request.uri.queryParameters;
+      expect(request.uri.path, endsWith('/Shows/NextUp'));
+      expect(p['ParentId'], 'library');
+      expect(p['Filters'], isNull);
+      final start = int.parse(p['StartIndex']!);
+      return _page([
+        _movie('episode-$start', type: 'Episode', provider: null),
+      ], total: 3);
+    };
+    await f.query.start(
+      QueryScope(
+        region: AccessRegion.ordinary,
+        serverIds: {'a'},
+        mode: QueryMode.nextUp,
+        pageSize: 1,
+      ),
+    );
+    expect(f.query.items.map((i) => i.item.id), ['episode-0']);
+    await f.query.loadMoreServer('a');
+    expect(
+      f.query.items.map((i) => i.item.id),
+      containsAll(['episode-0', 'episode-1']),
+    );
+    final arrived = Completer<void>();
+    final gate = Completer<void>();
+    f.a.items = (_) async {
+      arrived.complete();
+      await gate.future;
+      return _page([_movie('late', type: 'Episode', provider: null)], total: 3);
+    };
+    final pending = f.query.loadMoreServer('a');
+    await arrived.future;
+    await f.access.setPin('1234', '1234', (_) async {});
+    await f.access.unlock('1234');
+    await f.registry.move('a', AccessRegion.private);
+    gate.complete();
+    await pending;
+    expect(f.query.items, isEmpty);
+  });
   setUp(() {
     f = _Fixture();
   });
@@ -213,217 +209,191 @@ void main() {
     await f.close();
   });
 
-  test(
-    'query getters reuse groups until data changes and clear them on membership loss',
-    () async {
-      await f.open();
-      f.a.items = (request) async {
-        final cursor = int.parse(
-          request.uri.queryParameters['StartIndex'] ?? '0',
-        );
-        return _page([_movie('film-$cursor', provider: '$cursor')], total: 2);
-      };
-      await f.query.start(
-        QueryScope(
-          region: AccessRegion.ordinary,
-          serverIds: {'a'},
-          pageSize: 1,
-        ),
+  test('query getters reuse groups until data changes and clear them on membership loss', () async {
+    await f.open();
+    f.a.items = (request) async {
+      final cursor = int.parse(
+        request.uri.queryParameters['StartIndex'] ?? '0',
       );
-      final first = f.query.works;
-      expect(first, hasLength(1));
-      for (var i = 0; i < 20; i++) {
-        expect(f.query.sources, hasLength(1));
-        expect(f.query.items, hasLength(1));
-        expect(f.query.summary, QuerySummary.available);
-        expect(f.query.works, same(first));
-        expect(
-          f.query.resolveAnchor(first.single.sources.single.reference),
-          same(first.single),
-        );
-      }
-      await f.query.loadMoreServer('a');
-      final updated = f.query.works;
-      expect(updated, hasLength(2));
-      expect(updated, isNot(same(first)));
-      await f.access.setPin('1234', '1234', (_) async {});
-      await f.access.unlock('1234');
-      await f.registry.move('a', AccessRegion.private);
-      expect(f.query.works, isEmpty);
+      return _page([_movie('film-$cursor', provider: '$cursor')], total: 2);
+    };
+    await f.query.start(
+      QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}, pageSize: 1),
+    );
+    final first = f.query.works;
+    expect(first, hasLength(1));
+    for (var i = 0; i < 20; i++) {
+      expect(f.query.sources, hasLength(1));
+      expect(f.query.items, hasLength(1));
+      expect(f.query.summary, QuerySummary.available);
+      expect(f.query.works, same(first));
       expect(
         f.query.resolveAnchor(first.single.sources.single.reference),
-        isNull,
+        same(first.single),
       );
-    },
-  );
+    }
+    await f.query.loadMoreServer('a');
+    final updated = f.query.works;
+    expect(updated, hasLength(2));
+    expect(updated, isNot(same(first)));
+    await f.access.setPin('1234', '1234', (_) async {});
+    await f.access.unlock('1234');
+    await f.registry.move('a', AccessRegion.private);
+    expect(f.query.works, isEmpty);
+    expect(
+      f.query.resolveAnchor(first.single.sources.single.reference),
+      isNull,
+    );
+  });
 
-  test(
-    'two independent controllers reuse existing playback permit without authentication or session replacement',
-    () async {
-      await f.open();
-      f.a.items = (_) async => _page([_movie('one')], total: 1);
-      final account = (await f.registry.authenticate('a')).account;
-      final playing = f.registry.permit(account, libraryId: 'library');
-      final infoCount = f.a.requests
-          .where((r) => r.path.endsWith('/System/Info/Public'))
-          .length;
-      final second = AggregationQueryController(
-        registry: f.registry,
-        history: f.history,
-      );
-      addTearDown(second.dispose);
-      await Future.wait([
-        f.query.start(
-          QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-        ),
-        second.start(
-          QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-        ),
-      ]);
-      expect(playing.isValid, isTrue);
-      expect(f.query.items.single.reference.account, account);
-      expect(second.items.single.reference.account, account);
-      expect(
-        f.a.requests
-            .where((r) => r.path.endsWith('/System/Info/Public'))
-            .length,
-        infoCount,
-      );
-      expect(
-        f.registry.sessionAccount(
-          'a',
-          region: AccessRegion.ordinary,
-          libraryId: 'unknown',
-        ),
-        isNull,
-      );
-      await expectLater(
-        f.registry.acquireAccount(
-          'a',
-          region: AccessRegion.ordinary,
-          libraryId: 'unknown',
-        ),
-        throwsStateError,
-      );
-      expect(playing.isValid, isTrue);
-    },
-  );
-
-  test(
-    'concurrent initial query authentication is shared across independent controllers',
-    () async {
-      await f.open();
-      final gate = Completer<void>();
-      f.a.authenticationGate = () => gate.future;
-      f.a.items = (_) async => _page([_movie('one')], total: 1);
-      final second = AggregationQueryController(
-        registry: f.registry,
-        history: f.history,
-      );
-      addTearDown(second.dispose);
-      final firstRun = f.query.start(
+  test('two independent controllers reuse existing playback permit without authentication or session replacement', () async {
+    await f.open();
+    f.a.items = (_) async => _page([_movie('one')], total: 1);
+    final account = (await f.registry.authenticate('a')).account;
+    final playing = f.registry.permit(account, libraryId: 'library');
+    final infoCount = f.a.requests
+        .where((r) => r.path.endsWith('/System/Info/Public'))
+        .length;
+    final second = AggregationQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(second.dispose);
+    await Future.wait([
+      f.query.start(
         QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-      );
-      final secondRun = second.start(
-        QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-      );
-      await _until(() => f.a.requests.isNotEmpty);
-      expect(
-        f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')),
-        hasLength(1),
-      );
-      gate.complete();
-      await Future.wait([firstRun, secondRun]);
-      expect(f.query.items, hasLength(1));
-      expect(second.items, hasLength(1));
-      final account = f.query.items.single.reference.account;
-      expect(f.registry.permit(account, libraryId: 'library').isValid, isTrue);
-      expect(
-        f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')),
-        hasLength(1),
-      );
-    },
-  );
+      ),
+      second.start(QueryScope(region: AccessRegion.ordinary, serverIds: {'a'})),
+    ]);
+    expect(playing.isValid, isTrue);
+    expect(f.query.items.single.reference.account, account);
+    expect(second.items.single.reference.account, account);
+    expect(
+      f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')).length,
+      infoCount,
+    );
+    expect(
+      f.registry.sessionAccount(
+        'a',
+        region: AccessRegion.ordinary,
+        libraryId: 'unknown',
+      ),
+      isNull,
+    );
+    await expectLater(
+      f.registry.acquireAccount(
+        'a',
+        region: AccessRegion.ordinary,
+        libraryId: 'unknown',
+      ),
+      throwsStateError,
+    );
+    expect(playing.isValid, isTrue);
+  });
 
-  test(
-    'reentrant scope replacement from a listener cannot dispatch the unselected service',
-    () async {
-      await f.open();
-      var replaced = false;
-      Future<void>? replacement;
-      f.query.addListener(() {
-        if (!replaced && f.query.scope?.serverIds?.contains('b') == true) {
-          replaced = true;
-          replacement = f.query.start(
-            QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
-          );
-        }
-      });
-      await f.query.start(
-        QueryScope(region: AccessRegion.ordinary, serverIds: {'b'}),
-      );
-      await replacement;
-      expect(f.b.requests, isEmpty);
-      expect(f.query.sources.single.key.serverId, 'a');
-    },
-  );
+  test('concurrent initial query authentication is shared across independent controllers', () async {
+    await f.open();
+    final gate = Completer<void>();
+    f.a.authenticationGate = () => gate.future;
+    f.a.items = (_) async => _page([_movie('one')], total: 1);
+    final second = AggregationQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(second.dispose);
+    final firstRun = f.query.start(
+      QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
+    );
+    final secondRun = second.start(
+      QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
+    );
+    await _until(() => f.a.requests.isNotEmpty);
+    expect(
+      f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')),
+      hasLength(1),
+    );
+    gate.complete();
+    await Future.wait([firstRun, secondRun]);
+    expect(f.query.items, hasLength(1));
+    expect(second.items, hasLength(1));
+    final account = f.query.items.single.reference.account;
+    expect(f.registry.permit(account, libraryId: 'library').isValid, isTrue);
+    expect(
+      f.a.requests.where((r) => r.path.endsWith('/System/Info/Public')),
+      hasLength(1),
+    );
+  });
 
-  test(
-    'HTTP first successful service is usable before slower source; independent paging grows editions without duplicate cards',
-    () async {
-      await f.open();
-      final gate = Completer<void>();
-      f.a.items = (r) async =>
-          int.parse(r.uri.queryParameters['StartIndex']!) == 0
-          ? _page([_movie('one')], total: 1)
-          : _page([], total: 1);
-      f.b.items = (r) async {
-        await gate.future;
-        final cursor = int.parse(r.uri.queryParameters['StartIndex']!);
-        return cursor == 0
-            ? _page([_movie('two', provider: '2')], total: 2)
-            : _page([_movie('edition')], total: 2);
-      };
-      final run = f.query.start(
-        QueryScope(region: AccessRegion.ordinary, pageSize: 1),
-      );
-      await _until(() => f.query.items.length == 1);
-      expect(f.query.summary, QuerySummary.available);
-      expect(f.query.totalWorks, isNull);
-      final anchor = f.query.items.single.reference;
-      f.query.anchor = anchor;
-      gate.complete();
-      await run;
-      expect(f.query.works, hasLength(2));
-      await f.query.loadMore(const QuerySourceKey('b', 'library'));
-      expect(f.query.works, hasLength(2));
-      expect(f.query.resolveAnchor(anchor)!.sources, hasLength(2));
-      expect(f.query.complete, isTrue);
-      expect(f.query.totalWorks, 2);
-      expect(f.query.anchor, anchor);
-      expect(f.b.itemRequests.last.queryParameters['StartIndex'], '1');
-    },
-  );
+  test('reentrant scope replacement from a listener cannot dispatch the unselected service', () async {
+    await f.open();
+    var replaced = false;
+    Future<void>? replacement;
+    f.query.addListener(() {
+      if (!replaced && f.query.scope?.serverIds?.contains('b') == true) {
+        replaced = true;
+        replacement = f.query.start(
+          QueryScope(region: AccessRegion.ordinary, serverIds: {'a'}),
+        );
+      }
+    });
+    await f.query.start(
+      QueryScope(region: AccessRegion.ordinary, serverIds: {'b'}),
+    );
+    await replacement;
+    expect(f.b.requests, isEmpty);
+    expect(f.query.sources.single.key.serverId, 'a');
+  });
 
-  test(
-    'HTTP local 401 does not expire sibling; single-source retry reauthenticates only failed service',
-    () async {
-      await f.open();
-      f.a.items = (_) async => _page([_movie('one')], total: 1);
-      f.b.status = 401;
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
-      expect(f.query.items, hasLength(1));
-      expect(f.query.summary, QuerySummary.partialFailure);
-      expect(f.query.sources.last.status, SourceQueryStatus.needsLogin);
-      final aRequests = f.a.requests.length;
-      f.b.status = 200;
-      f.b.items = (_) async => _page([_movie('two')], total: 1);
-      await f.query.retry(const QuerySourceKey('b', 'library'));
-      expect(f.a.requests.length, aRequests);
-      expect(f.query.works.single.sources, hasLength(2));
-      expect(f.query.complete, isTrue);
-    },
-  );
+  test('HTTP first successful service is usable before slower source; independent paging grows editions without duplicate cards', () async {
+    await f.open();
+    final gate = Completer<void>();
+    f.a.items = (r) async =>
+        int.parse(r.uri.queryParameters['StartIndex']!) == 0
+        ? _page([_movie('one')], total: 1)
+        : _page([], total: 1);
+    f.b.items = (r) async {
+      await gate.future;
+      final cursor = int.parse(r.uri.queryParameters['StartIndex']!);
+      return cursor == 0
+          ? _page([_movie('two', provider: '2')], total: 2)
+          : _page([_movie('edition')], total: 2);
+    };
+    final run = f.query.start(
+      QueryScope(region: AccessRegion.ordinary, pageSize: 1),
+    );
+    await _until(() => f.query.items.length == 1);
+    expect(f.query.summary, QuerySummary.available);
+    expect(f.query.totalWorks, isNull);
+    final anchor = f.query.items.single.reference;
+    f.query.anchor = anchor;
+    gate.complete();
+    await run;
+    expect(f.query.works, hasLength(2));
+    await f.query.loadMore(const QuerySourceKey('b', 'library'));
+    expect(f.query.works, hasLength(2));
+    expect(f.query.resolveAnchor(anchor)!.sources, hasLength(2));
+    expect(f.query.complete, isTrue);
+    expect(f.query.totalWorks, 2);
+    expect(f.query.anchor, anchor);
+    expect(f.b.itemRequests.last.queryParameters['StartIndex'], '1');
+  });
+
+  test('HTTP local 401 does not expire sibling; single-source retry reauthenticates only failed service', () async {
+    await f.open();
+    f.a.items = (_) async => _page([_movie('one')], total: 1);
+    f.b.status = 401;
+    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    expect(f.query.items, hasLength(1));
+    expect(f.query.summary, QuerySummary.partialFailure);
+    expect(f.query.sources.last.status, SourceQueryStatus.needsLogin);
+    final aRequests = f.a.requests.length;
+    f.b.status = 200;
+    f.b.items = (_) async => _page([_movie('two')], total: 1);
+    await f.query.retry(const QuerySourceKey('b', 'library'));
+    expect(f.a.requests.length, aRequests);
+    expect(f.query.works.single.sources, hasLength(2));
+    expect(f.query.complete, isTrue);
+  });
 
   test(
     'HTTP timeout preserves success and retry rejects original late page',
@@ -449,58 +419,52 @@ void main() {
     },
   );
 
-  test(
-    'keyword/scope changes synchronously remove errors counts and rows; unselected service has no HTTP',
-    () async {
-      await f.open();
-      f.a.items = (_) async => _page([_movie('old')], total: 1);
-      f.b.status = 403;
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
-      final old = Completer<void>();
-      f.a.items = (_) async {
-        await old.future;
-        return _page([_movie('stale')], total: 100);
-      };
-      final pending = f.query.start(
-        QueryScope(
-          region: AccessRegion.ordinary,
-          mode: QueryMode.search,
-          keyword: 'old',
-          serverIds: {'a'},
-        ),
-      );
-      await _until(() => f.a.itemRequests.length == 2);
-      final bCount = f.b.requests.length;
-      f.a.items = (_) async => _page([_movie('fresh')]);
-      final fresh = f.query.start(
-        QueryScope(
-          region: AccessRegion.ordinary,
-          mode: QueryMode.search,
-          keyword: 'new',
-          serverIds: {'a'},
-        ),
-      );
-      expect(f.query.items, isEmpty);
-      expect(f.query.totalWorks, isNull);
-      expect(
-        f.query.sources.every((s) => s.total == null && !s.failed),
-        isTrue,
-      );
-      await fresh;
-      old.complete();
-      await pending;
-      expect(f.query.items.single.reference.itemId, 'fresh');
-      expect(f.b.requests.length, bCount);
-      expect(f.a.itemRequests.last.queryParameters['SearchTerm'], 'new');
-      // Unknown server total stays unknown even when a short page exhausts it.
-      expect(f.query.sources.single.total, isNull);
-      expect(f.query.complete, isTrue);
-      await f.query.start(
-        QueryScope(region: AccessRegion.ordinary, serverIds: {}),
-      );
-      expect(f.query.summary, QuerySummary.emptyScope);
-    },
-  );
+  test('keyword/scope changes synchronously remove errors counts and rows; unselected service has no HTTP', () async {
+    await f.open();
+    f.a.items = (_) async => _page([_movie('old')], total: 1);
+    f.b.status = 403;
+    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    final old = Completer<void>();
+    f.a.items = (_) async {
+      await old.future;
+      return _page([_movie('stale')], total: 100);
+    };
+    final pending = f.query.start(
+      QueryScope(
+        region: AccessRegion.ordinary,
+        mode: QueryMode.search,
+        keyword: 'old',
+        serverIds: {'a'},
+      ),
+    );
+    await _until(() => f.a.itemRequests.length == 2);
+    final bCount = f.b.requests.length;
+    f.a.items = (_) async => _page([_movie('fresh')]);
+    final fresh = f.query.start(
+      QueryScope(
+        region: AccessRegion.ordinary,
+        mode: QueryMode.search,
+        keyword: 'new',
+        serverIds: {'a'},
+      ),
+    );
+    expect(f.query.items, isEmpty);
+    expect(f.query.totalWorks, isNull);
+    expect(f.query.sources.every((s) => s.total == null && !s.failed), isTrue);
+    await fresh;
+    old.complete();
+    await pending;
+    expect(f.query.items.single.reference.itemId, 'fresh');
+    expect(f.b.requests.length, bCount);
+    expect(f.a.itemRequests.last.queryParameters['SearchTerm'], 'new');
+    // Unknown server total stays unknown even when a short page exhausts it.
+    expect(f.query.sources.single.total, isNull);
+    expect(f.query.complete, isTrue);
+    await f.query.start(
+      QueryScope(region: AccessRegion.ordinary, serverIds: {}),
+    );
+    expect(f.query.summary, QuerySummary.emptyScope);
+  });
 
   test(
     'source filters precede reliable merge, server library scope never widens',
@@ -547,109 +511,100 @@ void main() {
     },
   );
 
-  test(
-    'private lock rejects HTTP late data and ordinary projection excludes unlocked private membership',
-    () async {
-      await f.open(privateB: true);
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
-      expect(f.b.requests, isEmpty);
-      final gate = Completer<void>();
-      f.b.items = (_) async {
-        await gate.future;
-        return _page([_movie('secret')], total: 7);
-      };
-      final run = f.query.start(QueryScope(region: AccessRegion.private));
-      await _until(() => f.b.itemRequests.isNotEmpty);
-      await f.access.lock();
-      final requestCount = f.b.requests.length;
-      expect(
-        f.registry.sessionAccount(
-          'b',
-          region: AccessRegion.private,
-          libraryId: 'library',
-        ),
-        isNull,
-      );
-      expect(
-        f.registry.sessionAccount(
-          'b',
-          region: AccessRegion.ordinary,
-          libraryId: 'library',
-        ),
-        isNull,
-      );
-      await expectLater(
-        f.registry.acquireAccount(
-          'b',
-          region: AccessRegion.private,
-          libraryId: 'library',
-        ),
-        throwsStateError,
-      );
-      expect(f.b.requests.length, requestCount);
-      expect(f.query.items, isEmpty);
-      expect(f.query.sources, isEmpty);
-      gate.complete();
-      await run;
-      expect(f.query.items, isEmpty);
-      expect(f.query.totalWorks, isNull);
-    },
-  );
-
-  test(
-    'membership migration evicts contributions before commit and rejects in-flight result',
-    () async {
-      await f.open(privateB: true);
-      final gate = Completer<void>();
-      f.a.items = (_) async {
-        await gate.future;
-        return _page([_movie('moved')], total: 1);
-      };
-      final run = f.query.start(QueryScope(region: AccessRegion.ordinary));
-      await _until(() => f.a.itemRequests.isNotEmpty);
-      await f.registry.move('a', AccessRegion.private);
-      gate.complete();
-      await run;
-      expect(f.query.sources, isEmpty);
-      expect(f.query.items, isEmpty);
-    },
-  );
-
-  test(
-    'T3 records projected by actual source/selected scope; lock prevents stale history access',
-    () async {
-      await f.open(privateB: true);
-      final account = (await f.registry.authenticate('b')).account;
-      final version = SourceReference(
-        account: account,
-        itemId: 'one',
-        mediaSourceId: 'v',
-      );
-      final session = await f.history.beginSession(
-        source: version,
-        work: version.item,
+  test('private lock rejects HTTP late data and ordinary projection excludes unlocked private membership', () async {
+    await f.open(privateB: true);
+    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    expect(f.b.requests, isEmpty);
+    final gate = Completer<void>();
+    f.b.items = (_) async {
+      await gate.future;
+      return _page([_movie('secret')], total: 7);
+    };
+    final run = f.query.start(QueryScope(region: AccessRegion.private));
+    await _until(() => f.b.itemRequests.isNotEmpty);
+    await f.access.lock();
+    final requestCount = f.b.requests.length;
+    expect(
+      f.registry.sessionAccount(
+        'b',
+        region: AccessRegion.private,
         libraryId: 'library',
-      );
-      await f.history.observe(
-        session: session,
-        eventSequence: 1,
-        positionTicks: 100,
-        actuallyPlaying: true,
-        timeline: const WatchTimeline(durationTicks: 1000),
-      );
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
-      expect(f.query.localContinueWatching, isEmpty);
-      await f.query.start(
-        QueryScope(
-          region: AccessRegion.private,
-          mode: QueryMode.continueWatching,
-        ),
-      );
-      expect(f.query.localContinueWatching.single.source, version);
-      await f.access.lock();
-      expect(f.query.localContinueWatching, isEmpty);
-    },
-  );
+      ),
+      isNull,
+    );
+    expect(
+      f.registry.sessionAccount(
+        'b',
+        region: AccessRegion.ordinary,
+        libraryId: 'library',
+      ),
+      isNull,
+    );
+    await expectLater(
+      f.registry.acquireAccount(
+        'b',
+        region: AccessRegion.private,
+        libraryId: 'library',
+      ),
+      throwsStateError,
+    );
+    expect(f.b.requests.length, requestCount);
+    expect(f.query.items, isEmpty);
+    expect(f.query.sources, isEmpty);
+    gate.complete();
+    await run;
+    expect(f.query.items, isEmpty);
+    expect(f.query.totalWorks, isNull);
+  });
+
+  test('membership migration evicts contributions before commit and rejects in-flight result', () async {
+    await f.open(privateB: true);
+    final gate = Completer<void>();
+    f.a.items = (_) async {
+      await gate.future;
+      return _page([_movie('moved')], total: 1);
+    };
+    final run = f.query.start(QueryScope(region: AccessRegion.ordinary));
+    await _until(() => f.a.itemRequests.isNotEmpty);
+    await f.registry.move('a', AccessRegion.private);
+    gate.complete();
+    await run;
+    expect(f.query.sources, isEmpty);
+    expect(f.query.items, isEmpty);
+  });
+
+  test('T3 records projected by actual source/selected scope; lock prevents stale history access', () async {
+    await f.open(privateB: true);
+    final account = (await f.registry.authenticate('b')).account;
+    final version = SourceReference(
+      account: account,
+      itemId: 'one',
+      mediaSourceId: 'v',
+    );
+    final session = await f.history.beginSession(
+      source: version,
+      work: version.item,
+      libraryId: 'library',
+    );
+    await f.history.observe(
+      session: session,
+      eventSequence: 1,
+      positionTicks: 100,
+      actuallyPlaying: true,
+      timeline: const WatchTimeline(durationTicks: 1000),
+    );
+    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    expect(f.query.localContinueWatching, isEmpty);
+    await f.query.start(
+      QueryScope(
+        region: AccessRegion.private,
+        mode: QueryMode.continueWatching,
+      ),
+    );
+    expect(f.query.localContinueWatching.single.source, version);
+    await f.access.lock();
+    expect(f.query.localContinueWatching, isEmpty);
+  });
 
   for (final inFlight in [false, true]) {
     test(
@@ -778,245 +733,218 @@ void main() {
     );
   }
 
-  test(
-    'malformed provider aliases fail only their source and corrected retry is atomic',
-    () async {
-      await f.open();
-      f.a.items = (_) async => _page([_movie('good')], total: 1);
-      f.b.items = (_) async => _page([
-        _movie('valid-before-malformed'),
-        _movie('bad')..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
-      ], total: 2);
-      await f.query.start(QueryScope(region: AccessRegion.ordinary));
-      expect(f.query.summary, QuerySummary.partialFailure);
-      expect(
-        f.query.sources.firstWhere((s) => s.key.serverId == 'b').status,
-        SourceQueryStatus.failed,
-      );
-      expect(
-        f.query.sources.firstWhere((s) => s.key.serverId == 'b').cursor,
-        0,
-      );
-      expect(f.query.items.single.reference.itemId, 'good');
-      expect(f.query.works.single.sources.single.reference.itemId, 'good');
-      f.b.items = (_) async => _page([_movie('repaired')], total: 1);
-      await f.query.retry(const QuerySourceKey('b', 'library'));
-      expect(f.query.summary, QuerySummary.available);
-      expect(f.query.items, hasLength(2));
-      expect(f.query.works.single.sources, hasLength(2));
-      expect(f.b.itemRequests.last.queryParameters['StartIndex'], '0');
-    },
-  );
+  test('malformed provider aliases fail only their source and corrected retry is atomic', () async {
+    await f.open();
+    f.a.items = (_) async => _page([_movie('good')], total: 1);
+    f.b.items = (_) async => _page([
+      _movie('valid-before-malformed'),
+      _movie('bad')..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
+    ], total: 2);
+    await f.query.start(QueryScope(region: AccessRegion.ordinary));
+    expect(f.query.summary, QuerySummary.partialFailure);
+    expect(
+      f.query.sources.firstWhere((s) => s.key.serverId == 'b').status,
+      SourceQueryStatus.failed,
+    );
+    expect(f.query.sources.firstWhere((s) => s.key.serverId == 'b').cursor, 0);
+    expect(f.query.items.single.reference.itemId, 'good');
+    expect(f.query.works.single.sources.single.reference.itemId, 'good');
+    f.b.items = (_) async => _page([_movie('repaired')], total: 1);
+    await f.query.retry(const QuerySourceKey('b', 'library'));
+    expect(f.query.summary, QuerySummary.available);
+    expect(f.query.items, hasLength(2));
+    expect(f.query.works.single.sources, hasLength(2));
+    expect(f.b.itemRequests.last.queryParameters['StartIndex'], '0');
+  });
 
-  test(
-    'malformed discovery page retains cached editions and retries at unchanged cursor',
-    () async {
-      await f.open();
-      f.a.items = (_) async =>
-          _page([_movie('origin', type: 'Series')], total: 1);
-      await f.query.start(
-        QueryScope(
-          region: AccessRegion.ordinary,
-          serverIds: {'a'},
-          types: {'Series'},
-        ),
-      );
-      final detail = SameSourceQueryController(
-        registry: f.registry,
-        history: f.history,
-      );
-      addTearDown(detail.dispose);
-      f.b.items = (_) async =>
-          _page([_movie('cached', type: 'Series')], total: 2);
-      await detail.start(
-        origin: f.query.items.single,
-        scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
-      );
-      f.b.items = (_) async => _page([
-        _movie('cached', type: 'Series', provider: '2'),
-        _movie('bad', type: 'Series')
-          ..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
-      ], total: 3);
-      await detail.loadMore(const QuerySourceKey('b', 'library'));
-      expect(
-        detail.sources.firstWhere((s) => s.key.serverId == 'b').status,
-        SourceQueryStatus.failed,
-      );
-      expect(detail.sources.firstWhere((s) => s.key.serverId == 'b').cursor, 1);
-      expect(detail.comparisons.single.decision.confirmed, isTrue);
-      expect(detail.query.works.single.sources, hasLength(2));
-      expect(detail.episodes, isEmpty);
-      f.b.items = (_) async =>
-          _page([_movie('repaired', type: 'Series')], total: 2);
-      await detail.retry(const QuerySourceKey('b', 'library'));
-      expect(f.b.itemRequests.last.queryParameters['StartIndex'], '1');
-      expect(detail.comparisons, hasLength(2));
-      expect(detail.comparisons.every((c) => c.decision.confirmed), isTrue);
-      expect(detail.complete, isTrue);
-    },
-  );
+  test('malformed discovery page retains cached editions and retries at unchanged cursor', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('origin', type: 'Series')], total: 1);
+    await f.query.start(
+      QueryScope(
+        region: AccessRegion.ordinary,
+        serverIds: {'a'},
+        types: {'Series'},
+      ),
+    );
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    f.b.items = (_) async =>
+        _page([_movie('cached', type: 'Series')], total: 2);
+    await detail.start(
+      origin: f.query.items.single,
+      scope: QueryScope(region: AccessRegion.ordinary, pageSize: 1),
+    );
+    f.b.items = (_) async => _page([
+      _movie('cached', type: 'Series', provider: '2'),
+      _movie('bad', type: 'Series')
+        ..['ProviderIds'] = {'Tmdb': '1', 'tmdb': '2'},
+    ], total: 3);
+    await detail.loadMore(const QuerySourceKey('b', 'library'));
+    expect(
+      detail.sources.firstWhere((s) => s.key.serverId == 'b').status,
+      SourceQueryStatus.failed,
+    );
+    expect(detail.sources.firstWhere((s) => s.key.serverId == 'b').cursor, 1);
+    expect(detail.comparisons.single.decision.confirmed, isTrue);
+    expect(detail.query.works.single.sources, hasLength(2));
+    expect(detail.episodes, isEmpty);
+    f.b.items = (_) async =>
+        _page([_movie('repaired', type: 'Series')], total: 2);
+    await detail.retry(const QuerySourceKey('b', 'library'));
+    expect(f.b.itemRequests.last.queryParameters['StartIndex'], '1');
+    expect(detail.comparisons, hasLength(2));
+    expect(detail.comparisons.every((c) => c.decision.confirmed), isTrue);
+    expect(detail.complete, isTrue);
+  });
 
-  test(
-    'independent detail lookup separates title candidates, preserves unknown version data and missing/uncertain episodes',
-    () async {
-      await f.open();
-      f.a.items = (_) async =>
-          _page([_movie('series-a', type: 'Series')], total: 1);
-      f.b.items = (_) async => _page([
-        _movie('series-b', title: 'Localized', type: 'Series'),
-        _movie('candidate', type: 'Series', provider: null),
-      ], total: 2);
-      await f.query.start(
-        QueryScope(
-          region: AccessRegion.ordinary,
-          types: {'Series'},
-          serverIds: {'a'},
-        ),
-      );
-      final seed = f.query.items.single;
-      final detail = SameSourceQueryController(
-        registry: f.registry,
-        history: f.history,
-      );
-      addTearDown(detail.dispose);
-      await detail.start(
+  test('independent detail lookup separates title candidates, preserves unknown version data and missing/uncertain episodes', () async {
+    await f.open();
+    f.a.items = (_) async =>
+        _page([_movie('series-a', type: 'Series')], total: 1);
+    f.b.items = (_) async => _page([
+      _movie('series-b', title: 'Localized', type: 'Series'),
+      _movie('candidate', type: 'Series', provider: null),
+    ], total: 2);
+    await f.query.start(
+      QueryScope(
+        region: AccessRegion.ordinary,
+        types: {'Series'},
+        serverIds: {'a'},
+      ),
+    );
+    final seed = f.query.items.single;
+    final detail = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+    );
+    addTearDown(detail.dispose);
+    await detail.start(
+      origin: seed,
+      scope: QueryScope(region: AccessRegion.ordinary, serverIds: {'a', 'b'}),
+    );
+    expect(detail.comparisons.where((c) => c.decision.confirmed), hasLength(1));
+    expect(
+      detail.comparisons.where((c) => c.decision.kind == MatchKind.candidate),
+      hasLength(1),
+    );
+    expect(detail.comparisons.first.source.item.mediaSources, isEmpty);
+    expect(f.query.items.single.reference, seed.reference);
+    final target = detail.comparisons
+        .firstWhere((c) => c.decision.confirmed)
+        .source;
+    final episode = EpisodeSource(
+      reference: SourceReference(account: seed.reference.account, itemId: 'e1'),
+      series: seed.reference,
+      season: 1,
+      episode: 1,
+      isSpecial: false,
+      numberingScheme: 'aired',
+    );
+    f.b.items = (_) async => _page([], total: 0);
+    await detail.lookupEpisode(
+      target: target,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.missing);
+    expect(detail.episodes.single.lookup.source, isNull);
+    f.b.items = (_) async => _page([
+      {'Id': 'unknown', 'Name': 'Unknown'},
+    ], total: 1);
+    await detail.lookupEpisode(
+      target: target,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.uncertain);
+    expect(detail.episodes.single.lookup.source, isNull);
+    final failed = Completer<void>();
+    f.b.items = (_) async {
+      await failed.future;
+      return _page([], total: 0);
+    };
+    // Timeout is separate from discovery's successful comparison rows.
+    // A second detail controller gives this probe a short bounded timeout.
+    final short = SameSourceQueryController(
+      registry: f.registry,
+      history: f.history,
+      // Allow loopback HTTP scheduling under the parallel full suite.
+      // The unresolved gate below still deterministically forces a timeout.
+      timeout: const Duration(seconds: 1),
+    );
+    addTearDown(short.dispose);
+    short.query.useAccount(
+      target.reference.account,
+      libraryId: target.libraryId,
+    );
+    f.b.items = (_) async => _page([
+      _movie('series-b', title: 'Localized', type: 'Series'),
+    ], total: 1);
+    await short.start(
+      origin: seed,
+      scope: QueryScope(region: AccessRegion.ordinary, serverIds: {'b'}),
+    );
+    f.b.items = (_) async {
+      await failed.future;
+      return _page([], total: 0);
+    };
+    await short.lookupEpisode(
+      target: target,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(short.episodes.single.status, SourceQueryStatus.timeout);
+    expect(short.comparisons.single.decision.confirmed, isTrue);
+    f.b.items = (_) async => _page([], total: 0);
+    await short.lookupEpisode(
+      target: target,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(short.episodes.single.lookup.status, EpisodeLookupStatus.missing);
+    failed.complete();
+    f.b.items = (_) async => _page([
+      {
+        'Id': 'e1-b',
+        'Name': 'E',
+        'Type': 'Episode',
+        'SeriesId': 'series-b',
+        'ParentIndexNumber': 1,
+        'IndexNumber': 1,
+      },
+    ], total: 1);
+    await detail.lookupEpisode(target: target, episode: episode);
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.uncertain);
+    await detail.lookupEpisode(
+      target: target,
+      episode: episode,
+      verifiedNumberingScheme: 'aired',
+    );
+    expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.confirmed);
+    expect(
+      detail.episodes.single.lookup.source!.reference.account,
+      target.reference.account,
+    );
+    await expectLater(
+      detail.lookupEpisode(
+        target: detail.comparisons
+            .firstWhere((c) => c.decision.kind == MatchKind.candidate)
+            .source,
+        episode: episode,
+      ),
+      throwsStateError,
+    );
+    expect(
+      () => detail.start(
         origin: seed,
-        scope: QueryScope(region: AccessRegion.ordinary, serverIds: {'a', 'b'}),
-      );
-      expect(
-        detail.comparisons.where((c) => c.decision.confirmed),
-        hasLength(1),
-      );
-      expect(
-        detail.comparisons.where((c) => c.decision.kind == MatchKind.candidate),
-        hasLength(1),
-      );
-      expect(detail.comparisons.first.source.item.mediaSources, isEmpty);
-      expect(f.query.items.single.reference, seed.reference);
-      final target = detail.comparisons
-          .firstWhere((c) => c.decision.confirmed)
-          .source;
-      final episode = EpisodeSource(
-        reference: SourceReference(
-          account: seed.reference.account,
-          itemId: 'e1',
-        ),
-        series: seed.reference,
-        season: 1,
-        episode: 1,
-        isSpecial: false,
-        numberingScheme: 'aired',
-      );
-      f.b.items = (_) async => _page([], total: 0);
-      await detail.lookupEpisode(
-        target: target,
-        episode: episode,
-        verifiedNumberingScheme: 'aired',
-      );
-      expect(detail.episodes.single.lookup.status, EpisodeLookupStatus.missing);
-      expect(detail.episodes.single.lookup.source, isNull);
-      f.b.items = (_) async => _page([
-        {'Id': 'unknown', 'Name': 'Unknown'},
-      ], total: 1);
-      await detail.lookupEpisode(
-        target: target,
-        episode: episode,
-        verifiedNumberingScheme: 'aired',
-      );
-      expect(
-        detail.episodes.single.lookup.status,
-        EpisodeLookupStatus.uncertain,
-      );
-      expect(detail.episodes.single.lookup.source, isNull);
-      final failed = Completer<void>();
-      f.b.items = (_) async {
-        await failed.future;
-        return _page([], total: 0);
-      };
-      // Timeout is separate from discovery's successful comparison rows.
-      // A second detail controller gives this probe a short bounded timeout.
-      final short = SameSourceQueryController(
-        registry: f.registry,
-        history: f.history,
-        // Allow loopback HTTP scheduling under the parallel full suite.
-        // The unresolved gate below still deterministically forces a timeout.
-        timeout: const Duration(seconds: 1),
-      );
-      addTearDown(short.dispose);
-      short.query.useAccount(
-        target.reference.account,
-        libraryId: target.libraryId,
-      );
-      f.b.items = (_) async => _page([
-        _movie('series-b', title: 'Localized', type: 'Series'),
-      ], total: 1);
-      await short.start(
-        origin: seed,
-        scope: QueryScope(region: AccessRegion.ordinary, serverIds: {'b'}),
-      );
-      f.b.items = (_) async {
-        await failed.future;
-        return _page([], total: 0);
-      };
-      await short.lookupEpisode(
-        target: target,
-        episode: episode,
-        verifiedNumberingScheme: 'aired',
-      );
-      expect(short.episodes.single.status, SourceQueryStatus.timeout);
-      expect(short.comparisons.single.decision.confirmed, isTrue);
-      f.b.items = (_) async => _page([], total: 0);
-      await short.lookupEpisode(
-        target: target,
-        episode: episode,
-        verifiedNumberingScheme: 'aired',
-      );
-      expect(short.episodes.single.lookup.status, EpisodeLookupStatus.missing);
-      failed.complete();
-      f.b.items = (_) async => _page([
-        {
-          'Id': 'e1-b',
-          'Name': 'E',
-          'Type': 'Episode',
-          'SeriesId': 'series-b',
-          'ParentIndexNumber': 1,
-          'IndexNumber': 1,
-        },
-      ], total: 1);
-      await detail.lookupEpisode(target: target, episode: episode);
-      expect(
-        detail.episodes.single.lookup.status,
-        EpisodeLookupStatus.uncertain,
-      );
-      await detail.lookupEpisode(
-        target: target,
-        episode: episode,
-        verifiedNumberingScheme: 'aired',
-      );
-      expect(
-        detail.episodes.single.lookup.status,
-        EpisodeLookupStatus.confirmed,
-      );
-      expect(
-        detail.episodes.single.lookup.source!.reference.account,
-        target.reference.account,
-      );
-      await expectLater(
-        detail.lookupEpisode(
-          target: detail.comparisons
-              .firstWhere((c) => c.decision.kind == MatchKind.candidate)
-              .source,
-          episode: episode,
-        ),
-        throwsStateError,
-      );
-      expect(
-        () => detail.start(
-          origin: seed,
-          scope: QueryScope(region: AccessRegion.private),
-        ),
-        throwsArgumentError,
-      );
-    },
-  );
+        scope: QueryScope(region: AccessRegion.private),
+      ),
+      throwsArgumentError,
+    );
+  });
 }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+
 import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
 
@@ -173,13 +174,11 @@ class FileCredentialStore implements CredentialStore {
 
 class SecureCredentialStore implements CredentialStore {
   SecureCredentialStore({
-    Future<void> Function(String key, String value)? writeSecure,
-    Future<String?> Function(String key)? readSecure,
-    Future<void> Function(String key)? deleteSecure,
+    this._writeSecure,
+    this._readSecure,
+    this._deleteSecure,
     required this.fallback,
-  }) : _writeSecure = writeSecure,
-       _readSecure = readSecure,
-       _deleteSecure = deleteSecure;
+  });
 
   final Future<void> Function(String key, String value)? _writeSecure;
   final Future<String?> Function(String key)? _readSecure;

@@ -1,6 +1,8 @@
 import '../helpers/region_access_fixture.dart';
+
 import 'package:dio/dio.dart';
 import 'package:rillight/media_server/device.dart';
+
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -209,10 +211,8 @@ void main() {
         expect(server.scopeKnown, isFalse);
       }
       expect(
-        (await auth.importServers([
-          draft('alice'),
-          draft('bob'),
-        ])).count(ServerImportStatus.duplicate),
+        (await auth.importServers([draft('alice'), draft('bob')]))
+            .count(ServerImportStatus.duplicate),
         2,
       );
       auth.dispose();
@@ -222,9 +222,8 @@ void main() {
   test(
     'same-address accounts authenticate independently using saved passwords',
     () async {
-      final result = await ServerImportService(
-        sources,
-      ).commit([draft('alice'), draft('bob')]);
+      final result = await ServerImportService(sources)
+          .commit([draft('alice'), draft('bob')]);
       final first = await sources.ensureSession(result.items[0].serverId!);
       final second = await sources.ensureSession(result.items[1].serverId!);
       expect(first.account.verifiedServerId, 'remote');
@@ -247,35 +246,32 @@ void main() {
     },
   );
 
-  test(
-    'token import is verified on first connection and remote mismatch stays rejected',
-    () async {
-      final result = await sources.importServers([
-        draft(
-          'alice',
-          credentials: const StoredCredentials(
-            accessToken: 'synthetic-token',
-            userId: 'user-alice',
-            username: 'alice',
-          ),
+  test('token import is verified on first connection and remote mismatch stays rejected', () async {
+    final result = await sources.importServers([
+      draft(
+        'alice',
+        credentials: const StoredCredentials(
+          accessToken: 'synthetic-token',
+          userId: 'user-alice',
+          username: 'alice',
         ),
-      ]);
-      final id = result.items.single.serverId!;
-      final session = await sources.ensureSession(id);
-      expect(session.account.userId, 'user-alice');
-      expect(clients.single.requests, 2);
-      sources.dispose();
-      sources = SourceSessionRegistry(
-        access: access,
-        store: store,
-        credentials: credentials,
-        createClient: () => ImportClient()..identity = 'impostor',
-      );
-      await sources.load();
-      await expectLater(sources.authenticate(id), throwsStateError);
-      expect((await credentials.read(id))!.accessToken, 'synthetic-token');
-    },
-  );
+      ),
+    ]);
+    final id = result.items.single.serverId!;
+    final session = await sources.ensureSession(id);
+    expect(session.account.userId, 'user-alice');
+    expect(clients.single.requests, 2);
+    sources.dispose();
+    sources = SourceSessionRegistry(
+      access: access,
+      store: store,
+      credentials: credentials,
+      createClient: () => ImportClient()..identity = 'impostor',
+    );
+    await sources.load();
+    await expectLater(sources.authenticate(id), throwsStateError);
+    expect((await credentials.read(id))!.accessToken, 'synthetic-token');
+  });
 
   test('missing or invalid credentials retain pending configuration', () async {
     final result = await sources.importServers([
@@ -444,125 +440,112 @@ void main() {
     },
   );
 
-  test(
-    'switch connects pending password account without disturbing another source',
-    () async {
-      final auth = AuthController(
-        client: ImportClient(),
-        credentials: credentials,
-        servers: store,
-        sources: sources,
-      );
-      await auth.restore();
-      final result = await auth.importServers([draft('alice'), draft('bob')]);
-      await auth.switchTo(result.items.first.serverId!);
-      expect(auth.session!.userId, 'user-alice');
-      final first = await sources.ensureSession(result.items.first.serverId!);
-      final permit = sources.permit(first.account, sessionOnly: true);
-      await auth.switchTo(result.items.last.serverId!);
-      expect(auth.session!.userId, 'user-bob');
-      expect(permit.isValid, isTrue);
-      expect(first.client.accessToken, 'token-alice');
-      final remembered = (await store.load()).lastServerId;
-      await auth.restore();
-      expect(auth.session!.server.id, remembered);
-      auth.dispose();
-    },
-  );
+  test('switch connects pending password account without disturbing another source', () async {
+    final auth = AuthController(
+      client: ImportClient(),
+      credentials: credentials,
+      servers: store,
+      sources: sources,
+    );
+    await auth.restore();
+    final result = await auth.importServers([draft('alice'), draft('bob')]);
+    await auth.switchTo(result.items.first.serverId!);
+    expect(auth.session!.userId, 'user-alice');
+    final first = await sources.ensureSession(result.items.first.serverId!);
+    final permit = sources.permit(first.account, sessionOnly: true);
+    await auth.switchTo(result.items.last.serverId!);
+    expect(auth.session!.userId, 'user-bob');
+    expect(permit.isValid, isTrue);
+    expect(first.client.accessToken, 'token-alice');
+    final remembered = (await store.load()).lastServerId;
+    await auth.restore();
+    expect(auth.session!.server.id, remembered);
+    auth.dispose();
+  });
 
-  test(
-    'expired imported token can use its password, without changing account identity',
-    () async {
-      sources.dispose();
-      sources = SourceSessionRegistry(
-        access: access,
-        store: store,
-        credentials: credentials,
-        createClient: () => ImportClient()..expired = true,
-      );
-      await sources.load();
-      final result = await sources.importServers([
-        draft(
-          'alice',
-          credentials: const StoredCredentials(
-            accessToken: 'expired',
-            userId: 'user-alice',
-            username: 'alice',
-            password: 'synthetic',
-          ),
+  test('expired imported token can use its password, without changing account identity', () async {
+    sources.dispose();
+    sources = SourceSessionRegistry(
+      access: access,
+      store: store,
+      credentials: credentials,
+      createClient: () => ImportClient()..expired = true,
+    );
+    await sources.load();
+    final result = await sources.importServers([
+      draft(
+        'alice',
+        credentials: const StoredCredentials(
+          accessToken: 'expired',
+          userId: 'user-alice',
+          username: 'alice',
+          password: 'synthetic',
         ),
-      ]);
-      final id = result.items.single.serverId!;
-      final session = await sources.ensureSession(id);
-      expect(session.account.userId, 'user-alice');
-      expect((await credentials.read(id))!.accessToken, 'token-alice');
-      final wrongAccount = await sources.importServers([
-        draft(
-          'bob',
-          credentials: const StoredCredentials(
-            accessToken: 'expired',
-            userId: 'different-user',
-            username: 'bob',
-            password: 'synthetic',
-          ),
+      ),
+    ]);
+    final id = result.items.single.serverId!;
+    final session = await sources.ensureSession(id);
+    expect(session.account.userId, 'user-alice');
+    expect((await credentials.read(id))!.accessToken, 'token-alice');
+    final wrongAccount = await sources.importServers([
+      draft(
+        'bob',
+        credentials: const StoredCredentials(
+          accessToken: 'expired',
+          userId: 'different-user',
+          username: 'bob',
+          password: 'synthetic',
         ),
-      ]);
-      await expectLater(
-        sources.ensureSession(wrongAccount.items.single.serverId!),
-        throwsStateError,
-      );
-      expect(
-        (await credentials.read(
-          wrongAccount.items.single.serverId!,
-        ))!.accessToken,
-        'expired',
-      );
-    },
-  );
+      ),
+    ]);
+    await expectLater(
+      sources.ensureSession(wrongAccount.items.single.serverId!),
+      throwsStateError,
+    );
+    expect(
+      (await credentials.read(wrongAccount.items.single.serverId!))!
+          .accessToken,
+      'expired',
+    );
+  });
 
-  test(
-    'independent login verifies a credential-free configuration and records username',
-    () async {
-      final result = await sources.importServers([draft('', password: false)]);
-      final id = result.items.single.serverId!;
-      await sources.login(id, 'alice', 'synthetic');
-      final saved = sources.project(AccessRegion.ordinary).single;
-      expect(saved.id, id);
-      expect(saved.username, 'alice');
-      expect(saved.identityPending, isFalse);
-      expect(saved.verifiedServerId, 'remote');
-      expect((await sources.ensureSession(id)).account.userId, 'user-alice');
-    },
-  );
+  test('independent login verifies a credential-free configuration and records username', () async {
+    final result = await sources.importServers([draft('', password: false)]);
+    final id = result.items.single.serverId!;
+    await sources.login(id, 'alice', 'synthetic');
+    final saved = sources.project(AccessRegion.ordinary).single;
+    expect(saved.id, id);
+    expect(saved.username, 'alice');
+    expect(saved.identityPending, isFalse);
+    expect(saved.verifiedServerId, 'remote');
+    expect((await sources.ensureSession(id)).account.userId, 'user-alice');
+  });
 
-  test(
-    'pending identity authentication cannot revive a configuration deleted during IO',
-    () async {
-      final result = await sources.importServers([draft('alice')]);
-      final id = result.items.single.serverId!;
-      final gate = Completer<void>();
-      final started = Completer<void>();
-      sources.dispose();
-      sources = SourceSessionRegistry(
-        access: access,
-        store: store,
-        credentials: credentials,
-        createClient: () => ImportClient()
-          ..gate = gate
-          ..started = started,
-      );
-      await sources.load();
-      await sources.ordinaryStore.load();
-      final pending = sources.ensureSession(id);
-      final rejected = expectLater(pending, throwsStateError);
-      await started.future;
-      await sources.ordinaryStore.save(const ServerListSnapshot(servers: []));
-      gate.complete();
-      await rejected;
-      expect((await store.load()).servers, isEmpty);
-      expect((await credentials.read(id))!.accessToken, isEmpty);
-    },
-  );
+  test('pending identity authentication cannot revive a configuration deleted during IO', () async {
+    final result = await sources.importServers([draft('alice')]);
+    final id = result.items.single.serverId!;
+    final gate = Completer<void>();
+    final started = Completer<void>();
+    sources.dispose();
+    sources = SourceSessionRegistry(
+      access: access,
+      store: store,
+      credentials: credentials,
+      createClient: () => ImportClient()
+        ..gate = gate
+        ..started = started,
+    );
+    await sources.load();
+    await sources.ordinaryStore.load();
+    final pending = sources.ensureSession(id);
+    final rejected = expectLater(pending, throwsStateError);
+    await started.future;
+    await sources.ordinaryStore.save(const ServerListSnapshot(servers: []));
+    gate.complete();
+    await rejected;
+    expect((await store.load()).servers, isEmpty);
+    expect((await credentials.read(id))!.accessToken, isEmpty);
+  });
 
   test(
     'manual connect does not overwrite another account on the same remote',

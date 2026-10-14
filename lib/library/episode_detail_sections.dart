@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -10,7 +10,6 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/models.dart';
@@ -38,7 +37,7 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final phone = PresentationScope.isPhoneOf(context);
     final gutter = PresentationScope.pageGutterOf(context);
     return Padding(
@@ -115,7 +114,7 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final overview = widget.overview;
     if (overview == null || overview.isEmpty) {
       return const SizedBox.shrink();
@@ -143,17 +142,16 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
               style: style,
             ),
             if (toggleable)
-              TextButton(
+              AppButton(
                 key: EpisodeOverviewSection.toggleKey,
                 onPressed: () => setState(() => _expanded = !_expanded),
-                style: TextButton.styleFrom(
+                style: AppButtonStyle(
                   foregroundColor: theme.colorScheme.primary,
                   padding: EdgeInsets.zero,
                   minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
                   textStyle: theme.textTheme.labelLarge,
                 ),
+                variant: AppButtonVariant.plain,
                 child: Text(_expanded ? l10n.collapse : l10n.expand),
               ),
           ],
@@ -305,7 +303,7 @@ class EpisodePeopleSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     if (people.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -394,7 +392,7 @@ class _PersonMetrics {
 }
 
 _PersonMetrics _personMetrics(BuildContext context) {
-  final theme = Theme.of(context);
+  final theme = AppUiTheme.of(context);
   final scheme = theme.colorScheme;
   final screen = MediaQuery.sizeOf(context).width;
   final tv = PresentationScope.maybeOf(context)?.isTv == true;
@@ -769,7 +767,7 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
               child: ScrimIconButton(
                 key: CatalogKeys.shelfScrollLeft(shelfId),
                 tooltip: l10n.scrollLeft,
-                icon: const Icon(Icons.chevron_left),
+                icon: const Icon(CupertinoIcons.chevron_left),
                 onPressed: () => _page(-1),
               ),
             ),
@@ -779,7 +777,7 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
               child: ScrimIconButton(
                 key: CatalogKeys.shelfScrollRight(shelfId),
                 tooltip: l10n.scrollRight,
-                icon: const Icon(Icons.chevron_right),
+                icon: const Icon(CupertinoIcons.chevron_right),
                 onPressed: () => _page(1),
               ),
             ),
@@ -790,7 +788,7 @@ class _PeopleGroupRowState extends State<_PeopleGroupRow> {
 }
 
 /// 桌面鼠标左键可以拖动演职员横条。竖直滚轮仍交给外层详情页。
-class _RowScrollBehavior extends MaterialScrollBehavior {
+class _RowScrollBehavior extends CupertinoScrollBehavior {
   const _RowScrollBehavior();
 
   @override
@@ -881,9 +879,9 @@ class _PersonCard extends StatelessWidget {
       );
     }
     if (_personId(person).isEmpty) return card(false);
-    return Material(
-      type: MaterialType.transparency,
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(),
+      child: AppSurfaceAction(
         onTap: () => _openPerson(context, person),
         canRequestFocus: !metrics.phone,
         child: card(false),
@@ -989,7 +987,7 @@ class _PersonPosterState extends State<_PersonPoster> {
   Widget build(BuildContext context) {
     final metrics = widget.metrics;
     final radius = BorderRadius.circular(metrics.radius);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final scale = metrics.tv ? TvDesign.scaleOf(context) : 1.0;
     return SizedBox(
       key: EpisodePeopleSection.imageKey,
@@ -1001,7 +999,9 @@ class _PersonPosterState extends State<_PersonPoster> {
           borderRadius: radius,
           border: metrics.tv
               ? Border.all(
-                  color: widget.focused ? scheme.onSurface : Colors.transparent,
+                  color: widget.focused
+                      ? scheme.onSurface
+                      : const Color(0x00000000),
                   width: TvAction.focusRingWidth * scale,
                   strokeAlign: BorderSide.strokeAlignOutside,
                 )
@@ -1033,7 +1033,7 @@ class _PersonPosterState extends State<_PersonPoster> {
 
   Widget _letter(BuildContext context) {
     final name = widget.person.name.trim();
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return Center(
       child: Text(
         name.isEmpty ? '?' : name.characters.first,
@@ -1068,7 +1068,7 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final source = this.source;
     if (source == null || source.streams.isEmpty) {
       return const SizedBox.shrink();
@@ -1163,7 +1163,7 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
                   children: [
                     for (var i = 0; i < groups.length; i++) ...[
                       if (i > 0)
-                        Divider(
+                        AppDivider(
                           height: 1,
                           color: scheme.onSurface.withValues(alpha: .08),
                         ),
@@ -1244,9 +1244,10 @@ class EpisodeMediaStreamsSection extends StatelessWidget {
     String join(
       Iterable<ItemMediaStream> streams,
       String Function(ItemMediaStream) line,
-    ) => {
-      for (final stream in streams) line(stream),
-    }.where((value) => value.isNotEmpty).join('  ·  ');
+    ) =>
+        {for (final stream in streams) line(stream)}
+            .where((value) => value.isNotEmpty)
+            .join('  ·  ');
     final video = join(source.streams.where((s) => s.isVideo), _videoLine);
     final audio = join(
       source.streams.where((s) => s.isAudio),
@@ -1357,9 +1358,9 @@ class _PhoneStreamCard extends StatelessWidget {
   IconData _icon(_StreamGroup group) {
     final first = group.choices.firstOrNull;
     final stream = first == null ? null : _stream(first.index);
-    if (stream?.isSubtitle == true) return Icons.subtitles_outlined;
-    if (stream?.isAudio == true) return Icons.graphic_eq_rounded;
-    return Icons.videocam_outlined;
+    if (stream?.isSubtitle == true) return CupertinoIcons.captions_bubble;
+    if (stream?.isAudio == true) return CupertinoIcons.waveform;
+    return CupertinoIcons.videocam;
   }
 
   int? _defaultIndex(_StreamGroup group) {
@@ -1371,7 +1372,7 @@ class _PhoneStreamCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1383,7 +1384,7 @@ class _PhoneStreamCard extends StatelessWidget {
         children: [
           for (var i = 0; i < groups.length; i++) ...[
             if (i > 0)
-              Divider(
+              AppDivider(
                 height: 1,
                 indent: AppSpacing.md,
                 endIndent: AppSpacing.md,
@@ -1470,7 +1471,7 @@ class _PhoneTrackRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final height =
         40 * (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
@@ -1487,20 +1488,15 @@ class _PhoneTrackRow extends StatelessWidget {
           itemBuilder: (context, index) {
             final choice = group.choices[index];
             final selected = choice.index == highlighted;
-            return Material(
-              key: ValueKey('media-stream-${choice.index}'),
-              color: selected
-                  ? scheme.primary.withValues(alpha: .16)
-                  : scheme.surface.withValues(alpha: .6),
-              shape: StadiumBorder(
-                side: BorderSide(
-                  color: selected
-                      ? scheme.primary
-                      : scheme.outlineVariant.withValues(alpha: .7),
-                ),
+            return Container(
+              decoration: BoxDecoration(
+                color: selected
+                    ? scheme.primary.withValues(alpha: .16)
+                    : scheme.surface.withValues(alpha: .6),
               ),
+              key: ValueKey('media-stream-${choice.index}'),
               clipBehavior: Clip.antiAlias,
-              child: InkWell(
+              child: AppSurfaceAction(
                 onTap: () => group.onSelected!(choice.index),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -1509,7 +1505,7 @@ class _PhoneTrackRow extends StatelessWidget {
                     children: [
                       if (selected) ...[
                         Icon(
-                          Icons.check_rounded,
+                          CupertinoIcons.check_mark,
                           size: 16,
                           color: scheme.primary,
                         ),
@@ -1592,7 +1588,7 @@ class _StreamChoiceWrap extends StatelessWidget {
     _StreamChoice choice, {
     bool expand = false,
   }) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final selected = choice.index == group.selectedIndex;
     final label = Text(
@@ -1604,14 +1600,16 @@ class _StreamChoiceWrap extends StatelessWidget {
         fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
       ),
     );
-    return Material(
+    return Container(
+      decoration: BoxDecoration(
+        color: selected
+            ? scheme.primary.withValues(alpha: 0.18)
+            : scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(AppRadii.sm),
+      ),
       key: ValueKey('media-stream-${choice.index}'),
-      color: selected
-          ? scheme.primary.withValues(alpha: 0.18)
-          : scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(AppRadii.sm),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
+      child: AppSurfaceAction(
         onTap: group.onSelected == null
             ? null
             : () => group.onSelected!(choice.index),
@@ -1642,7 +1640,7 @@ class NextEpisodeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final episode = this.episode;
     if (episode == null) {
       return const SizedBox.shrink();
@@ -1655,10 +1653,12 @@ class NextEpisodeCard extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 420),
         child: SizedBox(
           width: double.infinity,
-          child: Material(
-            color: theme.colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            child: InkWell(
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: AppSurfaceAction(
               key: cardKey,
               onTap: onTap,
               borderRadius: BorderRadius.circular(AppRadii.md),
@@ -1747,7 +1747,7 @@ class EpisodeMetadataSection extends StatelessWidget {
   }
 
   Widget _phone(BuildContext context, AppLocalizations l10n) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final source = this.source;
     final runtime = item.isSeries ? null : runtimeLabel(l10n, item);
@@ -1788,7 +1788,7 @@ class EpisodeMetadataSection extends StatelessWidget {
           children: [
             for (var i = 0; i < rows.length; i++) ...[
               if (i > 0)
-                Divider(
+                AppDivider(
                   height: 1,
                   indent: AppSpacing.md,
                   endIndent: AppSpacing.md,
@@ -1825,7 +1825,7 @@ class EpisodeMetadataSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     if (PresentationScope.isPhoneOf(context)) {
       return _phone(context, l10n);
     }
@@ -1874,7 +1874,7 @@ class ChapterFallbackArt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1901,7 +1901,7 @@ class ChapterFallbackArt extends StatelessWidget {
           ),
           Center(
             child: Icon(
-              Icons.play_circle_outline_rounded,
+              CupertinoIcons.play_circle,
               size: 30,
               color: scheme.onPrimaryContainer.withValues(alpha: .8),
             ),

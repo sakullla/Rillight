@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -110,7 +110,7 @@ class FileTvSectionStore implements TvSectionStore {
 
 /// 电视首页与编辑弹层共用一份顺序。文件按服务器分开。
 class TvSectionController extends ChangeNotifier {
-  TvSectionController({TvSectionStore? store}) : _store = store;
+  TvSectionController({this._store});
 
   static TvSectionController? _app;
 
@@ -273,7 +273,7 @@ Future<void> showTvSectionEditor(BuildContext context) {
   final serverId = AuthScope.maybeOf(context)?.session?.server.id ?? '';
   unawaited(sections.load(serverId));
   // 根导航上的对话框不会让壳内路由离开 current，TvFocusRegion 会把焦点抢回去。
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     useRootNavigator: false,
     builder: (context) {
@@ -281,7 +281,7 @@ Future<void> showTvSectionEditor(BuildContext context) {
       final s = TvDesign.scaleOf(context);
       final width = (viewport.width - 96 * s).clamp(0.0, 560 * s);
       final height = (viewport.height - 54 * s).clamp(0.0, 480 * s);
-      return Dialog(
+      return AppModalFrame(
         child: SizedBox(
           key: TvSectionEditor.editorKey,
           width: width,
@@ -398,7 +398,7 @@ class TvSectionEditor extends StatelessWidget {
             children: [
               Text(
                 l10n.phoneHomeEdit,
-                style: Theme.of(context).textTheme.headlineSmall,
+                style: AppUiTheme.of(context).textTheme.headlineSmall,
               ),
               SizedBox(height: 12 * s),
               Expanded(
@@ -466,7 +466,7 @@ class TvSectionEditor extends StatelessWidget {
     required FocusNode? initialFocus,
   }) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
     final visible = !controller.isHidden(id);
     // 一行一个分区:显隐开关 + 名称,右侧上移/下移。上下键在同列间移动。
@@ -481,7 +481,7 @@ class TvSectionEditor extends StatelessWidget {
             selected: visible,
             onPressed: () => controller.setVisible(id, !visible),
             child: Icon(
-              visible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+              visible ? CupertinoIcons.eye : CupertinoIcons.eye_slash,
             ),
           ),
           SizedBox(width: 12 * s),
@@ -504,7 +504,7 @@ class TvSectionEditor extends StatelessWidget {
                 : () => controller.move(id, -1, libraries),
             child: Semantics(
               label: l10n.tvSectionMoveUp,
-              child: const Icon(Icons.arrow_upward_rounded),
+              child: const Icon(CupertinoIcons.arrow_up),
             ),
           ),
           SizedBox(width: 6 * s),
@@ -517,7 +517,7 @@ class TvSectionEditor extends StatelessWidget {
                 : () => controller.move(id, 1, libraries),
             child: Semantics(
               label: l10n.tvSectionMoveDown,
-              child: const Icon(Icons.arrow_downward_rounded),
+              child: const Icon(CupertinoIcons.arrow_down),
             ),
           ),
         ],

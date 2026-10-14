@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -77,13 +77,19 @@ class _TvSearchPageState extends State<TvSearchPage> {
                             label: l.search,
                             controller: _text,
                             pill: true,
-                            leading: const Icon(Icons.search_rounded, size: 20),
+                            leading: const Icon(
+                              CupertinoIcons.search,
+                              size: 20,
+                            ),
                             onSubmitted: () => c.submit(_text.text),
                           ),
                         ),
                         TvAction(
                           pill: true,
-                          leading: const Icon(Icons.tune_rounded, size: 20),
+                          leading: const Icon(
+                            CupertinoIcons.slider_horizontal_3,
+                            size: 20,
+                          ),
                           onPressed: () => showCatalogWatchFilter(
                             context,
                             watch: c.watch,
@@ -103,9 +109,7 @@ class _TvSearchPageState extends State<TvSearchPage> {
                     ),
                   if (c.refreshingFirstPage)
                     const SliverToBoxAdapter(
-                      child: LinearProgressIndicator(
-                        key: Key('tv-search-refreshing'),
-                      ),
+                      child: AppLoadingBar(key: Key('tv-search-refreshing')),
                     ),
                   if (c.error != null)
                     SliverToBoxAdapter(

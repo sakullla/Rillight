@@ -1,11 +1,10 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -120,7 +119,7 @@ class PhoneItemBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final imageHeight = imageHeightOf(context);
     final showPoster = _showPoster;
@@ -166,7 +165,7 @@ class PhoneItemBanner extends StatelessWidget {
               ),
               child: backdrop,
             ),
-          ColoredBox(color: Colors.black.withValues(alpha: .18)),
+          ColoredBox(color: const Color(0xff000000).withValues(alpha: .18)),
         ],
       );
     }
@@ -214,10 +213,10 @@ class PhoneItemBanner extends StatelessWidget {
                         end: Alignment.bottomCenter,
                         stops: const [0, .38],
                         colors: [
-                          Colors.black.withValues(
+                          const Color(0xff000000).withValues(
                             alpha: AppScrim.of(context, AppScrim.top),
                           ),
-                          Colors.transparent,
+                          const Color(0x00000000),
                         ],
                       ),
                     ),
@@ -312,7 +311,7 @@ class _PosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final height = width * 1.5;
     Widget image = MediaImage(
@@ -337,7 +336,7 @@ class _PosterCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.md),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: light ? .16 : .35),
+            color: const Color(0xff000000).withValues(alpha: light ? .16 : .35),
             blurRadius: light ? 14 : 18,
             offset: const Offset(0, 6),
           ),
@@ -359,8 +358,8 @@ class _PosterCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(AppRadii.md),
                     border: Border.all(
                       color: light
-                          ? Colors.black.withValues(alpha: .08)
-                          : Colors.white.withValues(alpha: .12),
+                          ? const Color(0xff000000).withValues(alpha: .08)
+                          : const Color(0xffffffff).withValues(alpha: .12),
                     ),
                   ),
                 ),
@@ -375,13 +374,15 @@ class _PosterCard extends StatelessWidget {
 
 /// 头部标题字阶：比全局 headlineLarge 收一档；海报右侧再收一档，
 /// 两行长标题也不把海报卡顶高。
-TextStyle? phoneDetailTitleStyle(ThemeData theme, {bool compact = false}) =>
-    theme.textTheme.headlineLarge?.copyWith(
-      color: theme.colorScheme.onSurface,
-      fontSize: compact ? 22 : 26,
-      fontWeight: FontWeight.w700,
-      height: 1.22,
-    );
+TextStyle? phoneDetailTitleStyle(
+  AppUiThemeData theme, {
+  bool compact = false,
+}) => theme.textTheme.headlineLarge?.copyWith(
+  color: theme.colorScheme.onSurface,
+  fontSize: compact ? 22 : 26,
+  fontWeight: FontWeight.w700,
+  height: 1.22,
+);
 
 class _MetaLine extends StatelessWidget {
   const _MetaLine({required this.entries});
@@ -390,7 +391,7 @@ class _MetaLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final dot = Text(
       '·',
       style: theme.textTheme.labelLarge?.copyWith(
@@ -431,7 +432,7 @@ class _BannerTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final heading = Text(
       title,
       maxLines: compact ? 3 : 2,
@@ -459,7 +460,7 @@ class _BannerTitle extends StatelessWidget {
         ),
         if (onTap != null)
           Icon(
-            Icons.chevron_right_rounded,
+            CupertinoIcons.chevron_right,
             size: 20,
             color: theme.colorScheme.primary,
           ),
@@ -471,7 +472,7 @@ class _BannerTitle extends StatelessWidget {
         if (onTap == null)
           overline
         else
-          InkWell(
+          AppSurfaceAction(
             key: CatalogKeys.seriesLink,
             onTap: onTap,
             borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -498,7 +499,7 @@ class _MetaChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     if (entry.badge) {
       return DecoratedBox(
@@ -531,7 +532,7 @@ class _MetaChip extends StatelessWidget {
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.star_rounded, size: 16, color: scheme.primary),
+              Icon(CupertinoIcons.star_fill, size: 16, color: scheme.primary),
               const SizedBox(width: 2),
               Text(entry.label, style: style),
             ],
@@ -541,9 +542,9 @@ class _MetaChip extends StatelessWidget {
     if (onTap == null) {
       return chip;
     }
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(color: const Color(0x00000000)),
+      child: AppSurfaceAction(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
         child: chip,
@@ -564,7 +565,7 @@ class PhoneGenreChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (genres.isEmpty) return const SizedBox.shrink();
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final height =
         36 * (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
@@ -584,11 +585,13 @@ class PhoneGenreChips extends StatelessWidget {
             itemBuilder: (context, index) {
               final genre = genres[index];
               final tap = onTap;
-              return Material(
-                color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(AppRadii.sm),
+              return Container(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                ),
                 clipBehavior: Clip.antiAlias,
-                child: InkWell(
+                child: AppSurfaceAction(
                   onTap: tap == null ? null : () => tap(genre),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -628,16 +631,17 @@ class PhoneSeasonTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Semantics(
       button: true,
       selected: selected,
-      child: Material(
-        color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
-        shape: const StadiumBorder(),
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
+        ),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        child: AppSurfaceAction(
           onTap: onPressed,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 56, minHeight: 40),
@@ -758,7 +762,7 @@ class MobileSeriesPage extends StatelessWidget {
 
   List<Widget> _content(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final showSeasons = seasons.length > 1;
     final selected = seasons.where((s) => s.id == seasonId).firstOrNull;
     final total = episodeTotal != null && episodeTotal! > 0
@@ -820,12 +824,13 @@ class MobileSeriesPage extends StatelessWidget {
                 ),
               ),
               if (onPickEpisode != null && (total ?? episodes.length) > 1)
-                TextButton.icon(
+                AppButton.icon(
                   key: CatalogKeys.locateEpisode,
-                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  style: AppButtonStyle(minimumSize: const Size(48, 48)),
                   onPressed: onPickEpisode,
-                  icon: const Icon(Icons.grid_view_rounded, size: 18),
+                  icon: const Icon(CupertinoIcons.square_grid_2x2, size: 18),
                   label: Text(l.pickEpisode),
+                  variant: AppButtonVariant.plain,
                 ),
             ],
           ),
@@ -913,9 +918,10 @@ class MobileSeriesPage extends StatelessWidget {
             AppSpacing.md,
             0,
           ),
-          child: FilledButton.tonal(
-            style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+          child: AppButton(
+            style: AppButtonStyle(minimumSize: const Size(48, 48)),
             onPressed: episodesLoading ? null : onLoadMore,
+            variant: AppButtonVariant.tinted,
             child: Text(l.mobileLoadMore),
           ),
         ),
@@ -1089,7 +1095,7 @@ class _EpisodeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final overview = plainOverview(episode.overview);
     final runtime = runtimeLabel(l, episode);
@@ -1122,13 +1128,15 @@ class _EpisodeRow extends StatelessWidget {
         AppSpacing.xs,
         AppSpacing.xxs,
       ),
-      child: Material(
-        color: current
-            ? scheme.surfaceContainerHigh.withValues(alpha: .7)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: Container(
+        decoration: BoxDecoration(
+          color: current
+              ? scheme.surfaceContainerHigh.withValues(alpha: .7)
+              : const Color(0x00000000),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        child: AppSurfaceAction(
           key: CatalogKeys.episode(episode.id),
           onTap: onTap,
           child: Padding(
@@ -1172,8 +1180,7 @@ class _EpisodeRow extends StatelessWidget {
                     ),
                   ],
                 ),
-                // 该集简介:MediaItem.overview 缺失(无字段/纯空白/HTML 残迹)
-                // 时整行隐藏,卡片优雅降级为剧照 + 标题。
+
                 if (overview != null)
                   Padding(
                     padding: const EdgeInsets.only(top: AppSpacing.xs),
@@ -1214,7 +1221,7 @@ class _EpisodeThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
     final showProgress = progress > 0 && !played;
     return SizedBox(
@@ -1234,7 +1241,9 @@ class _EpisodeThumb extends StatelessWidget {
                 maxWidth: 480,
               ),
               if (played && !current)
-                ColoredBox(color: Colors.black.withValues(alpha: .38)),
+                ColoredBox(
+                  color: const Color(0xff000000).withValues(alpha: .38),
+                ),
               if (showProgress)
                 Positioned(
                   left: 0,
@@ -1242,14 +1251,14 @@ class _EpisodeThumb extends StatelessWidget {
                   bottom: 0,
                   child: Semantics(
                     container: true,
-                    label: AppLocalizations.of(
-                      context,
-                    ).playbackProgress((progress * 100).round()),
-                    child: LinearProgressIndicator(
+                    label: AppLocalizations.of(context)
+                        .playbackProgress((progress * 100).round()),
+                    child: AppLoadingBar(
                       value: progress,
                       minHeight: 4,
                       color: scheme.primary,
-                      backgroundColor: Colors.black.withValues(alpha: .45),
+                      backgroundColor: const Color(0xff000000)
+                          .withValues(alpha: .45),
                     ),
                   ),
                 ),
@@ -1267,21 +1276,24 @@ class _EpisodeThumb extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: light
                           ? scheme.primary
-                          : Colors.black.withValues(alpha: .42),
+                          : const Color(0xff000000).withValues(alpha: .42),
                       shape: BoxShape.circle,
                       border: light
                           ? null
                           : Border.all(
-                              color: Colors.white.withValues(alpha: .85),
+                              color: const Color(0xffffffff)
+                                  .withValues(alpha: .85),
                               width: 1.5,
                             ),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.all(6),
                       child: Icon(
-                        Icons.play_arrow_rounded,
+                        CupertinoIcons.play_fill,
                         key: const Key('phone-episode-current'),
-                        color: light ? scheme.onPrimary : Colors.white,
+                        color: light
+                            ? scheme.onPrimary
+                            : const Color(0xffffffff),
                         size: 24,
                       ),
                     ),
@@ -1325,13 +1337,14 @@ class _SimilarRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   l.similarRow,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: AppUiTheme.of(context).textTheme.titleMedium,
                 ),
               ),
-              TextButton(
+              AppButton(
                 key: CatalogKeys.shelfMore(CatalogKeys.shelfSimilar),
-                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                style: AppButtonStyle(minimumSize: const Size(48, 48)),
                 onPressed: onOpenSimilar,
+                variant: AppButtonVariant.plain,
                 child: Text(l.more),
               ),
             ],

@@ -1,12 +1,12 @@
 import 'login_widgets.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
+
 import 'package:rillight/media_server/server_address.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/connect_draft.dart';
@@ -127,9 +127,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     context,
     auth: AuthScope.of(context),
     onSelect: (id, lineId) async {
-      final server = AuthScope.of(
-        context,
-      ).savedServers.firstWhere((s) => s.id == id);
+      final server = AuthScope.of(context).savedServers
+          .firstWhere((s) => s.id == id);
       setState(() => _select(server.copyWith(activeLineId: lineId)));
     },
     onAddServer: () {
@@ -280,17 +279,18 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
-    return Scaffold(
-      // 品牌头已经说明了页面用途,顶栏只留外观入口,不再重复一行标题。
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        // 登录前也能切外观;偏好持久化,设置页同源。
-        actions: const [
-          AppearanceMenuButton(buttonKey: Key('android-connect-appearance')),
-        ],
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        transitionBetweenRoutes: false,
+        backgroundColor: const Color(0x00000000),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            AppearanceMenuButton(buttonKey: Key('android-connect-appearance')),
+          ],
+        ),
       ),
-      body: SafeArea(
+      child: SafeArea(
         top: false,
         child: Align(
           alignment: Alignment.topCenter,
@@ -313,21 +313,21 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                           Expanded(
                             child: Text(
                               l10n.savedServers,
-                              style: Theme.of(context).textTheme.titleSmall
+                              style: AppUiTheme.of(context).textTheme.titleSmall
                                   ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
-                          TextButton.icon(
+                          AppButton.icon(
                             key: const Key('phone-connect-manage-servers'),
                             onPressed: auth.isBusy ? null : _manageServers,
-                            icon: const Icon(Icons.settings_outlined, size: 18),
+                            icon: const Icon(CupertinoIcons.gear, size: 18),
                             label: Text(l10n.phoneManageServer),
+                            variant: AppButtonVariant.plain,
                           ),
                         ],
                       ),
                       const SizedBox(height: 4),
                       SizedBox(
-                        // 两行文字随系统字号增高,200% 时卡片不溢出。
                         height: 24 + MediaQuery.textScalerOf(context).scale(40),
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
@@ -361,7 +361,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                TextField(
+                                AppTextField(
                                   key: const Key('android-connect-address'),
                                   controller: _address,
                                   autofocus: false,
@@ -370,33 +370,29 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                   autocorrect: false,
                                   autofillHints: const [AutofillHints.url],
                                   textInputAction: TextInputAction.next,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.serverAddress,
-                                    hintText: l10n.serverAddressHint,
-                                    prefixIcon: const Icon(
-                                      Icons.link_rounded,
-                                      size: 20,
-                                    ),
+                                  label: l10n.serverAddress,
+                                  placeholder: l10n.serverAddressHint,
+                                  prefix: const Icon(
+                                    CupertinoIcons.link,
+                                    size: 20,
                                   ),
                                 ),
                                 const SizedBox(height: 14),
-                                TextField(
+                                AppTextField(
                                   key: const Key('android-connect-username'),
                                   controller: _username,
                                   enabled: !auth.isBusy,
                                   autocorrect: false,
                                   autofillHints: const [AutofillHints.username],
                                   textInputAction: TextInputAction.next,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.username,
-                                    prefixIcon: const Icon(
-                                      Icons.person_outline_rounded,
-                                      size: 20,
-                                    ),
+                                  label: l10n.username,
+                                  prefix: const Icon(
+                                    CupertinoIcons.person,
+                                    size: 20,
                                   ),
                                 ),
                                 const SizedBox(height: 14),
-                                TextField(
+                                AppTextField(
                                   key: const Key('android-connect-password'),
                                   controller: _password,
                                   enabled: !auth.isBusy,
@@ -406,29 +402,27 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                   autofillHints: const [AutofillHints.password],
                                   textInputAction: TextInputAction.done,
                                   onSubmitted: (_) => _submit(),
-                                  decoration: InputDecoration(
-                                    labelText: l10n.password,
-                                    prefixIcon: const Icon(
-                                      Icons.lock_outline_rounded,
-                                      size: 20,
+                                  label: l10n.password,
+                                  prefix: const Icon(
+                                    CupertinoIcons.lock,
+                                    size: 20,
+                                  ),
+                                  suffix: AppIconButton(
+                                    key: const Key(
+                                      'android-connect-password-visibility',
                                     ),
-                                    suffixIcon: IconButton(
-                                      key: const Key(
-                                        'android-connect-password-visibility',
-                                      ),
-                                      tooltip: _passwordVisible
-                                          ? l10n.hidePassword
-                                          : l10n.showPassword,
-                                      onPressed: () => setState(
-                                        () => _passwordVisible =
-                                            !_passwordVisible,
-                                      ),
-                                      icon: Icon(
-                                        _passwordVisible
-                                            ? Icons.visibility_off_outlined
-                                            : Icons.visibility_outlined,
-                                        size: 20,
-                                      ),
+                                    tooltip: _passwordVisible
+                                        ? l10n.hidePassword
+                                        : l10n.showPassword,
+                                    onPressed: () => setState(
+                                      () =>
+                                          _passwordVisible = !_passwordVisible,
+                                    ),
+                                    icon: Icon(
+                                      _passwordVisible
+                                          ? CupertinoIcons.eye_slash
+                                          : CupertinoIcons.eye,
+                                      size: 20,
                                     ),
                                   ),
                                 ),
@@ -442,12 +436,13 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             ),
                           ],
                           const SizedBox(height: 22),
-                          FilledButton(
+                          AppButton(
                             key: const Key('android-connect-submit'),
-                            style: FilledButton.styleFrom(
+                            style: AppButtonStyle(
                               minimumSize: const Size(52, 52),
                             ),
                             onPressed: auth.isBusy ? null : _submit,
+                            variant: AppButtonVariant.filled,
                             child: BusyLabel(
                               busy: auth.isBusy,
                               label: auth.failure != null
@@ -477,83 +472,79 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     AuthController auth,
   ) {
     final canDelete = _extraLines.isNotEmpty || _canDeletePersistedLine(auth);
-    return ExpansionTile(
+    return AppDisclosure(
       key: const Key('android-connect-more'),
       initiallyExpanded: _moreExpanded,
       title: Text(l10n.more),
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: 12),
-      shape: const Border(),
-      collapsedShape: const Border(),
       onExpansionChanged: (expanded) {
         setState(() => _moreExpanded = expanded);
         _save();
       },
       children: [
         if (_moreExpanded) ...[
-          TextField(
+          AppTextField(
             key: const Key('android-connect-path'),
             controller: _path,
             enabled: !auth.isBusy,
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(hintText: '/emby'),
+            placeholder: '/emby',
           ),
           const SizedBox(height: 16),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
               l10n.lines,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
+                color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ),
           Wrap(
             spacing: 8,
             children: [
-              TextButton.icon(
+              AppButton.icon(
                 key: const Key('android-connect-add-line'),
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(Icons.add, size: 18),
+                icon: const Icon(CupertinoIcons.plus, size: 18),
                 label: Text(l10n.addLine),
+                variant: AppButtonVariant.plain,
               ),
-              TextButton.icon(
+              AppButton.icon(
                 key: const Key('android-connect-delete-line'),
                 onPressed: auth.isBusy || !canDelete
                     ? null
                     : () => _deleteLine(auth),
-                icon: const Icon(Icons.link_off, size: 18),
+                icon: const Icon(CupertinoIcons.link, size: 18),
                 label: Text(l10n.deleteLine),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
+                style: AppButtonStyle(
+                  foregroundColor: AppUiTheme.of(context).colorScheme.error,
                 ),
+                variant: AppButtonVariant.plain,
               ),
             ],
           ),
           for (var i = 0; i < _extraLines.length; i++) ...[
             const SizedBox(height: 8),
-            TextField(
+            AppTextField(
               key: Key('android-connect-extra-line-$i'),
               controller: _extraLines[i],
               enabled: !auth.isBusy,
               keyboardType: TextInputType.url,
-              decoration: InputDecoration(
-                labelText: l10n.extraLineAddress,
-                hintText: l10n.serverAddressHint,
-              ),
+              label: l10n.extraLineAddress,
+              placeholder: l10n.serverAddressHint,
             ),
           ],
           const SizedBox(height: 16),
-          TextField(
+          AppTextField(
             key: const Key('android-connect-user-agent'),
             controller: _userAgent,
             enabled: !auth.isBusy,
             textInputAction: TextInputAction.next,
-            decoration: InputDecoration(
-              labelText: l10n.userAgent,
-              hintText: l10n.userAgentHint,
-            ),
+            label: l10n.userAgent,
+            placeholder: l10n.userAgentHint,
           ),
         ],
       ],
@@ -569,7 +560,7 @@ class _PhoneBrandHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -610,26 +601,19 @@ class _PhoneServerChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Semantics(
       button: true,
       selected: selected,
-      child: Material(
-        color: selected
-            ? scheme.primary.withValues(alpha: .1)
-            : scheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          side: BorderSide(
-            color: selected
-                ? scheme.primary
-                : scheme.outlineVariant.withValues(alpha: .6),
-            width: selected ? 1.5 : 1,
-          ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected
+              ? scheme.primary.withValues(alpha: .1)
+              : scheme.surfaceContainerHigh,
         ),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        child: AppSurfaceAction(
           onTap: onPressed,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 150, maxWidth: 230),
@@ -667,7 +651,7 @@ class _PhoneServerChip extends StatelessWidget {
                   if (selected) ...[
                     const SizedBox(width: 8),
                     Icon(
-                      Icons.check_circle_rounded,
+                      CupertinoIcons.checkmark_circle_fill,
                       size: 18,
                       color: scheme.primary,
                     ),

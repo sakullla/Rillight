@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/session_actions.dart';
@@ -117,27 +116,18 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final viewport = MediaQuery.sizeOf(context);
     final filtered = _filtered;
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
+    return AppModalFrame(
+      backgroundColor: const Color(0x00000000),
       insetPadding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.xxl,
         vertical: AppSpacing.xxl,
       ),
-      // 不透明 surface 底色:面板与背景海报/简介/播放控件不同层,
-      // 浅色与深色下服务器名/地址/搜索/添加/退出都清晰可读(R12)。
-      child: Material(
+      child: Container(
+        decoration: BoxDecoration(color: scheme.surface),
         key: ServerSwitcherDialog.panelKey,
-        color: scheme.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.xl),
-          side: BorderSide(color: scheme.outlineVariant),
-        ),
         clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -161,26 +151,23 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                   ),
                   child: Text(
                     l10n.switchServer,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: AppUiTheme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                // 少量服务器一眼可见,不再摆一个空搜索框;多了才提供筛选。
+
                 if (_searchable) ...[
-                  TextField(
+                  AppTextField(
                     key: ServerSwitcherDialog.searchField,
                     controller: _query,
                     autofocus: widget.servers.length > 8,
                     onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: l10n.searchServers,
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      isDense: true,
-                    ),
+                    placeholder: l10n.searchServers,
+                    prefix: const Icon(CupertinoIcons.search, size: 20),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                 ],
-                // 列表按内容收缩,服务器少时面板不留大片空白。
+
                 Flexible(
                   child: filtered.isEmpty
                       ? Padding(
@@ -207,18 +194,18 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                         ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                const Divider(height: 1),
+                const AppDivider(height: 1),
                 const SizedBox(height: AppSpacing.xs),
                 _ActionTile(
                   key: SessionActions.addServerKey,
-                  icon: Icons.add_rounded,
+                  icon: CupertinoIcons.plus,
                   label: l10n.addServer,
                   onTap: widget.onAddServer,
                 ),
                 if (widget.onManage != null)
                   _ActionTile(
                     key: const Key('server-manage-providers'),
-                    icon: Icons.manage_accounts_outlined,
+                    icon: CupertinoIcons.person_crop_circle,
                     label: l10n.sourceManagement,
                     onTap: widget.onManage!,
                   ),
@@ -226,14 +213,14 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                     widget.externalAccountManagement)
                   _ActionTile(
                     key: ServerSwitcherDialog.changePasswordKey,
-                    icon: Icons.password_outlined,
+                    icon: CupertinoIcons.lock,
                     label: widget.externalAccountManagement
                         ? l10n.providerAccountManage
                         : l10n.changePassword,
                     onTap: widget.onChangePassword,
                   ),
                 _ActionTile(
-                  icon: Icons.logout_rounded,
+                  icon: CupertinoIcons.square_arrow_right,
                   label: l10n.logout,
                   color: scheme.error,
                   onTap: widget.onLogout,
@@ -264,16 +251,8 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      visualDensity: VisualDensity.compact,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.md),
-      ),
-      iconColor: color,
-      textColor: color,
+    return AppListTile(
       leading: Icon(icon, size: 20),
-      minLeadingWidth: 24,
       title: Text(label),
       onTap: onTap,
     );
@@ -352,9 +331,9 @@ class _CheckSlot extends StatelessWidget {
       width: 28,
       child: checked
           ? Icon(
-              Icons.check_rounded,
+              CupertinoIcons.check_mark,
               size: 20,
-              color: Theme.of(context).colorScheme.primary,
+              color: AppUiTheme.of(context).colorScheme.primary,
             )
           : null,
     );
@@ -386,16 +365,12 @@ class _ServerTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final selectedServer = server.id == activeServerId;
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final deleteServerButton = IconButton(
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final deleteServerButton = AppIconButton(
       key: ServerSwitcherDialog.deleteKey(server.id),
       tooltip: l10n.deleteServer,
-      visualDensity: VisualDensity.compact,
-      icon: const Icon(Icons.delete_outline, size: 20),
+      icon: const Icon(CupertinoIcons.trash, size: 20),
       onPressed: () => _confirmDelete(context, l10n),
-    );
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadii.md),
     );
     final selectedFill = scheme.primary.withValues(alpha: 0.10);
     final active = server.activeLine;
@@ -405,11 +380,8 @@ class _ServerTile extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
         child: _RevealActions(
-          child: ListTile(
-            shape: shape,
+          child: AppListTile(
             selected: selectedServer,
-            selectedTileColor: selectedFill,
-            selectedColor: scheme.onSurface,
             contentPadding: const EdgeInsets.only(
               left: AppSpacing.sm,
               right: AppSpacing.xs,
@@ -436,21 +408,19 @@ class _ServerTile extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
+                      AppIconButton(
                         key: ServerSwitcherDialog.addLineKey(server.id),
                         tooltip: l10n.addLine,
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.add_link_rounded, size: 20),
+                        icon: const Icon(CupertinoIcons.link, size: 20),
                         onPressed: () => onAddLine(server.id),
                       ),
-                      IconButton(
+                      AppIconButton(
                         key: ServerSwitcherDialog.editLineKey(
                           server.id,
                           active.id,
                         ),
                         tooltip: l10n.editLine,
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.edit_outlined, size: 20),
+                        icon: const Icon(CupertinoIcons.pencil, size: 20),
                         onPressed: () => onEditLine(server.id, active),
                       ),
                       deleteServerButton,
@@ -466,11 +436,8 @@ class _ServerTile extends StatelessWidget {
       );
     }
     return _RevealActions(
-      child: ExpansionTile(
-        shape: shape,
-        collapsedShape: shape,
+      child: AppDisclosure(
         backgroundColor: selectedServer ? selectedFill : null,
-        collapsedBackgroundColor: selectedServer ? selectedFill : null,
         tilePadding: const EdgeInsets.only(
           left: AppSpacing.sm,
           right: AppSpacing.xs,
@@ -502,13 +469,13 @@ class _ServerTile extends StatelessWidget {
         children: [
           for (final line in server.lines)
             _lineTile(context, line, selectedServer: selectedServer),
-          ListTile(
+          AppListTile(
             key: ServerSwitcherDialog.addLineKey(server.id),
             contentPadding: const EdgeInsets.only(
               left: AppSpacing.xxxl,
               right: AppSpacing.md,
             ),
-            leading: const Icon(Icons.add, size: 20),
+            leading: const Icon(CupertinoIcons.plus, size: 20),
             title: Text(l10n.addLine),
             onTap: () => onAddLine(server.id),
           ),
@@ -525,7 +492,7 @@ class _ServerTile extends StatelessWidget {
   }) {
     final l10n = AppLocalizations.of(context);
     return _RevealActions(
-      child: ListTile(
+      child: AppListTile(
         key: ServerSwitcherDialog.lineOptionKey(server.id, line.id),
         contentPadding: const EdgeInsets.only(
           left: AppSpacing.xxxl,
@@ -543,18 +510,16 @@ class _ServerTile extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
+                  AppIconButton(
                     key: ServerSwitcherDialog.editLineKey(server.id, line.id),
                     tooltip: l10n.editLine,
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    icon: const Icon(CupertinoIcons.pencil, size: 20),
                     onPressed: () => onEditLine(server.id, line),
                   ),
-                  IconButton(
+                  AppIconButton(
                     key: ServerSwitcherDialog.deleteLineKey(server.id, line.id),
                     tooltip: l10n.deleteLine,
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.link_off, size: 20),
+                    icon: const Icon(CupertinoIcons.link, size: 20),
                     onPressed: server.lines.length > 1
                         ? () => onDeleteLine(server.id, line)
                         : null,
@@ -572,24 +537,26 @@ class _ServerTile extends StatelessWidget {
 
   /// 先确认再删除;取消不改动任何内容。
   Future<void> _confirmDelete(BuildContext context, AppLocalizations l10n) {
-    return showDialog<void>(
+    return showAppDialog<void>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
+        return AppDialog(
           title: Text(l10n.deleteServer),
           content: Text(l10n.deleteServerConfirmMessage(server.name)),
           actions: [
-            TextButton(
+            AppButton(
               key: ServerSwitcherDialog.deleteCancelKey,
               onPressed: () => Navigator.of(dialogContext).pop(),
+              variant: AppButtonVariant.plain,
               child: Text(l10n.cancelAction),
             ),
-            FilledButton(
+            AppButton(
               key: ServerSwitcherDialog.deleteConfirmKey,
               onPressed: () {
                 Navigator.of(dialogContext).pop();
                 onDelete(server.id);
               },
+              variant: AppButtonVariant.filled,
               child: Text(l10n.deleteServerConfirm),
             ),
           ],

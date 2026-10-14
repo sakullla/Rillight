@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/presentation_environment.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/failure_message.dart';
@@ -12,7 +11,7 @@ import 'package:rillight/auth/failure_message.dart';
 /// 服务器拒绝时留在对话框内显示原因,输入保留;成功后关闭对话框。
 /// 服务器吊销会话时控制器会回到登录页,本机保存的新密码可直接重新进入。
 /// 电视呈现把输入和确认取消放进同一纵向焦点序列;手机与桌面仍用文本框和
-/// Material 按钮。
+/// Cupertino 按钮。
 class ChangePasswordDialog extends StatefulWidget {
   const ChangePasswordDialog({super.key, required this.auth});
 
@@ -92,7 +91,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
             _confirm.text.isNotEmpty && _confirm.text != _newPassword.text;
         final canSubmit =
             !auth.isBusy && _newPassword.text.isNotEmpty && !mismatch;
-        return AlertDialog(
+        return AppDialog(
           title: Text(l10n.changePassword),
           content: SizedBox(
             width: tv
@@ -110,37 +109,29 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                   if (tv)
                     ..._tvFields(l10n, mismatch)
                   else ...[
-                    TextField(
+                    AppTextField(
                       key: ChangePasswordDialog.currentPasswordField,
                       controller: _current,
                       obscureText: true,
-                      decoration: InputDecoration(
-                        labelText: l10n.changePasswordCurrent,
-                        helperText: l10n.changePasswordCurrentHint,
-                      ),
+                      label: l10n.changePasswordCurrent,
+                      helperText: l10n.changePasswordCurrentHint,
                     ),
                     const SizedBox(height: 20),
-                    TextField(
+                    AppTextField(
                       key: ChangePasswordDialog.newPasswordField,
                       controller: _newPassword,
                       obscureText: true,
                       onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: l10n.changePasswordNew,
-                      ),
+                      label: l10n.changePasswordNew,
                     ),
                     const SizedBox(height: 20),
-                    TextField(
+                    AppTextField(
                       key: ChangePasswordDialog.confirmField,
                       controller: _confirm,
                       obscureText: true,
                       onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: l10n.changePasswordConfirm,
-                        errorText: mismatch
-                            ? l10n.changePasswordMismatch
-                            : null,
-                      ),
+                      label: l10n.changePasswordConfirm,
+                      errorText: mismatch ? l10n.changePasswordMismatch : null,
                     ),
                   ],
                   if (failure != null)
@@ -150,7 +141,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                         embyFailureMessage(l10n, failure),
                         key: ChangePasswordDialog.failureKey,
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                          color: AppUiTheme.of(context).colorScheme.error,
                         ),
                       ),
                     ),
@@ -176,9 +167,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                           child: auth.isBusy
                               ? SizedBox.square(
                                   dimension: context.tvdp(16),
-                                  child: const CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
+                                  child: const CupertinoActivityIndicator(),
                                 )
                               : Text(l10n.changePasswordSubmit),
                         ),
@@ -190,23 +179,25 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
             ),
           ),
           actions: tv
-              ? null
+              ? <Widget>[]
               : [
-                  TextButton(
+                  AppButton(
                     key: ChangePasswordDialog.cancelKey,
                     onPressed: auth.isBusy
                         ? null
                         : () => Navigator.of(context).pop(),
+                    variant: AppButtonVariant.plain,
                     child: Text(l10n.cancelAction),
                   ),
-                  FilledButton(
+                  AppButton(
                     key: ChangePasswordDialog.submitKey,
                     onPressed: canSubmit ? _submit : null,
+                    variant: AppButtonVariant.filled,
                     child: auth.isBusy
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CupertinoActivityIndicator(),
                           )
                         : Text(l10n.changePasswordSubmit),
                   ),
@@ -234,7 +225,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
         ),
         child: Text(
           l10n.changePasswordCurrentHint,
-          style: Theme.of(context).textTheme.bodySmall,
+          style: AppUiTheme.of(context).textTheme.bodySmall,
         ),
       ),
       TvInput(
@@ -255,7 +246,7 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
           padding: const EdgeInsets.only(top: 8),
           child: Text(
             l10n.changePasswordMismatch,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
+            style: TextStyle(color: AppUiTheme.of(context).colorScheme.error),
           ),
         ),
     ];

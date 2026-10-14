@@ -35,92 +35,83 @@ WorkSource work(
 );
 
 void main() {
-  test(
-    'reference equality includes region, configured/verified server, account, item and version',
-    () {
-      final ordinary = ref('a');
-      final references = [
-        ordinary,
-        ref('b'),
-        ref('a', version: 'v1'),
-        ref('a', version: 'v2'),
-        SourceReference(
-          account: account('a', user: 'other'),
-          itemId: 'same',
+  test('reference equality includes region, configured/verified server, account, item and version', () {
+    final ordinary = ref('a');
+    final references = [
+      ordinary,
+      ref('b'),
+      ref('a', version: 'v1'),
+      ref('a', version: 'v2'),
+      SourceReference(
+        account: account('a', user: 'other'),
+        itemId: 'same',
+      ),
+      SourceReference(
+        account: account('a', region: AccessRegion.private),
+        itemId: 'same',
+      ),
+      const SourceReference(
+        account: SourceAccount(
+          region: AccessRegion.ordinary,
+          configuredServerId: 'a',
+          verifiedServerId: 'different',
+          userId: 'u',
         ),
-        SourceReference(
-          account: account('a', region: AccessRegion.private),
-          itemId: 'same',
-        ),
-        const SourceReference(
-          account: SourceAccount(
-            region: AccessRegion.ordinary,
-            configuredServerId: 'a',
-            verifiedServerId: 'different',
-            userId: 'u',
-          ),
-          itemId: 'same',
-        ),
-      ];
-      expect(references.toSet(), hasLength(7));
-      expect(references.map((r) => r.key).toSet(), hasLength(7));
-      expect(ref('a', version: 'v1').item, ordinary);
-    },
-  );
+        itemId: 'same',
+      ),
+    ];
+    expect(references.toSet(), hasLength(7));
+    expect(references.map((r) => r.key).toSet(), hasLength(7));
+    expect(ref('a', version: 'v1').item, ordinary);
+  });
 
-  test(
-    'reliable normalized identity confirms even different titles; page duplicates do not add sources',
-    () {
-      final index = WorkIndex()
-        ..upsert([
-          work('a', ids: {'TMDB': '0042'}),
-          work('b', title: 'Translated'),
-        ]);
-      index.upsert([work('b', title: 'Translated')]);
-      expect(index.groups, hasLength(1));
-      expect(index.groups.single.sources, hasLength(2));
-      expect(index.groups.single.confirmations.single.decision.providers, [
-        'tmdb',
+  test('reliable normalized identity confirms even different titles; page duplicates do not add sources', () {
+    final index = WorkIndex()
+      ..upsert([
+        work('a', ids: {'TMDB': '0042'}),
+        work('b', title: 'Translated'),
       ]);
-    },
-  );
+    index.upsert([work('b', title: 'Translated')]);
+    expect(index.groups, hasLength(1));
+    expect(index.groups.single.sources, hasLength(2));
+    expect(index.groups.single.confirmations.single.decision.providers, [
+      'tmdb',
+    ]);
+  });
 
-  test(
-    'title-only candidates, bare id and unknown external provider never confirm',
-    () {
-      final a = work('a', ids: {});
-      final b = work('b', ids: {});
-      final index = WorkIndex()..upsert([a, b]);
-      expect(index.groups, hasLength(2));
-      expect(index.candidatesFor(a).single.reference, b.reference);
-      expect(compareWorks(a, b).reason, MatchReason.titleOnly);
-      expect(
-        compareWorks(
-          work('a', ids: {'custom': 'x'}),
-          work('b', ids: {'custom': 'x'}),
-        ).confirmed,
-        isFalse,
-      );
-      expect(
-        compareWorks(
-          work('a', ids: {'Tmdb': '42'}),
-          work('b', ids: {'Imdb': 'tt42'}),
-        ).confirmed,
-        isFalse,
-      );
-      expect(
-        compareWorks(
-          work('a', ids: {'Tmdb': 'bad'}),
-          work('b', ids: {'Tmdb': 'bad'}),
-        ).confirmed,
-        isFalse,
-      );
-      expect(
-        () => work('a', ids: {'Tmdb': '42', 'tmdb': '43'}),
-        throwsFormatException,
-      );
-    },
-  );
+  test('title-only candidates, bare id and unknown external provider never confirm', () {
+    final a = work('a', ids: {});
+    final b = work('b', ids: {});
+    final index = WorkIndex()..upsert([a, b]);
+    expect(index.groups, hasLength(2));
+    expect(index.candidatesFor(a).single.reference, b.reference);
+    expect(compareWorks(a, b).reason, MatchReason.titleOnly);
+    expect(
+      compareWorks(
+        work('a', ids: {'custom': 'x'}),
+        work('b', ids: {'custom': 'x'}),
+      ).confirmed,
+      isFalse,
+    );
+    expect(
+      compareWorks(
+        work('a', ids: {'Tmdb': '42'}),
+        work('b', ids: {'Imdb': 'tt42'}),
+      ).confirmed,
+      isFalse,
+    );
+    expect(
+      compareWorks(
+        work('a', ids: {'Tmdb': 'bad'}),
+        work('b', ids: {'Tmdb': 'bad'}),
+      ).confirmed,
+      isFalse,
+    );
+    expect(
+      () => work('a', ids: {'Tmdb': '42', 'tmdb': '43'}),
+      throwsFormatException,
+    );
+  });
 
   test('known provider/year/type/region conflicts beat common identity', () {
     final a = work('a', ids: {'Tmdb': '42', 'Imdb': 'tt1'});
@@ -203,27 +194,21 @@ void main() {
     },
   );
 
-  test(
-    'late earlier source keeps card key and retired merge aliases survive a split',
-    () {
-      final index = WorkIndex()..upsert([work('z')]);
-      final oldKey = index.groups.single.key;
-      index.upsert([work('a')]);
-      expect(index.groups.single.key, oldKey);
-      expect(index.groupForKey(oldKey)!.contains(ref('z')), isTrue);
-      index.upsert([
-        work('z', ids: {'Tmdb': '99'}),
-      ]);
-      expect(index.groups, hasLength(2));
-      expect(index.groupForKey(oldKey)!.sources.single.reference, ref('z'));
-      expect(
-        index.groupForKey(ref('a').key)!.sources.single.reference,
-        ref('a'),
-      );
-      index.removeWhere((r) => r == ref('z'));
-      expect(index.groupForKey(oldKey), isNull);
-    },
-  );
+  test('late earlier source keeps card key and retired merge aliases survive a split', () {
+    final index = WorkIndex()..upsert([work('z')]);
+    final oldKey = index.groups.single.key;
+    index.upsert([work('a')]);
+    expect(index.groups.single.key, oldKey);
+    expect(index.groupForKey(oldKey)!.contains(ref('z')), isTrue);
+    index.upsert([
+      work('z', ids: {'Tmdb': '99'}),
+    ]);
+    expect(index.groups, hasLength(2));
+    expect(index.groupForKey(oldKey)!.sources.single.reference, ref('z'));
+    expect(index.groupForKey(ref('a').key)!.sources.single.reference, ref('a'));
+    index.removeWhere((r) => r == ref('z'));
+    expect(index.groupForKey(oldKey), isNull);
+  });
 
   test(
     'versions of the same scoped item retain separate references in one work',
@@ -400,72 +385,63 @@ void main() {
         isNull,
       );
     });
-    test(
-      'specials cannot match ordinary episodes and malformed special boundary is uncertain',
-      () {
-        expect(
-          lookup(episode('a', season: 0, special: true), [episode('b')]).status,
-          EpisodeLookupStatus.missing,
-        );
-        expect(
-          lookup(episode('a', season: 0, special: true), [
-            episode('b', season: 0, special: true),
-          ]).status,
-          EpisodeLookupStatus.confirmed,
-        );
-        expect(
-          lookup(episode('a', season: 0), [episode('b', season: 0)]).source,
-          isNull,
-        );
-      },
-    );
-    test(
-      'unconfirmed series, numbering, conflicts and incomplete/failed query never resume',
-      () {
-        for (final target in [
-          episode('b', seriesId: 'unconfirmed'),
-          episode('b', scheme: null),
-          episode('b', scheme: 'dvd'),
-          episode('b', number: null),
-        ]) {
-          final result = lookup(episode('a'), [target]);
-          expect(result.status, EpisodeLookupStatus.uncertain);
-          expect(result.source, isNull);
-        }
-        expect(
-          lookup(episode('a', ids: {'Tvdb': '1'}), [
-            episode('b', ids: {'Tvdb': '2'}),
-          ]).status,
-          EpisodeLookupStatus.conflict,
-        );
-        expect(
-          lookup(episode('a'), [], complete: false).status,
-          EpisodeLookupStatus.uncertain,
-        );
-        expect(
-          lookup(episode('a'), [], success: false).status,
-          EpisodeLookupStatus.queryFailed,
-        );
-        expect(
-          lookup(episode('a', scheme: null), [episode('b')]).source,
-          isNull,
-        );
-        expect(
-          lookup(episode('a'), [
-            episode('b'),
-            EpisodeSource(
-              reference: ref('b', id: 'duplicate'),
-              series: ref('b'),
-              season: 1,
-              episode: 2,
-              isSpecial: false,
-              numberingScheme: 'aired',
-            ),
-          ]).status,
-          EpisodeLookupStatus.ambiguous,
-        );
-      },
-    );
+    test('specials cannot match ordinary episodes and malformed special boundary is uncertain', () {
+      expect(
+        lookup(episode('a', season: 0, special: true), [episode('b')]).status,
+        EpisodeLookupStatus.missing,
+      );
+      expect(
+        lookup(episode('a', season: 0, special: true), [
+          episode('b', season: 0, special: true),
+        ]).status,
+        EpisodeLookupStatus.confirmed,
+      );
+      expect(
+        lookup(episode('a', season: 0), [episode('b', season: 0)]).source,
+        isNull,
+      );
+    });
+    test('unconfirmed series, numbering, conflicts and incomplete/failed query never resume', () {
+      for (final target in [
+        episode('b', seriesId: 'unconfirmed'),
+        episode('b', scheme: null),
+        episode('b', scheme: 'dvd'),
+        episode('b', number: null),
+      ]) {
+        final result = lookup(episode('a'), [target]);
+        expect(result.status, EpisodeLookupStatus.uncertain);
+        expect(result.source, isNull);
+      }
+      expect(
+        lookup(episode('a', ids: {'Tvdb': '1'}), [
+          episode('b', ids: {'Tvdb': '2'}),
+        ]).status,
+        EpisodeLookupStatus.conflict,
+      );
+      expect(
+        lookup(episode('a'), [], complete: false).status,
+        EpisodeLookupStatus.uncertain,
+      );
+      expect(
+        lookup(episode('a'), [], success: false).status,
+        EpisodeLookupStatus.queryFailed,
+      );
+      expect(lookup(episode('a', scheme: null), [episode('b')]).source, isNull);
+      expect(
+        lookup(episode('a'), [
+          episode('b'),
+          EpisodeSource(
+            reference: ref('b', id: 'duplicate'),
+            series: ref('b'),
+            season: 1,
+            episode: 2,
+            isSpecial: false,
+            numberingScheme: 'aired',
+          ),
+        ]).status,
+        EpisodeLookupStatus.ambiguous,
+      );
+    });
     test('combined episodes remain uncertain even with verified ordering', () {
       final parsed = EpisodeSource.fromMediaItem(
         ref('b', id: 'combined'),

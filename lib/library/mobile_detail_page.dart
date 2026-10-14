@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/content_theme.dart';
@@ -12,7 +12,6 @@ import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -219,9 +218,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         itemId: itemId,
         source: DetailSourceScope.command(context, itemId)?.source,
         libraryId: DetailSourceScope.maybeOf(context)?.libraryId,
-        regionGeneration: DetailSourceScope.maybeOf(
-          context,
-        )?.permit.regionGeneration,
+        regionGeneration: DetailSourceScope.maybeOf(context)
+            ?.permit
+            .regionGeneration,
         // The displayed first source is a default, not an explicit choice.
         // Only pin it when the user picked one of its tracks on this page.
         mediaSourceId:
@@ -309,9 +308,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     final ok = await controller.togglePlayed();
     if (!mounted || !ok) return;
     final l = AppLocalizations.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(next ? l.markPlayed : l.markUnplayed)),
-    );
+    showAppNotice(context, next ? l.markPlayed : l.markUnplayed);
   }
 
   void _openItem(String itemId) {
@@ -344,9 +341,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (controller == null || seasonId == null || total <= 0) {
       return;
     }
-    final selected = await showModalBottomSheet<int>(
+    final selected = await showAppModalSheet<int>(
       context: context,
-      showDragHandle: true,
       builder: (context) {
         final l = AppLocalizations.of(context);
         return Column(
@@ -362,13 +358,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   l.pickEpisode,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: AppUiTheme.of(context).textTheme.titleMedium,
                 ),
               ),
             ),
             Expanded(
-              // 格子编号是列表位置，不是正在看的那一集。已加载的分集
-              // 不能拿来上色，对不上观看进度时就留空。
               child: GridView.builder(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.md,
@@ -385,9 +379,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 itemCount: total,
                 itemBuilder: (context, index) {
                   final number = index + 1;
-                  return OutlinedButton(
-                    style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                  return AppButton(
+                    style: AppButtonStyle(padding: EdgeInsets.zero),
                     onPressed: () => Navigator.pop(context, number),
+                    variant: AppButtonVariant.outlined,
                     child: Text('$number'),
                   );
                 },
@@ -521,16 +516,11 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         return ContentTheme(
           item: imageSource,
           preferBackdrop: preferBackdrop,
-          child: Scaffold(
-            extendBodyBehindAppBar: imageSource != null,
-            appBar: AppBar(
-              backgroundColor: immersive ? Colors.transparent : null,
-              surfaceTintColor: Colors.transparent,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              foregroundColor: immersive ? Colors.white : null,
-              // 横幅滚出后顶栏接管标题,不再只剩一条空色块。
-              title: _barSolid && (item ?? handoff?.item) != null
+          child: CupertinoPageScaffold(
+            navigationBar: CupertinoNavigationBar(
+              transitionBetweenRoutes: false,
+              backgroundColor: immersive ? const Color(0x00000000) : null,
+              middle: _barSolid && (item ?? handoff?.item) != null
                   ? Text(
                       (item ?? handoff?.item)!.name,
                       maxLines: 1,
@@ -538,7 +528,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                     )
                   : null,
             ),
-            body: RefreshIndicator(
+            child: AppRefresh(
               onRefresh: _refresh,
               child: CustomScrollView(
                 key: PageStorageKey('detail-${widget.itemId}'),
@@ -808,7 +798,7 @@ class _DetailPlayActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final played = this.played;
     final progress = this.progress;
@@ -817,21 +807,21 @@ class _DetailPlayActions extends StatelessWidget {
       if (showRestart)
         _SecondaryAction(
           key: const Key('phone-detail-play-start'),
-          icon: Icons.replay_rounded,
+          icon: CupertinoIcons.arrow_counterclockwise,
           label: l.playFromStart,
           onPressed: onRestart,
         ),
       if (onPrevious != null)
         _SecondaryAction(
           key: CatalogKeys.previousEpisode,
-          icon: Icons.skip_previous_rounded,
+          icon: CupertinoIcons.backward_end_fill,
           label: l.previousEpisode,
           onPressed: onPrevious,
         ),
       if (onNext != null)
         _SecondaryAction(
           key: CatalogKeys.nextEpisode,
-          icon: Icons.skip_next_rounded,
+          icon: CupertinoIcons.forward_end_fill,
           label: l.nextEpisode,
           onPressed: onNext,
         ),
@@ -845,11 +835,11 @@ class _DetailPlayActions extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Tooltip(
+              child: AppTooltip(
                 message: tooltip ?? label,
-                child: FilledButton.icon(
+                child: AppButton.icon(
                   key: const Key('mobile-detail-play'),
-                  style: FilledButton.styleFrom(
+                  style: AppButtonStyle(
                     minimumSize: const Size(48, _height),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
@@ -861,36 +851,38 @@ class _DetailPlayActions extends StatelessWidget {
                     ),
                   ),
                   onPressed: enabled ? onPlay : null,
-                  icon: const Icon(Icons.play_arrow_rounded, size: 26),
+                  icon: const Icon(CupertinoIcons.play_fill, size: 26),
                   label: Text(
                     label,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  variant: AppButtonVariant.filled,
                 ),
               ),
             ),
             if (played != null) ...[
               const SizedBox(width: AppSpacing.xs),
-              Tooltip(
+              AppTooltip(
                 message: played ? l.markUnplayed : l.markPlayed,
                 child: Semantics(
                   toggled: played,
-                  child: Material(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: played
+                          ? scheme.primaryContainer
+                          : scheme.surfaceContainerHigh,
+                    ),
                     key: CatalogKeys.playedToggle,
-                    color: played
-                        ? scheme.primaryContainer
-                        : scheme.surfaceContainerHigh,
-                    shape: shape,
                     clipBehavior: Clip.antiAlias,
-                    child: InkWell(
+                    child: AppSurfaceAction(
                       onTap: onTogglePlayed,
                       child: SizedBox.square(
                         dimension: _height,
                         child: Icon(
                           played
-                              ? Icons.check_circle_rounded
-                              : Icons.check_circle_outline_rounded,
+                              ? CupertinoIcons.checkmark_circle_fill
+                              : CupertinoIcons.checkmark_circle,
                           size: 26,
                           color: onTogglePlayed == null
                               ? scheme.onSurface.withValues(alpha: .38)
@@ -916,7 +908,7 @@ class _DetailPlayActions extends StatelessWidget {
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(2),
-                    child: LinearProgressIndicator(
+                    child: AppLoadingBar(
                       key: const Key('phone-detail-progress'),
                       value: progress.clamp(0, 1),
                       minHeight: 4,
@@ -972,12 +964,12 @@ class _SecondaryAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    return Tooltip(
+    return AppTooltip(
       message: label,
-      child: TextButton.icon(
-        style: TextButton.styleFrom(
+      child: AppButton.icon(
+        style: AppButtonStyle(
           minimumSize: const Size(48, 48),
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
           backgroundColor: scheme.surfaceContainerHigh,
@@ -992,6 +984,7 @@ class _SecondaryAction extends StatelessWidget {
         onPressed: onPressed,
         icon: Icon(icon, size: 20),
         label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        variant: AppButtonVariant.plain,
       ),
     );
   }
@@ -1082,11 +1075,10 @@ class _ChapterStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final labelHeight =
-        MediaQuery.textScalerOf(
-          context,
-        ).scale(theme.textTheme.labelLarge?.fontSize ?? 14) *
+        MediaQuery.textScalerOf(context)
+            .scale(theme.textTheme.labelLarge?.fontSize ?? 14) *
         1.4;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1141,12 +1133,12 @@ class _ChapterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
     final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
     return SizedBox(
       width: _ChapterStrip._cardWidth,
-      child: InkWell(
+      child: AppSurfaceAction(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
         child: Column(
@@ -1173,7 +1165,8 @@ class _ChapterCard extends StatelessWidget {
                       bottom: AppSpacing.xs,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.62),
+                          color: const Color(0xff000000)
+                              .withValues(alpha: 0.62),
                           borderRadius: BorderRadius.circular(AppRadii.sm),
                         ),
                         child: Padding(
@@ -1184,7 +1177,7 @@ class _ChapterCard extends StatelessWidget {
                           child: Text(
                             chapterClock(chapter.startPosition),
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: Colors.white,
+                              color: const Color(0xffffffff),
                               fontFeatures: const [
                                 FontFeature.tabularFigures(),
                               ],
@@ -1285,13 +1278,14 @@ class _DetailSimilar extends StatelessWidget {
               Expanded(
                 child: Text(
                   l.similarRow,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: AppUiTheme.of(context).textTheme.titleMedium,
                 ),
               ),
-              TextButton(
+              AppButton(
                 key: CatalogKeys.shelfMore(CatalogKeys.shelfSimilar),
-                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                style: AppButtonStyle(minimumSize: const Size(48, 48)),
                 onPressed: onOpenSimilar,
+                variant: AppButtonVariant.plain,
                 child: Text(l.more),
               ),
             ],
@@ -1344,7 +1338,7 @@ class _PhoneDetailPending extends StatelessWidget {
   static const bodyKey = Key('phone-detail-pending-body');
 
   static Widget title(BuildContext context, PhoneImageHandoff? handoff) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final name = handoff?.item.name.trim() ?? '';
     final compact = handoff != null && !handoff.item.isEpisode;
     if (name.isEmpty) {
@@ -1446,7 +1440,7 @@ class _PhoneDetailPending extends StatelessWidget {
                       ? metaPlaceholder(context, source)!
                       : Text(
                           meta.map((entry) => entry.label).join(' · '),
-                          style: Theme.of(context).textTheme.labelLarge,
+                          style: AppUiTheme.of(context).textTheme.labelLarge,
                         ),
                 ),
                 const SizedBox(height: AppSpacing.md),

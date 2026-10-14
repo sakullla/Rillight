@@ -1,9 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -51,7 +50,7 @@ class EpisodeGridMetrics {
     final cardWidth = (available - crossSpacing * (columns - 1)) / columns;
     final thumbWidth = cardWidth - inset * 2;
     final thumbHeight = thumbWidth * 9 / 16;
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scaler = MediaQuery.textScalerOf(context);
     double lines(TextStyle? style, int count) {
       final painter = TextPainter(
@@ -85,13 +84,13 @@ class EpisodeGridMetrics {
 }
 
 abstract final class _EpisodeCardStyles {
-  static TextStyle? title(ThemeData theme) =>
+  static TextStyle? title(AppUiThemeData theme) =>
       theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600);
 
-  static TextStyle? meta(ThemeData theme) => theme.textTheme.bodySmall
+  static TextStyle? meta(AppUiThemeData theme) => theme.textTheme.bodySmall
       ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
 
-  static TextStyle? overview(ThemeData theme) => theme.textTheme.bodySmall
+  static TextStyle? overview(AppUiThemeData theme) => theme.textTheme.bodySmall
       ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.4);
 }
 
@@ -214,9 +213,9 @@ class _EpisodeListState extends State<EpisodeList> {
     }
     final position = Scrollable.of(header).position;
     final anchor = header.findRenderObject() as RenderBox;
-    final start = RenderAbstractViewport.of(
-      anchor,
-    ).getOffsetToReveal(anchor, 0).offset;
+    final start = RenderAbstractViewport.of(anchor)
+        .getOffsetToReveal(anchor, 0)
+        .offset;
     final row = target ~/ metrics.columns;
     final offset =
         (start +
@@ -233,7 +232,7 @@ class _EpisodeListState extends State<EpisodeList> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final error = widget.error;
     final loadMoreError = widget.loadMoreError;
     final empty = widget.episodes.isEmpty;
@@ -285,13 +284,14 @@ class _EpisodeListState extends State<EpisodeList> {
                     ),
                     widget.headerAction,
                     if (widget.onMore != null && error == null)
-                      TextButton(
+                      AppButton(
                         key: CatalogKeys.shelfMore(CatalogKeys.shelfEpisodes),
                         onPressed: widget.onMore,
-                        style: TextButton.styleFrom(
+                        style: AppButtonStyle(
                           foregroundColor: theme.colorScheme.onSurfaceVariant,
                           textStyle: theme.textTheme.labelLarge,
                         ),
+                        variant: AppButtonVariant.plain,
                         child: Text(l10n.more),
                       ),
                   ],
@@ -317,10 +317,11 @@ class _EpisodeListState extends State<EpisodeList> {
                         ),
                       ),
                       if (widget.onRetryLoadMore != null)
-                        TextButton(
+                        AppButton(
                           onPressed: widget.loadingMore
                               ? null
                               : widget.onRetryLoadMore,
+                          variant: AppButtonVariant.plain,
                           child: Text(l10n.retry),
                         ),
                     ],
@@ -376,14 +377,15 @@ class _EpisodeListState extends State<EpisodeList> {
             ),
             child: widget.hasMore
                 ? Center(
-                    child: OutlinedButton(
+                    child: AppButton(
                       key: CatalogKeys.episodesLoadMore,
                       onPressed: widget.loadingMore ? null : widget.onLoadMore,
+                      variant: AppButtonVariant.outlined,
                       child: widget.loadingMore
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CupertinoActivityIndicator(),
                             )
                           : Text(l10n.episodesLoadMore),
                     ),
@@ -443,18 +445,17 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final item = widget.item;
     final played = item.userData.played;
     final playLabel = item.canResume ? l10n.resumePlay : l10n.play;
-    final action = await showMenu<_EpisodeRowMenuAction>(
+    final action = await showAppMenu<_EpisodeRowMenuAction>(
       context: context,
-      position: RelativeRect.fromRect(
-        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
-        Offset.zero & overlayBox.size,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        overlayBox.size.width - globalPosition.dx,
+        overlayBox.size.height - globalPosition.dy,
       ),
       items: [
-        PopupMenuItem(
-          value: _EpisodeRowMenuAction.play,
-          child: Text(playLabel),
-        ),
-        PopupMenuItem(
+        AppMenuEntry(value: _EpisodeRowMenuAction.play, child: Text(playLabel)),
+        AppMenuEntry(
           value: _EpisodeRowMenuAction.togglePlayed,
           child: Text(played ? l10n.markUnplayed : l10n.markPlayed),
         ),
@@ -474,7 +475,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final item = widget.item;
     final selected = widget.selected;
@@ -487,15 +488,17 @@ class _EpisodeRowState extends State<EpisodeRow> {
     final revealed = _hovered || _focused;
     final fill = revealed
         ? scheme.surfaceContainerHighest.withValues(alpha: 0.5)
-        : Colors.transparent;
+        : const Color(0x00000000);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Material(
-        color: fill,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: Container(
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
+        child: AppSurfaceAction(
           key: CatalogKeys.episode(item.id),
           onTap: widget.onTap,
           onFocusChange: (value) => setState(() => _focused = value),
@@ -536,7 +539,7 @@ class _EpisodeRowState extends State<EpisodeRow> {
                         : scheme.onSurface,
                   ),
                 ),
-                // 续播由进度条表达，已看由角标表达，这里只写播出日期。
+
                 if (premiere != null) ...[
                   const SizedBox(height: 2),
                   Text(
@@ -596,7 +599,7 @@ class _EpisodeThumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final scheme = AppUiTheme.of(context).colorScheme;
     final resumable = item.canResume;
     final fade = AppMotion.durationOf(context, AppMotion.normal);
     final runtime = this.runtime;
@@ -637,7 +640,7 @@ class _EpisodeThumb extends StatelessWidget {
                 IgnorePointer(
                   child: AnimatedContainer(
                     duration: fade,
-                    color: Colors.black.withValues(
+                    color: const Color(0xff000000).withValues(
                       alpha: hovered
                           ? .36
                           : played && !selected
@@ -661,23 +664,20 @@ class _EpisodeThumb extends StatelessWidget {
                       scale: hovered ? 1 : .85,
                       duration: fade,
                       curve: AppMotion.standard,
-                      child: Tooltip(
+                      child: AppTooltip(
                         message: playLabel,
-                        child: Material(
+                        child: Container(
+                          decoration: BoxDecoration(color: scheme.primary),
                           key: CatalogKeys.episodePlay(item.id),
-                          color: scheme.primary,
-                          shape: const CircleBorder(),
-                          elevation: 4,
-                          shadowColor: Colors.black54,
                           clipBehavior: Clip.antiAlias,
-                          child: InkWell(
+                          child: AppSurfaceAction(
                             key: ValueKey('episode-thumb-play-${item.id}'),
                             canRequestFocus: false,
                             onTap: onPlay,
                             child: Padding(
                               padding: EdgeInsets.all(height * .06),
                               child: Icon(
-                                Icons.play_arrow_rounded,
+                                CupertinoIcons.play_fill,
                                 color: scheme.onPrimary,
                                 size: height * .22,
                               ),
@@ -695,29 +695,29 @@ class _EpisodeThumb extends StatelessWidget {
                     // 未看的勾平时隐去,悬停/聚焦再出现;已看的实心勾常驻。
                     opacity: played || hovered ? 1 : 0,
                     duration: AppMotion.durationOf(context, AppMotion.fast),
-                    child: IconButton(
+                    child: AppIconButton(
                       key: CatalogKeys.episodePlayed(item.id),
                       tooltip: played ? l10n.markUnplayed : l10n.markPlayed,
-                      style: IconButton.styleFrom(
+                      style: AppButtonStyle(
                         minimumSize: const Size(32, 32),
                         padding: const EdgeInsets.all(4),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        visualDensity: VisualDensity.compact,
                       ),
                       onPressed: busyPlayed ? null : onTogglePlayed,
                       icon: played
                           ? const EpisodeWatchedBadge()
                           : DecoratedBox(
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: .6),
+                                color: const Color(0xff000000)
+                                    .withValues(alpha: .6),
                                 shape: BoxShape.circle,
                               ),
                               child: Padding(
                                 padding: const EdgeInsets.all(2),
                                 child: Icon(
-                                  Icons.check_rounded,
+                                  CupertinoIcons.check_mark,
                                   size: 16,
-                                  color: Colors.white.withValues(alpha: .7),
+                                  color: const Color(0xffffffff)
+                                      .withValues(alpha: .7),
                                 ),
                               ),
                             ),
@@ -754,7 +754,7 @@ class EpisodeThumbBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .66),
+        color: const Color(0xff000000).withValues(alpha: .66),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Padding(
@@ -762,8 +762,8 @@ class EpisodeThumbBadge extends StatelessWidget {
         child: Text(
           label,
           maxLines: 1,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: Colors.white,
+          style: AppUiTheme.of(context).textTheme.labelSmall?.copyWith(
+            color: const Color(0xffffffff),
             fontWeight: FontWeight.w600,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
@@ -787,16 +787,16 @@ class EpisodeWatchedBadge extends StatelessWidget {
       label: AppLocalizations.of(context).mobileWatched,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: .6),
+          color: const Color(0xff000000).withValues(alpha: .6),
           shape: BoxShape.circle,
         ),
         child: Padding(
           padding: const EdgeInsets.all(2),
           child: Icon(
-            Icons.check_rounded,
+            CupertinoIcons.check_mark,
             key: iconKey,
             size: size,
-            color: Colors.white.withValues(alpha: .95),
+            color: const Color(0xffffffff).withValues(alpha: .95),
           ),
         ),
       ),
@@ -881,12 +881,14 @@ class _EpisodeProgressBar extends StatelessWidget {
       child: SizedBox(
         height: 3,
         child: ColoredBox(
-          color: Colors.black.withValues(alpha: 0.45),
+          color: const Color(0xff000000).withValues(alpha: 0.45),
           child: Align(
             alignment: Alignment.centerLeft,
             child: FractionallySizedBox(
               widthFactor: value.clamp(0.0, 1.0),
-              child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+              child: ColoredBox(
+                color: AppUiTheme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         ),

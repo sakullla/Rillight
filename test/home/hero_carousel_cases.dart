@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -55,9 +58,18 @@ void main() {
   Widget wrap(Widget child) {
     return MaterialApp(
       locale: const Locale('zh'),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: [
+        ...AppLocalizations.localizationsDelegates,
+        ui.GlobalCupertinoLocalizations.delegate,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: child),
+      builder: (context, child) => ui.AppUiTheme(
+        data: Theme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
   }
 
@@ -404,8 +416,17 @@ void main() {
         MaterialApp.router(
           routerConfig: router,
           locale: const Locale('zh'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       );
       await settle(tester);

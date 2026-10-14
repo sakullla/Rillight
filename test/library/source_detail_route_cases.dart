@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
 import '../helpers/region_access_fixture.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -166,9 +169,8 @@ void main() {
         createClient: client,
       );
       await tester.runAsync(registry.load);
-      final account = (await tester.runAsync(
-        () => registry.authenticate('b'),
-      ))!.account;
+      final account = (await tester.runAsync(() => registry.authenticate('b')))!
+          .account;
       final auth = AuthController(
         client: client(),
         credentials: credentials,
@@ -232,8 +234,17 @@ void main() {
             host: host,
             child: MaterialApp.router(
               routerConfig: router,
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              localizationsDelegates: [
+                ...AppLocalizations.localizationsDelegates,
+                ui.GlobalCupertinoLocalizations.delegate,
+              ],
               supportedLocales: AppLocalizations.supportedLocales,
+              builder: (context, child) => ui.AppUiTheme(
+                data: Theme.of(context).brightness == Brightness.dark
+                    ? ui.AppUiTheme.dark()
+                    : ui.AppUiTheme.light(),
+                child: child ?? const SizedBox.shrink(),
+              ),
             ),
           ),
         ),
@@ -343,9 +354,8 @@ void main() {
         createClient: client,
       );
       await tester.runAsync(registry.load);
-      final b = (await tester.runAsync(
-        () => registry.authenticate('b'),
-      ))!.account;
+      final b = (await tester.runAsync(() => registry.authenticate('b')))!
+          .account;
       final auth = AuthController(
         client: client(),
         credentials: credentials,
@@ -359,7 +369,10 @@ void main() {
       addTearDown(showLatePoster.dispose);
       await tester.pumpWidget(
         MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: AuthScope(
             controller: auth,
@@ -409,6 +422,12 @@ void main() {
                 },
               ),
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       );
@@ -588,8 +607,7 @@ void main() {
       expect(
         transport.requests.length,
         dispatchedBeforeLock,
-        reason:
-            'revoked queued chapters never dispatch, and in-flight responses never retry',
+        reason: 'revoked queued chapters never dispatch, and in-flight responses never retry',
       );
       expect(
         cache.peek(
@@ -679,9 +697,8 @@ void main() {
             createClient: client,
           );
           await tester.runAsync(registry.load);
-          final b = (await tester.runAsync(
-            () => registry.authenticate('b'),
-          ))!.account;
+          final b = (await tester.runAsync(() => registry.authenticate('b')))!
+              .account;
           final auth = AuthController(
             client: client(),
             credentials: credentials,
@@ -724,7 +741,7 @@ void main() {
             );
             expect(similarShelf.onMore, isNull);
           } else if (!environment.isTv && id != 'episode-no-parent') {
-            final more = tester.widget<TextButton>(
+            final more = tester.widget<ui.AppButton>(
               find.byKey(CatalogKeys.shelfMore(CatalogKeys.shelfSimilar)),
             );
             expect(more.onPressed, isNull);
@@ -889,9 +906,8 @@ void main() {
         createClient: client,
       );
       await tester.runAsync(registry.load);
-      final account = (await tester.runAsync(
-        () => registry.authenticate('b'),
-      ))!.account;
+      final account = (await tester.runAsync(() => registry.authenticate('b')))!
+          .account;
       final auth = AuthController(
         client: client(),
         credentials: credentials,

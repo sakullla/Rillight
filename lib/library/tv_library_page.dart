@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -82,10 +82,10 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
 
   Future<void> _filter() async {
     final c = _controller!;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       useRootNavigator: false,
-      builder: (context) => Dialog(
+      builder: (context) => AppModalFrame(
         clipBehavior: Clip.antiAlias,
         child: LibraryFilterPanel(
           television: true,
@@ -131,9 +131,9 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
   @override
   Widget build(BuildContext context) {
     final c = _controller!, l = AppLocalizations.of(context);
-    final library = CatalogScope.of(
-      context,
-    ).libraries.where((item) => item.id == widget.viewId).firstOrNull;
+    final library = CatalogScope.of(context).libraries
+        .where((item) => item.id == widget.viewId)
+        .firstOrNull;
     return ListenableBuilder(
       listenable: c,
       builder: (context, _) {
@@ -150,7 +150,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
               autofocus: true,
               pill: true,
               selected: active,
-              leading: const Icon(Icons.tune_rounded),
+              leading: const Icon(CupertinoIcons.slider_horizontal_3),
               onPressed: _filter,
               child: Text(l.libraryFilter),
             ),
@@ -175,7 +175,7 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                           8 * s,
                         ),
                         sliver: const SliverToBoxAdapter(
-                          child: LinearProgressIndicator(),
+                          child: AppLoadingBar(),
                         ),
                       ),
                     if (c.error != null)
@@ -221,7 +221,9 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                               TvAction(
                                 key: const Key('tv-library-more'),
                                 pill: true,
-                                leading: const Icon(Icons.expand_more_rounded),
+                                leading: const Icon(
+                                  CupertinoIcons.chevron_down,
+                                ),
                                 onPressed: c.loading || c.loadingMore
                                     ? null
                                     : () => c.load(more: true),
@@ -232,7 +234,9 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
                             TvAction(
                               key: const Key('tv-library-refresh'),
                               pill: true,
-                              leading: const Icon(Icons.refresh_rounded),
+                              leading: const Icon(
+                                CupertinoIcons.arrow_clockwise,
+                              ),
                               onPressed: c.load,
                               child: Text(l.mobileRefresh),
                             ),

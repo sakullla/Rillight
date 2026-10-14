@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -29,10 +28,9 @@ class LibraryCountsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final bodySmall = Theme.of(
-      context,
-    ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant);
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final bodySmall = AppUiTheme.of(context).textTheme.bodySmall
+        ?.copyWith(color: scheme.onSurfaceVariant);
     if (loading) {
       // 静态文案而不是转圈:加载可能停在无动画的状态(如宿主测试里被冻结的
       // 后台拉取),无限动画会让 pumpAndSettle 永远等不到静止帧。
@@ -43,9 +41,8 @@ class LibraryCountsPanel extends StatelessWidget {
       return Text(
         key: failureKey,
         embyFailureMessage(l10n, error),
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: scheme.error),
+        style: AppUiTheme.of(context).textTheme.bodySmall
+            ?.copyWith(color: scheme.error),
       );
     }
     final data = counts;

@@ -11,10 +11,9 @@ import 'blurred_artwork.dart';
 import 'package:cryptography/dart.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/artwork_color_scope.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -972,9 +971,8 @@ class _MediaImageState extends State<MediaImage> {
           return _loadingBox(context, width, height);
         }
         if (widget.contributesToTheme) {
-          ArtworkColorScope.maybeOf(
-            context,
-          )?.report(widget.item.id, loaded.cacheKey, loaded.bytes);
+          ArtworkColorScope.maybeOf(context)
+              ?.report(widget.item.id, loaded.cacheKey, loaded.bytes);
         }
         return child;
       },
@@ -993,7 +991,7 @@ class _MediaImageState extends State<MediaImage> {
             RepaintBoundary(
               child: BlurredArtwork(bytes: loaded.bytes, sigma: 28),
             ),
-            ColoredBox(color: Colors.black.withValues(alpha: .18)),
+            ColoredBox(color: const Color(0xff000000).withValues(alpha: .18)),
             image,
           ],
         ),

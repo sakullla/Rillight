@@ -1,8 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
@@ -14,17 +13,16 @@ Future<void> showHomeDisplayDialog(BuildContext context) {
   final sections = PhoneHomeSectionController.app();
   final serverId = AuthScope.maybeOf(context)?.session?.server.id ?? '';
   unawaited(sections.load(serverId));
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) {
-      final theme = Theme.of(context);
+      final theme = AppUiTheme.of(context);
       final l10n = AppLocalizations.of(context);
       final viewport = MediaQuery.sizeOf(context);
       final width = AppViewport.fit(420, viewport.width - 48, viewport);
       final height = AppViewport.fit(480, viewport.height * 0.88, viewport);
-      return Dialog(
+      return AppModalFrame(
         backgroundColor: theme.colorScheme.surface,
-        elevation: 0,
         child: LiquidGlass(
           kind: LiquidGlassKind.panel,
           child: SizedBox(

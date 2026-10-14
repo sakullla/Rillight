@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import 'configured_source.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -114,9 +117,8 @@ void main() {
       expect(auth.passwordChangeFailure?.detail, 'HTTP 400: 密码策略不满足');
       // 本机仍保存旧密码,服务器端密码未变。
       expect(
-        (await auth.credentials.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.password,
+        (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+            ?.password,
         'correct-horse',
       );
       expect(server.effectivePassword('user-alice'), 'correct-horse');
@@ -141,9 +143,8 @@ void main() {
       expect(auth.passwordChangeFailure?.statusCode, 400);
       expect(auth.passwordChangeFailure?.detail, 'HTTP 400: 旧密码不正确');
       expect(
-        (await auth.credentials.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.password,
+        (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+            ?.password,
         'correct-horse',
       );
     },
@@ -167,9 +168,8 @@ void main() {
       expect(auth.failure?.kind, MediaServerFailureKind.sessionExpired);
       // 本机已保存新密码。
       expect(
-        (await auth.credentials.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.password,
+        (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+            ?.password,
         'new-horse',
       );
 
@@ -190,9 +190,8 @@ void main() {
       );
       expect(auth.isLoggedIn, isTrue);
       expect(
-        (await auth.credentials.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.password,
+        (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+            ?.password,
         'new-horse',
       );
     },
@@ -217,23 +216,22 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<FilledButton>(find.byKey(ChangePasswordDialog.submitKey))
+            .widget<ui.AppButton>(find.byKey(ChangePasswordDialog.submitKey))
             .onPressed,
         isNotNull,
       );
 
       await tester.tap(find.byKey(ChangePasswordDialog.submitKey));
-      await _pumpUntilGone(tester, find.byType(AlertDialog));
+      await _pumpUntilGone(tester, find.byType(ui.AppDialog));
 
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(ui.AppDialog), findsNothing);
       expect(
         server.changePasswordRequests.single.containsKey('CurrentPw'),
         isFalse,
       );
       expect(
-        (await auth.credentials.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.password,
+        (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+            ?.password,
         'new-horse',
       );
       expect(tester.takeException(), isNull);
@@ -266,12 +264,11 @@ void main() {
     await _pumpUntilFound(tester, find.byKey(ChangePasswordDialog.failureKey));
 
     // 失败:对话框保留,显示服务器给的原因。
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(ui.AppDialog), findsOneWidget);
     expect(find.textContaining('密码策略不满足'), findsOneWidget);
     expect(
-      (await auth.credentials.read(
-        configuredSourceId(auth, server.serverId),
-      ))?.password,
+      (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+          ?.password,
       'correct-horse',
     );
     expect(auth.isLoggedIn, isTrue);
@@ -298,7 +295,7 @@ void main() {
     expect(find.text('两次输入的新密码不一致'), findsOneWidget);
     expect(
       tester
-          .widget<FilledButton>(find.byKey(ChangePasswordDialog.submitKey))
+          .widget<ui.AppButton>(find.byKey(ChangePasswordDialog.submitKey))
           .onPressed,
       isNull,
     );
@@ -317,11 +314,14 @@ void main() {
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         home: Scaffold(
           body: Builder(
             builder: (context) => Center(
-              child: FilledButton(
+              child: ui.AppButton(
                 key: const Key('open-switcher'),
                 onPressed: () => showDialog<void>(
                   context: context,
@@ -349,7 +349,7 @@ void main() {
                     onAddLine: (_) {},
                     onEditLine: (_, _) {},
                     onDeleteLine: (_, _) {},
-                    // 宿主(session_actions)在回调里先收起切换面板。
+
                     onChangePassword: () {
                       requested = true;
                       Navigator.of(dialogContext).pop();
@@ -360,6 +360,12 @@ void main() {
               ),
             ),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );
@@ -394,8 +400,17 @@ void main() {
             theme: AppTheme.dark(),
             locale: const Locale('zh'),
             supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             home: const PhoneMinePage(),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         ),
       ),
@@ -427,14 +442,14 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(ChangePasswordDialog),
-          matching: find.byType(TextField),
+          matching: find.byType(ui.AppTextField),
         ),
         findsNothing,
       );
       expect(
         find.descendant(
           of: find.byType(ChangePasswordDialog),
-          matching: find.byType(FilledButton),
+          matching: find.byType(ui.AppButton),
         ),
         findsNothing,
       );
@@ -453,7 +468,7 @@ void main() {
       );
 
       await _key(tester, LogicalKeyboardKey.select);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(ui.AppDialog), findsNothing);
       expect(server.changePasswordRequests, isEmpty);
       expect(tester.takeException(), isNull);
     },
@@ -486,17 +501,16 @@ void main() {
       );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      await _pumpUntilGone(tester, find.byType(AlertDialog));
+      await _pumpUntilGone(tester, find.byType(ui.AppDialog));
 
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(ui.AppDialog), findsNothing);
       expect(
         server.changePasswordRequests.single.containsKey('CurrentPw'),
         isFalse,
       );
       expect(
-        (await auth.credentials.read(
-          configuredSourceId(auth, server.serverId),
-        ))?.password,
+        (await auth.credentials.read(configuredSourceId(auth, server.serverId)))
+            ?.password,
         'new-horse',
       );
       expect(tester.takeException(), isNull);
@@ -537,11 +551,14 @@ Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
         theme: AppTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         home: Scaffold(
           body: Builder(
             builder: (context) => Center(
-              child: FilledButton(
+              child: ui.AppButton(
                 key: const Key('open-change-password'),
                 onPressed: () => showDialog<void>(
                   context: context,
@@ -551,6 +568,12 @@ Future<void> _pumpTvDialog(WidgetTester tester, AuthController auth) async {
               ),
             ),
           ),
+        ),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     ),
@@ -565,11 +588,14 @@ Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {
       theme: AppTheme.dark(),
       locale: const Locale('zh'),
       supportedLocales: AppLocalizations.supportedLocales,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: [
+        ...AppLocalizations.localizationsDelegates,
+        ui.GlobalCupertinoLocalizations.delegate,
+      ],
       home: Scaffold(
         body: Builder(
           builder: (context) => Center(
-            child: FilledButton(
+            child: ui.AppButton(
               key: const Key('open-change-password'),
               onPressed: () => showDialog<void>(
                 context: context,
@@ -579,6 +605,12 @@ Future<void> _pumpDialog(WidgetTester tester, AuthController auth) async {
             ),
           ),
         ),
+      ),
+      builder: (context, child) => ui.AppUiTheme(
+        data: Theme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: child ?? const SizedBox.shrink(),
       ),
     ),
   );

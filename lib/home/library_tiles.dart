@@ -1,10 +1,9 @@
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/media_server/models.dart';
@@ -139,7 +138,7 @@ class _LibraryTilesState extends State<LibraryTiles> {
                 Expanded(
                   child: Text(
                     l10n.libraries,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: AppUiTheme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 ?widget.headerAction,
@@ -200,7 +199,7 @@ class _LibraryTilesState extends State<LibraryTiles> {
                         child: _LibraryScrollButton(
                           buttonKey: CatalogKeys.shelfScrollLeft(_shelfId),
                           tooltip: l10n.scrollLeft,
-                          icon: Icons.chevron_left,
+                          icon: CupertinoIcons.chevron_left,
                           onPressed: () => _page(-1),
                         ),
                       ),
@@ -216,7 +215,7 @@ class _LibraryTilesState extends State<LibraryTiles> {
                         child: _LibraryScrollButton(
                           buttonKey: CatalogKeys.shelfScrollRight(_shelfId),
                           tooltip: l10n.scrollRight,
-                          icon: Icons.chevron_right,
+                          icon: CupertinoIcons.chevron_right,
                           onPressed: () => _page(1),
                         ),
                       ),
@@ -259,7 +258,7 @@ class _LibraryScrollButton extends StatelessWidget {
 }
 
 /// 片库行允许鼠标拖动。不拦截滚轮，竖向滚动仍由首页接管。
-class _LibraryRailScrollBehavior extends MaterialScrollBehavior {
+class _LibraryRailScrollBehavior extends CupertinoScrollBehavior {
   const _LibraryRailScrollBehavior();
 
   @override
@@ -286,7 +285,7 @@ class LibraryCardFace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadii.md),
@@ -328,7 +327,7 @@ class LibraryCardFace extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.start,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.white,
+                    color: const Color(0xffffffff),
                     fontWeight: FontWeight.w600,
                   ),
                 ),

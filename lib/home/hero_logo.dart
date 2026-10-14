@@ -3,8 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/material.dart';
-import 'package:rillight/app/theme/tokens.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_image/media_image.dart';

@@ -1,8 +1,9 @@
 import '../app/tv_widgets.dart';
 import '../app/presentation_environment.dart';
+
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,7 +11,6 @@ import '../app/l10n/app_localizations.dart';
 import '../media_server/authentication.dart';
 import '../media_server/capabilities.dart';
 import '../media_server/errors.dart';
-import '../app/theme/tokens.dart';
 import 'auth_controller.dart';
 import 'login_widgets.dart';
 import 'provider_connect_controller.dart';
@@ -19,39 +19,37 @@ import 'server_list_store.dart';
 Future<void> showProviderAccountSettings(BuildContext context) {
   final l = AppLocalizations.of(context);
   final uri = Uri.parse('https://app.plex.tv/desktop/#!/settings/account');
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
-    builder: (dialog) => AlertDialog(
+    builder: (dialog) => AppDialog(
       title: Text(l.providerAccountManage),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(l.providerAccountInstructions),
-          SelectableText(uri.toString()),
+          AppSelectableText(uri.toString()),
         ],
       ),
       actions: [
-        TextButton(
+        AppButton(
           onPressed: () => Navigator.pop(dialog),
+          variant: AppButtonVariant.plain,
           child: Text(l.cancelAction),
         ),
-        FilledButton(
+        AppButton(
           onPressed: () async {
             try {
               if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
                   context.mounted) {
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                  SnackBar(content: Text(l.providerBrowserFailure)),
-                );
+                showAppNotice(context, l.providerBrowserFailure);
               }
             } catch (_) {
               if (context.mounted) {
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                  SnackBar(content: Text(l.providerBrowserFailure)),
-                );
+                showAppNotice(context, l.providerBrowserFailure);
               }
             }
           },
+          variant: AppButtonVariant.filled,
           child: Text(l.providerOpenBrowser),
         ),
       ],
@@ -69,7 +67,7 @@ Future<bool?> showProviderConnect(
 }) async {
   final release = auth.retainAuthorizationPresentation();
   try {
-    return await showDialog<bool>(
+    return await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => ProviderConnectDialog(
@@ -241,7 +239,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     final l = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: TextField(
+      child: AppTextField(
         key: Key(id),
         controller: value,
         obscureText: obscured,
@@ -251,25 +249,23 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         autofillHints: autofillHints,
         textInputAction: action,
         onSubmitted: onSubmitted,
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixIcon: icon == null ? null : Icon(icon, size: 20),
-          suffixIcon: secret && keyboardType != TextInputType.number
-              ? IconButton(
-                  key: Key('$id-visibility'),
-                  tooltip: _passwordVisible ? l.hidePassword : l.showPassword,
-                  onPressed: () =>
-                      setState(() => _passwordVisible = !_passwordVisible),
-                  icon: Icon(
-                    _passwordVisible
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    size: 20,
-                  ),
-                )
-              : null,
-        ),
+        label: label,
+        placeholder: hint,
+        prefix: icon == null ? null : Icon(icon, size: 20),
+        suffix: secret && keyboardType != TextInputType.number
+            ? AppIconButton(
+                key: Key('$id-visibility'),
+                tooltip: _passwordVisible ? l.hidePassword : l.showPassword,
+                onPressed: () =>
+                    setState(() => _passwordVisible = !_passwordVisible),
+                icon: Icon(
+                  _passwordVisible
+                      ? CupertinoIcons.eye_slash
+                      : CupertinoIcons.eye,
+                  size: 20,
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -294,20 +290,22 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       );
     }
     final child = BusyLabel(busy: busy, label: label, busyLabel: l.connecting);
-    final style = FilledButton.styleFrom(minimumSize: const Size(48, 48));
+    final style = AppButtonStyle(minimumSize: const Size(48, 48));
     return icon == null || busy
-        ? FilledButton(
+        ? AppButton(
             key: Key(id),
             style: style,
             onPressed: onPressed,
+            variant: AppButtonVariant.filled,
             child: child,
           )
-        : FilledButton.icon(
+        : AppButton.icon(
             key: Key(id),
             style: style,
             onPressed: onPressed,
             icon: Icon(icon, size: 20),
             label: child,
+            variant: AppButtonVariant.filled,
           );
   }
 
@@ -327,25 +325,27 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         child: Center(child: Text(label)),
       );
     }
-    final scheme = Theme.of(context).colorScheme;
-    final style = FilledButton.styleFrom(
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final style = AppButtonStyle(
       minimumSize: const Size(48, 48),
       backgroundColor: scheme.surfaceContainerHighest,
       foregroundColor: scheme.onSurface,
     );
     return icon == null
-        ? FilledButton.tonal(
+        ? AppButton(
             key: Key(id),
             style: style,
             onPressed: onPressed,
+            variant: AppButtonVariant.tinted,
             child: Text(label),
           )
-        : FilledButton.tonalIcon(
+        : AppButton.icon(
             key: Key(id),
             style: style,
             onPressed: onPressed,
             icon: Icon(icon, size: 20),
             label: Text(label),
+            variant: AppButtonVariant.tinted,
           );
   }
 
@@ -365,12 +365,18 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       );
     }
     return icon == null
-        ? TextButton(key: key, onPressed: onPressed, child: Text(label))
-        : TextButton.icon(
+        ? AppButton(
+            key: key,
+            onPressed: onPressed,
+            variant: AppButtonVariant.plain,
+            child: Text(label),
+          )
+        : AppButton.icon(
             key: key,
             onPressed: onPressed,
             icon: Icon(icon, size: 18),
             label: Text(label),
+            variant: AppButtonVariant.plain,
           );
   }
 
@@ -379,21 +385,17 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     try {
       final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!opened && mounted) {
-        ScaffoldMessenger.maybeOf(
-          context,
-        )?.showSnackBar(SnackBar(content: Text(l.providerBrowserFailure)));
+        showAppNotice(context, l.providerBrowserFailure);
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.maybeOf(
-          context,
-        )?.showSnackBar(SnackBar(content: Text(l.providerBrowserFailure)));
+        showAppNotice(context, l.providerBrowserFailure);
       }
     }
   }
 
   Widget _sectionLabel(String text) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 4, bottom: 8),
       child: Text(
@@ -432,13 +434,13 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
   }
 
   List<Widget> _credentials(AppLocalizations l, ProviderConnectController c) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final userAgentInput = _input(
       'provider-user-agent',
       userAgent,
       _tv ? l.tvUserAgentOptional : l.userAgent,
-      icon: Icons.badge_outlined,
+      icon: CupertinoIcons.person_crop_rectangle,
       hint: _tv ? null : l.userAgentHint,
     );
     final advanced = _tv
@@ -529,7 +531,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           'provider-authorize',
           l.providerPlexAuthorize,
           c.busy ? null : () => c.authorize(address.text),
-          icon: Icons.open_in_new_rounded,
+          icon: CupertinoIcons.arrow_up_right_square,
           busy: c.busy,
         ),
         SizedBox(height: 8 * s),
@@ -546,7 +548,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               address,
               l.serverAddress,
               keyboardType: TextInputType.url,
-              icon: Icons.link_rounded,
+              icon: CupertinoIcons.link,
               hint: l.serverAddressHint,
               action: TextInputAction.next,
               autofillHints: const [AutofillHints.url],
@@ -555,7 +557,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               'provider-username',
               username,
               l.username,
-              icon: Icons.person_outline_rounded,
+              icon: CupertinoIcons.person,
               action: TextInputAction.next,
               autofillHints: const [AutofillHints.username],
             ),
@@ -564,7 +566,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               password,
               l.password,
               secret: true,
-              icon: Icons.lock_outline_rounded,
+              icon: CupertinoIcons.lock,
               action: TextInputAction.done,
               onSubmitted: c.busy ? null : (_) => submit(),
               autofillHints: const [AutofillHints.password],
@@ -588,7 +590,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           'provider-authorize',
           l.providerQuickConnect,
           c.busy ? null : () => c.authorize(address.text),
-          icon: Icons.bolt_rounded,
+          icon: CupertinoIcons.bolt_fill,
         ),
       ],
       if (!_tv) ...[const SizedBox(height: 8), advanced],
@@ -596,7 +598,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
   }
 
   List<Widget> _authorization(AppLocalizations l, ProviderConnectController c) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = _tv ? TvDesign.scaleOf(context) : 1.0;
     final status = c.authorizationStatus;
@@ -641,7 +643,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     ),
                   ),
                   SizedBox(height: 4 * s),
-                  SelectableText(
+                  AppSelectableText(
                     code,
                     key: const Key('provider-authorization-code'),
                     style: theme.textTheme.headlineMedium?.copyWith(
@@ -654,24 +656,22 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               ),
             ),
             if (!_tv)
-              IconButton(
+              AppIconButton(
                 key: const Key('provider-copy-code'),
                 tooltip: l.providerCopyCode,
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: code));
                   if (!mounted) return;
-                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                    SnackBar(content: Text(l.providerCodeCopied)),
-                  );
+                  showAppNotice(context, l.providerCodeCopied);
                 },
-                icon: const Icon(Icons.copy_rounded, size: 20),
+                icon: const Icon(CupertinoIcons.doc_on_doc, size: 20),
               ),
           ],
         ),
       ),
       if (c.attempt!.verificationUri case final uri?) ...[
         SizedBox(height: 12 * s),
-        SelectableText(
+        AppSelectableText(
           uri.toString(),
           style: theme.textTheme.bodySmall?.copyWith(
             color: scheme.onSurfaceVariant,
@@ -682,18 +682,22 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           'provider-open-browser',
           l.providerOpenBrowser,
           () => unawaited(_openUri(uri)),
-          icon: Icons.open_in_new_rounded,
+          icon: CupertinoIcons.arrow_up_right_square,
         ),
       ],
       SizedBox(height: 14 * s),
       Row(
         children: [
           if (expired)
-            Icon(Icons.error_outline_rounded, size: 18 * s, color: scheme.error)
+            Icon(
+              CupertinoIcons.exclamationmark_circle,
+              size: 18 * s,
+              color: scheme.error,
+            )
           else
             SizedBox.square(
               dimension: 16 * s,
-              child: CircularProgressIndicator(strokeWidth: 2 * s),
+              child: CupertinoActivityIndicator(),
             ),
           SizedBox(width: 10 * s),
           Expanded(
@@ -712,7 +716,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             l.providerRestart,
             () => c.reset(),
             key: const Key('provider-restart'),
-            icon: Icons.refresh_rounded,
+            icon: CupertinoIcons.arrow_clockwise,
           ),
         ],
       ),
@@ -724,7 +728,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     ProviderConnectController c,
     Iterable<AuthorizedServerResource> resources,
   ) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = _tv ? TvDesign.scaleOf(context) : 1.0;
     final visible = [
@@ -734,9 +738,10 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           resource,
     ];
     IconData kindIcon(ServerConnectionKind kind) => switch (kind) {
-      ServerConnectionKind.local => Icons.lan_rounded,
-      ServerConnectionKind.remote => Icons.public_rounded,
-      ServerConnectionKind.relay => Icons.sync_alt_rounded,
+      ServerConnectionKind.local =>
+        CupertinoIcons.antenna_radiowaves_left_right,
+      ServerConnectionKind.remote => CupertinoIcons.globe,
+      ServerConnectionKind.relay => CupertinoIcons.arrow_left_right,
     };
     String kindLabel(ServerConnectionKind kind) => switch (kind) {
       ServerConnectionKind.local => l.providerLocal,
@@ -779,7 +784,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               ],
             ),
           ),
-          Icon(Icons.chevron_right_rounded, size: 20 * s),
+          Icon(CupertinoIcons.chevron_right, size: 20 * s),
         ],
       );
       if (_tv) {
@@ -795,10 +800,9 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       }
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: OutlinedButton(
+        child: AppButton(
           key: key,
-          style: OutlinedButton.styleFrom(
-            alignment: Alignment.centerLeft,
+          style: AppButtonStyle(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             foregroundColor: scheme.onSurface,
             shape: RoundedRectangleBorder(
@@ -807,6 +811,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             side: BorderSide(color: scheme.outlineVariant),
           ),
           onPressed: onPressed,
+          variant: AppButtonVariant.outlined,
           child: label,
         ),
       );
@@ -815,17 +820,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     return [
       if (c.users.isNotEmpty) ...[
         _sectionLabel(l.providerChooseHome),
-        DropdownButtonFormField<HomeUser>(
+        AppDropdown<HomeUser>(
           key: const Key('provider-home-user'),
-          initialValue: homeUser,
-          isExpanded: true,
-          decoration: InputDecoration(
-            hintText: l.providerHomeManage,
-            prefixIcon: const Icon(Icons.people_outline_rounded, size: 20),
-          ),
+          value: homeUser,
           items: [
             for (final user in c.users)
-              DropdownMenuItem(
+              AppMenuEntry(
                 value: user,
                 child: Row(
                   children: [
@@ -834,7 +834,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     ),
                     if (user.requiresPin)
                       Icon(
-                        Icons.lock_outline_rounded,
+                        CupertinoIcons.lock,
                         size: 16,
                         color: scheme.onSurfaceVariant,
                       ),
@@ -857,7 +857,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             l.providerHomePin,
             secret: true,
             keyboardType: TextInputType.number,
-            icon: Icons.pin_outlined,
+            icon: CupertinoIcons.number,
           ),
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 8),
@@ -876,7 +876,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             'provider-home-switch',
             l.providerSwitchHome,
             c.busy ? null : () => c.selectHome(homeUser!, pin.text),
-            icon: Icons.switch_account_outlined,
+            icon: CupertinoIcons.person_2,
           ),
         ],
         const SizedBox(height: 18),
@@ -952,7 +952,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
   }
 
   List<Widget> _libraries(AppLocalizations l, ProviderConnectController c) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final s = _tv ? TvDesign.scaleOf(context) : 1.0;
     final all =
@@ -970,12 +970,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             height: 32 * s,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.green.withValues(alpha: .18),
+              color: const Color(0xff34c759).withValues(alpha: .18),
             ),
             child: Icon(
-              Icons.check_rounded,
+              CupertinoIcons.check_mark,
               size: 20 * s,
-              color: Colors.green.shade400,
+              color: const Color(0xff66bb6a),
             ),
           ),
           SizedBox(width: 12 * s),
@@ -1029,8 +1029,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     ),
               leading: Icon(
                 c.selectedLibraries.contains(library.key)
-                    ? Icons.check_box_rounded
-                    : Icons.check_box_outline_blank_rounded,
+                    ? CupertinoIcons.checkmark_square_fill
+                    : CupertinoIcons.square,
               ),
               child: Text(library.value),
             ),
@@ -1046,16 +1046,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           child: Column(
             children: [
               for (final library in c.libraries.entries)
-                CheckboxListTile(
-                  dense: true,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                  ),
-                  secondary: Icon(
-                    Icons.video_library_outlined,
-                    size: 20,
-                    color: scheme.onSurfaceVariant,
-                  ),
+                AppSwitchTile(
                   title: Text(library.value),
                   value: c.selectedLibraries.contains(library.key),
                   onChanged: c.busy
@@ -1077,7 +1068,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         child: _quiet(
           l.sourceDiscoverLibraries,
           c.busy ? null : c.retryLibraries,
-          icon: Icons.refresh_rounded,
+          icon: CupertinoIcons.arrow_clockwise,
         ),
       ),
     ];
@@ -1118,7 +1109,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                         padding: EdgeInsets.only(bottom: 12 * s),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(99),
-                          child: const LinearProgressIndicator(minHeight: 3),
+                          child: const AppLoadingBar(minHeight: 3),
                         ),
                       ),
                     if (!widget.inline &&
@@ -1156,9 +1147,10 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                         onPressed: () => Navigator.pop(context, false),
                         child: Text(l.cancelAction),
                       )
-                    : TextButton(
+                    : AppButton(
                         key: const Key('provider-cancel'),
                         onPressed: () => Navigator.pop(context, false),
+                        variant: AppButtonVariant.plain,
                         child: Text(l.cancelAction),
                       ),
               if (c.stage == ProviderConnectStage.libraries)
@@ -1169,11 +1161,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                         onPressed: c.busy ? null : _finish,
                         child: Text(l.providerFinish),
                       )
-                    : FilledButton.icon(
+                    : AppButton.icon(
                         key: const Key('provider-finish'),
                         onPressed: c.busy ? null : _finish,
-                        icon: const Icon(Icons.check_rounded, size: 18),
+                        icon: const Icon(CupertinoIcons.check_mark, size: 18),
                         label: Text(l.providerFinish),
+                        variant: AppButtonVariant.filled,
                       ),
             ],
           ),
@@ -1215,14 +1208,15 @@ class _ProviderPresentation extends StatelessWidget {
             ],
           ],
         )
-      : AlertDialog(
+      : AppDialog(
+          maxWidth: 528,
           insetPadding: insetPadding,
           title: Row(
             children: [
               Icon(
-                Icons.dns_rounded,
+                CupertinoIcons.rectangle_stack,
                 size: 22,
-                color: Theme.of(context).colorScheme.primary,
+                color: AppUiTheme.of(context).colorScheme.primary,
               ),
               const SizedBox(width: 10),
               Expanded(child: title),

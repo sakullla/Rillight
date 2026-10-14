@@ -71,9 +71,9 @@ class DetailRepository {
   Future<List<MediaItem>> seasons(String seriesId) => _shared(
     _seasonsInFlight,
     _key('seasons:$seriesId'),
-    () async => parseCatalogPage(
-      await cache.fetch(client, _seasonsRequest(seriesId)),
-    ).items,
+    () async =>
+        parseCatalogPage(await cache.fetch(client, _seasonsRequest(seriesId)))
+            .items,
   );
 
   Future<List<MediaItem>?> cachedSeasons(String seriesId) async {
@@ -141,8 +141,8 @@ class DetailRepository {
   Future<List<MediaItem>> similar(String id, {int limit = 12}) => _shared(
     _similarInFlight,
     _key('similar:$id:$limit'),
-    () async => parseCatalogPage(
-      await cache.fetch(client, _similarRequest(id, limit)),
-    ).items,
+    () async =>
+        parseCatalogPage(await cache.fetch(client, _similarRequest(id, limit)))
+            .items,
   );
 }

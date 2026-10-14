@@ -1,5 +1,8 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -88,13 +91,22 @@ void main() {
           theme: theme,
           locale: const Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           home: const Scaffold(body: DetailAlbumStrip(item: item)),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );
     await settle(tester);
-    await tester.tap(find.byType(InkWell).first);
+    await tester.tap(find.byType(ui.AppSurfaceAction).first);
     await settle(tester);
   }
 
@@ -163,7 +175,10 @@ void main() {
         child: MaterialApp(
           locale: Locale('zh', 'CN'),
           supportedLocales: AppLocalizations.supportedLocales,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           home: Scaffold(
             body: ListView(
               children: [
@@ -179,6 +194,12 @@ void main() {
                 SizedBox(height: 800),
               ],
             ),
+          ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
           ),
         ),
       ),
@@ -248,7 +269,7 @@ void main() {
   testWidgets('enlargement supports zoom and keyboard paging', (tester) async {
     final client = _AlbumClient();
     await pumpAlbum(tester, client);
-    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.byType(ui.AppModalFrame), findsOneWidget);
     expect(find.byType(InteractiveViewer), findsWidgets);
     expect(find.text('1 / 2'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -257,7 +278,7 @@ void main() {
     expect(client.originalRequests, containsAll([0, 1]));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
-    expect(find.byType(Dialog), findsNothing);
+    expect(find.byType(ui.AppModalFrame), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -265,14 +286,21 @@ void main() {
     tester,
   ) async {
     await pumpAlbum(tester, _AlbumClient(), theme: AppTheme.light());
-    expect(tester.widget<Dialog>(find.byType(Dialog)).backgroundColor, isNull);
+    expect(
+      tester
+          .widget<ui.AppModalFrame>(find.byType(ui.AppModalFrame))
+          .backgroundColor,
+      isNull,
+    );
     expect(find.text('1 / 2'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await settle(tester);
 
     await pumpAlbum(tester, _AlbumClient(), theme: AppTheme.dark());
     expect(
-      tester.widget<Dialog>(find.byType(Dialog)).backgroundColor,
+      tester
+          .widget<ui.AppModalFrame>(find.byType(ui.AppModalFrame))
+          .backgroundColor,
       Colors.black,
     );
   });
@@ -301,10 +329,10 @@ void main() {
         if (output.existsSync() &&
             output.lengthSync() == client.original.length &&
             tester
-                    .widget<TextButton>(
+                    .widget<ui.AppButton>(
                       find.ancestor(
                         of: find.text('下载原图'),
-                        matching: find.byType(TextButton),
+                        matching: find.byType(ui.AppButton),
                       ),
                     )
                     .onPressed !=
@@ -327,7 +355,7 @@ void main() {
     await pumpAlbum(tester, _AlbumClient());
     await tester.tap(find.text('下载原图'));
     await settle(tester);
-    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.byType(ui.AppModalFrame), findsOneWidget);
     expect(find.text('图片已保存'), findsNothing);
     expect(find.text('图片保存失败，请重试'), findsNothing);
     expect(tester.takeException(), isNull);

@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import '../helpers/region_access_fixture.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -63,9 +66,18 @@ void main() {
       });
       await tester.pumpWidget(
         MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: SourceManagement(auth: auth, region: AccessRegion.private),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       );
       await settle(tester);
@@ -84,7 +96,7 @@ void main() {
         find.byKey(const Key('source-text-value')),
         secondary.baseUrl.toString(),
       );
-      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '保存'));
       await settle(tester);
       var source = auth.sources.project(AccessRegion.private).single;
       expect(source.lines, hasLength(2));
@@ -97,7 +109,7 @@ void main() {
         find.byKey(const Key('source-text-value')),
         third.baseUrl.toString(),
       );
-      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.tap(find.widgetWithText(ui.AppButton, '保存'));
       await settle(tester);
       expect(
         auth.sources.project(AccessRegion.private).single.lines.last.address,
@@ -111,21 +123,57 @@ void main() {
       final l = AppLocalizations.of(
         tester.element(find.byType(SourceManagement)),
       );
-      await tester.tap(find.widgetWithText(FilledButton, l.deleteLine));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(ui.AppDialog),
+          matching: find.ancestor(
+            of: find.text(l.deleteLine),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is ui.AppButton &&
+                  widget.variant == ui.AppButtonVariant.filled,
+            ),
+          ),
+        ),
+      );
       await settle(tester);
       source = auth.sources.project(AccessRegion.private).single;
       expect(source.lines, hasLength(1));
       await reveal(find.byKey(Key('source-logout-$id')));
       await tester.tap(find.byKey(Key('source-logout-$id')));
       await settle(tester);
-      await tester.tap(find.widgetWithText(FilledButton, l.logout));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(ui.AppDialog),
+          matching: find.ancestor(
+            of: find.text(l.logout),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is ui.AppButton &&
+                  widget.variant == ui.AppButtonVariant.filled,
+            ),
+          ),
+        ),
+      );
       await settle(tester);
       expect(await credentials.read(id), isNull);
       expect(auth.sources.project(AccessRegion.private), hasLength(1));
       await reveal(find.byKey(Key('source-delete-$id')));
       await tester.tap(find.byKey(Key('source-delete-$id')));
       await settle(tester);
-      await tester.tap(find.widgetWithText(FilledButton, l.deleteServer));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(ui.AppDialog),
+          matching: find.ancestor(
+            of: find.text(l.deleteServer),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is ui.AppButton &&
+                  widget.variant == ui.AppButtonVariant.filled,
+            ),
+          ),
+        ),
+      );
       await settle(tester);
       expect(auth.sources.project(AccessRegion.private), isEmpty);
       expect(auth.savedServers, isEmpty);

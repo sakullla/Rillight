@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 
 /// A small detail/chroma map, not face recognition. Cover crops only one axis,
 /// so two marginal profiles suffice and resizing never needs another decode.

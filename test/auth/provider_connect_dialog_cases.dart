@@ -1,6 +1,9 @@
+import 'package:rillight/app/ui/ui.dart' as ui;
+
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 import '../helpers/region_access_fixture.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -26,9 +29,18 @@ void main() {
       regionAccess: TestRegionAccessController(),
     );
     Widget app() => MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: [
+        ...AppLocalizations.localizationsDelegates,
+        ui.GlobalCupertinoLocalizations.delegate,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       home: ProviderConnectDialog(auth: auth),
+      builder: (context, child) => ui.AppUiTheme(
+        data: Theme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
     await tester.pumpWidget(app());
     final controller =
@@ -70,7 +82,7 @@ void main() {
     controller.resources = [resource('owned'), resource('shared')];
     final resourceButtons = find.byWidgetPredicate(
       (widget) =>
-          widget is OutlinedButton &&
+          widget is ui.AppButton &&
           widget.key is ValueKey<String> &&
           (widget.key! as ValueKey<String>).value.startsWith(
             'provider-resource-',
@@ -113,11 +125,14 @@ void main() {
       CatalogSort? applied;
       await tester.pumpWidget(
         MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: Builder(
             builder: (context) => Scaffold(
-              body: TextButton(
+              body: ui.AppButton(
                 onPressed: () => showDialog<void>(
                   context: context,
                   builder: (_) => Dialog(
@@ -133,10 +148,20 @@ void main() {
               ),
             ),
           ),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       );
       await tester.tap(find.text('open'));
       await settle(tester);
+      await tester.ensureVisible(
+        find.byKey(const Key('catalog-grid-filter-section-sort')),
+      );
+      await tester.pump();
       await tester.tap(
         find.byKey(const Key('catalog-grid-filter-section-sort')),
       );
@@ -186,11 +211,14 @@ void main() {
         PresentationScope(
           environment: PresentationEnvironment.tv,
           child: MaterialApp(
-            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            localizationsDelegates: [
+              ...AppLocalizations.localizationsDelegates,
+              ui.GlobalCupertinoLocalizations.delegate,
+            ],
             supportedLocales: AppLocalizations.supportedLocales,
             home: Builder(
               builder: (context) => Scaffold(
-                body: TextButton(
+                body: ui.AppButton(
                   onPressed: () => showProviderConnect(
                     context,
                     auth,
@@ -199,6 +227,12 @@ void main() {
                   child: const Text('open'),
                 ),
               ),
+            ),
+            builder: (context, child) => ui.AppUiTheme(
+              data: Theme.of(context).brightness == Brightness.dark
+                  ? ui.AppUiTheme.dark()
+                  : ui.AppUiTheme.light(),
+              child: child ?? const SizedBox.shrink(),
             ),
           ),
         ),
@@ -235,9 +269,18 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: [
+          ...AppLocalizations.localizationsDelegates,
+          ui.GlobalCupertinoLocalizations.delegate,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: ProviderConnectDialog(auth: auth),
+        builder: (context, child) => ui.AppUiTheme(
+          data: Theme.of(context).brightness == Brightness.dark
+              ? ui.AppUiTheme.dark()
+              : ui.AppUiTheme.light(),
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
     await settle(tester);
@@ -263,15 +306,24 @@ void main() {
       PresentationScope(
         environment: PresentationEnvironment.tv,
         child: MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          localizationsDelegates: [
+            ...AppLocalizations.localizationsDelegates,
+            ui.GlobalCupertinoLocalizations.delegate,
+          ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: ProviderConnectDialog(auth: auth),
+          builder: (context, child) => ui.AppUiTheme(
+            data: Theme.of(context).brightness == Brightness.dark
+                ? ui.AppUiTheme.dark()
+                : ui.AppUiTheme.light(),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );
     await settle(tester);
     expect(find.byType(TvInput), findsNWidgets(4));
-    expect(find.byType(TextField), findsNothing);
+    expect(find.byType(ui.AppTextField), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     auth.dispose();

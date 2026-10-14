@@ -3,13 +3,13 @@ import 'dart:math' as math;
 import 'login_widgets.dart';
 import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
+
 import 'package:rillight/media_server/server_address.dart';
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/app/theme/tokens.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
@@ -302,7 +302,7 @@ class _ConnectPageState extends State<ConnectPage> {
     return LiquidGlass(
       kind: LiquidGlassKind.panel,
       padding: const EdgeInsets.all(AppSpacing.xl),
-      child: Material(type: MaterialType.transparency, child: form),
+      child: Container(decoration: BoxDecoration(), child: form),
     );
   }
 
@@ -436,7 +436,7 @@ class _ConnectPageState extends State<ConnectPage> {
                   children: [
                     Text(
                       l10n.connectTitle,
-                      style: Theme.of(context).textTheme.headlineSmall
+                      style: AppUiTheme.of(context).textTheme.headlineSmall
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: AppSpacing.xl),
@@ -469,7 +469,7 @@ class _ConnectPageState extends State<ConnectPage> {
         AutofillGroup(
           child: Column(
             children: [
-              TextField(
+              AppTextField(
                 key: ConnectFormKeys.address,
                 controller: _address,
                 enabled: !auth.isBusy,
@@ -477,30 +477,23 @@ class _ConnectPageState extends State<ConnectPage> {
                 autocorrect: false,
                 autofillHints: const [AutofillHints.url],
                 textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: l10n.serverAddress,
-                  hintText: l10n.serverAddressHint,
-                  prefixIcon: const Icon(Icons.link_rounded, size: 20),
-                ),
+                label: l10n.serverAddress,
+                placeholder: l10n.serverAddressHint,
+                prefix: const Icon(CupertinoIcons.link, size: 20),
               ),
               const SizedBox(height: AppSpacing.md),
-              TextField(
+              AppTextField(
                 key: ConnectFormKeys.username,
                 controller: _username,
                 enabled: !auth.isBusy,
                 autocorrect: false,
                 autofillHints: const [AutofillHints.username],
                 textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: l10n.username,
-                  prefixIcon: const Icon(
-                    Icons.person_outline_rounded,
-                    size: 20,
-                  ),
-                ),
+                label: l10n.username,
+                prefix: const Icon(CupertinoIcons.person, size: 20),
               ),
               const SizedBox(height: AppSpacing.md),
-              TextField(
+              AppTextField(
                 key: ConnectFormKeys.password,
                 controller: _password,
                 enabled: !auth.isBusy,
@@ -510,23 +503,21 @@ class _ConnectPageState extends State<ConnectPage> {
                 autofillHints: const [AutofillHints.password],
                 textInputAction: TextInputAction.done,
                 onSubmitted: auth.isBusy ? null : (_) => _submit(),
-                decoration: InputDecoration(
-                  labelText: l10n.password,
-                  prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
-                  suffixIcon: IconButton(
-                    key: ConnectFormKeys.passwordVisibility,
-                    tooltip: _passwordVisible
-                        ? l10n.hidePassword
-                        : l10n.showPassword,
-                    onPressed: () {
-                      setState(() => _passwordVisible = !_passwordVisible);
-                    },
-                    icon: Icon(
-                      _passwordVisible
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      size: 20,
-                    ),
+                label: l10n.password,
+                prefix: const Icon(CupertinoIcons.lock, size: 20),
+                suffix: AppIconButton(
+                  key: ConnectFormKeys.passwordVisibility,
+                  tooltip: _passwordVisible
+                      ? l10n.hidePassword
+                      : l10n.showPassword,
+                  onPressed: () {
+                    setState(() => _passwordVisible = !_passwordVisible);
+                  },
+                  icon: Icon(
+                    _passwordVisible
+                        ? CupertinoIcons.eye_slash
+                        : CupertinoIcons.eye,
+                    size: 20,
                   ),
                 ),
               ),
@@ -534,10 +525,11 @@ class _ConnectPageState extends State<ConnectPage> {
           ),
         ),
         const SizedBox(height: AppSpacing.xl),
-        FilledButton(
+        AppButton(
           key: ConnectFormKeys.submit,
-          style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+          style: AppButtonStyle(minimumSize: const Size(48, 48)),
           onPressed: auth.isBusy ? null : _submit,
+          variant: AppButtonVariant.filled,
           child: BusyLabel(
             busy: auth.isBusy,
             label: auth.failure == null ? l10n.connect : l10n.retry,
@@ -556,48 +548,47 @@ class _ConnectPageState extends State<ConnectPage> {
     AuthController auth,
   ) {
     final selectedServer = _selectedServer(auth);
-    return ExpansionTile(
+    return AppDisclosure(
       key: ConnectFormKeys.more,
       initiallyExpanded: _moreExpanded,
       title: Text(l10n.more),
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      shape: const Border(),
-      collapsedShape: const Border(),
       onExpansionChanged: (expanded) {
         setState(() => _moreExpanded = expanded);
         _saveDraft();
       },
       children: [
         if (_moreExpanded) ...[
-          TextField(
+          AppTextField(
             key: ConnectFormKeys.path,
             controller: _path,
             enabled: !auth.isBusy,
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(hintText: '/emby'),
+            placeholder: '/emby',
           ),
           const SizedBox(height: AppSpacing.md),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
               l10n.lines,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              style: AppUiTheme.of(context).textTheme.labelMedium?.copyWith(
+                color: AppUiTheme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ),
           Row(
             children: [
-              TextButton.icon(
+              AppButton.icon(
                 key: ConnectFormKeys.addLine,
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(Icons.add, size: 18),
+                icon: const Icon(CupertinoIcons.plus, size: 18),
                 label: Text(l10n.addLine),
+                variant: AppButtonVariant.plain,
               ),
               const SizedBox(width: AppSpacing.xs),
-              TextButton.icon(
+              AppButton.icon(
                 key: ConnectFormKeys.deleteLine,
                 onPressed: auth.isBusy
                     ? null
@@ -608,37 +599,34 @@ class _ConnectPageState extends State<ConnectPage> {
                           _selectedLineId == null)
                     ? null
                     : _deleteSelectedLine,
-                icon: const Icon(Icons.link_off, size: 18),
+                icon: const Icon(CupertinoIcons.link, size: 18),
                 label: Text(l10n.deleteLine),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
+                style: AppButtonStyle(
+                  foregroundColor: AppUiTheme.of(context).colorScheme.error,
                 ),
+                variant: AppButtonVariant.plain,
               ),
             ],
           ),
           for (var i = 0; i < _extraLines.length; i++) ...[
             const SizedBox(height: AppSpacing.sm),
-            TextField(
+            AppTextField(
               key: ConnectFormKeys.extraLine(i),
               controller: _extraLines[i],
               enabled: !auth.isBusy,
               keyboardType: TextInputType.url,
-              decoration: InputDecoration(
-                labelText: l10n.extraLineAddress,
-                hintText: l10n.serverAddressHint,
-              ),
+              label: l10n.extraLineAddress,
+              placeholder: l10n.serverAddressHint,
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          TextField(
+          AppTextField(
             key: ConnectFormKeys.userAgent,
             controller: _userAgent,
             enabled: !auth.isBusy,
             textInputAction: TextInputAction.next,
-            decoration: InputDecoration(
-              labelText: l10n.userAgent,
-              hintText: l10n.userAgentHint,
-            ),
+            label: l10n.userAgent,
+            placeholder: l10n.userAgentHint,
           ),
         ],
       ],
@@ -664,7 +652,7 @@ class _ConnectPageState extends State<ConnectPage> {
     AuthController auth, {
     bool fill = false,
   }) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final servers = _filteredServers(auth);
     final header = Row(
@@ -693,25 +681,23 @@ class _ConnectPageState extends State<ConnectPage> {
           ),
         ],
         const Spacer(),
-        TextButton.icon(
+        AppButton.icon(
           key: ConnectFormKeys.addServer,
           onPressed: auth.isBusy ? null : _startNewServer,
-          icon: const Icon(Icons.add, size: 18),
+          icon: const Icon(CupertinoIcons.plus, size: 18),
           label: Text(l10n.addServer),
+          variant: AppButtonVariant.plain,
         ),
       ],
     );
     final search = auth.savedServers.length > 6
         ? Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: TextField(
+            child: AppTextField(
               key: ConnectFormKeys.serverSearch,
               onChanged: (value) => setState(() => _serverQuery = value),
-              decoration: InputDecoration(
-                hintText: l10n.searchServers,
-                prefixIcon: const Icon(Icons.search, size: 20),
-                isDense: true,
-              ),
+              placeholder: l10n.searchServers,
+              prefix: const Icon(CupertinoIcons.search, size: 20),
             ),
           )
         : null;
@@ -741,7 +727,7 @@ class _ConnectPageState extends State<ConnectPage> {
                     alignment: Alignment.topCenter,
                     child: AppEmptyView(
                       message: l10n.noSavedServers,
-                      icon: Icons.dns_outlined,
+                      icon: CupertinoIcons.rectangle_stack,
                     ),
                   )
                 : ListView.separated(
@@ -760,7 +746,10 @@ class _ConnectPageState extends State<ConnectPage> {
         header,
         const SizedBox(height: AppSpacing.sm),
         if (auth.savedServers.isEmpty)
-          AppEmptyView(message: l10n.noSavedServers, icon: Icons.dns_outlined)
+          AppEmptyView(
+            message: l10n.noSavedServers,
+            icon: CupertinoIcons.rectangle_stack,
+          )
         else ...[
           ?search,
           SizedBox(
@@ -799,7 +788,7 @@ class _ConnectPageState extends State<ConnectPage> {
     AuthController auth,
     SavedServer server,
   ) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
     final selected = server.id == _selectedServerId;
     final host = server.activeLine?.hostLabel ?? server.baseUrl;
@@ -821,12 +810,12 @@ class _ConnectPageState extends State<ConnectPage> {
           width: selected ? 1.5 : 1,
         ),
       ),
-      child: Material(
-        type: MaterialType.transparency,
+      child: Container(
+        decoration: BoxDecoration(),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            InkWell(
+            AppSurfaceAction(
               key: Key('saved-server-${server.id}'),
               onTap: auth.isBusy ? null : () => _selectSaved(server),
               borderRadius: BorderRadius.circular(AppRadii.lg),
@@ -866,8 +855,8 @@ class _ConnectPageState extends State<ConnectPage> {
                     const SizedBox(width: AppSpacing.xs),
                     Icon(
                       selected
-                          ? Icons.check_circle_rounded
-                          : Icons.chevron_right_rounded,
+                          ? CupertinoIcons.checkmark_circle_fill
+                          : CupertinoIcons.chevron_right,
                       color: selected
                           ? colorScheme.primary
                           : colorScheme.onSurfaceVariant,
@@ -905,17 +894,19 @@ class _ConnectPageState extends State<ConnectPage> {
     ServerLine line,
     bool serverSelected,
   ) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
     final selected = serverSelected && line.id == _selectedLineId;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.xxs),
-      child: Material(
-        color: selected
-            ? colorScheme.primaryContainer.withValues(alpha: 0.35)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: InkWell(
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected
+              ? colorScheme.primaryContainer.withValues(alpha: 0.35)
+              : const Color(0x00000000),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: AppSurfaceAction(
           key: Key('saved-line-${line.id}'),
           onTap: auth.isBusy ? null : () => _selectSavedLine(server, line),
           borderRadius: BorderRadius.circular(AppRadii.md),
@@ -927,7 +918,7 @@ class _ConnectPageState extends State<ConnectPage> {
             child: Row(
               children: [
                 Icon(
-                  Icons.alt_route,
+                  CupertinoIcons.arrow_branch,
                   size: 18,
                   color: selected
                       ? colorScheme.primary
@@ -943,7 +934,11 @@ class _ConnectPageState extends State<ConnectPage> {
                   ),
                 ),
                 if (selected)
-                  Icon(Icons.check, color: colorScheme.primary, size: 18),
+                  Icon(
+                    CupertinoIcons.check_mark,
+                    color: colorScheme.primary,
+                    size: 18,
+                  ),
               ],
             ),
           ),
@@ -975,7 +970,7 @@ class _SupportedServices extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     return Wrap(
       spacing: AppSpacing.xs,
@@ -1019,7 +1014,7 @@ class _HeroPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
     return DecoratedBox(
@@ -1099,7 +1094,7 @@ class _BrandHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
 
     return Column(

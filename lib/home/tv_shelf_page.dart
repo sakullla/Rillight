@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -305,7 +305,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
             key: PageStorageKey('tv-shelf-${widget.source}'),
             slivers: [
               if ((_loading && _items.isEmpty) || _refreshing)
-                box(const LinearProgressIndicator()),
+                box(const AppLoadingBar()),
               if (_error != null)
                 box(TvFailure(error: _error!, retry: () => _load())),
               if (_refreshError != null)
@@ -362,7 +362,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
                       alignment: Alignment.centerLeft,
                       child: TvAction(
                         pill: true,
-                        leading: const Icon(Icons.expand_more_rounded),
+                        leading: const Icon(CupertinoIcons.chevron_down),
                         onPressed: _loadingMore || _refreshing
                             ? null
                             : () => _load(more: true),

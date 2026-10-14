@@ -262,18 +262,18 @@ class ServerSectionsLoader extends ChangeNotifier {
     await Future.wait([
       () async {
         try {
-          resume = (await client.getResumeItems(
-            limit: aggregationRowLimit,
-          )).where((item) => item.isResumeMedia).toList();
+          resume = (await client.getResumeItems(limit: aggregationRowLimit))
+              .where((item) => item.isResumeMedia)
+              .toList();
         } catch (error) {
           resumeError = error;
         }
       }(),
       () async {
         try {
-          nextUp = (await client.getNextUp(
-            limit: aggregationRowLimit,
-          )).where((item) => item.isEpisode).toList();
+          nextUp = (await client.getNextUp(limit: aggregationRowLimit))
+              .where((item) => item.isEpisode)
+              .toList();
         } on MediaServerException catch (error) {
           if (!_nextUpUnsupported(error)) {
             nextError = error;
