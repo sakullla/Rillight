@@ -45,6 +45,66 @@ void main() {
         ),
       );
 
+  for (final selected in [AppearanceStyle.dark, AppearanceStyle.light]) {
+    testWidgets(
+      'appearance menu respects $selected against opposite system brightness',
+      (tester) async {
+        final brightness = selected == AppearanceStyle.dark
+            ? Brightness.dark
+            : Brightness.light;
+        tester.platformDispatcher.platformBrightnessTestValue =
+            brightness == Brightness.dark ? Brightness.light : Brightness.dark;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final store = MemoryPlayerSettingsStore(
+          PlayerSettings(appearanceStyle: selected.name),
+        );
+        final controller = AppearanceController(store: store);
+        addTearDown(controller.dispose);
+        await controller.ready;
+        await tester.pumpWidget(
+          MaterialApp(
+            locale: const Locale('zh', 'CN'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            theme: brightness == Brightness.dark
+                ? AppTheme.dark()
+                : AppTheme.light(),
+            home: AppearanceScope(
+              controller: controller,
+              child: const Scaffold(body: AppearanceMenuButton()),
+            ),
+          ),
+        );
+        final menu = find.byType(ui.AppMenuButton<AppearanceStyle>);
+        expect(ui.AppUiTheme.of(tester.element(menu)).brightness, brightness);
+        expect(
+          ui.CupertinoTheme.brightnessOf(tester.element(menu)),
+          brightness,
+        );
+        await tester.tap(find.byKey(AppearanceMenuButton.menuKey));
+        await settle(tester);
+        final dialog = tester.element(find.byType(ui.AppDialog));
+        expect(ui.AppUiTheme.of(dialog).brightness, brightness);
+        expect(ui.CupertinoTheme.brightnessOf(dialog), brightness);
+        await tester.tap(find.text('取消'));
+        await settle(tester);
+        expect(controller.style, selected);
+        expect((await store.read()).appearanceStyle, selected.name);
+        await tester.tap(find.byKey(AppearanceMenuButton.menuKey));
+        await settle(tester);
+        await tester.tap(
+          find.text(selected == AppearanceStyle.dark ? '浅色' : '深色'),
+        );
+        await settle(tester);
+        expect(controller.brightness, isNot(brightness));
+        expect(
+          ui.AppUiTheme.of(tester.element(menu)).brightness,
+          controller.brightness,
+        );
+      },
+    );
+  }
+
   testWidgets(
     'Cupertino tooltip remains inside the viewport at the right edge',
     (tester) async {

@@ -241,16 +241,28 @@ class AppearanceMenuButton extends StatelessWidget {
     final controller = AppearanceScope.maybeOf(context);
     final l10n = AppLocalizations.of(context);
     final style = controller?.style ?? AppearanceStyle.system;
-    return app.AppMenuButton<AppearanceStyle>(
-      key: buttonKey ?? menuKey,
-      tooltip: l10n.settingsAppearance,
-      selected: style,
-      onSelected: controller?.setStyle,
-      items: [
-        for (final value in AppearanceStyle.values)
-          app.AppMenuEntry(value: value, child: Text(value.label(l10n))),
-      ],
-      child: const Icon(app.CupertinoIcons.circle_lefthalf_fill),
+    // Until the application shell migrates, its Material theme cannot reach
+    // the independent Cupertino package. Bridge the resolved preference here,
+    // while preserving a migrated parent's palette and typography.
+    final brightness = controller?.brightness ?? Theme.of(context).brightness;
+    final theme =
+        app.AppUiTheme.maybeOf(context) ??
+        (brightness == Brightness.dark
+            ? app.AppUiTheme.dark()
+            : app.AppUiTheme.light());
+    return app.AppUiTheme(
+      data: theme,
+      child: app.AppMenuButton<AppearanceStyle>(
+        key: buttonKey ?? menuKey,
+        tooltip: l10n.settingsAppearance,
+        selected: style,
+        onSelected: controller?.setStyle,
+        items: [
+          for (final value in AppearanceStyle.values)
+            app.AppMenuEntry(value: value, child: Text(value.label(l10n))),
+        ],
+        child: const Icon(app.CupertinoIcons.circle_lefthalf_fill),
+      ),
     );
   }
 }
