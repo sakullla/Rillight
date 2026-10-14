@@ -980,7 +980,7 @@ void main() {
   );
 
   cases.testWidgets(
-    'search page back and system back return home; mine opens private',
+    'search tab has no back button and system back returns home; mine opens private',
     (tester) async {
       final server = FakeEmbyServer();
       final (app, _) = await start(tester, server);
@@ -999,20 +999,13 @@ void main() {
       );
 
       await openSearch();
-      expect(searchBack(), findsOneWidget);
+      expect(searchBack(), findsNothing);
       await tester.enterText(
         find.byKey(const Key('aggregation-keyword')),
         'Inception',
       );
       await tester.pump();
-      await tester.tap(searchBack());
-      await settle(tester);
       expect(find.byType(MobileShell), findsOneWidget);
-      expect(
-        find.byKey(const PageStorageKey('mobile-home-scroll')),
-        findsOneWidget,
-      );
-      expect(app.router.state.uri.path, AppRoutes.home);
 
       await openSearch();
       await tester.binding.handlePopRoute();
