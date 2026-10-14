@@ -19,6 +19,7 @@ import 'package:rillight/player/player_bindings.dart';
 class MobileShell extends StatefulWidget {
   const MobileShell({super.key});
   static const serverPillKey = Key('mobile-shell-server-pill');
+  static const topBarKey = Key('mobile-shell-top-bar');
 
   @override
   State<MobileShell> createState() => _MobileShellState();
@@ -107,10 +108,8 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context), auth = AuthScope.of(context);
-    final titles = [l.home, l.aggregation, l.search];
     final floating = PhoneNavStyle.floatingOf(context);
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final immersive = _index == 0 && !_homeCovered;
     const hit = Size(AppSpacing.huge, AppSpacing.huge);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
@@ -120,100 +119,18 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
     final pillLabel = serverName.isEmpty
         ? l.phoneServerManagement
         : (lineLabel.isEmpty ? serverName : '$serverName · $lineLabel');
+    final topInset = MediaQuery.viewPaddingOf(context).top;
+    const barBody = 44.0;
+    final homeImmersive = _index == 0 && !_homeCovered;
+    final onBar = homeImmersive && theme.brightness == Brightness.dark
+        ? const Color(0xFFFFFFFF)
+        : scheme.onSurface;
     return PopScope(
       canPop: _index == 0,
       onPopInvokedWithResult: (popped, _) {
         if (!popped) setState(() => _index = 0);
       },
       child: CupertinoPageScaffold(
-        navigationBar: CupertinoNavigationBar(
-          backgroundColor: immersive ? const Color(0x00000000) : null,
-          leading: Align(
-            alignment: Alignment.centerLeft,
-            widthFactor: 1,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 136),
-              child: AppSurfaceAction(
-                key: MobileShell.serverPillKey,
-                borderRadius: BorderRadius.circular(999),
-                onTap: () => showPhoneServerManagerSheet(context, auth),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: immersive
-                        ? scheme.scrim.withValues(alpha: 0.42)
-                        : scheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: immersive
-                          ? const Color(0x33FFFFFF)
-                          : scheme.outlineVariant,
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          CupertinoIcons.cube_box,
-                          size: 13,
-                          color: immersive
-                              ? const Color(0xFFFFFFFF)
-                              : scheme.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            pillLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: immersive
-                                  ? const Color(0xFFFFFFFF)
-                                  : scheme.onSurface,
-                              fontWeight: FontWeight.w600,
-                              height: 1.15,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        Icon(
-                          CupertinoIcons.chevron_down,
-                          size: 11,
-                          color: immersive
-                              ? const Color(0xCCFFFFFF)
-                              : scheme.onSurfaceVariant,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          middle: Text(titles[_index]),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_index == 0)
-                AppIconButton(
-                  key: const Key('phone-home-edit'),
-                  tooltip: l.phoneHomeEdit,
-                  icon: const Icon(CupertinoIcons.slider_horizontal_3),
-                  onPressed: () => context.push(AppRoutes.homeEdit),
-                ),
-              AppIconButton(
-                key: const Key('mobile-shell-mine-entry'),
-                tooltip: l.mobileMine,
-                icon: const Icon(CupertinoIcons.person_crop_circle),
-                onPressed: () => context.push(AppRoutes.mine),
-              ),
-            ],
-          ),
-        ),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -254,7 +171,7 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                   return false;
                 },
                 child: SafeArea(
-                  top: _index != 0,
+                  top: false,
                   bottom: !floating,
                   child: Column(
                     children: [
@@ -281,38 +198,165 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                           ),
                         ),
                       Expanded(
-                        child: IgnorePointer(
-                          ignoring: _recovering || _recoveryFailed,
-                          child: PhoneTabTransition(
-                            index: _index,
-                            child: IndexedStack(
-                              index: _index,
-                              children: [
-                                TickerMode(
-                                  enabled: _index == 0,
-                                  child: const PhoneHome(),
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            top: _index == 0 ? 0 : topInset + barBody,
+                          ),
+                          child: PhoneShellContentInset(
+                            cleared: _index != 0,
+                            child: IgnorePointer(
+                              ignoring: _recovering || _recoveryFailed,
+                              child: PhoneTabTransition(
+                                index: _index,
+                                child: IndexedStack(
+                                  index: _index,
+                                  children: [
+                                    TickerMode(
+                                      enabled: _index == 0,
+                                      child: const PhoneHome(),
+                                    ),
+                                    TickerMode(
+                                      enabled: _index == 1,
+                                      child: const AggregationPage(),
+                                    ),
+                                    TickerMode(
+                                      enabled: _index == 2,
+                                      child: SearchRouteGuard(
+                                        canPop: true,
+                                        onPop: () {
+                                          FocusScope.of(context).unfocus();
+                                          setState(() => _index = 0);
+                                        },
+                                        child: const AggregationPage(
+                                          search: true,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                TickerMode(
-                                  enabled: _index == 1,
-                                  child: const AggregationPage(),
-                                ),
-                                TickerMode(
-                                  enabled: _index == 2,
-                                  child: SearchRouteGuard(
-                                    canPop: true,
-                                    onPop: () {
-                                      FocusScope.of(context).unfocus();
-                                      setState(() => _index = 0);
-                                    },
-                                    child: const AggregationPage(search: true),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: PhoneShellBar(
+                backgroundColor: homeImmersive
+                    ? const Color(0x00000000)
+                    : theme.scaffoldBackgroundColor,
+                child: Padding(
+                  padding: EdgeInsets.only(top: topInset),
+                  child: SizedBox(
+                    height: barBody,
+                    child: IconTheme(
+                      data: IconThemeData(color: onBar),
+                      child: Row(
+                        children: [
+                          if (_index == 0)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 168,
+                                ),
+                                child: AppSurfaceAction(
+                                  key: MobileShell.serverPillKey,
+                                  borderRadius: BorderRadius.circular(999),
+                                  onTap: () => showPhoneServerManagerSheet(
+                                    context,
+                                    auth,
+                                  ),
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: homeImmersive
+                                          ? scheme.scrim.withValues(alpha: 0.42)
+                                          : scheme.surfaceContainerHigh,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: homeImmersive
+                                            ? const Color(0x33FFFFFF)
+                                            : scheme.outlineVariant,
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 5,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            CupertinoIcons.cube_box,
+                                            size: 13,
+                                            color: homeImmersive
+                                                ? const Color(0xFFFFFFFF)
+                                                : scheme.primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
+                                              pillLabel,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.labelSmall
+                                                  ?.copyWith(
+                                                    color: homeImmersive
+                                                        ? const Color(
+                                                            0xFFFFFFFF,
+                                                          )
+                                                        : scheme.onSurface,
+                                                    fontWeight: FontWeight.w600,
+                                                    height: 1.15,
+                                                  ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Icon(
+                                            CupertinoIcons.chevron_down,
+                                            size: 11,
+                                            color: homeImmersive
+                                                ? const Color(0xCCFFFFFF)
+                                                : scheme.onSurfaceVariant,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            const Spacer(),
+                          const Spacer(),
+                          if (_index == 0)
+                            AppIconButton(
+                              key: const Key('phone-home-edit'),
+                              tooltip: l.phoneHomeEdit,
+                              color: onBar,
+                              icon: const Icon(
+                                CupertinoIcons.slider_horizontal_3,
+                              ),
+                              onPressed: () => context.push(AppRoutes.homeEdit),
+                            ),
+                          AppIconButton(
+                            key: const Key('mobile-shell-mine-entry'),
+                            tooltip: l.mobileMine,
+                            color: onBar,
+                            icon: const Icon(CupertinoIcons.person_crop_circle),
+                            onPressed: () => context.push(AppRoutes.mine),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -334,6 +378,27 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 叠在内容上的手机顶栏。首页透明时横幅从窗口顶铺上来。
+class PhoneShellBar extends StatelessWidget {
+  const PhoneShellBar({
+    super.key,
+    required this.backgroundColor,
+    required this.child,
+  });
+
+  final Color backgroundColor;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      key: MobileShell.topBarKey,
+      color: backgroundColor,
+      child: child,
     );
   }
 }

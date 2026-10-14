@@ -43,6 +43,27 @@ import 'server_library_page.dart';
 
 /// A route-local projection. Keeping this State mounted on push preserves the
 /// authorized query, filters, cursors, and scroll position when detail returns.
+/// 手机壳已经把聚合/搜索顶到顶栏下面时为 true，页内不再重复避开状态栏。
+class PhoneShellContentInset extends InheritedWidget {
+  const PhoneShellContentInset({
+    super.key,
+    required this.cleared,
+    required super.child,
+  });
+
+  final bool cleared;
+
+  static bool clearedOf(BuildContext context) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<PhoneShellContentInset>();
+    return scope?.cleared ?? false;
+  }
+
+  @override
+  bool updateShouldNotify(PhoneShellContentInset oldWidget) =>
+      cleared != oldWidget.cleared;
+}
+
 class RegionAggregationGate extends StatelessWidget {
   const RegionAggregationGate({super.key, required this.region});
   final AccessRegion region;
@@ -2195,6 +2216,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             ((ModalRoute.of(context)?.canPop ?? false) &&
                 context.findAncestorWidgetOfExactType<SearchRouteGuard>() ==
                     null));
+    final phoneTop = PhoneShellContentInset.clearedOf(context)
+        ? 8.0
+        : MediaQuery.viewPaddingOf(context).top + 8;
     return Container(
       decoration: BoxDecoration(),
       child: Column(
@@ -2203,7 +2227,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
           Padding(
             padding: EdgeInsets.fromLTRB(
               presentation.isDesktop ? AppSpacing.page : 16,
-              presentation.isDesktop && widget.clearOfDesktopBar ? 64 : 8,
+              presentation.isDesktop
+                  ? (widget.clearOfDesktopBar ? 64 : 8)
+                  : phoneTop,
               presentation.isDesktop ? AppSpacing.md : 16,
               6,
             ),

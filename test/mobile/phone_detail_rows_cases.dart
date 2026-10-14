@@ -1356,6 +1356,34 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('movie and series banners cover the status bar', (tester) async {
+    final harness = await _startDetail(tester, width: 390, reduceMotion: true);
+    tester.view.viewPadding = const FakeViewPadding(top: 47, bottom: 34);
+    tester.view.padding = const FakeViewPadding(top: 47, bottom: 34);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+
+    Future<void> expectCovered(String id) async {
+      unawaited(harness.router.push('/item/$id'));
+      await settle(tester);
+      final banner = tester.getRect(find.byKey(PhoneItemBanner.bannerKey));
+      final image = tester.getRect(find.byKey(PhoneItemBanner.handoffImageKey));
+      final back = tester.getRect(
+        find.byType(CupertinoNavigationBarBackButton),
+      );
+      expect(banner.top, 0, reason: id);
+      expect(image.top, 0, reason: id);
+      expect(back.top, greaterThanOrEqualTo(47), reason: id);
+      expect(back.bottom, lessThan(image.bottom), reason: id);
+      harness.router.pop();
+      await settle(tester);
+    }
+
+    await expectCovered('movie-inception');
+    await expectCovered('series-friends');
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('reduced motion opens detail in place with placeholders', (
     tester,
   ) async {
@@ -1739,6 +1767,8 @@ void main() {
 
     final grid = find.byType(GridView);
     expect(grid, findsOneWidget);
+    expect(tester.getSize(grid).height, lessThan(500));
+    expect(tester.getTopLeft(grid).dy, greaterThan(300));
     expect(find.widgetWithText(AppButton, '29'), findsOneWidget);
     final tinted = tester
         .widgetList<AppButton>(

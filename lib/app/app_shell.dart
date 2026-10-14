@@ -43,8 +43,9 @@ class AppShell extends StatefulWidget {
 
   /// 顶栏内容行高;有窗口铬时不低于标题按钮带。
   ///
-  /// 52 让 36 高的返回胶囊上下各留 8,不再贴着窗口上缘;右侧应用图标
-  /// 仍与系统标题按钮对齐在上方 32 的标题带里。
+  /// 有系统标题按钮时,导航、编辑首页、搜索、设置和账号收进同一条
+  /// 标题按钮带,垂直中心与最小化/最大化/关闭重合。没有标题按钮时,
+  /// 这些控件在本高度内共用一条中线。
   static const topBarHeight = 52.0;
 
   /// 顶栏下沿溶进画面的渐变高度,避免硬分割线切开海报。
@@ -352,6 +353,7 @@ class _TopBar extends StatelessWidget {
   Widget _bar(BuildContext context, List<MediaItem> libraries) {
     final hasChrome =
         context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;
+    final captionBand = hasChrome && windowChromeShowsCaptionButtons;
     final leading = hasChrome ? windowChromeLeadingInset() : 0.0;
     final trailing = hasChrome ? windowChromeTrailingInset() : 0.0;
     final height = hasChrome
@@ -491,73 +493,73 @@ class _TopBar extends StatelessWidget {
                 left: leading + AppSpacing.sm,
                 right: trailing,
               ),
-              child: Row(
-                children: [
-                  if (canPop ||
-                      (location != AppRoutes.home &&
-                          !AppRoutes.showsBrowseNav(location)))
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        left: AppSpacing.page - AppSpacing.sm,
-                        right: AppSpacing.sm,
-                      ),
-                      child: DesktopBackButton(
-                        overArtwork: !opaque,
-                        tooltip: !canPop ? l10n.home : l10n.mobileBack,
-                        onPressed: onBack,
-                        icon: canPop
-                            ? CupertinoIcons.chevron_left
-                            : CupertinoIcons.house,
-                        label: canPop ? l10n.mobileBack : l10n.home,
-                      ),
-                    ),
-                  if (AppRoutes.showsBrowseNav(location)) ...[
-                    _HomeNav(selected: location == AppRoutes.home),
-                    _NavTextButton(
-                      buttonKey: const Key('app-shell-aggregation'),
-                      label: l10n.aggregation,
-                      selected: location == AppRoutes.aggregation,
-                      onPressed: () => context.go(AppRoutes.aggregation),
-                    ),
-                    const Spacer(),
-                    AppIconButton(
-                      key: AppShell.overflowNavKey,
-                      tooltip: l10n.phoneHomeEdit,
-
-                      onPressed: () {
-                        unawaited(showHomeDisplayDialog(context));
-                      },
-                      icon: const Icon(CupertinoIcons.slider_horizontal_3),
-                    ),
-                  ] else ...[
-                    Expanded(
-                      child: item
-                          ? const SizedBox.shrink()
-                          : AnimatedOpacity(
-                              opacity: showTitle ? 1 : 0,
-                              duration: AppMotion.durationOf(
-                                context,
-                                AppMotion.fast,
-                              ),
-                              child: Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppUiTheme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                    ),
-                  ],
-                  Align(
-                    alignment: hasChrome && windowChromeShowsCaptionButtons
-                        ? Alignment.topCenter
-                        : Alignment.center,
-                    child: SizedBox(
-                      height: kWindowChromeHeight,
-                      child: IconTheme(
+              child: Align(
+                alignment: captionBand ? Alignment.topCenter : Alignment.center,
+                child: SizedBox(
+                  height: captionBand ? kWindowChromeHeight : null,
+                  child: Row(
+                    children: [
+                      if (canPop ||
+                          (location != AppRoutes.home &&
+                              !AppRoutes.showsBrowseNav(location)))
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: AppSpacing.page - AppSpacing.sm,
+                            right: AppSpacing.sm,
+                          ),
+                          child: DesktopBackButton(
+                            overArtwork: !opaque,
+                            tooltip: !canPop ? l10n.home : l10n.mobileBack,
+                            onPressed: onBack,
+                            icon: canPop
+                                ? CupertinoIcons.chevron_left
+                                : CupertinoIcons.house,
+                            label: canPop ? l10n.mobileBack : l10n.home,
+                          ),
+                        ),
+                      if (AppRoutes.showsBrowseNav(location)) ...[
+                        _HomeNav(selected: location == AppRoutes.home),
+                        _NavTextButton(
+                          buttonKey: const Key('app-shell-aggregation'),
+                          label: l10n.aggregation,
+                          selected: location == AppRoutes.aggregation,
+                          onPressed: () => context.go(AppRoutes.aggregation),
+                        ),
+                        const Spacer(),
+                        AppIconButton(
+                          key: AppShell.overflowNavKey,
+                          tooltip: l10n.phoneHomeEdit,
+                          padding: EdgeInsets.zero,
+                          constraints: kTitleBarIconConstraints,
+                          size: 18,
+                          onPressed: () {
+                            unawaited(showHomeDisplayDialog(context));
+                          },
+                          icon: const Icon(CupertinoIcons.slider_horizontal_3),
+                        ),
+                      ] else ...[
+                        Expanded(
+                          child: item
+                              ? const SizedBox.shrink()
+                              : AnimatedOpacity(
+                                  opacity: showTitle ? 1 : 0,
+                                  duration: AppMotion.durationOf(
+                                    context,
+                                    AppMotion.fast,
+                                  ),
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppUiTheme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                        ),
+                      ],
+                      IconTheme(
                         data: IconTheme.of(context).copyWith(size: 18),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -568,9 +570,9 @@ class _TopBar extends StatelessWidget {
                           ],
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -635,6 +637,7 @@ class _NavTextButton extends StatelessWidget {
           fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
         ),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        minimumSize: const Size(44, kWindowChromeHeight),
       ),
       variant: AppButtonVariant.plain,
       child: Column(

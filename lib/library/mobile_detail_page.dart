@@ -349,12 +349,20 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       context: context,
       builder: (context) {
         final l = AppLocalizations.of(context);
+        const columns = 6;
+        const gap = 8.0;
+        const cellExtent = 44.0;
+        final rows = (total / columns).ceil();
+        final raw = rows * cellExtent + gap * (rows - 1);
+        final maxGrid = MediaQuery.sizeOf(context).height * 0.5;
+        final gridHeight = (raw < maxGrid ? raw : maxGrid) + AppSpacing.lg;
         return Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.md,
-                0,
+                AppSpacing.sm,
                 AppSpacing.md,
                 AppSpacing.sm,
               ),
@@ -366,7 +374,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 ),
               ),
             ),
-            Expanded(
+            SizedBox(
+              height: gridHeight,
               child: GridView.builder(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.md,
@@ -375,10 +384,10 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                   AppSpacing.lg,
                 ),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 6,
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                  childAspectRatio: 1.4,
+                  crossAxisCount: columns,
+                  mainAxisSpacing: gap,
+                  crossAxisSpacing: gap,
+                  mainAxisExtent: cellExtent,
                 ),
                 itemCount: total,
                 itemBuilder: (context, index) {
@@ -532,241 +541,305 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
           item: imageSource,
           preferBackdrop: preferBackdrop,
           child: CupertinoPageScaffold(
-            navigationBar: CupertinoNavigationBar(
-              transitionBetweenRoutes: false,
-              backgroundColor: immersive ? const Color(0x00000000) : null,
-              middle: _barSolid && (item ?? handoff?.item) != null
-                  ? Text(
-                      (item ?? handoff?.item)!.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    )
-                  : null,
-            ),
-            child: AppRefresh(
-              onRefresh: _refresh,
-              child: CustomScrollView(
-                key: PageStorageKey('detail-${widget.itemId}'),
-                controller: _scroll,
-                physics: const AlwaysScrollableScrollPhysics(),
-                scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
-                slivers: [
-                  SliverList.list(
-                    children: [
-                      if (pending && imageSource == null)
-                        KeyedSubtree(
-                          key: _PhoneDetailPending.headerKey,
-                          child: SizedBox(
-                            height: _pendingHeaderHeight(context),
-                            child: SkeletonBlock(
-                              borderRadius: BorderRadius.zero,
-                              animated: !MediaQuery.disableAnimationsOf(
-                                context,
+            child: Stack(
+              children: [
+                AppRefresh(
+                  onRefresh: _refresh,
+                  child: CustomScrollView(
+                    key: PageStorageKey('detail-${widget.itemId}'),
+                    controller: _scroll,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+                    slivers: [
+                      SliverList.list(
+                        children: [
+                          if (pending && imageSource == null)
+                            KeyedSubtree(
+                              key: _PhoneDetailPending.headerKey,
+                              child: SizedBox(
+                                height: _pendingHeaderHeight(context),
+                                child: SkeletonBlock(
+                                  borderRadius: BorderRadius.zero,
+                                  animated: !MediaQuery.disableAnimationsOf(
+                                    context,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else if (failed)
+                            MobileFailureState(
+                              message: embyFailureMessage(l, controller.error!),
+                              onRetry: _refresh,
+                            )
+                          else if (imageSource != null)
+                            KeyedSubtree(
+                              key: _PhoneDetailPending.headerKey,
+                              child: PhoneItemBanner(
+                                item: imageSource,
+                                title: (item ?? imageSource).name,
+                                titleWidget: pending
+                                    ? _PhoneDetailPending.title(
+                                        context,
+                                        handoff,
+                                      )
+                                    : null,
+                                pendingMeta: pending
+                                    ? _PhoneDetailPending.metaPlaceholder(
+                                        context,
+                                        handoff,
+                                      )
+                                    : null,
+                                titleHint: item != null && item.isEpisode
+                                    ? item.seriesName
+                                    : null,
+                                onTitleTap:
+                                    item != null &&
+                                        item.isEpisode &&
+                                        item.seriesId != null &&
+                                        item.seriesId!.isNotEmpty
+                                    ? () => _openSeries(item)
+                                    : null,
+                                meta: item == null
+                                    ? _PhoneDetailPending.metaEntries(
+                                        context,
+                                        handoff,
+                                      )
+                                    : _bannerMeta(l, item),
+                                actions: item == null
+                                    ? (pending
+                                          ? _PhoneDetailPending.action(context)
+                                          : null)
+                                    : _DetailPlayActions(
+                                        label: target == null
+                                            ? l.noPlayableStream
+                                            : _playLabel(l, item, target),
+                                        tooltip: target == null
+                                            ? null
+                                            : _playLabel(
+                                                l,
+                                                item,
+                                                target,
+                                                full: true,
+                                              ),
+                                        enabled:
+                                            target != null && target.isPlayable,
+                                        progress: target?.canResume == true
+                                            ? target!.playbackProgress
+                                            : null,
+                                        progressLabel: target == null
+                                            ? null
+                                            : remainingLabel(l, target),
+                                        played: item.isSeries
+                                            ? null
+                                            : item.userData.played,
+                                        onTogglePlayed: controller.playedBusy
+                                            ? null
+                                            : _togglePlayed,
+                                        showRestart:
+                                            !item.isSeries &&
+                                            target?.canResume == true,
+                                        onPlay: target == null
+                                            ? null
+                                            : _openPreferredPlayer,
+                                        onRestart: target == null
+                                            ? null
+                                            : () => _openPlayer(
+                                                target.id,
+                                                fromStart: true,
+                                              ),
+                                        onPrevious:
+                                            item.isEpisode &&
+                                                _previousEpisode != null
+                                            ? () => _openItem(
+                                                _previousEpisode!.id,
+                                              )
+                                            : null,
+                                        onNext:
+                                            item.isEpisode &&
+                                                _nextEpisode != null
+                                            ? () => _openItem(_nextEpisode!.id)
+                                            : null,
+                                      ),
+                                preferBackdrop: preferBackdrop,
+                                maxWidth: imageWidth,
+                                posterItem: handoff?.item ?? item,
                               ),
                             ),
-                          ),
-                        )
-                      else if (failed)
-                        MobileFailureState(
-                          message: embyFailureMessage(l, controller.error!),
-                          onRetry: _refresh,
-                        )
-                      else if (imageSource != null)
-                        KeyedSubtree(
-                          key: _PhoneDetailPending.headerKey,
-                          child: PhoneItemBanner(
-                            item: imageSource,
-                            title: (item ?? imageSource).name,
-                            titleWidget: pending
-                                ? _PhoneDetailPending.title(context, handoff)
-                                : null,
-                            pendingMeta: pending
-                                ? _PhoneDetailPending.metaPlaceholder(
-                                    context,
-                                    handoff,
-                                  )
-                                : null,
-                            titleHint: item != null && item.isEpisode
-                                ? item.seriesName
-                                : null,
-                            onTitleTap:
-                                item != null &&
-                                    item.isEpisode &&
-                                    item.seriesId != null &&
-                                    item.seriesId!.isNotEmpty
-                                ? () => _openSeries(item)
-                                : null,
-                            meta: item == null
-                                ? _PhoneDetailPending.metaEntries(
-                                    context,
-                                    handoff,
-                                  )
-                                : _bannerMeta(l, item),
-                            actions: item == null
-                                ? (pending
-                                      ? _PhoneDetailPending.action(context)
-                                      : null)
-                                : _DetailPlayActions(
-                                    label: target == null
-                                        ? l.noPlayableStream
-                                        : _playLabel(l, item, target),
-                                    tooltip: target == null
-                                        ? null
-                                        : _playLabel(
-                                            l,
-                                            item,
-                                            target,
-                                            full: true,
-                                          ),
-                                    enabled:
-                                        target != null && target.isPlayable,
-                                    progress: target?.canResume == true
-                                        ? target!.playbackProgress
-                                        : null,
-                                    progressLabel: target == null
-                                        ? null
-                                        : remainingLabel(l, target),
-                                    played: item.isSeries
-                                        ? null
-                                        : item.userData.played,
-                                    onTogglePlayed: controller.playedBusy
-                                        ? null
-                                        : _togglePlayed,
-                                    showRestart:
-                                        !item.isSeries &&
-                                        target?.canResume == true,
-                                    onPlay: target == null
-                                        ? null
-                                        : _openPreferredPlayer,
-                                    onRestart: target == null
-                                        ? null
-                                        : () => _openPlayer(
-                                            target.id,
-                                            fromStart: true,
-                                          ),
-                                    onPrevious:
-                                        item.isEpisode &&
-                                            _previousEpisode != null
-                                        ? () => _openItem(_previousEpisode!.id)
-                                        : null,
-                                    onNext:
-                                        item.isEpisode && _nextEpisode != null
-                                        ? () => _openItem(_nextEpisode!.id)
-                                        : null,
-                                  ),
-                            preferBackdrop: preferBackdrop,
-                            maxWidth: imageWidth,
-                            posterItem: handoff?.item ?? item,
-                          ),
-                        ),
-                      if (pending)
-                        _PhoneDetailPending(
-                          handoff: handoff,
-                          withCaption: imageSource == null,
-                        ),
-                      if (item != null && controller.error != null)
-                        MobileFailureState(
-                          message: embyFailureMessage(l, controller.error!),
-                          onRetry: _refresh,
-                        ),
-                      if (item?.isSeries == true &&
-                          controller.seasonError != null)
-                        MobileFailureState(
-                          message: embyFailureMessage(
-                            l,
-                            controller.seasonError!,
-                          ),
-                          onRetry: controller.loadSeasons,
-                        ),
-                    ],
-                  ),
-                  if (item != null && item.isSeries)
-                    ...MobileSeriesPage(
-                      item: item,
-                      seasons: controller.seasons,
-                      seasonId: controller.seasonId,
-                      episodes: controller.episodes,
-                      episodesLoading: controller.episodesLoading,
-                      episodeError: controller.episodeError,
-                      hasMore: controller.hasMore,
-                      episodeTotal: controller.episodeTotal,
-                      playTargetId: target?.id,
-                      focusEpisodeId: widget.initialEpisodeId,
-                      scrollCoordinator: _episodeScrollCoordinator,
-                      similar: _similar,
-                      onPickEpisode: _pickEpisode,
-                      onOpenGenre: DetailSourceScope.maybeOf(context) == null
-                          ? (genre) => _openGenre(item, genre)
-                          : null,
-                      onSelectSeason: _changeSeason,
-                      onOpenEpisode: _openItem,
-                      onRetryEpisodes: controller.seasonId == null
-                          ? null
-                          : () => _changeSeason(
-                              controller.seasonId!,
-                              more:
-                                  controller.episodes.isNotEmpty &&
-                                  controller.hasMore,
+                          if (pending)
+                            _PhoneDetailPending(
+                              handoff: handoff,
+                              withCaption: imageSource == null,
                             ),
-                      onLoadMore: controller.seasonId == null
-                          ? null
-                          : () =>
-                                _changeSeason(controller.seasonId!, more: true),
-                      onOpenItem: _openItem,
-                      onOpenSimilar: DetailSourceScope.maybeOf(context) == null
-                          ? _openSimilarShelf
-                          : null,
-                    ).buildSlivers(context),
-                  SliverList.list(
-                    children: [
-                      if (item != null && !item.isSeries)
-                        _PhoneItemDetail(
+                          if (item != null && controller.error != null)
+                            MobileFailureState(
+                              message: embyFailureMessage(l, controller.error!),
+                              onRetry: _refresh,
+                            ),
+                          if (item?.isSeries == true &&
+                              controller.seasonError != null)
+                            MobileFailureState(
+                              message: embyFailureMessage(
+                                l,
+                                controller.seasonError!,
+                              ),
+                              onRetry: controller.loadSeasons,
+                            ),
+                        ],
+                      ),
+                      if (item != null && item.isSeries)
+                        ...MobileSeriesPage(
                           item: item,
+                          seasons: controller.seasons,
+                          seasonId: controller.seasonId,
+                          episodes: controller.episodes,
+                          episodesLoading: controller.episodesLoading,
+                          episodeError: controller.episodeError,
+                          hasMore: controller.hasMore,
+                          episodeTotal: controller.episodeTotal,
+                          playTargetId: target?.id,
+                          focusEpisodeId: widget.initialEpisodeId,
+                          scrollCoordinator: _episodeScrollCoordinator,
                           similar: _similar,
-                          mediaSource: _source(item),
-                          selectedSourceId: _source(item)?.id,
-                          onSelectSource: _selectSource,
-                          selectedAudioIndex: _audioStreamIndex,
-                          selectedSubtitleIndex: _subtitleStreamIndex,
-                          onAudio: (index) =>
-                              setState(() => _audioStreamIndex = index),
-                          onSubtitle: (index) =>
-                              setState(() => _subtitleStreamIndex = index),
-                          onOpenItem: _openItem,
+                          onPickEpisode: _pickEpisode,
                           onOpenGenre:
                               DetailSourceScope.maybeOf(context) == null
                               ? (genre) => _openGenre(item, genre)
                               : null,
-                          onChapter: item.isPlayable
-                              ? (chapter) => _openPlayer(
-                                  item.id,
-                                  startPosition: chapter.startPosition,
-                                )
-                              : null,
+                          onSelectSeason: _changeSeason,
+                          onOpenEpisode: _openItem,
+                          onRetryEpisodes: controller.seasonId == null
+                              ? null
+                              : () => _changeSeason(
+                                  controller.seasonId!,
+                                  more:
+                                      controller.episodes.isNotEmpty &&
+                                      controller.hasMore,
+                                ),
+                          onLoadMore: controller.seasonId == null
+                              ? null
+                              : () => _changeSeason(
+                                  controller.seasonId!,
+                                  more: true,
+                                ),
+                          onOpenItem: _openItem,
                           onOpenSimilar:
                               DetailSourceScope.maybeOf(context) == null
                               ? _openSimilarShelf
                               : null,
+                        ).buildSlivers(context),
+                      SliverList.list(
+                        children: [
+                          if (item != null && !item.isSeries)
+                            _PhoneItemDetail(
+                              item: item,
+                              similar: _similar,
+                              mediaSource: _source(item),
+                              selectedSourceId: _source(item)?.id,
+                              onSelectSource: _selectSource,
+                              selectedAudioIndex: _audioStreamIndex,
+                              selectedSubtitleIndex: _subtitleStreamIndex,
+                              onAudio: (index) =>
+                                  setState(() => _audioStreamIndex = index),
+                              onSubtitle: (index) =>
+                                  setState(() => _subtitleStreamIndex = index),
+                              onOpenItem: _openItem,
+                              onOpenGenre:
+                                  DetailSourceScope.maybeOf(context) == null
+                                  ? (genre) => _openGenre(item, genre)
+                                  : null,
+                              onChapter: item.isPlayable
+                                  ? (chapter) => _openPlayer(
+                                      item.id,
+                                      startPosition: chapter.startPosition,
+                                    )
+                                  : null,
+                              onOpenSimilar:
+                                  DetailSourceScope.maybeOf(context) == null
+                                  ? _openSimilarShelf
+                                  : null,
+                            ),
+                          if (_similarError != null)
+                            MobileFailureState(
+                              message: embyFailureMessage(l, _similarError!),
+                              onRetry: _loadExtras,
+                            ),
+                        ],
+                      ),
+                      SliverToBoxAdapter(
+                        child: SizedBox(
+                          height:
+                              MediaQuery.paddingOf(context).bottom +
+                              AppSpacing.lg,
                         ),
-                      if (_similarError != null)
-                        MobileFailureState(
-                          message: embyFailureMessage(l, _similarError!),
-                          onRetry: _loadExtras,
-                        ),
+                      ),
                     ],
                   ),
-                  SliverToBoxAdapter(
-                    child: SizedBox(
-                      height:
-                          MediaQuery.paddingOf(context).bottom + AppSpacing.lg,
-                    ),
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _PhoneDetailBar(
+                    immersive: immersive,
+                    title: _barSolid ? (item ?? handoff?.item)?.name : null,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _PhoneDetailBar extends StatelessWidget {
+  const _PhoneDetailBar({required this.immersive, this.title});
+
+  final bool immersive;
+  final String? title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final onBar = immersive ? const Color(0xFFFFFFFF) : scheme.onSurface;
+    return ColoredBox(
+      color: immersive
+          ? const Color(0x00000000)
+          : theme.scaffoldBackgroundColor,
+      child: Padding(
+        padding: EdgeInsets.only(top: MediaQuery.viewPaddingOf(context).top),
+        child: SizedBox(
+          height: 44,
+          child: IconTheme(
+            data: IconThemeData(color: onBar),
+            child: Row(
+              children: [
+                CupertinoNavigationBarBackButton(
+                  color: onBar,
+                  onPressed: () => context.pop(),
+                ),
+                Expanded(
+                  child: title == null
+                      ? const SizedBox.shrink()
+                      : Text(
+                          title!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: onBar,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 44),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

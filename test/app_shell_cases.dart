@@ -15,6 +15,8 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
+import 'package:rillight/app/window_chrome.dart';
+import 'package:rillight/app/settings/settings_action.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/connect_page.dart';
 
@@ -375,7 +377,12 @@ void main() {
       (tester) async {
         final auth = await _connect(tester);
         final app = await _sourceApp(tester, auth as SyntheticSourceAuth);
-        await tester.pumpWidget(app);
+        await tester.pumpWidget(
+          AppUiTheme(
+            data: AppUiTheme.dark(),
+            child: WindowChromeHost(child: app),
+          ),
+        );
         await settle(tester);
 
         expect(
@@ -385,6 +392,19 @@ void main() {
           findsNothing,
         );
         expect(find.byKey(AppShell.topBarKey), findsOneWidget);
+        final homeCenter = tester.getCenter(find.byKey(AppShell.homeNavKey));
+        for (final finder in [
+          find.byKey(const Key('app-shell-aggregation')),
+          find.byKey(AppShell.overflowNavKey),
+          find.byKey(SettingsAction.actionKey),
+          find.byKey(SessionActions.serverMenuKey),
+          find.widgetWithIcon(AppIconButton, CupertinoIcons.search),
+        ]) {
+          expect(
+            tester.getCenter(finder).dy,
+            moreOrLessEquals(homeCenter.dy, epsilon: 1),
+          );
+        }
         expect(find.byType(HomePage), findsOneWidget);
         expect(tester.getTopLeft(find.byType(HomePage)).dy, 0);
         expect(tester.getTopLeft(find.byKey(AppShell.topBarKey)).dy, 0);
@@ -461,7 +481,7 @@ void main() {
           find.descendant(of: back, matching: find.text('返回')),
           findsOneWidget,
         );
-        expect(tester.getSize(back).height, 36);
+        expect(tester.getSize(back).height, kWindowChromeHeight);
         expect(tester.getSize(back).width, greaterThan(36));
         expect(
           find.descendant(

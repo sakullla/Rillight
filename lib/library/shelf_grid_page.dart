@@ -991,7 +991,7 @@ class _ShelfChildDelegate extends SliverChildBuilderDelegate {
 double _headerTopInset(BuildContext context) {
   var inset = AppSpacing.xl;
   if (context.findAncestorWidgetOfExactType<AppShell>() == null) {
-    return inset;
+    return inset + MediaQuery.viewPaddingOf(context).top;
   }
   final hasChrome =
       context.findAncestorWidgetOfExactType<WindowChromeHost>() != null;

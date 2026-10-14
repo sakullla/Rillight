@@ -69,6 +69,7 @@ class TvTopNavBar extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: horizontal),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // 非交互文本不拦截命中:hero/内容区在栏下出血时仍可点按。
               IgnorePointer(child: _Brand(name: l.appName)),
@@ -100,7 +101,9 @@ class TvTopNavBar extends StatelessWidget {
               ],
               const Spacer(),
               if (username case final name? when name.isNotEmpty)
-                IgnorePointer(child: _UserChip(name: name)),
+                IgnorePointer(
+                  child: _UserChip(key: const Key('tv-nav-user'), name: name),
+                ),
             ],
           ),
         ),
@@ -172,7 +175,7 @@ class _Brand extends StatelessWidget {
 }
 
 class _UserChip extends StatelessWidget {
-  const _UserChip({required this.name});
+  const _UserChip({super.key, required this.name});
   final String name;
 
   @override

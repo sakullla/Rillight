@@ -73,6 +73,19 @@ void main() {
       await tester.pumpWidget(app);
       await settle(tester);
       expect(find.byType(TvShell), findsOneWidget);
+      final navHome = tester.getCenter(find.byKey(const ValueKey('tv-nav-0')));
+      for (final finder in [
+        find.byKey(const ValueKey('tv-nav-1')),
+        find.byKey(const ValueKey('tv-nav-2')),
+        find.byKey(const ValueKey('tv-nav-3')),
+        find.byKey(const Key('tv-nav-user')),
+        find.text('灯川 Rillight'),
+      ]) {
+        expect(
+          tester.getCenter(finder).dy,
+          moreOrLessEquals(navHome.dy, epsilon: 1),
+        );
+      }
 
       FocusNode navFocus(int index) => tester
           .widget<FocusableActionDetector>(

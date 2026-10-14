@@ -3,6 +3,7 @@ import '../helpers/widget_harness.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -46,7 +47,10 @@ void main() {
       decorationOf(light).color,
       AppUiTheme.light().colorScheme.surfaceContainerLowest,
     );
-    expect(tester.getSize(find.byKey(CatalogKeys.back)).height, 36);
+    expect(
+      tester.getSize(find.byKey(CatalogKeys.back)).height,
+      kWindowChromeHeight,
+    );
     expect(find.text('返回'), findsOneWidget);
     final dark = await pump(
       tester,

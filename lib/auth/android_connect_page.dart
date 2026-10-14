@@ -301,7 +301,12 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
             child: ListenableBuilder(
               listenable: auth,
               builder: (context, _) => SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                padding: EdgeInsets.fromLTRB(
+                  24,
+                  MediaQuery.paddingOf(context).top,
+                  24,
+                  24,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

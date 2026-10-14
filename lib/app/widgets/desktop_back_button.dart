@@ -1,4 +1,5 @@
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/home/catalog_keys.dart';
 
 /// 桌面顶栏返回:胶囊按钮,图标加短标签。
@@ -68,7 +69,7 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
         key: CatalogKeys.back,
         duration: duration,
         curve: AppMotion.standard,
-        height: 36,
+        height: kWindowChromeHeight,
         decoration: ShapeDecoration(
           color: fill,
           shape: StadiumBorder(

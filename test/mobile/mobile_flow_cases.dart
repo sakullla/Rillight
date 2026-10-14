@@ -263,13 +263,20 @@ void main() {
 
       bool transparent() =>
           tester
-              .widget<CupertinoNavigationBar>(
-                find.byType(CupertinoNavigationBar),
-              )
+              .widget<PhoneShellBar>(find.byType(PhoneShellBar))
               .backgroundColor
-              ?.a ==
+              .a ==
           0;
       expect(transparent(), isTrue);
+      expect(tester.getTopLeft(find.byKey(PhoneHero.bannerKey)).dy, 0);
+      expect(
+        find.descendant(
+          of: find.byType(PhoneShellBar),
+          matching: find.text('首页'),
+        ),
+        findsNothing,
+      );
+      expect(find.byKey(MobileShell.serverPillKey), findsOneWidget);
       final home = position('mobile-home-scroll');
       // No pump between jumps: the final notification must supersede the first,
       // even though it equals the currently rendered transparent state.
@@ -285,6 +292,14 @@ void main() {
       expect(transparent(), isTrue);
       await tester.tap(find.text('聚合').last);
       await settle(tester);
+      expect(find.byKey(MobileShell.serverPillKey), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(PhoneShellBar),
+          matching: find.text('聚合'),
+        ),
+        findsNothing,
+      );
       expect(position('aggregation').maxScrollExtent, greaterThan(24));
       await tester.tap(find.text('首页').last);
       await settle(tester);
