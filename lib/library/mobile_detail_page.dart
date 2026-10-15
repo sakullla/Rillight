@@ -963,7 +963,8 @@ class _DetailPlayActions extends StatelessWidget {
           toggled: favorite,
           child: _SecondaryAction(
             key: favoriteKey,
-            icon: favorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+            icon: AppIcons.favorite,
+            iconFill: favorite ? AppIcons.filled : AppIcons.outline,
             label: favorite ? l.phoneFavorited : l.phoneFavorite,
             highlighted: favorite,
             onPressed: onToggleFavorite,
@@ -992,7 +993,7 @@ class _DetailPlayActions extends StatelessWidget {
       if (onPrevious != null)
         _SecondaryAction(
           key: CatalogKeys.previousEpisode,
-          icon: CupertinoIcons.backward_end_fill,
+          icon: AppIcons.skipPrevious,
           label: l.previousEpisode,
           onPressed: onPrevious,
         ),

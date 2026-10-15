@@ -46,6 +46,12 @@ abstract final class AppIcons {
   static const IconData replay10 = Symbols.replay_10_rounded;
   static const IconData forward10 = Symbols.forward_10_rounded;
   static const IconData skipNext = Symbols.skip_next_rounded;
+
+  /// 上一集。和 [skipNext] 成对，图形本身不变。
+  static const IconData skipPrevious = Symbols.skip_previous_rounded;
+
+  /// 心形。收藏未选中为线框，选中为同一图形的实心。
+  static const IconData favorite = Symbols.favorite_rounded;
   static const IconData fastForward = Symbols.fast_forward_rounded;
   static const IconData replay = Symbols.replay_rounded;
   static const IconData refresh = Symbols.refresh_rounded;
@@ -108,6 +114,9 @@ abstract final class AppIcons {
   static const IconData wifiOff = Symbols.wifi_off_rounded;
   static const IconData speed = Symbols.speed_rounded;
   static const IconData subtitles = Symbols.subtitles_rounded;
+
+  /// 摄像机。片源里的视频轨只用这一个图形，影片库仍用 [movie]，片源文件仍用 [mediaSource]。
+  static const IconData video = Symbols.videocam_rounded;
 
   /// 四向展开。全屏开关只用这一个图形，未全屏为线框，全屏为实心。
   static const IconData fullscreen = Symbols.fullscreen_rounded;

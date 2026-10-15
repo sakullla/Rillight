@@ -1777,6 +1777,17 @@ void main() {
     unawaited(harness.router.push('/item/series-friends'));
     await settle(tester);
     final picker = find.byKey(CatalogKeys.locateEpisode);
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(
+              of: picker,
+              matching: find.byIcon(AppIcons.episodes),
+            ),
+          )
+          .icon,
+      AppIcons.episodes,
+    );
     await Scrollable.ensureVisible(tester.element(picker), alignment: 0.5);
     await settle(tester);
     await tester.tap(picker);
@@ -1867,6 +1878,13 @@ void main() {
           .icon,
       AppIcons.play,
     );
+    final favorite = find.byKey(const Key('phone-detail-favorite'));
+    expect(favorite, findsOneWidget);
+    final favoriteIcon = tester.widget<Icon>(
+      find.descendant(of: favorite, matching: find.byType(Icon)),
+    );
+    expect(favoriteIcon.icon, AppIcons.favorite);
+    expect(favoriteIcon.fill, AppIcons.outline);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -1926,6 +1944,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('NF.WD.264.AAC-SonyHD'), findsNothing);
+      expect(find.byIcon(AppIcons.video), findsOneWidget);
       await tester.tap(row);
       await tester.pumpAndSettle();
       expect(find.text('导演剪辑版'), findsOneWidget);

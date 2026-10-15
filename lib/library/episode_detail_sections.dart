@@ -1382,8 +1382,8 @@ class _PhoneStreamCard extends StatelessWidget {
     final first = group.choices.firstOrNull;
     final stream = first == null ? null : _stream(first.index);
     if (stream?.isSubtitle == true) return AppIcons.subtitles;
-    if (stream?.isAudio == true) return CupertinoIcons.waveform;
-    return CupertinoIcons.videocam;
+    if (stream?.isAudio == true) return AppIcons.music;
+    return AppIcons.video;
   }
 
   int? _defaultIndex(_StreamGroup group) {

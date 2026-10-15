@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
@@ -1933,7 +1934,11 @@ class _EpisodeShelfActions extends StatelessWidget {
           AppButton.icon(
             key: CatalogKeys.locateEpisode,
             onPressed: onLocate,
-            icon: const Icon(CupertinoIcons.square_grid_2x2, size: 18),
+            icon: const Icon(
+              AppIcons.episodes,
+              fill: AppIcons.filled,
+              size: 18,
+            ),
             label: Text(l10n.pickEpisode),
             variant: AppButtonVariant.plain,
           ),
@@ -2994,7 +2999,7 @@ class _DetailActions extends StatelessWidget {
           key: CatalogKeys.previousEpisode,
           onPressed: onOpenPreviousEpisode,
           style: ghost,
-          icon: const Icon(CupertinoIcons.backward_end_fill),
+          icon: const Icon(AppIcons.skipPrevious, fill: AppIcons.filled),
           label: Text(l10n.previousEpisode),
           variant: AppButtonVariant.outlined,
         ),
@@ -3003,7 +3008,7 @@ class _DetailActions extends StatelessWidget {
           key: CatalogKeys.nextEpisode,
           onPressed: onOpenNextEpisode,
           style: ghost,
-          icon: const Icon(CupertinoIcons.forward_end_fill),
+          icon: const Icon(AppIcons.skipNext, fill: AppIcons.filled),
           label: Text(l10n.nextEpisode),
           variant: AppButtonVariant.outlined,
         ),
@@ -3050,7 +3055,7 @@ class _DetailActions extends StatelessWidget {
           menuKey: CatalogKeys.detailAudio,
           initialValue: audioStreamIndex,
           tooltip: '${l10n.audioTrack} · $audioLabel',
-          icon: CupertinoIcons.waveform,
+          icon: AppIcons.music,
           items: [
             for (final stream in audios)
               AppMenuEntry(
@@ -3065,7 +3070,7 @@ class _DetailActions extends StatelessWidget {
           menuKey: CatalogKeys.detailSubtitle,
           initialValue: subtitleStreamIndex ?? _subtitleOffToken,
           tooltip: '${l10n.subtitleTrack} · $subtitleLabel',
-          icon: CupertinoIcons.captions_bubble,
+          icon: AppIcons.subtitles,
           items: [
             AppMenuEntry<int>(
               value: _subtitleOffToken,

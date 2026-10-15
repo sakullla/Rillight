@@ -848,7 +848,11 @@ class MobileSeriesPage extends StatelessWidget {
                   key: CatalogKeys.locateEpisode,
                   style: AppButtonStyle(minimumSize: const Size(48, 48)),
                   onPressed: onPickEpisode,
-                  icon: const Icon(CupertinoIcons.square_grid_2x2, size: 18),
+                  icon: const Icon(
+                    AppIcons.episodes,
+                    fill: AppIcons.filled,
+                    size: 18,
+                  ),
                   label: Text(l.pickEpisode),
                   variant: AppButtonVariant.plain,
                 ),

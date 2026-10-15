@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -364,7 +365,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         TvAction(
           key: CatalogKeys.previousEpisode,
           pill: true,
-          leading: const Icon(CupertinoIcons.backward_end_fill),
+          leading: const Icon(AppIcons.skipPrevious, fill: AppIcons.filled),
           onPressed: () => _openEpisode(_previous!),
           child: Text(l.previousEpisode),
         ),
@@ -372,7 +373,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         TvAction(
           key: CatalogKeys.nextEpisode,
           pill: true,
-          leading: const Icon(CupertinoIcons.forward_end_fill),
+          leading: const Icon(AppIcons.skipNext, fill: AppIcons.filled),
           onPressed: () => _openEpisode(_next!),
           child: Text(l.nextEpisode),
         ),

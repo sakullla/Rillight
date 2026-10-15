@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:rillight/app/app_shell.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
@@ -1740,7 +1741,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             l.filterFavorite,
             'aggregation-segment-favorites',
             _AggregationSegment.favorites,
-            CupertinoIcons.heart,
+            AppIcons.favorite,
           ),
           segment(
             l.libraries,
