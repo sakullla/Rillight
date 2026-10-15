@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -402,17 +403,17 @@ void main() {
           ),
         );
         final cardTitle = tester.getRect(find.text('示例剧').first);
-        final cardMeta = tester.getRect(find.text('S1E1 · 第 1 集'));
+        final cardMeta = tester.getRect(find.text('第 1 集'));
         expect(title.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(picture.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(cardTitle.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(cardMeta.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(card.bottom, lessThanOrEqualTo(navTop + 0.5));
-        // 季集角标叠在剧照左上角,不另占标题上方的一行。
-        final badges = tester.getRect(find.byKey(phoneHomeBadgesKey('ep-1')));
-        expect(badges.top, greaterThanOrEqualTo(picture.top - 0.5));
-        expect(badges.bottom, lessThanOrEqualTo(picture.bottom + 0.5));
-        expect(badges.top, lessThan(cardTitle.top));
+        // 集名已经是「第 1 集」时，季集编号不再在角标和副标题里各出现一次。
+        expect(cardMeta.top, greaterThanOrEqualTo(picture.bottom - 0.5));
+        expect(find.textContaining('S1E1'), findsNothing);
+        expect(find.textContaining('S1E2'), findsNothing);
+        expect(find.byKey(phoneHomeBadgesKey('ep-1')), findsNothing);
         final remove = tester.getRect(
           find.byKey(CatalogKeys.removeFromResume('ep-1')),
         );
@@ -477,6 +478,140 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'continue watching keeps progress on the frame and episode once',
+    (tester) async {
+      await _pumpSurface(tester, width: 2200, height: 900);
+      final auth = AuthController.memory();
+      final catalog = CatalogController(auth: auth);
+      addTearDown(catalog.dispose);
+      addTearDown(auth.dispose);
+      catalog
+        ..resume = CatalogRowState(
+          items: [
+            MediaItem(
+              id: 'ep-human',
+              name: '重逢',
+              type: 'Episode',
+              seriesName: '人读剧',
+              parentIndexNumber: 1,
+              indexNumber: 1,
+              runtime: const Duration(minutes: 50),
+              userData: const MediaUserData(
+                playbackPosition: Duration(minutes: 10),
+                playedPercentage: 20,
+              ),
+            ),
+            MediaItem(
+              id: 'ep-release',
+              name: 'NF.WD.264.AAC-SonyHD',
+              type: 'Episode',
+              seriesName: '发布剧',
+              parentIndexNumber: 1,
+              indexNumber: 2,
+              mediaSources: const [
+                ItemMediaSource(
+                  id: 'src',
+                  name: 'NF.WD.264.AAC-SonyHD',
+                  width: 1920,
+                  height: 1080,
+                  streams: [
+                    ItemMediaStream(
+                      index: 0,
+                      type: 'Video',
+                      codec: 'h264',
+                      width: 1920,
+                      height: 1080,
+                    ),
+                  ],
+                ),
+              ],
+              userData: const MediaUserData(playedPercentage: 25),
+            ),
+            const MediaItem(
+              id: 'ep-named',
+              name: '第 3 集',
+              type: 'Episode',
+              seriesName: '编号剧',
+              parentIndexNumber: 1,
+              indexNumber: 3,
+            ),
+            const MediaItem(
+              id: 'ep-edition',
+              name: '导演剪辑版',
+              type: 'Episode',
+              seriesName: '版本剧',
+              parentIndexNumber: 1,
+              indexNumber: 4,
+            ),
+          ],
+        )
+        ..nextUp = const CatalogRowState(hidden: true)
+        ..latestMovies = const CatalogRowState(hidden: true)
+        ..latestSeries = const CatalogRowState(hidden: true)
+        ..libraries = const []
+        ..librariesLoading = false;
+      await tester.pumpWidget(_homeApp(catalog));
+      await tester.pump();
+
+      final human = find.byKey(CatalogKeys.item('ep-human'));
+      final picture = tester.getRect(
+        find.descendant(of: human, matching: find.byType(AspectRatio)),
+      );
+      final title = tester.getRect(
+        find.descendant(of: human, matching: find.text('人读剧')),
+      );
+      final caption = tester.getRect(find.text('S1E1 · 重逢 · 剩余 40 分钟'));
+      expect(caption.top, greaterThanOrEqualTo(title.bottom - 0.5));
+      expect(caption.top, greaterThanOrEqualTo(picture.bottom - 0.5));
+      expect(
+        find.descendant(of: human, matching: find.textContaining('剩余')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.descendant(of: human, matching: find.byType(AspectRatio)),
+          matching: find.textContaining('剩余'),
+        ),
+        findsNothing,
+      );
+      expect(find.textContaining('S1E1'), findsOneWidget);
+      expect(find.byKey(phoneHomeBadgesKey('ep-human')), findsNothing);
+
+      final bar = tester.getRect(
+        find.descendant(
+          of: human,
+          matching: find.byKey(CatalogKeys.resumeProgress),
+        ),
+      );
+      expect((bar.bottom - picture.bottom).abs(), lessThan(2));
+      expect(bar.top, greaterThan(picture.top + picture.height * 0.75));
+
+      final play = tester.widget<AppIconButton>(
+        find.byKey(const Key('phone-resume-play-ep-human')),
+      );
+      expect(play.style?.backgroundColor, const Color(0xF2FFFFFF));
+      expect(play.style!.backgroundColor!.computeLuminance(), greaterThan(0.7));
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const Key('phone-resume-play-ep-human')),
+          matching: find.byIcon(AppIcons.play),
+        ),
+      );
+      expect(icon.fill, AppIcons.filled);
+
+      expect(find.text('S1E2 · 1080p · H.264'), findsOneWidget);
+      expect(find.textContaining('SonyHD'), findsNothing);
+      expect(find.textContaining('NF.WD'), findsNothing);
+      expect(find.textContaining('S1E2'), findsOneWidget);
+      expect(find.text('第 3 集'), findsOneWidget);
+      expect(find.textContaining('S1E3'), findsNothing);
+      expect(find.text('S1E4 · 导演剪辑版'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('home keeps its scroll offset across detail and reduced motion', (
     tester,

@@ -1,5 +1,6 @@
 import '../helpers/cupertino_test_app.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -390,4 +391,109 @@ void main() {
     );
     expect(play.style?.backgroundColor, const Color(0xffffffff));
   });
+
+  testWidgets('phone carousel keeps one solid play button beside details', (
+    tester,
+  ) async {
+    final item = decodeEmbyMediaItem({
+      'Id': 'movie',
+      'Name': 'Movie',
+      'Type': 'Movie',
+    });
+    for (final theme in [AppUiTheme.phoneDark(), AppUiTheme.phoneLight()]) {
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          theme: theme,
+          locale: const Locale('zh'),
+          home: CupertinoPageScaffold(
+            child: Center(
+              child: HeroPlaybackActions(
+                item: item,
+                expand: true,
+                onDetails: () {},
+                onResume: () async {},
+              ),
+            ),
+          ),
+        ),
+      );
+      final playFinder = find.byKey(const ValueKey('hero-resume-movie'));
+      final detailsFinder = find.widgetWithText(ui.AppButton, '详情');
+      final play = tester.widget<ui.AppButton>(playFinder);
+      final details = tester.widget<ui.AppButton>(detailsFinder);
+      expect(play.variant, AppButtonVariant.filled);
+      expect(details.variant, AppButtonVariant.outlined);
+      expect(details.style?.backgroundColor, isNull);
+      expect(play.style?.backgroundColor, theme.colorScheme.inverseSurface);
+      expect(play.style!.backgroundColor!.a, greaterThan(0.9));
+      expect(
+        (play.style!.backgroundColor!.computeLuminance() - 0.5).abs(),
+        greaterThan(0.35),
+      );
+      expect(
+        tester.getTopLeft(playFinder).dy,
+        tester.getTopLeft(detailsFinder).dy,
+      );
+      final icon = tester.widget<Icon>(
+        find.descendant(of: playFinder, matching: find.byIcon(AppIcons.play)),
+      );
+      expect(icon.fill, AppIcons.filled);
+      expect(find.text('播放'), findsOneWidget);
+      expect(find.text('详情'), findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping the phone hero still opens details', (tester) async {
+    isolateImageCache();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 800);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final auth = AuthController.memory();
+    final catalog = CatalogController(auth: auth);
+    addTearDown(catalog.dispose);
+    addTearDown(auth.dispose);
+    catalog.latestMovies = CatalogRowState(
+      items: [
+        decodeEmbyMediaItem({
+          'Id': 'hero-movie',
+          'Name': '新片',
+          'Type': 'Movie',
+          'ImageTags': {'Primary': 'poster'},
+        }),
+      ],
+    );
+    final router = GoRouter(
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (_, _) => AuthScope(
+            controller: auth,
+            child: CatalogScope(
+              controller: catalog,
+              child: PhoneHero(catalog: catalog),
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/item/:id',
+          builder: (_, state) => Text('detail ${state.pathParameters['id']}'),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      CupertinoTestApp.router(
+        theme: AppUiTheme.phoneDark(),
+        locale: const Locale('zh'),
+        routerConfig: router,
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(PhoneHero.openKey));
+    await settle(tester);
+    expect(find.text('detail hero-movie'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }

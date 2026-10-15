@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
@@ -320,13 +321,66 @@ String _resumeMeta(MediaItem item, String title) {
   }
   final code = seasonEpisodeCode(item);
   final name = item.name.trim();
-  if (code == null) {
-    return name == title ? '' : name;
+  if (_episodeNameIsTechnical(name)) {
+    final spec = _episodeSpecLabel(item);
+    return [?code, if (spec.isNotEmpty) spec].join(' · ');
   }
   if (name.isEmpty || name == title) {
-    return code;
+    return code ?? '';
+  }
+  if (_nameCarriesEpisode(item) || code == null) {
+    return name;
   }
   return '$code · $name';
+}
+
+/// 集名已经写出这一集（S1E2、第 2 集、EP02）时，副标题不再加一遍季集编号。
+bool _nameCarriesEpisode(MediaItem item) {
+  final name = item.name.trim();
+  final code = seasonEpisodeCode(item);
+  if (code != null && name.toLowerCase().startsWith(code.toLowerCase())) {
+    return true;
+  }
+  if (item.indexNumber == null) return false;
+  return numberedEpisodeTitle(item) == item.name;
+}
+
+/// 集名主要由分辨率、编码或点分发布串组成。人读集名（含中文短名）不是。
+bool _episodeNameIsTechnical(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return false;
+  // 没有点分的中文名是人读集名，即使里面提到画质也不改写成规格。
+  if (RegExp(r'[\u3400-\u9fff]').hasMatch(trimmed) &&
+      !RegExp(r'[._]').hasMatch(trimmed)) {
+    return false;
+  }
+  return _releaseHint.hasMatch(trimmed);
+}
+
+final _releaseHint = RegExp(
+  r'1080p|720p|2160p|1440p|480p|\b4k\b|\buhd\b|x26[45]|h\.?26[45]|\b26[45]\b|'
+  r'hevc|\bavc\b|\bav1\b|\bvp9\b|flac|\baac\b|bdrip|bluray|web-?dl|webrip|10bit',
+  caseSensitive: false,
+);
+
+/// 发布串集名的副标题规格：分辨率和视频编码。解析不到时不回退成文件名。
+String _episodeSpecLabel(MediaItem item) {
+  final first = item.mediaSources.isEmpty ? null : item.mediaSources.first;
+  final sourceName = first?.name?.trim();
+  final source = ItemMediaSource(
+    id: first?.id ?? item.id,
+    name: sourceName != null && sourceName.isNotEmpty ? sourceName : item.name,
+    height: first?.height,
+    width: first?.width,
+    streams: first?.streams ?? const [],
+  );
+  final text = releaseSourcePrimaryText(source).trim();
+  final raw = item.name.trim();
+  final named = source.name?.trim() ?? '';
+  if (text.isEmpty || text == raw || text == named || text == source.label) {
+    return '';
+  }
+  return text;
 }
 
 /// 行高 = 图区 + 图下标题。横卡的进度在画面底边，移除按钮叠在画面角上。
@@ -488,12 +542,18 @@ class _WideCard extends StatelessWidget {
     final title = _resumeTitle(item);
     final meta = _resumeMeta(item, title);
     final remaining = remainingLabel(l10n, item);
-    final badges = phoneCardBadgeLabels(
-      l10n,
-      item,
-      // 横卡底部已经有进度条，不再把同一进度写成「已看 n%」。
-      includeResumeText: false,
-    );
+    final caption = [if (meta.isNotEmpty) meta, ?remaining].join(' · ');
+    final episodeCode = item.isEpisode ? seasonEpisodeCode(item) : null;
+    final badges = [
+      for (final label in phoneCardBadgeLabels(
+        l10n,
+        item,
+        // 横卡底部已经有进度条，不再把同一进度写成「已看 n%」。
+        includeResumeText: false,
+      ))
+        // 副标题已经写出集数时，角标不再重复同一季集编号。
+        if (episodeCode == null || label != episodeCode || meta.isEmpty) label,
+    ];
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
@@ -574,26 +634,9 @@ class _WideCard extends StatelessWidget {
                               ),
                             ),
                             icon: const Icon(
-                              CupertinoIcons.play_fill,
+                              AppIcons.play,
                               size: 20,
-                            ),
-                          ),
-                        ),
-                      if (item.canResume && remaining != null)
-                        Positioned(
-                          left: 66,
-                          right: 10,
-                          bottom: 26,
-                          child: Text(
-                            remaining,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: const Color(0xffffffff),
-                              fontWeight: FontWeight.w600,
-                              shadows: const [
-                                Shadow(color: Color(0x80000000), blurRadius: 6),
-                              ],
+                              fill: AppIcons.filled,
                             ),
                           ),
                         ),
@@ -645,8 +688,9 @@ class _WideCard extends StatelessWidget {
                                       width: 26,
                                       height: 26,
                                       child: Icon(
-                                        CupertinoIcons.xmark,
+                                        AppIcons.close,
                                         size: 13,
+                                        fill: AppIcons.filled,
                                         color: Color(0xffffffff),
                                       ),
                                     ),
@@ -674,11 +718,11 @@ class _WideCard extends StatelessWidget {
                         height: 1.25,
                       ),
                     ),
-                    if (meta.isNotEmpty)
+                    if (caption.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
-                          meta,
+                          caption,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(

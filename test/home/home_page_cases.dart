@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
@@ -430,7 +431,7 @@ void main() {
     expect(find.byType(AppErrorView), findsOneWidget);
     expect(find.byType(AppEmptyView), findsNothing);
     expect(find.text('货架加载失败'), findsOneWidget);
-    expect(find.byIcon(CupertinoIcons.exclamationmark_circle), findsOneWidget);
+    expect(find.byIcon(AppIcons.error), findsOneWidget);
     expect(find.byIcon(CupertinoIcons.tray), findsNothing);
     expect(find.text('重试'), findsOneWidget);
     expect(find.byKey(homeRefreshKey), findsOneWidget);

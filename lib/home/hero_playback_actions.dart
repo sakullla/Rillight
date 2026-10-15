@@ -1,3 +1,4 @@
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -117,7 +118,11 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
               height: 18,
               child: CupertinoActivityIndicator(),
             )
-          : const Icon(CupertinoIcons.play_fill, size: 22),
+          : Icon(
+              expand ? AppIcons.play : CupertinoIcons.play_fill,
+              size: 22,
+              fill: expand ? AppIcons.filled : null,
+            ),
       label: Text(
         l10n.play,
         maxLines: 1,
@@ -141,15 +146,16 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
       ),
       variant: AppButtonVariant.filled,
     );
+    // 手机播放与详情同一行。播放保持反相实底；详情只描边，不再用相近的实心块。
     final details = expand
         ? AppButton(
             onPressed: widget.onDetails,
             style: AppButtonStyle(
               minimumSize: const Size(0, 48),
-              backgroundColor: scheme.onSurface.withValues(alpha: .14),
               foregroundColor: scheme.onSurface,
+              side: BorderSide(color: scheme.outline),
             ),
-            variant: AppButtonVariant.tinted,
+            variant: AppButtonVariant.outlined,
             child: Text(l10n.details),
           )
         : AppButton(
