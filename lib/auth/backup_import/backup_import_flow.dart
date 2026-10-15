@@ -319,7 +319,7 @@ class BackupImportResultDialog extends StatelessWidget {
           const SizedBox(height: 6),
           row(
             BackupImportFlowKeys.nonTarget,
-            AppIcons.filter,
+            AppIcons.block,
             l10n.backupImportNonTargetCount(outcome.nonTarget),
           ),
         ],

@@ -1680,9 +1680,10 @@ class _ControlsRow extends StatelessWidget {
               ? l10n.exitFullscreen
               : l10n.fullscreen,
           onPressed: controller.toggleFullScreen,
-          icon: controller.isFullScreen
-              ? AppIcons.fullscreenExit
-              : AppIcons.fullscreen,
+          icon: AppIcons.fullscreen,
+          symbolFill: controller.isFullScreen
+              ? AppIcons.filled
+              : AppIcons.outline,
         ),
       ],
     );

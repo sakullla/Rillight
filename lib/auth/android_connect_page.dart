@@ -331,7 +331,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             key: const Key('phone-connect-manage-servers'),
                             onPressed: auth.isBusy ? null : _manageServers,
                             icon: const Icon(
-                              AppIcons.settings,
+                              AppIcons.server,
                               fill: AppIcons.filled,
                               size: 18,
                             ),
@@ -436,10 +436,10 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                           _passwordVisible = !_passwordVisible,
                                     ),
                                     icon: Icon(
-                                      _passwordVisible
-                                          ? AppIcons.visibilityOff
-                                          : AppIcons.visibility,
-                                      fill: AppIcons.filled,
+                                      AppIcons.visibility,
+                                      fill: _passwordVisible
+                                          ? AppIcons.filled
+                                          : AppIcons.outline,
                                       size: 20,
                                     ),
                                   ),

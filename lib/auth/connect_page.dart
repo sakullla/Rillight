@@ -532,10 +532,8 @@ class _ConnectPageState extends State<ConnectPage> {
                     setState(() => _passwordVisible = !_passwordVisible);
                   },
                   icon: Icon(
-                    _passwordVisible
-                        ? AppIcons.visibilityOff
-                        : AppIcons.visibility,
-                    fill: AppIcons.filled,
+                    AppIcons.visibility,
+                    fill: _passwordVisible ? AppIcons.filled : AppIcons.outline,
                     size: 20,
                   ),
                 ),

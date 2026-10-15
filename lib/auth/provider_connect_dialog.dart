@@ -263,10 +263,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                 onPressed: () =>
                     setState(() => _passwordVisible = !_passwordVisible),
                 icon: Icon(
-                  _passwordVisible
-                      ? AppIcons.visibilityOff
-                      : AppIcons.visibility,
-                  fill: AppIcons.filled,
+                  AppIcons.visibility,
+                  fill: _passwordVisible ? AppIcons.filled : AppIcons.outline,
                   size: 20,
                 ),
               )
@@ -1039,9 +1037,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                       !c.selectedLibraries.contains(library.key),
                     ),
               leading: Icon(
-                c.selectedLibraries.contains(library.key)
-                    ? AppIcons.checkboxOn
-                    : AppIcons.checkboxOff,
+                AppIcons.checkbox,
                 fill: c.selectedLibraries.contains(library.key)
                     ? AppIcons.filled
                     : AppIcons.outline,

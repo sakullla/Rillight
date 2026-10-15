@@ -740,7 +740,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       _actionButton(
         keyName: 'mobile-player-more',
         tooltip: l.mobileMore,
-        icon: const Icon(AppIcons.tune, fill: AppIcons.filled, size: 22),
+        icon: const Icon(AppIcons.settings, fill: AppIcons.filled, size: 22),
         action: () => _openMore(),
       ),
     ];
@@ -1139,9 +1139,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                     c.pendingMediaSourceId == source.id &&
                                             c.isRecovering
                                         ? AppIcons.hourglass
-                                        : source.id == c.activeMediaSourceId
-                                        ? AppIcons.checkCircle
-                                        : AppIcons.circle,
+                                        : AppIcons.checkCircle,
                                     fill:
                                         (c.pendingMediaSourceId == source.id &&
                                                 c.isRecovering) ||

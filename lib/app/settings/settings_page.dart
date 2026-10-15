@@ -612,10 +612,10 @@ class _SettingsPageState extends State<SettingsPage> {
                             setState(() => _tokenVisible = !_tokenVisible);
                           },
                           icon: Icon(
-                            _tokenVisible
-                                ? AppIcons.visibilityOff
-                                : AppIcons.visibility,
-                            fill: AppIcons.filled,
+                            AppIcons.visibility,
+                            fill: _tokenVisible
+                                ? AppIcons.filled
+                                : AppIcons.outline,
                           ),
                         ),
                       ),

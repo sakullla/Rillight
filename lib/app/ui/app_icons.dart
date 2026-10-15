@@ -75,31 +75,42 @@ abstract final class AppIcons {
   static const IconData delete = Symbols.delete_rounded;
   static const IconData download = Symbols.download_rounded;
   static const IconData logout = Symbols.logout_rounded;
+
+  /// 眼睛。密码或令牌是否可见只用这一个图形，未显示为线框，显示为实心。
   static const IconData visibility = Symbols.visibility_rounded;
-  static const IconData visibilityOff = Symbols.visibility_off_rounded;
   static const IconData error = Symbols.error_rounded;
+
+  /// 禁止标记。不支持的服务类型计数只用这一个图形，片库筛选仍用 [filter]。
+  static const IconData block = Symbols.block_rounded;
   static const IconData info = Symbols.info_rounded;
   static const IconData star = Symbols.star_rounded;
   static const IconData photo = Symbols.image_rounded;
   static const IconData photoLibrary = Symbols.photo_library_rounded;
   static const IconData empty = Symbols.inbox_rounded;
   static const IconData movie = Symbols.movie_rounded;
-  static const IconData episodes = Symbols.playlist_play_rounded;
+
+  /// 编号列表。选集只用这一个图形，和 [playlist] 不同。
+  static const IconData episodes = Symbols.format_list_numbered_rounded;
   static const IconData series = Symbols.tv_rounded;
   static const IconData mediaSource = Symbols.video_file_rounded;
   static const IconData music = Symbols.music_note_rounded;
   static const IconData musicVideo = Symbols.music_video_rounded;
   static const IconData liveTv = Symbols.live_tv_rounded;
   static const IconData boxSet = Symbols.folder_special_rounded;
+
+  /// 播放列表。片库播放列表只用这一个图形，和 [episodes] 不同。
   static const IconData playlist = Symbols.playlist_play_rounded;
+
+  /// 服务器。管理服务器只用这一个图形，设置仍用 [settings]。
   static const IconData server = Symbols.dns_rounded;
   static const IconData lan = Symbols.lan_rounded;
   static const IconData wifi = Symbols.wifi_rounded;
   static const IconData wifiOff = Symbols.wifi_off_rounded;
   static const IconData speed = Symbols.speed_rounded;
   static const IconData subtitles = Symbols.subtitles_rounded;
+
+  /// 四向展开。全屏开关只用这一个图形，未全屏为线框，全屏为实心。
   static const IconData fullscreen = Symbols.fullscreen_rounded;
-  static const IconData fullscreenExit = Symbols.fullscreen_exit_rounded;
   static const IconData volumeUp = Symbols.volume_up_rounded;
   static const IconData volumeDown = Symbols.volume_down_rounded;
   static const IconData volumeOff = Symbols.volume_off_rounded;
@@ -126,6 +137,7 @@ abstract final class AppIcons {
   static const IconData copy = Symbols.content_copy_rounded;
   static const IconData tag = Symbols.tag_rounded;
   static const IconData globe = Symbols.public_rounded;
-  static const IconData checkboxOn = Symbols.check_box_rounded;
-  static const IconData checkboxOff = Symbols.check_box_outline_blank_rounded;
+
+  /// 方框勾选。多选未选中为线框，选中为同一图形的实心。
+  static const IconData checkbox = Symbols.check_box_rounded;
 }
