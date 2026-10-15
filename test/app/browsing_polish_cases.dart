@@ -44,6 +44,61 @@ double _channelDistance(Color a, Color b) {
   return dr * dr + dg * dg + db * db;
 }
 
+bool _leansSakura(Color color) => color.r > color.b && color.b > color.g;
+
+bool _isSakuraAccent(Color color) =>
+    _leansSakura(color) && color.r - color.g >= 0.25;
+
+bool _leansBluePurple(Color color) => color.b > color.r && color.r > color.g;
+
+bool _isWarmGold(Color color) =>
+    color.r > color.g && color.g > color.b && color.g - color.b >= 0.12;
+
+bool _isRed(Color color) =>
+    color.r > color.g &&
+    color.g >= color.b &&
+    color.r - color.b >= 0.35 &&
+    color.g - color.b < 0.12;
+
+bool _tinted(Color color) {
+  final channels = [color.r, color.g, color.b]..sort();
+  return channels.last - channels.first >= 0.03;
+}
+
+List<Color> _toneColors(Tones tones) => [
+  tones.base,
+  tones.surfaceLowest,
+  tones.surfaceLow,
+  tones.surface,
+  tones.surfaceHigh,
+  tones.surfaceHighest,
+  tones.surfaceBright,
+  tones.onSurface,
+  tones.onSurfaceVariant,
+  tones.outline,
+  tones.outlineVariant,
+  tones.accent,
+  tones.onAccent,
+  tones.accentContainer,
+  tones.onAccentContainer,
+  tones.secondary,
+  tones.onSecondary,
+  tones.secondaryContainer,
+  tones.onSecondaryContainer,
+  tones.tertiary,
+  tones.onTertiary,
+  tones.tertiaryContainer,
+  tones.onTertiaryContainer,
+  tones.error,
+  tones.onError,
+  tones.errorContainer,
+  tones.onErrorContainer,
+  tones.inverseSurface,
+  tones.onInverseSurface,
+  tones.inversePrimary,
+  tones.scrim,
+];
+
 void main() {
   setUp(isolateImageCache);
 
@@ -75,6 +130,198 @@ void main() {
         );
       }
     }
+  });
+
+  test('phone themes use sakura and blue-purple while desktop and TV stay', () {
+    expect(
+      _toneColors(AppPalette.darkTones),
+      _toneColors(
+        const Tones(
+          base: Color(0xFF151A28),
+          surfaceLowest: Color(0xFF171D2C),
+          surfaceLow: Color(0xFF1D2536),
+          surface: Color(0xFF242D40),
+          surfaceHigh: Color(0xFF2B354A),
+          surfaceHighest: Color(0xFF354158),
+          surfaceBright: Color(0xFF414D65),
+          onSurface: Color(0xFFF3F5FF),
+          onSurfaceVariant: Color(0xFFB9C3D9),
+          outline: Color(0xFF78849F),
+          outlineVariant: Color(0xFF39445B),
+          accent: Color(0xFFB8B8FF),
+          onAccent: Color(0xFF242052),
+          accentContainer: Color(0xFF37355F),
+          onAccentContainer: Color(0xFFE4DFFF),
+          secondary: Color(0xFFEDB7CD),
+          onSecondary: Color(0xFF462437),
+          secondaryContainer: Color(0xFF4E3447),
+          onSecondaryContainer: Color(0xFFFFDBEA),
+          tertiary: Color(0xFF9EDBD5),
+          onTertiary: Color(0xFF143C3B),
+          tertiaryContainer: Color(0xFF284C4C),
+          onTertiaryContainer: Color(0xFFC1F2EC),
+          error: Color(0xFFE8786F),
+          onError: Color(0xFF2A0A08),
+          errorContainer: Color(0xFF5C2320),
+          onErrorContainer: Color(0xFFFFD2CD),
+          inverseSurface: Color(0xFFF3F5FF),
+          onInverseSurface: Color(0xFF242D40),
+          inversePrimary: Color(0xFF5757A8),
+          scrim: Color(0xFF000000),
+        ),
+      ),
+    );
+    expect(
+      _toneColors(AppPalette.lightTones),
+      _toneColors(
+        const Tones(
+          base: Color(0xFFF3F5F8),
+          surfaceLowest: Color(0xFFFFFFFF),
+          surfaceLow: Color(0xFFFFFFFF),
+          surface: Color(0xFFE9EDF4),
+          surfaceHigh: Color(0xFFDFE5EE),
+          surfaceHighest: Color(0xFFD4DBE6),
+          surfaceBright: Color(0xFFC7CFD9),
+          onSurface: Color(0xFF151A24),
+          onSurfaceVariant: Color(0xFF3B4454),
+          outline: Color(0xFF5A6475),
+          outlineVariant: Color(0xFFCDD4DF),
+          accent: Color(0xFF3A42B0),
+          onAccent: Color(0xFFFFFFFF),
+          accentContainer: Color(0xFFE4E6F8),
+          onAccentContainer: Color(0xFF1E2468),
+          secondary: Color(0xFF8A4564),
+          onSecondary: Color(0xFFFFFFFF),
+          secondaryContainer: Color(0xFFF8E4EC),
+          onSecondaryContainer: Color(0xFF5C2C42),
+          tertiary: Color(0xFF1F6A64),
+          onTertiary: Color(0xFFFFFFFF),
+          tertiaryContainer: Color(0xFFD7F1ED),
+          onTertiaryContainer: Color(0xFF0E3E3A),
+          error: Color(0xFFB42318),
+          onError: Color(0xFFFFFFFF),
+          errorContainer: Color(0xFFF8D7D4),
+          onErrorContainer: Color(0xFF5C1612),
+          inverseSurface: Color(0xFF1C2433),
+          onInverseSurface: Color(0xFFF4F6FA),
+          inversePrimary: Color(0xFFC4C6FF),
+          scrim: Color(0xFF000000),
+        ),
+      ),
+    );
+    expect(
+      _toneColors(AppPalette.tvDarkTones),
+      _toneColors(
+        const Tones(
+          base: Color(0xFF0E1014),
+          surfaceLowest: Color(0xFF121419),
+          surfaceLow: Color(0xFF171A20),
+          surface: Color(0xFF1D2027),
+          surfaceHigh: Color(0xFF24282F),
+          surfaceHighest: Color(0xFF2D3139),
+          surfaceBright: Color(0xFF383D46),
+          onSurface: Color(0xFFF2F3F5),
+          onSurfaceVariant: Color(0xFFA9AFBA),
+          outline: Color(0xFF6E7480),
+          outlineVariant: Color(0xFF2E323A),
+          accent: Color(0xFFB8B8FF),
+          onAccent: Color(0xFF242052),
+          accentContainer: Color(0xFF37355F),
+          onAccentContainer: Color(0xFFE4DFFF),
+          secondary: Color(0xFFEDB7CD),
+          onSecondary: Color(0xFF462437),
+          secondaryContainer: Color(0xFF4E3447),
+          onSecondaryContainer: Color(0xFFFFDBEA),
+          tertiary: Color(0xFF9EDBD5),
+          onTertiary: Color(0xFF143C3B),
+          tertiaryContainer: Color(0xFF284C4C),
+          onTertiaryContainer: Color(0xFFC1F2EC),
+          error: Color(0xFFF08A80),
+          onError: Color(0xFF2A0A08),
+          errorContainer: Color(0xFF5C2320),
+          onErrorContainer: Color(0xFFFFD2CD),
+          inverseSurface: Color(0xFFF2F3F5),
+          onInverseSurface: Color(0xFF15171C),
+          inversePrimary: Color(0xFF5757A8),
+          scrim: Color(0xFF000000),
+        ),
+      ),
+    );
+    expect(
+      _toneColors(AppPalette.tvLightTones),
+      _toneColors(
+        const Tones(
+          base: Color(0xFFF4F5F7),
+          surfaceLowest: Color(0xFFFFFFFF),
+          surfaceLow: Color(0xFFFFFFFF),
+          surface: Color(0xFFE8EAEE),
+          surfaceHigh: Color(0xFFDEE1E6),
+          surfaceHighest: Color(0xFFD3D7DE),
+          surfaceBright: Color(0xFFC6CBD4),
+          onSurface: Color(0xFF14171C),
+          onSurfaceVariant: Color(0xFF3C424C),
+          outline: Color(0xFF5C636E),
+          outlineVariant: Color(0xFFD5D8DE),
+          accent: Color(0xFF3A42B0),
+          onAccent: Color(0xFFFFFFFF),
+          accentContainer: Color(0xFFE4E6F8),
+          onAccentContainer: Color(0xFF1E2468),
+          secondary: Color(0xFF8A4564),
+          onSecondary: Color(0xFFFFFFFF),
+          secondaryContainer: Color(0xFFF8E4EC),
+          onSecondaryContainer: Color(0xFF5C2C42),
+          tertiary: Color(0xFF1F6A64),
+          onTertiary: Color(0xFFFFFFFF),
+          tertiaryContainer: Color(0xFFD7F1ED),
+          onTertiaryContainer: Color(0xFF0E3E3A),
+          error: Color(0xFFB42318),
+          onError: Color(0xFFFFFFFF),
+          errorContainer: Color(0xFFF8D7D4),
+          onErrorContainer: Color(0xFF5C1612),
+          inverseSurface: Color(0xFF14171C),
+          onInverseSurface: Color(0xFFF7F8FA),
+          inversePrimary: Color(0xFFC4C6FF),
+          scrim: Color(0xFF000000),
+        ),
+      ),
+    );
+
+    final phoneLight = AppPalette.phoneLightTones;
+    final phoneDark = AppPalette.phoneDarkTones;
+    expect(phoneLight.brightness, Brightness.light);
+    expect(phoneDark.brightness, Brightness.dark);
+    expect(phoneLight.base.computeLuminance(), greaterThan(0.75));
+    expect(phoneDark.base.computeLuminance(), lessThan(0.02));
+    expect(_tinted(phoneLight.base), isTrue);
+    expect(_tinted(phoneDark.base), isTrue);
+    expect(_leansSakura(phoneLight.base), isTrue);
+    expect(_leansBluePurple(phoneDark.base), isTrue);
+    expect(_leansSakura(phoneLight.surface), isTrue);
+    expect(_leansBluePurple(phoneDark.surface), isTrue);
+
+    for (final tones in [phoneLight, phoneDark]) {
+      expect(_isSakuraAccent(tones.accent), isTrue);
+      expect(_isWarmGold(tones.accent), isFalse);
+      expect(_leansSakura(tones.accentContainer), isTrue);
+      expect(_leansBluePurple(tones.secondary), isTrue);
+      expect(_leansBluePurple(tones.surfaceHigh), isTrue);
+      expect(_isRed(tones.error), isTrue);
+      expect(_isSakuraAccent(tones.error), isFalse);
+      expect(_channelDistance(tones.error, tones.accent), greaterThan(0.05));
+      expect(tones.scrim, const Color(0xFF000000));
+      expect(
+        _contrast(tones.onAccent, tones.accent),
+        greaterThanOrEqualTo(4.5),
+      );
+    }
+
+    expect(
+      _contrast(phoneLight.accent, phoneLight.onSurface),
+      greaterThanOrEqualTo(4.5),
+    );
+    expect(phoneLight.error, const Color(0xFFB42318));
+    expect(phoneDark.error, const Color(0xFFF08A80));
+    expect(AppUiTheme.dark().colorScheme.primary, AppPalette.darkTones.accent);
   });
 
   test('artwork color tints detail surfaces without replacing them', () {
