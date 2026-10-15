@@ -108,7 +108,7 @@ abstract final class AppPalette {
   );
 
   /// 手机浅色调:浅色底带轻微樱粉,表面高亮带蓝紫。
-  /// 强调色是樱粉,与正文对比度不低于 4.5:1;次强调是蓝紫。错误仍是红色。
+  /// 强调色是加深的樱粉,与浅色页面对比不低于 4.5:1;次强调是蓝紫。错误仍是红色。
   static const Tones phoneLightTones = Tones(
     base: Color(0xFFF6E7EF),
     surfaceLowest: Color(0xFFFFF8FB),
@@ -121,8 +121,8 @@ abstract final class AppPalette {
     onSurfaceVariant: Color(0xFF53464F),
     outline: Color(0xFF6E6570),
     outlineVariant: Color(0xFFE4D5DE),
-    accent: Color(0xFFE56B97),
-    onAccent: Color(0xFF2C101C),
+    accent: Color(0xFFB21F54),
+    onAccent: Color(0xFFFFFFFF),
     accentContainer: Color(0xFFF8D5E4),
     onAccentContainer: Color(0xFF5C1E3A),
     secondary: Color(0xFF5446C8),

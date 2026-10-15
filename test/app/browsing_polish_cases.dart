@@ -315,10 +315,18 @@ void main() {
       );
     }
 
-    expect(
-      _contrast(phoneLight.accent, phoneLight.onSurface),
-      greaterThanOrEqualTo(4.5),
-    );
+    for (final entry in <String, Color>{
+      'base': phoneLight.base,
+      'surfaceLow': phoneLight.surfaceLow,
+      'surface': phoneLight.surface,
+      'surfaceHigh': phoneLight.surfaceHigh,
+    }.entries) {
+      expect(
+        _contrast(phoneLight.accent, entry.value),
+        greaterThanOrEqualTo(4.5),
+        reason: 'phone light accent on ${entry.key}',
+      );
+    }
     expect(phoneLight.error, const Color(0xFFB42318));
     expect(phoneDark.error, const Color(0xFFF08A80));
     expect(AppUiTheme.dark().colorScheme.primary, AppPalette.darkTones.accent);
