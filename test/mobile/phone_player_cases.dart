@@ -1331,12 +1331,17 @@ void main() {
     'multiple sources appear only in more, never in quality',
     (tester) async {
       final backend = _ControlledSourceBackend();
+      final reportGate = Completer<void>();
+      addTearDown(() {
+        if (!reportGate.isCompleted) reportGate.complete();
+      });
       final current = await showPlayer(
         tester,
         itemId: 'movie-inception',
         backend: backend,
         size: const Size(360, 800),
         prepare: (server) {
+          server.sessionsHold = reportGate;
           server.items
               .firstWhere((item) => item.id == 'movie-inception')
               .extraSources = const [
@@ -1345,33 +1350,38 @@ void main() {
         },
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
-      await tester.runAsync(
-        () async => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pump();
       expect(current.canSwitchMediaSource, isTrue);
-      for (var frame = 0; frame < 40 && current.loading; frame++) {
-        await tester.pump(const Duration(milliseconds: 20));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-      }
       expect(current.loading, isFalse);
       expect(backend.isPlaying, isTrue);
-      // A successful open is pending; establish the original actual source
-      // with a backend viewing receipt before testing cancellation ownership.
-      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 1));
-      for (
-        var frame = 0;
-        frame < 40 && current.activeMediaSourceId == null;
-        frame++
-      ) {
-        await tester.pump(const Duration(milliseconds: 50));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-      }
+      // This ordinary playback path has no observation sink. Successful native
+      // startup must identify its source even while the Playing report is held.
+      expect(reportGate.isCompleted, isFalse);
       expect(current.activeMediaSourceId, 'movie-inception');
+      reportGate.complete();
+
+      Future<void> waitForSource(String source) async {
+        final elapsed = Stopwatch()..start();
+        while (current.loading ||
+            current.isRecovering ||
+            current.activeMediaSourceId != source) {
+          if (elapsed.elapsed >= const Duration(seconds: 5)) {
+            fail(
+              'Source $source did not settle: active=${current.activeMediaSourceId} '
+              'pending=${current.pendingMediaSourceId} phase=${current.state.phase} '
+              'failure=${current.loadFailure} track=${current.trackFailure} '
+              'detail=${current.disconnectDetail}',
+            );
+          }
+          // Advance scheduled controller work and yield for real subtitle I/O.
+          // Completion is decided by state, with a wall-clock deadline.
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        await tester.pump();
+      }
+
       await tester.tap(find.byKey(const Key('mobile-player-toggle')));
       await tester.pump();
       expect(backend.isPlaying, isFalse);
@@ -1407,15 +1417,7 @@ void main() {
       await tester.tap(alternate);
       expect(find.byType(PlaybackLineMenu), findsNothing);
       expect(current.switchConfirmation, isNull);
-      for (var i = 0; i < 40; i++) {
-        await tester.pump(const Duration(milliseconds: 20));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-        if (!current.loading && current.activeMediaSourceId == 'alternate') {
-          break;
-        }
-      }
+      await waitForSource('alternate');
       expect(
         current.activeMediaSourceId,
         'alternate',
@@ -1465,13 +1467,7 @@ void main() {
       expect(tester.widget<AppListTile>(alternate).selected, isTrue);
       expect(tester.widget<AppListTile>(original).selected, isFalse);
       gate.complete();
-      for (var i = 0; i < 40; i++) {
-        await tester.pump(const Duration(milliseconds: 20));
-        await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 10)),
-        );
-        if (!current.isRecovering) break;
-      }
+      await waitForSource('alternate');
       expect(current.activeMediaSourceId, 'alternate');
       expect(current.error, isNull);
       expect(find.byType(PlaybackLineMenu), findsNothing);

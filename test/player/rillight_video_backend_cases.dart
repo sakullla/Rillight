@@ -1,4 +1,5 @@
 import '../helpers/case_shard.dart';
+import '../helpers/temporary_directory.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -371,7 +372,7 @@ void main() {
       expect(backend.selectedAudioIndex, 721);
     } finally {
       await backend.dispose();
-      await temp.delete(recursive: true);
+      await deleteTemporaryDirectory(temp);
     }
   });
 
@@ -382,7 +383,7 @@ void main() {
     );
     // Never join the real player's shared quota while running unit tests.
     // A test's default 2 GiB budget can evict an active 8 GiB session.
-    addTearDown(() => isolatedCache.delete(recursive: true));
+    addTearDown(() => deleteTemporaryDirectory(isolatedCache));
   });
   cases.test(
     'Android prefetch follows saved disk budget across opens',
@@ -782,7 +783,7 @@ void main() {
           unawaited(response.close().catchError((Object _) => response));
         }
         await upstream.close(force: true);
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       }
     },
     timeout: const Timeout(Duration(seconds: 60)),
@@ -1066,7 +1067,7 @@ void main() {
           await opening;
           await backend.dispose();
           await upstream.close(force: true);
-          await temp.delete(recursive: true);
+          await deleteTemporaryDirectory(temp);
         }
       },
     );
@@ -1347,7 +1348,7 @@ void main() {
       addTearDown(() async {
         if (!first.releaseDispose.isCompleted) first.releaseDispose.complete();
         await backend.dispose();
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       });
       final request = VideoOpenRequest(
         sessionId: 29,
@@ -1421,7 +1422,7 @@ void main() {
       addTearDown(() async {
         await backend.dispose();
         await upstream.close(force: true);
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       });
 
       Future<void> openEpisode(int sessionId) {
@@ -1500,7 +1501,7 @@ void main() {
       addTearDown(() async {
         await backend.dispose();
         await upstream.close(force: true);
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       });
       final events = <VideoBackendEvent>[];
       final subscription = backend.events.listen(events.add);
@@ -1569,7 +1570,7 @@ void main() {
       addTearDown(() async {
         await backend.dispose();
         await upstream.close(force: true);
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       });
       final native = <Map<String, dynamic>>[];
       final subscription = backend.nativeEvents.listen(native.add);
@@ -1610,7 +1611,7 @@ void main() {
       );
       addTearDown(() async {
         await backend.dispose();
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       });
       await backend.open(
         VideoOpenRequest(
@@ -1659,7 +1660,7 @@ void main() {
       addTearDown(() async {
         await backend.dispose();
         await subtitleRoot.delete(recursive: true);
-        await temp.delete(recursive: true);
+        await deleteTemporaryDirectory(temp);
       });
       await backend.open(
         VideoOpenRequest(

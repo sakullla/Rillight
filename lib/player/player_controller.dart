@@ -4997,6 +4997,11 @@ class PlayerController extends ChangeNotifier {
         if (!startPaused && !backend.isPlaying) await backend.play();
         if (!_accepts(operation)) return;
         isPlaying = backend.isPlaying;
+        // The ordinary player's source is confirmed by the successful native
+        // open/settings restore. Optional subtitles and server reporting must
+        // not leave its source menu unselected while playback is already ready.
+        // Scoped playback still requires its persisted viewing observation.
+        if (!_scopedPlayback) activeMediaSourceId = chosenId;
         if (!isRecovering) {
           loading = false;
           state.updatePlaying(isPlaying);
@@ -5064,9 +5069,7 @@ class PlayerController extends ChangeNotifier {
       }
       if (!_accepts(operation) || disconnected) return;
       error = null;
-      if (!_scopedPlayback) {
-        activeMediaSourceId = chosenId;
-      } else {
+      if (_scopedPlayback) {
         pendingMediaSourceId = chosenId;
       }
       _preferredSourceName = _sourceFingerprint(next.mediaSource);
