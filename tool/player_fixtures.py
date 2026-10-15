@@ -93,6 +93,41 @@ Dialogue: 0,0:00:00.00,0:00:12.00,Default,,0,0,0,,Rillight ASS validation
     for extension in ['srt', 'vtt', 'ssa']:
         subprocess.run([ffmpeg, '-y', '-i', str(directory / 'sample.ass'),
                         str(directory / ('sample.' + extension))], check=True, capture_output=True)
+    # 双槽窗口检查用字幕:CRLF/多行显式分行的 SRT 主字幕与 \N 硬换行的 ASS
+    # 次字幕。写成原始字节,保留 BOM/CRLF 原文换行。
+    if not (directory / 'subtitle-window.mp4').exists():
+        # 静态纯色背景:cue 之外的像素差异只可能来自字幕渲染本身。
+        subprocess.run([ffmpeg, '-y', '-f', 'lavfi',
+                        '-i', 'color=c=0x183048:size=640x360:rate=30',
+                        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+                        '-t', '60', '-c:v', 'libx264', '-preset', 'ultrafast',
+                        '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+                        str(directory / 'subtitle-window.mp4')], check=True)
+    if not (directory / 'window-multiline.srt').exists():
+        srt = ('﻿1\r\n'
+               '00:00:00.500 --> 00:00:05.000\r\n'
+               'PRIMARY explicit line one\r\n'
+               '主字幕显式第二行\r\n'
+               '第三行 multi-line\r\n\r\n'
+               '2\r\n'
+               '00:00:05.500 --> 00:00:10.500\r\n'
+               'PRIMARY second cue\r\n'
+               '继续两行显示\r\n\r\n')
+        (directory / 'window-multiline.srt').write_bytes(srt.encode('utf-8'))
+    if not (directory / 'window-secondary.ass').exists():
+        ass = '''[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,40,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,20,1
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.50,0:00:05.00,Default,,0,0,0,,SECOND hard break one\\N次字幕硬换行第二行
+Dialogue: 0,0:00:05.50,0:00:10.50,Default,,0,0,0,,SECOND second cue\\N继续显示
+'''
+        (directory / 'window-secondary.ass').write_text(ass, encoding='utf-8')
     if long_cache and not (directory / 'cache-long.mp4').exists():
         # A synthetic 90-second movie large enough to cross several 8 MiB
         # transfer boundaries at normal playback speed.
@@ -123,6 +158,7 @@ def serve(media, output, metadata_delay_ms=0):
              '1080p60': '1080p60.mp4', '1080p60-long': '1080p60-long.mp4',
              '4k-hevc': '4k-hevc.mkv', 'av1': 'av1.mkv',
              'vp9': 'vp9.webm', 'cache-long': 'cache-long.mp4',
+             'subtitle-window': 'subtitle-window.mp4',
              'broken': 'missing.mkv'}
     user = {'Id': 'validation-user', 'Name': 'validation', 'Configuration': {'EnableNextEpisodeAutoPlay': False}}
     def item(identifier):
@@ -162,6 +198,11 @@ def serve(media, output, metadata_delay_ms=0):
                                 *[{'Index': i, 'Type': 'Subtitle', 'Codec': codec,
                                    'IsTextSubtitleStream': True, 'IsExternal': True}
                                   for i, codec in [(5, 'srt'), (6, 'vtt'), (7, 'ssa')]]]
+                if identifier == 'subtitle-window':
+                    streams += [{'Index': 2, 'Type': 'Subtitle', 'Codec': 'srt',
+                                 'IsTextSubtitleStream': True, 'IsExternal': True},
+                                {'Index': 3, 'Type': 'Subtitle', 'Codec': 'ass',
+                                 'IsTextSubtitleStream': True, 'IsExternal': True}]
                 source = {'Id': identifier, 'Container': 'mkv' if identifier == 'tracks' else 'mp4',
                           'Name': identifier, 'RunTimeTicks': item(identifier)['RunTimeTicks'],
                           'SupportsDirectPlay': identifier != 'hls', 'SupportsDirectStream': identifier != 'hls',
@@ -208,7 +249,17 @@ def serve(media, output, metadata_delay_ms=0):
                 if conditions['offline']:
                     self.send_json({'error': 'synthetic outage'}, 503)
                     return
-                filename = ('sample.' + path.split('.')[-1]) if '/Subtitles/' in path else path.removeprefix('/media/')
+                filename = path.removeprefix('/media/')
+                if '/Subtitles/' in path:
+                    if 'subtitle-window' in path:
+                        window_index = path.split('/Subtitles/')[1].split('/')[0]
+                        filename = {'2': 'window-multiline.srt',
+                                    '3': 'window-secondary.ass'}.get(window_index)
+                        if filename is None:
+                            self.send_json({'error': 'missing window subtitle fixture'}, 404)
+                            return
+                    else:
+                        filename = 'sample.' + path.split('.')[-1]
                 target = (media / filename).resolve()
                 if not target.is_relative_to(media) or not target.is_file():
                     self.send_json({'error': 'missing fixture'}, 404)

@@ -7,64 +7,72 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/playback_switch_test.dart',
-    caseEntrypoints['aggregation/playback_switch_cases.dart']!,
+    'aggregation/identity_test.dart',
+    caseEntrypoints['aggregation/identity_cases.dart']!,
   );
   group(
-    'aggregation/query_test.dart',
-    caseEntrypoints['aggregation/query_cases.dart']!,
+    'aggregation/work_index_regression_test.dart',
+    caseEntrypoints['aggregation/work_index_regression_cases.dart']!,
   );
   group(
-    'aggregation/server_sections_test.dart',
-    caseEntrypoints['aggregation/server_sections_cases.dart']!,
+    'auth/provider_connect_controller_test.dart',
+    caseEntrypoints['auth/provider_connect_controller_cases.dart']!,
   );
   group(
     'auth/provider_identity_test.dart',
     caseEntrypoints['auth/provider_identity_cases.dart']!,
   );
   group(
-    'auth/server_import_test.dart',
-    caseEntrypoints['auth/server_import_cases.dart']!,
+    'auth/provider_user_agent_test.dart',
+    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
   );
   group(
     'auth/source_sessions_test.dart',
     caseEntrypoints['auth/source_sessions_cases.dart']!,
   );
   group(
-    'catalog/detail_controller_test.dart',
-    caseEntrypoints['catalog/detail_controller_cases.dart']!,
+    'emby/emby_socket_test.dart',
+    caseEntrypoints['emby/emby_socket_cases.dart']!,
   );
   group(
-    'library/item_format_test.dart',
-    caseEntrypoints['library/item_format_cases.dart']!,
+    'emby/video_preview_test.dart',
+    caseEntrypoints['emby/video_preview_cases.dart']!,
   );
   group(
-    'mobile/catalog_controllers_test.dart',
-    caseEntrypoints['mobile/catalog_controllers_cases.dart']!,
+    'home/library_nav_prefs_test.dart',
+    caseEntrypoints['home/library_nav_prefs_cases.dart']!,
+  );
+  group(
+    'media_server/contract_test.dart',
+    caseEntrypoints['media_server/contract_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 2]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#1']!,
   );
   group(
-    'player/cache/proxy_progressive_timeline_test.dart',
-    caseEntrypoints['player/cache/proxy_progressive_timeline_cases.dart']!,
+    'player/cache/media_time_index_test.dart',
+    caseEntrypoints['player/cache/media_time_index_cases.dart']!,
+  );
+  group(
+    'player/danmaku/danmaku_hash_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_hash_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_layout_test.dart',
     caseEntrypoints['player/danmaku/danmaku_layout_cases.dart']!,
   );
   group(
-    'player/danmaku/danmaku_settings_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_settings_cases.dart']!,
+    'player/danmaku/danmaku_timeline_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
   );
   group(
-    'player/emby_playback_client_test.dart',
-    caseEntrypoints['player/emby_playback_client_cases.dart']!,
+    'player/hls_prefetch_test.dart',
+    caseEntrypoints['player/hls_prefetch_cases.dart']!,
   );
   group(
-    'player/next_episode_prefix_authorization_test.dart',
-    caseEntrypoints['player/next_episode_prefix_authorization_cases.dart']!,
+    'player/hls_redirect_chain_test.dart',
+    caseEntrypoints['player/hls_redirect_chain_cases.dart']!,
   );
   group(
     'player/playback_http_proxy_test.dart [part 3]',
@@ -75,16 +83,16 @@ void main() {
     caseEntrypoints['player/playback_wake_lock_cases.dart']!,
   );
   group(
-    'player/player_window_launch_test.dart',
-    caseEntrypoints['player/player_window_launch_cases.dart']!,
+    'player/provider_part_playback_test.dart',
+    caseEntrypoints['player/provider_part_playback_cases.dart']!,
   );
   group(
-    'player/provider_failed_preparation_recovery_test.dart',
-    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
+    'player/provider_process_boundary_test.dart',
+    caseEntrypoints['player/provider_process_boundary_cases.dart']!,
   );
   group(
-    'player/provider_transport_test.dart',
-    caseEntrypoints['player/provider_transport_cases.dart']!,
+    'player/provider_scoped_preference_test.dart',
+    caseEntrypoints['player/provider_scoped_preference_cases.dart']!,
   );
   group(
     'player/response_read_ahead_test.dart [part 2]',
@@ -93,9 +101,5 @@ void main() {
   group(
     'player/rillight_video_backend_test.dart [part 2]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#1']!,
-  );
-  group(
-    'player/strm_quality_confirmation_test.dart',
-    caseEntrypoints['player/strm_quality_confirmation_cases.dart']!,
   );
 }

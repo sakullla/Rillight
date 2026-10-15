@@ -2092,4 +2092,164 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get phoneFavoriteFailed => '收藏没有保存，请稍后再试';
+
+  @override
+  String get subtitleTrackPrimary => '主字幕';
+
+  @override
+  String get subtitleTrackSecondary => '次字幕';
+
+  @override
+  String get subtitleImportLocal => '导入本地字幕…';
+
+  @override
+  String get subtitleImportRunning => '正在导入字幕…';
+
+  @override
+  String get subtitleImportDuplicate => '相同内容的字幕已在候选列表中';
+
+  @override
+  String get subtitleImportInvalid => '不是有效的 SRT/ASS/SSA/VTT UTF-8 字幕文件';
+
+  @override
+  String get subtitleImportTooLarge => '字幕文件超过单文件大小限制';
+
+  @override
+  String get subtitleImportSessionLimit => '会话内字幕文件总大小已达上限';
+
+  @override
+  String get subtitleImportUnreadable => '字幕文件无法读取';
+
+  @override
+  String get subtitleImportPickerUnavailable => '此设备没有可用的文件选择器';
+
+  @override
+  String get subtitleSlotOccupied => '该来源已在另一字幕槽位使用';
+
+  @override
+  String get subtitleBurnInSecondary => '烧录字幕无法作为可独立关闭的次字幕';
+
+  @override
+  String get subtitleMetaImported => '本地导入';
+
+  @override
+  String get backupImportEntry => '导入备份';
+
+  @override
+  String get backupImportPickerTitle => '选择备份文件';
+
+  @override
+  String get backupImportWorking => '正在读取备份…';
+
+  @override
+  String get backupImportResultTitle => '备份导入结果';
+
+  @override
+  String get backupImportFailureTitle => '备份导入未完成';
+
+  @override
+  String get backupImportClose => '关闭';
+
+  @override
+  String backupImportAddedCount(int count) {
+    return '新增 $count 台';
+  }
+
+  @override
+  String backupImportCredentialsReady(int count) {
+    return '已带凭据 $count 个';
+  }
+
+  @override
+  String backupImportPendingLogin(int count) {
+    return '待登录 $count 个';
+  }
+
+  @override
+  String backupImportDuplicateCount(int count) {
+    return '重复跳过 $count 台';
+  }
+
+  @override
+  String backupImportNonTargetCount(int count) {
+    return '不支持的服务类型 $count 条';
+  }
+
+  @override
+  String backupImportFailedCount(int count) {
+    return '失败 $count 条';
+  }
+
+  @override
+  String backupImportPrivateSkippedCount(int count) {
+    return '私密区域未解锁，跳过 $count 条';
+  }
+
+  @override
+  String get backupImportPickerUnavailable => '此设备没有可用的文件选择器，无法选择备份文件';
+
+  @override
+  String get backupImportTooLarge => '备份文件超过大小限制';
+
+  @override
+  String get backupImportUnreadable => '备份文件无法读取';
+
+  @override
+  String get backupImportUnrecognized => '无法识别的备份格式';
+
+  @override
+  String get backupImportCorrupt => '备份文件已损坏';
+
+  @override
+  String get backupImportUnsupportedVersion => '暂不支持该备份版本';
+
+  @override
+  String get backupImportKeyUnavailable => '缺少解密密钥，未读取加密内容';
+
+  @override
+  String get backupImportUndecryptable => '备份内容无法解密';
+
+  @override
+  String get backupImportReasonMissingFields => '部分记录缺少名称或线路，未导入';
+
+  @override
+  String get backupImportReasonInvalid => '记录配置无效，未导入';
+
+  @override
+  String get backupImportReasonUnsupportedOptions => '包含无法表达的连接选项，未导入';
+
+  @override
+  String get backupImportReasonAccessRevoked => '导入期间权限或区域已变更，未导入';
+
+  @override
+  String get backupImportReasonPersistence => '保存失败，未导入';
+
+  @override
+  String get backupImportReasonRollback => '存储状态不确定，已停止后续写入';
+
+  @override
+  String get updateCheck => '检查更新';
+
+  @override
+  String get updateChecking => '正在检查更新…';
+
+  @override
+  String get updateCheckFailed => '暂时无法检查更新，请检查网络后重试。';
+
+  @override
+  String updateAvailable(String version) {
+    return '发现新版本 $version';
+  }
+
+  @override
+  String get updateCurrent => '当前已是最新版本';
+
+  @override
+  String get updateOpenRelease => '前往下载';
+
+  @override
+  String get updateNotes => '更新内容';
+
+  @override
+  String get updateOpenFailed => '无法打开浏览器，可复制下方链接前往下载。';
 }

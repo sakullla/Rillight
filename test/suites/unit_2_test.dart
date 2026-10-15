@@ -7,83 +7,83 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/source_route_extra_codec_test.dart',
-    caseEntrypoints['app/source_route_extra_codec_cases.dart']!,
-  );
-  group(
-    'auth/provider_connect_controller_test.dart',
-    caseEntrypoints['auth/provider_connect_controller_cases.dart']!,
+    'auth/provider_line_boundaries_test.dart',
+    caseEntrypoints['auth/provider_line_boundaries_cases.dart']!,
   );
   group(
     'auth/provider_session_ownership_test.dart',
     caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
   );
   group(
-    'emby/aggregation_metadata_test.dart',
-    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
+    'auth/server_import_test.dart',
+    caseEntrypoints['auth/server_import_cases.dart']!,
   );
   group(
-    'emby/emby_device_test.dart',
-    caseEntrypoints['emby/emby_device_cases.dart']!,
+    'catalog/catalog_cache_test.dart',
+    caseEntrypoints['catalog/catalog_cache_cases.dart']!,
   );
   group(
-    'media_server/contract_test.dart',
-    caseEntrypoints['media_server/contract_cases.dart']!,
+    'catalog/detail_controller_test.dart',
+    caseEntrypoints['catalog/detail_controller_cases.dart']!,
+  );
+  group(
+    'catalog/emby_catalog_client_test.dart',
+    caseEntrypoints['catalog/emby_catalog_client_cases.dart']!,
+  );
+  group(
+    'emby/emby_item_image_test.dart',
+    caseEntrypoints['emby/emby_item_image_cases.dart']!,
+  );
+  group(
+    'helpers/synthetic_mailbox_test.dart',
+    caseEntrypoints['helpers/synthetic_mailbox_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 3]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#2']!,
   );
   group(
-    'player/cache/range_lease_index_test.dart',
-    caseEntrypoints['player/cache/range_lease_index_cases.dart']!,
+    'player/cache/directory_inventory_test.dart',
+    caseEntrypoints['player/cache/directory_inventory_cases.dart']!,
   );
   group(
-    'player/cache_crc32_test.dart',
-    caseEntrypoints['player/cache_crc32_cases.dart']!,
+    'player/device_profile_test.dart',
+    caseEntrypoints['player/device_profile_cases.dart']!,
   );
   group(
-    'player/capability_record_test.dart',
-    caseEntrypoints['player/capability_record_cases.dart']!,
-  );
-  group(
-    'player/catalog_preference_negotiation_test.dart',
-    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
-  );
-  group(
-    'player/danmaku/dandanplay_client_test.dart',
-    caseEntrypoints['player/danmaku/dandanplay_client_cases.dart']!,
-  );
-  group(
-    'player/danmaku/danmaku_timeline_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
+    'player/playback_check_in_test.dart',
+    caseEntrypoints['player/playback_check_in_cases.dart']!,
   );
   group(
     'player/playback_http_proxy_test.dart [part 1]',
     caseEntrypoints['player/playback_http_proxy_cases.dart#0']!,
   );
   group(
+    'player/playback_metadata_test.dart',
+    caseEntrypoints['player/playback_metadata_cases.dart']!,
+  );
+  group(
     'player/playback_session_snapshot_test.dart',
     caseEntrypoints['player/playback_session_snapshot_cases.dart']!,
+  );
+  group(
+    'player/player_host_command_test.dart',
+    caseEntrypoints['player/player_host_command_cases.dart']!,
   );
   group(
     'player/player_process_control_test.dart',
     caseEntrypoints['player/player_process_control_cases.dart']!,
   );
   group(
-    'player/player_runtime_options_test.dart',
-    caseEntrypoints['player/player_runtime_options_cases.dart']!,
-  );
-  group(
-    'player/player_settings_test.dart',
-    caseEntrypoints['player/player_settings_cases.dart']!,
-  );
-  group(
-    'player/provider_part_playback_test.dart',
-    caseEntrypoints['player/provider_part_playback_cases.dart']!,
+    'player/player_startup_test.dart',
+    caseEntrypoints['player/player_startup_cases.dart']!,
   );
   group(
     'player/rillight_video_backend_test.dart [part 3]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#2']!,
+  );
+  group(
+    'plex/plex_review_regression_test.dart',
+    caseEntrypoints['plex/plex_review_regression_cases.dart']!,
   );
 }

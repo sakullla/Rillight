@@ -4065,6 +4065,294 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'收藏没有保存，请稍后再试'**
   String get phoneFavoriteFailed;
+
+  /// Primary subtitle slot label.
+  ///
+  /// In zh, this message translates to:
+  /// **'主字幕'**
+  String get subtitleTrackPrimary;
+
+  /// Secondary subtitle slot label.
+  ///
+  /// In zh, this message translates to:
+  /// **'次字幕'**
+  String get subtitleTrackSecondary;
+
+  /// Entry for importing a session-local subtitle file.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入本地字幕…'**
+  String get subtitleImportLocal;
+
+  /// Progress note while a subtitle import is running.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在导入字幕…'**
+  String get subtitleImportRunning;
+
+  /// Import finished as a duplicate of an existing candidate.
+  ///
+  /// In zh, this message translates to:
+  /// **'相同内容的字幕已在候选列表中'**
+  String get subtitleImportDuplicate;
+
+  /// Import rejected because content validation failed.
+  ///
+  /// In zh, this message translates to:
+  /// **'不是有效的 SRT/ASS/SSA/VTT UTF-8 字幕文件'**
+  String get subtitleImportInvalid;
+
+  /// Import rejected because the file exceeds the single-file limit.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕文件超过单文件大小限制'**
+  String get subtitleImportTooLarge;
+
+  /// Import rejected because the session total size limit is reached.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话内字幕文件总大小已达上限'**
+  String get subtitleImportSessionLimit;
+
+  /// Import failed while reading or copying the file.
+  ///
+  /// In zh, this message translates to:
+  /// **'字幕文件无法读取'**
+  String get subtitleImportUnreadable;
+
+  /// No documents provider is available, common on Android TV.
+  ///
+  /// In zh, this message translates to:
+  /// **'此设备没有可用的文件选择器'**
+  String get subtitleImportPickerUnavailable;
+
+  /// A source cannot occupy both subtitle slots at once.
+  ///
+  /// In zh, this message translates to:
+  /// **'该来源已在另一字幕槽位使用'**
+  String get subtitleSlotOccupied;
+
+  /// Burned-in transcode subtitles cannot fill the secondary slot.
+  ///
+  /// In zh, this message translates to:
+  /// **'烧录字幕无法作为可独立关闭的次字幕'**
+  String get subtitleBurnInSecondary;
+
+  /// Badge marking a session-imported local subtitle file.
+  ///
+  /// In zh, this message translates to:
+  /// **'本地导入'**
+  String get subtitleMetaImported;
+
+  /// Server management / connect pages: entry that imports a Hills or Rodel backup file.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入备份'**
+  String get backupImportEntry;
+
+  /// Native file picker dialog title for backup import.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择备份文件'**
+  String get backupImportPickerTitle;
+
+  /// Loading dialog shown while a backup is parsed and committed.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在读取备份…'**
+  String get backupImportWorking;
+
+  /// Result panel title after a backup was committed.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份导入结果'**
+  String get backupImportResultTitle;
+
+  /// Result panel title when the backup could not be read or parsed.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份导入未完成'**
+  String get backupImportFailureTitle;
+
+  /// Backup import result panel close action.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get backupImportClose;
+
+  /// Result row: how many servers were added.
+  ///
+  /// In zh, this message translates to:
+  /// **'新增 {count} 台'**
+  String backupImportAddedCount(int count);
+
+  /// Result row: added accounts that carry credentials and can be verified on connect.
+  ///
+  /// In zh, this message translates to:
+  /// **'已带凭据 {count} 个'**
+  String backupImportCredentialsReady(int count);
+
+  /// Result row: added accounts without credentials that stay pending login.
+  ///
+  /// In zh, this message translates to:
+  /// **'待登录 {count} 个'**
+  String backupImportPendingLogin(int count);
+
+  /// Result row: records equal to an already saved account and line.
+  ///
+  /// In zh, this message translates to:
+  /// **'重复跳过 {count} 台'**
+  String backupImportDuplicateCount(int count);
+
+  /// Records with unsupported service types that were not migrated.
+  ///
+  /// In zh, this message translates to:
+  /// **'不支持的服务类型 {count} 条'**
+  String backupImportNonTargetCount(int count);
+
+  /// Result row: records that failed to parse or commit.
+  ///
+  /// In zh, this message translates to:
+  /// **'失败 {count} 条'**
+  String backupImportFailedCount(int count);
+
+  /// Result row: private-region records skipped because the private area is locked.
+  ///
+  /// In zh, this message translates to:
+  /// **'私密区域未解锁，跳过 {count} 条'**
+  String backupImportPrivateSkippedCount(int count);
+
+  /// Failure shown when the device has no documents provider.
+  ///
+  /// In zh, this message translates to:
+  /// **'此设备没有可用的文件选择器，无法选择备份文件'**
+  String get backupImportPickerUnavailable;
+
+  /// Failure shown for oversized backup files.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份文件超过大小限制'**
+  String get backupImportTooLarge;
+
+  /// Failure shown when the picked file cannot be read.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份文件无法读取'**
+  String get backupImportUnreadable;
+
+  /// Failure for an unrecognized container.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法识别的备份格式'**
+  String get backupImportUnrecognized;
+
+  /// Failure for a damaged container.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份文件已损坏'**
+  String get backupImportCorrupt;
+
+  /// Failure for a backup version the parser does not support.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂不支持该备份版本'**
+  String get backupImportUnsupportedVersion;
+
+  /// Honest failure when the decryption key for an encrypted backup is not provisioned.
+  ///
+  /// In zh, this message translates to:
+  /// **'缺少解密密钥，未读取加密内容'**
+  String get backupImportKeyUnavailable;
+
+  /// Failure when the payload cannot be decrypted with the provided key.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份内容无法解密'**
+  String get backupImportUndecryptable;
+
+  /// Parse-level failure reason shown under the failed row.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分记录缺少名称或线路，未导入'**
+  String get backupImportReasonMissingFields;
+
+  /// Commit failure reason: invalid configuration.
+  ///
+  /// In zh, this message translates to:
+  /// **'记录配置无效，未导入'**
+  String get backupImportReasonInvalid;
+
+  /// Commit failure reason: connection semantics the app cannot express.
+  ///
+  /// In zh, this message translates to:
+  /// **'包含无法表达的连接选项，未导入'**
+  String get backupImportReasonUnsupportedOptions;
+
+  /// Commit failure reason: access or region changed during import.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入期间权限或区域已变更，未导入'**
+  String get backupImportReasonAccessRevoked;
+
+  /// Commit failure reason: persistence failed.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存失败，未导入'**
+  String get backupImportReasonPersistence;
+
+  /// Commit failure reason: rollback failed so remaining records were stopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'存储状态不确定，已停止后续写入'**
+  String get backupImportReasonRollback;
+
+  /// No description provided for @updateCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查更新'**
+  String get updateCheck;
+
+  /// No description provided for @updateChecking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查更新…'**
+  String get updateChecking;
+
+  /// No description provided for @updateCheckFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂时无法检查更新，请检查网络后重试。'**
+  String get updateCheckFailed;
+
+  /// No description provided for @updateAvailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现新版本 {version}'**
+  String updateAvailable(String version);
+
+  /// No description provided for @updateCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前已是最新版本'**
+  String get updateCurrent;
+
+  /// No description provided for @updateOpenRelease.
+  ///
+  /// In zh, this message translates to:
+  /// **'前往下载'**
+  String get updateOpenRelease;
+
+  /// No description provided for @updateNotes.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新内容'**
+  String get updateNotes;
+
+  /// No description provided for @updateOpenFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法打开浏览器，可复制下方链接前往下载。'**
+  String get updateOpenFailed;
 }
 
 class _AppLocalizationsDelegate

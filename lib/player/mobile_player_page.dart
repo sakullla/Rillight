@@ -44,6 +44,7 @@ class MobilePlayerPage extends StatefulWidget {
     this.autoResume = true,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
+    this.secondarySubtitleStreamIndex,
     this.orientation,
     this.systemBars,
     this.wakeLock,
@@ -59,6 +60,9 @@ class MobilePlayerPage extends StatefulWidget {
   /// 详情页选出的音轨/字幕。只作用于本次起播。
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
+
+  /// 次字幕显式预选;null 表示次字幕保持关闭。
+  final int? secondarySubtitleStreamIndex;
 
   /// Replaceable picture orientation. The default follows decoded geometry,
   /// then server metadata, and uses landscape when dimensions are unknown.
@@ -334,6 +338,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
       preferredMediaSourceId: widget.mediaSourceId,
       preferredAudioStreamIndex: widget.audioStreamIndex,
       preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
+      preferredSecondarySubtitleStreamIndex:
+          widget.secondarySubtitleStreamIndex,
       progressInterval: bindings.progressInterval,
       // 手机控制层自动隐藏 4s(T6);桌面/TV 仍用 bindings 档。
       controlsHideAfter: const Duration(seconds: 4),

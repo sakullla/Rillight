@@ -1220,11 +1220,15 @@ void main() {
       ]) {
         expect(find.byKey(Key(key)), findsNothing);
       }
+      // 无自带字幕的媒体也保留轨道入口:本地导入在那里(R1/R2)。
       expect(
         find.byKey(const Key('mobile-player-section-tracks')),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.text('关闭字幕'), findsNothing);
+      await enterSection(tester, 'tracks');
+      // 双槽字幕面板:主/次字幕各有一个"关闭字幕"项。
+      expect(find.text('关闭字幕'), findsNWidgets(2));
+      expect(find.byKey(const Key('mobile-subtitle-import')), findsOneWidget);
       await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
       await settle(tester);
       await closePlayer(tester);
@@ -2456,9 +2460,9 @@ class _PhoneTrackBackend extends FakeVideoBackend
   }
 
   @override
-  Future<void> setSubtitleIndex(int index) async {
+  Future<void> setSubtitleIndex(int index, {int slot = 0}) async {
     subtitleCalls.add(index);
-    await super.setSubtitleIndex(index);
+    await super.setSubtitleIndex(index, slot: slot);
   }
 }
 

@@ -7,43 +7,40 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
+    'aggregation/playback_runtime_test.dart [part 3]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#2']!,
+  );
+  group(
     'aggregation/presentation_test.dart [part 3]',
     caseEntrypoints['aggregation/presentation_cases.dart#2']!,
-  );
-  group(
-    'app/desktop_performance_host_test.dart',
-    caseEntrypoints['app/desktop_performance_host_cases.dart']!,
-  );
-  group(
-    'auth/line_management_test.dart',
-    caseEntrypoints['auth/line_management_cases.dart']!,
-  );
-  group(
-    'auth/phone_server_manager_test.dart',
-    caseEntrypoints['auth/phone_server_manager_cases.dart']!,
   );
   group(
     'catalog/desktop_provider_filter_test.dart',
     caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
   );
   group(
-    'mobile/motion_behaviors_test.dart',
-    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
+    'catalog/item_detail_test.dart [part 2]',
+    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
   );
   group(
-    'mobile/phone_nav_style_test.dart',
-    caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
+    'home/library_tiles_test.dart',
+    caseEntrypoints['home/library_tiles_cases.dart']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 2]',
     caseEntrypoints['mobile/phone_pages_cases.dart#1']!,
   );
   group(
-    'widgets/artwork_crop_test.dart',
-    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
+    'player/desktop_player_window_host_test.dart',
+    caseEntrypoints['player/desktop_player_window_host_cases.dart']!,
+  );
+  group('tv/tv_flow_test.dart', caseEntrypoints['tv/tv_flow_cases.dart']!);
+  group(
+    'tv/tv_lan_pair_test.dart [part 1]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
   );
   group(
-    'widgets/desktop_back_button_test.dart',
-    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
+    'widgets/app_empty_view_test.dart',
+    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
   );
 }

@@ -169,6 +169,10 @@ class RillightVideoBackend extends VideoBackend
   Uri? _selectedSubtitleUri;
   int? _selectedSubtitleServerIndex;
   String? _selectedSubtitleTitle;
+  Uri? _secondarySelectedSubtitleUri;
+  int? _secondarySelectedSubtitleServerIndex;
+  String? _secondarySelectedSubtitleTitle;
+  int? _selectedSecondarySubtitleIndex;
   double _volume = 1;
   double _rate = 1;
   PlaybackOutputStatus _outputStatus = PlaybackOutputStatus.unknown;
@@ -273,6 +277,8 @@ class RillightVideoBackend extends VideoBackend
   int? selectedAudioIndex;
   @override
   int? selectedSubtitleIndex;
+  @override
+  int? get selectedSecondarySubtitleIndex => _selectedSecondarySubtitleIndex;
   BufferSnapshot bufferSnapshot = BufferSnapshot.empty(
     sessionId: 0,
     unknownReason: 'notOpened',
@@ -367,6 +373,8 @@ class RillightVideoBackend extends VideoBackend
       },
       'selectedAudioIndex': selectedAudioIndex,
       'selectedSubtitleIndex': selectedSubtitleIndex,
+      'selectedSecondarySubtitleIndex': _selectedSecondarySubtitleIndex,
+      'secondarySubtitleUri': _secondarySelectedSubtitleUri?.toString(),
       'bufferIdentity': bufferSnapshot.representationVersion,
       'bufferUnknownReason': bufferSnapshot.unknownReason,
       'bufferRanges': [
@@ -512,6 +520,9 @@ class RillightVideoBackend extends VideoBackend
     _selectedSubtitleUri = null;
     _selectedSubtitleServerIndex = null;
     _selectedSubtitleTitle = null;
+    _secondarySelectedSubtitleUri = null;
+    _secondarySelectedSubtitleServerIndex = null;
+    _secondarySelectedSubtitleTitle = null;
     await _open(request);
   }
 
@@ -528,6 +539,7 @@ class RillightVideoBackend extends VideoBackend
     _lastTimelineRefreshAt = null;
     isPlaying = false;
     selectedAudioIndex = selectedSubtitleIndex = null;
+    _selectedSecondarySubtitleIndex = null;
     if (sameSession) {
       ++_trackVersion;
       ++_bufferSequence;
@@ -700,6 +712,9 @@ class RillightVideoBackend extends VideoBackend
       selectedAudioIndex = _remoteTrackIndex(result['audioIndex'] as int?);
       selectedSubtitleIndex = _remoteTrackIndex(
         result['subtitleIndex'] as int?,
+      );
+      _selectedSecondarySubtitleIndex = _remoteTrackIndex(
+        result['secondarySubtitleIndex'] as int?,
       );
       _noteOutput(result, generation);
 
@@ -878,6 +893,10 @@ class RillightVideoBackend extends VideoBackend
     final selectedUri = _selectedSubtitleUri;
     final selectedTitle = _selectedSubtitleTitle;
     final selectedServerIndex = _selectedSubtitleServerIndex;
+    final secondaryUri = _secondarySelectedSubtitleUri;
+    final secondarySubtitle = _selectedSecondarySubtitleIndex;
+    final secondaryTitle = _secondarySelectedSubtitleTitle;
+    final secondaryServerIndex = _secondarySelectedSubtitleServerIndex;
     try {
       Map<String, Object?> data = const {};
       try {
@@ -943,6 +962,28 @@ class RillightVideoBackend extends VideoBackend
             );
           } else if (selectedSubtitle != null) {
             await setSubtitleIndex(selectedSubtitle);
+          }
+          // 次字幕独立恢复:主槽失败不阻断,恢复失败只放弃该槽。
+          if (secondaryUri != null) {
+            try {
+              await setSubtitleUri(
+                secondaryUri,
+                title: secondaryTitle,
+                index: secondaryServerIndex,
+                slot: 1,
+              );
+            } catch (_) {
+              _secondarySelectedSubtitleUri = null;
+              _secondarySelectedSubtitleServerIndex = null;
+              _secondarySelectedSubtitleTitle = null;
+              _selectedSecondarySubtitleIndex = null;
+            }
+          } else if (secondarySubtitle != null) {
+            try {
+              await setSubtitleIndex(secondarySubtitle, slot: 1);
+            } catch (_) {
+              _selectedSecondarySubtitleIndex = null;
+            }
           }
           await _command('volume', {'value': _volume});
           await _command('rate', {'value': _rate});
@@ -1411,40 +1452,73 @@ class RillightVideoBackend extends VideoBackend
   }
 
   @override
-  Future<void> setSubtitleIndex(int index) async {
+  Future<void> setSubtitleIndex(int index, {int slot = 0}) async {
     if (subtitleTrackSupported(index) == false) {
       throw const DeviceTrackRejected();
     }
-    await _command('subtitle', {'index': _outputTrackIndex(index)});
-    _selectedSubtitleUri = null;
-    _selectedSubtitleServerIndex = null;
-    _selectedSubtitleTitle = null;
+    await _command('subtitle', {
+      'index': _outputTrackIndex(index),
+      'slot': slot,
+    });
+    if (slot == 1) {
+      _secondarySelectedSubtitleUri = null;
+      _secondarySelectedSubtitleServerIndex = null;
+      _secondarySelectedSubtitleTitle = null;
+      _selectedSecondarySubtitleIndex = index;
+    } else {
+      _selectedSubtitleUri = null;
+      _selectedSubtitleServerIndex = null;
+      _selectedSubtitleTitle = null;
+    }
     _invalidateTrack();
   }
 
   @override
-  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index}) async {
+  Future<bool> setSubtitleUri(
+    Uri uri, {
+    String? title,
+    int? index,
+    int slot = 0,
+  }) async {
     final transport = _transport;
     if (transport == null) throw StateError('Playback transport unavailable');
     final sealed = await transport.register(
       uri,
       role: PlaybackResourceRole.subtitle,
     );
-    await _command('subtitleUri', {'url': sealed.toString(), 'title': title});
-    _selectedSubtitleUri = uri;
-    _selectedSubtitleServerIndex = index;
-    _selectedSubtitleTitle = title;
-    selectedSubtitleIndex = index;
+    await _command('subtitleUri', {
+      'url': sealed.toString(),
+      'title': title,
+      'slot': slot,
+    });
+    if (slot == 1) {
+      _secondarySelectedSubtitleUri = uri;
+      _secondarySelectedSubtitleServerIndex = index;
+      _secondarySelectedSubtitleTitle = title;
+      _selectedSecondarySubtitleIndex = index;
+    } else {
+      _selectedSubtitleUri = uri;
+      _selectedSubtitleServerIndex = index;
+      _selectedSubtitleTitle = title;
+      selectedSubtitleIndex = index;
+    }
     _invalidateTrack();
     return true;
   }
 
   @override
-  Future<void> setSubtitleOff() async {
-    await _command('subtitleOff');
-    _selectedSubtitleUri = null;
-    _selectedSubtitleServerIndex = null;
-    _selectedSubtitleTitle = null;
+  Future<void> setSubtitleOff({int slot = 0}) async {
+    await _command('subtitleOff', {'slot': slot});
+    if (slot == 1) {
+      _secondarySelectedSubtitleUri = null;
+      _secondarySelectedSubtitleServerIndex = null;
+      _secondarySelectedSubtitleTitle = null;
+      _selectedSecondarySubtitleIndex = null;
+    } else {
+      _selectedSubtitleUri = null;
+      _selectedSubtitleServerIndex = null;
+      _selectedSubtitleTitle = null;
+    }
     _invalidateTrack();
   }
 

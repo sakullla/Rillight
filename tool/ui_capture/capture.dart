@@ -28,6 +28,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/tv_section_prefs.dart';
 import 'package:rillight/player/mobile_player_page.dart';
+import 'package:rillight/player/player_page.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_keys.dart';
@@ -487,6 +488,26 @@ void main() {
             await capture.advance(250);
             await capture.tap(PlayerKeys.subtitle);
             await capture.save('player-subtitles');
+            // 次字幕槽:分段切换后同一列表编辑槽位 1。
+            await tester.tap(find.text('次字幕').last);
+            await capture.advance(300);
+            await capture.save('player-subtitles-secondary');
+            // 会话导入:绕过系统选择器,直接注入严格校验后的本地字幕。
+            final slotController = tester
+                .state<PlayerPageState>(find.byType(PlayerPage))
+                .controller!;
+            await tester.runAsync(
+              () => slotController.importSubtitleBytes(
+                fileName: '本地双语.srt',
+                bytes: Uint8List.fromList(
+                  const Utf8Encoder().convert(
+                    '1\n00:00:01,000 --> 00:00:04,000\n本地导入第一行\n本地导入第二行\n',
+                  ),
+                ),
+              ),
+            );
+            await capture.advance(300);
+            await capture.save('player-subtitles-imported');
             await capture.dismiss();
             await capture.danmakuPages(danmakuClient);
             await mouse.removePointer();
@@ -665,23 +686,29 @@ void main() {
                 await capture.tap(const Key('mobile-player-section-tracks'));
                 await capture.save('player-dense-tracks');
                 await tester.enterText(
-                  find.byKey(kTrackPickerSearchKey),
+                  find.byKey(kTrackPickerSearchKey).first,
                   'eng',
                 );
                 await capture.advance(300);
                 await capture.save('player-dense-tracks-search');
-                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey).first,
+                  '',
+                );
                 await capture.advance(200);
                 await capture.tap(const Key('mobile-player-panel-back'));
                 await capture.tap(const Key('mobile-player-source-entry'));
                 await capture.save('player-dense-source');
                 await tester.enterText(
-                  find.byKey(kTrackPickerSearchKey),
+                  find.byKey(kTrackPickerSearchKey).first,
                   '1080',
                 );
                 await capture.advance(300);
                 await capture.save('player-dense-source-search');
-                await tester.enterText(find.byKey(kTrackPickerSearchKey), '');
+                await tester.enterText(
+                  find.byKey(kTrackPickerSearchKey).first,
+                  '',
+                );
                 await capture.advance(200);
                 await capture.tap(const Key('mobile-player-panel-back'));
                 await capture.tap(const Key('mobile-player-panel-close'));

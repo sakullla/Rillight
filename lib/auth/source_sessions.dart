@@ -458,6 +458,7 @@ class SourceSessionRegistry {
       for (final draft in drafts)
         ServerImportDraft(
           name: draft.name,
+          serviceType: draft.serviceType,
           username: draft.username,
           lines: List.unmodifiable(draft.lines),
           credentials: draft.credentials,
@@ -504,7 +505,8 @@ class SourceSessionRegistry {
         if (draft.lines.isEmpty ||
             draft.userAgent?.contains(RegExp(r'[\r\n]')) == true ||
             (draft.credentials != null &&
-                draft.credentials!.username != draft.username)) {
+                (draft.credentials!.username != draft.username ||
+                    draft.credentials!.serviceType != draft.serviceType))) {
           throw const FormatException();
         }
         for (final line in draft.lines) {
@@ -554,7 +556,7 @@ class SourceSessionRegistry {
           guard();
           final addresses = lines.map((line) => line.address).toSet();
           for (final existing in _servers.where(
-            (s) => s.region == region && s.serviceType == MediaServerType.emby,
+            (s) => s.region == region && s.serviceType == draft.serviceType,
           )) {
             if (!existing.lines.any((line) {
               try {
@@ -584,6 +586,7 @@ class SourceSessionRegistry {
           final server = SavedServer(
             id: id,
             name: draft.name,
+            serviceType: draft.serviceType,
             username: draft.username,
             lines: List.unmodifiable(lines),
             activeLineId: lines.first.id,

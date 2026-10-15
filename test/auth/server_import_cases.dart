@@ -1,3 +1,5 @@
+import 'package:rillight/media_server/capabilities.dart';
+
 import '../helpers/region_access_fixture.dart';
 
 import 'package:dio/dio.dart';
@@ -161,6 +163,43 @@ void main() {
     sources.dispose();
     access.dispose();
   });
+
+  test(
+    'import preserves Jellyfin type and deduplicates within each provider',
+    () async {
+      ServerImportDraft draft(MediaServerType type) => ServerImportDraft(
+        name: 'Synthetic',
+        username: 'alice',
+        serviceType: type,
+        lines: const [ServerImportLine(address: 'https://same.test/jellyfin')],
+        credentials: StoredCredentials(
+          serviceType: type,
+          accessToken: 'synthetic-token',
+          userId: 'alice-id',
+          username: 'alice',
+        ),
+      );
+      final result = await sources.importServers([
+        draft(MediaServerType.emby),
+        draft(MediaServerType.jellyfin),
+        draft(MediaServerType.jellyfin),
+        draft(MediaServerType.emby),
+      ]);
+      expect(result.count(ServerImportStatus.added), 2);
+      expect(result.count(ServerImportStatus.duplicate), 2);
+      final saved = (await store.load()).servers;
+      expect(saved.map((s) => s.serviceType), [
+        MediaServerType.emby,
+        MediaServerType.jellyfin,
+      ]);
+      expect(saved.every((s) => s.identityPending), isTrue);
+      expect(
+        (await credentials.read(saved.last.id))?.accessToken,
+        'synthetic-token',
+      );
+      expect(clients, isEmpty, reason: 'Import does not contact a server');
+    },
+  );
 
   test(
     'offline partial merge preserves active client, remembered ID and scope',

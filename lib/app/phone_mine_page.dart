@@ -1,3 +1,4 @@
+import 'updates/update_check.dart';
 import '../auth/provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
 
@@ -416,6 +417,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   ],
                 ),
               ),
+              const SizedBox(height: AppSpacing.md),
+              const UpdateCheck(),
             ],
           ),
         ],

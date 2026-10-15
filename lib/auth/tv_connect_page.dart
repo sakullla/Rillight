@@ -3,11 +3,15 @@ import 'provider_login_form.dart';
 import '../media_server/capabilities.dart';
 
 import 'package:rillight/app/ui/ui.dart';
+
+import 'dart:async';
+
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -225,6 +229,18 @@ class _TvConnectPageState extends State<TvConnectPage> {
                             ),
                           ),
                           SizedBox(height: 24 * s),
+                          // 备份导入:无服务与已有服务都可用,遥控可聚焦。
+                          TvNavTile(
+                            actionKey: const ValueKey('tv-connect-import'),
+                            icon: CupertinoIcons.square_arrow_down,
+                            title: l10n.backupImportEntry,
+                            onPressed: auth.isBusy
+                                ? null
+                                : () => unawaited(
+                                    showBackupImportFlow(context, auth: auth),
+                                  ),
+                          ),
+                          SizedBox(height: 18 * s),
                           if (_lanActive)
                             ..._lanSection(l10n, auth.isBusy)
                           else ...[

@@ -983,6 +983,20 @@
     ]
   },
   {
+    "id": "player-subtitles-secondary",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
+    "id": "player-subtitles-imported",
+    "feature": "player",
+    "platforms": [
+      "desktop"
+    ]
+  },
+  {
     "id": "poster-hover",
     "feature": "home",
     "platforms": [
@@ -1778,6 +1792,59 @@
       "desktop",
       "phone",
       "tv"
+    ]
+  },
+  {
+    "id": "server-import-entry",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-import-loading",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-import-partial",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-import-failed",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-import-private",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "settings-update",
+    "feature": "settings",
+    "platforms": [
+      "desktop",
+      "phone"
     ]
   }
 ]

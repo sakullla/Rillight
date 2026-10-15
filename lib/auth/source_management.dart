@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import '../app/l10n/app_localizations.dart';
 import 'auth_controller.dart';
 import 'auth_scope.dart';
+import 'backup_import/backup_import_flow.dart';
 import 'source_sessions.dart';
 import 'server_list_store.dart';
 import 'region_access.dart' show RegionAccessController;
@@ -570,6 +571,19 @@ class _SourceManagementState extends State<SourceManagement> {
           ),
         ),
         actions: [
+          AppButton(
+            key: const Key('source-management-import'),
+            onPressed: _busy
+                ? null
+                : () => unawaited(
+                    showBackupImportFlow(
+                      context,
+                      auth: widget.auth,
+                      region: widget.region,
+                    ),
+                  ),
+            child: Text(l.backupImportEntry),
+          ),
           AppButton(
             key: const Key('source-management-close'),
             onPressed: () => Navigator.pop(context),

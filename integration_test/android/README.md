@@ -241,3 +241,39 @@ readiness and old controls; route disable/dispose and Activity stop/lock revoke
 presentation protection. Test old RemoteActions against the new session, plus
 close/lock during replacement. This is separate from the no-media-change PiP
 flow, where the core session must remain identical.
+
+## Dual subtitle slots and local import acceptance entry
+
+The player controller and the owned core expose two independent subtitle slots
+(`subtitle`/`secondarySubtitle` selection, `setSubtitleOff` per slot). Phone and
+TV pages list both slots with the shared candidate set; the same server stream or
+the same imported file may occupy only one slot, and burned-in transcode streams
+cannot fill the secondary slot. Imported SRT/ASS/SSA/VTT files are validated as
+strict UTF-8 (BOM allowed), copied into the session subtitle cache with original
+line breaks preserved, and cleared on media change; they are never persisted as
+preferences. The secondary slot is session-scoped and defaults to off.
+
+Device acceptance entry (execute with the disposable `.validation` package and
+synthetic credentials; record actual results):
+
+1. Open a media item with text subtitles; select a primary and a different
+   secondary subtitle from the tracks panel. Confirm both render simultaneously
+   in actual device frames, and that turning one slot off leaves the other and
+   the playback position unchanged.
+2. Import a local multi-line SRT (CRLF) and an ASS file with `\N` hard breaks
+   through the import entry; verify the explicit lines stay on separate rows in
+   real screenshots, the candidate appears in both slot lists, and a second
+   import of identical bytes reports a duplicate without adding a candidate.
+3. Try to place the same source in both slots and confirm the refusal notice.
+4. With both slots active, pause, seek, background/return and screen lock/wake
+   (phone), and D-pad exit navigation followed by re-entry (TV); subtitles must
+   re-register without a stale native index or a remounted surface.
+5. On devices without a documents provider (common Android TV), the import entry
+   must surface the missing-picker notice instead of passing a content URI to
+   the core.
+
+The controller/widget tests in this repository cover selection, refusal,
+rollback, import validation and re-registration with a fake backend; they do not
+establish device rendering, provider availability or physical evidence. This
+entry has **not** been executed on a device for the current candidate; report
+actual results separately when it is run.

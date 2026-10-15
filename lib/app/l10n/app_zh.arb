@@ -2033,5 +2033,215 @@
   "phoneFavorited": "已收藏",
   "phoneFavoriteAdded": "已加入收藏",
   "phoneFavoriteRemoved": "已取消收藏",
-  "phoneFavoriteFailed": "收藏没有保存，请稍后再试"
+  "phoneFavoriteFailed": "收藏没有保存，请稍后再试",
+  "subtitleTrackPrimary": "主字幕",
+  "@subtitleTrackPrimary": {
+    "description": "Primary subtitle slot label."
+  },
+  "subtitleTrackSecondary": "次字幕",
+  "@subtitleTrackSecondary": {
+    "description": "Secondary subtitle slot label."
+  },
+  "subtitleImportLocal": "导入本地字幕…",
+  "@subtitleImportLocal": {
+    "description": "Entry for importing a session-local subtitle file."
+  },
+  "subtitleImportRunning": "正在导入字幕…",
+  "@subtitleImportRunning": {
+    "description": "Progress note while a subtitle import is running."
+  },
+  "subtitleImportDuplicate": "相同内容的字幕已在候选列表中",
+  "@subtitleImportDuplicate": {
+    "description": "Import finished as a duplicate of an existing candidate."
+  },
+  "subtitleImportInvalid": "不是有效的 SRT/ASS/SSA/VTT UTF-8 字幕文件",
+  "@subtitleImportInvalid": {
+    "description": "Import rejected because content validation failed."
+  },
+  "subtitleImportTooLarge": "字幕文件超过单文件大小限制",
+  "@subtitleImportTooLarge": {
+    "description": "Import rejected because the file exceeds the single-file limit."
+  },
+  "subtitleImportSessionLimit": "会话内字幕文件总大小已达上限",
+  "@subtitleImportSessionLimit": {
+    "description": "Import rejected because the session total size limit is reached."
+  },
+  "subtitleImportUnreadable": "字幕文件无法读取",
+  "@subtitleImportUnreadable": {
+    "description": "Import failed while reading or copying the file."
+  },
+  "subtitleImportPickerUnavailable": "此设备没有可用的文件选择器",
+  "@subtitleImportPickerUnavailable": {
+    "description": "No documents provider is available, common on Android TV."
+  },
+  "subtitleSlotOccupied": "该来源已在另一字幕槽位使用",
+  "@subtitleSlotOccupied": {
+    "description": "A source cannot occupy both subtitle slots at once."
+  },
+  "subtitleBurnInSecondary": "烧录字幕无法作为可独立关闭的次字幕",
+  "@subtitleBurnInSecondary": {
+    "description": "Burned-in transcode subtitles cannot fill the secondary slot."
+  },
+  "subtitleMetaImported": "本地导入",
+  "@subtitleMetaImported": {
+    "description": "Badge marking a session-imported local subtitle file."
+  },
+  "backupImportEntry": "导入备份",
+  "@backupImportEntry": {
+    "description": "Server management / connect pages: entry that imports a Hills or Rodel backup file."
+  },
+  "backupImportPickerTitle": "选择备份文件",
+  "@backupImportPickerTitle": {
+    "description": "Native file picker dialog title for backup import."
+  },
+  "backupImportWorking": "正在读取备份…",
+  "@backupImportWorking": {
+    "description": "Loading dialog shown while a backup is parsed and committed."
+  },
+  "backupImportResultTitle": "备份导入结果",
+  "@backupImportResultTitle": {
+    "description": "Result panel title after a backup was committed."
+  },
+  "backupImportFailureTitle": "备份导入未完成",
+  "@backupImportFailureTitle": {
+    "description": "Result panel title when the backup could not be read or parsed."
+  },
+  "backupImportClose": "关闭",
+  "@backupImportClose": {
+    "description": "Backup import result panel close action."
+  },
+  "backupImportAddedCount": "新增 {count} 台",
+  "@backupImportAddedCount": {
+    "description": "Result row: how many servers were added.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportCredentialsReady": "已带凭据 {count} 个",
+  "@backupImportCredentialsReady": {
+    "description": "Result row: added accounts that carry credentials and can be verified on connect.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportPendingLogin": "待登录 {count} 个",
+  "@backupImportPendingLogin": {
+    "description": "Result row: added accounts without credentials that stay pending login.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportDuplicateCount": "重复跳过 {count} 台",
+  "@backupImportDuplicateCount": {
+    "description": "Result row: records equal to an already saved account and line.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportNonTargetCount": "不支持的服务类型 {count} 条",
+  "@backupImportNonTargetCount": {
+    "description": "Records with unsupported service types that were not migrated.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportFailedCount": "失败 {count} 条",
+  "@backupImportFailedCount": {
+    "description": "Result row: records that failed to parse or commit.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportPrivateSkippedCount": "私密区域未解锁，跳过 {count} 条",
+  "@backupImportPrivateSkippedCount": {
+    "description": "Result row: private-region records skipped because the private area is locked.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "backupImportPickerUnavailable": "此设备没有可用的文件选择器，无法选择备份文件",
+  "@backupImportPickerUnavailable": {
+    "description": "Failure shown when the device has no documents provider."
+  },
+  "backupImportTooLarge": "备份文件超过大小限制",
+  "@backupImportTooLarge": {
+    "description": "Failure shown for oversized backup files."
+  },
+  "backupImportUnreadable": "备份文件无法读取",
+  "@backupImportUnreadable": {
+    "description": "Failure shown when the picked file cannot be read."
+  },
+  "backupImportUnrecognized": "无法识别的备份格式",
+  "@backupImportUnrecognized": {
+    "description": "Failure for an unrecognized container."
+  },
+  "backupImportCorrupt": "备份文件已损坏",
+  "@backupImportCorrupt": {
+    "description": "Failure for a damaged container."
+  },
+  "backupImportUnsupportedVersion": "暂不支持该备份版本",
+  "@backupImportUnsupportedVersion": {
+    "description": "Failure for a backup version the parser does not support."
+  },
+  "backupImportKeyUnavailable": "缺少解密密钥，未读取加密内容",
+  "@backupImportKeyUnavailable": {
+    "description": "Honest failure when the decryption key for an encrypted backup is not provisioned."
+  },
+  "backupImportUndecryptable": "备份内容无法解密",
+  "@backupImportUndecryptable": {
+    "description": "Failure when the payload cannot be decrypted with the provided key."
+  },
+  "backupImportReasonMissingFields": "部分记录缺少名称或线路，未导入",
+  "@backupImportReasonMissingFields": {
+    "description": "Parse-level failure reason shown under the failed row."
+  },
+  "backupImportReasonInvalid": "记录配置无效，未导入",
+  "@backupImportReasonInvalid": {
+    "description": "Commit failure reason: invalid configuration."
+  },
+  "backupImportReasonUnsupportedOptions": "包含无法表达的连接选项，未导入",
+  "@backupImportReasonUnsupportedOptions": {
+    "description": "Commit failure reason: connection semantics the app cannot express."
+  },
+  "backupImportReasonAccessRevoked": "导入期间权限或区域已变更，未导入",
+  "@backupImportReasonAccessRevoked": {
+    "description": "Commit failure reason: access or region changed during import."
+  },
+  "backupImportReasonPersistence": "保存失败，未导入",
+  "@backupImportReasonPersistence": {
+    "description": "Commit failure reason: persistence failed."
+  },
+  "backupImportReasonRollback": "存储状态不确定，已停止后续写入",
+  "@backupImportReasonRollback": {
+    "description": "Commit failure reason: rollback failed so remaining records were stopped."
+  },
+  "updateCheck": "检查更新",
+  "updateChecking": "正在检查更新…",
+  "updateCheckFailed": "暂时无法检查更新，请检查网络后重试。",
+  "updateAvailable": "发现新版本 {version}",
+  "@updateAvailable": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "updateCurrent": "当前已是最新版本",
+  "updateOpenRelease": "前往下载",
+  "updateNotes": "更新内容",
+  "updateOpenFailed": "无法打开浏览器，可复制下方链接前往下载。"
 }

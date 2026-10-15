@@ -157,6 +157,10 @@ class PlayerWindowLaunch {
             : json['startTimeTicks'] is int
             ? durationFromTicks(json['startTimeTicks'] as int)
             : null,
+        secondarySubtitleStreamIndex:
+            json['secondarySubtitleStreamIndex'] is int
+            ? json['secondarySubtitleStreamIndex'] as int
+            : int.tryParse('${json['secondarySubtitleStreamIndex'] ?? ''}'),
       ),
       regionGeneration: json['regionGeneration'] as int?,
       baseUrl: json['baseUrl'] as String? ?? '',
@@ -214,6 +218,8 @@ class PlayerWindowLaunch {
         'startUs': request.startPosition!.inMicroseconds,
       'serviceType': serviceType.name,
       'schema': 2,
+      if (request.secondarySubtitleStreamIndex != null)
+        'secondarySubtitleStreamIndex': request.secondarySubtitleStreamIndex,
       'baseUrl': baseUrl,
       'accessToken': accessToken,
       'userId': userId,
@@ -483,6 +489,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                       )),
             startPosition: request.startPosition,
             startPaused: request.startPaused,
+            secondarySubtitleStreamIndex: request.secondarySubtitleStreamIndex,
             subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
             maxStreamingBitrate:
                 request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
@@ -1988,6 +1995,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
             audioStreamIndex: request.audioStreamIndex,
             subtitleStreamIndex: request.subtitleStreamIndex,
             startPosition: request.startPosition,
+            secondarySubtitleStreamIndex: request.secondarySubtitleStreamIndex,
             onClosed: () {
               unawaited(_closeWindow());
             },

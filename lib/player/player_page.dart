@@ -59,6 +59,7 @@ class PlayerPage extends StatefulWidget {
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.startPosition,
+    this.secondarySubtitleStreamIndex,
     this.sourceRequest,
     this.onClosed,
     this.onOpenItem,
@@ -73,6 +74,9 @@ class PlayerPage extends StatefulWidget {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final Duration? startPosition;
+
+  /// 次字幕显式预选;null 表示次字幕保持关闭。
+  final int? secondarySubtitleStreamIndex;
   final PlayerOpenRequest? sourceRequest;
   final VoidCallback? onClosed;
   final ValueChanged<String>? onOpenItem;
@@ -157,6 +161,8 @@ class PlayerPageState extends State<PlayerPage> {
       preferredAudioStreamIndex: widget.audioStreamIndex,
       preferredSubtitleStreamIndex: widget.subtitleStreamIndex,
       startPosition: widget.startPosition,
+      preferredSecondarySubtitleStreamIndex:
+          widget.secondarySubtitleStreamIndex,
       progressInterval: bindings.progressInterval,
       controlsHideAfter: bindings.controlsHideAfter,
       nextEpisodeCountdown: bindings.nextEpisodeCountdown,
@@ -1645,6 +1651,10 @@ class _ControlsRow extends StatelessWidget {
             danmaku: danmakuController,
             onPressed: onDanmakuSearch,
           ),
+        // 无自带字幕的媒体也保留字幕入口:本地导入在菜单内。
+        if (controller.canConfigureSubtitles ||
+            controller.canImportSubtitleFiles)
+          SubtitleTrackMenu(controller: controller),
         if (controller.canBrowseEpisodes)
           _PlayerIconButton(
             key: const Key('player-episodes'),
@@ -1652,8 +1662,6 @@ class _ControlsRow extends StatelessWidget {
             onPressed: onOpenEpisodes,
             icon: CupertinoIcons.film,
           ),
-        if (controller.canConfigureSubtitles)
-          SubtitleTrackMenu(controller: controller),
         PlaybackSettingsMenu(controller: controller),
         _PlayerIconButton(
           key: PlayerKeys.fullscreen,

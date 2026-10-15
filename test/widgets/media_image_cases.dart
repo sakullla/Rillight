@@ -1701,15 +1701,35 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
     });
     await tester.pump();
-    expect(imageRequests().map(requestedItemId), contains('poster-0'));
+    // 满载机器上首个可见请求可能晚于固定窗口启动;轮询至 poster-0 已
+    // 开始(有界),再核对滚动优先级门仍按住屏外项。
+    var visibleStarted = false;
+    for (var i = 0; i < 100; i++) {
+      if (imageRequests().map(requestedItemId).contains('poster-0')) {
+        visibleStarted = true;
+        break;
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    expect(visibleStarted, isTrue);
     expect(imageRequests().map(requestedItemId), isNot(contains('poster-1')));
     expect(find.byType(MediaImage), findsWidgets);
 
-    await tester.runAsync(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-    });
-    await tester.pump();
-    await tester.pump();
+    var offscreenStarted = false;
+    for (var i = 0; i < 100; i++) {
+      if (imageRequests().map(requestedItemId).contains('poster-1')) {
+        offscreenStarted = true;
+        break;
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    expect(offscreenStarted, isTrue);
     final ids = imageRequests().map(requestedItemId).whereType<String>();
     expect(ids, contains('poster-0'));
     expect(ids, contains('poster-1'));

@@ -10,6 +10,7 @@ class PlayerOpenRequest {
     this.audioStreamIndex,
     this.subtitleStreamIndex,
     this.startPosition,
+    this.secondarySubtitleStreamIndex,
     this.source,
     this.work,
     this.libraryId,
@@ -25,6 +26,10 @@ class PlayerOpenRequest {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final Duration? startPosition;
+
+  /// 次字幕(槽位 1)的显式预选;缺省 null 表示次字幕关闭。
+  /// 会话导入文件不跨进程传递,只有服务器流索引可表达。
+  final int? secondarySubtitleStreamIndex;
   final SourceReference? source;
   final SourceReference? work;
   final String? libraryId;
