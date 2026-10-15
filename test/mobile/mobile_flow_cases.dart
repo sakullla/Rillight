@@ -1,4 +1,12 @@
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+import 'package:rillight/app/widgets/emby_mark.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/jellyfin/jellyfin_client.dart';
 import 'package:rillight/library/mobile_library_page.dart';
+import 'package:rillight/media_server/capabilities.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/search/recent_searches.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
@@ -1601,6 +1609,264 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  cases.testWidgets(
+    'phone home switcher shows the server name and existing Emby mark',
+    (tester) async {
+      final server = FakeEmbyServer();
+      await start(tester, server, signedIn: true);
+      final pill = find.byKey(MobileShell.serverPillKey);
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(of: pill, matching: find.byType(Text)),
+            )
+            .data,
+        '灯川测试',
+      );
+      expect(
+        find.descendant(of: pill, matching: find.textContaining('emby.test')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: pill, matching: find.byType(EmbyMark)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: pill,
+          matching: find.byKey(PhoneServerBrandSlot.logoKey),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: pill,
+          matching: find.byIcon(CupertinoIcons.dot_radiowaves_right),
+        ),
+        findsNothing,
+      );
+      await tester.tap(pill);
+      await settle(tester);
+      expect(find.text('服务器管理'), findsOneWidget);
+      expect(find.textContaining('emby.test:8096'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.test('emby branding has no frozen logo route', () async {
+    final dio = Dio();
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          fail('Emby branding must not call ${options.method} ${options.uri}');
+        },
+      ),
+    );
+    final client = EmbyClient(
+      device: const ClientDeviceInfo(
+        clientName: 'test',
+        deviceName: 'phone',
+        deviceId: 'brand-emby',
+        version: '1',
+      ),
+      dio: dio,
+    );
+    expect(await client.loadBrandingLogo(), isNull);
+  });
+
+  cases.test(
+    'jellyfin branding logo uses the frozen splashscreen route once',
+    () async {
+      final hits = <String>[];
+      var status = 200;
+      var body = kTinyPng;
+      final dio = Dio();
+      dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            hits.add('${options.method} ${options.uri.path}');
+            final response = Response<List<int>>(
+              requestOptions: options,
+              statusCode: status,
+              data: body,
+            );
+            if (status != 200) {
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  response: response,
+                  type: DioExceptionType.badResponse,
+                ),
+              );
+              return;
+            }
+            handler.resolve(response);
+          },
+        ),
+      );
+      final client = JellyfinClient(
+        device: const ClientDeviceInfo(
+          clientName: 'test',
+          deviceName: 'phone',
+          deviceId: 'brand-jellyfin',
+          version: '1',
+        ),
+        dio: dio,
+      );
+      client.attachSession(
+        baseUrl: Uri.parse('http://127.0.0.1:9/jf'),
+        accessToken: 'token',
+        userId: 'user',
+      );
+      expect(await client.loadBrandingLogo(), orderedEquals(kTinyPng));
+      expect(hits, ['GET /jf/Branding/Splashscreen']);
+
+      hits.clear();
+      status = 404;
+      expect(await client.loadBrandingLogo(), isNull);
+      expect(hits, ['GET /jf/Branding/Splashscreen']);
+
+      hits.clear();
+      status = 200;
+      body = Uint8List(0);
+      expect(await client.loadBrandingLogo(), isNull);
+      expect(hits, ['GET /jf/Branding/Splashscreen']);
+    },
+  );
+
+  cases.testWidgets(
+    'server brand slot keeps one logo or the matching service mark',
+    (tester) async {
+      Widget host(MediaServerType type, MediaServerClient client, String id) {
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          child: PhoneServerBrandSlot(
+            serviceType: type,
+            client: client,
+            identity: id,
+          ),
+        );
+      }
+
+      final jellyfin = _LogoJellyfin(() async => kTinyPng);
+      await tester.pumpWidget(
+        host(MediaServerType.jellyfin, jellyfin, 'jellyfin-logo'),
+      );
+      await tester.pump();
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsOneWidget);
+      expect(
+        find.byKey(PhoneServerBrandSlot.markKeyFor(MediaServerType.jellyfin)),
+        findsNothing,
+      );
+      expect(find.byType(EmbyMark), findsNothing);
+      final shown = jellyfin.calls;
+      await tester.pumpWidget(
+        host(MediaServerType.jellyfin, jellyfin, 'jellyfin-logo'),
+      );
+      await tester.pump();
+      expect(jellyfin.calls, shown);
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsOneWidget);
+
+      final failed = _LogoJellyfin(() async => null);
+      await tester.pumpWidget(
+        host(MediaServerType.jellyfin, failed, 'jellyfin-missing'),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(PhoneServerBrandSlot.markKeyFor(MediaServerType.jellyfin)),
+        findsOneWidget,
+      );
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+      expect(find.byType(EmbyMark), findsNothing);
+      final failedCalls = failed.calls;
+      await tester.pump(const Duration(seconds: 2));
+      expect(failed.calls, failedCalls);
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+
+      final broken = _LogoJellyfin(
+        () async => Uint8List.fromList(const [1, 2, 3, 4, 5, 6, 7, 8]),
+      );
+      await tester.pumpWidget(
+        host(MediaServerType.jellyfin, broken, 'jellyfin-broken'),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(PhoneServerBrandSlot.markKeyFor(MediaServerType.jellyfin)),
+        findsOneWidget,
+      );
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+      expect(broken.calls, 1);
+
+      final foreign = _LogoJellyfin(() async => kTinyPng);
+      await tester.pumpWidget(host(MediaServerType.plex, foreign, 'plex'));
+      await tester.pump();
+      expect(foreign.calls, 0);
+      expect(
+        find.byKey(PhoneServerBrandSlot.markKeyFor(MediaServerType.plex)),
+        findsOneWidget,
+      );
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+      expect(find.byType(EmbyMark), findsNothing);
+
+      await tester.pumpWidget(host(MediaServerType.emby, foreign, 'not-emby'));
+      await tester.pump();
+      expect(foreign.calls, 0);
+      expect(find.byType(EmbyMark), findsOneWidget);
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+
+      final late = Completer<Uint8List?>();
+      final slow = _LogoJellyfin(() => late.future);
+      await tester.pumpWidget(
+        host(MediaServerType.jellyfin, slow, 'jellyfin-slow'),
+      );
+      expect(
+        find.byKey(PhoneServerBrandSlot.markKeyFor(MediaServerType.jellyfin)),
+        findsOneWidget,
+      );
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+      final emby = EmbyClient(
+        device: const ClientDeviceInfo(
+          clientName: 'test',
+          deviceName: 'phone',
+          deviceId: 'brand-switch',
+          version: '1',
+        ),
+      );
+      await tester.pumpWidget(host(MediaServerType.emby, emby, 'emby-now'));
+      late.complete(kTinyPng);
+      await tester.pump();
+      expect(find.byType(EmbyMark), findsOneWidget);
+      expect(find.byKey(PhoneServerBrandSlot.logoKey), findsNothing);
+      expect(
+        find.byKey(PhoneServerBrandSlot.markKeyFor(MediaServerType.jellyfin)),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+}
+
+class _LogoJellyfin extends JellyfinClient {
+  _LogoJellyfin(this._logo)
+    : super(
+        device: const ClientDeviceInfo(
+          clientName: 'test',
+          deviceName: 'phone',
+          deviceId: 'brand-slot',
+          version: '1',
+        ),
+      );
+
+  final Future<Uint8List?> Function() _logo;
+  int calls = 0;
+
+  @override
+  Future<Uint8List?> loadBrandingLogo() {
+    calls++;
+    return _logo();
+  }
 }
 
 class _ScriptedCatalog extends CatalogController {

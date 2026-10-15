@@ -380,6 +380,10 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
     }
   }
 
+  /// Frozen Emby branding exposes configuration and CSS, not a logo image.
+  /// Callers keep the existing Emby mark instead of guessing a path.
+  Future<Uint8List?> loadBrandingLogo() async => null;
+
   @override
   Future<AuthenticationResult> authenticateByName({
     required Uri baseUrl,

@@ -269,6 +269,38 @@ class JellyfinClient extends MediaServerClient
           ),
         ),
       );
+
+  /// Frozen Jellyfin image route `GET /Branding/Splashscreen`.
+  /// One attempt: empty, failed, or missing responses yield null.
+  Future<Uint8List?> loadBrandingLogo() async {
+    final base = baseUrl;
+    if (!hasSession || base == null) return null;
+    final generation = _generation;
+    try {
+      _check(generation);
+      final response = await _dio.getUri<List<int>>(
+        _uri(base, 'Branding/Splashscreen'),
+        options: Options(
+          headers: _headers(accessToken),
+          responseType: ResponseType.bytes,
+          followRedirects: false,
+          sendTimeout: const Duration(seconds: 20),
+          receiveTimeout: const Duration(seconds: 30),
+          validateStatus: (status) => status == 200,
+        ),
+      );
+      _check(generation);
+      if (response.statusCode != 200) return null;
+      final data = response.data;
+      if (data == null || data.isEmpty) return null;
+      return Uint8List.fromList(data);
+    } on MediaServerException {
+      return null;
+    } on DioException {
+      return null;
+    }
+  }
+
   @override
   Future<AuthenticationResult> authenticateByName({
     required Uri baseUrl,

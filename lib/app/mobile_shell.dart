@@ -1,6 +1,12 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/auth/login_widgets.dart';
+import 'package:rillight/emby/emby_client.dart';
+import 'package:rillight/jellyfin/jellyfin_client.dart';
+import 'package:rillight/media_server/capabilities.dart';
+import 'package:rillight/media_server/media_server_client.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -128,10 +134,9 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
     final scheme = theme.colorScheme;
     final server = auth.session?.server;
     final serverName = server?.displayName.trim() ?? '';
-    final lineLabel = server?.activeLine?.hostLabel.trim() ?? '';
-    final pillLabel = serverName.isEmpty
+    final pillLabel = server == null || serverName.isEmpty
         ? l.phoneServerManagement
-        : (lineLabel.isEmpty ? serverName : '$serverName · $lineLabel');
+        : serverName;
     final topInset = MediaQuery.viewPaddingOf(context).top;
     final barBody = _index == 0
         ? MobileShell.homeBarHeight
@@ -323,13 +328,25 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Icon(
-                                            CupertinoIcons.dot_radiowaves_right,
-                                            size: 14,
-                                            color: homeImmersive
-                                                ? const Color(0xFFFFFFFF)
-                                                : scheme.primary,
-                                          ),
+                                          if (server == null)
+                                            Icon(
+                                              CupertinoIcons
+                                                  .dot_radiowaves_right,
+                                              size: 14,
+                                              color: homeImmersive
+                                                  ? const Color(0xFFFFFFFF)
+                                                  : scheme.primary,
+                                            )
+                                          else
+                                            PhoneServerBrandSlot(
+                                              key: ValueKey(
+                                                '${server.serviceType.name}|${server.id}|${server.baseUrl}',
+                                              ),
+                                              serviceType: server.serviceType,
+                                              client: auth.client,
+                                              identity:
+                                                  '${server.serviceType.name}|${server.id}|${server.baseUrl}',
+                                            ),
                                           const SizedBox(width: 6),
                                           Flexible(
                                             child: Text(
@@ -507,4 +524,158 @@ class _MineAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Phone home server mark. Emby and Jellyfin ask their own client once for a
+/// branding image; Plex and a missing or failed image stay on that service's
+/// existing mark. A later response cannot replace a settled choice or paint
+/// another service's image.
+class PhoneServerBrandSlot extends StatefulWidget {
+  const PhoneServerBrandSlot({
+    super.key,
+    required this.serviceType,
+    required this.client,
+    required this.identity,
+    this.size = 14,
+  });
+
+  final MediaServerType serviceType;
+  final MediaServerClient client;
+  final String identity;
+  final double size;
+
+  static Key markKeyFor(MediaServerType type) =>
+      Key('phone-server-mark-${type.name}');
+
+  static const logoKey = Key('phone-server-logo');
+
+  @override
+  State<PhoneServerBrandSlot> createState() => _PhoneServerBrandSlotState();
+}
+
+class _PhoneServerBrandSlotState extends State<PhoneServerBrandSlot> {
+  int _token = 0;
+  Uint8List? _logo;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(PhoneServerBrandSlot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.identity != widget.identity ||
+        oldWidget.serviceType != widget.serviceType) {
+      _logo = null;
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _token++;
+    super.dispose();
+  }
+
+  void _load() {
+    final token = ++_token;
+    final type = widget.serviceType;
+    final client = widget.client;
+    unawaited(() async {
+      final accepted = _acceptedBrandingLogo(
+        await _serverBrandingLogo(type, client),
+      );
+      if (!mounted || token != _token || accepted == null) return;
+      setState(() => _logo = accepted);
+    }());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final logo = _logo;
+    if (logo == null) {
+      return ServerTypeMark(
+        key: PhoneServerBrandSlot.markKeyFor(widget.serviceType),
+        type: widget.serviceType,
+        size: widget.size,
+      );
+    }
+    final size = widget.size;
+    return Semantics(
+      label: widget.serviceType.label,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.22),
+        child: Image.memory(
+          logo,
+          key: PhoneServerBrandSlot.logoKey,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          excludeFromSemantics: true,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded || frame != null) return child;
+            return ServerTypeMark(type: widget.serviceType, size: size);
+          },
+          errorBuilder: (_, _, _) =>
+              ServerTypeMark(type: widget.serviceType, size: size),
+        ),
+      ),
+    );
+  }
+}
+
+Future<Uint8List?> _serverBrandingLogo(
+  MediaServerType type,
+  MediaServerClient client,
+) {
+  if (type == MediaServerType.emby && client is EmbyClient) {
+    return client.loadBrandingLogo();
+  }
+  if (type == MediaServerType.jellyfin && client is JellyfinClient) {
+    return client.loadBrandingLogo();
+  }
+  return Future<Uint8List?>.value(null);
+}
+
+Uint8List? _acceptedBrandingLogo(Uint8List? bytes) {
+  if (bytes == null || bytes.isEmpty || !_isBrandingImage(bytes)) return null;
+  return Uint8List.fromList(bytes);
+}
+
+bool _isBrandingImage(Uint8List bytes) {
+  if (bytes.length >= 8 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47) {
+    return true;
+  }
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xFF &&
+      bytes[1] == 0xD8 &&
+      bytes[2] == 0xFF) {
+    return true;
+  }
+  if (bytes.length >= 6 &&
+      bytes[0] == 0x47 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x38) {
+    return true;
+  }
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46 &&
+      bytes[8] == 0x57 &&
+      bytes[9] == 0x45 &&
+      bytes[10] == 0x42 &&
+      bytes[11] == 0x50) {
+    return true;
+  }
+  return false;
 }
