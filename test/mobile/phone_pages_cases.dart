@@ -992,24 +992,38 @@ void main() {
         await tester.pumpWidget(_scriptedApp(catalog, router: router));
         await tester.pump();
 
-        // 继续观看横卡:季集编号留在角标，进度只由底部进度条表达。
-        final wideBadges = find.byKey(phoneHomeBadgesKey('episode-resume'));
-        expect(wideBadges, findsOneWidget);
-        final wideCard = tester.getRect(
-          find.byKey(CatalogKeys.item('episode-resume')),
+        // 继续观看横卡：副标题已经写出季集编号时不再叠同一角标，进度只留在画面底边。
+        final resumeCard = find.byKey(CatalogKeys.item('episode-resume'));
+        expect(resumeCard, findsOneWidget);
+        final wideCard = tester.getRect(resumeCard);
+        final episodeCaption = find.descendant(
+          of: resumeCard,
+          matching: find.text('S1E2 · 第二集'),
         );
-        expect(_inside(tester.getRect(wideBadges), wideCard), isTrue);
+        expect(episodeCaption, findsOneWidget);
         expect(
-          find.descendant(of: wideBadges, matching: find.text('S1E2')),
+          find.descendant(
+            of: resumeCard,
+            matching: find.textContaining('S1E2'),
+          ),
           findsOneWidget,
         );
+        expect(_inside(tester.getRect(episodeCaption), wideCard), isTrue);
+        final picture = tester.getRect(
+          find.descendant(of: resumeCard, matching: find.byType(AspectRatio)),
+        );
         expect(
-          find.descendant(of: wideBadges, matching: find.text('已看 40%')),
+          tester.getRect(episodeCaption).top,
+          greaterThanOrEqualTo(picture.bottom - 0.5),
+        );
+        expect(find.byKey(phoneHomeBadgesKey('episode-resume')), findsNothing);
+        expect(
+          find.descendant(of: resumeCard, matching: find.text('已看 40%')),
           findsNothing,
         );
         expect(
           find.descendant(
-            of: find.byKey(CatalogKeys.item('episode-resume')),
+            of: resumeCard,
             matching: find.byKey(CatalogKeys.resumeProgress),
           ),
           findsOneWidget,
