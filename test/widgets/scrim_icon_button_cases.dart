@@ -76,7 +76,7 @@ void main() {
     expect(find.byKey(_key), findsOneWidget);
     expect(find.byType(BackdropFilter), findsNothing);
     expect(findAppTooltip('向左'), findsOneWidget);
-    expect(tester.getSize(find.byKey(_key)), const Size(40, 40));
+    expect(tester.getSize(find.byKey(_key)), const Size(44, 44));
 
     final scheme = AppUiTheme.dark().colorScheme;
     final style = _styleOf(tester);
