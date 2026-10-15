@@ -11,8 +11,12 @@ void main() {
     caseEntrypoints['app/content_theme_cases.dart']!,
   );
   group(
-    'catalog/library_filter_test.dart',
-    caseEntrypoints['catalog/library_filter_cases.dart']!,
+    'auth/library_counts_test.dart',
+    caseEntrypoints['auth/library_counts_cases.dart']!,
+  );
+  group(
+    'catalog/shelf_grid_scroll_rebuild_test.dart',
+    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
   );
   group(
     'library/source_detail_route_test.dart [part 2]',
@@ -27,14 +31,13 @@ void main() {
     caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
   );
   group(
-    'player/android_seek_cancellation_test.dart',
-    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
+    'player/playback_image_release_test.dart',
+    caseEntrypoints['player/playback_image_release_cases.dart']!,
   );
   group(
     'tv/tv_detail_test.dart [part 2]',
     caseEntrypoints['tv/tv_detail_cases.dart#1']!,
   );
-  group('tv/tv_frame_test.dart', caseEntrypoints['tv/tv_frame_cases.dart']!);
   group(
     'widgets/backdrop_scrim_test.dart',
     caseEntrypoints['widgets/backdrop_scrim_cases.dart']!,

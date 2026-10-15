@@ -439,7 +439,8 @@ void main() {
         ),
       );
       await settle(tester);
-      await tester.drag(find.text('Movie A'), const Offset(-180, 0));
+      // 头图整屏宽,横滑过半屏才翻页。
+      await tester.drag(find.text('Movie A'), const Offset(-240, 0));
       await settle(tester);
       await tester.tap(find.byKey(const ValueKey('hero-resume-movie-b')));
       await settle(tester);
@@ -487,13 +488,14 @@ void main() {
           _ => find.byKey(PhoneHero.openKey),
         };
         // Start on the actual text/button, not the poster PageView.
-        await tester.drag(target(false), const Offset(-180, 0));
+        // 头图整屏宽,横滑过半屏才翻页。
+        await tester.drag(target(false), const Offset(-240, 0));
         await tester.pump();
         await tester.pump(const Duration(seconds: 1));
         expect(find.text('Movie B'), findsOneWidget);
         expect(find.text('Movie A'), findsNothing);
         expect(scroll.offset, 0);
-        await tester.drag(target(true), const Offset(180, 0));
+        await tester.drag(target(true), const Offset(240, 0));
         await tester.pump();
         await tester.pump(const Duration(seconds: 1));
         expect(find.text('Movie A'), findsOneWidget);

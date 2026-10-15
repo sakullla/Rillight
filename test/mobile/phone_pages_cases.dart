@@ -347,9 +347,18 @@ void main() {
         expect(find.byType(HomeHero), findsNothing);
         // 只取最近入库的电影/剧集交错、按 id 去重、上限 5:观看记录里的
         // episode-a 不进轮播,movie-f 落选。
-        expect(find.byKey(PhoneHero.itemKey('episode-a')), findsNothing);
-        expect(find.byKey(PhoneHero.itemKey('movie-f')), findsNothing);
-        expect(find.byKey(PhoneHero.itemKey('series-h')), findsOneWidget);
+        expect(
+          find.byKey(PhoneHero.itemKey('episode-a'), skipOffstage: false),
+          findsNothing,
+        );
+        expect(
+          find.byKey(PhoneHero.itemKey('movie-f'), skipOffstage: false),
+          findsNothing,
+        );
+        expect(
+          find.byKey(PhoneHero.itemKey('series-h'), skipOffstage: false),
+          findsOneWidget,
+        );
         expect(find.byKey(CatalogKeys.heroDot(4)), findsOneWidget);
         expect(find.byKey(CatalogKeys.heroDot(5)), findsNothing);
         // 轮播不展示用户使用记录:没有进度百分比,也没有「继续播放」。
@@ -375,10 +384,12 @@ void main() {
           tester.getCenter(play).dy,
           closeTo(tester.getCenter(detail).dy, 1),
         );
-        // 文字与按钮落在海报下方,不压在图片上。
+        // 片名与按钮压在剧照下缘溶入页面底色的那一段。
+        final bannerRect = tester.getRect(banner);
+        expect(tester.getTopLeft(title).dy, greaterThan(bannerRect.center.dy));
         expect(
-          tester.getTopLeft(title).dy,
-          greaterThan(tester.getBottomLeft(find.byKey(PhoneHero.openKey)).dy),
+          tester.getBottomLeft(play).dy,
+          lessThanOrEqualTo(bannerRect.bottom),
         );
         expect(findAppTooltip('暂停轮播'), findsNothing);
         // 横幅只留标题和元信息行，不再叠剧情简介。
@@ -398,7 +409,7 @@ void main() {
             if (finder.evaluate().isEmpty) {
               continue;
             }
-            // 当前卡居中,两侧露出邻卡。
+            // 当前剧照铺满整段头图。
             if ((tester.getCenter(finder).dx - banner.center.dx).abs() < 2) {
               return id;
             }
@@ -638,10 +649,7 @@ void main() {
         expect(_bannerImage(tester).preferBackdrop, isFalse);
         expect(
           _bannerImage(tester).maxWidth,
-          (PhoneHero.posterWidthFor(
-            360,
-            viewportHeight: 1600,
-          )).round().clamp(400, 800),
+          PhoneHero.requestWidthFor(360, 1),
         );
         expect(find.textContaining('dream-sharing'), findsOneWidget);
         expect(find.textContaining('2010'), findsOneWidget);
@@ -1640,6 +1648,71 @@ void main() {
     );
 
     cases.testWidgets(
+      'favorite toggles on the server, survives reload and rolls back on failure',
+      (tester) async {
+        final server = FakeEmbyServer();
+        final (router, _) = await start(tester, server, height: 1600);
+        await openItem(tester, router, 'movie-inception');
+        final favorite = find.byKey(const Key('phone-detail-favorite'));
+        expect(favorite, findsOneWidget);
+        expect(
+          find.descendant(of: favorite, matching: find.text('收藏')),
+          findsOneWidget,
+        );
+        await tester.ensureVisible(favorite);
+        await tester.tap(favorite);
+        await settle(tester);
+        expect(
+          server.items
+              .firstWhere((item) => item.id == 'movie-inception')
+              .favorite,
+          isTrue,
+        );
+        expect(
+          find.descendant(of: favorite, matching: find.text('已收藏')),
+          findsOneWidget,
+        );
+        expect(find.text('已加入收藏'), findsOneWidget);
+
+        // 重新打开详情仍是已收藏：状态来自服务器的 IsFavorite。
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        await openItem(tester, router, 'movie-inception');
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('phone-detail-favorite')),
+            matching: find.text('已收藏'),
+          ),
+          findsOneWidget,
+        );
+
+        // 写入失败时回到原状态并提示。
+        server.failNextFavorite = true;
+        await tester.ensureVisible(
+          find.byKey(const Key('phone-detail-favorite')),
+        );
+        await tester.tap(find.byKey(const Key('phone-detail-favorite')));
+        await settle(tester);
+        expect(
+          server.items
+              .firstWhere((item) => item.id == 'movie-inception')
+              .favorite,
+          isTrue,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('phone-detail-favorite')),
+            matching: find.text('已收藏'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('收藏没有保存，请稍后再试'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+
+    cases.testWidgets(
       'marking played removes the movie from the unwatched filter',
       (tester) async {
         final server = _FilteringEmbyServer();
@@ -1869,15 +1942,16 @@ void main() {
         );
         await openItem(tester, router, 'movie-inception');
 
-        expect(
-          find.byKey(const Key('phone-detail-version-row')),
-          findsOneWidget,
-        );
+        final versionRow = find.byKey(const Key('phone-detail-version-row'));
+        expect(versionRow, findsOneWidget);
+        // 版本行点开底部单选表，再选另一个版本。
+        await tester.ensureVisible(versionRow);
+        await tester.tap(versionRow);
+        await settle(tester);
         final altChip = find.byKey(
           const ValueKey('phone-detail-version-alternate-1080p'),
         );
         expect(altChip, findsOneWidget);
-        await tester.ensureVisible(altChip);
         await tester.tap(altChip);
         await settle(tester);
 
@@ -2066,7 +2140,7 @@ void main() {
             ),
         ];
         final width = arts.first.size.width;
-        expect(width, closeTo((360 - 32 - 16) / 2, 1));
+        expect(width, closeTo((360 - 32 - 12) / 2, 1));
         expect(
           arts.every((box) => (box.size.width - width).abs() < 0.5),
           isTrue,
@@ -2096,24 +2170,25 @@ void main() {
           ),
           findsNothing,
         );
+        // 裸海报只有一层圆角画框，没有卡片底和投影。
         expect(
           tester
-              .widget<ClipRRect>(
+              .widget<PhoneArtworkFrame>(
                 find.descendant(
                   of: inception,
-                  matching: find.byType(ClipRRect),
+                  matching: find.byType(PhoneArtworkFrame),
                 ),
               )
-              .borderRadius,
-          BorderRadius.circular(AppRadii.md),
+              .radius,
+          PhoneArtworkFrame.defaultRadius,
         );
-        // 续播进度以图上胶囊角标呈现,不再有图底进度条。
-        final inceptionBadges = find.byKey(
-          phoneCardBadgesKey('movie-inception'),
-        );
-        expect(inceptionBadges, findsOneWidget);
+        // 续播进度只由海报底边的进度条表达，不再写成「已看 n%」角标。
+        expect(find.byKey(phoneCardBadgesKey('movie-inception')), findsNothing);
         expect(
-          find.descendant(of: inceptionBadges, matching: find.text('已看 40%')),
+          find.descendant(
+            of: inception,
+            matching: find.byType(PhoneArtworkProgress),
+          ),
           findsOneWidget,
         );
         expect(find.byKey(phoneCardBadgesKey('movie-up')), findsNothing);

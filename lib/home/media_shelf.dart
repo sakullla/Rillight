@@ -370,7 +370,17 @@ class _MediaShelfState extends State<MediaShelf> {
                 Expanded(
                   child: Text(
                     widget.title,
-                    style: AppUiTheme.of(context).textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    // 手机与首页分区同一字阶：20 号粗体。
+                    style: AppUiTheme.of(context).phone
+                        ? AppUiTheme.of(context).textTheme.titleLarge?.copyWith(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            height: 1.25,
+                            letterSpacing: -0.2,
+                          )
+                        : AppUiTheme.of(context).textTheme.titleMedium,
                   ),
                 ),
                 if (widget.headerAction != null) widget.headerAction!,

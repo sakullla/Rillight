@@ -50,7 +50,7 @@ Dio _createEmbyDio({
   return dio;
 }
 
-class EmbyClient implements MediaServerClient {
+class EmbyClient implements MediaServerClient, MediaFavorites {
   @override
   MediaServerType get serviceType => MediaServerType.emby;
   @override
@@ -731,6 +731,16 @@ class EmbyClient implements MediaServerClient {
   @override
   Future<void> markUnplayed(String itemId) async {
     await deleteJson('/Users/${_requireUserId()}/PlayedItems/$itemId');
+  }
+
+  @override
+  Future<void> setFavorite(String itemId, {required bool favorite}) async {
+    final path = '/Users/${_requireUserId()}/FavoriteItems/$itemId';
+    if (favorite) {
+      await postJson(path);
+    } else {
+      await deleteJson(path);
+    }
   }
 
   /// 从继续观看移除:优先 HideFromResume,旧版 Emby 则清零播放进度。

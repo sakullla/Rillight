@@ -284,6 +284,10 @@ void main() {
     expect(fake.watched, contains('movie-1'));
     await client.markUnplayed('movie-1');
     expect(fake.watched, isEmpty);
+    await client.setFavorite('movie-1', favorite: true);
+    expect(fake.favorites, contains('movie-1'));
+    await client.setFavorite('movie-1', favorite: false);
+    expect(fake.favorites, isEmpty);
     await client.hideFromResume('movie-1');
     expect(fake.userData['PlaybackPositionTicks'], 0);
     expect(fake.userData['Played'], false);

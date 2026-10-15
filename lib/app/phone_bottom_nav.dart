@@ -15,7 +15,7 @@ double phoneScrollClearance(BuildContext context) {
       AppMobileNav.fadeHeight;
 }
 
-/// 手机底部三个目的地。悬浮时离开窗口边缘并盖在内容上；贴底时铺满宽度。
+/// 手机底部四个目的地:首页、媒体库、聚合、搜索。悬浮时离开窗口边缘并盖在内容上；贴底时铺满宽度。
 class PhoneBottomNav extends StatelessWidget {
   const PhoneBottomNav({
     super.key,
@@ -53,19 +53,26 @@ class PhoneBottomNav extends StatelessWidget {
             backgroundColor: const Color(0x00000000),
             currentIndex: index,
             onTap: onSelected,
+            iconSize: 26,
             items: [
               BottomNavigationBarItem(
                 icon: const Icon(CupertinoIcons.house),
-                activeIcon: const Icon(CupertinoIcons.house),
+                activeIcon: const Icon(CupertinoIcons.house_fill),
                 label: l.home,
               ),
               BottomNavigationBarItem(
-                icon: const Icon(CupertinoIcons.rectangle_stack),
-                activeIcon: const Icon(CupertinoIcons.rectangle_stack),
+                icon: const Icon(CupertinoIcons.play_rectangle),
+                activeIcon: const Icon(CupertinoIcons.play_rectangle_fill),
+                label: l.libraries,
+              ),
+              BottomNavigationBarItem(
+                icon: const Icon(CupertinoIcons.square_stack_3d_up),
+                activeIcon: const Icon(CupertinoIcons.square_stack_3d_up_fill),
                 label: l.aggregation,
               ),
               BottomNavigationBarItem(
                 icon: const Icon(CupertinoIcons.search),
+                activeIcon: const Icon(CupertinoIcons.search),
                 label: l.search,
               ),
             ],

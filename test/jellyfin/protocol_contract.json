@@ -821,6 +821,34 @@
           "403"
         ]
       }
+    },
+    "/UserFavoriteItems/{itemId}": {
+      "post": {
+        "parameters": [
+          "userId",
+          "itemId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      },
+      "delete": {
+        "parameters": [
+          "userId",
+          "itemId"
+        ],
+        "responses": [
+          "200",
+          "404",
+          "503",
+          "401",
+          "403"
+        ]
+      }
     }
   }
 }

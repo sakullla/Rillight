@@ -7,7 +7,10 @@ product label `12.2.0-fixture` describes synthetic data; no real Jellyfin instan
 or real product build was tested. The adapter is independent of `lib/emby`.
 
 The frozen API uses `/UserViews`, `/UserItems/Resume`, `/Items/{itemId}` and
-`/UserPlayedItems/{itemId}`. The fake validates routes and allowed parameters and
+`/UserPlayedItems/{itemId}`. `/UserFavoriteItems/{itemId}` (POST/DELETE with
+`userId`) was added by hand from the same OpenAPI's `MarkFavoriteItem` /
+`UnmarkFavoriteItem` operations for the phone favorite toggle; re-extract the
+oracle to confirm it against the recorded input. The fake validates routes and allowed parameters and
 request body keys against the extracted oracle, and models user state and
 separate device playback sessions. Its `resources` map represents session
 reservations and ownership, not proof that a real encoder was launched.

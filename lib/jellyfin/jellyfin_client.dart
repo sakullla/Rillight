@@ -27,7 +27,7 @@ const _detailFields =
 /// Independent Jellyfin adapter. No session is installed by a login response:
 /// the source registry remains the only authority which commits credentials.
 class JellyfinClient extends MediaServerClient
-    implements InteractiveAuthentication {
+    implements InteractiveAuthentication, MediaFavorites {
   JellyfinClient({required this.device, Dio? dio, DateTime Function()? clock})
     : _dio = dio ?? Dio(),
       _clock = clock ?? DateTime.now;
@@ -674,6 +674,15 @@ class JellyfinClient extends MediaServerClient
     await _request(
       'UserPlayedItems/${Uri.encodeComponent(itemId)}',
       method: 'DELETE',
+      query: {'userId': userId},
+    );
+  }
+
+  @override
+  Future<void> setFavorite(String itemId, {required bool favorite}) async {
+    await _request(
+      'UserFavoriteItems/${Uri.encodeComponent(itemId)}',
+      method: favorite ? 'POST' : 'DELETE',
       query: {'userId': userId},
     );
   }

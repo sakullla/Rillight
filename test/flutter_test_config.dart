@@ -4,9 +4,12 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rillight/search/recent_searches.dart';
 
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   setUp(() {
+    // Recent search terms are process-wide; each test starts with none.
+    RecentSearches.instance.debugReset();
     // Pure HTTP suites must not initialize a widget binding: that installs
     // Flutter's HTTP mock. testWidgets initializes it during registration.
     if (BindingBase.debugBindingType() == null) return;

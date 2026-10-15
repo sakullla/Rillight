@@ -381,26 +381,41 @@ void main() {
             ),
           ),
         );
-        expect(
-          find.byKey(EpisodeMediaStreamsSection.phoneVersionRowKey),
-          findsOneWidget,
+        final versionRow = find.byKey(
+          EpisodeMediaStreamsSection.phoneVersionRowKey,
         );
+        expect(versionRow, findsOneWidget);
+        // 版本行只写当前片源；可选项收在点开后的底部单选表里。
         expect(
-          find.byKey(const ValueKey('phone-detail-version-src-4k')),
+          find.descendant(of: versionRow, matching: find.text('4K HDR')),
           findsOneWidget,
         );
         expect(
           find.byKey(const ValueKey('phone-detail-version-src-1080p')),
-          findsOneWidget,
+          findsNothing,
         );
         expect(find.text('国语杜比'), findsOneWidget);
         expect(find.text('英语立体声'), findsNothing);
 
+        await tester.tap(versionRow);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('phone-detail-version-src-4k')),
+          findsOneWidget,
+        );
         await tester.tap(
           find.byKey(const ValueKey('phone-detail-version-src-1080p')),
         );
-        await tester.pump();
+        await tester.pumpAndSettle();
         expect(selectedId, 'src-1080p');
+        expect(
+          find.byKey(const ValueKey('phone-detail-version-src-1080p')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: versionRow, matching: find.text('1080p SDR')),
+          findsOneWidget,
+        );
         expect(find.text('英语立体声'), findsOneWidget);
         expect(find.text('国语杜比'), findsNothing);
       },

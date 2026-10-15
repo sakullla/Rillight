@@ -19,6 +19,7 @@ class JellyfinFakeServer {
       >[];
   final violations = <String>[];
   final watched = <String>{};
+  final favorites = <String>{};
   final nowPlaying = <String, String>{};
   final resources = <String, String>{};
   final userData = <String, dynamic>{
@@ -255,6 +256,13 @@ class JellyfinFakeServer {
             {'ItemId': 'movie-1', 'Type': 'Intro', 'StartTicks': 50000000},
           ],
         };
+      case '/UserFavoriteItems/movie-1':
+        if (request.method == 'POST') {
+          favorites.add('movie-1');
+        } else {
+          favorites.remove('movie-1');
+        }
+        result = {'IsFavorite': favorites.contains('movie-1')};
       case '/UserPlayedItems/movie-1':
         if (request.method == 'POST') {
           watched.add('movie-1');

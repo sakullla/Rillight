@@ -2046,4 +2046,50 @@ class AppLocalizationsZh extends AppLocalizations {
   String playerEndsAt(String time) {
     return '$time 结束';
   }
+
+  @override
+  String get phoneLibrariesMine => '我的媒体库';
+
+  @override
+  String get phoneLibrariesShortcuts => '快速入口';
+
+  @override
+  String get phoneShortcutLatestMovies => '最新电影';
+
+  @override
+  String get phoneShortcutLatestSeries => '最新剧集';
+
+  @override
+  String phoneLibraryCount(int count) {
+    return '$count 个媒体库';
+  }
+
+  @override
+  String get phoneSearchRecent => '最近搜索';
+
+  @override
+  String get phoneSearchClearRecent => '清除';
+
+  @override
+  String get phoneSearchIdleTitle => '想看点什么？';
+
+  @override
+  String phoneSearchResultCount(int count) {
+    return '$count 个结果';
+  }
+
+  @override
+  String get phoneFavorite => '收藏';
+
+  @override
+  String get phoneFavorited => '已收藏';
+
+  @override
+  String get phoneFavoriteAdded => '已加入收藏';
+
+  @override
+  String get phoneFavoriteRemoved => '已取消收藏';
+
+  @override
+  String get phoneFavoriteFailed => '收藏没有保存，请稍后再试';
 }

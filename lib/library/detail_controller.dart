@@ -52,6 +52,10 @@ class DetailController extends ChangeNotifier {
   Future<void>? _resumeScan;
   CancelToken? _resumeCancel;
   bool playedBusy = false;
+  bool favoriteBusy = false;
+
+  /// 当前服务是否支持收藏。
+  bool get supportsFavorite => repository.client is MediaFavorites;
   int _revision = 0, _seasonRevision = 0, _offset = 0;
   int? _seasonsLoadRevision;
   bool _disposed = false;
@@ -478,6 +482,39 @@ class DetailController extends ChangeNotifier {
       return false;
     } finally {
       playedBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// 切换当前条目的收藏。乐观更新，失败回滚；成功返回 true。
+  Future<bool> toggleFavorite() async {
+    final current = item;
+    final Object client = repository.client;
+    if (current == null || favoriteBusy || client is! MediaFavorites) {
+      return false;
+    }
+    final next = !current.userData.favorite;
+    favoriteBusy = true;
+    applyItem(
+      current.copyWith(userData: current.userData.copyWith(favorite: next)),
+    );
+    try {
+      await client.setFavorite(current.id, favorite: next);
+      return true;
+    } catch (_) {
+      final latest = item;
+      if (latest != null && latest.id == current.id) {
+        applyItem(
+          latest.copyWith(
+            userData: latest.userData.copyWith(
+              favorite: current.userData.favorite,
+            ),
+          ),
+        );
+      }
+      return false;
+    } finally {
+      favoriteBusy = false;
       notifyListeners();
     }
   }

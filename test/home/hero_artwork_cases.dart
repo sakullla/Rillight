@@ -537,12 +537,11 @@ void main() {
       );
       expect(find.byKey(CatalogKeys.heroDot(1)), findsOneWidget);
       if (phone) {
-        // 手机轮播高度与骨架屏使用的估算一致,顶栏延伸 56 以内。
-        final expected =
-            56 + PhoneHero.contentHeightFor(width, viewportHeight: 900);
+        // 手机头图整段高度与骨架屏使用同一估算。
+        final expected = PhoneHero.heightFor(width, viewportHeight: 900);
         expect(
           tester.getSize(find.byKey(PhoneHero.bannerKey)).height,
-          inInclusiveRange(expected, expected + 24),
+          closeTo(expected, .5),
         );
         expect(
           find.descendant(of: caption, matching: find.byType(HeroArtwork)),

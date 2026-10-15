@@ -3981,6 +3981,90 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{time} 结束'**
   String playerEndsAt(String time);
+
+  /// No description provided for @phoneLibrariesMine.
+  ///
+  /// In zh, this message translates to:
+  /// **'我的媒体库'**
+  String get phoneLibrariesMine;
+
+  /// No description provided for @phoneLibrariesShortcuts.
+  ///
+  /// In zh, this message translates to:
+  /// **'快速入口'**
+  String get phoneLibrariesShortcuts;
+
+  /// No description provided for @phoneShortcutLatestMovies.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新电影'**
+  String get phoneShortcutLatestMovies;
+
+  /// No description provided for @phoneShortcutLatestSeries.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新剧集'**
+  String get phoneShortcutLatestSeries;
+
+  /// No description provided for @phoneLibraryCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个媒体库'**
+  String phoneLibraryCount(int count);
+
+  /// No description provided for @phoneSearchRecent.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近搜索'**
+  String get phoneSearchRecent;
+
+  /// No description provided for @phoneSearchClearRecent.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除'**
+  String get phoneSearchClearRecent;
+
+  /// No description provided for @phoneSearchIdleTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'想看点什么？'**
+  String get phoneSearchIdleTitle;
+
+  /// No description provided for @phoneSearchResultCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 个结果'**
+  String phoneSearchResultCount(int count);
+
+  /// No description provided for @phoneFavorite.
+  ///
+  /// In zh, this message translates to:
+  /// **'收藏'**
+  String get phoneFavorite;
+
+  /// No description provided for @phoneFavorited.
+  ///
+  /// In zh, this message translates to:
+  /// **'已收藏'**
+  String get phoneFavorited;
+
+  /// No description provided for @phoneFavoriteAdded.
+  ///
+  /// In zh, this message translates to:
+  /// **'已加入收藏'**
+  String get phoneFavoriteAdded;
+
+  /// No description provided for @phoneFavoriteRemoved.
+  ///
+  /// In zh, this message translates to:
+  /// **'已取消收藏'**
+  String get phoneFavoriteRemoved;
+
+  /// No description provided for @phoneFavoriteFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'收藏没有保存，请稍后再试'**
+  String get phoneFavoriteFailed;
 }
 
 class _AppLocalizationsDelegate

@@ -15,12 +15,12 @@ import 'package:rillight/home/hero_logo.dart';
 import 'package:rillight/home/hero_playback_actions.dart';
 import 'package:rillight/player/player_window_host.dart';
 
-/// 手机轮播:紧凑高质感海报橱窗。
+/// 手机首页头图:整屏宽的影院橱窗。
 ///
-/// 当前条目的宣传图模糊后铺满整段并向下溶入页面底色,2:3 海报卡居中、邻卡
-/// 两侧露边并缩小压暗;标题、元信息与「播放 / 详情」固定在海报下方的页面
-/// 底色上,跟随主题取色,随翻页交叉淡化。通过紧凑的垂直节奏与海报比例,
-/// 确保首屏完整露出下方「继续观看」横卡。触摸暂停的 7 秒自动轮播,圆点带倒计时。
+/// 当前条目的横版剧照铺满整段并伸进状态栏,向下溶入页面底色;片名 Logo
+/// (没有 Logo 时是大号片名)、年份/类型/时长/评分与「播放 / 详情」叠在画面
+/// 下缘。左右滑动翻页,剧照随滑动有轻微视差;触摸暂停 7 秒自动轮播,
+/// 圆点带倒计时。条目只有海报时,海报完整地居中压在自身的模糊底上。
 class PhoneHero extends StatefulWidget {
   const PhoneHero({
     super.key,
@@ -42,67 +42,34 @@ class PhoneHero extends StatefulWidget {
   static List<MediaItem> featuredItemsOf(CatalogController catalog) =>
       featuredHomeItems(catalog, limit: maxFeatured);
 
-  /// 顶栏到海报、海报到文字、文字到按钮、按钮到圆点的紧凑垂直节奏。
-  static const double topGap = 4;
-  static const double posterGap = 8;
-  static const double actionsGap = 8;
-  static const double dotsGap = 0;
+  /// 文字与按钮的左右留白。
   static const double sidePadding = 20;
-  static const double actionsHeight = 40;
 
-  /// 圆点行高即其 44 的触控目标高,不另加间距。
+  /// 「播放 / 详情」按钮高,即 48 的触控高度。
+  static const double actionsHeight = 48;
+
+  /// 圆点行高即其 44 的触控目标高。
   static const double dotsHeight = 44;
 
-  /// 相邻海报之间的间距;邻卡从这条缝两侧露出。
-  static const double posterSpacing = 14;
+  /// 头图占屏宽的比例:接近方形,剧照的主体留在画面中央。
+  static const double widthShare = 1.08;
 
-  /// 海报占视口高的上限;矮视口整段随之收缩而不是裁切,同时保证首屏露出继续观看行。
-  static const double posterViewportShare = .23;
+  /// 头图占视口高的上限,矮屏和横屏时首屏仍露出下一行。
+  static const double viewportShare = .62;
 
-  /// 海报高:占屏宽 42% 的 2:3 海报,再被 [posterViewportShare] 封顶,
-  /// 夹在紧凑可读区间。
-  static double posterHeightFor(double width, {double? viewportHeight}) {
-    final byWidth = width * .42 * 1.5;
+  /// 整段头图高(含伸进状态栏的部分)。
+  static double heightFor(double width, {double? viewportHeight}) {
+    final byWidth = width * widthShare;
     final vh = viewportHeight;
     final byHeight = vh != null && vh.isFinite && vh > 0
-        ? vh * posterViewportShare
+        ? vh * viewportShare
         : double.infinity;
-    return math.min(byWidth, byHeight).clamp(124.0, 204.0);
+    return math.min(byWidth, byHeight).clamp(340.0, 640.0).floorToDouble();
   }
 
-  static double posterWidthFor(double width, {double? viewportHeight}) =>
-      posterHeightFor(width, viewportHeight: viewportHeight) * 2 / 3;
-
-  static double viewportFractionFor(double width, {double? viewportHeight}) =>
-      width <= 0
-      ? 1
-      : (math.max(
-                  posterWidthFor(width, viewportHeight: viewportHeight) +
-                      posterSpacing,
-                  width * .52,
-                ) /
-                width)
-            .clamp(.3, 1.0);
-
-  /// 文字区最小高:引导标签 + 两行紧凑标题 + 元信息行,标题不足两行时也占位,
-  /// 翻页时下方按钮不会上下跳。
-  static double textBlockHeightFor(double textScale) =>
-      (14 + 3 + 17 * 1.15 * 2 + 3 + 15) * textScale;
-
-  /// 顶栏以下的内容高(骨架屏与首页布局估算用)。
-  static double contentHeightFor(
-    double width, {
-    double textScale = 1,
-    double? viewportHeight,
-  }) =>
-      topGap +
-      posterHeightFor(width, viewportHeight: viewportHeight) +
-      posterGap +
-      textBlockHeightFor(textScale) +
-      actionsGap +
-      actionsHeight +
-      dotsGap +
-      dotsHeight;
+  /// 剧照请求宽:按实际像素取,夹在清晰与流量之间。
+  static int requestWidthFor(double width, double devicePixelRatio) =>
+      (width * devicePixelRatio).round().clamp(720, 1280);
 
   @override
   State<PhoneHero> createState() => _PhoneHeroState();
@@ -114,7 +81,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
 
   /// A finger is on the banner: page changes come from the user, not the timer.
   bool _touching = false;
-  PageController _page = PageController();
+  final PageController _page = PageController();
   Drag? _bannerDrag;
   List<MediaItem> get _featured => PhoneHero.featuredItemsOf(widget.catalog);
 
@@ -126,20 +93,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     super.dispose();
   }
 
-  /// viewportFraction 只能在构造时给定;横竖屏切换改了宽度就换一个
-  /// 停在同一页的控制器,旧控制器等 PageView 解绑后再释放。
-  PageController _controllerFor(double fraction) {
-    if ((_page.viewportFraction - fraction).abs() < .001) return _page;
-    _cancelBannerDrag();
-    final old = _page;
-    _page = PageController(initialPage: _index, viewportFraction: fraction);
-    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
-    return _page;
-  }
-
-  // Text, actions and gaps use the same paging physics as the posters.
-  // The PageView's own recognizer wins on posters; vertical scrolling and
-  // button taps still compete normally in the gesture arena.
+  // 文字、按钮和空白处的横滑同样交给 PageView;竖向滚动和按钮点按仍正常竞争。
   void _startBannerDrag(DragStartDetails details) {
     _cancelBannerDrag();
     if (_page.hasClients) {
@@ -159,8 +113,8 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     drag?.cancel();
   }
 
-  /// 邻卡按离中心的距离缩小并压暗,当前卡保持原大。
-  Widget _depth(int page, Widget child) {
+  /// 翻页时剧照比页面慢一点,给画面一点纵深。
+  Widget _parallax(int page, double width, Widget child) {
     if (MediaQuery.disableAnimationsOf(context)) return child;
     return AnimatedBuilder(
       animation: _page,
@@ -170,10 +124,10 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
         if (_page.hasClients && _page.position.haveDimensions) {
           current = _page.page ?? current;
         }
-        final distance = (current - page).abs().clamp(0.0, 1.0);
-        return Transform.scale(
-          scale: 1 - .12 * distance,
-          child: Opacity(opacity: 1 - .5 * distance, child: child),
+        final delta = (page - current).clamp(-1.0, 1.0);
+        return Transform.translate(
+          offset: Offset(-delta * width * .28, 0),
+          child: child,
         );
       },
     );
@@ -182,24 +136,17 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   HeroArtworkSources _artworkOf(MediaItem item) =>
       heroArtworkSources(item, series: widget.catalog.latestSeries.items);
 
-  /// 卡片实际画出的是海报时，进详情也带这张海报。横图只在没有海报时才用，
-  /// 避免飞过去的是海报、落地后又换成背景，动态色跟着取两次。
-  bool _posterLed(MediaItem item) => _artworkOf(item).posters.isNotEmpty;
-
   void _open(MediaItem item) {
     final media = MediaQuery.of(context);
-    final posterWidth = PhoneHero.posterWidthFor(
+    final requestWidth = PhoneHero.requestWidthFor(
       media.size.width,
-      viewportHeight: media.size.height,
+      media.devicePixelRatio,
     );
-    final requestWidth = (posterWidth * media.devicePixelRatio).round().clamp(
-      400,
-      800,
-    );
+    final sources = _artworkOf(item);
     PhoneMotion.openItem(
       context,
-      _artworkOf(item).handoffItem(item),
-      preferBackdrop: !_posterLed(item),
+      sources.handoffItem(item),
+      preferBackdrop: sources.backdrops.isNotEmpty || sources.posters.isEmpty,
       maxWidth: requestWidth,
     );
   }
@@ -230,34 +177,24 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     _report(item);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final viewport = MediaQuery.sizeOf(context).height;
-    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-    final top = widget.extendBehindTopBar
-        ? MediaQuery.viewPaddingOf(context).top + 56
-        : 0.0;
+    final page = theme.scaffoldBackgroundColor;
+    final dark = theme.brightness == Brightness.dark;
+    final media = MediaQuery.of(context);
+    final viewport = media.size.height;
+    final scale = media.textScaler.scale(14) / 14;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final posterHeight = PhoneHero.posterHeightFor(
+        final height = PhoneHero.heightFor(width, viewportHeight: viewport);
+        final requestWidth = PhoneHero.requestWidthFor(
           width,
-          viewportHeight: viewport,
+          media.devicePixelRatio,
         );
-        final posterWidth = posterHeight * 2 / 3;
-        final requestWidth =
-            (posterWidth * MediaQuery.devicePixelRatioOf(context))
-                .round()
-                .clamp(400, 800);
-        final controller = _controllerFor(
-          PhoneHero.viewportFractionFor(width, viewportHeight: viewport),
-        );
-        final ambient = _artworkOf(item);
-        // Server logos are usually light artwork for dark backdrops: the
-        // caption only swaps to one on the dark page surface. The logo box is
-        // the height of the two-line title, so the layout does not move.
-        final logo = theme.brightness == Brightness.dark
+        // 服务器 Logo 多是给深色背景准备的浅色图:只在深色主题替换片名。
+        final logo = dark
             ? Size(
-                math.min(width - PhoneHero.sidePadding * 2, 220),
-                17 * 1.15 * 2 * scale,
+                math.min(width - PhoneHero.sidePadding * 2, 250),
+                30 * 1.15 * 2 * scale,
               )
             : null;
         final neighbours = <MediaItem>{
@@ -280,121 +217,154 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
             _touching = false;
             resumeAutoRotate(items.length);
           },
-          child: Stack(
-            children: [
-              for (final next in neighbours)
-                if (HeroLogo.available(next))
-                  Offstage(
-                    key: ValueKey('phone-hero-prefetch-${next.id}'),
-                    child: HeroLogo(
-                      item: next,
-                      fallback: const SizedBox.shrink(),
-                      maxWidth: logo!.width,
-                      maxHeight: logo.height,
-                      prefetch: true,
+          child: SizedBox(
+            height: height,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                for (final next in neighbours)
+                  if (HeroLogo.available(next))
+                    Offstage(
+                      key: ValueKey('phone-hero-prefetch-${next.id}'),
+                      child: HeroLogo(
+                        item: next,
+                        fallback: const SizedBox.shrink(),
+                        maxWidth: logo!.width,
+                        maxHeight: logo.height,
+                        prefetch: true,
+                      ),
                     ),
+                ColoredBox(color: scheme.surfaceContainerHigh),
+                PageView.builder(
+                  controller: _page,
+                  allowImplicitScrolling: true,
+                  physics: items.length > 1
+                      ? const PageScrollPhysics()
+                      : const NeverScrollableScrollPhysics(),
+                  itemCount: items.length,
+                  onPageChanged: (value) {
+                    // A light tick when a swipe settles on a new slide;
+                    // timed rotation stays silent.
+                    if (_touching) HapticFeedback.selectionClick();
+                    setState(() => _index = value);
+                    resetAutoRotate(items.length);
+                  },
+                  itemBuilder: (context, slide) => _slide(
+                    items[slide],
+                    page: slide,
+                    index: index,
+                    count: items.length,
+                    width: width,
+                    requestWidth: requestWidth,
                   ),
-              Positioned.fill(
-                child: _Ambient(
-                  itemId: item.id,
-                  sources: ambient,
-                  requestWidth: requestWidth,
-                  surface: scheme.surface,
-                  dark: theme.brightness == Brightness.dark,
                 ),
-              ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(height: top + PhoneHero.topGap),
-                  SizedBox(
-                    height: posterHeight,
-                    child: PageView.builder(
-                      controller: controller,
-                      clipBehavior: Clip.none,
-                      physics: items.length > 1
-                          ? const PageScrollPhysics()
-                          : const NeverScrollableScrollPhysics(),
-                      itemCount: items.length,
-                      onPageChanged: (value) {
-                        // A light tick when a swipe settles on a new poster;
-                        // timed rotation stays silent.
-                        if (_touching) HapticFeedback.selectionClick();
-                        setState(() => _index = value);
-                        resetAutoRotate(items.length);
-                      },
-                      itemBuilder: (context, page) => _poster(
-                        items[page],
-                        page: page,
-                        index: index,
-                        count: items.length,
-                        width: posterWidth,
-                        height: posterHeight,
-                        requestWidth: requestWidth,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: PhoneHero.posterGap),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: PhoneHero.sidePadding,
-                    ),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: PhoneHero.textBlockHeightFor(scale),
-                      ),
-                      child: AnimatedSwitcher(
-                        duration: AppMotion.durationOf(context, AppMotion.slow),
-                        switchInCurve: AppMotion.standard,
-                        switchOutCurve: AppMotion.exit,
-                        transitionBuilder: _textTransition,
-                        child: _Caption(
-                          key: ValueKey('phone-hero-caption-${item.id}'),
-                          item: item,
-                          logo: logo,
+                // 顶带:状态栏与透明顶栏上的图标始终读得清。
+                if (widget.extendBehindTopBar)
+                  IgnorePointer(
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: SizedBox(
+                        height: media.viewPadding.top + 96,
+                        width: double.infinity,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                const Color(
+                                  0xff000000,
+                                ).withValues(alpha: AppScrim.of(context, .5)),
+                                const Color(0x00000000),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: PhoneHero.actionsGap),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: PhoneHero.sidePadding,
-                    ),
-                    child: SizedBox(
-                      height: PhoneHero.actionsHeight,
-                      child: HeroPlaybackActions(
-                        key: ValueKey('phone-hero-actions-${item.id}'),
-                        item: item,
-                        expand: true,
-                        catalog: widget.catalog,
-                        onDetails: () => _open(item),
-                        onResume: () => _play(item),
+                // 底带:画面下缘溶进页面底色,片名与按钮压在上面。
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [.34, .62, .84, 1],
+                        colors: [
+                          page.withValues(alpha: 0),
+                          page.withValues(alpha: dark ? .62 : .72),
+                          page.withValues(alpha: .96),
+                          page,
+                        ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: PhoneHero.dotsGap),
-                  SizedBox(
-                    height: PhoneHero.dotsHeight,
-                    child: items.length > 1
-                        ? Center(
-                            child: HeroDots(
-                              index: index,
-                              count: items.length,
-                              onSelect: (i) {
-                                _goTo(i);
-                                resetAutoRotate(items.length);
-                              },
-                              onScrim: false,
-                              cycle: rotateCycle,
-                            ),
-                          )
-                        : null,
+                ),
+                Positioned(
+                  left: PhoneHero.sidePadding,
+                  right: PhoneHero.sidePadding,
+                  bottom: 0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 片名区不拦点按与横滑:落到下面的剧照上,点开详情或翻页。
+                      IgnorePointer(
+                        child: AnimatedSwitcher(
+                          duration: AppMotion.durationOf(
+                            context,
+                            AppMotion.slow,
+                          ),
+                          switchInCurve: AppMotion.standard,
+                          switchOutCurve: AppMotion.exit,
+                          transitionBuilder: _textTransition,
+                          layoutBuilder: (current, previous) => Stack(
+                            alignment: Alignment.bottomCenter,
+                            children: [...previous, ?current],
+                          ),
+                          child: _Caption(
+                            key: ValueKey('phone-hero-caption-${item.id}'),
+                            item: item,
+                            logo: logo,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      SizedBox(
+                        height: PhoneHero.actionsHeight,
+                        child: HeroPlaybackActions(
+                          key: ValueKey('phone-hero-actions-${item.id}'),
+                          item: item,
+                          expand: true,
+                          catalog: widget.catalog,
+                          onDetails: () => _open(item),
+                          onResume: () => _play(item),
+                        ),
+                      ),
+                      SizedBox(
+                        height: PhoneHero.dotsHeight,
+                        child: items.length > 1
+                            ? Center(
+                                child: HeroDots(
+                                  index: index,
+                                  count: items.length,
+                                  onSelect: (i) {
+                                    _goTo(i);
+                                    resetAutoRotate(items.length);
+                                  },
+                                  onScrim: false,
+                                  activeColor: scheme.onSurface,
+                                  cycle: rotateCycle,
+                                ),
+                              )
+                            : null,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         );
         return GestureDetector(
@@ -416,7 +386,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
       opacity: animation,
       child: SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(0, .08),
+          begin: const Offset(0, .06),
           end: Offset.zero,
         ).animate(animation),
         child: child,
@@ -424,86 +394,39 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
     );
   }
 
-  Widget _poster(
+  Widget _slide(
     MediaItem item, {
     required int page,
     required int index,
     required int count,
     required double width,
-    required double height,
     required int requestWidth,
   }) {
     final current = page == index;
     final l10n = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
-    final dark = theme.brightness == Brightness.dark;
-    final radius = BorderRadius.circular(AppRadii.md);
-    // A soft drop shadow lifts the centre poster off the ambient blur; a
-    // hairline edge keeps dark posters from melting into a dark page.
-    final card = DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: radius,
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xff000000)
-                .withValues(alpha: current ? .44 : .18),
-            blurRadius: current ? 24 : 10,
-            offset: Offset(0, current ? 10 : 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: radius,
-        child: DecoratedBox(
-          position: DecorationPosition.foreground,
-          decoration: BoxDecoration(
-            borderRadius: radius,
-            border: Border.all(
-              color: dark
-                  ? const Color(0xffffffff)
-                        .withValues(alpha: current ? .16 : .08)
-                  : const Color(0xff000000)
-                        .withValues(alpha: current ? .10 : .05),
-              width: current ? 1.0 : 0.8,
-            ),
-          ),
-          child: ColoredBox(
-            color: theme.colorScheme.surfaceContainerLow,
-            child: HeroArtwork(
-              sources: _artworkOf(item),
-              requestWidth: requestWidth,
-              compact: true,
-              posterFirst: true,
-            ),
+    final art = RepaintBoundary(
+      child: ClipRect(
+        child: _parallax(
+          page,
+          width,
+          HeroArtwork(
+            sources: _artworkOf(item),
+            requestWidth: requestWidth,
+            compact: true,
           ),
         ),
       ),
     );
     return KeyedSubtree(
       key: PhoneHero.itemKey(item.id),
-      child: _depth(
-        page,
-        Center(
-          child: SizedBox(
-            width: width,
-            height: height,
-            child: Semantics(
-              button: true,
-              label: '${l10n.heroItemOf(page + 1, count)} ${heroTitle(item)}',
-              child: GestureDetector(
-                key: current ? PhoneHero.openKey : null,
-                behavior: HitTestBehavior.opaque,
-                // 点当前海报进详情;点露出的邻卡先把它滑到中间。
-                onTap: current
-                    ? () => _open(item)
-                    : () {
-                        _goTo(page);
-                        resetAutoRotate(count);
-                      },
-                child: card,
-              ),
-            ),
-          ),
+      child: Semantics(
+        button: true,
+        label: '${l10n.heroItemOf(page + 1, count)} ${heroTitle(item)}',
+        child: GestureDetector(
+          key: current ? PhoneHero.openKey : null,
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _open(item),
+          child: art,
         ),
       ),
     );
@@ -537,69 +460,7 @@ class _PhoneHeroState extends State<PhoneHero> with HeroAutoRotate {
   }
 }
 
-/// 当前条目宣传图的模糊底:上端留出透明顶栏可读的底色,向下溶成页面底色,
-/// 文字与按钮正好落在实色区。随条目切换交叉淡化。
-class _Ambient extends StatelessWidget {
-  const _Ambient({
-    required this.itemId,
-    required this.sources,
-    required this.requestWidth,
-    required this.surface,
-    required this.dark,
-  });
-
-  final String itemId;
-  final HeroArtworkSources sources;
-  final int requestWidth;
-  final Color surface;
-  final bool dark;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // New blur fades in over the old one, which stays opaque until
-            // covered: no mid-transition dip to the bare page colour.
-            AnimatedSwitcher(
-              duration: AppMotion.durationOf(context, heroBackdropDuration),
-              transitionBuilder: heroBackdropTransition,
-              child: RepaintBoundary(
-                key: ValueKey('phone-hero-ambient-$itemId'),
-                child: HeroArtwork(
-                  sources: sources,
-                  requestWidth: requestWidth,
-                  compact: true,
-                  posterFirst: true,
-                  ambient: true,
-                ),
-              ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0, .42, .78, 1],
-                  colors: [
-                    surface.withValues(alpha: dark ? .38 : .55),
-                    surface.withValues(alpha: dark ? .46 : .62),
-                    surface,
-                    surface,
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 海报下方的文字:引导标签 → 标题(居中,最多两行) → 年份 · 流派 · 时长 ★。
+/// 画面下缘的文字:引导标签 → Logo 或大号片名(居中,最多两行) → 年份 · 类型 · 时长 ★。
 class _Caption extends StatelessWidget {
   const _Caption({super.key, required this.item, this.logo});
 
@@ -615,14 +476,14 @@ class _Caption extends StatelessWidget {
     final meta = heroMetaLabels(l10n, item);
     return Column(
       mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.end,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         HeroKicker(label: heroKicker(l10n, item), onScrim: false),
-        const SizedBox(height: 3),
+        const SizedBox(height: 6),
         _title(theme),
         if (meta.isNotEmpty || item.communityRating != null) ...[
-          const SizedBox(height: 3),
+          const SizedBox(height: 8),
           Row(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -633,14 +494,15 @@ class _Caption extends StatelessWidget {
                     meta.join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurface.withValues(alpha: .78),
+                      fontWeight: FontWeight.w500,
                       height: 1.2,
                     ),
                   ),
                 ),
               if (item.communityRating != null) ...[
-                if (meta.isNotEmpty) const SizedBox(width: 6),
+                if (meta.isNotEmpty) const SizedBox(width: 8),
                 HeroRatingBadge(rating: item.communityRating, onScrim: false),
               ],
             ],
@@ -656,10 +518,12 @@ class _Caption extends StatelessWidget {
       textAlign: TextAlign.center,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleMedium?.copyWith(
-        fontSize: 17,
-        fontWeight: FontWeight.w700,
+      style: theme.textTheme.displaySmall?.copyWith(
+        color: theme.colorScheme.onSurface,
+        fontSize: 30,
+        fontWeight: FontWeight.w800,
         height: 1.15,
+        letterSpacing: -0.4,
       ),
     );
     final slot = logo;

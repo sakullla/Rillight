@@ -2005,5 +2005,33 @@
         "type": "String"
       }
     }
-  }
+  },
+  "phoneLibrariesMine": "我的媒体库",
+  "phoneLibrariesShortcuts": "快速入口",
+  "phoneShortcutLatestMovies": "最新电影",
+  "phoneShortcutLatestSeries": "最新剧集",
+  "phoneLibraryCount": "{count} 个媒体库",
+  "@phoneLibraryCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneSearchRecent": "最近搜索",
+  "phoneSearchClearRecent": "清除",
+  "phoneSearchIdleTitle": "想看点什么？",
+  "phoneSearchResultCount": "{count} 个结果",
+  "@phoneSearchResultCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneFavorite": "收藏",
+  "phoneFavorited": "已收藏",
+  "phoneFavoriteAdded": "已加入收藏",
+  "phoneFavoriteRemoved": "已取消收藏",
+  "phoneFavoriteFailed": "收藏没有保存，请稍后再试"
 }

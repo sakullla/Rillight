@@ -248,10 +248,11 @@ extension PageCaptures on CaptureSession {
         await save('home-customize');
         app.router.pop();
         await advance(400);
+        // 手机「媒体库」标签页:快速入口与全部媒体库磁贴。
         await activate(
           find.descendant(
             of: find.byType(CupertinoTabBar),
-            matching: find.text('聚合'),
+            matching: find.text('媒体库'),
           ),
         );
         await save('library-list');

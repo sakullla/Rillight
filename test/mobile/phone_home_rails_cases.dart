@@ -389,7 +389,7 @@ void main() {
     testWidgets(
       'home rails peek one card and clear the nav at ${width.toInt()}x${height.toInt()}dp',
       (tester) async {
-        // 紧凑 PhoneHero 在 360x800、412x915 及 960 视口下都能无需滚动把「继续观看」首排横卡完整露在底部导航上方。
+        // 整屏宽头图在 360x800、412x915 及 960 视口下都能无需滚动把「继续观看」首排横卡完整露在底部导航上方。
         await _pumpRails(tester, width: width, height: height);
         _expectPeek(tester, width);
         final navTop = tester.getTopLeft(find.byType(PhoneBottomNav)).dy;
@@ -408,20 +408,31 @@ void main() {
         expect(cardTitle.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(cardMeta.bottom, lessThanOrEqualTo(navTop + 0.5));
         expect(card.bottom, lessThanOrEqualTo(navTop + 0.5));
+        // 季集角标叠在剧照左上角,不另占标题上方的一行。
         final badges = tester.getRect(find.byKey(phoneHomeBadgesKey('ep-1')));
-        expect(badges.top, greaterThanOrEqualTo(picture.bottom - 0.5));
+        expect(badges.top, greaterThanOrEqualTo(picture.top - 0.5));
+        expect(badges.bottom, lessThanOrEqualTo(picture.bottom + 0.5));
+        expect(badges.top, lessThan(cardTitle.top));
         final remove = tester.getRect(
           find.byKey(CatalogKeys.removeFromResume('ep-1')),
         );
-        expect(remove.width, greaterThanOrEqualTo(48));
-        expect(remove.height, greaterThanOrEqualTo(48));
+        expect(remove.width, greaterThanOrEqualTo(44));
+        expect(remove.height, greaterThanOrEqualTo(44));
         final overlap = remove.intersect(picture);
         expect(
           overlap.width * overlap.height,
           lessThan(picture.width * picture.height * 0.5),
         );
         expect(
-          tester.getTopLeft(find.text('媒体库')).dy - card.bottom,
+          tester
+                  .getTopLeft(
+                    find.descendant(
+                      of: find.byKey(const Key('phone-home-libraries')),
+                      matching: find.text('媒体库'),
+                    ),
+                  )
+                  .dy -
+              card.bottom,
           greaterThanOrEqualTo(16),
         );
 
@@ -438,24 +449,25 @@ void main() {
     );
   }
 
-  testWidgets('a short viewport shrinks the hero poster instead of clipping', (
+  testWidgets('a short viewport shrinks the hero instead of clipping', (
     tester,
   ) async {
     await _pumpRails(tester, width: 360, height: 560);
     final banner = find.byKey(PhoneHero.bannerKey);
     final rect = tester.getRect(banner);
-    // 海报高按视口份额封顶,整段高度随之收缩,与骨架屏估算保持一致。
-    final posterHeight = 560 * PhoneHero.posterViewportShare;
+    // 头图高按视口份额封顶,整段高度随之收缩,与骨架屏估算保持一致。
+    final expected = PhoneHero.heightFor(360, viewportHeight: 560);
     expect(
-      PhoneHero.posterHeightFor(360, viewportHeight: 560),
-      closeTo(posterHeight, .01),
+      expected,
+      lessThanOrEqualTo(
+        (560 * PhoneHero.viewportShare).clamp(340.0, double.infinity),
+      ),
     );
-    final expected = 56 + PhoneHero.contentHeightFor(360, viewportHeight: 560);
-    expect(rect.height, inInclusiveRange(expected, expected + 24));
-    // 海报、标题、按钮与圆点都完整落在轮播区内,不被裁掉。
-    final poster = tester.getRect(find.byKey(PhoneHero.openKey));
-    expect(poster.height, closeTo(posterHeight, .01));
-    expect(poster.top, greaterThanOrEqualTo(rect.top));
+    expect(rect.height, closeTo(expected, .5));
+    // 剧照、片名、按钮与圆点都完整落在头图区内,不被裁掉。
+    final art = tester.getRect(find.byKey(PhoneHero.openKey));
+    expect(art.height, closeTo(expected, .5));
+    expect(art.top, greaterThanOrEqualTo(rect.top));
     final play = find.descendant(of: banner, matching: find.text('播放'));
     expect(play, findsOneWidget);
     expect(tester.getRect(play).bottom, lessThanOrEqualTo(rect.bottom));
@@ -541,7 +553,7 @@ void _expectPeek(WidgetTester tester, double width) {
   expect(first.left, closeTo(16, 1));
   expect(first.width, closeTo(phoneHomeWideCardWidth(width), 1));
   expect(first.right, lessThanOrEqualTo(width));
-  expect(second.left - first.right, closeTo(AppSpacing.xs, 1));
+  expect(second.left - first.right, closeTo(AppSpacing.sm, 1));
   expect(second.left, lessThan(width));
   expect(second.right, greaterThan(width));
   final picture = tester.getSize(

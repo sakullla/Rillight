@@ -46,9 +46,13 @@ class MediaUserData {
     this.playbackPosition = Duration.zero,
     this.playedPercentage,
     this.lastPlayedDate,
+    this.favorite = false,
   });
 
   final bool played;
+
+  /// 用户收藏（Emby/Jellyfin 的 IsFavorite）。不支持收藏的服务恒为 false。
+  final bool favorite;
   final Duration playbackPosition;
   final double? playedPercentage;
 
@@ -60,12 +64,14 @@ class MediaUserData {
     Duration? playbackPosition,
     double? playedPercentage,
     DateTime? lastPlayedDate,
+    bool? favorite,
   }) {
     return MediaUserData(
       played: played ?? this.played,
       playbackPosition: playbackPosition ?? this.playbackPosition,
       playedPercentage: playedPercentage ?? this.playedPercentage,
       lastPlayedDate: lastPlayedDate ?? this.lastPlayedDate,
+      favorite: favorite ?? this.favorite,
     );
   }
 }

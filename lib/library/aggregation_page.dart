@@ -29,6 +29,7 @@ import '../auth/auth_controller.dart';
 import '../auth/server_list_store.dart';
 import '../media_server/errors.dart';
 import '../home/media_shelf.dart';
+import '../search/recent_searches.dart';
 import '../search/search_action.dart';
 import '../search/search_overlay.dart';
 import '../media_image/media_image.dart';
@@ -39,6 +40,10 @@ import '../player/player_window_host.dart';
 import 'detail_source_scope.dart';
 import 'episode_mapping_dialog.dart';
 import 'poster_card.dart';
+import '../app/mobile_widgets.dart';
+import '../app/widgets/app_error_view.dart';
+import '../home/catalog_failure.dart';
+import '../home/catalog_keys.dart';
 import 'server_library_page.dart';
 
 /// A route-local projection. Keeping this State mounted on push preserves the
@@ -2181,7 +2186,12 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             controller: _keyword,
             autofocus: widget.focusNode == null,
             textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _submit(),
+            onSubmitted: (_) {
+              if (!presentation.isDesktop) {
+                unawaited(RecentSearches.instance.add(_keyword.text));
+              }
+              _submit();
+            },
             placeholder: l.searchHint,
             prefix: const Icon(CupertinoIcons.search),
             suffix: ValueListenableBuilder<TextEditingValue>(
@@ -2297,6 +2307,77 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             ),
           ),
           Expanded(child: _results(context, visible)),
+        ],
+      ),
+    );
+  }
+
+  /// 手机搜索结果:每个服务器一段,标题带结果数,下面是三列海报网格。
+  Widget _phoneResults(BuildContext context, List<_SearchHit> visible) {
+    final l = AppLocalizations.of(context);
+    final failed = visible.where((row) => row.error != null).length;
+    return MediaImageScrollListener(
+      child: ListView(
+        key: const PageStorageKey('aggregation-search'),
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.xs,
+          AppSpacing.md,
+          AppSpacing.xl + MediaQuery.paddingOf(context).bottom,
+        ),
+        children: [
+          if (failed > 0 && failed < visible.length)
+            Text(l.aggregationPartialFailure),
+          if (failed == visible.length && visible.isNotEmpty)
+            Text(l.aggregationAllFailed),
+          for (final row in visible)
+            Padding(
+              key: ValueKey('aggregation-search-${row.serverId}'),
+              padding: const EdgeInsets.only(bottom: AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  PhoneSectionHeader(
+                    title: row.serverName,
+                    subtitle: row.items.isEmpty
+                        ? null
+                        : l.phoneSearchResultCount(row.items.length),
+                  ),
+                  if (row.loading && row.items.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(AppSpacing.md),
+                      child: Center(child: CupertinoActivityIndicator()),
+                    ),
+                  if (row.error != null)
+                    AppErrorView(
+                      message: catalogFailureMessage(l, row.error!),
+                      onRetry: () => _retry(row.serverId),
+                    ),
+                  if (row.items.isNotEmpty)
+                    scopeServerPosters(
+                      account: row.account,
+                      serverId: row.serverId,
+                      child: MobileGrid(
+                        items: row.items,
+                        itemBuilder: (context, item) => PhonePosterCard(
+                          key: CatalogKeys.item(item.id),
+                          item: item,
+                          onTap: () {
+                            final account = row.account;
+                            if (account == null) return;
+                            unawaited(RecentSearches.instance.add(_term));
+                            openServerItem(
+                              context,
+                              account: account,
+                              item: item,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -2474,13 +2555,30 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     );
   }
 
+  /// 从最近搜索里点一个词:填进输入框并立即查询。
+  void _searchRecent(String term) {
+    _keyword.value = TextEditingValue(
+      text: term,
+      selection: TextSelection.collapsed(offset: term.length),
+    );
+    unawaited(RecentSearches.instance.add(term));
+    unawaited(_submit());
+  }
+
   Widget _results(BuildContext context, List<_SearchHit> visible) {
     final l = AppLocalizations.of(context);
+    final phone = PresentationScope.isPhoneOf(context);
     if (_term.isEmpty) {
+      if (phone) {
+        return _PhoneSearchIdle(onPick: _searchRecent);
+      }
       return AppEmptyView(
         icon: CupertinoIcons.search,
         message: l.searchEmptyQuery,
       );
+    }
+    if (phone && !(_searching && visible.isEmpty) && visible.isNotEmpty) {
+      return _phoneResults(context, visible);
     }
     if (_searching && visible.isEmpty) {
       return const Center(child: CupertinoActivityIndicator());
@@ -2526,6 +2624,163 @@ class _AggregationSearchState extends State<_AggregationSearch> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 手机搜索页还没输入时:最近搜索的词(可点、可清除);没有记录时是一段引导。
+class _PhoneSearchIdle extends StatefulWidget {
+  const _PhoneSearchIdle({required this.onPick});
+
+  final ValueChanged<String> onPick;
+
+  static const recentKey = Key('phone-search-recent');
+  static const clearKey = Key('phone-search-recent-clear');
+
+  @override
+  State<_PhoneSearchIdle> createState() => _PhoneSearchIdleState();
+}
+
+class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(RecentSearches.instance.load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return ListenableBuilder(
+      listenable: RecentSearches.instance,
+      builder: (context, _) {
+        final terms = RecentSearches.instance.terms;
+        final guide = Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    scheme.primary.withValues(alpha: .28),
+                    scheme.primary.withValues(alpha: .06),
+                  ],
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(22),
+                child: Icon(
+                  CupertinoIcons.search,
+                  size: 34,
+                  color: scheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              l.phoneSearchIdleTitle,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              l.searchEmptyQuery,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        );
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.xl,
+          ),
+          children: [
+            if (terms.isNotEmpty) ...[
+              PhoneSectionHeader(
+                title: l.phoneSearchRecent,
+                trailing: AppButton(
+                  key: _PhoneSearchIdle.clearKey,
+                  style: AppButtonStyle(
+                    minimumSize: const Size(44, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    foregroundColor: scheme.onSurfaceVariant,
+                  ),
+                  onPressed: () {
+                    unawaited(RecentSearches.instance.clear());
+                  },
+                  variant: AppButtonVariant.plain,
+                  child: Text(l.phoneSearchClearRecent),
+                ),
+              ),
+              Wrap(
+                key: _PhoneSearchIdle.recentKey,
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  for (final term in terms)
+                    Container(
+                      key: ValueKey('phone-search-recent-$term'),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: AppSurfaceAction(
+                        onTap: () => widget.onPick(term),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 9,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                CupertinoIcons.clock,
+                                size: 14,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 6),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 220,
+                                ),
+                                child: Text(
+                                  term,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelLarge?.copyWith(
+                                    color: scheme.onSurface,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 56),
+            ] else
+              const SizedBox(height: 96),
+            guide,
+          ],
+        );
+      },
     );
   }
 }

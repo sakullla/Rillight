@@ -70,32 +70,66 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
   Future<void> _lines() =>
       showPhoneServerManagerSheet(context, AuthScope.of(context));
 
+  void _openSettings() {
+    final l10n = AppLocalizations.of(context);
+    Navigator.of(context).push(
+      CupertinoPageRoute<void>(
+        builder: (context) => CupertinoPageScaffold(
+          navigationBar: CupertinoNavigationBar(middle: Text(l10n.settings)),
+          child: SettingsPage(
+            showTitle: false,
+            settingsStore: PlayerScope.of(context).settingsStore,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPrivate() async {
+    if (await SessionActions.ensurePrivateAccess(context) && mounted) {
+      context.push('/private');
+    }
+  }
+
   Widget _group(
     BuildContext context, {
     required String title,
     required List<Widget> children,
   }) {
-    final scheme = AppUiTheme.of(context).colorScheme;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (title.isNotEmpty)
-          Text(
-            title,
-            style: AppUiTheme.of(context).textTheme.titleSmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.xs),
+            child: Text(
+              title,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-        if (title.isNotEmpty) const SizedBox(height: AppSpacing.xs),
         Container(
           decoration: BoxDecoration(
-            color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
+            color: scheme.surfaceContainer,
             borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: Border.all(color: scheme.outlineVariant),
           ),
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Column(children: children),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                if (i > 0)
+                  AppDivider(
+                    height: 1,
+                    indent: 56,
+                    color: scheme.onSurface.withValues(alpha: .06),
+                  ),
+                children[i],
+              ],
+            ],
           ),
         ),
       ],
@@ -106,71 +140,149 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
-    final scheme = AppUiTheme.of(context).colorScheme;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     final session = auth.session;
     final lineLabel = session?.server.activeLine?.hostLabel ?? '';
     final failure = auth.failure;
     final lineSwitchFailure = auth.lineSwitchFailure;
+    final name = session?.username ?? '';
+    final initial = name.trim().isEmpty
+        ? null
+        : String.fromCharCode(name.trim().runes.first).toUpperCase();
+    final canChangePassword =
+        auth.client.serviceType == MediaServerType.plex ||
+        auth.client.capabilities[ServiceCapability.changePassword].isAvailable;
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(middle: Text(l10n.mobileMine)),
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(l10n.mobileMine),
+        border: null,
+        backgroundColor: theme.scaffoldBackgroundColor,
+      ),
       child: ListView(
         key: const PageStorageKey('mobile-mine-scroll'),
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.xl + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
+          // 身份卡：头像、用户名、服务器与线路。整张卡点开服务器管理。
           Container(
-            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: scheme.surfaceContainerLow,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: scheme.outlineVariant),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color.lerp(scheme.surfaceContainerHigh, scheme.primary, .22)!,
+                  scheme.surfaceContainer,
+                ],
+              ),
             ),
-            child: Row(
-              children: [
-                Container(
-                  width: (28) * 2,
-                  height: (28) * 2,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: scheme.secondaryContainer,
-                  ),
-                  child: Icon(
-                    CupertinoIcons.person,
-                    size: 32,
-                    color: scheme.onSecondaryContainer,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        session?.username ?? '',
-                        key: PhoneMinePage.userKey,
-                        style: AppUiTheme.of(context).textTheme.headlineSmall,
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
-                        session == null
-                            ? ''
-                            : '${session.server.serviceType.name} · ${session.server.displayName}',
-                        key: PhoneMinePage.serverKey,
-                        style: AppUiTheme.of(context).textTheme.titleMedium,
-                      ),
-                      if (lineLabel.isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          lineLabel,
-                          key: PhoneMinePage.currentLineKey,
-                          style: AppUiTheme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: scheme.onSurfaceVariant),
+            clipBehavior: Clip.antiAlias,
+            child: AppSurfaceAction(
+              onTap: _lines,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            scheme.primary,
+                            Color.lerp(
+                              scheme.primary,
+                              const Color(0xFF7A3E00),
+                              .55,
+                            )!,
+                          ],
                         ),
-                      ],
-                    ],
-                  ),
+                      ),
+                      child: initial == null
+                          ? Icon(
+                              CupertinoIcons.person_fill,
+                              size: 30,
+                              color: scheme.onPrimary,
+                            )
+                          : Text(
+                              initial,
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                color: scheme.onPrimary,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            key: PhoneMinePage.userKey,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            session == null
+                                ? ''
+                                : '${session.server.serviceType.name} · ${session.server.displayName}',
+                            key: PhoneMinePage.serverKey,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (lineLabel.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  CupertinoIcons.dot_radiowaves_right,
+                                  size: 13,
+                                  color: scheme.primary,
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    lineLabel,
+                                    key: PhoneMinePage.currentLineKey,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      CupertinoIcons.chevron_right,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
           if (failure != null) ...[
@@ -178,8 +290,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               embyFailureMessage(l10n, failure),
               key: PhoneMinePage.failureKey,
-              style: AppUiTheme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: scheme.error),
+              style: theme.textTheme.bodyMedium?.copyWith(color: scheme.error),
             ),
           ],
           if (lineSwitchFailure != null) ...[
@@ -187,46 +298,74 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             Text(
               l10n.lineSwitchFailed(lineSwitchFailure.detail),
               key: PhoneMinePage.lineSwitchFailureKey,
-              style: AppUiTheme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: scheme.error),
+              style: theme.textTheme.bodyMedium?.copyWith(color: scheme.error),
             ),
           ],
+          const SizedBox(height: AppSpacing.md),
+          // 常用入口：两列磁贴，图标落在强调色浅底上。
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const gap = AppSpacing.sm;
+              final columns =
+                  MediaQuery.textScalerOf(context).scale(14) / 14 > 1.5 ? 1 : 2;
+              final width =
+                  (constraints.maxWidth - gap * (columns - 1)) / columns;
+              final tiles = <Widget>[
+                _MineTile(
+                  key: PhoneMinePage.lineKey,
+                  icon: CupertinoIcons.cube_box,
+                  label: l10n.phoneServerManagement,
+                  onTap: _lines,
+                ),
+                _MineTile(
+                  icon: CupertinoIcons.plus_circle,
+                  label: l10n.mobileAddServer,
+                  onTap: () => context.push('${AppRoutes.connect}?add=1'),
+                ),
+                _MineTile(
+                  key: PhoneMinePage.privateKey,
+                  icon: CupertinoIcons.lock_shield,
+                  label: l10n.aggregationPrivate,
+                  onTap: _openPrivate,
+                ),
+                _MineTile(
+                  key: PhoneMinePage.settingsKey,
+                  icon: CupertinoIcons.gear_alt,
+                  label: l10n.settings,
+                  onTap: _openSettings,
+                ),
+              ];
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (final tile in tiles) SizedBox(width: width, child: tile),
+                ],
+              );
+            },
+          ),
           const SizedBox(height: AppSpacing.xl),
           _group(
             context,
             title: l10n.mobileAccountServerGroup,
             children: [
-              AppListTile(
-                key: PhoneMinePage.lineKey,
-                minTileHeight: AppSpacing.huge,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(CupertinoIcons.cube_box),
-                title: Text(l10n.phoneServerManagement),
-                trailing: const Icon(CupertinoIcons.chevron_right),
-                onTap: _lines,
-              ),
-              AppListTile(
-                minTileHeight: AppSpacing.huge,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(CupertinoIcons.plus),
-                title: Text(l10n.mobileAddServer),
-                trailing: const Icon(CupertinoIcons.chevron_right),
-                onTap: () => context.push('${AppRoutes.connect}?add=1'),
-              ),
-              if (auth.client.serviceType == MediaServerType.plex ||
-                  auth
-                      .client
-                      .capabilities[ServiceCapability.changePassword]
-                      .isAvailable)
+              if (canChangePassword)
                 AppListTile(
                   key: PhoneMinePage.changePasswordKey,
-                  minTileHeight: AppSpacing.huge,
-                  contentPadding: EdgeInsets.zero,
+                  minTileHeight: 52,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
                   leading: const Icon(CupertinoIcons.lock),
                   title: Text(
                     auth.client.serviceType == MediaServerType.plex
                         ? l10n.providerAccountManage
                         : l10n.changePassword,
+                  ),
+                  trailing: Icon(
+                    CupertinoIcons.chevron_right,
+                    size: 16,
+                    color: scheme.onSurfaceVariant,
                   ),
                   onTap: auth.client.serviceType == MediaServerType.plex
                       ? () => showProviderAccountSettings(context)
@@ -237,43 +376,10 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                         ),
                 ),
               AppListTile(
-                key: PhoneMinePage.privateKey,
-                minTileHeight: AppSpacing.huge,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(CupertinoIcons.lock),
-                title: Text(l10n.aggregationPrivate),
-                trailing: const Icon(CupertinoIcons.chevron_right),
-                onTap: () async {
-                  if (await SessionActions.ensurePrivateAccess(context) &&
-                      context.mounted) {
-                    context.push('/private');
-                  }
-                },
-              ),
-              AppListTile(
-                key: PhoneMinePage.settingsKey,
-                minTileHeight: AppSpacing.huge,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(CupertinoIcons.slider_horizontal_3),
-                title: Text(l10n.settings),
-                trailing: const Icon(CupertinoIcons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  CupertinoPageRoute<void>(
-                    builder: (context) => CupertinoPageScaffold(
-                      navigationBar: CupertinoNavigationBar(
-                        middle: Text(l10n.settings),
-                      ),
-                      child: SettingsPage(
-                        showTitle: false,
-                        settingsStore: PlayerScope.of(context).settingsStore,
-                      ),
-                    ),
-                  ),
+                minTileHeight: 52,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
                 ),
-              ),
-              AppListTile(
-                minTileHeight: AppSpacing.huge,
-                contentPadding: EdgeInsets.zero,
                 leading: Icon(
                   CupertinoIcons.square_arrow_right,
                   color: scheme.error,
@@ -288,26 +394,93 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
             context,
             title: l10n.mobileAboutGroup,
             children: [
-              const SizedBox(height: AppSpacing.sm),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      l10n.appName,
-                      style: AppUiTheme.of(context).textTheme.titleMedium,
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l10n.appName,
+                        style: theme.textTheme.titleSmall,
+                      ),
                     ),
-                  ),
-                  Text(
-                    l10n.mobileVersion(kAppVersion),
-                    style: AppUiTheme.of(context).textTheme.bodyMedium
-                        ?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                ],
+                    Text(
+                      l10n.mobileVersion(kAppVersion),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: AppSpacing.md),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 「我的」常用入口磁贴：左侧强调色圆底图标，右侧名称。
+class _MineTile extends StatelessWidget {
+  const _MineTile({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: AppSurfaceAction(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 64),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: .16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(icon, size: 20, color: scheme.primary),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: scheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

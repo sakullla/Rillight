@@ -91,20 +91,20 @@ class PhoneItemBanner extends StatelessWidget {
   final bool preferBackdrop;
   final int maxWidth;
 
-  /// 背景高度：16:9 加状态栏，横屏/矮窗封顶半屏，标题与主操作首屏可达。
+  /// 背景高度：约 3:2 加状态栏，横屏/矮窗封顶半屏多一点，标题与主操作首屏可达。
   static double imageHeightOf(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     // viewPadding 只含状态栏；padding 在透明顶栏下还加了顶栏高度。
     final top = MediaQuery.viewPaddingOf(context).top;
-    final byWidth = size.width * 9 / 16 + top;
-    final cap = size.height * 0.5;
+    final byWidth = size.width * .68 + top;
+    final cap = size.height * 0.52;
     // 取整：半像素的画面下缘会和页面底色叠出一条细线。
     return (byWidth < cap ? byWidth : cap).floorToDouble();
   }
 
   /// 海报卡宽：窄屏收一档，给标题留出两行半汉字的宽度。
   static double posterWidthOf(BuildContext context) =>
-      MediaQuery.sizeOf(context).width < 380 ? 100 : 112;
+      MediaQuery.sizeOf(context).width < 380 ? 104 : 118;
 
   /// 单集默认不画海报卡（背景就是本集剧照）；从海报点进来的单集仍保留，
   /// 共享图才有落点。
@@ -121,12 +121,13 @@ class PhoneItemBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final page = theme.scaffoldBackgroundColor;
     final imageHeight = imageHeightOf(context);
     final showPoster = _showPoster;
     final posterWidth = posterWidthOf(context);
     final posterHeight = posterWidth * 1.5;
     // 海报卡上半截压在画面上，标题块与海报底边对齐。
-    final rise = showPoster ? posterHeight * .68 : AppSpacing.xl;
+    final rise = showPoster ? posterHeight * .62 : AppSpacing.xxl;
     final landscape = hasLandscapeArt(item);
 
     // 只有海报、又不承接共享图时，背景只是氛围底：直接取预先缩小模糊好的
@@ -227,11 +228,11 @@ class PhoneItemBanner extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        stops: const [.4, .78, .97],
+                        stops: const [.36, .74, .97],
                         colors: [
-                          scheme.surface.withValues(alpha: 0),
-                          scheme.surface.withValues(alpha: .72),
-                          scheme.surface,
+                          page.withValues(alpha: 0),
+                          page.withValues(alpha: .78),
+                          page,
                         ],
                       ),
                     ),
@@ -336,9 +337,9 @@ class _PosterCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadii.md),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xff000000).withValues(alpha: light ? .16 : .35),
-            blurRadius: light ? 14 : 18,
-            offset: const Offset(0, 6),
+            color: const Color(0xff000000).withValues(alpha: light ? .22 : .55),
+            blurRadius: light ? 18 : 24,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -379,9 +380,10 @@ TextStyle? phoneDetailTitleStyle(
   bool compact = false,
 }) => theme.textTheme.headlineLarge?.copyWith(
   color: theme.colorScheme.onSurface,
-  fontSize: compact ? 22 : 26,
-  fontWeight: FontWeight.w700,
-  height: 1.22,
+  fontSize: compact ? 23 : 28,
+  fontWeight: FontWeight.w800,
+  height: 1.2,
+  letterSpacing: -0.3,
 );
 
 class _MetaLine extends StatelessWidget {
@@ -398,21 +400,38 @@ class _MetaLine extends StatelessWidget {
         color: theme.colorScheme.onSurfaceVariant,
       ),
     );
-    final children = <Widget>[];
-    for (var i = 0; i < entries.length; i++) {
-      final entry = entries[i];
-      final previous = i > 0 ? entries[i - 1] : null;
-      if (previous != null && !previous.badge && !entry.badge) {
-        children.add(dot);
+    // 年份、时长、评分一行，用圆点隔开；画质/声道标签另起一行描边小牌。
+    final facts = <Widget>[];
+    final badges = <Widget>[];
+    for (final entry in entries) {
+      if (entry.badge) {
+        badges.add(_MetaChip(entry: entry));
+        continue;
       }
-      children.add(_MetaChip(entry: entry));
+      if (facts.isNotEmpty) facts.add(dot);
+      facts.add(_MetaChip(entry: entry));
     }
-    return Wrap(
+    return Column(
       key: PhoneItemBanner.metaKey,
-      spacing: AppSpacing.xs,
-      runSpacing: AppSpacing.xs,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: children,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (facts.isNotEmpty)
+          Wrap(
+            spacing: 6,
+            runSpacing: AppSpacing.xxs,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: facts,
+          ),
+        if (facts.isNotEmpty && badges.isNotEmpty) const SizedBox(height: 8),
+        if (badges.isNotEmpty)
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: badges,
+          ),
+      ],
     );
   }
 }
@@ -504,26 +523,32 @@ class _MetaChip extends StatelessWidget {
     if (entry.badge) {
       return DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(4),
+          color: scheme.onSurface.withValues(alpha: .08),
+          borderRadius: BorderRadius.circular(5),
           border: Border.all(
-            color: scheme.onSurfaceVariant.withValues(alpha: .55),
+            color: scheme.onSurface.withValues(alpha: .28),
+            width: 0.8,
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
           child: Text(
             entry.label,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
+              color: scheme.onSurface.withValues(alpha: .86),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
               height: 1.3,
+              letterSpacing: .3,
             ),
           ),
         ),
       );
     }
     final style = theme.textTheme.labelLarge?.copyWith(
-      color: entry.highlight || entry.onTap != null
+      color: entry.highlight
+          ? scheme.onSurface
+          : entry.onTap != null
           ? scheme.primary
           : scheme.onSurfaceVariant,
       fontWeight: entry.highlight ? FontWeight.w700 : FontWeight.w500,
@@ -532,8 +557,12 @@ class _MetaChip extends StatelessWidget {
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(CupertinoIcons.star_fill, size: 16, color: scheme.primary),
-              const SizedBox(width: 2),
+              const Icon(
+                CupertinoIcons.star_fill,
+                size: 15,
+                color: phoneRatingStarColor,
+              ),
+              const SizedBox(width: 3),
               Text(entry.label, style: style),
             ],
           )
@@ -587,14 +616,18 @@ class PhoneGenreChips extends StatelessWidget {
               final tap = onTap;
               return Container(
                 decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  color: scheme.onSurface.withValues(alpha: .06),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: scheme.onSurface.withValues(alpha: .14),
+                    width: 0.8,
+                  ),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: AppSurfaceAction(
                   onTap: tap == null ? null : () => tap(genre),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     child: Center(
                       widthFactor: 1,
                       child: Text(
@@ -639,15 +672,15 @@ class PhoneSeasonTab extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderRadius: BorderRadius.circular(999),
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(
           onTap: onPressed,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 56, minHeight: 36),
+            constraints: const BoxConstraints(minWidth: 64, minHeight: 36),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Center(
                 widthFactor: 1,
                 child: Text(
@@ -808,7 +841,9 @@ class MobileSeriesPage extends StatelessWidget {
                     Text(
                       l.detailEpisodesHeader,
                       style: theme.textTheme.titleMedium?.copyWith(
+                        fontSize: 19,
                         fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
                       ),
                     ),
                     if (summary.isNotEmpty)
@@ -1091,7 +1126,7 @@ class _EpisodeRow extends StatelessWidget {
   final bool current;
   final VoidCallback onTap;
 
-  static const double _thumbWidth = 128;
+  static const double _thumbWidth = 140;
 
   @override
   Widget build(BuildContext context) {
@@ -1114,7 +1149,9 @@ class _EpisodeRow extends StatelessWidget {
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.titleSmall?.copyWith(
+        fontSize: 15,
         fontWeight: current ? FontWeight.w700 : FontWeight.w600,
+        height: 1.3,
         color: current
             ? scheme.primary
             : played
@@ -1123,16 +1160,13 @@ class _EpisodeRow extends StatelessWidget {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.xs, 2, AppSpacing.xs, 2),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.xs, 1, AppSpacing.xs, 1),
       child: Container(
         decoration: BoxDecoration(
           color: current
-              ? scheme.surfaceContainerHigh.withValues(alpha: .7)
+              ? scheme.primary.withValues(alpha: .10)
               : const Color(0x00000000),
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: current
-              ? Border.all(color: scheme.primary.withValues(alpha: .22))
-              : null,
+          borderRadius: BorderRadius.circular(AppRadii.lg),
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(
@@ -1141,7 +1175,7 @@ class _EpisodeRow extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.xs,
-              vertical: 6,
+              vertical: 8,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1193,7 +1227,7 @@ class _EpisodeRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
-                        height: 1.38,
+                        height: 1.45,
                       ),
                     ),
                   ),
@@ -1231,7 +1265,7 @@ class _EpisodeThumb extends StatelessWidget {
       child: AspectRatio(
         aspectRatio: 16 / 9,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.md),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -1278,13 +1312,13 @@ class _EpisodeThumb extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: light
                           ? scheme.primary
-                          : const Color(0xff000000).withValues(alpha: .42),
+                          : const Color(0xff000000).withValues(alpha: .5),
                       shape: BoxShape.circle,
                       border: light
                           ? null
                           : Border.all(
                               color: const Color(0xffffffff)
-                                  .withValues(alpha: .85),
+                                  .withValues(alpha: .9),
                               width: 1.5,
                             ),
                     ),
@@ -1339,7 +1373,11 @@ class _SimilarRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   l.similarRow,
-                  style: AppUiTheme.of(context).textTheme.titleMedium,
+                  style: AppUiTheme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.2,
+                  ),
                 ),
               ),
               AppButton(
@@ -1382,3 +1420,6 @@ class _SimilarRow extends StatelessWidget {
     );
   }
 }
+
+/// 评分星标的固定金色，不随画面取色变化，一眼认出是评分。
+const Color phoneRatingStarColor = Color(0xFFF5C518);

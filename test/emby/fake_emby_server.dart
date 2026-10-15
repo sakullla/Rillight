@@ -551,6 +551,9 @@ class FakeEmbyServer {
 
   int? searchStatus;
   int? itemStatus;
+
+  /// 下一次收藏写入返回 500，用来验证详情页的回滚。
+  bool failNextFavorite = false;
   int? similarStatus;
   bool similarEmpty = false;
   final Set<String> failingImageIds = {'movie-broken'};
@@ -1368,6 +1371,20 @@ class FakeEmbyServer {
         return _json(200, json);
       }
       return _json(200, item.toJson());
+    }
+    if (rest.length == 2 && rest[0] == 'FavoriteItems') {
+      if (failNextFavorite) {
+        failNextFavorite = false;
+        return _json(500, {'error': 'favorite failed'});
+      }
+      final item = _itemById(rest[1]);
+      if (item == null) {
+        return _json(404, {'error': 'not found'});
+      }
+      if (method == 'POST' || method == 'DELETE') {
+        item.favorite = method == 'POST';
+        return _json(200, item.toJson()['UserData'] as Map<String, dynamic>);
+      }
     }
     if (rest.length == 2 && rest[0] == 'PlayedItems') {
       final item = _itemById(rest[1]);

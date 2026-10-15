@@ -7,39 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/app_shell_top_bar_test.dart',
-    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
+    'auth/change_password_test.dart',
+    caseEntrypoints['auth/change_password_cases.dart']!,
   );
   group(
-    'auth/connect_page_test.dart',
-    caseEntrypoints['auth/connect_page_cases.dart']!,
+    'home/hero_playback_actions_test.dart',
+    caseEntrypoints['home/hero_playback_actions_cases.dart']!,
   );
   group(
-    'auth/provider_connect_entry_user_agent_test.dart',
-    caseEntrypoints['auth/provider_connect_entry_user_agent_cases.dart']!,
+    'media_image/blurred_artwork_test.dart',
+    caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
+  );
+  group(
+    'mobile/mobile_flow_test.dart [part 4]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 3]',
     caseEntrypoints['mobile/phone_pages_cases.dart#2']!,
   );
   group(
-    'mobile/tv_shelf_focus_test.dart',
-    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
-  );
-  group(
-    'mobile/tv_shell_navigation_test.dart',
-    caseEntrypoints['mobile/tv_shell_navigation_cases.dart']!,
-  );
-  group(
     'player/danmaku/danmaku_renderer_test.dart',
     caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
   );
   group(
-    'widgets/poster_card_test.dart',
-    caseEntrypoints['widgets/poster_card_cases.dart']!,
+    'player/ended_navigation_test.dart',
+    caseEntrypoints['player/ended_navigation_cases.dart']!,
   );
   group(
-    'widgets/skeleton_test.dart',
-    caseEntrypoints['widgets/skeleton_cases.dart']!,
+    'tv/tv_detail_test.dart [part 1]',
+    caseEntrypoints['tv/tv_detail_cases.dart#0']!,
   );
+  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
 }

@@ -53,11 +53,10 @@ class _ContentThemeState extends State<ContentTheme> {
     final brightness =
         AppUiTheme.maybeOf(context)?.brightness ??
         AppUiTheme.of(context).brightness;
-    final token = '$identity/${brightness.name}';
+    final phone = AppUiTheme.of(context).phone;
+    final token = '$identity/${brightness.name}${phone ? '/phone' : ''}';
     if (_identity == token) return;
-    final base = brightness == Brightness.dark
-        ? AppUiTheme.dark().colorScheme
-        : AppUiTheme.light().colorScheme;
+    final base = _baseScheme(AppUiTheme.of(context), brightness);
     _identity = token;
     final generation = ++_generation;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -107,11 +106,7 @@ class _ContentThemeState extends State<ContentTheme> {
       _scheme = null;
       ++_generation;
     }
-    final scheme =
-        _scheme ??
-        (theme.brightness == Brightness.dark
-            ? AppUiTheme.dark().colorScheme
-            : AppUiTheme.light().colorScheme);
+    final scheme = _scheme ?? _baseScheme(theme, theme.brightness);
     return AppUiTheme(
       data: theme.copyWith(
         colorScheme: scheme,
@@ -131,6 +126,17 @@ class _ContentThemeState extends State<ContentTheme> {
       ),
     );
   }
+}
+
+/// 取色的中性底:手机用影院黑/纸白,桌面和电视沿用各自的应用取色。
+AppColorScheme _baseScheme(AppUiThemeData theme, Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  if (theme.phone) {
+    return dark
+        ? AppUiTheme.phoneDark().colorScheme
+        : AppUiTheme.phoneLight().colorScheme;
+  }
+  return dark ? AppUiTheme.dark().colorScheme : AppUiTheme.light().colorScheme;
 }
 
 void _remember(String token, AppColorScheme scheme) {

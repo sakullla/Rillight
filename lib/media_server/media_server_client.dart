@@ -98,6 +98,11 @@ extension MediaServerPlaybackStop on MediaServerClient {
   }
 }
 
+/// 可选能力：用户收藏。Emby 与 Jellyfin 支持；不实现它的服务不显示收藏操作。
+abstract interface class MediaFavorites {
+  Future<void> setFavorite(String itemId, {required bool favorite});
+}
+
 abstract interface class CatalogNotifications {
   void start();
   Future<void> stop();

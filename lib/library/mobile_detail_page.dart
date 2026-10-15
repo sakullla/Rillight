@@ -315,6 +315,25 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     showAppNotice(context, next ? l.markPlayed : l.markUnplayed);
   }
 
+  /// 收藏切换同样乐观更新；失败时提示并回滚。
+  Future<void> _toggleFavorite() async {
+    final controller = _controller;
+    final item = controller?.item;
+    if (controller == null || item == null) return;
+    final next = !item.userData.favorite;
+    final ok = await controller.toggleFavorite();
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
+    showAppNotice(
+      context,
+      !ok
+          ? l.phoneFavoriteFailed
+          : next
+          ? l.phoneFavoriteAdded
+          : l.phoneFavoriteRemoved,
+    );
+  }
+
   void _openItem(String itemId) {
     context.push(
       DetailSourceScope.itemLocation(context, itemId),
@@ -635,6 +654,13 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                         onTogglePlayed: controller.playedBusy
                                             ? null
                                             : _togglePlayed,
+                                        favorite: controller.supportsFavorite
+                                            ? item.userData.favorite
+                                            : null,
+                                        onToggleFavorite:
+                                            controller.favoriteBusy
+                                            ? null
+                                            : _toggleFavorite,
                                         showRestart:
                                             !item.isSeries &&
                                             target?.canResume == true,
@@ -816,9 +842,28 @@ class _PhoneDetailBar extends StatelessWidget {
             data: IconThemeData(color: onBar),
             child: Row(
               children: [
-                CupertinoNavigationBarBackButton(
-                  color: onBar,
-                  onPressed: () => context.pop(),
+                // 压在画面上时给返回钮垫一枚深色圆底，亮画面上也看得清。
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    IgnorePointer(
+                      child: AnimatedContainer(
+                        duration: AppMotion.durationOf(context, AppMotion.fast),
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: immersive
+                              ? const Color(0xff000000).withValues(alpha: .32)
+                              : const Color(0x00000000),
+                        ),
+                      ),
+                    ),
+                    CupertinoNavigationBarBackButton(
+                      color: onBar,
+                      onPressed: () => context.pop(),
+                    ),
+                  ],
                 ),
                 Expanded(
                   child: title == null
@@ -844,10 +889,10 @@ class _PhoneDetailBar extends StatelessWidget {
   }
 }
 
-/// 头部主操作：播放钮（`mobile-detail-play`）占满一行，已看切换
-/// （[CatalogKeys.playedToggle]）作为同高的方形钮紧挨在右侧，状态由实心/空心勾表示。
-/// 续播时下面是一条进度和「剩余 N 分钟」。从头播放（`phone-detail-play-start`）、
-/// 上一集/下一集是等宽的次级按钮，只有可用时才出现。
+//// 头部主操作：播放钮（`mobile-detail-play`）通栏，续播时下面是一条进度和
+/// 「剩余 N 分钟」。再往下是一排图标加文字的次级操作：已看切换
+/// （[CatalogKeys.playedToggle]）、从头播放（`phone-detail-play-start`）、
+/// 上一集/下一集，只有可用时才出现，等宽排开。
 class _DetailPlayActions extends StatelessWidget {
   const _DetailPlayActions({
     required this.label,
@@ -860,9 +905,13 @@ class _DetailPlayActions extends StatelessWidget {
     this.progressLabel,
     this.played,
     this.onTogglePlayed,
+    this.favorite,
+    this.onToggleFavorite,
     this.onPrevious,
     this.onNext,
   });
+
+  static const favoriteKey = Key('phone-detail-favorite');
 
   static const double _height = 52;
 
@@ -882,6 +931,10 @@ class _DetailPlayActions extends StatelessWidget {
   /// 已看状态；为 null（剧集）时不提供已看切换。
   final bool? played;
   final VoidCallback? onTogglePlayed;
+
+  /// 收藏状态；为 null（服务不支持收藏）时不提供收藏切换。
+  final bool? favorite;
+  final VoidCallback? onToggleFavorite;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
 
@@ -891,9 +944,35 @@ class _DetailPlayActions extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final played = this.played;
+    final favorite = this.favorite;
     final progress = this.progress;
     final progressLabel = this.progressLabel;
     final secondary = <Widget>[
+      if (favorite != null)
+        Semantics(
+          toggled: favorite,
+          child: _SecondaryAction(
+            key: favoriteKey,
+            icon: favorite ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
+            label: favorite ? l.phoneFavorited : l.phoneFavorite,
+            highlighted: favorite,
+            onPressed: onToggleFavorite,
+          ),
+        ),
+      if (played != null)
+        Semantics(
+          toggled: played,
+          child: _SecondaryAction(
+            key: CatalogKeys.playedToggle,
+            icon: played
+                ? CupertinoIcons.checkmark_circle_fill
+                : CupertinoIcons.checkmark_circle,
+            label: played ? l.mobileWatched : l.markPlayed,
+            tooltip: played ? l.markUnplayed : l.markPlayed,
+            highlighted: played,
+            onPressed: onTogglePlayed,
+          ),
+        ),
       if (showRestart)
         _SecondaryAction(
           key: const Key('phone-detail-play-start'),
@@ -917,76 +996,32 @@ class _DetailPlayActions extends StatelessWidget {
         ),
     ];
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+      borderRadius: BorderRadius.circular(14),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: AppTooltip(
-                message: tooltip ?? label,
-                child: AppButton.icon(
-                  key: const Key('mobile-detail-play'),
-                  style: AppButtonStyle(
-                    minimumSize: const Size(48, _height),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                    shape: shape,
-                    textStyle: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  onPressed: enabled ? onPlay : null,
-                  icon: const Icon(CupertinoIcons.play_fill, size: 26),
-                  label: Text(
-                    label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  variant: AppButtonVariant.filled,
-                ),
+        AppTooltip(
+          message: tooltip ?? label,
+          child: AppButton.icon(
+            key: const Key('mobile-detail-play'),
+            // 主播放钮与首页头图同为反相实底：深色白底黑字，浅色墨底白字。
+            style: AppButtonStyle(
+              minimumSize: const Size(48, _height),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              backgroundColor: scheme.inverseSurface,
+              foregroundColor: scheme.onInverseSurface,
+              shape: shape,
+              textStyle: theme.textTheme.titleSmall?.copyWith(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            if (played != null) ...[
-              const SizedBox(width: AppSpacing.xs),
-              AppTooltip(
-                message: played ? l.markUnplayed : l.markPlayed,
-                child: Semantics(
-                  toggled: played,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: played
-                          ? scheme.primaryContainer
-                          : scheme.surfaceContainerHigh,
-                    ),
-                    key: CatalogKeys.playedToggle,
-                    clipBehavior: Clip.antiAlias,
-                    child: AppSurfaceAction(
-                      onTap: onTogglePlayed,
-                      child: SizedBox.square(
-                        dimension: _height,
-                        child: Icon(
-                          played
-                              ? CupertinoIcons.checkmark_circle_fill
-                              : CupertinoIcons.checkmark_circle,
-                          size: 26,
-                          color: onTogglePlayed == null
-                              ? scheme.onSurface.withValues(alpha: .38)
-                              : played
-                              ? scheme.onPrimaryContainer
-                              : scheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
+            onPressed: enabled ? onPlay : null,
+            icon: const Icon(CupertinoIcons.play_fill, size: 24),
+            label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+            variant: AppButtonVariant.filled,
+          ),
         ),
         if (progress != null && progress > 0) ...[
           const SizedBox(height: AppSpacing.sm),
@@ -1003,7 +1038,7 @@ class _DetailPlayActions extends StatelessWidget {
                       value: progress.clamp(0, 1),
                       minHeight: 4,
                       color: scheme.primary,
-                      backgroundColor: scheme.onSurface.withValues(alpha: .12),
+                      backgroundColor: scheme.onSurface.withValues(alpha: .14),
                     ),
                   ),
                 ),
@@ -1027,10 +1062,10 @@ class _DetailPlayActions extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
-              for (var i = 0; i < secondary.length; i++) ...[
-                if (i > 0) const SizedBox(width: AppSpacing.xs),
-                Expanded(child: secondary[i]),
-              ],
+              for (final action in secondary) Expanded(child: action),
+              // 只有一两个操作时不拉满整行，按钮保持图标加文字的紧凑形状。
+              for (var i = secondary.length; i < 5; i++)
+                const Expanded(child: SizedBox.shrink()),
             ],
           ),
         ],
@@ -1039,48 +1074,74 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 次级操作：浅底圆角钮，图标与文字同行，等宽排开，触控高度 48。
+/// 次级操作：上图标下文字，无底色，触控高度 56。
 class _SecondaryAction extends StatelessWidget {
   const _SecondaryAction({
     super.key,
     required this.icon,
     required this.label,
     required this.onPressed,
+    this.tooltip,
+    this.highlighted = false,
   });
 
   final IconData icon;
   final String label;
+
+  /// 悬停/读屏说明；缺省同 [label]。已看切换写的是点下去之后的动作。
+  final String? tooltip;
   final VoidCallback? onPressed;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final enabled = onPressed != null;
+    final color = !enabled
+        ? scheme.onSurface.withValues(alpha: .38)
+        : highlighted
+        ? scheme.primary
+        : scheme.onSurface;
     return AppTooltip(
-      message: label,
-      child: AppButton.icon(
-        style: AppButtonStyle(
-          minimumSize: const Size(48, 48),
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-          backgroundColor: scheme.surfaceContainerHigh,
-          foregroundColor: scheme.onSurface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-          ),
-          textStyle: theme.textTheme.labelLarge?.copyWith(
-            fontWeight: FontWeight.w600,
+      message: tooltip ?? label,
+      child: AppSurfaceAction(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 24, color: color),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: enabled
+                        ? (highlighted
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant)
+                        : color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        onPressed: onPressed,
-        icon: Icon(icon, size: 20),
-        label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-        variant: AppButtonVariant.plain,
       ),
     );
   }
 }
 
-/// 头部画质/声道/字幕标签，与桌面和电视共用 [mediaTechBadges]。
+// 头部画质/声道/字幕标签，与桌面和电视共用 [mediaTechBadges]。
 List<String> phoneTechBadges(ItemMediaSource? source) =>
     mediaTechBadges(source);
 
@@ -1188,7 +1249,14 @@ class _ChapterStrip extends StatelessWidget {
             AppSpacing.md,
             AppSpacing.sm,
           ),
-          child: Text(l.chapters, style: theme.textTheme.titleMedium),
+          child: Text(
+            l.chapters,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
+            ),
+          ),
         ),
         WholeCardStrip(
           key: const Key('phone-chapter-strip'),
@@ -1375,7 +1443,11 @@ class _DetailSimilar extends StatelessWidget {
               Expanded(
                 child: Text(
                   l.similarRow,
-                  style: AppUiTheme.of(context).textTheme.titleMedium,
+                  style: AppUiTheme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.2,
+                  ),
                 ),
               ),
               AppButton(

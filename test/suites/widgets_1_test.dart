@@ -23,12 +23,12 @@ void main() {
     caseEntrypoints['mobile/mobile_flow_cases.dart#0']!,
   );
   group(
-    'player/ended_navigation_test.dart',
-    caseEntrypoints['player/ended_navigation_cases.dart']!,
-  );
-  group(
     'player/player_window_test.dart',
     caseEntrypoints['player/player_window_cases.dart']!,
+  );
+  group(
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
   );
   group(
     'widgets/liquid_glass_test.dart',

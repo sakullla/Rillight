@@ -2,16 +2,20 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/routes.dart';
-import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
-import 'package:rillight/media_image/media_image.dart';
 
-/// 手机片库列表。两列卡片保留库名；没有封面时显示媒体类型图标。
+/// 手机「媒体库」标签页:顶部一排快速入口(继续观看、即将播放、最新电影、
+/// 最新剧集),下面是当前服务器的全部媒体库磁贴。磁贴有封面铺封面,没有就按
+/// 类型画渐变和图标。
 class PhoneLibrariesTab extends StatelessWidget {
   const PhoneLibrariesTab({super.key});
+
+  static const shortcutsKey = Key('phone-libraries-shortcuts');
+  static Key shortcutKey(String id) => Key('phone-libraries-shortcut-$id');
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +46,7 @@ class PhoneLibrariesTab extends StatelessWidget {
             },
           );
         } else if (error != null || notice != null) {
-          // 已有库时刷新失败仍留下图片块，只附加失败和重试。
+          // 已有库时刷新失败仍留下磁贴，只附加失败和重试。
           status = MobileFailureState(
             message: catalogFailureMessage(l10n, (error ?? notice)!),
             onRetry: () {
@@ -52,12 +56,63 @@ class PhoneLibrariesTab extends StatelessWidget {
         } else {
           status = null;
         }
+        final shortcuts = <_Shortcut>[
+          _Shortcut(
+            id: 'resume',
+            label: l10n.resumeRow,
+            icon: CupertinoIcons.play_circle,
+            location: AppRoutes.shelfResume,
+          ),
+          _Shortcut(
+            id: 'nextup',
+            label: l10n.nextUpRow,
+            icon: CupertinoIcons.forward_end_alt,
+            location: AppRoutes.shelfNextUp,
+          ),
+          _Shortcut(
+            id: 'latest-movies',
+            label: l10n.phoneShortcutLatestMovies,
+            icon: CupertinoIcons.film,
+            location: AppRoutes.shelfLatestMovies,
+          ),
+          _Shortcut(
+            id: 'latest-series',
+            label: l10n.phoneShortcutLatestSeries,
+            icon: CupertinoIcons.tv,
+            location: AppRoutes.shelfLatestSeries,
+          ),
+        ];
         return AppRefresh(
           onRefresh: catalog.reload,
           child: CustomScrollView(
             key: const PageStorageKey('mobile-libraries-scroll'),
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.xs),
+                  child: SizedBox(
+                    height: 40,
+                    child: ListView.separated(
+                      key: shortcutsKey,
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
+                      itemCount: shortcuts.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: AppSpacing.xs),
+                      itemBuilder: (context, index) {
+                        final shortcut = shortcuts[index];
+                        return _ShortcutChip(
+                          key: shortcutKey(shortcut.id),
+                          shortcut: shortcut,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
               if (status != null)
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(
@@ -68,41 +123,61 @@ class PhoneLibrariesTab extends StatelessWidget {
                   ),
                   sliver: SliverToBoxAdapter(child: status),
                 ),
+              if (!empty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.xl,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  sliver: SliverToBoxAdapter(
+                    child: PhoneSectionHeader(
+                      title: l10n.phoneLibrariesMine,
+                      subtitle: l10n.phoneLibraryCount(
+                        catalog.libraries.length,
+                      ),
+                    ),
+                  ),
+                ),
               SliverPadding(
                 padding: EdgeInsets.fromLTRB(
                   AppSpacing.md,
-                  AppSpacing.md,
+                  AppSpacing.xxs,
                   AppSpacing.md,
                   AppSpacing.md + phoneScrollClearance(context),
                 ),
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
-                    const spacing = AppSpacing.md;
-                    final columns =
-                        MediaQuery.textScalerOf(context).scale(14) / 14 > 1.5
-                        ? 1
-                        : 2;
+                    const spacing = AppSpacing.sm;
+                    final textScale =
+                        MediaQuery.textScalerOf(context).scale(14) / 14;
+                    final columns = textScale > 1.5 ? 1 : 2;
                     final cellWidth =
                         (constraints.crossAxisExtent -
                             spacing * (columns - 1)) /
                         columns;
-                    final textScale =
-                        MediaQuery.textScalerOf(context).scale(14) / 14;
-                    final titleBlock = 20 + 44 * textScale;
                     return SliverGrid(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
                         mainAxisSpacing: spacing,
                         crossAxisSpacing: spacing,
-                        childAspectRatio:
-                            cellWidth / (cellWidth * 9 / 16 + titleBlock),
+                        childAspectRatio: cellWidth / (cellWidth * 10 / 16),
                       ),
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final library = catalog.libraries[index];
-                        return _LibraryBlock(
-                          library: library,
+                        return MobilePressable(
+                          key: Key('phone-library-block-${library.id}'),
                           onTap: () =>
                               context.push(AppRoutes.library(library.id)),
+                          child: PhoneLibraryTile(
+                            library: library,
+                            large: columns == 1,
+                            imageKey: Key('phone-library-image-${library.id}'),
+                            placeholderKey: Key(
+                              'phone-library-placeholder-${library.id}',
+                            ),
+                          ),
                         );
                       }, childCount: catalog.libraries.length),
                     );
@@ -117,100 +192,55 @@ class PhoneLibrariesTab extends StatelessWidget {
   }
 }
 
-class _LibraryBlock extends StatelessWidget {
-  const _LibraryBlock({required this.library, required this.onTap});
+class _Shortcut {
+  const _Shortcut({
+    required this.id,
+    required this.label,
+    required this.icon,
+    required this.location,
+  });
 
-  final MediaItem library;
-  final VoidCallback onTap;
+  final String id;
+  final String label;
+  final IconData icon;
+  final String location;
+}
 
-  bool get _hasImage {
-    bool tagged(String? tag) => tag != null && tag.isNotEmpty;
-    return tagged(library.primaryImageTag) ||
-        tagged(library.backdropImageTag) ||
-        tagged(library.thumbImageTag);
-  }
+/// 快速入口:浅底胶囊,图标用强调色。
+class _ShortcutChip extends StatelessWidget {
+  const _ShortcutChip({super.key, required this.shortcut});
+
+  final _Shortcut shortcut;
 
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final hasImage = _hasImage;
     return Container(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(20),
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
       ),
       clipBehavior: Clip.antiAlias,
       child: AppSurfaceAction(
-        key: Key('phone-library-block-${library.id}'),
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(20),
+        onTap: () => context.push(shortcut.location),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(shortcut.icon, size: 17, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                shortcut.label,
+                maxLines: 1,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: scheme.onSurface,
+                  fontWeight: FontWeight.w600,
                 ),
-                clipBehavior: Clip.antiAlias,
-                child: hasImage
-                    ? MediaImage(
-                        key: Key('phone-library-image-${library.id}'),
-                        item: library,
-                        preferBackdrop: true,
-                        maxWidth: 480,
-                      )
-                    : _LibraryNamePlaceholder(
-                        key: Key('phone-library-placeholder-${library.id}'),
-                        collectionType: library.collectionType,
-                      ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              child: Text(
-                library.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LibraryNamePlaceholder extends StatelessWidget {
-  const _LibraryNamePlaceholder({super.key, this.collectionType});
-  final String? collectionType;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = AppUiTheme.of(context).colorScheme;
-    final icon = switch (collectionType) {
-      'movies' => CupertinoIcons.film,
-      'tvshows' => CupertinoIcons.tv,
-      'music' => CupertinoIcons.music_note,
-      'photos' => CupertinoIcons.photo_on_rectangle,
-      _ => CupertinoIcons.rectangle_stack,
-    };
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [scheme.primaryContainer, scheme.surfaceContainerLow],
-        ),
-      ),
-      child: Center(
-        child: ExcludeSemantics(
-          child: Icon(icon, size: 44, color: scheme.onPrimaryContainer),
+            ],
+          ),
         ),
       ),
     );

@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_motion.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
+import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/routes.dart';
@@ -20,6 +22,17 @@ class MobileShell extends StatefulWidget {
   const MobileShell({super.key});
   static const serverPillKey = Key('mobile-shell-server-pill');
   static const topBarKey = Key('mobile-shell-top-bar');
+  static const titleKey = Key('mobile-shell-title');
+
+  /// 标签页顺序:首页、媒体库、聚合、搜索。
+  static const homeTab = 0;
+  static const librariesTab = 1;
+  static const aggregationTab = 2;
+  static const searchTab = 3;
+
+  /// 首页顶栏高;其它标签页顶栏放大号页面名,更高一些。
+  static const homeBarHeight = 44.0;
+  static const titleBarHeight = 52.0;
 
   @override
   State<MobileShell> createState() => _MobileShellState();
@@ -120,8 +133,16 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
         ? l.phoneServerManagement
         : (lineLabel.isEmpty ? serverName : '$serverName · $lineLabel');
     final topInset = MediaQuery.viewPaddingOf(context).top;
-    const barBody = 44.0;
+    final barBody = _index == 0
+        ? MobileShell.homeBarHeight
+        : MobileShell.titleBarHeight;
     final homeImmersive = _index == 0 && !_homeCovered;
+    final tabTitle = switch (_index) {
+      MobileShell.librariesTab => l.libraries,
+      MobileShell.aggregationTab => l.aggregation,
+      MobileShell.searchTab => l.search,
+      _ => '',
+    };
     final onBar = homeImmersive && theme.brightness == Brightness.dark
         ? const Color(0xFFFFFFFF)
         : scheme.onSurface;
@@ -212,15 +233,21 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                   index: _index,
                                   children: [
                                     TickerMode(
-                                      enabled: _index == 0,
+                                      enabled: _index == MobileShell.homeTab,
                                       child: const PhoneHome(),
                                     ),
                                     TickerMode(
-                                      enabled: _index == 1,
+                                      enabled:
+                                          _index == MobileShell.librariesTab,
+                                      child: const PhoneLibrariesTab(),
+                                    ),
+                                    TickerMode(
+                                      enabled:
+                                          _index == MobileShell.aggregationTab,
                                       child: const AggregationPage(),
                                     ),
                                     TickerMode(
-                                      enabled: _index == 2,
+                                      enabled: _index == MobileShell.searchTab,
                                       child: SearchRouteGuard(
                                         canPop: true,
                                         onPop: () {
@@ -260,12 +287,13 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                       data: IconThemeData(color: onBar),
                       child: Row(
                         children: [
-                          if (_index == 0)
+                          if (_index == 0) ...[
+                            const SizedBox(width: AppSpacing.sm),
                             Align(
                               alignment: Alignment.centerLeft,
                               child: ConstrainedBox(
                                 constraints: const BoxConstraints(
-                                  maxWidth: 168,
+                                  maxWidth: 220,
                                 ),
                                 child: AppSurfaceAction(
                                   key: MobileShell.serverPillKey,
@@ -277,37 +305,38 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                   child: DecoratedBox(
                                     decoration: BoxDecoration(
                                       color: homeImmersive
-                                          ? scheme.scrim.withValues(alpha: 0.42)
+                                          ? scheme.scrim.withValues(alpha: 0.36)
                                           : scheme.surfaceContainerHigh,
                                       borderRadius: BorderRadius.circular(999),
                                       border: Border.all(
                                         color: homeImmersive
-                                            ? const Color(0x33FFFFFF)
+                                            ? const Color(0x29FFFFFF)
                                             : scheme.outlineVariant,
+                                        width: 0.8,
                                       ),
                                     ),
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 5,
+                                        horizontal: 12,
+                                        vertical: 7,
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Icon(
-                                            CupertinoIcons.cube_box,
-                                            size: 13,
+                                            CupertinoIcons.dot_radiowaves_right,
+                                            size: 14,
                                             color: homeImmersive
                                                 ? const Color(0xFFFFFFFF)
                                                 : scheme.primary,
                                           ),
-                                          const SizedBox(width: 4),
+                                          const SizedBox(width: 6),
                                           Flexible(
                                             child: Text(
                                               pillLabel,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.labelSmall
+                                              style: theme.textTheme.labelMedium
                                                   ?.copyWith(
                                                     color: homeImmersive
                                                         ? const Color(
@@ -333,10 +362,28 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                                   ),
                                 ),
                               ),
-                            )
-                          else
-                            const Spacer(),
-                          const Spacer(),
+                            ),
+                          ] else
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(
+                                  left: AppSpacing.md,
+                                ),
+                                // 大标题已经够大，系统放大字号时只跟到 1.3 倍，
+                                // 不把固定高的顶栏撑破。
+                                child: MediaQuery.withClampedTextScaling(
+                                  maxScaleFactor: 1.3,
+                                  child: Text(
+                                    tabTitle,
+                                    key: MobileShell.titleKey,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: phoneLargeTitleStyle(theme),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (_index == 0) const Spacer(),
                           if (_index == 0)
                             AppIconButton(
                               key: const Key('phone-home-edit'),
@@ -351,9 +398,13 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
                             key: const Key('mobile-shell-mine-entry'),
                             tooltip: l.mobileMine,
                             color: onBar,
-                            icon: const Icon(CupertinoIcons.person_crop_circle),
+                            icon: _MineAvatar(
+                              name: auth.session?.username ?? '',
+                              immersive: homeImmersive,
+                            ),
                             onPressed: () => context.push(AppRoutes.mine),
                           ),
+                          const SizedBox(width: AppSpacing.xxs),
                         ],
                       ),
                     ),
@@ -399,6 +450,61 @@ class PhoneShellBar extends StatelessWidget {
       key: MobileShell.topBarKey,
       color: backgroundColor,
       child: child,
+    );
+  }
+}
+
+/// 顶栏右侧的账户头像:用户名首字的圆形头像。
+class _MineAvatar extends StatelessWidget {
+  const _MineAvatar({required this.name, required this.immersive});
+
+  final String name;
+  final bool immersive;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final trimmed = name.trim();
+    final initial = trimmed.isEmpty
+        ? null
+        : String.fromCharCode(trimmed.runes.first).toUpperCase();
+    return SizedBox.square(
+      dimension: 30,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primary,
+              Color.lerp(scheme.primary, const Color(0xFF7A3E00), .55)!,
+            ],
+          ),
+          border: Border.all(
+            color: immersive
+                ? const Color(0x66FFFFFF)
+                : scheme.onSurface.withValues(alpha: .12),
+          ),
+        ),
+        child: Center(
+          child: initial == null
+              ? Icon(
+                  CupertinoIcons.person_fill,
+                  size: 16,
+                  color: scheme.onPrimary,
+                )
+              : Text(
+                  initial,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: scheme.onPrimary,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                ),
+        ),
+      ),
     );
   }
 }

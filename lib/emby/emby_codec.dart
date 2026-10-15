@@ -68,6 +68,7 @@ MediaUserData decodeEmbyMediaUserData(dynamic json) {
   final map = Map<String, dynamic>.from(json);
   return MediaUserData(
     played: map['Played'] == true,
+    favorite: map['IsFavorite'] == true,
     playbackPosition: Duration(
       microseconds: (_asInt(map['PlaybackPositionTicks']) ?? 0) ~/ 10,
     ),

@@ -15,7 +15,6 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/detail_source_scope.dart';
-import 'package:rillight/library/detached_scroll.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 
@@ -54,7 +53,9 @@ class _Section extends StatelessWidget {
             title,
             style: phone
                 ? theme.textTheme.titleMedium?.copyWith(
+                    fontSize: 19,
                     fontWeight: FontWeight.w700,
+                    letterSpacing: -0.2,
                   )
                 : theme.textTheme.titleMedium,
           ),
@@ -120,7 +121,10 @@ class _EpisodeOverviewSectionState extends State<EpisodeOverviewSection> {
       return const SizedBox.shrink();
     }
     final style = theme.textTheme.bodyLarge?.copyWith(
-      color: theme.colorScheme.onSurface,
+      color: theme.colorScheme.onSurface.withValues(
+        alpha: PresentationScope.isPhoneOf(context) ? .86 : 1,
+      ),
+      fontSize: PresentationScope.isPhoneOf(context) ? 15 : null,
       height: 1.55,
     );
     final body = LayoutBuilder(
@@ -1351,8 +1355,9 @@ class _StreamGroup {
   final ValueChanged<int>? onSelected;
 }
 
-/// 手机媒体信息：一张卡分三行（视频/音轨/字幕），每行图标 + 标题，下面是可横滑的
-/// 单选轨道。没选过时高亮片源的默认轨，说明「不改就放这一条」。
+//// 手机媒体信息：一张卡里每类一行——版本、视频、音轨、字幕。左侧图标和类名，
+/// 右侧是当前会播放的那一条；有多条可选时整行可点，弹出底部单选表。
+/// 没选过时显示片源的默认轨，说明「不改就放这一条」。
 class _PhoneStreamCard extends StatelessWidget {
   const _PhoneStreamCard({
     super.key,
@@ -1387,129 +1392,292 @@ class _PhoneStreamCard extends StatelessWidget {
     return null;
   }
 
+  Future<void> _pickTrack(BuildContext context, _StreamGroup group) async {
+    final highlighted = group.selectedIndex ?? _defaultIndex(group);
+    final picked = await showAppModalSheet<int>(
+      context: context,
+      builder: (context) => _PhoneChoiceSheet<int>(
+        title: group.title,
+        options: [
+          for (final choice in group.choices)
+            (
+              ValueKey('media-stream-${choice.index}'),
+              choice.index,
+              choice.line,
+            ),
+        ],
+        selected: highlighted,
+      ),
+    );
+    if (picked != null) group.onSelected?.call(picked);
+  }
+
+  Future<void> _pickVersion(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
+    final picked = await showAppModalSheet<String>(
+      context: context,
+      builder: (context) => _PhoneChoiceSheet<String>(
+        title: l10n.mediaSource,
+        options: [
+          for (final item in sources)
+            (
+              ValueKey('phone-detail-version-${item.id}'),
+              item.id,
+              _PhoneVersionRow.versionLabel(item),
+            ),
+        ],
+        selected: selectedSourceId ?? source.id,
+      ),
+    );
+    if (picked != null) onSelectSource?.call(picked);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final hasMultipleSources = sources.length > 1;
+    final rows = <Widget>[
+      if (hasMultipleSources)
+        _PhoneVersionRow(
+          key: EpisodeMediaStreamsSection.phoneVersionRowKey,
+          sources: sources,
+          selectedSourceId: selectedSourceId ?? source.id,
+          onTap: onSelectSource == null ? null : () => _pickVersion(context),
+        ),
+      for (final group in groups)
+        _PhoneSelectorRow(
+          key: ValueKey('phone-detail-stream-row-${group.title}'),
+          icon: _icon(group),
+          title: group.title,
+          count: group.choices.length,
+          value: _valueOf(group),
+          valueKey: group.onSelected == null && group.choices.length == 1
+              ? ValueKey('media-stream-${group.choices.first.index}')
+              : null,
+          onTap: group.onSelected != null && group.choices.length > 1
+              ? () => _pickTrack(context, group)
+              : null,
+        ),
+    ];
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh.withValues(alpha: .55),
+        color: scheme.surfaceContainerHigh.withValues(alpha: .6),
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: .28)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (hasMultipleSources) ...[
-            _PhoneVersionRow(
-              key: EpisodeMediaStreamsSection.phoneVersionRowKey,
-              sources: sources,
-              selectedSourceId: selectedSourceId ?? source.id,
-              onSelectSource: onSelectSource,
-            ),
-            if (groups.isNotEmpty)
-              AppDivider(
-                height: 1,
-                indent: AppSpacing.md,
-                endIndent: AppSpacing.md,
-                color: scheme.outlineVariant.withValues(alpha: .5),
-              ),
-          ],
-          for (var i = 0; i < groups.length; i++) ...[
+          for (var i = 0; i < rows.length; i++) ...[
             if (i > 0)
               AppDivider(
                 height: 1,
-                indent: AppSpacing.md,
-                endIndent: AppSpacing.md,
-                color: scheme.outlineVariant.withValues(alpha: .5),
+                indent: AppSpacing.md + 26,
+                endIndent: 0,
+                color: scheme.onSurface.withValues(alpha: .07),
               ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _icon(groups[i]),
-                          size: 18,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: AppSpacing.xs),
-                        Text(
-                          groups[i].title,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        if (groups[i].choices.length > 1) ...[
-                          const SizedBox(width: AppSpacing.xxs),
-                          Text(
-                            '${groups[i].choices.length}',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: scheme.onSurfaceVariant.withValues(
-                                alpha: .7,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  if (groups[i].onSelected == null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final choice in groups[i].choices)
-                            Text(
-                              choice.line,
-                              key: ValueKey('media-stream-${choice.index}'),
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                        ],
-                      ),
-                    )
-                  else
-                    _PhoneTrackRow(
-                      group: groups[i],
-                      highlighted:
-                          groups[i].selectedIndex ?? _defaultIndex(groups[i]),
-                    ),
-                ],
-              ),
-            ),
+            rows[i],
           ],
         ],
       ),
     );
   }
+
+  String _valueOf(_StreamGroup group) {
+    if (group.onSelected == null) {
+      return group.choices.map((choice) => choice.line).join(' / ');
+    }
+    final highlighted = group.selectedIndex ?? _defaultIndex(group);
+    final choice =
+        group.choices.where((c) => c.index == highlighted).firstOrNull ??
+        group.choices.firstOrNull;
+    return choice?.line ?? '';
+  }
 }
 
+/// 一行选择器：图标、类名（带可选数）、右侧当前值和下拉箭头。
+class _PhoneSelectorRow extends StatelessWidget {
+  const _PhoneSelectorRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.value,
+    this.count = 1,
+    this.valueKey,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final int count;
+  final Key? valueKey;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final row = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 52),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: 10,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (count > 1) ...[
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant.withValues(alpha: .7),
+                ),
+              ),
+            ],
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                value,
+                key: valueKey,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 6),
+              Icon(
+                CupertinoIcons.chevron_up_chevron_down,
+                size: 15,
+                color: scheme.onSurfaceVariant,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+    if (onTap == null) return row;
+    return AppSurfaceAction(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: row,
+    );
+  }
+}
+
+/// 底部单选表：标题和逐行选项，当前项打勾，点按即选并收起。
+class _PhoneChoiceSheet<T> extends StatelessWidget {
+  const _PhoneChoiceSheet({
+    required this.title,
+    required this.options,
+    required this.selected,
+  });
+
+  final String title;
+  final List<(Key, T, String)> options;
+  final T? selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.xs,
+          ),
+          child: Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Flexible(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+            children: [
+              for (final (key, value, label) in options)
+                AppSurfaceAction(
+                  key: key,
+                  onTap: () => Navigator.of(context).pop(value),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 52),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: value == selected
+                                    ? scheme.primary
+                                    : scheme.onSurface,
+                                fontWeight: value == selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (value == selected)
+                            Icon(
+                              CupertinoIcons.check_mark,
+                              size: 18,
+                              color: scheme.primary,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 版本行：与音轨字幕同形，右侧是当前片源的版本名。
 class _PhoneVersionRow extends StatelessWidget {
   const _PhoneVersionRow({
     super.key,
     required this.sources,
     required this.selectedSourceId,
-    this.onSelectSource,
+    this.onTap,
   });
 
   final List<ItemMediaSource> sources;
   final String selectedSourceId;
-  final ValueChanged<String>? onSelectSource;
+  final VoidCallback? onTap;
 
-  String _versionLabel(ItemMediaSource source) {
+  static String versionLabel(ItemMediaSource source) {
     final raw = source.label.trim();
     if (raw.isNotEmpty && raw.length <= 24) {
       return raw;
@@ -1520,188 +1688,21 @@ class _PhoneVersionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context);
-    final height =
-        40 * (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Row(
-              children: [
-                Icon(
-                  CupertinoIcons.layers_alt,
-                  size: 18,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: AppSpacing.xs),
-                Text(
-                  l10n.mediaSource,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.xxs),
-                Text(
-                  '${sources.length}',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: .7),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          SizedBox(
-            height: height,
-            child: DetachedHorizontalScroll(
-              builder: (controller) => ListView.separated(
-                controller: controller,
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                itemCount: sources.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(width: AppSpacing.xs),
-                itemBuilder: (context, index) {
-                  final item = sources[index];
-                  final selected = item.id == selectedSourceId;
-                  return Container(
-                    key: ValueKey('phone-detail-version-${item.id}'),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? scheme.primary.withValues(alpha: .16)
-                          : scheme.surface.withValues(alpha: .6),
-                      borderRadius: BorderRadius.circular(AppRadii.sm),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: AppSurfaceAction(
-                      onTap: onSelectSource == null
-                          ? null
-                          : () => onSelectSource!(item.id),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (selected) ...[
-                              Icon(
-                                CupertinoIcons.check_mark,
-                                size: 16,
-                                color: scheme.primary,
-                              ),
-                              const SizedBox(width: 4),
-                            ],
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 240),
-                              child: Text(
-                                _versionLabel(item),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelLarge?.copyWith(
-                                  color: selected
-                                      ? scheme.primary
-                                      : scheme.onSurface,
-                                  fontWeight: selected
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
+    final selected =
+        sources.where((s) => s.id == selectedSourceId).firstOrNull ??
+        sources.first;
+    return _PhoneSelectorRow(
+      icon: CupertinoIcons.layers_alt,
+      title: l10n.mediaSource,
+      count: sources.length,
+      value: versionLabel(selected),
+      onTap: onTap,
     );
   }
 }
 
-class _PhoneTrackRow extends StatelessWidget {
-  const _PhoneTrackRow({required this.group, required this.highlighted});
-
-  final _StreamGroup group;
-  final int? highlighted;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final height =
-        40 * (MediaQuery.textScalerOf(context).scale(14) / 14).clamp(1.0, 2.0);
-    return SizedBox(
-      height: height,
-      child: DetachedHorizontalScroll(
-        builder: (controller) => ListView.separated(
-          controller: controller,
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          itemCount: group.choices.length,
-          separatorBuilder: (context, index) =>
-              const SizedBox(width: AppSpacing.xs),
-          itemBuilder: (context, index) {
-            final choice = group.choices[index];
-            final selected = choice.index == highlighted;
-            return Container(
-              decoration: BoxDecoration(
-                color: selected
-                    ? scheme.primary.withValues(alpha: .16)
-                    : scheme.surface.withValues(alpha: .6),
-              ),
-              key: ValueKey('media-stream-${choice.index}'),
-              clipBehavior: Clip.antiAlias,
-              child: AppSurfaceAction(
-                onTap: () => group.onSelected!(choice.index),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (selected) ...[
-                        Icon(
-                          CupertinoIcons.check_mark,
-                          size: 16,
-                          color: scheme.primary,
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 240),
-                        child: Text(
-                          choice.line,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            color: selected ? scheme.primary : scheme.onSurface,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// 轨道少时按文字宽度排列。轨道一多，长短标题会把换行挤成参差的一行一个，
+// 轨道少时按文字宽度排列。轨道一多，长短标题会把换行挤成参差的一行一个，
 /// 所以改成等宽列，重复标题补上轨道序号。
 class _StreamChoiceWrap extends StatelessWidget {
   const _StreamChoiceWrap({required this.group});

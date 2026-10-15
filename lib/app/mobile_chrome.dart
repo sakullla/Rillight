@@ -85,7 +85,7 @@ class _SectionSkeleton extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SkeletonBlock(width: 96, height: 16, animated: animate),
+        SkeletonBlock(width: 112, height: 20, animated: animate),
         const SizedBox(height: AppSpacing.sm),
         _RailLoading(animate: animate, wide: wide),
       ],
@@ -107,115 +107,89 @@ class _HomeLoading extends StatelessWidget {
           builder: (context, constraints) {
             final width = constraints.maxWidth;
             final viewport = MediaQuery.sizeOf(context).height;
-            final top = MediaQuery.viewPaddingOf(context).top + 56;
             final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-            final posterHeight = PhoneHero.posterHeightFor(
-              width,
-              viewportHeight: viewport,
-            );
-            final posterWidth = posterHeight * 2 / 3;
-            // 与成品同形:居中 2:3 海报、两侧露出邻卡、下方标题/元信息/按钮。
+            final height = PhoneHero.heightFor(width, viewportHeight: viewport);
+            final page = AppUiTheme.of(context).scaffoldBackgroundColor;
+            // 与成品同形:整屏宽的头图块,片名、元信息和按钮压在下缘。
             return SizedBox(
-              height:
-                  top +
-                  PhoneHero.contentHeightFor(
-                    width,
-                    textScale: scale,
-                    viewportHeight: viewport,
+              height: height,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  SkeletonBlock(
+                    borderRadius: BorderRadius.zero,
+                    animated: animate,
                   ),
-              child: Padding(
-                padding: EdgeInsets.only(top: top + PhoneHero.topGap),
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: posterHeight,
-                      child: ClipRect(
-                        child: OverflowBox(
-                          maxWidth: double.infinity,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              for (var i = 0; i < 3; i++) ...[
-                                if (i > 0)
-                                  const SizedBox(
-                                    width: PhoneHero.posterSpacing,
-                                  ),
-                                SkeletonBlock(
-                                  width: i == 1
-                                      ? posterWidth
-                                      : posterWidth * .88,
-                                  height: i == 1
-                                      ? posterHeight
-                                      : posterHeight * .88,
-                                  borderRadius: BorderRadius.circular(
-                                    AppRadii.md,
-                                  ),
-                                  animated: animate,
-                                ),
-                              ],
-                            ],
-                          ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [.4, 1],
+                        colors: [page.withValues(alpha: 0), page],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: PhoneHero.sidePadding,
+                    right: PhoneHero.sidePadding,
+                    bottom: PhoneHero.dotsHeight,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SkeletonBlock(
+                          width: 68,
+                          height: 11 * scale,
+                          animated: animate,
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: PhoneHero.posterGap),
-                    SkeletonBlock(
-                      width: 68,
-                      height: 11 * scale,
-                      animated: animate,
-                    ),
-                    const SizedBox(height: 6),
-                    SkeletonBlock(
-                      width: (width - 40) * .60,
-                      height: 20 * scale,
-                      animated: animate,
-                    ),
-                    const SizedBox(height: 6),
-                    SkeletonBlock(
-                      width: (width - 40) * .42,
-                      height: 12 * scale,
-                      animated: animate,
-                    ),
-                    const SizedBox(height: PhoneHero.actionsGap),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: PhoneHero.sidePadding,
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: SkeletonBlock(
-                              height: PhoneHero.actionsHeight,
-                              borderRadius: BorderRadius.circular(20),
-                              animated: animate,
+                        const SizedBox(height: 8),
+                        SkeletonBlock(
+                          width: (width - 40) * .62,
+                          height: 30 * scale,
+                          animated: animate,
+                        ),
+                        const SizedBox(height: 10),
+                        SkeletonBlock(
+                          width: (width - 40) * .44,
+                          height: 12 * scale,
+                          animated: animate,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: SkeletonBlock(
+                                height: PhoneHero.actionsHeight,
+                                borderRadius: BorderRadius.circular(24),
+                                animated: animate,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 2,
-                            child: SkeletonBlock(
-                              height: PhoneHero.actionsHeight,
-                              borderRadius: BorderRadius.circular(20),
-                              animated: animate,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 2,
+                              child: SkeletonBlock(
+                                height: PhoneHero.actionsHeight,
+                                borderRadius: BorderRadius.circular(24),
+                                animated: animate,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             );
           },
         ),
-        const SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.lg),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: _SectionSkeleton(wide: true),
         ),
-        const SizedBox(height: AppSpacing.md),
+        const SizedBox(height: 28),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: _SectionSkeleton(wide: false),
@@ -267,16 +241,22 @@ class _LibrariesLoading extends StatelessWidget {
   }
 }
 
-/// 海报卡宽：一屏两张完整 2:3，再露出下一张。页边距 16，间距 8。
+//// 海报卡宽：一屏两张半到三张完整 2:3，再露出下一张。页边距 16，间距 12。
 double phoneHomePosterCardWidth(double screenWidth) {
   final available = screenWidth - AppSpacing.md * 2;
-  return (available - AppSpacing.xs * 2) / 2.2;
+  return ((available - AppSpacing.sm * 2) / 2.7).clamp(104.0, 168.0);
 }
 
-/// 横卡宽：一屏一张完整 16:9，再露出下一张。页边距 16，间距 8。
+/// 横卡宽：一屏一张完整 16:9，再露出下一张。页边距 16，间距 12。
 double phoneHomeWideCardWidth(double screenWidth) {
   final available = screenWidth - AppSpacing.md * 2;
-  return (available - AppSpacing.xs) / 1.3;
+  return ((available - AppSpacing.sm) / 1.22).clamp(220.0, 420.0);
+}
+
+/// 片库磁贴宽：一屏两张多。
+double phoneHomeLibraryCardWidth(double screenWidth) {
+  final available = screenWidth - AppSpacing.md * 2;
+  return ((available - AppSpacing.sm) / 1.8).clamp(160.0, 300.0);
 }
 
 /// Shared geometry keeps loading and resolved rails on the same baseline.
@@ -288,18 +268,13 @@ double phoneHomeRailHeight(BuildContext context, {required bool wide}) {
   if (!wide) return width * 1.5 + phonePosterCardLabelExtent(context) + 2;
   final theme = AppUiTheme.of(context).textTheme;
   final scaler = MediaQuery.textScalerOf(context);
-  final title = scaler.scale(theme.bodyMedium?.fontSize ?? 14) * 1.2;
-  final meta = scaler.scale(theme.labelSmall?.fontSize ?? 12) * 1.2;
-  return width * 9 / 16 +
-      16 +
-      phoneHomeWideBadgeHeight(context) +
-      title * 2 +
-      meta +
-      4;
+  final title = scaler.scale(theme.bodyMedium?.fontSize ?? 14) * 1.25;
+  final meta = scaler.scale(theme.labelSmall?.fontSize ?? 12) * 1.25;
+  return width * 9 / 16 + 8 + title + 2 + meta + 6;
 }
 
 double phoneHomeWideBadgeHeight(BuildContext context) =>
-    MediaQuery.textScalerOf(context).scale(12) * 1.2 + 4;
+    MediaQuery.textScalerOf(context).scale(11) * 1.25 + 4;
 
 class _RailLoading extends StatelessWidget {
   const _RailLoading({required this.animate, required this.wide});
@@ -322,7 +297,7 @@ class _RailLoading extends StatelessWidget {
         itemCount: wide ? 2 : 4,
         itemBuilder: (context, index) {
           return Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.xs),
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
             child: SizedBox(
               width: cardWidth,
               child: Column(

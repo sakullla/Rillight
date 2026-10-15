@@ -168,8 +168,9 @@ class _PhoneHomeState extends State<PhoneHome> {
           final librariesById = {
             for (final library in catalog.libraries) library.id: library,
           };
-          const sectionMargin = EdgeInsets.symmetric(horizontal: AppSpacing.md);
-          // 区块之间统一 16 的紧凑垂直节奏；隐藏的区块不占位。横幅全出血,
+          // 横向海报行从屏幕边缘滑入滑出，页边距由标题和行内留白负责。
+          const sectionMargin = EdgeInsets.zero;
+          // 区块之间统一 28 的垂直节奏；隐藏的区块不占位。横幅全出血,
           // 排在第一位时伸进状态栏与透明顶栏之下。
           final children = <Widget>[];
           for (final id in visible) {
@@ -281,7 +282,7 @@ class _PhoneHomeState extends State<PhoneHome> {
               final sections = sectionChildren;
               if (sections == null) return body;
               if (index.isOdd) {
-                return const SizedBox(height: AppSpacing.md);
+                return const SizedBox(height: 28);
               }
               return sections[index ~/ 2];
             },
@@ -332,9 +333,6 @@ String _resumeMeta(MediaItem item, String title) {
 double _rowHeightOf(BuildContext context, {required bool wide}) =>
     phoneHomeRailHeight(context, wide: wide);
 
-double _wideBadgeHeight(BuildContext context) =>
-    phoneHomeWideBadgeHeight(context);
-
 class _HomeSection {
   const _HomeSection({
     required this.title,
@@ -355,7 +353,7 @@ class _HomeSection {
   final bool resume;
 }
 
-/// 分栏标题。能进入完整列表时，箭头贴在标题右侧，整段都可点。
+//// 分栏标题。能进入完整列表时，箭头贴在标题右侧，整段都可点。
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title, this.onMore, this.moreKey});
 
@@ -365,44 +363,17 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final label = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-              height: 1.2,
-            ),
-          ),
-        ),
-        if (onMore != null)
-          Icon(
-            CupertinoIcons.chevron_right,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-      ],
-    );
     // 区块之间的垂直节奏由首页统一负责，标题只留与卡片的下间距。
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: onMore == null
-            ? label
-            : Container(
-                decoration: BoxDecoration(),
-                child: AppSurfaceAction(
-                  key: moreKey,
-                  onTap: onMore,
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: label,
-                ),
-              ),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        child: PhoneSectionHeader(
+          title: title,
+          onMore: onMore,
+          moreKey: moreKey,
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+        ),
       ),
     );
   }
@@ -445,11 +416,17 @@ class _PhoneHomeRow extends StatelessWidget {
           moreKey: hasMore ? CatalogKeys.shelfMore(section.shelfId) : null,
         ),
         if (state.loading && state.items.isEmpty)
-          MobileLoadingPlaceholder.row(wide: section.wide),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: MobileLoadingPlaceholder.row(wide: section.wide),
+          ),
         if (problem != null)
-          MobileFailureState(
-            message: catalogFailureMessage(l10n, problem),
-            onRetry: retry,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: MobileFailureState(
+              message: catalogFailureMessage(l10n, problem),
+              onRetry: retry,
+            ),
           ),
         if (state.items.isNotEmpty)
           SizedBox(
@@ -457,6 +434,7 @@ class _PhoneHomeRow extends StatelessWidget {
             child: ListView.builder(
               key: PageStorageKey('row-${section.title}'),
               scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
               itemCount: state.items.length,
               itemBuilder: (context, index) {
                 final item = state.items[index];
@@ -506,234 +484,218 @@ class _WideCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final light = scheme.brightness == Brightness.light;
     final progress = item.playbackProgress;
     final title = _resumeTitle(item);
     final meta = _resumeMeta(item, title);
+    final remaining = remainingLabel(l10n, item);
     final badges = phoneCardBadgeLabels(
       l10n,
       item,
       // 横卡底部已经有进度条，不再把同一进度写成「已看 n%」。
       includeResumeText: false,
     );
-    final badgeHeight = _wideBadgeHeight(context);
     return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.xs),
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
         width: width,
-        child: DecoratedBox(
-          position: DecorationPosition.foreground,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
-            ),
+        child: MobilePressable(
+          key: CatalogKeys.item(item.id),
+          onTap: () => PhoneMotion.openItem(
+            context,
+            item,
+            preferBackdrop: !item.isEpisode,
+            maxWidth: PhoneMotion.posterRequestWidth,
           ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: MobilePressable(
-              key: CatalogKeys.item(item.id),
-              onTap: () => PhoneMotion.openItem(
-                context,
-                item,
-                preferBackdrop: !item.isEpisode,
-                maxWidth: PhoneMotion.posterRequestWidth,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    child: AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        clipBehavior: Clip.hardEdge,
-                        children: [
-                          _sharedPosterImage(item, shared),
-                          const Positioned.fill(
-                            child: IgnorePointer(
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    stops: [0.0, 0.55, 1.0],
-                                    colors: [
-                                      Color(0x24000000),
-                                      Color(0x00000000),
-                                      Color(0x66000000),
-                                    ],
-                                  ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: PhoneArtworkFrame(
+                  radius: 12,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    clipBehavior: Clip.hardEdge,
+                    children: [
+                      _sharedPosterImage(item, shared),
+                      const Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                stops: [0.0, 0.35, 0.62, 1.0],
+                                colors: [
+                                  Color(0x40000000),
+                                  Color(0x00000000),
+                                  Color(0x00000000),
+                                  Color(0x9E000000),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (badges.isNotEmpty)
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          right: 48,
+                          child: Align(
+                            alignment: Alignment.topLeft,
+                            child: PhoneCardBadges(
+                              itemId: item.id,
+                              labels: badges,
+                            ),
+                          ),
+                        ),
+                      if (item.canResume)
+                        Positioned(
+                          left: 10,
+                          bottom: 12,
+                          child: AppIconButton(
+                            key: Key('phone-resume-play-${item.id}'),
+                            tooltip: l10n.resumePlay,
+                            style: AppButtonStyle(
+                              minimumSize: const Size(48, 48),
+                              fixedSize: const Size(48, 48),
+                              padding: EdgeInsets.zero,
+                              backgroundColor: const Color(0xF2FFFFFF),
+                              foregroundColor: const Color(0xff000000),
+                              shape: const CircleBorder(),
+                            ),
+                            onPressed: () => context.push<void>(
+                              '/play/${item.id}',
+                              extra: PlayerOpenRequest(
+                                itemId: item.id,
+                                autoResume: true,
+                              ),
+                            ),
+                            icon: const Icon(
+                              CupertinoIcons.play_fill,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      if (item.canResume && remaining != null)
+                        Positioned(
+                          left: 66,
+                          right: 10,
+                          bottom: 26,
+                          child: Text(
+                            remaining,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: const Color(0xffffffff),
+                              fontWeight: FontWeight.w600,
+                              shadows: const [
+                                Shadow(color: Color(0x80000000), blurRadius: 6),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (item.canResume)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Semantics(
+                            container: true,
+                            label: l10n.playbackProgress(
+                              (progress * 100).round(),
+                            ),
+                            child: SizedBox(
+                              key: CatalogKeys.resumeProgress,
+                              height: 3.5,
+                              child: ColoredBox(
+                                color: const Color(0xffffffff)
+                                    .withValues(alpha: 0.22),
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: progress.clamp(0.0, 1.0),
+                                  child: ColoredBox(color: scheme.primary),
                                 ),
                               ),
                             ),
                           ),
-                          if (item.canResume)
-                            Positioned.fill(
-                              child: Center(
-                                child: AppIconButton(
-                                  key: Key('phone-resume-play-${item.id}'),
-                                  tooltip: l10n.resumePlay,
-                                  style: AppButtonStyle(
-                                    minimumSize: const Size(48, 48),
-                                    fixedSize: const Size(48, 48),
-                                    padding: EdgeInsets.zero,
-                                    backgroundColor: light
-                                        ? scheme.primary.withValues(alpha: 0.94)
-                                        : const Color(0xEBFFFFFF),
-                                    foregroundColor: light
-                                        ? scheme.onPrimary
-                                        : const Color(0xff000000),
-                                    shape: const CircleBorder(),
-                                  ),
-                                  onPressed: () => context.push<void>(
-                                    '/play/${item.id}',
-                                    extra: PlayerOpenRequest(
-                                      itemId: item.id,
-                                      autoResume: true,
+                        ),
+                      if (onRemove != null)
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: AppTooltip(
+                            message: l10n.removeFromResume,
+                            child: GestureDetector(
+                              key: CatalogKeys.removeFromResume(item.id),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: onRemove,
+                              child: SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: Center(
+                                  child: DecoratedBox(
+                                    decoration: const BoxDecoration(
+                                      color: Color(0x8C000000),
+                                      shape: BoxShape.circle,
                                     ),
-                                  ),
-                                  icon: const Icon(CupertinoIcons.play_fill),
-                                ),
-                              ),
-                            ),
-
-                          if (item.canResume)
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              child: Semantics(
-                                container: true,
-                                label: l10n.playbackProgress(
-                                  (progress * 100).round(),
-                                ),
-                                child: SizedBox(
-                                  key: CatalogKeys.resumeProgress,
-                                  height: 3.5,
-                                  child: ColoredBox(
-                                    color: light
-                                        ? scheme.inverseSurface.withValues(
-                                            alpha: 0.30,
-                                          )
-                                        : const Color(0xff000000)
-                                              .withValues(alpha: 0.52),
-                                    child: FractionallySizedBox(
-                                      alignment: Alignment.centerLeft,
-                                      widthFactor: progress.clamp(0.0, 1.0),
-                                      child: ColoredBox(color: scheme.primary),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (onRemove != null)
-                            Positioned(
-                              top: 0,
-                              right: 0,
-                              child: AppTooltip(
-                                message: l10n.removeFromResume,
-                                child: GestureDetector(
-                                  key: CatalogKeys.removeFromResume(item.id),
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: onRemove,
-                                  child: SizedBox(
-                                    width: 48,
-                                    height: 48,
-                                    child: Center(
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: light
-                                              ? scheme.surfaceContainerLowest
-                                                    .withValues(alpha: 0.92)
-                                              : const Color(0x99000000),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: light
-                                                ? scheme.outlineVariant
-                                                : const Color(0x33FFFFFF),
-                                          ),
-                                        ),
-                                        child: SizedBox(
-                                          width: 28,
-                                          height: 28,
-                                          child: Icon(
-                                            CupertinoIcons.xmark,
-                                            size: 15,
-                                            color: light
-                                                ? scheme.onSurface
-                                                : const Color(0xffffffff),
-                                          ),
-                                        ),
+                                    child: const SizedBox(
+                                      width: 26,
+                                      height: 26,
+                                      child: Icon(
+                                        CupertinoIcons.xmark,
+                                        size: 13,
+                                        color: Color(0xffffffff),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (badges.isNotEmpty)
-                          SizedBox(
-                            height: badgeHeight,
-                            child: ClipRect(
-                              child: PhoneCardBadges(
-                                itemId: item.id,
-                                labels: badges,
-                              ),
-                            ),
-                          ),
-                        Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            height: 1.2,
                           ),
                         ),
-
-                        if (meta.isNotEmpty)
-                          Text(
-                            meta,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              height: 1.2,
-                            ),
-                          ),
-                      ],
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 8, 2, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
+                      ),
+                    ),
+                    if (meta.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          meta,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            height: 1.25,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
-}
-
-bool _libraryHasImage(MediaItem library) {
-  bool tagged(String? tag) => tag != null && tag.isNotEmpty;
-  return tagged(library.primaryImageTag) ||
-      tagged(library.backdropImageTag) ||
-      tagged(library.thumbImageTag);
 }
 
 class _PhoneLibraryEntry extends StatelessWidget {
@@ -747,10 +709,9 @@ class _PhoneLibraryEntry extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final l10n = AppLocalizations.of(context);
-    final theme = AppUiTheme.of(context);
     final screen = MediaQuery.sizeOf(context).width;
-    // 与继续观看横卡同宽：一屏一张多，露出下一张。
-    final cardWidth = phoneHomeWideCardWidth(screen);
+    // 比继续观看小一档：一屏两张多，片库多时一眼看到更多入口。
+    final cardWidth = phoneHomeLibraryCardWidth(screen);
     final cardHeight = cardWidth * 9 / 16;
     return Column(
       key: const Key('phone-home-libraries'),
@@ -761,68 +722,19 @@ class _PhoneLibraryEntry extends StatelessWidget {
           height: cardHeight,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             itemCount: libraries.length,
             itemBuilder: (context, index) {
               final library = libraries[index];
-              final hasImage = _libraryHasImage(library);
               return Padding(
-                padding: const EdgeInsets.only(right: AppSpacing.xs),
+                padding: const EdgeInsets.only(right: AppSpacing.sm),
                 child: SizedBox(
                   width: cardWidth,
                   height: cardHeight,
                   child: MobilePressable(
                     key: Key('phone-home-library-${library.id}'),
                     onTap: () => context.push(AppRoutes.library(library.id)),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      child: ColoredBox(
-                        color: theme.colorScheme.surfaceContainerHigh,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (hasImage)
-                              MediaImage(
-                                item: library,
-                                preferBackdrop: true,
-                                maxWidth: 480,
-                              ),
-                            if (hasImage)
-                              const DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Color(0x00000000),
-                                      Color(0xB3000000),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            Align(
-                              alignment: hasImage
-                                  ? Alignment.bottomLeft
-                                  : Alignment.center,
-                              child: Padding(
-                                padding: const EdgeInsets.all(AppSpacing.md),
-                                child: Text(
-                                  library.name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: hasImage
-                                        ? const Color(0xffffffff)
-                                        : theme.colorScheme.onSurface,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                    child: PhoneLibraryTile(library: library),
                   ),
                 ),
               );
@@ -862,11 +774,17 @@ class _PhoneLibraryLatest extends StatelessWidget {
               onMore: () => context.push(AppRoutes.library(library.id)),
             ),
             if (snapshot.loading && snapshot.items.isEmpty)
-              const MobileLoadingPlaceholder.row(),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: MobileLoadingPlaceholder.row(),
+              ),
             if (snapshot.error != null)
-              MobileFailureState(
-                message: catalogFailureMessage(l10n, snapshot.error!),
-                onRetry: snapshot.retry,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                child: MobileFailureState(
+                  message: catalogFailureMessage(l10n, snapshot.error!),
+                  onRetry: snapshot.retry,
+                ),
               ),
             if (snapshot.items.isNotEmpty)
               SizedBox(
@@ -874,6 +792,9 @@ class _PhoneLibraryLatest extends StatelessWidget {
                 child: ListView.builder(
                   key: PageStorageKey('row-$title'),
                   scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
                   itemCount: snapshot.items.length,
                   itemBuilder: (context, index) {
                     final item = snapshot.items[index];

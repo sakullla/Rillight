@@ -48,9 +48,11 @@ Map<String, dynamic> encodeMediaUserData(MediaUserData value) => {
   'playbackPositionUs': value.playbackPosition.inMicroseconds,
   'playedPercentage': value.playedPercentage,
   'lastPlayedDate': value.lastPlayedDate?.toIso8601String(),
+  if (value.favorite) 'favorite': true,
 };
 MediaUserData decodeMediaUserData(Map<String, dynamic> json) => MediaUserData(
   played: json['played'] as bool? ?? false,
+  favorite: json['favorite'] as bool? ?? false,
   playbackPosition: Duration(
     microseconds: json['playbackPositionUs'] as int? ?? 0,
   ),

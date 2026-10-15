@@ -1,3 +1,6 @@
+import 'package:rillight/library/mobile_library_page.dart';
+import 'package:rillight/search/recent_searches.dart';
+import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
 import '../helpers/cupertino_test_app.dart';
@@ -35,7 +38,6 @@ import 'package:rillight/home/phone_home.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/library_page.dart';
-import 'package:rillight/library/poster_card.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
 import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/library/tv_detail_page.dart';
@@ -293,13 +295,8 @@ void main() {
       await tester.tap(find.text('聚合').last);
       await settle(tester);
       expect(find.byKey(MobileShell.serverPillKey), findsNothing);
-      expect(
-        find.descendant(
-          of: find.byType(PhoneShellBar),
-          matching: find.text('聚合'),
-        ),
-        findsNothing,
-      );
+      // 非首页标签页的顶栏是大号页面名。
+      expect(tester.widget<Text>(find.byKey(MobileShell.titleKey)).data, '聚合');
       expect(position('aggregation').maxScrollExtent, greaterThan(24));
       await tester.tap(find.text('首页').last);
       await settle(tester);
@@ -474,7 +471,8 @@ void main() {
       expectPhoneOnly(tester);
 
       final play = find.byKey(const Key('mobile-detail-play'));
-      expect(tester.getRect(play).bottom, lessThanOrEqualTo(width));
+      // 主播放钮落在 360x800 首屏的上半部，不用滚动就能点到。
+      expect(tester.getRect(play).bottom, lessThanOrEqualTo(800 * .5));
       await tester.tap(play);
       await settle(tester);
       expect(find.byType(MobilePlayerPage), findsOneWidget);
@@ -744,19 +742,19 @@ void main() {
       );
       await tester.pump(const Duration(seconds: 1));
       await settle(tester);
-      expect(find.byType(PosterCard), findsNothing);
+      expect(find.byType(PhonePosterCard), findsNothing);
 
       await tester.enterText(field, 'Inception');
       await tester.pump(const Duration(milliseconds: 100));
-      expect(find.byType(PosterCard), findsNothing);
+      expect(find.byType(PhonePosterCard), findsNothing);
       await tester.pump(const Duration(milliseconds: 500));
       await settle(tester);
-      expect(find.byType(PosterCard), findsWidgets);
+      expect(find.byType(PhonePosterCard), findsWidgets);
 
       // 清空即回到空态。
       await tester.tap(find.byKey(const Key('aggregation-search-clear')));
       await settle(tester);
-      expect(find.byType(PosterCard), findsNothing);
+      expect(find.byType(PhonePosterCard), findsNothing);
     },
     tags: ['integration'],
   );
@@ -773,7 +771,7 @@ void main() {
       await tester.enterText(field, 'Inception');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await settle(tester);
-      expect(find.byType(PosterCard), findsWidgets);
+      expect(find.byType(PhonePosterCard), findsWidgets);
       server.searchStatus = 503;
       // 搜索框已无单独的提交钮：回到输入框再按一次搜索键重查同一片名。
       await tester.showKeyboard(field);
@@ -782,11 +780,11 @@ void main() {
       expect(find.text('所选来源全部失败，请逐来源重试'), findsOneWidget);
       expect(find.text('重试'), findsWidgets);
       // 再次提交片名会撤掉上一轮海报，失败不能拿旧结果冒充成功。
-      expect(find.byType(PosterCard), findsNothing);
+      expect(find.byType(PhonePosterCard), findsNothing);
       server.searchStatus = null;
       await tester.tap(find.text('重试').first);
       await settle(tester);
-      expect(find.byType(PosterCard), findsWidgets);
+      expect(find.byType(PhonePosterCard), findsWidgets);
       expect(find.text('重试'), findsNothing);
       await tester.enterText(field, 'no-such-movie');
       await tester.testTextInput.receiveAction(TextInputAction.search);
@@ -802,7 +800,7 @@ void main() {
       expect(find.byType(MobileShell), findsOneWidget);
       // 来源登录过期只留在这一次搜索上，不把当前全局连接退出。
       expect(find.text('重试'), findsWidgets);
-      expect(find.byType(PosterCard), findsNothing);
+      expect(find.byType(PhonePosterCard), findsNothing);
       expect(find.byKey(const Key('android-connect-submit')), findsNothing);
       final requestsAfterRevocation = server.requests.length;
       await tester.pump(const Duration(seconds: 1));
@@ -1245,15 +1243,33 @@ void main() {
       final blocks = tester
           .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
           .toList();
-      // 轮播骨架是一张居中的 2:3 海报,与成品同形。
-      final heroPoster = PhoneHero.posterHeightFor(360, viewportHeight: 800);
+      // 头图骨架是整屏宽的一块,高度与成品头图相同。
+      final heroHeight = PhoneHero.heightFor(360, viewportHeight: 800);
       expect(
         blocks.where(
           (block) =>
-              ((block.height ?? 0) - heroPoster).abs() < 0.1 &&
-              ((block.width ?? 0) - heroPoster * 2 / 3).abs() < 0.1,
+              block.width == null &&
+              block.height == null &&
+              block.borderRadius == BorderRadius.zero,
         ),
         hasLength(1),
+      );
+      expect(
+        tester
+            .getSize(
+              find
+                  .ancestor(
+                    of: find.byWidgetPredicate(
+                      (widget) =>
+                          widget is SkeletonBlock &&
+                          widget.borderRadius == BorderRadius.zero,
+                    ),
+                    matching: find.byType(SizedBox),
+                  )
+                  .first,
+            )
+            .height,
+        closeTo(heroHeight, .5),
       );
       final posterWidth = phoneHomePosterCardWidth(360);
       expect(
@@ -1365,7 +1381,7 @@ void main() {
             .widget<CupertinoTabBar>(find.byType(CupertinoTabBar))
             .items
             .length,
-        3,
+        4,
       );
       expect(find.text('我的'), findsNothing);
       await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
@@ -1419,6 +1435,92 @@ void main() {
         tester.getRect(find.byKey(const Key('aggregation-keyword'))).bottom,
         lessThanOrEqualTo(560),
       );
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'libraries tab lists every library with shortcuts that open shelves',
+    (tester) async {
+      final server = FakeEmbyServer();
+      final (app, _) = await start(tester, server);
+      await login(tester, server);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CupertinoTabBar),
+          matching: find.text('媒体库'),
+        ),
+      );
+      await settle(tester);
+      expect(tester.widget<Text>(find.byKey(MobileShell.titleKey)).data, '媒体库');
+      expect(find.byType(PhoneLibrariesTab), findsOneWidget);
+      expect(find.text('我的媒体库'), findsOneWidget);
+      final libraries = CatalogScope.of(
+        tester.element(find.byType(PhoneLibrariesTab)),
+      ).libraries;
+      expect(libraries, isNotEmpty);
+      for (final library in libraries.take(2)) {
+        expect(
+          find.byKey(Key('phone-library-block-${library.id}')),
+          findsOneWidget,
+        );
+      }
+      await tester.tap(
+        find.byKey(Key('phone-library-block-${libraries.first.id}')),
+      );
+      await settle(tester);
+      expect(find.byType(MobileLibraryPage), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.byType(PhoneLibrariesTab), findsOneWidget);
+      await tester.tap(
+        find.byKey(PhoneLibrariesTab.shortcutKey('latest-movies')),
+      );
+      await settle(tester);
+      expect(
+        app.router.routerDelegate.currentConfiguration.last.matchedLocation,
+        AppRoutes.shelfLatestMovies,
+      );
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'submitted searches are remembered and replayed from the idle page',
+    (tester) async {
+      final server = FakeEmbyServer();
+      await start(tester, server);
+      await login(tester, server);
+      await tester.tap(find.text('搜索').last);
+      await settle(tester);
+      expect(find.text('想看点什么？'), findsOneWidget);
+      expect(find.text('最近搜索'), findsNothing);
+      final field = find.byKey(const Key('aggregation-keyword'));
+      await tester.enterText(field, 'Inception');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await settle(tester);
+      expect(find.byType(PhonePosterCard), findsWidgets);
+      await tester.tap(find.byKey(const Key('aggregation-search-clear')));
+      await settle(tester);
+      expect(find.text('最近搜索'), findsOneWidget);
+      final recent = find.byKey(
+        const ValueKey('phone-search-recent-Inception'),
+      );
+      expect(recent, findsOneWidget);
+      await tester.tap(recent);
+      await settle(tester);
+      expect(tester.widget<AppTextField>(field).controller!.text, 'Inception');
+      expect(find.byType(PhonePosterCard), findsWidgets);
+      await tester.tap(find.byKey(const Key('aggregation-search-clear')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('phone-search-recent-clear')));
+      await settle(tester);
+      expect(find.text('最近搜索'), findsNothing);
+      expect(RecentSearches.instance.terms, isEmpty);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

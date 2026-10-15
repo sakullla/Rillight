@@ -28,6 +28,9 @@ class BrowseController extends ChangeNotifier {
 
   List<MediaItem> items = const [];
   bool loading = false, loadingMore = false, hasMore = false;
+
+  /// 服务器报告的当前查询总条数;不报告时为 null。
+  int? totalCount;
   bool _liveFirstPageReady = false;
   String? type, watch, genre;
   int? year;
@@ -94,6 +97,7 @@ class BrowseController extends ChangeNotifier {
       }
     } else {
       items = page.items;
+      totalCount = page.totalRecordCount;
       _offset = page.items.length;
       if (page.items.length < pageSize) {
         hasMore = false;

@@ -7,6 +7,7 @@ class AppUiThemeData {
   AppUiThemeData({
     required this.colorScheme,
     this.tv = false,
+    this.phone = false,
     AppTextTheme? textTheme,
     Color? scaffoldBackgroundColor,
   }) : textTheme = textTheme ?? AppTextTheme.standard(colorScheme.onSurface),
@@ -16,10 +17,14 @@ class AppUiThemeData {
   factory AppUiThemeData.fromTones(Tones tones, {bool phone = false}) =>
       AppUiThemeData(
         colorScheme: AppColorScheme.fromTones(tones),
+        phone: phone,
         textTheme: AppTextTheme.standard(tones.onSurface, phone: phone),
       );
 
   final bool tv;
+
+  /// 手机交互树的主题(影院黑/纸白取色与手机字阶)。
+  final bool phone;
   final AppColorScheme colorScheme;
   final AppTextTheme textTheme;
   final Color scaffoldBackgroundColor;
@@ -30,11 +35,13 @@ class AppUiThemeData {
 
   AppUiThemeData copyWith({
     bool? tv,
+    bool? phone,
     AppColorScheme? colorScheme,
     AppTextTheme? textTheme,
     Color? scaffoldBackgroundColor,
   }) => AppUiThemeData(
     tv: tv ?? this.tv,
+    phone: phone ?? this.phone,
     colorScheme: colorScheme ?? this.colorScheme,
     textTheme: textTheme ?? this.textTheme,
     scaffoldBackgroundColor:
@@ -46,7 +53,10 @@ class AppUiThemeData {
     primaryColor: colorScheme.primary,
     primaryContrastingColor: colorScheme.onPrimary,
     scaffoldBackgroundColor: scaffoldBackgroundColor,
-    barBackgroundColor: colorScheme.surfaceContainerLow,
+    // 手机导航栏与页面同色、略透明，滚动内容从下面隐约透出。
+    barBackgroundColor: phone
+        ? scaffoldBackgroundColor.withValues(alpha: .94)
+        : colorScheme.surfaceContainerLow,
     textTheme: CupertinoTextThemeData(
       primaryColor: colorScheme.primary,
       textStyle: textTheme.bodyMedium!,
@@ -86,10 +96,16 @@ class AppUiTheme extends StatelessWidget {
   );
   static AppUiThemeData dark() => _dark;
   static AppUiThemeData light() => _light;
-  static AppUiThemeData phoneDark() =>
-      AppUiThemeData.fromTones(AppPalette.darkTones, phone: true);
-  static AppUiThemeData phoneLight() =>
-      AppUiThemeData.fromTones(AppPalette.lightTones, phone: true);
+  static final AppUiThemeData _phoneDark = AppUiThemeData.fromTones(
+    AppPalette.phoneDarkTones,
+    phone: true,
+  );
+  static final AppUiThemeData _phoneLight = AppUiThemeData.fromTones(
+    AppPalette.phoneLightTones,
+    phone: true,
+  );
+  static AppUiThemeData phoneDark() => _phoneDark;
+  static AppUiThemeData phoneLight() => _phoneLight;
   static AppUiThemeData tvDark() =>
       AppUiThemeData.fromTones(AppPalette.tvDarkTones);
   static AppUiThemeData tvLight() =>
