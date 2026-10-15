@@ -8,6 +8,17 @@ import 'theme.dart';
 
 enum AppButtonVariant { plain, filled, tinted, outlined }
 
+/// One corner radius per emphasis level, shared by desktop, phone and TV.
+double _buttonRadius(AppButtonVariant variant) => switch (variant) {
+  AppButtonVariant.plain => AppRadii.md,
+  AppButtonVariant.filled => AppRadii.md,
+  AppButtonVariant.tinted => AppRadii.md,
+  AppButtonVariant.outlined => AppRadii.md,
+};
+
+const _tvFocusScale = 1.04;
+const _tvPressScale = 0.96;
+
 /// Reusable app action appearance, independent of a design library's states.
 class AppButtonStyle {
   const AppButtonStyle({
@@ -69,12 +80,16 @@ class _AppSelectableTextState extends State<AppSelectableText> {
 
 /// One focus owner for pointer, keyboard and remote activation. Cupertino's
 /// button supplies pointer feedback; the outer focus also handles select/space.
+///
+/// Hover, keyboard focus, pressed, disabled and selected each differ from the
+/// resting face. Television focus changes the fill and the scale.
 class AppButton extends StatefulWidget {
   const AppButton({
     super.key,
     required this.child,
     this.onPressed,
     this.variant = AppButtonVariant.plain,
+    this.selected = false,
     this.focusNode,
     this.autofocus = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -91,6 +106,7 @@ class AppButton extends StatefulWidget {
     required Widget label,
     this.onPressed,
     this.variant = AppButtonVariant.plain,
+    this.selected = false,
     this.focusNode,
     this.autofocus = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -111,6 +127,9 @@ class AppButton extends StatefulWidget {
   final Widget child;
   final VoidCallback? onPressed;
   final AppButtonVariant variant;
+
+  /// Selected emphasis. Independent of hover, focus, pressed and disabled.
+  final bool selected;
   final FocusNode? focusNode;
   final bool autofocus;
   final EdgeInsetsGeometry padding;
@@ -124,29 +143,187 @@ class AppButton extends StatefulWidget {
 }
 
 class _AppButtonState extends State<AppButton> {
-  bool _focused = false, _hovered = false;
+  bool _focused = false,
+      _hovered = false,
+      _pointerDown = false,
+      _keyDown = false;
+  bool get _pressed => _pointerDown || _keyDown;
+  static final _activateKeys = {
+    LogicalKeyboardKey.enter,
+    LogicalKeyboardKey.space,
+    LogicalKeyboardKey.select,
+  };
+
   @override
-  Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKey);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKey);
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(AppButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.onPressed == null && (_pointerDown || _keyDown)) {
+      _pointerDown = false;
+      _keyDown = false;
+    }
+  }
+
+  bool _handleKey(KeyEvent event) {
+    if (!_focused ||
+        widget.onPressed == null ||
+        !_activateKeys.contains(event.logicalKey)) {
+      return false;
+    }
+    final down = event is! KeyUpEvent;
+    if (_keyDown != down) setState(() => _keyDown = down);
+    return false;
+  }
+
+  void _setPointer(bool value) {
+    if (widget.onPressed == null || _pointerDown == value) return;
+    setState(() => _pointerDown = value);
+  }
+
+  _ButtonFace _face(AppUiThemeData theme) {
     final colors = theme.colorScheme;
     final enabled = widget.onPressed != null;
-    final filled = widget.variant == AppButtonVariant.filled;
-    final background =
-        widget.color ??
-        widget.style?.backgroundColor ??
+    final customFill = widget.color ?? widget.style?.backgroundColor;
+    final resting =
+        customFill ??
         switch (widget.variant) {
           AppButtonVariant.filled => colors.primary,
           AppButtonVariant.tinted => colors.primaryContainer,
-          _ => const Color(0x00000000),
+          AppButtonVariant.plain ||
+          AppButtonVariant.outlined => const Color(0x00000000),
         };
-    final foreground = theme.tv && _focused && enabled
-        ? colors.onInverseSurface
-        : enabled
-        ? widget.foregroundColor ??
-              widget.style?.foregroundColor ??
-              (filled ? colors.onPrimary : colors.primary)
-        : widget.style?.disabledForegroundColor ??
-              colors.onSurfaceVariant.withValues(alpha: .5);
+    final tvFocus = theme.tv && _focused && enabled;
+    var fill = resting;
+    var scale = 1.0;
+    var side =
+        widget.style?.side ??
+        BorderSide(
+          color: widget.variant == AppButtonVariant.outlined
+              ? colors.outline
+              : const Color(0x00000000),
+        );
+
+    if (!enabled) {
+      if (widget.variant == AppButtonVariant.filled) {
+        fill = colors.surfaceContainerHigh;
+      }
+      if (widget.variant == AppButtonVariant.outlined &&
+          widget.style?.side == null) {
+        side = BorderSide(color: colors.outline.withValues(alpha: .38));
+      }
+    } else if (tvFocus && !_pressed) {
+      fill = colors.inverseSurface;
+      scale = _tvFocusScale;
+      side = BorderSide(color: colors.primary, width: 2);
+    } else if (_pressed) {
+      fill = theme.tv && _focused
+          ? Color.alphaBlend(
+              colors.scrim.withValues(alpha: .16),
+              colors.inverseSurface,
+            )
+          : _stateFill(colors, resting, customFill != null, _PressKind.pressed);
+      scale = theme.tv && _focused ? _tvPressScale : 1;
+      if (widget.style?.side == null) {
+        side = BorderSide(color: colors.tertiary, width: 2);
+      }
+    } else if (_focused) {
+      if (customFill == null) {
+        fill = _stateFill(colors, resting, false, _PressKind.focus);
+      }
+      side = BorderSide(color: colors.primary, width: 2);
+    } else if (widget.selected) {
+      if (customFill == null) fill = colors.secondaryContainer;
+      if (widget.style?.side == null) {
+        side = BorderSide(color: colors.secondary, width: 2);
+      }
+    } else if (_hovered) {
+      fill =
+          widget.style?.hoverColor ??
+          _stateFill(colors, resting, customFill != null, _PressKind.hover);
+      if (widget.style?.side == null) {
+        side = BorderSide(color: colors.outlineVariant);
+      }
+    }
+
+    return _ButtonFace(
+      fill: fill,
+      foreground: _foreground(colors, enabled, tvFocus),
+      side: side,
+      radius: _buttonRadius(widget.variant),
+      scale: scale,
+    );
+  }
+
+  Color _stateFill(
+    AppColorScheme colors,
+    Color resting,
+    bool custom,
+    _PressKind kind,
+  ) {
+    if (!custom &&
+        (widget.variant == AppButtonVariant.plain ||
+            widget.variant == AppButtonVariant.outlined)) {
+      return switch (kind) {
+        _PressKind.hover => colors.surfaceContainerHigh,
+        _PressKind.focus => colors.surfaceContainerHighest,
+        _PressKind.pressed => colors.surfaceBright,
+      };
+    }
+    final base = resting.a == 0 ? colors.surfaceContainerHighest : resting;
+    final (ink, amount) = switch (kind) {
+      _PressKind.hover => (colors.onSurface, .1),
+      _PressKind.focus => (
+        widget.variant == AppButtonVariant.filled
+            ? colors.onSurface
+            : colors.primary,
+        .22,
+      ),
+      _PressKind.pressed => (colors.scrim, .16),
+    };
+    return Color.alphaBlend(ink.withValues(alpha: amount), base);
+  }
+
+  Color _foreground(AppColorScheme colors, bool enabled, bool tvFocus) {
+    if (tvFocus) return colors.onInverseSurface;
+    if (!enabled) {
+      return widget.style?.disabledForegroundColor ??
+          colors.onSurfaceVariant.withValues(alpha: .5);
+    }
+    final explicit = widget.foregroundColor ?? widget.style?.foregroundColor;
+    if (explicit != null) return explicit;
+    if (widget.selected &&
+        widget.color == null &&
+        widget.style?.backgroundColor == null) {
+      return colors.onSecondaryContainer;
+    }
+    return widget.variant == AppButtonVariant.filled
+        ? colors.onPrimary
+        : colors.primary;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final enabled = widget.onPressed != null;
+    final face = _face(theme);
+    final duration = AppMotion.durationOf(context, AppMotion.fast);
+    final shape =
+        (widget.style?.shape ??
+                RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(face.radius),
+                ))
+            .copyWith(side: face.side);
     return FocusableActionDetector(
       enabled: enabled,
       focusNode: widget.focusNode,
@@ -155,16 +332,29 @@ class _AppButtonState extends State<AppButton> {
           ? SystemMouseCursors.click
           : SystemMouseCursors.basic,
       onFocusChange: (value) {
-        setState(() => _focused = value);
+        setState(() {
+          _focused = value;
+          if (!value) _keyDown = false;
+        });
         widget.onFocusChange?.call(value);
       },
       onShowHoverHighlight: (value) => setState(() => _hovered = value),
       shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        _KeyPhaseActivator(LogicalKeyboardKey.enter, up: false):
+            DoNothingIntent(),
+        _KeyPhaseActivator(LogicalKeyboardKey.space, up: false):
+            DoNothingIntent(),
+        _KeyPhaseActivator(LogicalKeyboardKey.select, up: false):
+            DoNothingIntent(),
+        _KeyPhaseActivator(LogicalKeyboardKey.enter, up: true):
+            ActivateIntent(),
+        _KeyPhaseActivator(LogicalKeyboardKey.space, up: true):
+            ActivateIntent(),
+        _KeyPhaseActivator(LogicalKeyboardKey.select, up: true):
+            ActivateIntent(),
       },
       actions: <Type, Action<Intent>>{
+        DoNothingIntent: DoNothingAction(),
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) {
             widget.onPressed?.call();
@@ -175,52 +365,38 @@ class _AppButtonState extends State<AppButton> {
       child: Semantics(
         button: true,
         enabled: enabled,
+        selected: widget.selected ? true : null,
         label: widget.semanticLabel,
-        child: AnimatedContainer(
-          duration: AppMotion.durationOf(context, AppMotion.fast),
-          constraints: widget.style?.fixedSize == null
-              ? null
-              : BoxConstraints.tight(widget.style!.fixedSize!),
-          decoration: ShapeDecoration(
-            color: theme.tv && _focused && enabled
-                ? colors.inverseSurface
-                : !enabled && filled
-                ? colors.surfaceContainerHigh
-                : _hovered
-                ? widget.style?.hoverColor ?? background
-                : background,
-            shape:
-                (widget.style?.shape ??
-                        RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                        ))
-                    .copyWith(
-                      side: BorderSide(
-                        width: _focused ? 2 : widget.style?.side?.width ?? 1,
-                        color: _focused
-                            ? colors.primary
-                            : widget.style?.side?.color ??
-                                  (widget.variant == AppButtonVariant.outlined
-                                      ? colors.outline
-                                      : _hovered
-                                      ? colors.outlineVariant
-                                      : const Color(0x00000000)),
-                      ),
+        child: Listener(
+          onPointerDown: (_) => _setPointer(true),
+          onPointerUp: (_) => _setPointer(false),
+          onPointerCancel: (_) => _setPointer(false),
+          child: AnimatedScale(
+            scale: face.scale,
+            duration: duration,
+            alignment: Alignment.center,
+            child: AnimatedContainer(
+              duration: duration,
+              constraints: widget.style?.fixedSize == null
+                  ? null
+                  : BoxConstraints.tight(widget.style!.fixedSize!),
+              decoration: ShapeDecoration(color: face.fill, shape: shape),
+              child: ExcludeFocus(
+                child: CupertinoButton(
+                  padding: widget.style?.padding ?? widget.padding,
+                  minimumSize: widget.style?.minimumSize ?? widget.minimumSize,
+                  onPressed: widget.onPressed,
+                  child: IconTheme(
+                    data: IconThemeData(color: face.foreground, size: 20),
+                    child: DefaultTextStyle(
+                      style:
+                          (widget.style?.textStyle ??
+                                  theme.textTheme.labelLarge!)
+                              .copyWith(color: face.foreground),
+                      textAlign: TextAlign.center,
+                      child: widget.child,
                     ),
-          ),
-          child: ExcludeFocus(
-            child: CupertinoButton(
-              padding: widget.style?.padding ?? widget.padding,
-              minimumSize: widget.style?.minimumSize ?? widget.minimumSize,
-              onPressed: widget.onPressed,
-              child: IconTheme(
-                data: IconThemeData(color: foreground, size: 20),
-                child: DefaultTextStyle(
-                  style:
-                      (widget.style?.textStyle ?? theme.textTheme.labelLarge!)
-                          .copyWith(color: foreground),
-                  textAlign: TextAlign.center,
-                  child: widget.child,
+                  ),
                 ),
               ),
             ),
@@ -229,6 +405,35 @@ class _AppButtonState extends State<AppButton> {
       ),
     );
   }
+}
+
+enum _PressKind { hover, focus, pressed }
+
+/// Key-down is the pressed face only. The action runs on release, and the
+/// down event is consumed so an ancestor shortcut does not run it early.
+class _KeyPhaseActivator extends SingleActivator {
+  const _KeyPhaseActivator(super.trigger, {required this.up});
+
+  final bool up;
+
+  @override
+  bool accepts(KeyEvent event, HardwareKeyboard state) {
+    final matched = up ? event is KeyUpEvent : event is KeyDownEvent;
+    return matched && event.logicalKey == trigger;
+  }
+}
+
+class _ButtonFace {
+  const _ButtonFace({
+    required this.fill,
+    required this.foreground,
+    required this.side,
+    required this.radius,
+    required this.scale,
+  });
+  final Color fill, foreground;
+  final BorderSide side;
+  final double radius, scale;
 }
 
 class AppIconButton extends StatelessWidget {
@@ -246,6 +451,7 @@ class AppIconButton extends StatelessWidget {
     this.backgroundColor,
     this.style,
     this.constraints,
+    this.selected = false,
   });
   final Widget icon;
   final VoidCallback? onPressed;
@@ -259,10 +465,12 @@ class AppIconButton extends StatelessWidget {
   final Color? backgroundColor;
   final AppButtonStyle? style;
   final BoxConstraints? constraints;
+  final bool selected;
   @override
   Widget build(BuildContext context) {
     final button = AppButton(
       onPressed: onPressed,
+      selected: selected,
       focusNode: focusNode,
       autofocus: autofocus,
       padding: padding,
