@@ -89,8 +89,9 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
       AppViewport.dp(rail ? 560 : 420, screen),
       math.max(280.0, screen.width - 48),
     );
+    // 宽栏每项热区 44。七项、间距和内边距要完整落在面板内。
     final height = math.min(
-      AppViewport.dp(rail ? 400 : 336, screen),
+      AppViewport.dp(rail ? 412 : 336, screen),
       math.max(240.0, screen.height - 220),
     );
     final l10n = AppLocalizations.of(context);
@@ -275,7 +276,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
               icon: Icon(info.$2, fill: AppIcons.filled, size: 16),
               label: Text(info.$1),
               style: AppButtonStyle(
-                minimumSize: Size(rail ? double.infinity : 0, rail ? 40 : 36),
+                minimumSize: Size(rail ? double.infinity : 0, rail ? 44 : 36),
                 foregroundColor: selected
                     ? scheme.onSurface
                     : scheme.onSurfaceVariant,
