@@ -1,3 +1,4 @@
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
@@ -30,7 +31,8 @@ class CatalogFilterButton extends StatelessWidget {
       onPressed: () =>
           showCatalogWatchFilter(context, watch: watch, onChanged: onChanged),
       icon: Icon(
-        CupertinoIcons.line_horizontal_3_decrease,
+        AppIcons.filter,
+        fill: active ? AppIcons.filled : AppIcons.outline,
         color: active ? AppUiTheme.of(context).colorScheme.primary : null,
       ),
     );

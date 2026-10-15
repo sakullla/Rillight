@@ -347,7 +347,7 @@ class _TvDetailPageState extends State<TvDetailPage> {
         emphasized: true,
         autofocus: true,
         pill: true,
-        leading: const Icon(CupertinoIcons.play_fill),
+        leading: const Icon(AppIcons.play, fill: AppIcons.filled),
         onPressed:
             !_playBusy && target != null && (target.isMovie || target.isEpisode)
             ? _play

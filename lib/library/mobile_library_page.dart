@@ -1,3 +1,4 @@
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
@@ -306,9 +307,8 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
                             ),
                           ),
                           icon: Icon(
-                            active
-                                ? CupertinoIcons.line_horizontal_3_decrease
-                                : CupertinoIcons.slider_horizontal_3,
+                            AppIcons.filter,
+                            fill: active ? AppIcons.filled : AppIcons.outline,
                             size: 17,
                           ),
                           label: Text(l10n.libraryFilter),

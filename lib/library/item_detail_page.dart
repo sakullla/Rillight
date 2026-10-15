@@ -2982,7 +2982,7 @@ class _DetailActions extends StatelessWidget {
               vertical: AppSpacing.sm,
             ),
           ),
-          icon: const Icon(CupertinoIcons.play_fill, size: 26),
+          icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 26),
           label: Text(playLabel),
           variant: AppButtonVariant.filled,
         ),

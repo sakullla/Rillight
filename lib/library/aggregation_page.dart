@@ -477,7 +477,10 @@ class _AggregationPageState extends State<AggregationPage> {
                                 suffix: AppIconButton(
                                   tooltip: l.search,
                                   onPressed: _start,
-                                  icon: const Icon(CupertinoIcons.search),
+                                  icon: const Icon(
+                                    AppIcons.search,
+                                    fill: AppIcons.filled,
+                                  ),
                                 ),
                               ),
                             Wrap(
@@ -766,7 +769,8 @@ class _AggregationPageState extends State<AggregationPage> {
                                     trailing: AppIconButton(
                                       tooltip: l.aggregationResumeActual,
                                       icon: const Icon(
-                                        CupertinoIcons.play_fill,
+                                        AppIcons.play,
+                                        fill: AppIcons.filled,
                                       ),
                                       onPressed: () =>
                                           _resumeRecord(context, record),
@@ -1751,7 +1755,10 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             l.libraries,
             'aggregation-segment-libraries',
             _AggregationSegment.libraries,
-            CupertinoIcons.rectangle_stack,
+            AppIcons.library,
+            fill: _segment == _AggregationSegment.libraries
+                ? AppIcons.filled
+                : AppIcons.outline,
           ),
         ],
       ),
@@ -2198,7 +2205,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
               _submit();
             },
             placeholder: l.searchHint,
-            prefix: const Icon(CupertinoIcons.search),
+            prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
             suffix: ValueListenableBuilder<TextEditingValue>(
               valueListenable: _keyword,
               builder: (context, value, _) {
@@ -2417,7 +2424,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                   key: const Key('aggregation-keyword'),
                   autofocus: true,
                   pill: true,
-                  leading: const Icon(CupertinoIcons.search),
+                  leading: const Icon(AppIcons.search, fill: AppIcons.filled),
                   label: l.searchHint,
                   controller: _keyword,
                   onSubmitted: _submit,
@@ -2468,10 +2475,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     if (_term.isEmpty) {
       body = SizedBox(
         height: 280 * s,
-        child: TvEmptyState(
-          icon: CupertinoIcons.search,
-          message: l.searchEmptyQuery,
-        ),
+        child: TvEmptyState(icon: AppIcons.search, message: l.searchEmptyQuery),
       );
     } else if (_searching && visible.isEmpty) {
       body = SizedBox(
@@ -2481,10 +2485,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     } else if (visible.isEmpty) {
       body = SizedBox(
         height: 280 * s,
-        child: TvEmptyState(
-          icon: CupertinoIcons.search,
-          message: l.searchNoResults,
-        ),
+        child: TvEmptyState(icon: AppIcons.search, message: l.searchNoResults),
       );
     } else {
       body = Column(
@@ -2577,10 +2578,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
       if (phone) {
         return _PhoneSearchIdle(onPick: _searchRecent);
       }
-      return AppEmptyView(
-        icon: CupertinoIcons.search,
-        message: l.searchEmptyQuery,
-      );
+      return AppEmptyView(icon: AppIcons.search, message: l.searchEmptyQuery);
     }
     if (phone && !(_searching && visible.isEmpty) && visible.isNotEmpty) {
       return _phoneResults(context, visible);
@@ -2589,10 +2587,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
       return const Center(child: CupertinoActivityIndicator());
     }
     if (visible.isEmpty) {
-      return AppEmptyView(
-        icon: CupertinoIcons.search,
-        message: l.searchNoResults,
-      );
+      return AppEmptyView(icon: AppIcons.search, message: l.searchNoResults);
     }
     final failed = visible.where((row) => row.error != null).length;
     return ListView(
@@ -2680,7 +2675,8 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
               child: Padding(
                 padding: const EdgeInsets.all(22),
                 child: Icon(
-                  CupertinoIcons.search,
+                  AppIcons.search,
+                  fill: AppIcons.filled,
                   size: 34,
                   color: scheme.primary,
                 ),

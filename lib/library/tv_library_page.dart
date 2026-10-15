@@ -1,3 +1,4 @@
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -150,7 +151,10 @@ class _TvLibraryPageState extends State<TvLibraryPage> {
               autofocus: true,
               pill: true,
               selected: active,
-              leading: const Icon(CupertinoIcons.slider_horizontal_3),
+              leading: Icon(
+                AppIcons.filter,
+                fill: active ? AppIcons.filled : AppIcons.outline,
+              ),
               onPressed: _filter,
               child: Text(l.libraryFilter),
             ),
