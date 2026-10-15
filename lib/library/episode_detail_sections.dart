@@ -2075,7 +2075,8 @@ class ChapterFallbackArt extends StatelessWidget {
           ),
           Center(
             child: Icon(
-              CupertinoIcons.play_circle,
+              AppIcons.play,
+              fill: AppIcons.filled,
               size: 30,
               color: scheme.onPrimaryContainer.withValues(alpha: .8),
             ),

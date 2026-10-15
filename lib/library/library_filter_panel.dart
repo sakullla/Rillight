@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -143,7 +144,8 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 child: Row(
                   children: [
                     Icon(
-                      CupertinoIcons.slider_horizontal_3,
+                      AppIcons.filter,
+                      fill: AppIcons.filled,
                       color: scheme.onSurface,
                     ),
                     const SizedBox(width: 12),
@@ -492,7 +494,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                 controller: _search,
                 onChanged: (_) => setState(() {}),
                 placeholder: l.filterSearchOptions,
-                prefix: const Icon(CupertinoIcons.search),
+                prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
                 suffix: query.isEmpty
                     ? null
                     : AppIconButton(

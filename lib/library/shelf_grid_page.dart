@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -1264,7 +1265,10 @@ class _FilterBar extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      CupertinoIcons.line_horizontal_3_decrease,
+                      AppIcons.filter,
+                      fill: filters.isNotEmpty
+                          ? AppIcons.filled
+                          : AppIcons.outline,
                       size: 18,
                       color: filters.isNotEmpty
                           ? colorScheme.primary
@@ -1284,10 +1288,7 @@ class _FilterBar extends StatelessWidget {
             key: gridFilterClearKey,
             tooltip: l10n.libraryFilterClear,
             onPressed: () => onChanged(const ShelfFilters()),
-            icon: const Icon(
-              CupertinoIcons.line_horizontal_3_decrease,
-              size: 18,
-            ),
+            icon: const Icon(AppIcons.close, fill: AppIcons.filled, size: 18),
           ),
       ],
     );

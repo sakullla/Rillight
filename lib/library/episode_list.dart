@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -677,7 +678,8 @@ class _EpisodeThumb extends StatelessWidget {
                             child: Padding(
                               padding: EdgeInsets.all(height * .06),
                               child: Icon(
-                                CupertinoIcons.play_fill,
+                                AppIcons.play,
+                                fill: AppIcons.filled,
                                 color: scheme.onPrimary,
                                 size: height * .22,
                               ),

@@ -1,3 +1,4 @@
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
@@ -562,7 +563,11 @@ class _PosterRevealOverlay extends StatelessWidget {
                             padding: const EdgeInsets.all(AppSpacing.sm),
                             minimumSize: const Size(52, 52),
                           ),
-                          icon: const Icon(CupertinoIcons.play_fill, size: 32),
+                          icon: const Icon(
+                            AppIcons.play,
+                            fill: AppIcons.filled,
+                            size: 32,
+                          ),
                         ),
                       ),
                     if (showMeta && meta.isNotEmpty)

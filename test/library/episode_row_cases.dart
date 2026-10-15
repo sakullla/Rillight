@@ -1,12 +1,16 @@
 import '../helpers/cupertino_test_app.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart' as ui;
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/episode_detail_sections.dart';
 import 'package:rillight/library/episode_list.dart';
+import 'package:rillight/library/library_filter_panel.dart';
+import 'package:rillight/library/shelf_sort.dart';
 
 void main() {
   testWidgets('episode cards stay compact enough to scan a season', (
@@ -73,6 +77,13 @@ void main() {
     expect(play.center.dx, closeTo(row.center.dx, 1));
     expect(play.center.dy, closeTo(row.top + 8 + thumbHeight / 2, 1));
     expect(play.width, lessThan(row.width / 2));
+    final playIcon = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(CatalogKeys.episodePlay('e1')),
+        matching: find.byIcon(AppIcons.play),
+      ),
+    );
+    expect(playIcon.fill, AppIcons.filled);
     expect(
       tester.getRect(find.text('1. 勇者的相遇')).top,
       greaterThan(row.top + 8 + thumbHeight),
@@ -328,6 +339,64 @@ void main() {
     // 4K 下卡宽与字号同比放大，卡片仍是一张剧照加三四行字的比例。
     final card = tester.getSize(find.byType(EpisodeRow));
     expect(card.height, lessThan(card.width * 1.1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('chapter fallback and library filter use the shared symbols', (
+    tester,
+  ) async {
+    Widget host(Widget child) => CupertinoTestApp(
+      locale: const Locale('zh'),
+      localizationsDelegates: [
+        ...[
+          AppLocalizations.delegate,
+          ...GlobalCupertinoLocalizations.delegates,
+        ],
+        ui.GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: CupertinoPageScaffold(child: child),
+      builder: (context, child) => ui.AppUiTheme(
+        data: AppUiTheme.of(context).brightness == Brightness.dark
+            ? ui.AppUiTheme.dark()
+            : ui.AppUiTheme.light(),
+        child: child ?? const SizedBox.shrink(),
+      ),
+    );
+
+    await tester.pumpWidget(
+      host(
+        const SizedBox(
+          width: 160,
+          height: 90,
+          child: ChapterFallbackArt(index: 2),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      tester.widget<Icon>(find.byIcon(AppIcons.play)).fill,
+      AppIcons.filled,
+    );
+
+    await tester.pumpWidget(
+      host(
+        LibraryFilterPanel(initial: const ShelfFilters(), onApply: (_, _) {}),
+      ),
+    );
+    await tester.pump();
+    expect(
+      tester.widget<Icon>(find.byIcon(AppIcons.filter)).fill,
+      AppIcons.filled,
+    );
+    await tester.tap(
+      find.byKey(const Key('catalog-grid-filter-section-genre')),
+    );
+    await tester.pump();
+    expect(
+      tester.widget<Icon>(find.byIcon(AppIcons.search)).fill,
+      AppIcons.filled,
+    );
     expect(tester.takeException(), isNull);
   });
 }

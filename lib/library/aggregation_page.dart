@@ -1773,7 +1773,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
       body = SizedBox(
         height: 300 * s,
         child: TvEmptyState(
-          icon: CupertinoIcons.rectangle_stack,
+          icon: AppIcons.library,
           message: '没有已登录的服务器',
           action: TvAction(
             emphasized: true,
@@ -2273,7 +2273,10 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                         onPressed: () =>
                             setState(() => _filtersOpen = !_filtersOpen),
                         icon: Icon(
-                          CupertinoIcons.line_horizontal_3_decrease,
+                          AppIcons.filter,
+                          fill: _filtersOpen || _servers != null
+                              ? AppIcons.filled
+                              : AppIcons.outline,
                           color: _servers == null
                               ? null
                               : AppUiTheme.of(context).colorScheme.primary,
@@ -2436,8 +2439,11 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                   key: const Key('aggregation-search-filters'),
                   pill: true,
                   selected: _filtersOpen || _servers != null,
-                  leading: const Icon(
-                    CupertinoIcons.line_horizontal_3_decrease,
+                  leading: Icon(
+                    AppIcons.filter,
+                    fill: _filtersOpen || _servers != null
+                        ? AppIcons.filled
+                        : AppIcons.outline,
                   ),
                   onPressed: () => setState(() => _filtersOpen = !_filtersOpen),
                   child: Text(l.searchServerFilter),

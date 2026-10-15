@@ -988,6 +988,17 @@ void main() {
       await settle(tester);
       expect(find.byKey(CatalogKeys.chapter(0)), findsOneWidget);
       expect(find.byKey(CatalogKeys.chapter(1)), findsOneWidget);
+      final fallbackPlay = tester.widgetList<Icon>(
+        find.descendant(
+          of: find.byType(ChapterFallbackArt),
+          matching: find.byIcon(AppIcons.play),
+        ),
+      );
+      expect(fallbackPlay, isNotEmpty);
+      for (final icon in fallbackPlay) {
+        expect(icon.icon, AppIcons.play);
+        expect(icon.fill, AppIcons.filled);
+      }
       expect(find.byKey(CatalogKeys.chapter(2)), findsNothing);
 
       final first = tester.getRect(find.byKey(CatalogKeys.chapter(0)));
