@@ -238,6 +238,50 @@ void main() {
       expect(iconSize.width, greaterThanOrEqualTo(44));
       expect(iconSize.height, greaterThanOrEqualTo(44));
 
+      await _pump(
+        tester,
+        AppButton(
+          onPressed: () {},
+          style: const AppButtonStyle(
+            minimumSize: Size(32, 32),
+            padding: EdgeInsets.zero,
+          ),
+          child: const SizedBox.shrink(),
+        ),
+      );
+      final smallMinimum = tester.getSize(find.byType(AppButton));
+      expect(smallMinimum.width, greaterThanOrEqualTo(44));
+      expect(smallMinimum.height, greaterThanOrEqualTo(44));
+
+      await _pump(
+        tester,
+        AppButton(
+          onPressed: () {},
+          style: const AppButtonStyle(
+            minimumSize: Size(40, 40),
+            fixedSize: Size(40, 40),
+            padding: EdgeInsets.zero,
+          ),
+          child: const SizedBox.shrink(),
+        ),
+      );
+      final smallFixed = tester.getSize(find.byType(AppButton));
+      expect(smallFixed.width, greaterThanOrEqualTo(44));
+      expect(smallFixed.height, greaterThanOrEqualTo(44));
+
+      await _pump(
+        tester,
+        AppIconButton(
+          onPressed: () {},
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+          icon: const Icon(CupertinoIcons.play_fill),
+        ),
+      );
+      final smallIcon = tester.getSize(find.byType(AppIconButton));
+      expect(smallIcon.width, greaterThanOrEqualTo(44));
+      expect(smallIcon.height, greaterThanOrEqualTo(44));
+
       final node = FocusNode();
       addTearDown(() async {
         await tester.pumpWidget(const SizedBox.shrink());

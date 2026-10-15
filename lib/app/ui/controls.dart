@@ -19,6 +19,40 @@ double _buttonRadius(AppButtonVariant variant) => switch (variant) {
 const _tvFocusScale = 1.04;
 const _tvPressScale = 0.96;
 
+/// Laid-out hit box on each axis. Style sizes and icon constraints can ask
+/// for less; they cannot shrink the control below this.
+const _minHitExtent = 44.0;
+
+double _hitExtent(double value) =>
+    value.isFinite && value < _minHitExtent ? _minHitExtent : value;
+
+Size _hitSize(Size size) =>
+    Size(_hitExtent(size.width), _hitExtent(size.height));
+
+/// Exact size is the larger of the requested fixed size and the minimum,
+/// then raised to [_minHitExtent] on each axis.
+Size _fixedHitSize(Size fixed, Size minimum) {
+  final resolved = _hitSize(fixed);
+  final floor = _hitSize(minimum);
+  return Size(
+    resolved.width < floor.width ? floor.width : resolved.width,
+    resolved.height < floor.height ? floor.height : resolved.height,
+  );
+}
+
+BoxConstraints _hitConstraints(BoxConstraints constraints) {
+  final minWidth = _hitExtent(constraints.minWidth);
+  final minHeight = _hitExtent(constraints.minHeight);
+  return BoxConstraints(
+    minWidth: minWidth,
+    maxWidth: constraints.maxWidth < minWidth ? minWidth : constraints.maxWidth,
+    minHeight: minHeight,
+    maxHeight: constraints.maxHeight < minHeight
+        ? minHeight
+        : constraints.maxHeight,
+  );
+}
+
 /// Reusable app action appearance, independent of a design library's states.
 class AppButtonStyle {
   const AppButtonStyle({
@@ -97,7 +131,7 @@ class AppButton extends StatefulWidget {
     this.foregroundColor,
     this.semanticLabel,
     this.onFocusChange,
-    this.minimumSize = const Size(44, 44),
+    this.minimumSize = const Size(_minHitExtent, _minHitExtent),
     this.style,
   });
   AppButton.icon({
@@ -114,7 +148,7 @@ class AppButton extends StatefulWidget {
     this.foregroundColor,
     this.semanticLabel,
     this.onFocusChange,
-    this.minimumSize = const Size(44, 44),
+    this.minimumSize = const Size(_minHitExtent, _minHitExtent),
     this.style,
   }) : child = Row(
          mainAxisSize: MainAxisSize.min,
@@ -317,6 +351,10 @@ class _AppButtonState extends State<AppButton> {
     final theme = AppUiTheme.of(context);
     final enabled = widget.onPressed != null;
     final face = _face(theme);
+    final minimumSize = _hitSize(
+      widget.style?.minimumSize ?? widget.minimumSize,
+    );
+    final fixedSize = widget.style?.fixedSize;
     final duration = AppMotion.durationOf(context, AppMotion.fast);
     final shape =
         (widget.style?.shape ??
@@ -377,14 +415,14 @@ class _AppButtonState extends State<AppButton> {
             alignment: Alignment.center,
             child: AnimatedContainer(
               duration: duration,
-              constraints: widget.style?.fixedSize == null
+              constraints: fixedSize == null
                   ? null
-                  : BoxConstraints.tight(widget.style!.fixedSize!),
+                  : BoxConstraints.tight(_fixedHitSize(fixedSize, minimumSize)),
               decoration: ShapeDecoration(color: face.fill, shape: shape),
               child: ExcludeFocus(
                 child: CupertinoButton(
                   padding: widget.style?.padding ?? widget.padding,
-                  minimumSize: widget.style?.minimumSize ?? widget.minimumSize,
+                  minimumSize: minimumSize,
                   onPressed: widget.onPressed,
                   child: IconTheme(
                     data: IconThemeData(color: face.foreground, size: 20),
@@ -447,7 +485,7 @@ class AppIconButton extends StatelessWidget {
     this.color,
     this.size = 20,
     this.padding = const EdgeInsets.all(10),
-    this.minimumSize = const Size(44, 44),
+    this.minimumSize = const Size(_minHitExtent, _minHitExtent),
     this.backgroundColor,
     this.style,
     this.constraints,
@@ -486,7 +524,10 @@ class AppIconButton extends StatelessWidget {
     );
     final bounded = constraints == null
         ? button
-        : ConstrainedBox(constraints: constraints!, child: button);
+        : ConstrainedBox(
+            constraints: _hitConstraints(constraints!),
+            child: button,
+          );
     return tooltip == null
         ? bounded
         : AppTooltip(message: tooltip!, child: bounded);
