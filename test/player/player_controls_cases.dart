@@ -1752,7 +1752,7 @@ class _GatedDeleteStore extends MemoryPlaybackSessionSnapshotStore {
 
 class _IndexMissBackend extends FakeVideoBackend {
   @override
-  Future<void> setSubtitleIndex(int index) async {
+  Future<void> setSubtitleIndex(int index, {int slot = 0}) async {
     throw StateError('Requested sub track is unavailable');
   }
 }
@@ -1784,8 +1784,8 @@ class _TrackSupportBackend extends FakeVideoBackend
   }
 
   @override
-  Future<void> setSubtitleIndex(int index) async {
+  Future<void> setSubtitleIndex(int index, {int slot = 0}) async {
     subtitleCalls.add(index);
-    await super.setSubtitleIndex(index);
+    await super.setSubtitleIndex(index, slot: slot);
   }
 }

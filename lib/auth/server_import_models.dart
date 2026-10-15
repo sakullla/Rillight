@@ -1,3 +1,4 @@
+import '../media_server/capabilities.dart';
 import 'credential_store.dart';
 
 /// Format adapters produce these values only after recognizing the container.
@@ -8,10 +9,12 @@ class ServerImportDraft {
     required this.username,
     required this.lines,
     this.credentials,
+    this.serviceType = MediaServerType.emby,
     this.userAgent,
     this.isPrivate = false,
   });
 
+  final MediaServerType serviceType;
   final String name;
   final String username;
 

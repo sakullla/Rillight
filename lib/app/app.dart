@@ -395,6 +395,8 @@ class _PlayerWindowLayer extends StatelessWidget {
                             audioStreamIndex: request.audioStreamIndex,
                             subtitleStreamIndex: request.subtitleStreamIndex,
                             startPosition: request.startPosition,
+                            secondarySubtitleStreamIndex:
+                                request.secondarySubtitleStreamIndex,
                             onOpenItemDetail: (itemId, {seasonId, command}) {
                               final permit = command?.source == null
                                   ? null

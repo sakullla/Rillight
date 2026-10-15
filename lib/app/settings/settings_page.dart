@@ -1,3 +1,6 @@
+import '../updates/update_check.dart';
+import '../product.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -306,6 +309,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: AppSpacing.xl),
                 ],
+                _SettingsSection(
+                  icon: CupertinoIcons.info_circle,
+                  title: l10n.mobileAboutGroup,
+                  subtitle: '$kProductName · $kAppVersion',
+                  children: const [UpdateCheck()],
+                ),
+                const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
                   icon: CupertinoIcons.circle_lefthalf_fill,
                   title: l10n.settingsAppearance,

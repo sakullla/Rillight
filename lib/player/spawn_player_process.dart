@@ -35,8 +35,13 @@ class _WindowsPlayerProcess implements WindowsPlayerProcess {
   void terminate() {
     if (!isAlive) return;
     final result = TerminateProcess(_handle, 1);
-    // The child may have exited between the poll and TerminateProcess.
-    if (!result.value && isAlive) {
+    if (result.value) return;
+    // The child may have exited between the poll and TerminateProcess; its
+    // handle is not signalled until kernel teardown finishes, so a zero-timeout
+    // liveness poll can still claim it is alive. Wait briefly and only treat
+    // the failure as fatal when the process really keeps running.
+    final reap = WaitForSingleObject(_handle, 2000);
+    if (reap.value != WAIT_OBJECT_0 && isAlive) {
       throw WindowsException(result.error.toHRESULT());
     }
   }

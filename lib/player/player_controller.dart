@@ -15,6 +15,7 @@ import 'package:rillight/media_server/resources.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/media_source_format.dart';
+import 'package:rillight/app/file_import.dart';
 import 'package:rillight/player/cache/next_episode_prefix.dart';
 import 'package:rillight/player/playback_check_in.dart';
 import 'package:rillight/player/buffer_snapshot.dart';
@@ -42,6 +43,7 @@ import 'package:rillight/player/network_throughput.dart';
 import 'package:rillight/player/playback_output_status.dart';
 import 'package:rillight/player/playback_resolver.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
+import 'package:rillight/player/session_subtitle_files.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/player_startup.dart';
 import 'package:rillight/player/player_window.dart';
@@ -158,6 +160,8 @@ class PlayerController extends ChangeNotifier {
     this.preferredAudioStreamIndex,
     this.preferredSubtitleStreamIndex,
     this.startPosition,
+    this.preferredSecondarySubtitleStreamIndex,
+    this.subtitleFilePicker,
     this.settingsStore,
     this.runtime,
     this.observationSink,
@@ -183,6 +187,8 @@ class PlayerController extends ChangeNotifier {
     preferredMediaSourceId ??= openRequest?.mediaSourceId;
     preferredAudioStreamIndex ??= openRequest?.audioStreamIndex;
     preferredSubtitleStreamIndex ??= openRequest?.subtitleStreamIndex;
+    preferredSecondarySubtitleStreamIndex ??=
+        openRequest?.secondarySubtitleStreamIndex;
     maxStreamingBitrate =
         openRequest?.maxStreamingBitrate ?? maxStreamingBitrate;
     activeMediaSourceId = _scopedPlayback ? null : preferredMediaSourceId;
@@ -321,6 +327,9 @@ class PlayerController extends ChangeNotifier {
   int? preferredSubtitleStreamIndex;
   Duration? startPosition;
 
+  /// 首次起播请求携带的次字幕显式预选;消费后清除,不进入持久化。
+  int? preferredSecondarySubtitleStreamIndex;
+
   final PlaybackCheckInMachine checkIn = PlaybackCheckInMachine();
 
   bool loading = true;
@@ -429,6 +438,31 @@ class PlayerController extends ChangeNotifier {
   int maxStreamingBitrate = kCoreMaxStreamingBitrate;
   int? audioStreamIndex;
   int? subtitleStreamIndex;
+
+  /// 次字幕(槽位 1)当前选中的服务器流索引;null 表示关闭或该槽
+  /// 当前由会话导入文件占用。次字幕不进入任何持久化偏好,默认关闭。
+  int? secondarySubtitleStreamIndex;
+
+  /// 占用主/次字幕槽的会话导入文件 id;与 [subtitleStreamIndex]/
+  /// [secondarySubtitleStreamIndex] 互斥,同一文件不可重复占用两槽。
+  String? primarySubtitleFileId;
+  String? secondarySubtitleFileId;
+
+  /// 会话内导入的字幕候选:严格校验后的受控临时目录副本。
+  final SessionSubtitleStore _subtitleImports = SessionSubtitleStore();
+
+  /// 当前会话的导入候选列表(按导入顺序稳定)。
+  List<SessionSubtitleFile> get sessionSubtitleFiles => _subtitleImports.files;
+
+  /// 最近一次导入结果(失败/重复),供 UI 提示;成功或用户清除后为 null。
+  SubtitleImportOutcome? subtitleImportNotice;
+
+  /// 最近一次槽位互斥或烧录限制的拒绝 token,UI 负责本地化。
+  String? subtitleSelectionNotice;
+
+  /// 可注入的文件选择边界;缺省使用系统选择器。
+  AppFilePicker? subtitleFilePicker;
+
   Duration position = Duration.zero;
   Duration duration = Duration.zero;
 
@@ -551,6 +585,32 @@ class PlayerController extends ChangeNotifier {
   bool get canConfigureSubtitles =>
       selectableSubtitleTracks.isNotEmpty || subtitleStreamIndex != null;
 
+  /// 无自带字幕的媒体也保留本地导入入口:媒体成功打开即可导入。
+  bool get canImportSubtitleFiles =>
+      resolved != null && !_disposed && !_operations.isClosed;
+
+  bool get hasSecondarySubtitle =>
+      secondarySubtitleStreamIndex != null || secondarySubtitleFileId != null;
+
+  /// 同一服务器流是否已占用另一槽位(用于菜单禁用与提示)。
+  bool subtitleStreamOccupiesOtherSlot(int slot, int streamIndex) => slot == 0
+      ? secondarySubtitleStreamIndex == streamIndex
+      : subtitleStreamIndex == streamIndex && primarySubtitleFileId == null;
+
+  /// 会话导入文件是否已占用另一槽位。
+  bool subtitleFileOccupiesOtherSlot(int slot, String fileId) => slot == 0
+      ? secondarySubtitleFileId == fileId
+      : primarySubtitleFileId == fileId;
+
+  /// 转码烧录字幕无法独立关闭,不能冒充可独立关闭的次字幕来源。
+  bool streamIsBurnedIn(int index) {
+    final source = resolved?.mediaSource;
+    if (source == null || !isTranscode) return false;
+    final stream = source.streamByIndex(index);
+    return stream != null &&
+        _transcodeSubtitleDelivery(stream) == TranscodeSubtitleDelivery.burnIn;
+  }
+
   bool get canSwitchAudioTrack => selectableAudioTracks.length > 1;
   bool get canSwitchQuality => availableBitrates.length > 1;
 
@@ -598,7 +658,7 @@ class PlayerController extends ChangeNotifier {
 
   /// 本次播放下载的外挂字幕。停播后整目录删除,不留在系统临时目录。
   Directory? _subtitleCache;
-  File? _activeSubtitleFile;
+  final Map<int, File> _activeSubtitleFiles = {};
   int _subtitleFileSequence = 0;
 
   /// 在途 Stopped(_handleCompleted / _stopSession / close 共用);
@@ -1863,6 +1923,10 @@ class PlayerController extends ChangeNotifier {
     if (source == null) return;
     final stream = index == null ? null : source.streamByIndex(index);
     if (index != null && (stream == null || !stream.isSubtitle)) return;
+    if (index != null && secondarySubtitleStreamIndex == index) {
+      _refuseSubtitleSlot('occupied');
+      return;
+    }
     final next = resolved!;
     bool burned(int? selected) {
       final candidate = selected == null
@@ -1875,6 +1939,9 @@ class PlayerController extends ChangeNotifier {
     }
 
     if (burned(index) || burned(subtitleStreamIndex)) {
+      // 用户把主槽切回服务器轨时先放弃会话文件占用,避免 `_open` 后的
+      // 槽位恢复把刚做的烧录重开选择又覆盖回文件。
+      if (index != null) primarySubtitleFileId = null;
       await _reopen(
         startTicks: ticksFromDuration(position),
         subtitle: index,
@@ -1883,18 +1950,252 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     final previous = subtitleStreamIndex;
+    final previousFile = primarySubtitleFileId;
     await _selectTrack(
       (current) => _activatePlaybackSubtitle(next, index, current: current),
       () {
         subtitleStreamIndex = index;
+        primarySubtitleFileId = null;
         _clearSubtitleNotice();
       },
       'SubtitleTrackChange',
       serialized: false,
       onFailure: () {
         subtitleStreamIndex = previous;
+        primarySubtitleFileId = previousFile;
         _emit();
       },
+    );
+  }
+
+  /// 主字幕槽选择会话导入文件;null 表示关闭主字幕。
+  Future<void> setSubtitleFromFile(String? fileId) async {
+    if (loading || _operations.isClosed) return;
+    if (fileId == null) {
+      await setSubtitle(null);
+      return;
+    }
+    if (resolved == null) return;
+    final file = _subtitleImports.byId(fileId);
+    if (file == null) return;
+    if (fileId == secondarySubtitleFileId) {
+      _refuseSubtitleSlot('occupied');
+      return;
+    }
+    final previous = subtitleStreamIndex;
+    final previousFile = primarySubtitleFileId;
+    await _selectTrack(
+      (current) =>
+          _applySubtitleSource(slot: 0, fileId: fileId, current: current),
+      () {
+        primarySubtitleFileId = fileId;
+        subtitleStreamIndex = null;
+        _clearSubtitleNotice();
+      },
+      'SubtitleTrackChange',
+      serialized: false,
+      onFailure: () {
+        subtitleStreamIndex = previous;
+        primarySubtitleFileId = previousFile;
+        _emit();
+      },
+    );
+  }
+
+  /// 次字幕槽选择服务器流;null 表示关闭次字幕。次字幕与主字幕相互独立,
+  /// 失败回滚不影响主字幕与播放位置。
+  Future<void> setSecondarySubtitle(int? index) async {
+    if (loading || _operations.isClosed) return;
+    final source = resolved?.mediaSource;
+    if (source == null && index != null) return;
+    if (index == null && !hasSecondarySubtitle) return;
+    if (index != null) {
+      final stream = source!.streamByIndex(index);
+      if (stream == null || !stream.isSubtitle) return;
+      if (subtitleStreamOccupiesOtherSlot(1, index)) {
+        _refuseSubtitleSlot('occupied');
+        return;
+      }
+      if (streamIsBurnedIn(index)) {
+        _refuseSubtitleSlot('burn-in');
+        return;
+      }
+    }
+    final previousIndex = secondarySubtitleStreamIndex;
+    final previousFile = secondarySubtitleFileId;
+    await _selectTrack(
+      (current) =>
+          _applySubtitleSource(slot: 1, streamIndex: index, current: current),
+      () {
+        secondarySubtitleStreamIndex = index;
+        secondarySubtitleFileId = null;
+        _clearSubtitleNotice();
+      },
+      'SecondarySubtitleTrackChange',
+      serialized: false,
+      onFailure: () {
+        secondarySubtitleStreamIndex = previousIndex;
+        secondarySubtitleFileId = previousFile;
+        _emit();
+      },
+    );
+  }
+
+  /// 次字幕槽选择会话导入文件;null 表示关闭次字幕。
+  Future<void> setSecondarySubtitleFromFile(String? fileId) async {
+    if (loading || _operations.isClosed) return;
+    if (fileId == null) {
+      await setSecondarySubtitle(null);
+      return;
+    }
+    if (resolved == null) return;
+    final file = _subtitleImports.byId(fileId);
+    if (file == null) return;
+    if (subtitleFileOccupiesOtherSlot(1, fileId)) {
+      _refuseSubtitleSlot('occupied');
+      return;
+    }
+    final previousIndex = secondarySubtitleStreamIndex;
+    final previousFile = secondarySubtitleFileId;
+    await _selectTrack(
+      (current) =>
+          _applySubtitleSource(slot: 1, fileId: fileId, current: current),
+      () {
+        secondarySubtitleFileId = fileId;
+        secondarySubtitleStreamIndex = null;
+        _clearSubtitleNotice();
+      },
+      'SecondarySubtitleTrackChange',
+      serialized: false,
+      onFailure: () {
+        secondarySubtitleStreamIndex = previousIndex;
+        secondarySubtitleFileId = previousFile;
+        _emit();
+      },
+    );
+  }
+
+  void _refuseSubtitleSlot(String token) {
+    subtitleSelectionNotice = token;
+    trackFailure = null;
+    onUserActivity();
+    _emit();
+  }
+
+  void clearSubtitleSelectionNotice() {
+    subtitleSelectionNotice = null;
+    _emit();
+  }
+
+  void clearSubtitleImportNotice() {
+    subtitleImportNotice = null;
+    _emit();
+  }
+
+  /// 弹出系统文件选择并导入会话内字幕。取消不提示;其余结果记录在
+  /// [subtitleImportNotice] 供 UI 展示。导入只增加候选,不改变当前选择。
+  Future<SubtitleImportOutcome> importSubtitleFile({
+    AppFilePicker? picker,
+  }) async {
+    final selection =
+        picker ?? subtitleFilePicker ?? const DefaultAppFilePicker();
+    PickedAppFile? picked;
+    try {
+      picked = await selection.pickFile(
+        dialogTitle: 'Subtitles',
+        allowedExtensions: kSubtitleImportExtensions.toList(),
+      );
+    } on AppFilePickerUnavailableException {
+      return _noteSubtitleImport(SubtitleImportOutcome.pickerUnavailable);
+    }
+    if (picked == null) return SubtitleImportOutcome.cancelled;
+    final Uint8List bytes;
+    try {
+      bytes = await picked.readBytes(kMaxSubtitleFileBytes);
+    } on AppFileTooLargeException {
+      return _noteSubtitleImport(SubtitleImportOutcome.tooLarge);
+    } on AppFileReadException {
+      return _noteSubtitleImport(SubtitleImportOutcome.unreadable);
+    }
+    return importSubtitleBytes(fileName: picked.fileName, bytes: bytes);
+  }
+
+  /// 校验并把字节复制进会话受控目录。测试与原生窗口检查直接复用。
+  Future<SubtitleImportOutcome> importSubtitleBytes({
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    final result = await _subtitleImports.add(
+      fileName: fileName,
+      bytes: bytes,
+      createDirectory: _ensureSubtitleCache,
+    );
+    if (result.outcome != SubtitleImportOutcome.added &&
+        result.outcome != SubtitleImportOutcome.cancelled) {
+      subtitleImportNotice = result.outcome;
+    } else {
+      subtitleImportNotice = null;
+    }
+    _emit();
+    return result.outcome;
+  }
+
+  SubtitleImportOutcome _noteSubtitleImport(SubtitleImportOutcome outcome) {
+    subtitleImportNotice = outcome;
+    _emit();
+    return outcome;
+  }
+
+  /// 统一的槽位应用:off/服务器流/会话文件 → backend 槽位语义。
+  Future<void> _applySubtitleSource({
+    required int slot,
+    required bool Function() current,
+    int? streamIndex,
+    String? fileId,
+  }) async {
+    if (!current()) return;
+    if (streamIndex == null && fileId == null) {
+      await backend.setSubtitleOff(slot: slot);
+      return;
+    }
+    if (fileId != null) {
+      final file = _subtitleImports.byId(fileId);
+      if (file == null) throw StateError('Imported subtitle is unavailable');
+      final applied = await backend.setSubtitleUri(
+        file.file.uri,
+        title: file.label,
+        slot: slot,
+      );
+      if (!current()) return;
+      if (!applied) throw StateError('Imported subtitle was not selected');
+      _activeSubtitleFiles[slot] = file.file;
+      return;
+    }
+    final index = streamIndex!;
+    final next = resolved!;
+    final stream = next.mediaSource.streamByIndex(index);
+    if (stream == null || !stream.isSubtitle) {
+      throw StateError('Subtitle track is unavailable');
+    }
+    if (slot == 1 && next.isTranscode) {
+      final delivery = _transcodeSubtitleDelivery(stream);
+      if (delivery != TranscodeSubtitleDelivery.burnIn) {
+        await _activateSubtitle(
+          next.mediaSource,
+          index,
+          forceExternal: delivery == TranscodeSubtitleDelivery.external,
+          current: current,
+          slot: slot,
+        );
+        return;
+      }
+      throw StateError('Burned-in subtitles cannot fill the secondary slot');
+    }
+    await _activateSubtitle(
+      next.mediaSource,
+      index,
+      current: current,
+      slot: slot,
     );
   }
 
@@ -2209,6 +2510,7 @@ class PlayerController extends ChangeNotifier {
     if (finishCurrent) {
       _showEpisodePlayed(finishedId);
     }
+    if (targetId != itemId) _resetSessionSubtitles();
     itemId = targetId;
     item = null;
     resolved = null;
@@ -2246,6 +2548,7 @@ class PlayerController extends ChangeNotifier {
     preferredAudioStreamIndex = null;
     preferredSubtitleStreamIndex = null;
     startPosition = null;
+    preferredSecondarySubtitleStreamIndex = null;
     autoResume = !fromStart;
     // Freeze credentials after retiring the old owner and installing the
     // verified concrete next-item line client.
@@ -3630,6 +3933,7 @@ class PlayerController extends ChangeNotifier {
       origin = savedOrigin;
       client = savedClient;
       item = savedItem;
+      if (savedItemId != itemId) _resetSessionSubtitles();
       itemId = savedItemId;
       if (savedUrl != null && savedToken != null && savedUser != null) {
         client.attachSession(
@@ -3720,6 +4024,7 @@ class PlayerController extends ChangeNotifier {
       if (_disposed || _revoked) return;
       origin = target;
       client = target.client;
+      if (target.source.itemId != itemId) _resetSessionSubtitles();
       itemId = target.source.itemId;
       item = nextItem;
       final operation = _beginOperation();
@@ -3785,6 +4090,7 @@ class PlayerController extends ChangeNotifier {
     pendingLineId = _lineFor(original.origin);
     _savePreferenceAfterObservation = true;
     client = origin!.client;
+    if (origin!.source.itemId != itemId) _resetSessionSubtitles();
     itemId = origin!.source.itemId;
     item = original.item;
     final operation = _beginOperation();
@@ -4727,6 +5033,29 @@ class PlayerController extends ChangeNotifier {
       // 换源/重开后部分后端会丢外挂字幕选择(字幕要等一会儿才出现),
       // 起流片刻后重断言一次,字幕晚显的问题即消失。
       if (subtitleApplied && ownsSubtitle()) _scheduleSubtitleReassert();
+      onStage?.call('restore session subtitle slots');
+      final slotsSession = _session;
+      bool ownsSlots() =>
+          _accepts(operation) &&
+          identical(slotsSession, _session) &&
+          !disconnected;
+      // 首次起播的显式次字幕预选只消费一次;之后的会话状态由
+      // 用户选择与恢复逻辑维护。
+      final preferredSecondary = preferredSecondarySubtitleStreamIndex;
+      if (preferredSecondary != null &&
+          secondarySubtitleStreamIndex == null &&
+          secondarySubtitleFileId == null &&
+          preferredSecondary != selectedSubtitle &&
+          next.mediaSource.streamByIndex(preferredSecondary)?.isSubtitle ==
+              true) {
+        secondarySubtitleStreamIndex = preferredSecondary;
+      }
+      preferredSecondarySubtitleStreamIndex = null;
+      await _restoreParameter(
+        operation,
+        () => _restoreSessionSubtitleSlots(next, current: ownsSlots),
+        accepts: ownsSubtitle,
+      );
       if (isRecovering) {
         // Reporting is independent of whether the native stream is usable.
         unawaited(started);
@@ -4915,10 +5244,11 @@ class PlayerController extends ChangeNotifier {
     ResolvedPlayback next,
     int? subtitle, {
     required bool Function() current,
+    int slot = 0,
   }) async {
     if (!current()) return;
     if (subtitle == null) {
-      await backend.setSubtitleOff();
+      await backend.setSubtitleOff(slot: slot);
       return;
     }
     final stream = next.mediaSource.streamByIndex(subtitle);
@@ -4936,31 +5266,39 @@ class PlayerController extends ChangeNotifier {
             subtitle,
             forceExternal: true,
             current: current,
+            slot: slot,
           );
           return;
         case TranscodeSubtitleDelivery.manifest:
           await _selectDeviceTrack(
             audio: false,
             index: subtitle,
-            select: () => backend.setSubtitleIndex(subtitle),
+            select: () => backend.setSubtitleIndex(subtitle, slot: slot),
           );
           return;
       }
     }
-    await _activateSubtitle(next.mediaSource, subtitle, current: current);
+    await _activateSubtitle(
+      next.mediaSource,
+      subtitle,
+      current: current,
+      slot: slot,
+    );
   }
 
   /// 内嵌文本按容器流索引切换。外挂文本先整文件下载到本地，再交给播放核心。
   /// 菜单勾选只在调用方确认这次选择已经生效后更新。
+  /// [slot] 0 为主字幕,1 为次字幕;两槽的下载副本互不挤占。
   Future<void> _activateSubtitle(
     PlaybackMediaSource source,
     int? index, {
     bool forceExternal = false,
     required bool Function() current,
+    int slot = 0,
   }) async {
     if (!current()) return;
     if (index == null) {
-      await backend.setSubtitleOff();
+      await backend.setSubtitleOff(slot: slot);
       return;
     }
     final stream = source.streamByIndex(index);
@@ -4971,7 +5309,7 @@ class PlayerController extends ChangeNotifier {
       await _selectDeviceTrack(
         audio: false,
         index: index,
-        select: () => backend.setSubtitleIndex(index),
+        select: () => backend.setSubtitleIndex(index, slot: slot),
       );
       return;
     }
@@ -4982,7 +5320,7 @@ class PlayerController extends ChangeNotifier {
         await _selectDeviceTrack(
           audio: false,
           index: index,
-          select: () => backend.setSubtitleIndex(index),
+          select: () => backend.setSubtitleIndex(index, slot: slot),
         );
         return;
       } on DeviceTrackRejected {
@@ -5015,6 +5353,7 @@ class PlayerController extends ChangeNotifier {
         file.uri,
         title: stream.label,
         index: index,
+        slot: slot,
       );
       if (!current()) return;
       if (!applied) {
@@ -5022,8 +5361,8 @@ class PlayerController extends ChangeNotifier {
       }
       // Capture the prior owner only at commit. Every download has a unique
       // path, so a superseded completion can only delete its own candidate.
-      final previous = _activeSubtitleFile;
-      _activeSubtitleFile = file;
+      final previous = _activeSubtitleFiles[slot];
+      _activeSubtitleFiles[slot] = file;
       retained = true;
       if (previous != null) await _deleteSubtitleFile(previous);
     } finally {
@@ -5058,23 +5397,8 @@ class PlayerController extends ChangeNotifier {
         sample.startsWith('{')) {
       throw StateError('Subtitle response was not a subtitle file');
     }
-    var cache = _subtitleCache;
-    if (cache == null) {
-      final created = await Directory.systemTemp.createTemp(
-        'rillight-subtitles-',
-      );
-      if (!current()) {
-        await created.delete(recursive: true);
-        return null;
-      }
-      cache = _subtitleCache;
-      if (cache == null) {
-        _subtitleCache = cache = created;
-      } else {
-        await created.delete(recursive: true);
-        if (!current()) return null;
-      }
-    }
+    final cache = await _ensureSubtitleCache();
+    if (!current()) return null;
     final file = File(
       '${cache.path}${Platform.pathSeparator}$safeId-$index-${++_subtitleFileSequence}.$ext',
     );
@@ -5090,19 +5414,110 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _deleteSubtitleFile(File file) async {
+    // Imported candidates remain reusable until the whole media session ends.
+    if (_subtitleImports.files.any((entry) => entry.file.path == file.path)) {
+      return;
+    }
     try {
       if (await file.exists()) await file.delete();
     } catch (_) {}
   }
 
+  /// 会话字幕缓存目录:服务器下载副本与导入副本共用同一受控临时目录。
+  Future<Directory> _ensureSubtitleCache() async {
+    final existing = _subtitleCache;
+    if (existing != null) return existing;
+    final created = await Directory.systemTemp.createTemp(
+      'rillight-subtitles-',
+    );
+    var settled = _subtitleCache;
+    if (settled == null) {
+      _subtitleCache = settled = created;
+    } else {
+      await created.delete(recursive: true);
+    }
+    return settled;
+  }
+
   Future<void> _deleteSubtitleCache() async {
     final cache = _subtitleCache;
     _subtitleCache = null;
-    _activeSubtitleFile = null;
+    _activeSubtitleFiles.clear();
+    primarySubtitleFileId = null;
+    secondarySubtitleFileId = null;
+    await _subtitleImports.clear();
     if (cache == null) return;
     try {
       if (await cache.exists()) await cache.delete(recursive: true);
     } catch (_) {}
+  }
+
+  /// 换媒体时清理会话字幕:导入候选、两槽文件占用与次字幕选择。
+  /// 同一媒体的换源/重开不经过这里,槽位在 `_open` 完成后重注册。
+  void _resetSessionSubtitles() {
+    secondarySubtitleStreamIndex = null;
+    secondarySubtitleFileId = null;
+    primarySubtitleFileId = null;
+    subtitleImportNotice = null;
+    subtitleSelectionNotice = null;
+    _activeSubtitleFiles.clear();
+    unawaited(_subtitleImports.clear());
+  }
+
+  /// 同会话恢复(换源/重开)后重注册两槽:会话文件副本与次字幕选择。
+  /// 每个槽独立处理,失败只放弃该槽,不影响主字幕服务器轨与播放位置。
+  Future<void> _restoreSessionSubtitleSlots(
+    ResolvedPlayback next, {
+    required bool Function() current,
+  }) async {
+    final primaryFile = primarySubtitleFileId;
+    if (primaryFile != null) {
+      try {
+        await _applySubtitleSource(
+          slot: 0,
+          fileId: primaryFile,
+          current: current,
+        );
+        if (current()) subtitleStreamIndex = null;
+      } catch (_) {
+        if (current()) primarySubtitleFileId = null;
+      }
+    }
+    final secondaryFile = secondarySubtitleFileId;
+    if (secondaryFile != null) {
+      try {
+        await _applySubtitleSource(
+          slot: 1,
+          fileId: secondaryFile,
+          current: current,
+        );
+      } catch (_) {
+        if (current()) secondarySubtitleFileId = null;
+      }
+      return;
+    }
+    final secondaryIndex = secondarySubtitleStreamIndex;
+    if (secondaryIndex != null) {
+      final stream = next.mediaSource.streamByIndex(secondaryIndex);
+      if (stream == null ||
+          !stream.isSubtitle ||
+          (next.isTranscode &&
+              _transcodeSubtitleDelivery(stream) ==
+                  TranscodeSubtitleDelivery.burnIn) ||
+          !current()) {
+        if (current()) secondarySubtitleStreamIndex = null;
+        return;
+      }
+      try {
+        await _applySubtitleSource(
+          slot: 1,
+          streamIndex: secondaryIndex,
+          current: current,
+        );
+      } catch (_) {
+        if (current()) secondarySubtitleStreamIndex = null;
+      }
+    }
   }
 
   /// 起流 2 秒后重断言外挂字幕选择:直接播放的外挂文本字幕在重开
@@ -5830,6 +6245,7 @@ class PlayerController extends ChangeNotifier {
   void _clearSubtitleNotice() {
     _subtitleNoticeTimer?.cancel();
     _subtitleNoticeTimer = null;
+    subtitleSelectionNotice = null;
     if (subtitleNotice == null) {
       return;
     }
@@ -6238,7 +6654,10 @@ class PlayerController extends ChangeNotifier {
       final audio = audioStreamIndex == null
           ? null
           : source.streamByIndex(audioStreamIndex!);
-      final subtitle = subtitleStreamIndex == null
+      // 主字幕由会话导入文件占位时不记录服务器轨偏好:该偏好只描述
+      // 服务器轨道,会话文件本身不持久化。
+      final primaryIsSessionFile = primarySubtitleFileId != null;
+      final subtitle = primaryIsSessionFile || subtitleStreamIndex == null
           ? null
           : source.streamByIndex(subtitleStreamIndex!);
       await runtime!.history.savePreference(
@@ -6258,7 +6677,7 @@ class PlayerController extends ChangeNotifier {
             audioTitle: audio?.label,
             subtitleLanguage: subtitle?.language,
             subtitleTitle: subtitle?.displayTitle,
-            subtitleOff: subtitleStreamIndex == null,
+            subtitleOff: !primaryIsSessionFile && subtitleStreamIndex == null,
             maxStreamingBitrate: maxStreamingBitrate,
             mediaSourceName: source.name,
           ),
@@ -6272,24 +6691,27 @@ class PlayerController extends ChangeNotifier {
     final audio = audioStreamIndex == null
         ? null
         : source?.streamByIndex(audioStreamIndex!);
-    final subtitle = subtitleStreamIndex == null
+    final primaryIsSessionFile = primarySubtitleFileId != null;
+    final subtitle = primaryIsSessionFile || subtitleStreamIndex == null
         ? null
         : source?.streamByIndex(subtitleStreamIndex!);
     final hasSubtitles = source?.subtitleStreams.isNotEmpty ?? false;
     _preferredSourceName = _sourceFingerprint(source) ?? _preferredSourceName;
-    PlayerSeriesPreference preference({bool exactSource = false}) =>
-        PlayerSeriesPreference(
-          audioStreamIndex: audioStreamIndex,
-          audioLanguage: audio?.language,
-          audioTitle: audio?.displayTitle ?? audio?.label,
-          subtitleStreamIndex: subtitleStreamIndex,
-          subtitleLanguage: subtitle?.language,
-          subtitleTitle: subtitle?.displayTitle ?? subtitle?.label,
-          subtitleOff: subtitleStreamIndex == null && hasSubtitles,
-          maxStreamingBitrate: maxStreamingBitrate,
-          mediaSourceName: _preferredSourceName,
-          mediaSourceId: exactSource ? source?.id : null,
-        );
+    PlayerSeriesPreference preference({
+      bool exactSource = false,
+    }) => PlayerSeriesPreference(
+      audioStreamIndex: audioStreamIndex,
+      audioLanguage: audio?.language,
+      audioTitle: audio?.displayTitle ?? audio?.label,
+      subtitleStreamIndex: primaryIsSessionFile ? null : subtitleStreamIndex,
+      subtitleLanguage: subtitle?.language,
+      subtitleTitle: subtitle?.displayTitle ?? subtitle?.label,
+      subtitleOff:
+          !primaryIsSessionFile && subtitleStreamIndex == null && hasSubtitles,
+      maxStreamingBitrate: maxStreamingBitrate,
+      mediaSourceName: _preferredSourceName,
+      mediaSourceId: exactSource ? source?.id : null,
+    );
     final current = preference(exactSource: true);
     _itemPreferences = {..._itemPreferences, _itemPreferenceKey: current};
     _rememberedPreference = current;

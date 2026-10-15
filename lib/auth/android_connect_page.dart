@@ -4,11 +4,15 @@ import '../media_server/capabilities.dart';
 
 import 'package:rillight/media_server/server_address.dart';
 import 'package:rillight/app/ui/ui.dart';
+
+import 'dart:async';
+
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -457,6 +461,20 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                             ),
                           ),
                           const SizedBox(height: 4),
+                          AppButton.icon(
+                            key: const Key('android-connect-import'),
+                            onPressed: auth.isBusy
+                                ? null
+                                : () => unawaited(
+                                    showBackupImportFlow(context, auth: auth),
+                                  ),
+                            icon: const Icon(
+                              CupertinoIcons.square_arrow_down,
+                              size: 18,
+                            ),
+                            label: Text(l10n.backupImportEntry),
+                            variant: AppButtonVariant.plain,
+                          ),
                           _buildMore(context, l10n, auth),
                         ],
                       ),

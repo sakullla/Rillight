@@ -6,6 +6,9 @@ import '../media_server/capabilities.dart';
 
 import 'package:rillight/media_server/server_address.dart';
 import 'package:rillight/app/ui/ui.dart';
+
+import 'dart:async';
+
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -16,6 +19,7 @@ import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -31,6 +35,7 @@ abstract final class ConnectFormKeys {
   static const submit = Key('connect-submit');
   static const passwordVisibility = Key('connect-password-visibility');
   static const addServer = Key('connect-add-server');
+  static const importBackup = Key('connect-import-backup');
   static const addLine = Key('connect-add-line');
   static const deleteLine = Key('connect-delete-line');
   static const serverSearch = Key('connect-server-search');
@@ -710,6 +715,18 @@ class _ConnectPageState extends State<ConnectPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           header,
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AppButton.icon(
+              key: ConnectFormKeys.importBackup,
+              onPressed: auth.isBusy
+                  ? null
+                  : () => unawaited(showBackupImportFlow(context, auth: auth)),
+              icon: const Icon(CupertinoIcons.square_arrow_down, size: 18),
+              label: Text(l10n.backupImportEntry),
+              variant: AppButtonVariant.plain,
+            ),
+          ),
           if (auth.savedServers.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -744,6 +761,18 @@ class _ConnectPageState extends State<ConnectPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         header,
+        Align(
+          alignment: Alignment.centerLeft,
+          child: AppButton.icon(
+            key: ConnectFormKeys.importBackup,
+            onPressed: auth.isBusy
+                ? null
+                : () => unawaited(showBackupImportFlow(context, auth: auth)),
+            icon: const Icon(CupertinoIcons.square_arrow_down, size: 18),
+            label: Text(l10n.backupImportEntry),
+            variant: AppButtonVariant.plain,
+          ),
+        ),
         const SizedBox(height: AppSpacing.sm),
         if (auth.savedServers.isEmpty)
           AppEmptyView(

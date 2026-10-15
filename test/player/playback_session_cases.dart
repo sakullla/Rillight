@@ -1382,11 +1382,21 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   @override
-  Future<bool> setSubtitleUri(Uri uri, {String? title, int? index}) async {
+  Future<bool> setSubtitleUri(
+    Uri uri, {
+    String? title,
+    int? index,
+    int slot = 0,
+  }) async {
     if (failInitialization == 'subtitleUri') {
       throw StateError('subtitle failed');
     }
-    final applied = await super.setSubtitleUri(uri, title: title, index: index);
+    final applied = await super.setSubtitleUri(
+      uri,
+      title: title,
+      index: index,
+      slot: slot,
+    );
     final gate = subtitleGate;
     subtitleWaiting = gate != null;
     await gate?.future;
@@ -1394,9 +1404,9 @@ class _ControlledBackend extends FakeVideoBackend {
   }
 
   @override
-  Future<void> setSubtitleOff() async {
+  Future<void> setSubtitleOff({int slot = 0}) async {
     if (failInitialization == 'subtitle') throw StateError('subtitle failed');
-    await super.setSubtitleOff();
+    await super.setSubtitleOff(slot: slot);
   }
 
   @override

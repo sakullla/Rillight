@@ -1,3 +1,4 @@
+import 'updates/update_check.dart';
 import '../auth/provider_connect_dialog.dart';
 import '../media_server/capabilities.dart';
 
@@ -462,6 +463,9 @@ class _TvSession extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    TvSectionTitle(l.mobileAboutGroup),
+                    const UpdateCheck(),
+                    SizedBox(height: TvDesign.sectionGap * s),
                     TvSectionTitle(l.settingsAppearance),
                     SizedBox(height: 6 * s),
                     const TvAppearancePicker(),
