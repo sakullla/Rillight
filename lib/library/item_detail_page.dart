@@ -3203,7 +3203,7 @@ class _DetailMenuButton<T> extends StatelessWidget {
       context,
       key: menuKey,
       tooltip: tooltip,
-      icon: Icon(icon),
+      icon: Icon(icon, fill: AppIcons.filled),
       onPressed: () => unawaited(_open(context)),
     );
   }

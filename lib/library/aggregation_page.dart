@@ -1711,12 +1711,13 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
       String label,
       String key,
       _AggregationSegment value,
-      IconData icon,
-    ) => TvAction(
+      IconData icon, {
+      double? fill,
+    }) => TvAction(
       key: Key(key),
       pill: true,
       selected: _segment == value,
-      leading: Icon(icon),
+      leading: Icon(icon, fill: fill),
       onPressed: () => setState(() => _segment = value),
       child: Text(label),
     );
@@ -1742,6 +1743,9 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             'aggregation-segment-favorites',
             _AggregationSegment.favorites,
             AppIcons.favorite,
+            fill: _segment == _AggregationSegment.favorites
+                ? AppIcons.filled
+                : AppIcons.outline,
           ),
           segment(
             l.libraries,
