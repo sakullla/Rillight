@@ -613,6 +613,118 @@ void main() {
     tags: ['integration'],
   );
 
+  testWidgets('continue watching keeps one episode code and a real spec', (
+    tester,
+  ) async {
+    await _pumpSurface(tester, width: 3600, height: 900);
+    final auth = AuthController.memory();
+    final catalog = CatalogController(auth: auth);
+    addTearDown(catalog.dispose);
+    addTearDown(auth.dispose);
+    catalog
+      ..resume = CatalogRowState(
+        items: [
+          const MediaItem(
+            id: 'ep-padded',
+            name: 'S01E02',
+            type: 'Episode',
+            seriesName: '补零剧',
+            parentIndexNumber: 1,
+            indexNumber: 2,
+          ),
+          const MediaItem(
+            id: 'ep-padded-title',
+            name: 'S01E02 - The Pilot',
+            type: 'Episode',
+            seriesName: '补零标题剧',
+            parentIndexNumber: 1,
+            indexNumber: 2,
+          ),
+          const MediaItem(
+            id: 'ep-human-quality',
+            name: 'The Rescue 1080p',
+            type: 'Episode',
+            seriesName: '人读画质剧',
+            parentIndexNumber: 3,
+            indexNumber: 1,
+          ),
+          const MediaItem(
+            id: 'ep-resolution',
+            name: '1080p',
+            type: 'Episode',
+            seriesName: '分辨率剧',
+            parentIndexNumber: 4,
+            indexNumber: 1,
+          ),
+          const MediaItem(
+            id: 'ep-4k',
+            name: '4K',
+            type: 'Episode',
+            seriesName: '四开剧',
+            parentIndexNumber: 4,
+            indexNumber: 2,
+          ),
+          const MediaItem(
+            id: 'ep-codec',
+            name: 'H.264',
+            type: 'Episode',
+            seriesName: '编码剧',
+            parentIndexNumber: 4,
+            indexNumber: 3,
+          ),
+          const MediaItem(
+            id: 'ep-filename',
+            name: 'NF.WD.264.AAC-SonyHD',
+            type: 'Episode',
+            seriesName: '发布剧',
+            parentIndexNumber: 5,
+            indexNumber: 1,
+            mediaSources: [
+              ItemMediaSource(
+                id: 'src',
+                name: 'NF.WD.264.AAC-SonyHD',
+                width: 1920,
+                height: 1080,
+                streams: [
+                  ItemMediaStream(
+                    index: 0,
+                    type: 'Video',
+                    codec: 'h264',
+                    width: 1920,
+                    height: 1080,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      )
+      ..nextUp = const CatalogRowState(hidden: true)
+      ..latestMovies = const CatalogRowState(hidden: true)
+      ..latestSeries = const CatalogRowState(hidden: true)
+      ..libraries = const []
+      ..librariesLoading = false;
+    await tester.pumpWidget(_homeApp(catalog));
+    await tester.pump();
+
+    expect(find.text('S01E02'), findsOneWidget);
+    expect(find.text('S1E2 · S01E02'), findsNothing);
+    expect(find.text('S01E02 - The Pilot'), findsOneWidget);
+    expect(find.text('S1E2 · S01E02 - The Pilot'), findsNothing);
+    expect(find.text('S3E1 · The Rescue 1080p'), findsOneWidget);
+    expect(find.text('S3E1 · 1080p'), findsNothing);
+    expect(find.text('S4E1 · 1080p'), findsOneWidget);
+    expect(find.text('S4E1'), findsNothing);
+    expect(find.text('S4E2 · 4K'), findsOneWidget);
+    expect(find.text('S4E2'), findsNothing);
+    expect(find.text('S4E3 · H.264'), findsOneWidget);
+    expect(find.text('S4E3'), findsNothing);
+    expect(find.text('S5E1 · 1080p · H.264'), findsOneWidget);
+    expect(find.textContaining('SonyHD'), findsNothing);
+    expect(find.textContaining('NF.WD'), findsNothing);
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('home keeps its scroll offset across detail and reduced motion', (
     tester,
   ) async {

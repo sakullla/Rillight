@@ -334,27 +334,47 @@ String _resumeMeta(MediaItem item, String title) {
   return '$code · $name';
 }
 
-/// 集名已经写出这一集（S1E2、第 2 集、EP02）时，副标题不再加一遍季集编号。
+/// 集名已经写出这一集（S1E2、S01E02、第 2 集、EP02）时，副标题不再加一遍季集编号。
 bool _nameCarriesEpisode(MediaItem item) {
   final name = item.name.trim();
   final code = seasonEpisodeCode(item);
   if (code != null && name.toLowerCase().startsWith(code.toLowerCase())) {
     return true;
   }
+  if (_leadingSeasonEpisodeMatches(item, name)) return true;
   if (item.indexNumber == null) return false;
   return numberedEpisodeTitle(item) == item.name;
+}
+
+/// 行首季集号允许前导零。S01E02 与未补零的 S1E2 是同一集。
+final _leadingSeasonEpisode = RegExp(r'^[sS](\d+)[eE](\d+)\b');
+
+bool _leadingSeasonEpisodeMatches(MediaItem item, String name) {
+  final season = item.parentIndexNumber;
+  final episode = item.indexNumber;
+  if (season == null || episode == null) return false;
+  final match = _leadingSeasonEpisode.firstMatch(name);
+  if (match == null) return false;
+  return int.tryParse(match.group(1)!) == season &&
+      int.tryParse(match.group(2)!) == episode;
 }
 
 /// 集名主要由分辨率、编码或点分发布串组成。人读集名（含中文短名）不是。
 bool _episodeNameIsTechnical(String name) {
   final trimmed = name.trim();
   if (trimmed.isEmpty) return false;
+  final separators = RegExp(r'[._]').allMatches(trimmed).length;
   // 没有点分的中文名是人读集名，即使里面提到画质也不改写成规格。
-  if (RegExp(r'[\u3400-\u9fff]').hasMatch(trimmed) &&
-      !RegExp(r'[._]').hasMatch(trimmed)) {
+  if (RegExp(r'[\u3400-\u9fff]').hasMatch(trimmed) && separators == 0) {
     return false;
   }
-  return _releaseHint.hasMatch(trimmed);
+  if (!_releaseHint.hasMatch(trimmed)) return false;
+  // 两个以上的点或下划线才是发布串。句子里的一个句点不算。
+  if (separators >= 2) return true;
+  final tokens = trimmed
+      .split(RegExp(r'\s+'))
+      .where((token) => token.isNotEmpty);
+  return tokens.isNotEmpty && tokens.every(_specToken.hasMatch);
 }
 
 final _releaseHint = RegExp(
@@ -363,7 +383,15 @@ final _releaseHint = RegExp(
   caseSensitive: false,
 );
 
-/// 发布串集名的副标题规格：分辨率和视频编码。解析不到时不回退成文件名。
+/// 整段标题本身就是分辨率、编码或发布词，而不是句子里夹了一个画质词。
+final _specToken = RegExp(
+  r'^(?:1080p|720p|2160p|1440p|480p|4k|uhd|x26[45]|h\.?26[45]|26[45]|'
+  r'hevc|avc|av1|vp9|flac|aac|bdrip|bluray|web-?dl|webrip|10bit)$',
+  caseSensitive: false,
+);
+
+/// 发布串集名的副标题规格：分辨率和视频编码。
+/// 解析出的规格即使与标题相同也保留；只有回退成原文件名或片源标签时才省略。
 String _episodeSpecLabel(MediaItem item) {
   final first = item.mediaSources.isEmpty ? null : item.mediaSources.first;
   final sourceName = first?.name?.trim();
@@ -375,13 +403,41 @@ String _episodeSpecLabel(MediaItem item) {
     streams: first?.streams ?? const [],
   );
   final text = releaseSourcePrimaryText(source).trim();
+  if (text.isEmpty) return '';
   final raw = item.name.trim();
   final named = source.name?.trim() ?? '';
-  if (text.isEmpty || text == raw || text == named || text == source.label) {
-    return '';
-  }
+  final echoed = text == raw || text == named || text == source.label;
+  if (echoed && !_sourceHasParsedSpec(source)) return '';
   return text;
 }
+
+/// 分辨率或视频编码来自画面尺寸、视频流，或文件名里的规格词。
+bool _sourceHasParsedSpec(ItemMediaSource source) {
+  ItemMediaStream? video;
+  for (final stream in source.streams) {
+    if (stream.isVideo) {
+      video = stream;
+      break;
+    }
+  }
+  final height = video?.height ?? source.height ?? 0;
+  final width = video?.width ?? source.width ?? 0;
+  if (height > 0 || width > 0) return true;
+  if (video?.codec?.trim().isNotEmpty ?? false) return true;
+  final raw = source.name?.trim() ?? '';
+  if (raw.isEmpty) return false;
+  for (final token in raw.split(RegExp(r'[.\s_\-]+'))) {
+    if (token.isNotEmpty && _parsedSpecToken.hasMatch(token)) return true;
+  }
+  return false;
+}
+
+/// 与片源格式化相同的分辨率、编码词。命中时主文字是解析结果，不是文件名回退。
+final _parsedSpecToken = RegExp(
+  r'^(?:2160p|4k|uhd|1440p|1080p|720p|480p|'
+  r'265|h265|h\.265|x265|hevc|264|h264|h\.264|x264|avc|av1|vp9)$',
+  caseSensitive: false,
+);
 
 /// 行高 = 图区 + 图下标题。横卡的进度在画面底边，移除按钮叠在画面角上。
 double _rowHeightOf(BuildContext context, {required bool wide}) =>
