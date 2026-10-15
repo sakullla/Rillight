@@ -50,6 +50,31 @@ Dio _createEmbyDio({
   return dio;
 }
 
+/// A guarded client borrows the shared transport. Dio can yield after request
+/// interceptors (including during body transformation), so the frozen permit
+/// must also be checked at the final adapter dispatch boundary.
+class _GuardedEmbyTransport implements HttpClientAdapter {
+  _GuardedEmbyTransport(this._transport, this._check);
+
+  final HttpClientAdapter _transport;
+  final void Function() _check;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    _check();
+    return _transport.fetch(options, requestStream, cancelFuture);
+  }
+
+  @override
+  void close({bool force = false}) {
+    // Only the owning client may close a transport shared by other consumers.
+  }
+}
+
 class EmbyClient implements MediaServerClient, MediaFavorites {
   @override
   MediaServerType get serviceType => MediaServerType.emby;
@@ -236,7 +261,10 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
     }
 
     final dio = Dio(_dio.options.copyWith());
-    dio.httpClientAdapter = _dio.httpClientAdapter;
+    dio.httpClientAdapter = _GuardedEmbyTransport(
+      _dio.httpClientAdapter,
+      check,
+    );
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
