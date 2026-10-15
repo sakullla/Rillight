@@ -172,7 +172,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                         key: _key('cancel'),
                         tooltip: l.libraryFilterCancel,
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(CupertinoIcons.xmark),
+                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                       ),
                   ],
                 ),
@@ -500,7 +500,7 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
                     : AppIconButton(
                         tooltip: l.filterReset,
                         onPressed: () => setState(_search.clear),
-                        icon: const Icon(CupertinoIcons.xmark),
+                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                       ),
               ),
             const SizedBox(height: 8),

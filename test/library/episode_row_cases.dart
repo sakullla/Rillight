@@ -397,6 +397,17 @@ void main() {
       tester.widget<Icon>(find.byIcon(AppIcons.search)).fill,
       AppIcons.filled,
     );
+    expect(
+      tester.widget<Icon>(find.byIcon(AppIcons.close)).fill,
+      AppIcons.filled,
+    );
+    await tester.enterText(find.byType(AppTextField), '剧');
+    await tester.pump();
+    final closes = tester.widgetList<Icon>(find.byIcon(AppIcons.close));
+    expect(closes, hasLength(2));
+    for (final icon in closes) {
+      expect(icon.fill, AppIcons.filled);
+    }
     expect(tester.takeException(), isNull);
   });
 }

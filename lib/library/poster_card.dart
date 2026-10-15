@@ -529,7 +529,11 @@ class _PosterRevealOverlay extends StatelessWidget {
                               minimumSize: const Size(32, 32),
                               padding: const EdgeInsets.all(AppSpacing.xxs),
                             ),
-                            icon: const Icon(CupertinoIcons.xmark, size: 18),
+                            icon: const Icon(
+                              AppIcons.close,
+                              fill: AppIcons.filled,
+                              size: 18,
+                            ),
                           ),
                         ),
                       ),

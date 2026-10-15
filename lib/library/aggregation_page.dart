@@ -2227,7 +2227,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                     _submit();
                     widget.focusNode?.requestFocus();
                   },
-                  icon: const Icon(CupertinoIcons.xmark),
+                  icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                 );
               },
             ),
@@ -2288,7 +2288,7 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                         key: SearchOverlay.closeKey,
                         tooltip: '关闭',
                         onPressed: widget.onClose,
-                        icon: const Icon(CupertinoIcons.xmark),
+                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                       ),
                   ],
                 ),
