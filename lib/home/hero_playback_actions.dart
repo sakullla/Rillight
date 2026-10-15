@@ -118,11 +118,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
               height: 18,
               child: CupertinoActivityIndicator(),
             )
-          : Icon(
-              expand ? AppIcons.play : CupertinoIcons.play_fill,
-              size: 22,
-              fill: expand ? AppIcons.filled : null,
-            ),
+          : const Icon(AppIcons.play, size: 22, fill: AppIcons.filled),
       label: Text(
         l10n.play,
         maxLines: 1,

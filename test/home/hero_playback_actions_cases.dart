@@ -337,10 +337,17 @@ void main() {
         ),
       ),
     );
-    final play = tester.widget<ui.AppButton>(
-      find.byKey(const ValueKey('hero-resume-movie')),
-    );
+    final playFinder = find.byKey(const ValueKey('hero-resume-movie'));
+    final play = tester.widget<ui.AppButton>(playFinder);
     expect(play.style?.backgroundColor, AppUiTheme.light().colorScheme.primary);
+    final icon = tester.widget<Icon>(
+      find.descendant(of: playFinder, matching: find.byIcon(AppIcons.play)),
+    );
+    expect(icon.fill, AppIcons.filled);
+    expect(
+      find.descendant(of: playFinder, matching: find.text('播放')),
+      findsOne,
+    );
     final details = tester.widget<ui.AppButton>(
       find.widgetWithText(ui.AppButton, '详情'),
     );
@@ -386,10 +393,17 @@ void main() {
         ),
       ),
     );
-    final play = tester.widget<ui.AppButton>(
-      find.byKey(const ValueKey('hero-resume-movie')),
-    );
+    final playFinder = find.byKey(const ValueKey('hero-resume-movie'));
+    final play = tester.widget<ui.AppButton>(playFinder);
     expect(play.style?.backgroundColor, const Color(0xffffffff));
+    final icon = tester.widget<Icon>(
+      find.descendant(of: playFinder, matching: find.byIcon(AppIcons.play)),
+    );
+    expect(icon.fill, AppIcons.filled);
+    expect(
+      find.descendant(of: playFinder, matching: find.text('播放')),
+      findsOne,
+    );
   });
 
   testWidgets('phone carousel keeps one solid play button beside details', (
