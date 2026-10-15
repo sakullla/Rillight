@@ -8,6 +8,8 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/widgets/poster_placeholder.dart';
+import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -571,9 +573,19 @@ void main() {
         final posterImage = tester.widget<MediaImage>(
           find.descendant(of: poster, matching: find.byType(MediaImage)),
         );
+        await _waitForDecoded(tester, poster);
 
         await tester.tap(poster);
-        await _homeUntil(tester, find.byKey(PhoneItemBanner.bannerKey));
+        for (var i = 0; i < 30; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          if (find
+              .byKey(PhoneItemBanner.handoffImageKey, skipOffstage: false)
+              .evaluate()
+              .isNotEmpty) {
+            break;
+          }
+        }
+        _expectHeroFrame(tester);
         _expectSameImage(tester, posterImage, onstage: true);
         await _homeSettle(tester);
         expect(
@@ -596,6 +608,7 @@ void main() {
         expect(landed.preferBackdrop, posterImage.preferBackdrop);
         expect(landed.maxWidth, posterImage.maxWidth);
         expect(landed.item.primaryImageTag, posterImage.item.primaryImageTag);
+        _expectHeroFrame(tester);
         final play = find.byKey(const Key('mobile-detail-play'));
         expect(tester.widget<AppButton>(play).onPressed, isNotNull);
         expect(find.text('Inception'), findsWidgets);
@@ -3109,6 +3122,80 @@ Future<(GoRouter, FakeEmbyServer)> _openPhone(
 }
 
 // ---- Hero/动效专用 harness(自 phone_motion_test 并入) ----
+
+Future<void> _waitForDecoded(WidgetTester tester, Finder scope) async {
+  for (var i = 0; i < 30; i++) {
+    final ready = tester
+        .widgetList<RawImage>(
+          find.descendant(
+            of: scope,
+            matching: find.byType(RawImage),
+            skipOffstage: false,
+          ),
+        )
+        .any((raw) => raw.image != null);
+    if (ready) return;
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 40)),
+    );
+  }
+  fail('artwork frame was not decoded');
+}
+
+void _expectHeroFrame(WidgetTester tester) {
+  final handoff = find.byKey(
+    PhoneItemBanner.handoffImageKey,
+    skipOffstage: false,
+  );
+  expect(handoff, findsWidgets);
+  expect(
+    find.descendant(
+      of: handoff,
+      matching: find.byType(SkeletonBlock, skipOffstage: false),
+      skipOffstage: false,
+    ),
+    findsNothing,
+  );
+  expect(
+    find.descendant(
+      of: handoff,
+      matching: find.byType(PosterPlaceholder, skipOffstage: false),
+      skipOffstage: false,
+    ),
+    findsNothing,
+  );
+  expect(
+    find.descendant(
+      of: handoff,
+      matching: find.byType(Image, skipOffstage: false),
+      skipOffstage: false,
+    ),
+    findsWidgets,
+  );
+  expect(
+    tester
+        .widgetList<RawImage>(
+          find.descendant(
+            of: handoff,
+            matching: find.byType(RawImage, skipOffstage: false),
+            skipOffstage: false,
+          ),
+        )
+        .any((raw) => raw.image != null),
+    isTrue,
+  );
+  final surface = AppUiTheme.dark().colorScheme.surfaceContainerHigh;
+  expect(
+    find.descendant(
+      of: find.byKey(PhoneItemBanner.bannerKey),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is ColoredBox && widget.color == surface,
+      ),
+    ),
+    findsNothing,
+  );
+}
 
 /// 头部承接共享图的那一张（从海报进来是海报卡，从横版卡进来是背景）。
 MediaImage _bannerImage(WidgetTester tester) {

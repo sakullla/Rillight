@@ -182,6 +182,7 @@ class MediaImage extends StatefulWidget {
     this.contributesToTheme = false,
     this.blurFill = false,
     this.blurSigma,
+    this.retainVisibleFrame = false,
   }) : assert(blurSigma == null || !contributesToTheme);
 
   final MediaItem item;
@@ -210,6 +211,9 @@ class MediaImage extends StatefulWidget {
   /// 模糊在不超过 160 像素的画布上做一次并缓存,滚动时不再逐帧对整幅
   /// 横幅跑 [ImageFiltered];与 [contributesToTheme] 互斥。
   final double? blurSigma;
+
+  /// 已经画出的画面留到下一张的第一帧。没有旧图时才允许一次骨架或失败占位。
+  final bool retainVisibleFrame;
 
   /// 清空内存与磁盘两级缓存,仅测试使用。
   @visibleForTesting
@@ -386,6 +390,8 @@ class _MediaImageState extends State<MediaImage> {
   }
 
   Future<_LoadedImage?>? _future;
+  _LoadedImage? _shown;
+  bool _failureShown = false;
   String? _lastAccountScope;
   int? _lastRequestWidth;
   int _loadGeneration = 0;
@@ -471,6 +477,10 @@ class _MediaImageState extends State<MediaImage> {
     final scope = _accountScope;
     final accountChanged = scope != _lastAccountScope;
     _lastAccountScope = scope;
+    if (accountChanged) {
+      _shown = null;
+      _failureShown = false;
+    }
     // 网格滚动时 LayoutBuilder 宽度会抖 1px;已指定 maxWidth 则不重拉。
     final maxWidthChanged = oldWidget.maxWidth != widget.maxWidth;
     final widthChanged =
@@ -890,11 +900,16 @@ class _MediaImageState extends State<MediaImage> {
     final width = widget.width;
     final height = widget.height;
     if (!_hasImageSource || _accountScope == null) {
+      final shown = _shown;
+      if (widget.retainVisibleFrame && shown != null) {
+        return _paint(context, shown, width, height);
+      }
       return PosterPlaceholder(width: width, height: height);
     }
     // 内存命中同一帧画上。视口内磁盘命中不等滚动空闲;屏幕外未缓存仍推迟。
     final cached = _peekLoaded();
     if (cached != null) {
+      _failureShown = false;
       return _paint(context, cached, width, height);
     }
     return FutureBuilder<_LoadedImage?>(
@@ -902,13 +917,20 @@ class _MediaImageState extends State<MediaImage> {
       future: _future,
       builder: (context, snapshot) {
         final loaded = snapshot.data;
-        if (snapshot.connectionState != ConnectionState.done) {
+        if (loaded != null && loaded.bytes.isNotEmpty) {
+          _failureShown = false;
+          return _paint(context, loaded, width, height);
+        }
+        final held = _shown;
+        if (widget.retainVisibleFrame && held != null) {
+          return _paint(context, held, width, height);
+        }
+        final waiting = snapshot.connectionState != ConnectionState.done;
+        if (waiting && !_failureShown) {
           return _loadingBox(context, width, height);
         }
-        if (loaded == null || loaded.bytes.isEmpty) {
-          return PosterPlaceholder(width: width, height: height);
-        }
-        return _paint(context, loaded, width, height);
+        _failureShown = true;
+        return PosterPlaceholder(width: width, height: height);
       },
     );
   }
@@ -968,8 +990,17 @@ class _MediaImageState extends State<MediaImage> {
       isAntiAlias: false,
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         if (frame == null && !wasSynchronouslyLoaded) {
+          final held = _shown;
+          if (widget.retainVisibleFrame &&
+              held != null &&
+              held.cacheKey != loaded.cacheKey) {
+            return _stillImage(context, held, width, height);
+          }
+          if (widget.retainVisibleFrame) return child;
           return _loadingBox(context, width, height);
         }
+        _shown = loaded;
+        _failureShown = false;
         if (widget.contributesToTheme) {
           ArtworkColorScope.maybeOf(context)
               ?.report(widget.item.id, loaded.cacheKey, loaded.bytes);
@@ -977,6 +1008,12 @@ class _MediaImageState extends State<MediaImage> {
         return child;
       },
       errorBuilder: (context, error, stackTrace) {
+        final held = _shown;
+        if (widget.retainVisibleFrame &&
+            held != null &&
+            held.cacheKey != loaded.cacheKey) {
+          return _stillImage(context, held, width, height);
+        }
         return PosterPlaceholder(width: width, height: height);
       },
     );
@@ -996,6 +1033,31 @@ class _MediaImageState extends State<MediaImage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// 旧画面本身，不再套一层会换成骨架的 frameBuilder。
+  Widget _stillImage(
+    BuildContext context,
+    _LoadedImage loaded,
+    double? width,
+    double? height,
+  ) {
+    return Image(
+      image: _MediaMemoryImage(
+        cacheKey: loaded.cacheKey,
+        bytes: loaded.bytes,
+        targetWidth: _requestMaxWidth,
+        policy: _sourcePolicy,
+      ),
+      width: width,
+      height: height,
+      fit: widget.smartCrop ? BoxFit.cover : widget.fit,
+      alignment: widget.alignment,
+      filterQuality: FilterQuality.low,
+      gaplessPlayback: true,
+      isAntiAlias: false,
+      errorBuilder: (context, error, stackTrace) => const SizedBox.expand(),
     );
   }
 

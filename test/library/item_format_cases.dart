@@ -50,4 +50,44 @@ void main() {
     expect(numberedEpisodeTitle(episode('1984', 2)), '2. 1984');
     expect(numberedEpisodeTitle(episode('无编号', null)), '无编号');
   });
+
+  test('release filenames use resolution and codec, readable names stay', () {
+    const release = ItemMediaSource(
+      id: 'release',
+      name: 'NF.WD.264.AAC-SonyHD',
+      height: 1080,
+      streams: [
+        ItemMediaStream(index: 0, type: 'Video', codec: 'h264', height: 1080),
+      ],
+    );
+    const edition = ItemMediaSource(
+      id: 'edition',
+      name: '导演剪辑版',
+      streams: [
+        ItemMediaStream(index: 0, type: 'Video', codec: 'hevc', height: 2160),
+      ],
+    );
+    const twin = ItemMediaSource(
+      id: 'twin',
+      name: 'Other.Group.1080p.x264-TEAM',
+      streams: [
+        ItemMediaStream(index: 0, type: 'Video', codec: 'h264', height: 1080),
+      ],
+    );
+    const readable = ItemMediaSource(id: 'short', name: '1080p SDR');
+    final sources = [release, edition, twin];
+    expect(isReleaseSourceName(release.name!), isTrue);
+    expect(isReleaseSourceName(edition.name!), isFalse);
+    expect(isReleaseSourceName(readable.name!), isFalse);
+    expect(phoneSourceVersionLabel(release, sources), '1080p · H.264 · 1');
+    expect(phoneSourceVersionLabel(edition, sources), '导演剪辑版');
+    expect(phoneSourceVersionLabel(twin, sources), '1080p · H.264 · 3');
+    expect(phoneSourceVersionLabel(readable, [readable]), '1080p SDR');
+    expect(
+      releaseSourcePrimaryText(
+        const ItemMediaSource(id: 'parsed', name: 'Show.1080p.HEVC-GROUP'),
+      ),
+      '1080p · H.265',
+    );
+  });
 }

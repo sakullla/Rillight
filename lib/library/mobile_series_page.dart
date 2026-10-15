@@ -1,5 +1,4 @@
-import 'dart:ui' as ui;
-
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
@@ -56,6 +55,7 @@ class PhoneItemBanner extends StatelessWidget {
     this.onTitleTap,
     this.titleHint,
     this.preferBackdrop = true,
+    this.imagePrefersBackdrop,
     this.maxWidth = PhoneMotion.pageRequestWidth,
     this.posterItem,
   });
@@ -67,8 +67,6 @@ class PhoneItemBanner extends StatelessWidget {
 
   /// 承接共享图过渡的那一张（海报卡或背景），参数与来源卡片一致。
   static const handoffImageKey = Key('phone-detail-handoff-image');
-
-  static const double _posterBlurSigma = 36;
 
   final MediaItem item;
 
@@ -87,9 +85,15 @@ class PhoneItemBanner extends StatelessWidget {
   final VoidCallback? onTitleTap;
   final String? titleHint;
 
-  /// 来源卡片是横版（true）还是海报（false）。
+  /// 来源卡片是横版（true）还是海报（false）。决定海报卡和共享图落点，进入后保持不变。
   final bool preferBackdrop;
+
+  /// 大图实际请求的候选。缺省同 [preferBackdrop]，因此从海报或横卡进入时
+  /// 背景就是点中的那一张。切换季时可以改成该季的横图，旧画面留到新图第一帧。
+  final bool? imagePrefersBackdrop;
   final int maxWidth;
+
+  bool get _imagePrefersBackdrop => imagePrefersBackdrop ?? preferBackdrop;
 
   /// 背景高度：约 3:2 加状态栏，横屏/矮窗封顶半屏多一点，标题与主操作首屏可达。
   static double imageHeightOf(BuildContext context) {
@@ -120,7 +124,6 @@ class PhoneItemBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
     final page = theme.scaffoldBackgroundColor;
     final imageHeight = imageHeightOf(context);
     final showPoster = _showPoster;
@@ -129,45 +132,25 @@ class PhoneItemBanner extends StatelessWidget {
     // 海报卡上半截压在画面上，标题块与海报底边对齐。
     final rise = showPoster ? posterHeight * .62 : AppSpacing.xxl;
     final landscape = hasLandscapeArt(item);
-
-    // 只有海报、又不承接共享图时，背景只是氛围底：直接取预先缩小模糊好的
-    // 版本，不解码清晰大图，也不在滚动时逐帧对整幅横幅做高斯模糊。
-    final cachedBlur = !landscape && !preferBackdrop;
+    final sameAsEntry = _imagePrefersBackdrop == preferBackdrop;
+    // 和点进来的那一张用同一请求宽度，内存里已有的画面才能在第一帧画上。
+    // 季画面用页面宽度；旧图由 [MediaImage.retainVisibleFrame] 留到新帧。
+    final imageMaxWidth = sameAsEntry ? maxWidth : PhoneMotion.pageRequestWidth;
     Widget backdrop = MediaImage(
       key: preferBackdrop ? handoffImageKey : backdropKey,
       item: item,
-      contributesToTheme: preferBackdrop,
-      preferBackdrop: true,
-      smartCrop: landscape,
+      contributesToTheme: preferBackdrop && sameAsEntry,
+      preferBackdrop: _imagePrefersBackdrop,
+      smartCrop: landscape && _imagePrefersBackdrop,
       fit: BoxFit.cover,
-      maxWidth: preferBackdrop ? maxWidth : PhoneMotion.pageRequestWidth,
-      blurSigma: cachedBlur ? _posterBlurSigma : null,
+      maxWidth: imageMaxWidth,
+      retainVisibleFrame: true,
     );
     if (preferBackdrop) {
       backdrop = PhoneMotion.sharedImage(
         itemId: item.id,
         preferBackdrop: true,
         child: backdrop,
-      );
-    }
-    if (!landscape) {
-      // 只有海报：大半径模糊成氛围底，再压一层暗色，海报卡才是主体。
-      backdrop = Stack(
-        fit: StackFit.expand,
-        children: [
-          if (cachedBlur)
-            backdrop
-          else
-            ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(
-                sigmaX: _posterBlurSigma,
-                sigmaY: _posterBlurSigma,
-                tileMode: TileMode.clamp,
-              ),
-              child: backdrop,
-            ),
-          ColoredBox(color: const Color(0xff000000).withValues(alpha: .18)),
-        ],
       );
     }
 
@@ -204,7 +187,6 @@ class PhoneItemBanner extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ColoredBox(color: scheme.surfaceContainerHigh),
                   RepaintBoundary(child: ClipRect(child: backdrop)),
                   // 顶带:保护透明顶栏与返回钮,向下溶到透明。
                   DecoratedBox(
@@ -323,6 +305,7 @@ class _PosterCard extends StatelessWidget {
       height: height,
       fit: BoxFit.cover,
       maxWidth: maxWidth,
+      retainVisibleFrame: true,
     );
     if (handoff) {
       image = PhoneMotion.sharedImage(
@@ -351,7 +334,6 @@ class _PosterCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ColoredBox(color: scheme.surfaceContainerHigh),
               image,
               IgnorePointer(
                 child: DecoratedBox(
@@ -479,7 +461,8 @@ class _BannerTitle extends StatelessWidget {
         ),
         if (onTap != null)
           Icon(
-            CupertinoIcons.chevron_right,
+            AppIcons.chevronRight,
+            fill: AppIcons.filled,
             size: 20,
             color: theme.colorScheme.primary,
           ),
@@ -558,7 +541,8 @@ class _MetaChip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(
-                CupertinoIcons.star_fill,
+                AppIcons.star,
+                fill: AppIcons.filled,
                 size: 15,
                 color: phoneRatingStarColor,
               ),
@@ -1325,8 +1309,9 @@ class _EpisodeThumb extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.all(6),
                       child: Icon(
-                        CupertinoIcons.play_fill,
+                        AppIcons.play,
                         key: const Key('phone-episode-current'),
+                        fill: AppIcons.filled,
                         color: light
                             ? scheme.onPrimary
                             : const Color(0xffffffff),

@@ -988,6 +988,62 @@ void main() {
     },
   );
 
+  testWidgets('retains the visible frame until the next image is ready', (
+    tester,
+  ) async {
+    final client = _ControlledImageClient();
+    final auth = AuthController(
+      client: client,
+      credentials: MemoryCredentialStore(),
+      servers: MemoryServerListStore(),
+    );
+    addTearDown(auth.dispose);
+    const first = MediaItem(
+      id: 'held-a',
+      name: '第一张',
+      type: 'Movie',
+      primaryImageTag: 'tag-a',
+    );
+    const second = MediaItem(
+      id: 'held-b',
+      name: '第二张',
+      type: 'Movie',
+      primaryImageTag: 'tag-b',
+    );
+    Future<void> show(MediaItem item) {
+      return tester.pumpWidget(
+        wrap(
+          auth,
+          MediaImage(
+            item: item,
+            width: 120,
+            height: 180,
+            retainVisibleFrame: true,
+          ),
+        ),
+      );
+    }
+
+    await show(first);
+    await pumpUntilImage(tester);
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.byType(SkeletonBlock), findsNothing);
+
+    client.hold = true;
+    await show(second);
+    await tester.pump();
+    expect(find.byType(SkeletonBlock), findsNothing);
+    expect(find.byType(PosterPlaceholder), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
+    expect(client.pending.containsKey('held-b'), isTrue);
+
+    client.pending['held-b']!.complete(kTinyPng);
+    await pumpUntilImage(tester);
+    expect(find.byType(SkeletonBlock), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shows a skeleton placeholder while loading', (tester) async {
     final auth = await connect(tester);
     await tester.runAsync(() async {

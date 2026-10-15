@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +19,7 @@ import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/widgets/poster_placeholder.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
@@ -1155,11 +1157,16 @@ void main() {
         ),
         findsOneWidget,
       );
+      expect(
+        find.descendant(of: poster, matching: find.byType(Image)),
+        findsWidgets,
+      );
+      await _waitForDecoded(tester, poster);
 
       await tester.tap(poster);
       await tester.pump();
-      await tester.pump();
       expect(find.byKey(_pendingHeader), findsOneWidget);
+      _expectHandoffFrame(tester);
       final headerImages = tester.widgetList<MediaImage>(
         find.descendant(
           of: find.byKey(_pendingHeader),
@@ -1198,6 +1205,8 @@ void main() {
       expect(settled.preferBackdrop, posterImage.preferBackdrop);
       expect(settled.maxWidth, posterImage.maxWidth);
       expect(settled.item.primaryImageTag, posterImage.item.primaryImageTag);
+      expect(settled.preferBackdrop, isFalse);
+      _expectHandoffFrame(tester);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -1284,11 +1293,19 @@ void main() {
       final posterImage = tester.widget<MediaImage>(
         find.descendant(of: poster, matching: find.byType(MediaImage)),
       );
+      expect(
+        find.descendant(of: poster, matching: find.byType(Image)),
+        findsWidgets,
+      );
+      await _waitForDecoded(tester, poster);
 
       await tester.tap(poster);
-      await tester.pump();
-      await tester.pump();
+      for (var i = 0; i < 4; i++) {
+        await tester.pump();
+        if (find.byKey(_pendingHeader).evaluate().isNotEmpty) break;
+      }
       expect(find.byKey(_pendingHeader), findsOneWidget);
+      _expectHandoffFrame(tester);
       final headerImages = tester.widgetList<MediaImage>(
         find.descendant(
           of: find.byKey(_pendingHeader),
@@ -1823,6 +1840,198 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  testWidgets('phone detail play button uses the phone accent', (tester) async {
+    final harness = await _startDetail(
+      tester,
+      width: 360,
+      reduceMotion: true,
+      theme: AppUiTheme.phoneLight(),
+    );
+    unawaited(harness.router.push('/item/movie-inception'));
+    await settle(tester);
+    final play = find.byKey(const Key('mobile-detail-play'));
+    expect(play, findsOneWidget);
+    final box = tester.widget<AnimatedContainer>(
+      find.descendant(of: play, matching: find.byType(AnimatedContainer)).first,
+    );
+    final color = (box.decoration! as ShapeDecoration).color;
+    final phone = AppUiTheme.phoneLight().colorScheme;
+    expect(color, phone.primary);
+    expect(color, isNot(phone.inverseSurface));
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(of: play, matching: find.byIcon(AppIcons.play)),
+          )
+          .icon,
+      AppIcons.play,
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets(
+    'release filenames show resolution and codec on the phone source row',
+    (tester) async {
+      const release = ItemMediaSource(
+        id: 'src-release',
+        name: 'NF.WD.264.AAC-SonyHD',
+        height: 1080,
+        streams: [
+          ItemMediaStream(index: 0, type: 'Video', codec: 'h264', height: 1080),
+        ],
+      );
+      const edition = ItemMediaSource(
+        id: 'src-edition',
+        name: '导演剪辑版',
+        height: 2160,
+        streams: [
+          ItemMediaStream(index: 0, type: 'Video', codec: 'hevc', height: 2160),
+        ],
+      );
+      const twin = ItemMediaSource(
+        id: 'src-twin',
+        name: 'Other.WD.264.AAC-Group',
+        height: 1080,
+        streams: [
+          ItemMediaStream(index: 0, type: 'Video', codec: 'h264', height: 1080),
+        ],
+      );
+      await tester.pumpWidget(
+        PresentationScope(
+          environment: PresentationEnvironment.phone,
+          child: CupertinoTestApp(
+            locale: const Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            theme: AppUiTheme.phoneLight(),
+            home: CupertinoPageScaffold(
+              child: EpisodeMediaStreamsSection(
+                source: release,
+                sources: const [release, edition, twin],
+                selectedSourceId: 'src-release',
+                onSelectSource: _ignore,
+              ),
+            ),
+          ),
+        ),
+      );
+      final row = find.byKey(EpisodeMediaStreamsSection.phoneVersionRowKey);
+      expect(row, findsOneWidget);
+      expect(
+        find.descendant(of: row, matching: find.text('1080p · H.264 · 1')),
+        findsOneWidget,
+      );
+      expect(find.text('NF.WD.264.AAC-SonyHD'), findsNothing);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(find.text('导演剪辑版'), findsOneWidget);
+      expect(find.text('1080p · H.264 · 3'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('changing season keeps the old hero until the new frame', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    final harness = await _startDetail(
+      tester,
+      width: 360,
+      reduceMotion: true,
+      prepare: (server) {
+        server.setSeasons('series-friends', const [
+          FakeSeason(
+            id: 'season-friends-1',
+            name: '第 1 季',
+            indexNumber: 1,
+            primaryImageTag: 'tag-s1',
+          ),
+          FakeSeason(
+            id: 'season-friends-2',
+            name: '第 2 季',
+            indexNumber: 2,
+            primaryImageTag: 'tag-s2',
+          ),
+        ]);
+      },
+      intercept: (dio) {
+        dio.interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) async {
+              if (options.uri.toString().contains(
+                    '/Items/season-friends-2/Images/',
+                  ) &&
+                  !gate.isCompleted) {
+                await gate.future;
+              }
+              handler.next(options);
+            },
+          ),
+        );
+      },
+    );
+    const series = MediaItem(
+      id: 'series-friends',
+      name: '老友记',
+      type: 'Series',
+      primaryImageTag: 'tag-friends',
+    );
+    unawaited(
+      harness.router.push(
+        AppRoutes.item(series.id),
+        extra: const PhoneImageHandoff(
+          item: series,
+          preferBackdrop: false,
+          maxWidth: 400,
+        ),
+      ),
+    );
+    await settle(tester);
+    final backdrop = find.byKey(PhoneItemBanner.backdropKey);
+    expect(backdrop, findsOneWidget);
+    await _waitForDecoded(tester, backdrop);
+    await tester.ensureVisible(
+      find.byKey(CatalogKeys.season('season-friends-2')),
+    );
+    await tester.tap(find.byKey(CatalogKeys.season('season-friends-2')));
+    await tester.pump();
+    expect(
+      find.descendant(of: backdrop, matching: find.byType(SkeletonBlock)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: backdrop, matching: find.byType(PosterPlaceholder)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: backdrop, matching: find.byType(Image)),
+      findsWidgets,
+    );
+    expect(
+      tester
+          .widgetList<RawImage>(
+            find.descendant(of: backdrop, matching: find.byType(RawImage)),
+          )
+          .any((raw) => raw.image != null),
+      isTrue,
+    );
+    expect(tester.widget<MediaImage>(backdrop).item.id, 'season-friends-2');
+    gate.complete();
+    await settle(tester);
+    expect(tester.widget<MediaImage>(backdrop).item.id, 'season-friends-2');
+    expect(
+      find.descendant(of: backdrop, matching: find.byType(Image)),
+      findsWidgets,
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
 }
 
 void _expectOnScreen(Rect rect, double width, double height) {
@@ -2072,6 +2281,61 @@ Future<void> _pumpSeasonPlaceholder(WidgetTester tester, double width) async {
   await tester.pump();
 }
 
+Future<void> _waitForDecoded(WidgetTester tester, Finder scope) async {
+  for (var i = 0; i < 30; i++) {
+    final ready = tester
+        .widgetList<RawImage>(
+          find.descendant(
+            of: scope,
+            matching: find.byType(RawImage),
+            skipOffstage: false,
+          ),
+        )
+        .any((raw) => raw.image != null);
+    if (ready) return;
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 40)),
+    );
+    await tester.pump();
+  }
+  fail('artwork frame was not decoded');
+}
+
+void _expectHandoffFrame(WidgetTester tester) {
+  final handoff = find.byKey(PhoneItemBanner.handoffImageKey);
+  expect(handoff, findsWidgets);
+  expect(
+    find.descendant(of: handoff, matching: find.byType(SkeletonBlock)),
+    findsNothing,
+  );
+  expect(
+    find.descendant(of: handoff, matching: find.byType(PosterPlaceholder)),
+    findsNothing,
+  );
+  expect(
+    find.descendant(of: handoff, matching: find.byType(Image)),
+    findsWidgets,
+  );
+  expect(
+    tester
+        .widgetList<RawImage>(
+          find.descendant(of: handoff, matching: find.byType(RawImage)),
+        )
+        .any((raw) => raw.image != null),
+    isTrue,
+  );
+  final surface = AppUiTheme.dark().colorScheme.surfaceContainerHigh;
+  expect(
+    find.descendant(
+      of: find.byKey(PhoneItemBanner.bannerKey),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is ColoredBox && widget.color == surface,
+      ),
+    ),
+    findsNothing,
+  );
+}
+
 void _ignore(String _) {}
 
 void _noop() {}
@@ -2092,6 +2356,7 @@ Future<_Started> _startDetail(
   WidgetTester tester, {
   required double width,
   bool reduceMotion = false,
+  AppUiThemeData? theme,
   void Function(FakeEmbyServer server)? prepare,
   void Function(Dio dio)? intercept,
 }) async {
@@ -2099,6 +2364,7 @@ Future<_Started> _startDetail(
     tester,
     width: width,
     reduceMotion: reduceMotion,
+    theme: theme,
     prepare: prepare,
     intercept: intercept,
     initialLocation: '/library/view-movies',
@@ -2164,6 +2430,7 @@ Future<_Started> _start(
   required String initialLocation,
   required bool showLibrary,
   bool reduceMotion = false,
+  AppUiThemeData? theme,
   void Function(FakeEmbyServer server)? prepare,
   void Function(Dio dio)? intercept,
 }) async {
@@ -2244,7 +2511,7 @@ Future<_Started> _start(
             AppLocalizations.delegate,
             ...GlobalCupertinoLocalizations.delegates,
           ],
-          theme: AppUiTheme.dark(),
+          theme: theme ?? AppUiTheme.dark(),
           routerConfig: router,
         ),
       ),

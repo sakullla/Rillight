@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:go_router/go_router.dart';
@@ -540,24 +541,25 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         final selectedSeason = controller.seasons
             .where((season) => season.id == controller.seasonId)
             .firstOrNull;
-        // 从海报点进来时，头图和取色都停在那一张上。加载完成后不再改成
-        // 背景或第一季的图，否则会先看到点进去的画面，再换成另一张，颜色变两次。
-        final imageSource = failed
-            ? null
-            : handoff != null
-            ? handoff.item
-            : item == null
-            ? null
-            : item.isSeries &&
-                  selectedSeason != null &&
-                  selectedSeason.id == _artworkSeasonId
-            ? seasonArtworkItem(selectedSeason, item)
-            : item;
+        // 从海报或横卡点进来时，头图和取色都停在那一张上。加载完成后不改来源，
+        // 否则会先看到点中的画面，再换成另一张，颜色变两次。
+        // 只有用户切换季时才换成该季的画面，旧图留到新图第一帧。
+        final userSeason =
+            item != null &&
+            item.isSeries &&
+            _artworkSeasonId != null &&
+            selectedSeason != null &&
+            selectedSeason.id == _artworkSeasonId;
+        final entryItem = handoff?.item ?? item;
+        final seasonArt = userSeason
+            ? seasonArtworkItem(selectedSeason!, item!)
+            : null;
+        final imageSource = failed ? null : seasonArt ?? entryItem;
         final preferBackdrop = handoff?.preferBackdrop ?? true;
         final imageWidth = handoff?.maxWidth ?? PhoneMotion.pageRequestWidth;
         final immersive = imageSource != null && !_barSolid;
         return ContentTheme(
-          item: imageSource,
+          item: failed ? null : entryItem,
           preferBackdrop: preferBackdrop,
           child: CupertinoPageScaffold(
             child: Stack(
@@ -687,6 +689,9 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                             : null,
                                       ),
                                 preferBackdrop: preferBackdrop,
+                                imagePrefersBackdrop: userSeason
+                                    ? true
+                                    : preferBackdrop,
                                 maxWidth: imageWidth,
                                 posterItem: handoff?.item ?? item,
                               ),
@@ -943,6 +948,11 @@ class _DetailPlayActions extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final accentTheme = theme.phone
+        ? (theme.brightness == Brightness.light
+              ? AppUiTheme.phoneLight()
+              : AppUiTheme.phoneDark())
+        : theme;
     final played = this.played;
     final favorite = this.favorite;
     final progress = this.progress;
@@ -964,9 +974,8 @@ class _DetailPlayActions extends StatelessWidget {
           toggled: played,
           child: _SecondaryAction(
             key: CatalogKeys.playedToggle,
-            icon: played
-                ? CupertinoIcons.checkmark_circle_fill
-                : CupertinoIcons.checkmark_circle,
+            icon: AppIcons.checkCircle,
+            iconFill: played ? AppIcons.filled : AppIcons.outline,
             label: played ? l.mobileWatched : l.markPlayed,
             tooltip: played ? l.markUnplayed : l.markPlayed,
             highlighted: played,
@@ -976,7 +985,7 @@ class _DetailPlayActions extends StatelessWidget {
       if (showRestart)
         _SecondaryAction(
           key: const Key('phone-detail-play-start'),
-          icon: CupertinoIcons.arrow_counterclockwise,
+          icon: AppIcons.replay,
           label: l.playFromStart,
           onPressed: onRestart,
         ),
@@ -990,7 +999,7 @@ class _DetailPlayActions extends StatelessWidget {
       if (onNext != null)
         _SecondaryAction(
           key: CatalogKeys.nextEpisode,
-          icon: CupertinoIcons.forward_end_fill,
+          icon: AppIcons.skipNext,
           label: l.nextEpisode,
           onPressed: onNext,
         ),
@@ -1005,12 +1014,11 @@ class _DetailPlayActions extends StatelessWidget {
           message: tooltip ?? label,
           child: AppButton.icon(
             key: const Key('mobile-detail-play'),
-            // 主播放钮与首页头图同为反相实底：深色白底黑字，浅色墨底白字。
             style: AppButtonStyle(
               minimumSize: const Size(48, _height),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              backgroundColor: scheme.inverseSurface,
-              foregroundColor: scheme.onInverseSurface,
+              backgroundColor: accentTheme.colorScheme.primary,
+              foregroundColor: accentTheme.colorScheme.onPrimary,
               shape: shape,
               textStyle: theme.textTheme.titleSmall?.copyWith(
                 fontSize: 16,
@@ -1018,7 +1026,7 @@ class _DetailPlayActions extends StatelessWidget {
               ),
             ),
             onPressed: enabled ? onPlay : null,
-            icon: const Icon(CupertinoIcons.play_fill, size: 24),
+            icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 24),
             label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
             variant: AppButtonVariant.filled,
           ),
@@ -1081,11 +1089,13 @@ class _SecondaryAction extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onPressed,
+    this.iconFill = AppIcons.filled,
     this.tooltip,
     this.highlighted = false,
   });
 
   final IconData icon;
+  final double? iconFill;
   final String label;
 
   /// 悬停/读屏说明；缺省同 [label]。已看切换写的是点下去之后的动作。
@@ -1116,7 +1126,7 @@ class _SecondaryAction extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 24, color: color),
+                Icon(icon, size: 24, color: color, fill: iconFill),
                 const SizedBox(height: 4),
                 Text(
                   label,

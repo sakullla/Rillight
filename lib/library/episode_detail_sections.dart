@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/widgets/scrim_icon_button.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:go_router/go_router.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -1380,7 +1381,7 @@ class _PhoneStreamCard extends StatelessWidget {
   IconData _icon(_StreamGroup group) {
     final first = group.choices.firstOrNull;
     final stream = first == null ? null : _stream(first.index);
-    if (stream?.isSubtitle == true) return CupertinoIcons.captions_bubble;
+    if (stream?.isSubtitle == true) return AppIcons.subtitles;
     if (stream?.isAudio == true) return CupertinoIcons.waveform;
     return CupertinoIcons.videocam;
   }
@@ -1423,7 +1424,7 @@ class _PhoneStreamCard extends StatelessWidget {
             (
               ValueKey('phone-detail-version-${item.id}'),
               item.id,
-              _PhoneVersionRow.versionLabel(item),
+              _PhoneVersionRow.versionLabel(item, sources: sources),
             ),
         ],
         selected: selectedSourceId ?? source.id,
@@ -1527,7 +1528,12 @@ class _PhoneSelectorRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+            Icon(
+              icon,
+              size: 18,
+              fill: AppIcons.filled,
+              color: scheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 8),
             Text(
               title,
@@ -1562,7 +1568,8 @@ class _PhoneSelectorRow extends StatelessWidget {
             if (onTap != null) ...[
               const SizedBox(width: 6),
               Icon(
-                CupertinoIcons.chevron_up_chevron_down,
+                AppIcons.chevronDown,
+                fill: AppIcons.filled,
                 size: 15,
                 color: scheme.onSurfaceVariant,
               ),
@@ -1647,7 +1654,8 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                           ),
                           if (value == selected)
                             Icon(
-                              CupertinoIcons.check_mark,
+                              AppIcons.check,
+                              fill: AppIcons.filled,
                               size: 18,
                               color: scheme.primary,
                             ),
@@ -1677,13 +1685,14 @@ class _PhoneVersionRow extends StatelessWidget {
   final String selectedSourceId;
   final VoidCallback? onTap;
 
-  static String versionLabel(ItemMediaSource source) {
-    final raw = source.label.trim();
-    if (raw.isNotEmpty && raw.length <= 24) {
-      return raw;
-    }
-    final compact = source.presentation.compact.trim();
-    return compact.isNotEmpty ? compact : raw;
+  static String versionLabel(
+    ItemMediaSource source, {
+    List<ItemMediaSource> sources = const [],
+  }) {
+    return phoneSourceVersionLabel(
+      source,
+      sources.isEmpty ? [source] : sources,
+    );
   }
 
   @override
@@ -1693,10 +1702,10 @@ class _PhoneVersionRow extends StatelessWidget {
         sources.where((s) => s.id == selectedSourceId).firstOrNull ??
         sources.first;
     return _PhoneSelectorRow(
-      icon: CupertinoIcons.layers_alt,
+      icon: AppIcons.mediaSource,
       title: l10n.mediaSource,
       count: sources.length,
-      value: versionLabel(selected),
+      value: versionLabel(selected, sources: sources),
       onTap: onTap,
     );
   }
