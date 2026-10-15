@@ -1,4 +1,5 @@
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 可多选的圆角选项。宽度随文字收缩，方便在筛选里换行排列。
 class OptionPill extends StatelessWidget {
@@ -55,7 +56,8 @@ class OptionPill extends StatelessWidget {
                   children: [
                     if (selected) ...[
                       Icon(
-                        CupertinoIcons.check_mark,
+                        AppIcons.check,
+                        fill: AppIcons.filled,
                         size: 16,
                         color: foreground,
                       ),
@@ -138,7 +140,8 @@ class RemovablePill extends StatelessWidget {
                   ),
                   SizedBox(width: compact ? 2 : 4),
                   Icon(
-                    CupertinoIcons.xmark,
+                    AppIcons.close,
+                    fill: AppIcons.filled,
                     size: compact ? 14 : 16,
                     color: scheme.onSurfaceVariant,
                   ),

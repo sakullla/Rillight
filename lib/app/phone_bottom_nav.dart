@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 悬浮导航盖住内容时，滚动区底部要留出系统手势条、间距、导航本身和溶入带。
 /// 贴底时沿用 Scaffold 已经算进 [MediaQuery.padding] 的高度。
@@ -56,23 +57,26 @@ class PhoneBottomNav extends StatelessWidget {
             iconSize: 26,
             items: [
               BottomNavigationBarItem(
-                icon: const Icon(CupertinoIcons.house),
-                activeIcon: const Icon(CupertinoIcons.house_fill),
+                icon: const Icon(AppIcons.home, fill: AppIcons.outline),
+                activeIcon: const Icon(AppIcons.home, fill: AppIcons.filled),
                 label: l.home,
               ),
               BottomNavigationBarItem(
-                icon: const Icon(CupertinoIcons.play_rectangle),
-                activeIcon: const Icon(CupertinoIcons.play_rectangle_fill),
+                icon: const Icon(AppIcons.library, fill: AppIcons.outline),
+                activeIcon: const Icon(AppIcons.library, fill: AppIcons.filled),
                 label: l.libraries,
               ),
               BottomNavigationBarItem(
-                icon: const Icon(CupertinoIcons.square_stack_3d_up),
-                activeIcon: const Icon(CupertinoIcons.square_stack_3d_up_fill),
+                icon: const Icon(AppIcons.aggregation, fill: AppIcons.outline),
+                activeIcon: const Icon(
+                  AppIcons.aggregation,
+                  fill: AppIcons.filled,
+                ),
                 label: l.aggregation,
               ),
               BottomNavigationBarItem(
-                icon: const Icon(CupertinoIcons.search),
-                activeIcon: const Icon(CupertinoIcons.search),
+                icon: const Icon(AppIcons.search, fill: AppIcons.outline),
+                activeIcon: const Icon(AppIcons.search, fill: AppIcons.filled),
                 label: l.search,
               ),
             ],

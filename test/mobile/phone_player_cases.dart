@@ -7,6 +7,7 @@ import 'dart:ui' show DisplayFeature, DisplayFeatureState, DisplayFeatureType;
 
 import 'package:dio/dio.dart';
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1462,7 +1463,7 @@ void main() {
               find.byKey(ValueKey('mobile-source-icon-$originalId')),
             )
             .icon,
-        CupertinoIcons.hourglass,
+        AppIcons.hourglass,
       );
       expect(tester.widget<AppListTile>(alternate).selected, isTrue);
       expect(tester.widget<AppListTile>(original).selected, isFalse);

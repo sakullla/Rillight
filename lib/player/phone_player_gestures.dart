@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// `mm:ss` / `h:mm:ss` clock used by gesture and control overlays.
 String phonePlayerClock(Duration value) {
@@ -389,12 +390,12 @@ class _OverlayView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final icon = switch (overlay.kind) {
-      _GestureOverlayKind.tapBack => CupertinoIcons.gobackward_10,
-      _GestureOverlayKind.tapForward => CupertinoIcons.goforward_10,
-      _GestureOverlayKind.brightness => CupertinoIcons.sun_max_fill,
-      _GestureOverlayKind.volume => CupertinoIcons.speaker_3_fill,
-      _GestureOverlayKind.seek => CupertinoIcons.clock,
-      _GestureOverlayKind.unavailable => CupertinoIcons.info_circle,
+      _GestureOverlayKind.tapBack => AppIcons.replay10,
+      _GestureOverlayKind.tapForward => AppIcons.forward10,
+      _GestureOverlayKind.brightness => AppIcons.brightness,
+      _GestureOverlayKind.volume => AppIcons.volumeUp,
+      _GestureOverlayKind.seek => AppIcons.schedule,
+      _GestureOverlayKind.unavailable => AppIcons.info,
     };
     final Widget? label = switch (overlay.kind) {
       _GestureOverlayKind.brightness || _GestureOverlayKind.volume => Text(
@@ -422,7 +423,7 @@ class _OverlayView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 32),
+          Icon(icon, fill: AppIcons.filled, size: 32),
           if (label != null) ...[const SizedBox(height: 8), label],
         ],
       ),

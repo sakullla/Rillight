@@ -32,6 +32,7 @@ import 'player_window_host.dart';
 import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/subtitle_viewport.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class TvPlayerPage extends StatefulWidget {
   const TvPlayerPage({
@@ -980,7 +981,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
         ),
         if (selected) ...[
           SizedBox(width: context.tvdp(10)),
-          const Icon(CupertinoIcons.check_mark),
+          const Icon(AppIcons.check, fill: AppIcons.filled),
         ],
       ],
     );
@@ -1046,12 +1047,15 @@ class TvPlayerPageState extends State<TvPlayerPage> {
           ? Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon),
+                Icon(icon, fill: AppIcons.filled),
                 SizedBox(width: context.tvdp(6)),
                 Text(label),
               ],
             )
-          : AppTooltip(message: label, child: Icon(icon)),
+          : AppTooltip(
+              message: label,
+              child: Icon(icon, fill: AppIcons.filled),
+            ),
     );
   }
 
@@ -1217,9 +1221,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                           Row(
                             children: [
                               Icon(
-                                c.isPlaying
-                                    ? CupertinoIcons.play_fill
-                                    : CupertinoIcons.pause_fill,
+                                c.isPlaying ? AppIcons.play : AppIcons.pause,
+                                fill: AppIcons.filled,
                                 size: 16 * s,
                                 color: const Color(0xb3ffffff),
                               ),
@@ -1251,7 +1254,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                     ),
                     _action(
                       'tv-player-close',
-                      CupertinoIcons.xmark,
+                      AppIcons.close,
                       l.closePlayer,
                       _close,
                     ),
@@ -1270,7 +1273,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                         : _failed
                         ? _action(
                             'tv-player-retry',
-                            CupertinoIcons.arrow_clockwise,
+                            AppIcons.refresh,
                             c.sessionExpired ? l.connect : l.retry,
                             c.sessionExpired
                                 ? () async {
@@ -1298,7 +1301,10 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                               tooltip: '关闭',
                               color: CupertinoColors.white,
                               onPressed: c.dismissNetworkSlowHint,
-                              icon: const Icon(CupertinoIcons.xmark),
+                              icon: const Icon(
+                                AppIcons.close,
+                                fill: AppIcons.filled,
+                              ),
                             ),
                           ],
                         ),
@@ -1327,9 +1333,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                         children: [
                           _action(
                             'tv-player-toggle',
-                            c.isPlaying
-                                ? CupertinoIcons.pause_fill
-                                : CupertinoIcons.play_fill,
+                            c.isPlaying ? AppIcons.pause : AppIcons.play,
                             c.isPlaying ? l.pause : l.play,
                             ready ? c.togglePlay : null,
                             focusNode: _playFocus,
@@ -1341,7 +1345,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 if (c.canBrowseEpisodes)
                                   _action(
                                     'tv-player-episodes',
-                                    CupertinoIcons.film,
+                                    AppIcons.episodes,
                                     l.playerEpisodes,
                                     ready ? _openEpisodes : null,
                                   ),
@@ -1350,7 +1354,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                     c.canImportSubtitleFiles)
                                   _action(
                                     'tv-player-tracks',
-                                    CupertinoIcons.captions_bubble,
+                                    AppIcons.subtitles,
                                     c.canSwitchAudioTrack
                                         ? l.mobileTracks
                                         : l.subtitleTrack,
@@ -1361,7 +1365,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 if (c.canSwitchQuality)
                                   _action(
                                     'tv-player-quality',
-                                    CupertinoIcons.sparkles,
+                                    AppIcons.quality,
                                     l.quality,
                                     ready
                                         ? () => _panel(_TvPanel.quality)
@@ -1374,7 +1378,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                 if (c.canSwitchMediaSource)
                                   _action(
                                     'tv-player-source',
-                                    CupertinoIcons.film,
+                                    AppIcons.mediaSource,
                                     l.mediaSource,
                                     ready
                                         ? () => _panel(_TvPanel.source)
@@ -1382,19 +1386,19 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                                   ),
                                 _action(
                                   'tv-player-skip',
-                                  CupertinoIcons.forward_fill,
+                                  AppIcons.skipNext,
                                   l.playerSkipSettings,
                                   () => _panel(_TvPanel.skip),
                                 ),
                                 _action(
                                   'tv-player-speed',
-                                  CupertinoIcons.speedometer,
+                                  AppIcons.speed,
                                   '${c.playbackRate}x',
                                   ready ? () => _panel(_TvPanel.speed) : null,
                                 ),
                                 _action(
                                   'tv-player-output',
-                                  CupertinoIcons.sparkles,
+                                  AppIcons.output,
                                   l.playbackOutputSection,
                                   () => _panel(_TvPanel.output),
                                 ),

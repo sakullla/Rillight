@@ -16,6 +16,8 @@ import 'source_sessions.dart';
 import 'server_list_store.dart';
 import 'region_access.dart' show RegionAccessController;
 
+import 'package:rillight/app/ui/app_icons.dart';
+
 Future<void> showSourceManagement(
   BuildContext context, {
   AccessRegion region = AccessRegion.ordinary,
@@ -292,7 +294,7 @@ class _SourceManagementState extends State<SourceManagement> {
             children: [
               AppButton.icon(
                 key: const Key('source-add-provider'),
-                icon: const Icon(CupertinoIcons.plus),
+                icon: const Icon(AppIcons.add, fill: AppIcons.filled),
                 label: Text(l.providerConnectEntry),
                 onPressed: _busy
                     ? null
@@ -311,7 +313,7 @@ class _SourceManagementState extends State<SourceManagement> {
                 Text(_error!, key: const Key('source-management-error')),
               if (widget.region == AccessRegion.ordinary)
                 AppListTile(
-                  leading: const Icon(CupertinoIcons.lock),
+                  leading: const Icon(AppIcons.lock, fill: AppIcons.filled),
                   title: Text(l.aggregationPrivate),
                   onTap: _busy
                       ? null
@@ -327,7 +329,7 @@ class _SourceManagementState extends State<SourceManagement> {
                     '${servers[index].serviceType.name} · ${servers[index].username} · ${servers[index].checkStatus} · ${servers[index].checkedAt?.toLocal().toString() ?? '—'}',
                   ),
                   trailing: AppIconButton(
-                    icon: const Icon(CupertinoIcons.arrow_up),
+                    icon: const Icon(AppIcons.arrowUp, fill: AppIcons.filled),
                     onPressed: _busy || index == 0
                         ? null
                         : () => _act(() {
@@ -476,7 +478,7 @@ class _SourceManagementState extends State<SourceManagement> {
                       '${line.checkStatus} · ${line.checkedAt?.toLocal().toString() ?? '—'}',
                     ),
                     leading: AppIconButton(
-                      icon: const Icon(CupertinoIcons.arrow_up),
+                      icon: const Icon(AppIcons.arrowUp, fill: AppIcons.filled),
                       onPressed: _busy || servers[index].lines.first == line
                           ? null
                           : () => _act(() {
@@ -499,7 +501,10 @@ class _SourceManagementState extends State<SourceManagement> {
                           key: Key(
                             'source-line-check-${servers[index].id}-${line.id}',
                           ),
-                          icon: const Icon(CupertinoIcons.wifi),
+                          icon: const Icon(
+                            AppIcons.wifi,
+                            fill: AppIcons.filled,
+                          ),
                           tooltip: l.sourceManualCheck,
                           onPressed: _busy
                               ? null
@@ -511,7 +516,10 @@ class _SourceManagementState extends State<SourceManagement> {
                                 }),
                         ),
                         AppIconButton(
-                          icon: const Icon(CupertinoIcons.pencil),
+                          icon: const Icon(
+                            AppIcons.edit,
+                            fill: AppIcons.filled,
+                          ),
                           tooltip: l.sourceRenameLine,
                           onPressed: _busy
                               ? null
@@ -543,7 +551,7 @@ class _SourceManagementState extends State<SourceManagement> {
                         key: Key(
                           'source-edit-line-${servers[index].id}-${line.id}',
                         ),
-                        icon: const Icon(CupertinoIcons.pencil),
+                        icon: const Icon(AppIcons.edit, fill: AppIcons.filled),
                         onPressed: _busy
                             ? null
                             : () => _editAddress(servers[index], line),
@@ -556,7 +564,10 @@ class _SourceManagementState extends State<SourceManagement> {
                         key: Key(
                           'source-delete-line-${servers[index].id}-${line.id}',
                         ),
-                        icon: const Icon(CupertinoIcons.trash),
+                        icon: const Icon(
+                          AppIcons.delete,
+                          fill: AppIcons.filled,
+                        ),
                         onPressed: _busy || servers[index].lines.length < 2
                             ? null
                             : () => _removeLine(servers[index], line),

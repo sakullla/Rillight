@@ -3,6 +3,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/session_actions.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 可搜索的服务器切换面板,按条目构建,面向上百台服务器。
 class ServerSwitcherDialog extends StatefulWidget {
@@ -168,7 +169,11 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                     autofocus: widget.servers.length > 8,
                     onChanged: (_) => setState(() {}),
                     placeholder: l10n.searchServers,
-                    prefix: const Icon(CupertinoIcons.search, size: 20),
+                    prefix: const Icon(
+                      AppIcons.search,
+                      fill: AppIcons.filled,
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                 ],
@@ -203,21 +208,21 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                 const SizedBox(height: AppSpacing.xs),
                 _ActionTile(
                   key: SessionActions.addServerKey,
-                  icon: CupertinoIcons.plus,
+                  icon: AppIcons.add,
                   label: l10n.addServer,
                   onTap: widget.onAddServer,
                 ),
                 if (widget.onImportBackup != null)
                   _ActionTile(
                     key: ServerSwitcherDialog.importBackupKey,
-                    icon: CupertinoIcons.square_arrow_down,
+                    icon: AppIcons.download,
                     label: l10n.backupImportEntry,
                     onTap: widget.onImportBackup!,
                   ),
                 if (widget.onManage != null)
                   _ActionTile(
                     key: const Key('server-manage-providers'),
-                    icon: CupertinoIcons.person_crop_circle,
+                    icon: AppIcons.account,
                     label: l10n.sourceManagement,
                     onTap: widget.onManage!,
                   ),
@@ -225,14 +230,14 @@ class _ServerSwitcherDialogState extends State<ServerSwitcherDialog> {
                     widget.externalAccountManagement)
                   _ActionTile(
                     key: ServerSwitcherDialog.changePasswordKey,
-                    icon: CupertinoIcons.lock,
+                    icon: AppIcons.lock,
                     label: widget.externalAccountManagement
                         ? l10n.providerAccountManage
                         : l10n.changePassword,
                     onTap: widget.onChangePassword,
                   ),
                 _ActionTile(
-                  icon: CupertinoIcons.square_arrow_right,
+                  icon: AppIcons.logout,
                   label: l10n.logout,
                   color: scheme.error,
                   onTap: widget.onLogout,
@@ -264,7 +269,7 @@ class _ActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppListTile(
-      leading: Icon(icon, size: 20),
+      leading: Icon(icon, fill: AppIcons.filled, size: 20),
       title: Text(label),
       onTap: onTap,
     );
@@ -343,7 +348,8 @@ class _CheckSlot extends StatelessWidget {
       width: 28,
       child: checked
           ? Icon(
-              CupertinoIcons.check_mark,
+              AppIcons.check,
+              fill: AppIcons.filled,
               size: 20,
               color: AppUiTheme.of(context).colorScheme.primary,
             )
@@ -381,7 +387,7 @@ class _ServerTile extends StatelessWidget {
     final deleteServerButton = AppIconButton(
       key: ServerSwitcherDialog.deleteKey(server.id),
       tooltip: l10n.deleteServer,
-      icon: const Icon(CupertinoIcons.trash, size: 20),
+      icon: const Icon(AppIcons.delete, fill: AppIcons.filled, size: 20),
       onPressed: () => _confirmDelete(context, l10n),
     );
     final selectedFill = scheme.primary.withValues(alpha: 0.10);
@@ -423,7 +429,11 @@ class _ServerTile extends StatelessWidget {
                       AppIconButton(
                         key: ServerSwitcherDialog.addLineKey(server.id),
                         tooltip: l10n.addLine,
-                        icon: const Icon(CupertinoIcons.link, size: 20),
+                        icon: const Icon(
+                          AppIcons.link,
+                          fill: AppIcons.filled,
+                          size: 20,
+                        ),
                         onPressed: () => onAddLine(server.id),
                       ),
                       AppIconButton(
@@ -432,7 +442,11 @@ class _ServerTile extends StatelessWidget {
                           active.id,
                         ),
                         tooltip: l10n.editLine,
-                        icon: const Icon(CupertinoIcons.pencil, size: 20),
+                        icon: const Icon(
+                          AppIcons.edit,
+                          fill: AppIcons.filled,
+                          size: 20,
+                        ),
                         onPressed: () => onEditLine(server.id, active),
                       ),
                       deleteServerButton,
@@ -487,7 +501,7 @@ class _ServerTile extends StatelessWidget {
               left: AppSpacing.xxxl,
               right: AppSpacing.md,
             ),
-            leading: const Icon(CupertinoIcons.plus, size: 20),
+            leading: const Icon(AppIcons.add, fill: AppIcons.filled, size: 20),
             title: Text(l10n.addLine),
             onTap: () => onAddLine(server.id),
           ),
@@ -525,13 +539,21 @@ class _ServerTile extends StatelessWidget {
                   AppIconButton(
                     key: ServerSwitcherDialog.editLineKey(server.id, line.id),
                     tooltip: l10n.editLine,
-                    icon: const Icon(CupertinoIcons.pencil, size: 20),
+                    icon: const Icon(
+                      AppIcons.edit,
+                      fill: AppIcons.filled,
+                      size: 20,
+                    ),
                     onPressed: () => onEditLine(server.id, line),
                   ),
                   AppIconButton(
                     key: ServerSwitcherDialog.deleteLineKey(server.id, line.id),
                     tooltip: l10n.deleteLine,
-                    icon: const Icon(CupertinoIcons.link, size: 20),
+                    icon: const Icon(
+                      AppIcons.link,
+                      fill: AppIcons.filled,
+                      size: 20,
+                    ),
                     onPressed: server.lines.length > 1
                         ? () => onDeleteLine(server.id, line)
                         : null,

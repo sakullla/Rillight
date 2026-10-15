@@ -5,6 +5,7 @@ import 'package:rillight/player/danmaku/danmaku_display_settings.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/player/player_setting_choices.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 弹幕显示表单的三种布局:播放器常用 / 播放器高级 / 设置页分组。
 enum DanmakuFormLayout { playerBasic, playerAdvanced, settings }
@@ -336,7 +337,7 @@ class _AdvancedGroup extends StatelessWidget {
               key: DanmakuKeys.restoreDefaults,
               onPressed: () => onChanged(const DanmakuDisplaySettings()),
               style: AppButtonStyle(),
-              icon: const Icon(CupertinoIcons.arrow_counterclockwise),
+              icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
               label: Text(l10n.danmakuRestoreDefaults),
             ),
           ),
@@ -662,7 +663,7 @@ class _TimeOffsetRow extends StatelessWidget {
           onPressed: atMin
               ? null
               : () => onChanged(value - const Duration(milliseconds: 500)),
-          icon: const Icon(CupertinoIcons.minus),
+          icon: const Icon(AppIcons.remove, fill: AppIcons.filled),
         ),
         SizedBox(
           width: 56,
@@ -679,7 +680,7 @@ class _TimeOffsetRow extends StatelessWidget {
           onPressed: atMax
               ? null
               : () => onChanged(value + const Duration(milliseconds: 500)),
-          icon: const Icon(CupertinoIcons.add),
+          icon: const Icon(AppIcons.add, fill: AppIcons.filled),
         ),
         AppButton(
           key: DanmakuKeys.timeOffsetZero,

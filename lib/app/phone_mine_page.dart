@@ -16,6 +16,7 @@ import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/player/player_bindings.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 手机「我的」：当前身份、线路、倍速和弹幕来源。
 class PhoneMinePage extends StatefulWidget {
@@ -210,7 +211,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                       ),
                       child: initial == null
                           ? Icon(
-                              CupertinoIcons.person_fill,
+                              AppIcons.person,
+                              fill: AppIcons.filled,
                               size: 30,
                               color: scheme.onPrimary,
                             )
@@ -253,7 +255,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                             Row(
                               children: [
                                 Icon(
-                                  CupertinoIcons.dot_radiowaves_right,
+                                  AppIcons.lan,
+                                  fill: AppIcons.filled,
                                   size: 13,
                                   color: scheme.primary,
                                 ),
@@ -277,7 +280,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                       ),
                     ),
                     Icon(
-                      CupertinoIcons.chevron_right,
+                      AppIcons.chevronRight,
+                      fill: AppIcons.filled,
                       size: 18,
                       color: scheme.onSurfaceVariant,
                     ),
@@ -314,24 +318,24 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
               final tiles = <Widget>[
                 _MineTile(
                   key: PhoneMinePage.lineKey,
-                  icon: CupertinoIcons.cube_box,
+                  icon: AppIcons.server,
                   label: l10n.phoneServerManagement,
                   onTap: _lines,
                 ),
                 _MineTile(
-                  icon: CupertinoIcons.plus_circle,
+                  icon: AppIcons.addCircle,
                   label: l10n.mobileAddServer,
                   onTap: () => context.push('${AppRoutes.connect}?add=1'),
                 ),
                 _MineTile(
                   key: PhoneMinePage.privateKey,
-                  icon: CupertinoIcons.lock_shield,
+                  icon: AppIcons.shield,
                   label: l10n.aggregationPrivate,
                   onTap: _openPrivate,
                 ),
                 _MineTile(
                   key: PhoneMinePage.settingsKey,
-                  icon: CupertinoIcons.gear_alt,
+                  icon: AppIcons.settings,
                   label: l10n.settings,
                   onTap: _openSettings,
                 ),
@@ -357,14 +361,15 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: AppSpacing.md,
                   ),
-                  leading: const Icon(CupertinoIcons.lock),
+                  leading: const Icon(AppIcons.lock, fill: AppIcons.filled),
                   title: Text(
                     auth.client.serviceType == MediaServerType.plex
                         ? l10n.providerAccountManage
                         : l10n.changePassword,
                   ),
                   trailing: Icon(
-                    CupertinoIcons.chevron_right,
+                    AppIcons.chevronRight,
+                    fill: AppIcons.filled,
                     size: 16,
                     color: scheme.onSurfaceVariant,
                   ),
@@ -382,7 +387,8 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   horizontal: AppSpacing.md,
                 ),
                 leading: Icon(
-                  CupertinoIcons.square_arrow_right,
+                  AppIcons.logout,
+                  fill: AppIcons.filled,
                   color: scheme.error,
                 ),
                 title: Text(l10n.logout, style: TextStyle(color: scheme.error)),
@@ -465,7 +471,12 @@ class _MineTile extends StatelessWidget {
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(8),
-                    child: Icon(icon, size: 20, color: scheme.primary),
+                    child: Icon(
+                      icon,
+                      fill: AppIcons.filled,
+                      size: 20,
+                      color: scheme.primary,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),

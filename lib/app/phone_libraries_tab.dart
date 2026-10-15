@@ -7,6 +7,7 @@ import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/home/catalog_failure.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 手机「媒体库」标签页:顶部一排快速入口(继续观看、即将播放、最新电影、
 /// 最新剧集),下面是当前服务器的全部媒体库磁贴。磁贴有封面铺封面,没有就按
@@ -60,25 +61,25 @@ class PhoneLibrariesTab extends StatelessWidget {
           _Shortcut(
             id: 'resume',
             label: l10n.resumeRow,
-            icon: CupertinoIcons.play_circle,
+            icon: AppIcons.play,
             location: AppRoutes.shelfResume,
           ),
           _Shortcut(
             id: 'nextup',
             label: l10n.nextUpRow,
-            icon: CupertinoIcons.forward_end_alt,
+            icon: AppIcons.skipNext,
             location: AppRoutes.shelfNextUp,
           ),
           _Shortcut(
             id: 'latest-movies',
             label: l10n.phoneShortcutLatestMovies,
-            icon: CupertinoIcons.film,
+            icon: AppIcons.movie,
             location: AppRoutes.shelfLatestMovies,
           ),
           _Shortcut(
             id: 'latest-series',
             label: l10n.phoneShortcutLatestSeries,
-            icon: CupertinoIcons.tv,
+            icon: AppIcons.series,
             location: AppRoutes.shelfLatestSeries,
           ),
         ];
@@ -229,7 +230,12 @@ class _ShortcutChip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(shortcut.icon, size: 17, color: scheme.primary),
+              Icon(
+                shortcut.icon,
+                fill: AppIcons.filled,
+                size: 17,
+                color: scheme.primary,
+              ),
               const SizedBox(width: 6),
               Text(
                 shortcut.label,

@@ -3,6 +3,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class NextEpisodeCard extends StatelessWidget {
   const NextEpisodeCard({
@@ -103,7 +104,8 @@ class NextEpisodeCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                         ),
                         icon: const Icon(
-                          CupertinoIcons.forward_end_fill,
+                          AppIcons.skipNext,
+                          fill: AppIcons.filled,
                           size: 20,
                         ),
                         label: Text(l10n.nextEpisode),
@@ -121,7 +123,11 @@ class NextEpisodeCard extends StatelessWidget {
                           fixedSize: const Size(40, 40),
                           padding: EdgeInsets.zero,
                         ),
-                        icon: const Icon(CupertinoIcons.xmark, size: 18),
+                        icon: const Icon(
+                          AppIcons.close,
+                          fill: AppIcons.filled,
+                          size: 18,
+                        ),
                       ),
                     ],
                   ),

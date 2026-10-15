@@ -4,6 +4,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 顶栏中的设置入口(图标按钮),push `/settings` 页。
 class SettingsAction extends StatelessWidget {
@@ -26,7 +27,7 @@ class SettingsAction extends StatelessWidget {
       constraints: kTitleBarIconConstraints,
 
       size: 18,
-      icon: const Icon(CupertinoIcons.gear),
+      icon: const Icon(AppIcons.settings, fill: AppIcons.filled),
     );
   }
 }

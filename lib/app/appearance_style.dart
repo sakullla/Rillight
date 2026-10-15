@@ -8,6 +8,7 @@ import 'ui/ui.dart' as app;
 
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 外观三态:跟随系统、浅色、深色。未选择过时默认深色。
 enum AppearanceStyle { system, light, dark }
@@ -251,7 +252,7 @@ class AppearanceMenuButton extends StatelessWidget {
           for (final value in AppearanceStyle.values)
             app.AppMenuEntry(value: value, child: Text(value.label(l10n))),
         ],
-        child: const Icon(app.CupertinoIcons.circle_lefthalf_fill),
+        child: const Icon(AppIcons.appearance, fill: AppIcons.filled),
       ),
     );
   }

@@ -24,6 +24,7 @@ import 'package:rillight/auth/connect_draft.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 abstract final class ConnectFormKeys {
   static const address = Key('connect-address');
@@ -484,7 +485,11 @@ class _ConnectPageState extends State<ConnectPage> {
                 textInputAction: TextInputAction.next,
                 label: l10n.serverAddress,
                 placeholder: l10n.serverAddressHint,
-                prefix: const Icon(CupertinoIcons.link, size: 20),
+                prefix: const Icon(
+                  AppIcons.link,
+                  fill: AppIcons.filled,
+                  size: 20,
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               AppTextField(
@@ -495,7 +500,11 @@ class _ConnectPageState extends State<ConnectPage> {
                 autofillHints: const [AutofillHints.username],
                 textInputAction: TextInputAction.next,
                 label: l10n.username,
-                prefix: const Icon(CupertinoIcons.person, size: 20),
+                prefix: const Icon(
+                  AppIcons.person,
+                  fill: AppIcons.filled,
+                  size: 20,
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               AppTextField(
@@ -509,7 +518,11 @@ class _ConnectPageState extends State<ConnectPage> {
                 textInputAction: TextInputAction.done,
                 onSubmitted: auth.isBusy ? null : (_) => _submit(),
                 label: l10n.password,
-                prefix: const Icon(CupertinoIcons.lock, size: 20),
+                prefix: const Icon(
+                  AppIcons.lock,
+                  fill: AppIcons.filled,
+                  size: 20,
+                ),
                 suffix: AppIconButton(
                   key: ConnectFormKeys.passwordVisibility,
                   tooltip: _passwordVisible
@@ -520,8 +533,9 @@ class _ConnectPageState extends State<ConnectPage> {
                   },
                   icon: Icon(
                     _passwordVisible
-                        ? CupertinoIcons.eye_slash
-                        : CupertinoIcons.eye,
+                        ? AppIcons.visibilityOff
+                        : AppIcons.visibility,
+                    fill: AppIcons.filled,
                     size: 20,
                   ),
                 ),
@@ -588,7 +602,7 @@ class _ConnectPageState extends State<ConnectPage> {
               AppButton.icon(
                 key: ConnectFormKeys.addLine,
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(CupertinoIcons.plus, size: 18),
+                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
                 label: Text(l10n.addLine),
                 variant: AppButtonVariant.plain,
               ),
@@ -604,7 +618,11 @@ class _ConnectPageState extends State<ConnectPage> {
                           _selectedLineId == null)
                     ? null
                     : _deleteSelectedLine,
-                icon: const Icon(CupertinoIcons.link, size: 18),
+                icon: const Icon(
+                  AppIcons.link,
+                  fill: AppIcons.filled,
+                  size: 18,
+                ),
                 label: Text(l10n.deleteLine),
                 style: AppButtonStyle(
                   foregroundColor: AppUiTheme.of(context).colorScheme.error,
@@ -689,7 +707,7 @@ class _ConnectPageState extends State<ConnectPage> {
         AppButton.icon(
           key: ConnectFormKeys.addServer,
           onPressed: auth.isBusy ? null : _startNewServer,
-          icon: const Icon(CupertinoIcons.plus, size: 18),
+          icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
           label: Text(l10n.addServer),
           variant: AppButtonVariant.plain,
         ),
@@ -702,7 +720,11 @@ class _ConnectPageState extends State<ConnectPage> {
               key: ConnectFormKeys.serverSearch,
               onChanged: (value) => setState(() => _serverQuery = value),
               placeholder: l10n.searchServers,
-              prefix: const Icon(CupertinoIcons.search, size: 20),
+              prefix: const Icon(
+                AppIcons.search,
+                fill: AppIcons.filled,
+                size: 20,
+              ),
             ),
           )
         : null;
@@ -722,7 +744,11 @@ class _ConnectPageState extends State<ConnectPage> {
               onPressed: auth.isBusy
                   ? null
                   : () => unawaited(showBackupImportFlow(context, auth: auth)),
-              icon: const Icon(CupertinoIcons.square_arrow_down, size: 18),
+              icon: const Icon(
+                AppIcons.download,
+                fill: AppIcons.filled,
+                size: 18,
+              ),
               label: Text(l10n.backupImportEntry),
               variant: AppButtonVariant.plain,
             ),
@@ -744,7 +770,7 @@ class _ConnectPageState extends State<ConnectPage> {
                     alignment: Alignment.topCenter,
                     child: AppEmptyView(
                       message: l10n.noSavedServers,
-                      icon: CupertinoIcons.rectangle_stack,
+                      icon: AppIcons.server,
                     ),
                   )
                 : ListView.separated(
@@ -768,17 +794,18 @@ class _ConnectPageState extends State<ConnectPage> {
             onPressed: auth.isBusy
                 ? null
                 : () => unawaited(showBackupImportFlow(context, auth: auth)),
-            icon: const Icon(CupertinoIcons.square_arrow_down, size: 18),
+            icon: const Icon(
+              AppIcons.download,
+              fill: AppIcons.filled,
+              size: 18,
+            ),
             label: Text(l10n.backupImportEntry),
             variant: AppButtonVariant.plain,
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
         if (auth.savedServers.isEmpty)
-          AppEmptyView(
-            message: l10n.noSavedServers,
-            icon: CupertinoIcons.rectangle_stack,
-          )
+          AppEmptyView(message: l10n.noSavedServers, icon: AppIcons.server)
         else ...[
           ?search,
           SizedBox(
@@ -883,9 +910,8 @@ class _ConnectPageState extends State<ConnectPage> {
                     ),
                     const SizedBox(width: AppSpacing.xs),
                     Icon(
-                      selected
-                          ? CupertinoIcons.checkmark_circle_fill
-                          : CupertinoIcons.chevron_right,
+                      selected ? AppIcons.checkCircle : AppIcons.chevronRight,
+                      fill: AppIcons.filled,
                       color: selected
                           ? colorScheme.primary
                           : colorScheme.onSurfaceVariant,
@@ -947,7 +973,8 @@ class _ConnectPageState extends State<ConnectPage> {
             child: Row(
               children: [
                 Icon(
-                  CupertinoIcons.arrow_branch,
+                  AppIcons.route,
+                  fill: AppIcons.filled,
                   size: 18,
                   color: selected
                       ? colorScheme.primary
@@ -964,7 +991,8 @@ class _ConnectPageState extends State<ConnectPage> {
                 ),
                 if (selected)
                   Icon(
-                    CupertinoIcons.check_mark,
+                    AppIcons.check,
+                    fill: AppIcons.filled,
                     color: colorScheme.primary,
                     size: 18,
                   ),

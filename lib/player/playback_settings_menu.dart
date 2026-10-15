@@ -20,6 +20,7 @@ import 'package:rillight/player/phone_subtitle_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/track_picker.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 enum _SettingsSection { speed, skip, subtitles, audio, quality, source, output }
 
@@ -112,7 +113,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             focusNode: _buttonFocus,
             tooltip: l10n.playerPlaybackSettings,
             color: scheme.onSurface,
-            icon: const Icon(CupertinoIcons.gear),
+            icon: const Icon(AppIcons.settings, fill: AppIcons.filled),
             onPressed: () => menu.isOpen ? menu.close() : menu.open(),
           ),
         ],
@@ -218,40 +219,40 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
     final sections = <_SettingsSection, (String, IconData, Key)>{
       _SettingsSection.speed: (
         l10n.playbackRate,
-        CupertinoIcons.speedometer,
+        AppIcons.speed,
         PlayerKeys.speed,
       ),
       _SettingsSection.skip: (
         l10n.playerSkipSettings,
-        CupertinoIcons.forward_end_fill,
+        AppIcons.skipNext,
         const Key('player-skip-settings-section'),
       ),
       _SettingsSection.subtitles: (
         l10n.phoneSubtitleSize,
-        CupertinoIcons.captions_bubble,
+        AppIcons.subtitles,
         const Key('player-subtitle-size-section'),
       ),
       if (c.canSwitchAudioTrack)
         _SettingsSection.audio: (
           l10n.audioTrack,
-          CupertinoIcons.music_note,
+          AppIcons.music,
           PlayerKeys.audio,
         ),
       if (c.canSwitchQuality)
         _SettingsSection.quality: (
           l10n.quality,
-          CupertinoIcons.sparkles,
+          AppIcons.quality,
           PlayerKeys.quality,
         ),
       if (c.canSwitchMediaSource)
         _SettingsSection.source: (
           l10n.mediaSource,
-          CupertinoIcons.film,
+          AppIcons.mediaSource,
           PlayerKeys.mediaSource,
         ),
       _SettingsSection.output: (
         l10n.playbackOutputSection,
-        CupertinoIcons.slider_horizontal_3,
+        AppIcons.output,
         const Key('player-output-section'),
       ),
     };
@@ -271,7 +272,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             child: AppButton.icon(
               key: info.$3,
               onPressed: () => setState(() => _section = key),
-              icon: Icon(info.$2, size: 16),
+              icon: Icon(info.$2, fill: AppIcons.filled, size: 16),
               label: Text(info.$1),
               style: AppButtonStyle(
                 minimumSize: Size(rail ? double.infinity : 0, rail ? 40 : 36),
@@ -396,7 +397,11 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                   key: const Key('player-settings-close'),
                   onPressed: _menu.close,
                   tooltip: '关闭',
-                  icon: const Icon(CupertinoIcons.xmark, size: 20),
+                  icon: const Icon(
+                    AppIcons.close,
+                    fill: AppIcons.filled,
+                    size: 20,
+                  ),
                 ),
               ],
             ),

@@ -3,6 +3,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/home/phone_hero.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 手机滚动不使用 Android 拉伸回弹，避免下拉刷新和上拉时把横幅、卡片拉变形。
 class PhoneScrollBehavior extends ScrollBehavior {
@@ -370,7 +371,8 @@ class MobileEmptyState extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Icon(
-                    CupertinoIcons.film,
+                    AppIcons.movie,
+                    fill: AppIcons.filled,
                     size: 28,
                     color: scheme.onSurfaceVariant,
                   ),
@@ -431,7 +433,8 @@ class MobileFailureState extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Icon(
-                    CupertinoIcons.exclamationmark_circle,
+                    AppIcons.error,
+                    fill: AppIcons.filled,
                     size: 28,
                     color: scheme.onErrorContainer,
                   ),

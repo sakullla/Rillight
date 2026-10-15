@@ -20,6 +20,7 @@ import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_controller.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({
@@ -169,7 +170,7 @@ class _SearchPageState extends State<SearchPage> {
               textInputAction: TextInputAction.search,
               onSubmitted: (value) => _submit(value),
               placeholder: l10n.searchHint,
-              prefix: const Icon(CupertinoIcons.search),
+              prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
               suffix: ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _query,
                 builder: (context, value, _) {
@@ -184,7 +185,10 @@ class _SearchPageState extends State<SearchPage> {
                             _query.clear();
                             _submit('');
                           },
-                          icon: const Icon(CupertinoIcons.xmark),
+                          icon: const Icon(
+                            AppIcons.close,
+                            fill: AppIcons.filled,
+                          ),
                         ),
                       AppIconButton(
                         key: CatalogKeys.searchSubmit,
@@ -196,7 +200,10 @@ class _SearchPageState extends State<SearchPage> {
                                 height: 18,
                                 child: CupertinoActivityIndicator(),
                               )
-                            : const Icon(CupertinoIcons.arrow_right),
+                            : const Icon(
+                                AppIcons.forward,
+                                fill: AppIcons.filled,
+                              ),
                       ),
                     ],
                   );
@@ -266,14 +273,14 @@ class _SearchPageState extends State<SearchPage> {
     }
     if (!_searched) {
       return AppEmptyView(
-        icon: CupertinoIcons.search,
+        icon: AppIcons.search,
         message: l10n.searchEmptyQuery,
       );
     }
     if (_items.isEmpty) {
       return AppEmptyView(
         key: CatalogKeys.searchNoResults,
-        icon: CupertinoIcons.search,
+        icon: AppIcons.search,
         message: l10n.searchNoResults,
       );
     }

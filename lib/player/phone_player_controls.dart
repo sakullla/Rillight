@@ -30,6 +30,7 @@ import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/session_subtitle_files.dart';
 import 'package:rillight/player/track_picker.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 轨道选项的辅助行(内嵌/外挂、编码、默认),复用桌面同款描述。
 Widget? _phoneTrackMeta(BuildContext context, MediaStreamInfo track) {
@@ -381,7 +382,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       tooltip: l.mobileUnlock,
                       style: _phoneChromeButton,
                       onPressed: toggleLock,
-                      icon: const Icon(CupertinoIcons.lock_open),
+                      icon: const Icon(
+                        AppIcons.lockOpen,
+                        fill: AppIcons.filled,
+                      ),
                     ),
                   if (!widget.interaction.unlockVisible)
                     const SizedBox(width: 48, height: 48),
@@ -392,7 +396,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     tooltip: l.closePlayer,
                     style: _phoneChromeButton,
                     onPressed: widget.onClose,
-                    icon: const Icon(CupertinoIcons.arrow_left),
+                    icon: const Icon(AppIcons.back, fill: AppIcons.filled),
                   ),
                   const SizedBox(width: 8),
                   Expanded(child: _title(l)),
@@ -409,14 +413,17 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               !_controller.playbackEnded
                           ? widget.onPictureInPicture
                           : null,
-                      icon: const Icon(CupertinoIcons.rectangle_on_rectangle),
+                      icon: const Icon(
+                        AppIcons.pictureInPicture,
+                        fill: AppIcons.filled,
+                      ),
                     ),
                   AppIconButton(
                     key: const Key('mobile-player-lock'),
                     tooltip: l.mobileLock,
                     style: _phoneChromeButton,
                     onPressed: toggleLock,
-                    icon: const Icon(CupertinoIcons.lock),
+                    icon: const Icon(AppIcons.lock, fill: AppIcons.filled),
                   ),
                 ],
         ),
@@ -473,16 +480,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           onPressed: canSeek
               ? () => c.seekRelative(const Duration(seconds: -10))
               : null,
-          icon: CupertinoIcons.gobackward_10,
+          icon: AppIcons.replay10,
         ),
         const SizedBox(width: 8),
         _transportButton(
           key: const Key('mobile-player-toggle'),
           tooltip: c.isPlaying ? l.pause : l.play,
           onPressed: c.togglePlay,
-          icon: c.isPlaying
-              ? CupertinoIcons.pause_fill
-              : CupertinoIcons.play_fill,
+          icon: c.isPlaying ? AppIcons.pause : AppIcons.play,
           primary: true,
         ),
         const SizedBox(width: 8),
@@ -492,7 +497,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
           onPressed: canSeek
               ? () => c.seekRelative(const Duration(seconds: 10))
               : null,
-          icon: CupertinoIcons.goforward_10,
+          icon: AppIcons.forward10,
         ),
       ],
     );
@@ -557,7 +562,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     key: const Key('mobile-dismiss-network-hint'),
                     tooltip: '关闭',
                     onPressed: c.dismissNetworkSlowHint,
-                    icon: const Icon(CupertinoIcons.xmark, size: 18),
+                    icon: const Icon(
+                      AppIcons.close,
+                      fill: AppIcons.filled,
+                      size: 18,
+                    ),
                   ),
                 ],
               ),
@@ -583,7 +592,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                     key: const Key('mobile-dismiss-track-failure'),
                     tooltip: '关闭',
                     onPressed: c.dismissTrackFailure,
-                    icon: const Icon(CupertinoIcons.xmark, size: 18),
+                    icon: const Icon(
+                      AppIcons.close,
+                      fill: AppIcons.filled,
+                      size: 18,
+                    ),
                   ),
                 ],
               ),
@@ -698,7 +711,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         _actionButton(
           keyName: 'mobile-player-episodes',
           tooltip: l.playerEpisodes,
-          icon: const Icon(CupertinoIcons.film, size: 22),
+          icon: const Icon(AppIcons.episodes, fill: AppIcons.filled, size: 22),
           action: _openEpisodes,
         ),
       _actionButton(
@@ -714,20 +727,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         _actionButton(
           keyName: 'mobile-player-tracks',
           tooltip: c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
-          icon: const Icon(CupertinoIcons.captions_bubble, size: 22),
+          icon: const Icon(AppIcons.subtitles, fill: AppIcons.filled, size: 22),
           action: () => _openMore(section: 'tracks'),
         ),
       if (widget.danmaku?.isConfigured == true)
         _actionButton(
           keyName: 'mobile-player-danmaku',
           tooltip: l.danmaku,
-          icon: const Icon(CupertinoIcons.chat_bubble, size: 22),
+          icon: const Icon(AppIcons.danmaku, fill: AppIcons.filled, size: 22),
           action: () => _openMore(section: 'danmaku'),
         ),
       _actionButton(
         keyName: 'mobile-player-more',
         tooltip: l.mobileMore,
-        icon: const Icon(CupertinoIcons.slider_horizontal_3, size: 22),
+        icon: const Icon(AppIcons.tune, fill: AppIcons.filled, size: 22),
         action: () => _openMore(),
       ),
     ];
@@ -778,7 +791,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         key: key,
         tooltip: tooltip,
         onPressed: onPressed,
-        icon: Icon(icon, size: primary ? 30 : 24),
+        icon: Icon(icon, fill: AppIcons.filled, size: primary ? 30 : 24),
         style: AppButtonStyle(
           foregroundColor: primary ? scheme.surface : CupertinoColors.white,
           backgroundColor: primary
@@ -957,7 +970,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                           panelSetState(() => panelSection = null);
                           widget.interaction.setPanel('more');
                         },
-                        icon: const Icon(CupertinoIcons.arrow_left),
+                        icon: const Icon(AppIcons.back, fill: AppIcons.filled),
                       ),
                     Expanded(
                       child: Text(
@@ -1010,7 +1023,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       key: const Key('mobile-player-panel-close'),
                       tooltip: '关闭',
                       onPressed: () => Navigator.pop(sheetContext),
-                      icon: const Icon(CupertinoIcons.xmark),
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                     ),
                   ],
                 ),
@@ -1027,45 +1040,39 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                             surface: PlaybackLineSurface.sheet,
                           ),
                           for (final entry in <String, (IconData, String)>{
-                            'speed': (
-                              CupertinoIcons.speedometer,
-                              l.playbackRate,
-                            ),
+                            'speed': (AppIcons.speed, l.playbackRate),
                             if (c.canSwitchAudioTrack ||
                                 c.canConfigureSubtitles ||
                                 c.canImportSubtitleFiles)
                               'tracks': (
-                                CupertinoIcons.captions_bubble,
+                                AppIcons.subtitles,
                                 c.canSwitchAudioTrack
                                     ? l.mobileTracks
                                     : l.subtitleTrack,
                               ),
                             if (c.canSwitchQuality)
-                              'quality': (CupertinoIcons.sparkles, l.quality),
+                              'quality': (AppIcons.quality, l.quality),
                             'picture': (
-                              CupertinoIcons.rectangle_expand_vertical,
+                              AppIcons.aspectRatio,
                               l.playerPictureSettings,
                             ),
-                            'skip': (
-                              CupertinoIcons.forward_fill,
-                              l.playerSkipSettings,
-                            ),
+                            'skip': (AppIcons.skipNext, l.playerSkipSettings),
                             'output': (
-                              CupertinoIcons.slider_horizontal_3,
+                              AppIcons.output,
                               l.playbackOutputSection,
                             ),
                             if (danmaku != null)
-                              'danmaku': (
-                                CupertinoIcons.chat_bubble,
-                                l.danmaku,
-                              ),
+                              'danmaku': (AppIcons.danmaku, l.danmaku),
                           }.entries)
                             optionTile(
                               key: ValueKey(
                                 'mobile-player-section-${entry.key}',
                               ),
                               selected: false,
-                              leading: Icon(entry.value.$1),
+                              leading: Icon(
+                                entry.value.$1,
+                                fill: AppIcons.filled,
+                              ),
                               title: Text(entry.value.$2),
                               subtitle: Text(
                                 sectionValue(entry.key),
@@ -1073,7 +1080,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               trailing: const Icon(
-                                CupertinoIcons.chevron_right,
+                                AppIcons.chevronRight,
+                                fill: AppIcons.filled,
                               ),
                               onTap: () {
                                 panelSetState(() => panelSection = entry.key);
@@ -1084,7 +1092,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                             optionTile(
                               key: const Key('mobile-player-source-entry'),
                               selected: false,
-                              leading: const Icon(CupertinoIcons.film),
+                              leading: const Icon(
+                                AppIcons.mediaSource,
+                                fill: AppIcons.filled,
+                              ),
                               title: Text(l.mobileSource),
                               subtitle: Text(
                                 sectionValue('source'),
@@ -1092,7 +1103,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               trailing: const Icon(
-                                CupertinoIcons.chevron_right,
+                                AppIcons.chevronRight,
+                                fill: AppIcons.filled,
                               ),
                               onTap: () {
                                 panelSetState(() => panelSection = 'source');
@@ -1126,11 +1138,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                   leading: Icon(
                                     c.pendingMediaSourceId == source.id &&
                                             c.isRecovering
-                                        ? CupertinoIcons.hourglass
+                                        ? AppIcons.hourglass
                                         : source.id == c.activeMediaSourceId
-                                        ? CupertinoIcons
-                                              .check_mark_circled_solid
-                                        : CupertinoIcons.circle,
+                                        ? AppIcons.checkCircle
+                                        : AppIcons.circle,
+                                    fill:
+                                        (c.pendingMediaSourceId == source.id &&
+                                                c.isRecovering) ||
+                                            source.id == c.activeMediaSourceId
+                                        ? AppIcons.filled
+                                        : AppIcons.outline,
                                     key: ValueKey(
                                       'mobile-source-icon-${source.id}',
                                     ),
@@ -1180,8 +1197,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                     : () => c.toggleMute(),
                                 icon: Icon(
                                   c.volume <= 0
-                                      ? CupertinoIcons.speaker_slash_fill
-                                      : CupertinoIcons.speaker_3_fill,
+                                      ? AppIcons.volumeOff
+                                      : AppIcons.volumeUp,
+                                  fill: AppIcons.filled,
                                 ),
                               ),
                               Expanded(
@@ -1220,7 +1238,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               Navigator.pop(sheetContext);
                               widget.onOpenDanmakuSearch();
                             },
-                            icon: const Icon(CupertinoIcons.search),
+                            icon: const Icon(
+                              AppIcons.search,
+                              fill: AppIcons.filled,
+                            ),
                             label: Text(l.danmakuSearch),
                           ),
                           const SizedBox(height: 8),
@@ -1240,7 +1261,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                               widget.onOpenDanmakuPanel();
                             },
                             icon: const Icon(
-                              CupertinoIcons.slider_horizontal_3,
+                              AppIcons.danmaku,
+                              fill: AppIcons.filled,
                             ),
                             label: Text(l.mobileDanmakuPanel),
                           ),
@@ -1273,8 +1295,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 selected: c.audioStreamIndex == track.index,
                                 leading: Icon(
                                   c.audioStreamIndex == track.index
-                                      ? CupertinoIcons.check_mark_circled_solid
-                                      : CupertinoIcons.circle,
+                                      ? AppIcons.checkCircle
+                                      : AppIcons.circle,
+                                  fill: c.audioStreamIndex == track.index
+                                      ? AppIcons.filled
+                                      : AppIcons.outline,
                                 ),
                                 title: Text(track.label),
                                 onTap: () => c.setAudio(track.index),
@@ -1301,9 +1326,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                   leading: Icon(
                                     c.subtitleStreamIndex == null &&
                                             c.primarySubtitleFileId == null
-                                        ? CupertinoIcons
-                                              .check_mark_circled_solid
-                                        : CupertinoIcons.circle,
+                                        ? AppIcons.checkCircle
+                                        : AppIcons.circle,
+                                    fill:
+                                        c.subtitleStreamIndex == null &&
+                                            c.primarySubtitleFileId == null
+                                        ? AppIcons.filled
+                                        : AppIcons.outline,
                                   ),
                                   title: Text(l.subtitleOff),
                                   searchText: l.subtitleOff,
@@ -1318,9 +1347,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                     leading: Icon(
                                       c.subtitleStreamIndex == track.index &&
                                               c.primarySubtitleFileId == null
-                                          ? CupertinoIcons
-                                                .check_mark_circled_solid
-                                          : CupertinoIcons.circle,
+                                          ? AppIcons.checkCircle
+                                          : AppIcons.circle,
+                                      fill:
+                                          c.subtitleStreamIndex ==
+                                                  track.index &&
+                                              c.primarySubtitleFileId == null
+                                          ? AppIcons.filled
+                                          : AppIcons.outline,
                                     ),
                                     title: Text(track.label),
                                     subtitle: _phoneTrackMeta(context, track),
@@ -1363,9 +1397,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                     reveal: false,
                                     leading: Icon(
                                       c.primarySubtitleFileId == file.id
-                                          ? CupertinoIcons
-                                                .check_mark_circled_solid
-                                          : CupertinoIcons.circle,
+                                          ? AppIcons.checkCircle
+                                          : AppIcons.circle,
+                                      fill: c.primarySubtitleFileId == file.id
+                                          ? AppIcons.filled
+                                          : AppIcons.outline,
                                     ),
                                     title: Text(file.label),
                                     subtitle: Text(l.subtitleMetaImported),
@@ -1423,9 +1459,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                   reveal: false,
                                   leading: Icon(
                                     c.hasSecondarySubtitle
-                                        ? CupertinoIcons.circle
-                                        : CupertinoIcons
-                                              .check_mark_circled_solid,
+                                        ? AppIcons.circle
+                                        : AppIcons.checkCircle,
+                                    fill: c.hasSecondarySubtitle
+                                        ? AppIcons.outline
+                                        : AppIcons.filled,
                                   ),
                                   title: Text(l.subtitleOff),
                                   searchText: l.subtitleOff,
@@ -1441,9 +1479,13 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                       leading: Icon(
                                         c.secondarySubtitleStreamIndex ==
                                                 track.index
-                                            ? CupertinoIcons
-                                                  .check_mark_circled_solid
-                                            : CupertinoIcons.circle,
+                                            ? AppIcons.checkCircle
+                                            : AppIcons.circle,
+                                        fill:
+                                            c.secondarySubtitleStreamIndex ==
+                                                track.index
+                                            ? AppIcons.filled
+                                            : AppIcons.outline,
                                       ),
                                       title: Text(track.label),
                                       subtitle: _phoneTrackMeta(context, track),
@@ -1488,9 +1530,11 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                     reveal: false,
                                     leading: Icon(
                                       c.secondarySubtitleFileId == file.id
-                                          ? CupertinoIcons
-                                                .check_mark_circled_solid
-                                          : CupertinoIcons.circle,
+                                          ? AppIcons.checkCircle
+                                          : AppIcons.circle,
+                                      fill: c.secondarySubtitleFileId == file.id
+                                          ? AppIcons.filled
+                                          : AppIcons.outline,
                                     ),
                                     title: Text(file.label),
                                     subtitle: Text(l.subtitleMetaImported),
@@ -1550,7 +1594,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                 onPressed: () =>
                                     c.importSubtitleFile().then((_) {}),
                                 icon: const Icon(
-                                  CupertinoIcons.square_arrow_down,
+                                  AppIcons.download,
+                                  fill: AppIcons.filled,
                                 ),
                                 label: Text(l.subtitleImportLocal),
                               ),
@@ -1604,9 +1649,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                                   }
                                 : () => Navigator.pop(sheetContext),
                             icon: Icon(
-                              section != null
-                                  ? CupertinoIcons.arrow_left
-                                  : CupertinoIcons.xmark,
+                              section != null ? AppIcons.back : AppIcons.close,
+                              fill: AppIcons.filled,
                             ),
                             label: Text(l.mobileBack),
                           ),

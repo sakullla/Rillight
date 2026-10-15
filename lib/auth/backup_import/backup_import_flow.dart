@@ -9,6 +9,7 @@ import 'package:rillight/auth/backup_import/backup_import.dart';
 import 'package:rillight/auth/backup_import/backup_import_models.dart';
 import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_import_models.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 三端共用的备份导入流程:T2 文件读取边界 → T4 解析 → T3 提交服务,
 /// 结果面板逐类列出新增/重复/非目标/失败/私密跳过与待登录数量。
@@ -274,7 +275,12 @@ class BackupImportResultDialog extends StatelessWidget {
     final scheme = AppUiTheme.of(context).colorScheme;
     Widget row(Key key, IconData icon, String text, {Color? color}) => Row(
       children: [
-        Icon(icon, size: 18, color: color ?? scheme.onSurfaceVariant),
+        Icon(
+          icon,
+          fill: AppIcons.filled,
+          size: 18,
+          color: color ?? scheme.onSurfaceVariant,
+        ),
         const SizedBox(width: 12),
         Expanded(child: Text(text, key: key)),
       ],
@@ -285,7 +291,7 @@ class BackupImportResultDialog extends StatelessWidget {
       children: [
         row(
           BackupImportFlowKeys.added,
-          CupertinoIcons.link,
+          AppIcons.link,
           l10n.backupImportAddedCount(outcome.added),
         ),
         if (outcome.added > 0) ...[
@@ -305,7 +311,7 @@ class BackupImportResultDialog extends StatelessWidget {
           const SizedBox(height: 6),
           row(
             BackupImportFlowKeys.duplicate,
-            CupertinoIcons.doc_on_doc,
+            AppIcons.copy,
             l10n.backupImportDuplicateCount(outcome.duplicate),
           ),
         ],
@@ -313,7 +319,7 @@ class BackupImportResultDialog extends StatelessWidget {
           const SizedBox(height: 6),
           row(
             BackupImportFlowKeys.nonTarget,
-            CupertinoIcons.line_horizontal_3_decrease,
+            AppIcons.filter,
             l10n.backupImportNonTargetCount(outcome.nonTarget),
           ),
         ],
@@ -321,7 +327,7 @@ class BackupImportResultDialog extends StatelessWidget {
           const SizedBox(height: 6),
           row(
             BackupImportFlowKeys.privateSkipped,
-            CupertinoIcons.lock,
+            AppIcons.lock,
             l10n.backupImportPrivateSkippedCount(outcome.privateSkipped),
           ),
         ],
@@ -329,7 +335,7 @@ class BackupImportResultDialog extends StatelessWidget {
           const SizedBox(height: 6),
           row(
             BackupImportFlowKeys.failed,
-            CupertinoIcons.exclamationmark_circle,
+            AppIcons.error,
             l10n.backupImportFailedCount(outcome.failedRecords),
             color: scheme.error,
           ),

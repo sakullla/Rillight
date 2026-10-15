@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 顶部导航:品牌字标 + 四个胶囊标签 + 用户名片。
 ///
@@ -46,10 +47,10 @@ class TvTopNavBar extends StatelessWidget {
       reserveHeight * TvDesign.scaleOf(context);
 
   static const _icons = [
-    CupertinoIcons.house,
-    CupertinoIcons.rectangle_stack,
-    CupertinoIcons.search,
-    CupertinoIcons.gear,
+    AppIcons.home,
+    AppIcons.aggregation,
+    AppIcons.search,
+    AppIcons.settings,
   ];
 
   @override
@@ -92,7 +93,12 @@ class TvTopNavBar extends StatelessWidget {
                     focusNode: i == 0 ? homeNode : null,
                     selected: i == index,
                     variant: TvActionVariant.ghost,
-                    leading: Icon(_icons[i]),
+                    leading: Icon(
+                      _icons[i],
+                      fill: i == index
+                          ? AppIcons.filled
+                          : AppIcons.outline,
+                    ),
                     onPressed: () => onSelect(i),
                     child: Text(labels[i]),
                   ),
@@ -157,7 +163,7 @@ class _Brand extends StatelessWidget {
             ),
           ),
           child: Icon(
-            CupertinoIcons.play_fill,
+            AppIcons.play, fill: AppIcons.filled,
             size: 16 * s,
             color: theme.colorScheme.onPrimary,
           ),

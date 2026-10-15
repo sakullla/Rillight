@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 电视外观三态。写入 [AppearanceScope] 中的 [AppearanceController],不另建偏好。
 ///
@@ -12,9 +13,9 @@ class TvAppearancePicker extends StatelessWidget {
   const TvAppearancePicker({super.key});
 
   static const _icons = {
-    AppearanceStyle.system: CupertinoIcons.circle_lefthalf_fill,
-    AppearanceStyle.light: CupertinoIcons.sun_max,
-    AppearanceStyle.dark: CupertinoIcons.moon,
+    AppearanceStyle.system: AppIcons.appearance,
+    AppearanceStyle.light: AppIcons.lightMode,
+    AppearanceStyle.dark: AppIcons.darkMode,
   };
 
   @override
@@ -33,7 +34,8 @@ class TvAppearancePicker extends StatelessWidget {
             pill: true,
             selected: style == value,
             leading: Icon(
-              style == value ? CupertinoIcons.check_mark : _icons[value],
+              _icons[value],
+              fill: style == value ? AppIcons.filled : AppIcons.outline,
             ),
             onPressed: appearance == null
                 ? null

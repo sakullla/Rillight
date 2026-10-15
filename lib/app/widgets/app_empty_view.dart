@@ -1,11 +1,12 @@
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 空状态视图:图标 + 文案,可选主操作,风格与 [AppErrorView] 对齐。
 class AppEmptyView extends StatelessWidget {
   const AppEmptyView({
     super.key,
     required this.message,
-    this.icon = CupertinoIcons.tray,
+    this.icon = AppIcons.empty,
     this.actionLabel,
     this.onAction,
     this.action,
@@ -40,6 +41,7 @@ class AppEmptyView extends StatelessWidget {
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Icon(
                   icon,
+                  fill: AppIcons.filled,
                   size: 28,
                   color: colorScheme.onSurfaceVariant,
                 ),

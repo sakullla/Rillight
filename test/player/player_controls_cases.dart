@@ -1,3 +1,4 @@
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
 import '../helpers/widget_harness.dart';
@@ -1284,10 +1285,9 @@ void main() {
           ),
         ),
       );
-      expect(find.byIcon(CupertinoIcons.arrow_down_to_line), findsNothing);
-      expect(find.byIcon(CupertinoIcons.arrow_down_to_line), findsNothing);
-      expect(find.byIcon(CupertinoIcons.wifi), findsNothing);
-      expect(find.byIcon(CupertinoIcons.speedometer), findsNothing);
+      expect(find.byIcon(AppIcons.download), findsNothing);
+      expect(find.byIcon(AppIcons.wifi), findsNothing);
+      expect(find.byIcon(AppIcons.speed), findsNothing);
       expect(find.text('2.5 MB/s'), findsOneWidget);
       expect(
         find.byWidgetPredicate(

@@ -9,6 +9,7 @@ import 'package:rillight/library/catalog_filter_button.dart';
 import 'package:rillight/library/tv_library_page.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_controller.dart' as search;
+import 'package:rillight/app/ui/app_icons.dart';
 
 class TvSearchPage extends StatefulWidget {
   const TvSearchPage({super.key});
@@ -78,7 +79,8 @@ class _TvSearchPageState extends State<TvSearchPage> {
                             controller: _text,
                             pill: true,
                             leading: const Icon(
-                              CupertinoIcons.search,
+                              AppIcons.search,
+                              fill: AppIcons.filled,
                               size: 20,
                             ),
                             onSubmitted: () => c.submit(_text.text),
@@ -87,7 +89,8 @@ class _TvSearchPageState extends State<TvSearchPage> {
                         TvAction(
                           pill: true,
                           leading: const Icon(
-                            CupertinoIcons.slider_horizontal_3,
+                            AppIcons.filter,
+                            fill: AppIcons.filled,
                             size: 20,
                           ),
                           onPressed: () => showCatalogWatchFilter(

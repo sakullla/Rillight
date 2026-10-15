@@ -18,6 +18,7 @@ import 'package:rillight/home/home_display_dialog.dart';
 import 'package:rillight/search/search_action.dart';
 import 'package:rillight/search/search_overlay.dart';
 import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class HomeScrollNotification extends Notification {
   const HomeScrollNotification(this.scrolled);
@@ -511,9 +512,7 @@ class _TopBar extends StatelessWidget {
                             overArtwork: !opaque,
                             tooltip: !canPop ? l10n.home : l10n.mobileBack,
                             onPressed: onBack,
-                            icon: canPop
-                                ? CupertinoIcons.chevron_left
-                                : CupertinoIcons.house,
+                            icon: canPop ? AppIcons.back : AppIcons.home,
                             label: canPop ? l10n.mobileBack : l10n.home,
                           ),
                         ),
@@ -535,7 +534,10 @@ class _TopBar extends StatelessWidget {
                           onPressed: () {
                             unawaited(showHomeDisplayDialog(context));
                           },
-                          icon: const Icon(CupertinoIcons.slider_horizontal_3),
+                          icon: const Icon(
+                            AppIcons.tune,
+                            fill: AppIcons.filled,
+                          ),
                         ),
                       ] else ...[
                         Expanded(

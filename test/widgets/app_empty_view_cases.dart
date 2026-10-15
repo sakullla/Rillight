@@ -3,6 +3,7 @@ import '../helpers/widget_harness.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/widgets/app_empty_view.dart';
 
 void main() {
@@ -19,7 +20,7 @@ void main() {
       ),
     );
     expect(find.text('这里什么都没有'), findsOneWidget);
-    expect(find.byIcon(CupertinoIcons.tray), findsOneWidget);
+    expect(find.byIcon(AppIcons.empty), findsOneWidget);
     // 未提供 onAction 时不渲染按钮。
     expect(find.byType(AppButton), findsNothing);
 

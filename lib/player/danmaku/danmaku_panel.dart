@@ -7,6 +7,7 @@ import 'package:rillight/player/danmaku/danmaku_controller.dart';
 import 'package:rillight/player/danmaku/danmaku_display_form.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/player/danmaku/danmaku_keys.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 桌面播放页窗口顶栏占用。手机等没有窗口铬的宿主传 0，或用 [DanmakuPanel.embedded]。
 const double kDanmakuPanelDefaultTopChrome =
@@ -60,7 +61,7 @@ class DanmakuSearchError extends StatelessWidget {
               const SizedBox(height: 8),
               AppButton.icon(
                 onPressed: onRetry,
-                icon: const Icon(CupertinoIcons.arrow_clockwise),
+                icon: const Icon(AppIcons.refresh, fill: AppIcons.filled),
                 label: Text(l.retry),
               ),
             ],
@@ -232,7 +233,7 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
             _HudIconButton(
               buttonKey: DanmakuKeys.search,
               tooltip: l10n.danmakuSearch,
-              icon: CupertinoIcons.search,
+              icon: AppIcons.search,
               onPressed: () {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   widget.onSearch();
@@ -241,7 +242,7 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
             ),
             _HudIconButton(
               tooltip: '关闭',
-              icon: CupertinoIcons.xmark,
+              icon: AppIcons.close,
               onPressed: () {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (context.mounted) {
@@ -303,8 +304,9 @@ class _DanmakuPanelState extends State<DanmakuPanel> {
                     ),
                     Icon(
                       _advancedExpanded
-                          ? CupertinoIcons.chevron_up
-                          : CupertinoIcons.chevron_down,
+                          ? AppIcons.chevronUp
+                          : AppIcons.chevronDown,
+                      fill: AppIcons.filled,
                       size: 18,
                       color: quiet,
                     ),
@@ -345,7 +347,7 @@ class _HudIconButton extends StatelessWidget {
         foregroundColor: scheme.onSurface.withValues(alpha: 0.82),
       ),
       onPressed: onPressed,
-      icon: Icon(icon, size: 20),
+      icon: Icon(icon, fill: AppIcons.filled, size: 20),
     );
   }
 }

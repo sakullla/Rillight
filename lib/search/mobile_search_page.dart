@@ -15,6 +15,7 @@ import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/library/catalog_filter_button.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/search/search_controller.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 手机搜索：输入即搜。剧集和电影都走 [AppRoutes.item]，由详情页按类型分画面。
 class MobileSearchPage extends StatefulWidget {
@@ -117,7 +118,7 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
                   onSubmitted: (_) => _submit(),
                   onChanged: _onChanged,
                   placeholder: l.searchHint,
-                  prefix: const Icon(CupertinoIcons.search),
+                  prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
                   suffix: ValueListenableBuilder<TextEditingValue>(
                     valueListenable: _text,
                     builder: (context, value, _) => Row(
@@ -132,12 +133,18 @@ class _MobileSearchPageState extends State<MobileSearchPage> {
                               _onChanged('');
                               _focus.requestFocus();
                             },
-                            icon: const Icon(CupertinoIcons.xmark),
+                            icon: const Icon(
+                              AppIcons.close,
+                              fill: AppIcons.filled,
+                            ),
                           ),
                         AppIconButton(
                           tooltip: l.search,
                           onPressed: _submit,
-                          icon: const Icon(CupertinoIcons.arrow_right),
+                          icon: const Icon(
+                            AppIcons.forward,
+                            fill: AppIcons.filled,
+                          ),
                         ),
                       ],
                     ),

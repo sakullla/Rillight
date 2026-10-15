@@ -10,6 +10,7 @@ import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/login_widgets.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/home/catalog_scope.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 Future<void> showPhoneServerManager(
   BuildContext context, {
@@ -241,9 +242,8 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
       selected: selected,
       contentPadding: EdgeInsets.zero,
       leading: Icon(
-        selected
-            ? CupertinoIcons.largecircle_fill_circle
-            : CupertinoIcons.circle,
+        AppIcons.circle,
+        fill: selected ? AppIcons.filled : AppIcons.outline,
         color: selected ? AppUiTheme.of(context).colorScheme.primary : null,
       ),
       title: Text(line.hostLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -259,7 +259,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
           AppIconButton(
             key: Key('phone-mine-line-edit-${server.id}-${line.id}'),
             tooltip: l.editLine,
-            icon: const Icon(CupertinoIcons.pencil),
+            icon: const Icon(AppIcons.edit, fill: AppIcons.filled),
             onPressed: disabled
                 ? null
                 : () => unawaited(_editLine(server, line)),
@@ -267,7 +267,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
           AppIconButton(
             key: Key('phone-mine-line-delete-${server.id}-${line.id}'),
             tooltip: l.deleteLine,
-            icon: const Icon(CupertinoIcons.link),
+            icon: const Icon(AppIcons.link, fill: AppIcons.filled),
             onPressed: disabled || server.lines.length <= 1
                 ? null
                 : () => unawaited(
@@ -340,13 +340,17 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                 ),
                 AppIconButton(
                   tooltip: l.phoneRenameServer,
-                  icon: const Icon(CupertinoIcons.pencil),
+                  icon: const Icon(AppIcons.edit, fill: AppIcons.filled),
                   onPressed: disabled ? null : () => unawaited(_rename(server)),
                 ),
                 AppIconButton(
                   key: Key('phone-mine-server-delete-${server.id}'),
                   tooltip: l.deleteServer,
-                  icon: Icon(CupertinoIcons.trash, color: scheme.error),
+                  icon: Icon(
+                    AppIcons.delete,
+                    fill: AppIcons.filled,
+                    color: scheme.error,
+                  ),
                   onPressed: disabled ? null : () => unawaited(_delete(server)),
                 ),
               ],
@@ -357,7 +361,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
               AppButton.icon(
                 key: Key('phone-mine-line-add-${server.id}'),
                 onPressed: disabled ? null : () => unawaited(_editLine(server)),
-                icon: const Icon(CupertinoIcons.link),
+                icon: const Icon(AppIcons.link, fill: AppIcons.filled),
                 label: Text(l.addLine),
                 variant: AppButtonVariant.plain,
               ),
@@ -369,7 +373,10 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                trailing: const Icon(CupertinoIcons.chevron_down),
+                trailing: const Icon(
+                  AppIcons.chevronDown,
+                  fill: AppIcons.filled,
+                ),
                 onTap: () => setState(() => _expanded = server.id),
               ),
           ],
@@ -414,7 +421,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                       AppIconButton(
                         tooltip: l.cancelAction,
                         onPressed: () => Navigator.pop(context),
-                        icon: const Icon(CupertinoIcons.xmark),
+                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                       ),
                     ],
                   ),
@@ -424,11 +431,14 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                     onChanged: (_) => setState(() {}),
                     textInputAction: TextInputAction.search,
                     placeholder: l.searchServers,
-                    prefix: const Icon(CupertinoIcons.search),
+                    prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
                     suffix: query.isEmpty
                         ? null
                         : AppIconButton(
-                            icon: const Icon(CupertinoIcons.xmark),
+                            icon: const Icon(
+                              AppIcons.close,
+                              fill: AppIcons.filled,
+                            ),
                             onPressed: () => setState(() => _search.clear()),
                           ),
                   ),
@@ -501,7 +511,8 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                               showBackupImportFlow(context, auth: widget.auth),
                             ),
                       icon: const Icon(
-                        CupertinoIcons.square_arrow_down,
+                        AppIcons.download,
+                        fill: AppIcons.filled,
                         size: 18,
                       ),
                       label: Text(l.backupImportEntry),
@@ -518,7 +529,7 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
                               Navigator.pop(context);
                               widget.onAddServer();
                             },
-                      icon: const Icon(CupertinoIcons.plus),
+                      icon: const Icon(AppIcons.add, fill: AppIcons.filled),
                       label: Text(l.mobileAddServer),
                       variant: AppButtonVariant.filled,
                     ),

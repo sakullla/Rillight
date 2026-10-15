@@ -26,6 +26,7 @@ import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/player/android_session_recovery.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class TvShell extends StatefulWidget {
   const TvShell({super.key});
@@ -297,7 +298,7 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                       ? const Center(child: CupertinoActivityIndicator())
                       : _failed
                       ? TvEmptyState(
-                          icon: CupertinoIcons.cloud,
+                          icon: AppIcons.cloud,
                           message: l.mobileRecoveryFailed,
                           action: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -567,7 +568,7 @@ class _TvAccountCard extends StatelessWidget {
         ),
         SizedBox(height: 14 * s),
         TvNavTile(
-          icon: CupertinoIcons.plus,
+          icon: AppIcons.add,
           title: l.mobileAddServer,
           onPressed: () => context.push('${AppRoutes.connect}?add=1'),
         ),
@@ -579,7 +580,7 @@ class _TvAccountCard extends StatelessWidget {
                 .isAvailable)
           TvNavTile(
             actionKey: _TvSession.changePasswordKey,
-            icon: CupertinoIcons.lock,
+            icon: AppIcons.lock,
             title: auth.client.serviceType == MediaServerType.plex
                 ? l.providerAccountManage
                 : l.changePassword,
@@ -595,7 +596,7 @@ class _TvAccountCard extends StatelessWidget {
           ),
         SizedBox(height: 6 * s),
         TvNavTile(
-          icon: CupertinoIcons.square_arrow_right,
+          icon: AppIcons.logout,
           title: l.logout,
           destructive: true,
           chevron: false,
@@ -633,7 +634,8 @@ class _TvServerCard extends StatelessWidget {
           Row(
             children: [
               Icon(
-                CupertinoIcons.cube_box,
+                AppIcons.server,
+                fill: AppIcons.filled,
                 size: 20 * s,
                 color: scheme.primary,
               ),
@@ -660,7 +662,7 @@ class _TvServerCard extends StatelessWidget {
               TvAction(
                 key: _TvSession.lineAddKey(server.id),
                 variant: TvActionVariant.ghost,
-                leading: const Icon(CupertinoIcons.plus),
+                leading: const Icon(AppIcons.add, fill: AppIcons.filled),
                 onPressed: auth.isBusy
                     ? null
                     : () => _addLine(context, auth, server.id),
@@ -670,7 +672,7 @@ class _TvServerCard extends StatelessWidget {
               TvAction(
                 key: _TvSession.serverDeleteKey(server.id),
                 variant: TvActionVariant.ghost,
-                leading: const Icon(CupertinoIcons.trash),
+                leading: const Icon(AppIcons.delete, fill: AppIcons.filled),
                 onPressed: auth.isBusy
                     ? null
                     : () => _confirmDelete(context, auth, server),
@@ -727,7 +729,7 @@ class _TvServerCard extends StatelessWidget {
                       : () => _editLine(context, auth, server, line),
                   child: Semantics(
                     label: l.editLine,
-                    child: const Icon(CupertinoIcons.pencil),
+                    child: const Icon(AppIcons.edit, fill: AppIcons.filled),
                   ),
                 ),
                 SizedBox(width: 4 * s),
@@ -739,7 +741,7 @@ class _TvServerCard extends StatelessWidget {
                       : () => _deleteLine(context, auth, server, line),
                   child: Semantics(
                     label: l.deleteLine,
-                    child: const Icon(CupertinoIcons.trash),
+                    child: const Icon(AppIcons.delete, fill: AppIcons.filled),
                   ),
                 ),
               ],

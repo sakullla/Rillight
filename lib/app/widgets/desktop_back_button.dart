@@ -1,6 +1,7 @@
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 桌面顶栏返回:胶囊按钮,图标加短标签。
 ///
@@ -102,7 +103,7 @@ class _DesktopBackButtonState extends State<DesktopBackButton> {
                       offset: highlighted ? const Offset(-.12, 0) : Offset.zero,
                       duration: duration,
                       curve: AppMotion.standard,
-                      child: Icon(widget.icon),
+                      child: Icon(widget.icon, fill: AppIcons.filled),
                     ),
                     const SizedBox(width: 4),
                     Text(widget.label, style: labelStyle),

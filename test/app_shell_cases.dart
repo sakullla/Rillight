@@ -4,6 +4,7 @@ import 'helpers/image_cache_fixture.dart';
 import 'helpers/settle.dart';
 
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -398,7 +399,7 @@ void main() {
           find.byKey(AppShell.overflowNavKey),
           find.byKey(SettingsAction.actionKey),
           find.byKey(SessionActions.serverMenuKey),
-          find.widgetWithIcon(AppIconButton, CupertinoIcons.search),
+          find.widgetWithIcon(AppIconButton, AppIcons.search),
         ]) {
           expect(
             tester.getCenter(finder).dy,
@@ -445,7 +446,7 @@ void main() {
         expect(
           tester
               .widget<AppIconButton>(
-                find.widgetWithIcon(AppIconButton, CupertinoIcons.search),
+                find.widgetWithIcon(AppIconButton, AppIcons.search),
               )
               .focusNode
               ?.hasFocus,

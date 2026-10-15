@@ -6,6 +6,7 @@ import 'package:rillight/app/routes.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 手机端通用按压反馈基件(T1):按下时缩放 + 提亮,供海报卡、主按钮等复用。
 ///
@@ -379,7 +380,8 @@ class PhonePosterCard extends StatelessWidget {
                     if (rating != null && rating > 0) ...[
                       if (subtitle.isNotEmpty) const SizedBox(width: 6),
                       Icon(
-                        CupertinoIcons.star_fill,
+                        AppIcons.star,
+                        fill: AppIcons.filled,
                         size: 10,
                         color: scheme.primary,
                       ),
@@ -630,7 +632,8 @@ class PhoneSectionHeader extends StatelessWidget {
               if (onMore != null) ...[
                 const SizedBox(width: 2),
                 Icon(
-                  CupertinoIcons.chevron_right,
+                  AppIcons.chevronRight,
+                  fill: AppIcons.filled,
                   size: 18,
                   color: scheme.onSurfaceVariant,
                 ),
@@ -717,15 +720,15 @@ bool phoneLibraryHasImage(MediaItem library) {
 
 /// 片库类型图标。
 IconData phoneLibraryIcon(String? collectionType) => switch (collectionType) {
-  'movies' => CupertinoIcons.film,
-  'tvshows' => CupertinoIcons.tv,
-  'music' => CupertinoIcons.music_note_2,
-  'musicvideos' => CupertinoIcons.music_note_list,
-  'photos' || 'homevideos' => CupertinoIcons.photo_on_rectangle,
-  'boxsets' => CupertinoIcons.square_stack_3d_up,
-  'playlists' => CupertinoIcons.list_bullet,
-  'livetv' => CupertinoIcons.dot_radiowaves_left_right,
-  _ => CupertinoIcons.rectangle_stack,
+  'movies' => AppIcons.movie,
+  'tvshows' => AppIcons.series,
+  'music' => AppIcons.music,
+  'musicvideos' => AppIcons.musicVideo,
+  'photos' || 'homevideos' => AppIcons.photoLibrary,
+  'boxsets' => AppIcons.boxSet,
+  'playlists' => AppIcons.playlist,
+  'livetv' => AppIcons.liveTv,
+  _ => AppIcons.library,
 };
 
 /// 没有封面的片库取一组深色渐变。按库 id 在色板里轮换，同类型的多个库
@@ -801,6 +804,7 @@ class PhoneLibraryTile extends StatelessWidget {
                 child: ExcludeSemantics(
                   child: Icon(
                     icon,
+                    fill: AppIcons.filled,
                     size: large ? 64 : 46,
                     color: const Color(0x33FFFFFF),
                   ),
@@ -862,6 +866,7 @@ class PhoneLibraryTile extends StatelessWidget {
                     child: ExcludeSemantics(
                       child: Icon(
                         icon,
+                        fill: AppIcons.filled,
                         size: large ? 18 : 15,
                         color: const Color(0xCCFFFFFF),
                       ),

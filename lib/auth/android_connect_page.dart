@@ -18,6 +18,7 @@ import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
 import 'package:rillight/media_server/errors.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// Independent touch-first connection form; drafts live only in the auth flow.
 class AndroidConnectPage extends StatefulWidget {
@@ -329,7 +330,11 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                           AppButton.icon(
                             key: const Key('phone-connect-manage-servers'),
                             onPressed: auth.isBusy ? null : _manageServers,
-                            icon: const Icon(CupertinoIcons.gear, size: 18),
+                            icon: const Icon(
+                              AppIcons.settings,
+                              fill: AppIcons.filled,
+                              size: 18,
+                            ),
                             label: Text(l10n.phoneManageServer),
                             variant: AppButtonVariant.plain,
                           ),
@@ -382,7 +387,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                   label: l10n.serverAddress,
                                   placeholder: l10n.serverAddressHint,
                                   prefix: const Icon(
-                                    CupertinoIcons.link,
+                                    AppIcons.link,
+                                    fill: AppIcons.filled,
                                     size: 20,
                                   ),
                                 ),
@@ -396,7 +402,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                   textInputAction: TextInputAction.next,
                                   label: l10n.username,
                                   prefix: const Icon(
-                                    CupertinoIcons.person,
+                                    AppIcons.person,
+                                    fill: AppIcons.filled,
                                     size: 20,
                                   ),
                                 ),
@@ -413,7 +420,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                   onSubmitted: (_) => _submit(),
                                   label: l10n.password,
                                   prefix: const Icon(
-                                    CupertinoIcons.lock,
+                                    AppIcons.lock,
+                                    fill: AppIcons.filled,
                                     size: 20,
                                   ),
                                   suffix: AppIconButton(
@@ -429,8 +437,9 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                     ),
                                     icon: Icon(
                                       _passwordVisible
-                                          ? CupertinoIcons.eye_slash
-                                          : CupertinoIcons.eye,
+                                          ? AppIcons.visibilityOff
+                                          : AppIcons.visibility,
+                                      fill: AppIcons.filled,
                                       size: 20,
                                     ),
                                   ),
@@ -469,7 +478,8 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                                     showBackupImportFlow(context, auth: auth),
                                   ),
                             icon: const Icon(
-                              CupertinoIcons.square_arrow_down,
+                              AppIcons.download,
+                              fill: AppIcons.filled,
                               size: 18,
                             ),
                             label: Text(l10n.backupImportEntry),
@@ -531,7 +541,7 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
               AppButton.icon(
                 key: const Key('android-connect-add-line'),
                 onPressed: auth.isBusy ? null : _addExtraLine,
-                icon: const Icon(CupertinoIcons.plus, size: 18),
+                icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
                 label: Text(l10n.addLine),
                 variant: AppButtonVariant.plain,
               ),
@@ -540,7 +550,11 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
                 onPressed: auth.isBusy || !canDelete
                     ? null
                     : () => _deleteLine(auth),
-                icon: const Icon(CupertinoIcons.link, size: 18),
+                icon: const Icon(
+                  AppIcons.link,
+                  fill: AppIcons.filled,
+                  size: 18,
+                ),
                 label: Text(l10n.deleteLine),
                 style: AppButtonStyle(
                   foregroundColor: AppUiTheme.of(context).colorScheme.error,
@@ -679,7 +693,8 @@ class _PhoneServerChip extends StatelessWidget {
                   if (selected) ...[
                     const SizedBox(width: 8),
                     Icon(
-                      CupertinoIcons.checkmark_circle_fill,
+                      AppIcons.checkCircle,
+                      fill: AppIcons.filled,
                       size: 18,
                       color: scheme.primary,
                     ),

@@ -1,5 +1,6 @@
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class PosterPlaceholder extends StatelessWidget {
   const PosterPlaceholder({
@@ -32,7 +33,8 @@ class PosterPlaceholder extends StatelessWidget {
             builder: (context, constraints) => Center(
               child: ExcludeSemantics(
                 child: Icon(
-                  CupertinoIcons.photo,
+                  AppIcons.photo,
+                  fill: AppIcons.filled,
                   size: (constraints.biggest.shortestSide * .2).clamp(16, 40),
                   color: colorScheme.onSurfaceVariant.withValues(alpha: .65),
                 ),

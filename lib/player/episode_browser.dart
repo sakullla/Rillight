@@ -8,6 +8,7 @@ import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 剧集行固定高度,给 ListView 按 index 做 O(1) jumpTo。
 ///
@@ -158,7 +159,7 @@ class PlayerEpisodeBrowser extends StatelessWidget {
         key: const Key('player-episodes-close'),
         variant: TvActionVariant.icon,
         onPressed: onClose,
-        child: const Icon(CupertinoIcons.xmark),
+        child: const Icon(AppIcons.close, fill: AppIcons.filled),
       );
     }
     return AppIconButton(
@@ -166,7 +167,7 @@ class PlayerEpisodeBrowser extends StatelessWidget {
       tooltip: tooltip,
       color: AppUiTheme.of(context).colorScheme.onSurface,
       onPressed: onClose,
-      icon: const Icon(CupertinoIcons.xmark),
+      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
     );
   }
 
@@ -296,7 +297,11 @@ class _SeasonMenu extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(CupertinoIcons.chevron_down, color: scheme.onSurface),
+            Icon(
+              AppIcons.chevronDown,
+              fill: AppIcons.filled,
+              color: scheme.onSurface,
+            ),
           ],
         ),
       ),
@@ -503,7 +508,8 @@ class _EpisodeThumb extends StatelessWidget {
               ColoredBox(
                 color: scheme.scrim.withValues(alpha: 0.42),
                 child: Icon(
-                  CupertinoIcons.waveform,
+                  AppIcons.nowPlaying,
+                  fill: AppIcons.filled,
                   color: scheme.onSurface,
                   size: 26,
                 ),
@@ -521,7 +527,8 @@ class _EpisodeThumb extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.all(2),
                       child: Icon(
-                        CupertinoIcons.check_mark,
+                        AppIcons.check,
+                        fill: AppIcons.filled,
                         size: 14,
                         color: scheme.onSurface,
                       ),

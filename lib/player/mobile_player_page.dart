@@ -33,6 +33,7 @@ import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/phone/phone_player_interaction.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class MobilePlayerPage extends StatefulWidget {
   const MobilePlayerPage({
@@ -1111,7 +1112,7 @@ class _PhoneDanmakuSearchState extends State<_PhoneDanmakuSearch> {
                 key: DanmakuKeys.searchSubmit,
                 tooltip: l10n.danmakuSearch,
                 onPressed: _loading ? null : () => unawaited(_run()),
-                icon: const Icon(CupertinoIcons.arrow_right),
+                icon: const Icon(AppIcons.forward, fill: AppIcons.filled),
               ),
             ),
             Expanded(

@@ -17,6 +17,7 @@ import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/tv_lan_pair.dart';
 import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// Remote connection flow; credentials remain owned by the auth draft.
 ///
@@ -232,7 +233,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
                           // 备份导入:无服务与已有服务都可用,遥控可聚焦。
                           TvNavTile(
                             actionKey: const ValueKey('tv-connect-import'),
-                            icon: CupertinoIcons.square_arrow_down,
+                            icon: AppIcons.download,
                             title: l10n.backupImportEntry,
                             onPressed: auth.isBusy
                                 ? null
@@ -315,7 +316,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
               controller: _address,
               placeholder: 'https://emby.example.com',
               keyboardType: TextInputType.url,
-              leading: const Icon(CupertinoIcons.link),
+              leading: const Icon(AppIcons.link, fill: AppIcons.filled),
               autofocus: true,
             ),
             SizedBox(height: 8 * s),
@@ -323,21 +324,21 @@ class _TvConnectPageState extends State<TvConnectPage> {
               key: const Key('tv-connect-username'),
               label: l10n.username,
               controller: _username,
-              leading: const Icon(CupertinoIcons.person),
+              leading: const Icon(AppIcons.person, fill: AppIcons.filled),
             ),
             SizedBox(height: 8 * s),
             TvInput(
               key: const Key('tv-connect-password'),
               label: l10n.password,
               controller: _password,
-              leading: const Icon(CupertinoIcons.lock),
+              leading: const Icon(AppIcons.lock, fill: AppIcons.filled),
               secret: true,
             ),
             SizedBox(height: 8 * s),
             TvInput(
               label: l10n.tvUserAgentOptional,
               controller: _userAgent,
-              leading: const Icon(CupertinoIcons.person_crop_rectangle),
+              leading: const Icon(AppIcons.badge, fill: AppIcons.filled),
             ),
             if (auth.failure != null) ...[
               SizedBox(height: 12 * s),
@@ -345,7 +346,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
-                    CupertinoIcons.exclamationmark_circle,
+                    AppIcons.error,
+                    fill: AppIcons.filled,
                     size: 18 * s,
                     color: scheme.error,
                   ),
@@ -417,7 +419,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
             TvAction(
               key: const Key('tv-lan-assist'),
               expand: true,
-              leading: const Icon(CupertinoIcons.qrcode),
+              leading: const Icon(AppIcons.qrCode, fill: AppIcons.filled),
               onPressed: auth.isBusy || _openingLan || _lanActive
                   ? null
                   : _openLan,
@@ -488,7 +490,8 @@ class _Brand extends StatelessWidget {
             ),
           ),
           child: Icon(
-            CupertinoIcons.play_fill,
+            AppIcons.play,
+            fill: AppIcons.filled,
             size: 22 * s,
             color: theme.colorScheme.onPrimary,
           ),
@@ -518,7 +521,12 @@ class _TvLanHeader extends StatelessWidget {
     final s = TvDesign.scaleOf(context);
     return Row(
       children: [
-        Icon(icon, size: 20 * s, color: theme.colorScheme.primary),
+        Icon(
+          icon,
+          fill: AppIcons.filled,
+          size: 20 * s,
+          color: theme.colorScheme.primary,
+        ),
         SizedBox(width: 8 * s),
         Expanded(child: Text(title, style: theme.textTheme.titleLarge)),
       ],
@@ -553,7 +561,7 @@ class _TvLanWaiting extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _TvLanHeader(icon: CupertinoIcons.qrcode, title: l10n.tvLanScanTitle),
+        _TvLanHeader(icon: AppIcons.qrCode, title: l10n.tvLanScanTitle),
         SizedBox(height: 12 * s),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -582,7 +590,8 @@ class _TvLanWaiting extends StatelessWidget {
                     Row(
                       children: [
                         Icon(
-                          CupertinoIcons.clock,
+                          AppIcons.schedule,
+                          fill: AppIcons.filled,
                           size: 16 * s,
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -620,7 +629,7 @@ class _TvLanWaiting extends StatelessWidget {
         TvAction(
           key: const Key('tv-lan-incomplete'),
           pill: true,
-          leading: const Icon(CupertinoIcons.xmark),
+          leading: const Icon(AppIcons.close, fill: AppIcons.filled),
           onPressed: lan.markIncomplete,
           child: Text(l10n.tvLanFailed),
         ),
@@ -652,7 +661,12 @@ class _TvLanPending extends StatelessWidget {
       padding: EdgeInsets.only(bottom: 8 * s),
       child: Row(
         children: [
-          Icon(icon, size: 18 * s, color: theme.colorScheme.onSurfaceVariant),
+          Icon(
+            icon,
+            fill: AppIcons.filled,
+            size: 18 * s,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
           SizedBox(width: 10 * s),
           Expanded(
             child: Text(
@@ -668,10 +682,7 @@ class _TvLanPending extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _TvLanHeader(
-          icon: CupertinoIcons.lock_shield,
-          title: l10n.tvLanPendingTitle,
-        ),
+        _TvLanHeader(icon: AppIcons.shield, title: l10n.tvLanPendingTitle),
         SizedBox(height: 12 * s),
         Container(
           width: double.infinity,
@@ -683,19 +694,15 @@ class _TvLanPending extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              line(AppIcons.server, pending.server, const Key('tv-lan-server')),
               line(
-                CupertinoIcons.rectangle_stack,
-                pending.server,
-                const Key('tv-lan-server'),
-              ),
-              line(
-                CupertinoIcons.person,
+                AppIcons.person,
                 pending.account,
                 const Key('tv-lan-account'),
               ),
               if (pending.userAgent != null)
                 line(
-                  CupertinoIcons.person_crop_rectangle,
+                  AppIcons.badge,
                   '${l10n.userAgent}: ${pending.userAgent}',
                   const Key('tv-lan-user-agent'),
                 ),
@@ -710,7 +717,7 @@ class _TvLanPending extends StatelessWidget {
               emphasized: true,
               pill: true,
               autofocus: true,
-              leading: const Icon(CupertinoIcons.check_mark),
+              leading: const Icon(AppIcons.check, fill: AppIcons.filled),
               onPressed: busy ? null : onConfirm,
               child: Text(l10n.tvLanConfirm),
             ),
@@ -758,9 +765,8 @@ class _TvServerTile extends StatelessWidget {
       leading: ServerTypeMark(type: server.serviceType, size: 24 * s),
       trailing: Builder(
         builder: (context) => Icon(
-          selected
-              ? CupertinoIcons.checkmark_circle_fill
-              : CupertinoIcons.chevron_right,
+          selected ? AppIcons.checkCircle : AppIcons.chevronRight,
+          fill: AppIcons.filled,
           color: TvAction.secondaryColor(context),
         ),
       ),

@@ -19,6 +19,7 @@ import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/player_window_host.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class SessionActions extends StatelessWidget {
   const SessionActions({super.key});
@@ -62,7 +63,7 @@ class SessionActions extends StatelessWidget {
               padding: EdgeInsets.zero,
               constraints: kTitleBarIconConstraints,
               size: 18,
-              icon: const Icon(CupertinoIcons.person),
+              icon: const Icon(AppIcons.person, fill: AppIcons.filled),
               onPressed: () => _openSwitcher(context, auth),
             ),
           ],

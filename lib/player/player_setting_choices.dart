@@ -3,6 +3,7 @@ import 'package:rillight/app/widgets/reveal_selected.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 整数倍速写成 `1x`，小数保留原样。
 String playerRateLabel(double rate) =>
@@ -153,7 +154,8 @@ class PlayerRateCell extends StatelessWidget {
                   children: [
                     if (selected) ...[
                       Icon(
-                        CupertinoIcons.check_mark,
+                        AppIcons.check,
+                        fill: AppIcons.filled,
                         size: 16,
                         color: foreground,
                       ),

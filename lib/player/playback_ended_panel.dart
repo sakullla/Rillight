@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/player/player_keys.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// Touch and remote completion actions. The owning page handles native cleanup
 /// and navigation, so returning to a series also restores phone system chrome.
@@ -45,7 +46,8 @@ class PlaybackEndedPanel extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        CupertinoIcons.arrow_counterclockwise,
+                        AppIcons.replay,
+                        fill: AppIcons.filled,
                         size: tv ? 48 : 32,
                         color: scheme.primary,
                       ),
@@ -86,10 +88,7 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     focusNode: replayFocus,
                                     autofocus: true,
                                     onPressed: onReplay,
-                                    child: _TvLabel(
-                                      CupertinoIcons.arrow_counterclockwise,
-                                      l.replay,
-                                    ),
+                                    child: _TvLabel(AppIcons.replay, l.replay),
                                   ),
                                   if (onViewSeries != null)
                                     TvAction(
@@ -97,7 +96,7 @@ class PlaybackEndedPanel extends StatelessWidget {
 
                                       onPressed: onViewSeries,
                                       child: _TvLabel(
-                                        CupertinoIcons.film,
+                                        AppIcons.series,
                                         l.viewSeries,
                                       ),
                                     ),
@@ -105,7 +104,7 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     key: PlayerKeys.endedClose,
                                     onPressed: onClose,
                                     child: _TvLabel(
-                                      CupertinoIcons.xmark,
+                                      AppIcons.close,
                                       l.closePlayer,
                                     ),
                                   ),
@@ -116,7 +115,8 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     variant: AppButtonVariant.filled,
                                     onPressed: onReplay,
                                     icon: const Icon(
-                                      CupertinoIcons.arrow_counterclockwise,
+                                      AppIcons.replay,
+                                      fill: AppIcons.filled,
                                     ),
                                     label: Text(l.replay),
                                   ),
@@ -125,7 +125,10 @@ class PlaybackEndedPanel extends StatelessWidget {
                                       key: PlayerKeys.endedViewSeries,
                                       variant: AppButtonVariant.outlined,
                                       onPressed: onViewSeries,
-                                      icon: const Icon(CupertinoIcons.film),
+                                      icon: const Icon(
+                                        AppIcons.series,
+                                        fill: AppIcons.filled,
+                                      ),
                                       label: Text(l.viewSeries),
                                     ),
                                   AppTooltip(
@@ -133,7 +136,10 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     child: AppButton.icon(
                                       key: PlayerKeys.endedClose,
                                       onPressed: onClose,
-                                      icon: const Icon(CupertinoIcons.xmark),
+                                      icon: const Icon(
+                                        AppIcons.close,
+                                        fill: AppIcons.filled,
+                                      ),
                                       label: Text(l.closePlayer),
                                     ),
                                   ),
@@ -163,7 +169,7 @@ class _TvLabel extends StatelessWidget {
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 28),
+        Icon(icon, fill: AppIcons.filled, size: 28),
         const SizedBox(width: 10),
         Text(text, style: const TextStyle(fontSize: 22)),
       ],

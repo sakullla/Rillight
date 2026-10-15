@@ -9,6 +9,7 @@ import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_controller.dart';
 import 'package:rillight/player/player_keys.dart';
 import 'package:rillight/player/session_subtitle_files.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 轨道/片源选项超过该数量时,选择器顶部显示搜索框。
 /// 低于阈值保持原有平铺,不为少数选项引入额外输入负担。
@@ -232,7 +233,7 @@ class TrackPickerSearchField extends StatelessWidget {
       style: theme.textTheme.bodyMedium,
       onChanged: onChanged,
       placeholder: l.filterSearchOptions,
-      prefix: const Icon(CupertinoIcons.search, size: 20),
+      prefix: const Icon(AppIcons.search, fill: AppIcons.filled, size: 20),
       suffix: ListenableBuilder(
         listenable: controller,
         builder: (context, _) => controller.text.isEmpty
@@ -243,7 +244,11 @@ class TrackPickerSearchField extends StatelessWidget {
                   controller.clear();
                   onChanged('');
                 },
-                icon: const Icon(CupertinoIcons.xmark, size: 18),
+                icon: const Icon(
+                  AppIcons.close,
+                  fill: AppIcons.filled,
+                  size: 18,
+                ),
               ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -277,7 +282,8 @@ class _PickerTile extends StatelessWidget {
               option.trailing ??
               (selected
                   ? Icon(
-                      CupertinoIcons.check_mark,
+                      AppIcons.check,
+                      fill: AppIcons.filled,
                       size: 18,
                       color: scheme.onSurface,
                     )
@@ -386,11 +392,13 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
           tooltip: l.subtitleTrack,
           color: scheme.onSurface,
           icon: Icon(
-            c.subtitleStreamIndex == null &&
+            AppIcons.subtitles,
+            fill:
+                c.subtitleStreamIndex == null &&
                     c.primarySubtitleFileId == null &&
                     !c.hasSecondarySubtitle
-                ? CupertinoIcons.captions_bubble
-                : CupertinoIcons.captions_bubble_fill,
+                ? AppIcons.outline
+                : AppIcons.filled,
           ),
           onPressed: () => menu.isOpen ? menu.close() : menu.open(),
         ),
@@ -504,7 +512,11 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                 key: const Key('player-subtitle-close'),
                 onPressed: _menu.close,
                 tooltip: '关闭',
-                icon: const Icon(CupertinoIcons.xmark, size: 20),
+                icon: const Icon(
+                  AppIcons.close,
+                  fill: AppIcons.filled,
+                  size: 20,
+                ),
               ),
             ],
           ),
@@ -657,7 +669,11 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
                     height: 16,
                     child: CupertinoActivityIndicator(),
                   )
-                : const Icon(CupertinoIcons.square_arrow_down, size: 18),
+                : const Icon(
+                    AppIcons.download,
+                    fill: AppIcons.filled,
+                    size: 18,
+                  ),
             label: Text(
               _importing ? l.subtitleImportRunning : l.subtitleImportLocal,
             ),

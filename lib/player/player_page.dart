@@ -39,6 +39,7 @@ import 'package:rillight/player/player_window.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight/player/playback_title.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 export 'package:rillight/player/episode_browser.dart'
     show kPlayerEpisodeRowExtent, playerEpisodeListOffset;
@@ -1025,9 +1026,10 @@ class _PlayerChromeBar extends StatelessWidget {
                     onPressed: () {
                       unawaited(controller.toggleAlwaysOnTop());
                     },
-                    icon: controller.isAlwaysOnTop
-                        ? CupertinoIcons.pin_fill
-                        : CupertinoIcons.pin_fill,
+                    icon: AppIcons.pin,
+                    symbolFill: controller.isAlwaysOnTop
+                        ? AppIcons.filled
+                        : AppIcons.outline,
                   ),
                   _PlayerChromeIconButton(
                     buttonKey: const Key('player-window-minimize'),
@@ -1066,12 +1068,14 @@ class _PlayerChromeIconButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.color,
+    this.symbolFill = AppIcons.filled,
   });
 
   final Key buttonKey;
   final String tooltip;
   final IconData icon;
   final Color? color;
+  final double symbolFill;
   final VoidCallback onPressed;
 
   @override
@@ -1088,7 +1092,7 @@ class _PlayerChromeIconButton extends StatelessWidget {
 
         size: 18,
         color: foreground,
-        icon: Icon(icon),
+        icon: Icon(icon, fill: symbolFill),
       ),
     );
   }
@@ -1131,7 +1135,8 @@ class _PlaybackEndedOverlay extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      CupertinoIcons.arrow_counterclockwise,
+                      AppIcons.replay,
+                      fill: AppIcons.filled,
                       size: 40,
                       color: scheme.primary,
                     ),
@@ -1165,7 +1170,8 @@ class _PlaybackEndedOverlay extends StatelessWidget {
                           onPressed: () => unawaited(controller.replay()),
                           style: _endedActionStyle(theme),
                           icon: const Icon(
-                            CupertinoIcons.arrow_counterclockwise,
+                            AppIcons.replay,
+                            fill: AppIcons.filled,
                           ),
                           label: Text(l10n.replay),
                         ),
@@ -1175,14 +1181,20 @@ class _PlaybackEndedOverlay extends StatelessWidget {
                             variant: AppButtonVariant.outlined,
                             onPressed: controller.openEndedSeries,
                             style: _endedActionStyle(theme),
-                            icon: const Icon(CupertinoIcons.film),
+                            icon: const Icon(
+                              AppIcons.series,
+                              fill: AppIcons.filled,
+                            ),
                             label: Text(l10n.viewSeries),
                           ),
                         AppButton.icon(
                           key: PlayerKeys.endedClose,
                           onPressed: () => unawaited(controller.close()),
                           style: _endedActionStyle(theme),
-                          icon: const Icon(CupertinoIcons.xmark),
+                          icon: const Icon(
+                            AppIcons.close,
+                            fill: AppIcons.filled,
+                          ),
                           label: Text(l10n.closePlayer),
                         ),
                       ],
@@ -1273,7 +1285,8 @@ class _SkipSegmentButton extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  CupertinoIcons.forward_fill,
+                  AppIcons.skipNext,
+                  fill: AppIcons.filled,
                   size: 18,
                   color: scheme.primary,
                 ),
@@ -1402,7 +1415,7 @@ class _Banner extends StatelessWidget {
                       width: 28,
                       height: 28,
                     ),
-                    icon: const Icon(CupertinoIcons.xmark),
+                    icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                   ),
                 ],
               ],
@@ -1619,9 +1632,7 @@ class _ControlsRow extends StatelessWidget {
           onPressed: controller.togglePlay,
           iconSize: 30,
           filled: true,
-          icon: controller.isPlaying
-              ? CupertinoIcons.pause_fill
-              : CupertinoIcons.play_fill,
+          icon: controller.isPlaying ? AppIcons.pause : AppIcons.play,
         ),
         const SizedBox(width: AppSpacing.xxs),
         _PlayerIconButton(
@@ -1632,7 +1643,7 @@ class _ControlsRow extends StatelessWidget {
                   controller.seekRelative(const Duration(seconds: -10)),
                 )
               : null,
-          icon: CupertinoIcons.gobackward_10,
+          icon: AppIcons.replay10,
         ),
         _PlayerIconButton(
           key: const Key('player-forward'),
@@ -1642,7 +1653,7 @@ class _ControlsRow extends StatelessWidget {
                   controller.seekRelative(const Duration(seconds: 10)),
                 )
               : null,
-          icon: CupertinoIcons.goforward_10,
+          icon: AppIcons.forward10,
         ),
         _VolumeControl(controller: controller),
         const Spacer(),
@@ -1660,7 +1671,7 @@ class _ControlsRow extends StatelessWidget {
             key: const Key('player-episodes'),
             tooltip: l10n.playerEpisodes,
             onPressed: onOpenEpisodes,
-            icon: CupertinoIcons.film,
+            icon: AppIcons.episodes,
           ),
         PlaybackSettingsMenu(controller: controller),
         _PlayerIconButton(
@@ -1670,8 +1681,8 @@ class _ControlsRow extends StatelessWidget {
               : l10n.fullscreen,
           onPressed: controller.toggleFullScreen,
           icon: controller.isFullScreen
-              ? CupertinoIcons.arrow_down_right_arrow_up_left
-              : CupertinoIcons.arrow_up_left_arrow_down_right,
+              ? AppIcons.fullscreenExit
+              : AppIcons.fullscreen,
         ),
       ],
     );
@@ -1693,9 +1704,8 @@ class _DanmakuButton extends StatelessWidget {
       key: DanmakuKeys.menu,
       tooltip: l10n.danmaku,
       onPressed: onPressed,
-      icon: danmaku.danmakuOn
-          ? CupertinoIcons.chat_bubble_fill
-          : CupertinoIcons.chat_bubble,
+      icon: AppIcons.danmaku,
+      symbolFill: danmaku.danmakuOn ? AppIcons.filled : AppIcons.outline,
       iconColor: danmaku.danmakuOn ? scheme.primary : null,
     );
   }
@@ -1736,7 +1746,8 @@ class _DanmakuMatchChip extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    CupertinoIcons.captions_bubble,
+                    AppIcons.subtitles,
+                    fill: AppIcons.filled,
                     size: 18,
                     color: scheme.onSurface,
                   ),
@@ -1792,7 +1803,8 @@ class _DanmakuSourceBanner extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    CupertinoIcons.wifi_slash,
+                    AppIcons.wifiOff,
+                    fill: AppIcons.filled,
                     size: 18,
                     color: scheme.primary,
                   ),
@@ -1948,7 +1960,10 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                           tooltip: '关闭',
                           color: scheme.onSurface,
                           onPressed: widget.onClose,
-                          icon: const Icon(CupertinoIcons.xmark),
+                          icon: const Icon(
+                            AppIcons.close,
+                            fill: AppIcons.filled,
+                          ),
                         ),
                       ],
                     ),
@@ -1964,12 +1979,19 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
                       style: theme.textTheme.bodyMedium,
                       onSubmitted: (_) => unawaited(_runSearch()),
                       placeholder: l10n.danmakuSearchHint,
-                      prefix: const Icon(CupertinoIcons.search, size: 20),
+                      prefix: const Icon(
+                        AppIcons.search,
+                        fill: AppIcons.filled,
+                        size: 20,
+                      ),
                       suffix: AppIconButton(
                         key: DanmakuKeys.searchSubmit,
                         tooltip: l10n.danmakuSearch,
                         onPressed: () => unawaited(_runSearch()),
-                        icon: const Icon(CupertinoIcons.arrow_right),
+                        icon: const Icon(
+                          AppIcons.forward,
+                          fill: AppIcons.filled,
+                        ),
                       ),
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.md,
@@ -2130,15 +2152,15 @@ class _VolumeControl extends StatelessWidget {
 
 IconData _volumeIconForLevel(int volume) {
   if (volume <= 0) {
-    return CupertinoIcons.speaker_slash_fill;
+    return AppIcons.volumeOff;
   }
   if (volume < 34) {
-    return CupertinoIcons.speaker_fill;
+    return AppIcons.volumeDown;
   }
   if (volume < 67) {
-    return CupertinoIcons.speaker_1_fill;
+    return AppIcons.volumeDown;
   }
-  return CupertinoIcons.speaker_3_fill;
+  return AppIcons.volumeUp;
 }
 
 /// 在 100%(0 dB)处画刻度,拖动时不量化,避免 5% 一格的粘滞感。
@@ -2152,6 +2174,7 @@ class _PlayerIconButton extends StatelessWidget {
     this.iconSize = 24,
     this.iconColor,
     this.filled = false,
+    this.symbolFill = AppIcons.filled,
   });
 
   final String? tooltip;
@@ -2159,6 +2182,7 @@ class _PlayerIconButton extends StatelessWidget {
   final IconData icon;
   final Color? iconColor;
   final bool filled;
+  final double symbolFill;
   final VoidCallback? onPressed;
 
   @override
@@ -2170,7 +2194,7 @@ class _PlayerIconButton extends StatelessWidget {
         onPressed: onPressed,
         color: iconColor ?? scheme.onSurface,
         size: iconSize,
-        icon: Icon(icon),
+        icon: Icon(icon, fill: symbolFill),
       );
     }
     return AppIconButton(
@@ -2183,7 +2207,7 @@ class _PlayerIconButton extends StatelessWidget {
         disabledForegroundColor: scheme.surface.withValues(alpha: .45),
         fixedSize: const Size(46, 46),
       ),
-      icon: Icon(icon),
+      icon: Icon(icon, fill: symbolFill),
     );
   }
 }

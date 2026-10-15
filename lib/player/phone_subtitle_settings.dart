@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/player/player_setting_choices.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// Shared preference editor. The playback host decides track capability.
 class PhoneSubtitleSettingsControls extends StatelessWidget {
@@ -63,7 +64,7 @@ class PhoneSubtitleSettingsControls extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: AppButton.icon(
               key: const Key('phone-subtitle-reset'),
-              icon: const Icon(CupertinoIcons.arrow_counterclockwise),
+              icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
               onPressed: () => onChanged(const PhoneSubtitleSettings()),
               label: Text(l.settingsRestoreDefaults),
             ),

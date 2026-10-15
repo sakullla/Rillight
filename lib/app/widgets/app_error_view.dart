@@ -1,5 +1,6 @@
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 class AppErrorView extends StatelessWidget {
   const AppErrorView({
@@ -25,7 +26,8 @@ class AppErrorView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              CupertinoIcons.exclamationmark_circle,
+              AppIcons.error,
+              fill: AppIcons.filled,
               color: colorScheme.error,
               size: 20,
             ),
@@ -58,7 +60,8 @@ class AppErrorView extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Icon(
-                  CupertinoIcons.exclamationmark_circle,
+                  AppIcons.error,
+                  fill: AppIcons.filled,
                   size: 28,
                   color: colorScheme.onErrorContainer,
                 ),

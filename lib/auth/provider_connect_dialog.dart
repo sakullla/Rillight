@@ -16,6 +16,8 @@ import 'login_widgets.dart';
 import 'provider_connect_controller.dart';
 import 'server_list_store.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
+
 Future<void> showProviderAccountSettings(BuildContext context) {
   final l = AppLocalizations.of(context);
   final uri = Uri.parse('https://app.plex.tv/desktop/#!/settings/account');
@@ -231,7 +233,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           secret: secret,
           keyboardType: keyboardType,
           placeholder: hint,
-          leading: icon == null ? null : Icon(icon),
+          leading: icon == null ? null : Icon(icon, fill: AppIcons.filled),
         ),
       );
     }
@@ -251,7 +253,9 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         onSubmitted: onSubmitted,
         label: label,
         placeholder: hint,
-        prefix: icon == null ? null : Icon(icon, size: 20),
+        prefix: icon == null
+            ? null
+            : Icon(icon, fill: AppIcons.filled, size: 20),
         suffix: secret && keyboardType != TextInputType.number
             ? AppIconButton(
                 key: Key('$id-visibility'),
@@ -260,8 +264,9 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     setState(() => _passwordVisible = !_passwordVisible),
                 icon: Icon(
                   _passwordVisible
-                      ? CupertinoIcons.eye_slash
-                      : CupertinoIcons.eye,
+                      ? AppIcons.visibilityOff
+                      : AppIcons.visibility,
+                  fill: AppIcons.filled,
                   size: 20,
                 ),
               )
@@ -284,7 +289,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         key: Key(id),
         emphasized: true,
         expand: true,
-        leading: icon == null ? null : Icon(icon),
+        leading: icon == null ? null : Icon(icon, fill: AppIcons.filled),
         onPressed: onPressed,
         child: Center(child: Text(busy ? l.connecting : label)),
       );
@@ -303,7 +308,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             key: Key(id),
             style: style,
             onPressed: onPressed,
-            icon: Icon(icon, size: 20),
+            icon: Icon(icon, fill: AppIcons.filled, size: 20),
             label: child,
             variant: AppButtonVariant.filled,
           );
@@ -320,7 +325,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       return TvAction(
         key: Key(id),
         expand: true,
-        leading: icon == null ? null : Icon(icon),
+        leading: icon == null ? null : Icon(icon, fill: AppIcons.filled),
         onPressed: onPressed,
         child: Center(child: Text(label)),
       );
@@ -343,7 +348,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             key: Key(id),
             style: style,
             onPressed: onPressed,
-            icon: Icon(icon, size: 20),
+            icon: Icon(icon, fill: AppIcons.filled, size: 20),
             label: Text(label),
             variant: AppButtonVariant.tinted,
           );
@@ -359,7 +364,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       return TvAction(
         key: key,
         variant: TvActionVariant.ghost,
-        leading: icon == null ? null : Icon(icon),
+        leading: icon == null ? null : Icon(icon, fill: AppIcons.filled),
         onPressed: onPressed,
         child: Text(label),
       );
@@ -374,7 +379,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         : AppButton.icon(
             key: key,
             onPressed: onPressed,
-            icon: Icon(icon, size: 18),
+            icon: Icon(icon, fill: AppIcons.filled, size: 18),
             label: Text(label),
             variant: AppButtonVariant.plain,
           );
@@ -440,7 +445,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       'provider-user-agent',
       userAgent,
       _tv ? l.tvUserAgentOptional : l.userAgent,
-      icon: CupertinoIcons.person_crop_rectangle,
+      icon: AppIcons.badge,
       hint: _tv ? null : l.userAgentHint,
     );
     final advanced = _tv
@@ -531,7 +536,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           'provider-authorize',
           l.providerPlexAuthorize,
           c.busy ? null : () => c.authorize(address.text),
-          icon: CupertinoIcons.arrow_up_right_square,
+          icon: AppIcons.openInNew,
           busy: c.busy,
         ),
         SizedBox(height: 8 * s),
@@ -548,7 +553,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               address,
               l.serverAddress,
               keyboardType: TextInputType.url,
-              icon: CupertinoIcons.link,
+              icon: AppIcons.link,
               hint: l.serverAddressHint,
               action: TextInputAction.next,
               autofillHints: const [AutofillHints.url],
@@ -557,7 +562,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               'provider-username',
               username,
               l.username,
-              icon: CupertinoIcons.person,
+              icon: AppIcons.person,
               action: TextInputAction.next,
               autofillHints: const [AutofillHints.username],
             ),
@@ -566,7 +571,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               password,
               l.password,
               secret: true,
-              icon: CupertinoIcons.lock,
+              icon: AppIcons.lock,
               action: TextInputAction.done,
               onSubmitted: c.busy ? null : (_) => submit(),
               autofillHints: const [AutofillHints.password],
@@ -590,7 +595,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           'provider-authorize',
           l.providerQuickConnect,
           c.busy ? null : () => c.authorize(address.text),
-          icon: CupertinoIcons.bolt_fill,
+          icon: AppIcons.bolt,
         ),
       ],
       if (!_tv) ...[const SizedBox(height: 8), advanced],
@@ -664,7 +669,11 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                   if (!mounted) return;
                   showAppNotice(context, l.providerCodeCopied);
                 },
-                icon: const Icon(CupertinoIcons.doc_on_doc, size: 20),
+                icon: const Icon(
+                  AppIcons.copy,
+                  fill: AppIcons.filled,
+                  size: 20,
+                ),
               ),
           ],
         ),
@@ -682,7 +691,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           'provider-open-browser',
           l.providerOpenBrowser,
           () => unawaited(_openUri(uri)),
-          icon: CupertinoIcons.arrow_up_right_square,
+          icon: AppIcons.openInNew,
         ),
       ],
       SizedBox(height: 14 * s),
@@ -690,7 +699,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         children: [
           if (expired)
             Icon(
-              CupertinoIcons.exclamationmark_circle,
+              AppIcons.error,
+              fill: AppIcons.filled,
               size: 18 * s,
               color: scheme.error,
             )
@@ -716,7 +726,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             l.providerRestart,
             () => c.reset(),
             key: const Key('provider-restart'),
-            icon: CupertinoIcons.arrow_clockwise,
+            icon: AppIcons.refresh,
           ),
         ],
       ),
@@ -738,10 +748,9 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           resource,
     ];
     IconData kindIcon(ServerConnectionKind kind) => switch (kind) {
-      ServerConnectionKind.local =>
-        CupertinoIcons.antenna_radiowaves_left_right,
-      ServerConnectionKind.remote => CupertinoIcons.globe,
-      ServerConnectionKind.relay => CupertinoIcons.arrow_left_right,
+      ServerConnectionKind.local => AppIcons.lan,
+      ServerConnectionKind.remote => AppIcons.globe,
+      ServerConnectionKind.relay => AppIcons.swap,
     };
     String kindLabel(ServerConnectionKind kind) => switch (kind) {
       ServerConnectionKind.local => l.providerLocal,
@@ -760,7 +769,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           : () => c.selectResource(resource, connection);
       final label = Row(
         children: [
-          Icon(kindIcon(connection.kind), size: 18 * s),
+          Icon(kindIcon(connection.kind), fill: AppIcons.filled, size: 18 * s),
           SizedBox(width: 10 * s),
           Expanded(
             child: Column(
@@ -784,7 +793,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               ],
             ),
           ),
-          Icon(CupertinoIcons.chevron_right, size: 20 * s),
+          Icon(AppIcons.chevronRight, fill: AppIcons.filled, size: 20 * s),
         ],
       );
       if (_tv) {
@@ -834,7 +843,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     ),
                     if (user.requiresPin)
                       Icon(
-                        CupertinoIcons.lock,
+                        AppIcons.lock,
+                        fill: AppIcons.filled,
                         size: 16,
                         color: scheme.onSurfaceVariant,
                       ),
@@ -857,7 +867,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             l.providerHomePin,
             secret: true,
             keyboardType: TextInputType.number,
-            icon: CupertinoIcons.number,
+            icon: AppIcons.tag,
           ),
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 8),
@@ -876,7 +886,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             'provider-home-switch',
             l.providerSwitchHome,
             c.busy ? null : () => c.selectHome(homeUser!, pin.text),
-            icon: CupertinoIcons.person_2,
+            icon: AppIcons.group,
           ),
         ],
         const SizedBox(height: 18),
@@ -973,7 +983,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
               color: const Color(0xff34c759).withValues(alpha: .18),
             ),
             child: Icon(
-              CupertinoIcons.check_mark,
+              AppIcons.check,
+              fill: AppIcons.filled,
               size: 20 * s,
               color: const Color(0xff66bb6a),
             ),
@@ -1029,8 +1040,11 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     ),
               leading: Icon(
                 c.selectedLibraries.contains(library.key)
-                    ? CupertinoIcons.checkmark_square_fill
-                    : CupertinoIcons.square,
+                    ? AppIcons.checkboxOn
+                    : AppIcons.checkboxOff,
+                fill: c.selectedLibraries.contains(library.key)
+                    ? AppIcons.filled
+                    : AppIcons.outline,
               ),
               child: Text(library.value),
             ),
@@ -1068,7 +1082,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         child: _quiet(
           l.sourceDiscoverLibraries,
           c.busy ? null : c.retryLibraries,
-          icon: CupertinoIcons.arrow_clockwise,
+          icon: AppIcons.refresh,
         ),
       ),
     ];
@@ -1164,7 +1178,11 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                     : AppButton.icon(
                         key: const Key('provider-finish'),
                         onPressed: c.busy ? null : _finish,
-                        icon: const Icon(CupertinoIcons.check_mark, size: 18),
+                        icon: const Icon(
+                          AppIcons.check,
+                          fill: AppIcons.filled,
+                          size: 18,
+                        ),
                         label: Text(l.providerFinish),
                         variant: AppButtonVariant.filled,
                       ),
@@ -1214,7 +1232,8 @@ class _ProviderPresentation extends StatelessWidget {
           title: Row(
             children: [
               Icon(
-                CupertinoIcons.rectangle_stack,
+                AppIcons.library,
+                fill: AppIcons.filled,
                 size: 22,
                 color: AppUiTheme.of(context).colorScheme.primary,
               ),

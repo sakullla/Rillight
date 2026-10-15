@@ -2,6 +2,7 @@ import '../helpers/cupertino_test_app.dart';
 import '../helpers/widget_harness.dart';
 
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/app/widgets/desktop_back_button.dart';
@@ -22,7 +23,7 @@ void main() {
             child: DesktopBackButton(
               tooltip: '返回',
               onPressed: () {},
-              icon: CupertinoIcons.chevron_left,
+              icon: AppIcons.back,
               label: '返回',
               overArtwork: overArtwork,
             ),

@@ -12,6 +12,7 @@ import 'package:rillight/media_server/models.dart';
 import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 电视设计基准。
 ///
@@ -782,7 +783,8 @@ class TvFailure extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            CupertinoIcons.exclamationmark_circle,
+            AppIcons.error,
+            fill: AppIcons.filled,
             size: 20 * s,
             color: theme.colorScheme.error,
           ),
@@ -798,7 +800,7 @@ class TvFailure extends StatelessWidget {
           SizedBox(width: 14 * s),
           TvAction(
             autofocus: true,
-            leading: const Icon(CupertinoIcons.arrow_clockwise),
+            leading: const Icon(AppIcons.refresh, fill: AppIcons.filled),
             onPressed: retry,
             child: Text(AppLocalizations.of(context).retry),
           ),
@@ -813,7 +815,7 @@ class TvEmptyState extends StatelessWidget {
   const TvEmptyState({
     super.key,
     required this.message,
-    this.icon = CupertinoIcons.tray,
+    this.icon = AppIcons.empty,
     this.action,
   });
   final String message;
@@ -830,7 +832,12 @@ class TvEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 40 * s, color: theme.colorScheme.onSurfaceVariant),
+            Icon(
+              icon,
+              fill: AppIcons.filled,
+              size: 40 * s,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             SizedBox(height: 12 * s),
             Text(
               message,
@@ -1087,7 +1094,8 @@ class _TvCardState extends State<TvCard> {
                   if (widget.current)
                     Center(
                       child: Icon(
-                        CupertinoIcons.play_circle_fill,
+                        AppIcons.nowPlaying,
+                        fill: AppIcons.filled,
                         key: const Key('tv-episode-current'),
                         size: 36 * s,
                         color: const Color(0xffffffff).withValues(alpha: .92),
@@ -1425,7 +1433,7 @@ class TvMoreTile extends StatelessWidget {
           builder: (context) => Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(CupertinoIcons.arrow_right, size: 26 * s),
+              Icon(AppIcons.forward, fill: AppIcons.filled, size: 26 * s),
               SizedBox(height: 8 * s),
               Text(
                 text,
@@ -1696,7 +1704,7 @@ class TvInput extends StatelessWidget {
         autofocus: autofocus,
         variant: TvActionVariant.tile,
         leading: leading,
-        trailing: const Icon(CupertinoIcons.pencil),
+        trailing: const Icon(AppIcons.edit, fill: AppIcons.filled),
         onPressed: () => _edit(context),
         child: Builder(
           builder: (context) {
@@ -1763,7 +1771,8 @@ class TvChoiceTile extends StatelessWidget {
       leading: leading,
       onPressed: onPressed,
       trailing: Icon(
-        selected ? CupertinoIcons.check_mark : null,
+        selected ? AppIcons.check : null,
+        fill: AppIcons.filled,
         key: selected ? const Key('tv-choice-check') : null,
       ),
       child: Builder(
@@ -1823,6 +1832,7 @@ class TvNavTile extends StatelessWidget {
           : Builder(
               builder: (context) => Icon(
                 icon,
+                fill: AppIcons.filled,
                 color: destructive && !TvAction.focusedOf(context)
                     ? scheme.error
                     : null,
@@ -1844,7 +1854,8 @@ class TvNavTile extends StatelessWidget {
               ),
             if (chevron)
               Icon(
-                CupertinoIcons.chevron_right,
+                AppIcons.chevronRight,
+                fill: AppIcons.filled,
                 color: TvAction.secondaryColor(context),
               ),
           ],

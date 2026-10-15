@@ -19,6 +19,7 @@ import 'package:rillight/player/player_runtime_options.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/phone_subtitle_settings.dart';
 import 'package:rillight/player/player_setting_choices.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 设置页:展开/收起外观、播放与弹幕配置,按需调整二级选项。
 ///
@@ -310,14 +311,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: AppSpacing.xl),
                 ],
                 _SettingsSection(
-                  icon: CupertinoIcons.info_circle,
+                  icon: AppIcons.info,
                   title: l10n.mobileAboutGroup,
                   subtitle: '$kProductName · $kAppVersion',
                   children: const [UpdateCheck()],
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: CupertinoIcons.circle_lefthalf_fill,
+                  icon: AppIcons.appearance,
                   title: l10n.settingsAppearance,
                   subtitle: (appearance?.style ?? AppearanceStyle.system).label(
                     l10n,
@@ -355,7 +356,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: CupertinoIcons.play_circle,
+                  icon: AppIcons.playbackSection,
                   title: l10n.settingsPlayback,
                   subtitle:
                       '${_settings.effectivePlaybackRate}× · ${l10n.settingsCacheSize(effectiveLimit / 1024)}',
@@ -367,7 +368,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         horizontal: AppSpacing.sm,
                       ),
                     ),
-                    icon: const Icon(CupertinoIcons.arrow_counterclockwise),
+                    icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
                     label: Text(l10n.settingsRestoreDefaults),
                     variant: AppButtonVariant.plain,
                   ),
@@ -497,7 +498,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: CupertinoIcons.slider_horizontal_3,
+                  icon: AppIcons.output,
                   title: l10n.playbackOutputSection,
                   subtitle: l10n.settingsOutputSummary,
                   children: [
@@ -508,7 +509,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 _SettingsSection(
-                  icon: CupertinoIcons.chat_bubble,
+                  icon: AppIcons.danmaku,
                   title: l10n.settingsDanmakuConfiguration,
                   subtitle: l10n.settingsDanmakuConfigurationSummary,
                   trailing: AppButton.icon(
@@ -523,7 +524,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         horizontal: AppSpacing.sm,
                       ),
                     ),
-                    icon: const Icon(CupertinoIcons.arrow_counterclockwise),
+                    icon: const Icon(AppIcons.replay, fill: AppIcons.filled),
                     label: Text(l10n.danmakuRestoreDefaults),
                     variant: AppButtonVariant.plain,
                   ),
@@ -612,8 +613,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           },
                           icon: Icon(
                             _tokenVisible
-                                ? CupertinoIcons.eye_slash
-                                : CupertinoIcons.eye,
+                                ? AppIcons.visibilityOff
+                                : AppIcons.visibility,
+                            fill: AppIcons.filled,
                           ),
                         ),
                       ),
@@ -706,7 +708,12 @@ class _SettingsSection extends StatelessWidget {
           ),
           child: SizedBox.square(
             dimension: 40,
-            child: Icon(icon, size: 20, color: scheme.onPrimaryContainer),
+            child: Icon(
+              icon,
+              fill: AppIcons.filled,
+              size: 20,
+              color: scheme.onPrimaryContainer,
+            ),
           ),
         ),
         title: Text(title, style: theme.textTheme.titleMedium),

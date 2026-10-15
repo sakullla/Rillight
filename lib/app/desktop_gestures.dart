@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// A navigation drag joins the arena, so a horizontal shelf gets first refusal.
 class DesktopNavigationGestures extends StatefulWidget {
@@ -208,11 +209,11 @@ class _DesktopPlaybackGesturesState extends State<DesktopPlaybackGestures> {
                           children: [
                             Icon(
                               _gesture == _PlaybackGesture.seek
-                                  ? CupertinoIcons.forward_fill
+                                  ? AppIcons.fastForward
                                   : _gesture == _PlaybackGesture.volume
-                                  ? CupertinoIcons.speaker_2_fill
-                                  : CupertinoIcons
-                                        .arrow_up_left_arrow_down_right,
+                                  ? AppIcons.volumeUp
+                                  : AppIcons.fullscreen,
+                              fill: AppIcons.filled,
                               color: const Color(0xffffffff),
                             ),
                             const SizedBox(width: 12),

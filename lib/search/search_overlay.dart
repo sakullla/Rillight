@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/search/search_page.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 搜索覆盖层与页面内容之间的半透明黑色遮罩。
 ///
@@ -105,7 +106,7 @@ class SearchOverlay extends StatelessWidget {
                   key: closeKey,
                   tooltip: '关闭',
                   onPressed: onClose,
-                  icon: const Icon(CupertinoIcons.xmark),
+                  icon: const Icon(AppIcons.close, fill: AppIcons.filled),
                 ),
               ),
             ),

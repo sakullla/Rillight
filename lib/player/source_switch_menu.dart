@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 import '../app/l10n/app_localizations.dart';
 import 'player_controller.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
+
 enum PlaybackLinePresentation { popup, sheet, focusable }
 
 enum PlaybackLineSurface { popup, sheet, dialog }
@@ -96,9 +98,9 @@ class _PlaybackLineEntry extends StatelessWidget {
     if (!focusable) {
       return AppListTile(
         key: const Key('player-playback-lines'),
-        leading: const Icon(CupertinoIcons.arrow_branch),
+        leading: const Icon(AppIcons.route, fill: AppIcons.filled),
         title: Text(label),
-        trailing: const Icon(CupertinoIcons.chevron_right),
+        trailing: const Icon(AppIcons.chevronRight, fill: AppIcons.filled),
         onTap: onPressed,
       );
     }
@@ -170,7 +172,8 @@ class _FocusableLineButtonState extends State<_FocusableLineButton> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      CupertinoIcons.arrow_branch,
+                      AppIcons.route,
+                      fill: AppIcons.filled,
                       size: 20 * s,
                       color: foreground,
                     ),
@@ -202,7 +205,7 @@ class _PlaybackLinePopup extends StatelessWidget {
     return AppIconButton(
       key: const Key('player-playback-lines'),
       tooltip: label,
-      icon: const Icon(CupertinoIcons.arrow_branch),
+      icon: const Icon(AppIcons.route, fill: AppIcons.filled),
       onPressed: () => unawaited(_open(context)),
     );
   }

@@ -5,6 +5,8 @@ import '../product.dart';
 import '../ui/ui.dart';
 import 'update_service.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
+
 /// Shared by desktop/TV settings and the phone's About section.
 class UpdateCheck extends StatefulWidget {
   const UpdateCheck({super.key, this.check, this.openRelease});
@@ -96,7 +98,11 @@ class _UpdateCheckState extends State<UpdateCheck> {
               onPressed: _busy ? null : _check,
               icon: _busy
                   ? const CupertinoActivityIndicator()
-                  : const Icon(CupertinoIcons.arrow_clockwise, size: 18),
+                  : const Icon(
+                      AppIcons.refresh,
+                      fill: AppIcons.filled,
+                      size: 18,
+                    ),
               label: Text(l.updateCheck),
             ),
             if (newer)

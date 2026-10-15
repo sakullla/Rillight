@@ -2,6 +2,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/window_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 
 /// 顶栏中的搜索入口(图标按钮)。
 ///
@@ -31,7 +32,7 @@ class SearchAction extends StatelessWidget {
           padding: EdgeInsets.zero,
           constraints: kTitleBarIconConstraints,
           size: 18,
-          icon: const Icon(CupertinoIcons.search),
+          icon: const Icon(AppIcons.search, fill: AppIcons.filled),
         );
       },
     );

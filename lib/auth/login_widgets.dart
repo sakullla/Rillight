@@ -5,6 +5,8 @@ import '../app/tv_widgets.dart';
 import '../app/widgets/emby_mark.dart';
 import '../media_server/capabilities.dart';
 
+import 'package:rillight/app/ui/app_icons.dart';
+
 /// 三种媒体服务在登录与服务器列表里的统一呈现:名称、品牌色与一句登录方式说明。
 extension MediaServerTypePresentation on MediaServerType {
   String get label => switch (this) {
@@ -152,7 +154,8 @@ class LoginBrandMark extends StatelessWidget {
         ],
       ),
       child: Icon(
-        CupertinoIcons.play_fill,
+        AppIcons.play,
+        fill: AppIcons.filled,
         color: scheme.onPrimary,
         size: size * .62,
       ),
@@ -436,7 +439,8 @@ class LoginErrorBanner extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(
-                CupertinoIcons.exclamationmark_circle,
+                AppIcons.error,
+                fill: AppIcons.filled,
                 size: 20,
                 color: scheme.onErrorContainer,
               ),
@@ -563,7 +567,11 @@ class _LoginAdvancedSectionState extends State<LoginAdvancedSection> {
             icon: AnimatedRotation(
               turns: _expanded ? .25 : 0,
               duration: duration,
-              child: const Icon(CupertinoIcons.chevron_right, size: 20),
+              child: const Icon(
+                AppIcons.chevronRight,
+                fill: AppIcons.filled,
+                size: 20,
+              ),
             ),
             label: Text(
               widget.title ?? AppLocalizations.of(context).loginAdvanced,

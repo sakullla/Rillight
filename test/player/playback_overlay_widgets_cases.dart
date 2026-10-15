@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:rillight/app/ui/ui.dart';
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -300,14 +301,14 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('player-rate-1.0')),
-          matching: find.byIcon(CupertinoIcons.check_mark),
+          matching: find.byIcon(AppIcons.check),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('player-rate-1.5')),
-          matching: find.byIcon(CupertinoIcons.check_mark),
+          matching: find.byIcon(AppIcons.check),
         ),
         findsNothing,
       );
