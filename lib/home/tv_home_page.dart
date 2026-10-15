@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -491,7 +492,10 @@ class _TvFeaturedState extends State<_TvFeatured> {
                           key: TvHomeKeys.featuredPlay,
                           emphasized: true,
                           pill: true,
-                          leading: const Icon(CupertinoIcons.play_fill),
+                          leading: const Icon(
+                            AppIcons.play,
+                            fill: AppIcons.filled,
+                          ),
                           onPressed: () => _play(item),
                           child: Text(l.play),
                         ),
