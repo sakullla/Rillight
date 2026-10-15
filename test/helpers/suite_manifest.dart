@@ -169,6 +169,7 @@ const caseModules = <String>[
   'tv/tv_home_featured_cases.dart',
   'tv/tv_lan_pair_cases.dart',
   'tv/tv_player_controls_cases.dart',
+  'widgets/app_button_cases.dart',
   'widgets/app_empty_view_cases.dart',
   'widgets/app_hover_card_cases.dart',
   'widgets/artwork_crop_cases.dart',
