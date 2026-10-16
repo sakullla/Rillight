@@ -95,9 +95,7 @@ class TvTopNavBar extends StatelessWidget {
                     variant: TvActionVariant.ghost,
                     leading: Icon(
                       _icons[i],
-                      fill: i == index
-                          ? AppIcons.filled
-                          : AppIcons.outline,
+                      fill: i == index ? AppIcons.filled : AppIcons.outline,
                     ),
                     onPressed: () => onSelect(i),
                     child: Text(labels[i]),
@@ -163,7 +161,8 @@ class _Brand extends StatelessWidget {
             ),
           ),
           child: Icon(
-            AppIcons.play, fill: AppIcons.filled,
+            AppIcons.play,
+            fill: AppIcons.filled,
             size: 16 * s,
             color: theme.colorScheme.onPrimary,
           ),
