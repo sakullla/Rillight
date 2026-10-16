@@ -1355,6 +1355,9 @@ void main() {
       final header = tester.getRect(find.byKey(_pendingHeader));
       final title = tester.getRect(find.byKey(_pendingTitle));
       final action = tester.getRect(find.byKey(_pendingAction));
+      final playDuringLoad = tester.getRect(
+        find.byKey(const Key('mobile-detail-play')),
+      );
       final body = tester.getRect(find.byKey(_pendingBody));
       expect(tester.widget<Text>(find.byKey(_pendingTitle)).data, 'Inception');
       // 有交接图时标题与主操作就画在同一个头部里，载入前后版式不跳。
@@ -1372,12 +1375,10 @@ void main() {
       await settle(tester);
       expect(find.byKey(_pendingBody), findsNothing);
       expect(find.textContaining('dream-sharing'), findsOneWidget);
-      expect(
-        tester
-            .widget<AppButton>(find.byKey(const Key('mobile-detail-play')))
-            .onPressed,
-        isNotNull,
-      );
+      final play = find.byKey(const Key('mobile-detail-play'));
+      expect(tester.widget<AppButton>(play).onPressed, isNotNull);
+      expect(tester.getTopLeft(play).dy, closeTo(playDuringLoad.top, 1));
+      expect(find.text('剩余 89 分钟'), findsOneWidget);
       expect(tester.getTopLeft(find.byKey(PhoneItemBanner.bannerKey)).dy, 0);
       expect(tester.takeException(), isNull);
     },
@@ -1396,19 +1397,169 @@ void main() {
       await settle(tester);
       final banner = tester.getRect(find.byKey(PhoneItemBanner.bannerKey));
       final image = tester.getRect(find.byKey(PhoneItemBanner.handoffImageKey));
-      final back = tester.getRect(
-        find.byType(CupertinoNavigationBarBackButton),
+      final bar = find.byType(PhoneTopBar);
+      final backButton = find.byKey(PhoneTopBar.backKey);
+      expect(bar, findsOneWidget, reason: id);
+      expect(
+        find.descendant(of: bar, matching: backButton),
+        findsOneWidget,
+        reason: id,
       );
+      expect(find.byType(CupertinoNavigationBarBackButton), findsNothing);
+      final back = tester.getRect(backButton);
       expect(banner.top, 0, reason: id);
       expect(image.top, 0, reason: id);
       expect(back.top, greaterThanOrEqualTo(47), reason: id);
       expect(back.bottom, lessThan(image.bottom), reason: id);
-      harness.router.pop();
+      final poster = tester.getRect(find.byKey(PhoneItemBanner.posterKey));
+      final posterImage = tester.getRect(
+        find.descendant(
+          of: find.byKey(PhoneItemBanner.posterKey),
+          matching: find.byType(MediaImage),
+        ),
+      );
+      expect(poster.height / poster.width, closeTo(1.5, 0.02), reason: id);
+      expect(poster.top, greaterThanOrEqualTo(0), reason: id);
+      expect(poster.bottom, lessThanOrEqualTo(900), reason: id);
+      expect(posterImage.width, closeTo(poster.width, 1), reason: id);
+      expect(posterImage.height, closeTo(poster.height, 1), reason: id);
+      expect(
+        tester.widget<ColoredBox>(find.byKey(PhoneTopBar.backgroundKey)).color,
+        const Color(0x00000000),
+        reason: id,
+      );
+      await tester.tap(backButton);
       await settle(tester);
+      expect(find.byType(MobileDetailPage), findsNothing, reason: id);
     }
 
     await expectCovered('movie-inception');
     await expectCovered('series-friends');
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('scrolled detail bar uses the phone top bar colors', (
+    tester,
+  ) async {
+    for (final theme in [AppUiTheme.phoneLight(), AppUiTheme.phoneDark()]) {
+      final harness = await _startDetail(
+        tester,
+        width: 390,
+        reduceMotion: true,
+        theme: theme,
+      );
+      unawaited(harness.router.push('/item/movie-inception'));
+      await settle(tester);
+      expect(
+        tester.widget<ColoredBox>(find.byKey(PhoneTopBar.backgroundKey)).color,
+        const Color(0x00000000),
+      );
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -180));
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.text('Inception'),
+        ),
+        findsOneWidget,
+      );
+      final phone = phoneChromeTheme(tester.element(find.byType(PhoneTopBar)));
+      expect(phone.phone, isTrue);
+      expect(phone.brightness, theme.brightness);
+      expect(
+        tester.widget<ColoredBox>(find.byKey(PhoneTopBar.backgroundKey)).color,
+        phone.scaffoldBackgroundColor,
+      );
+      final iconFinder = find.descendant(
+        of: find.byKey(PhoneTopBar.backKey),
+        matching: find.byIcon(AppIcons.back),
+      );
+      final icon = tester.widget<Icon>(iconFinder);
+      expect(
+        icon.color ?? IconTheme.of(tester.element(iconFinder)).color,
+        phone.colorScheme.onSurface,
+      );
+      expect(tester.takeException(), isNull);
+    }
+  }, tags: ['integration']);
+
+  testWidgets(
+    'one season hides the selector and a watched episode is marked once',
+    (tester) async {
+      final harness = await _startDetail(
+        tester,
+        width: 390,
+        reduceMotion: true,
+        theme: AppUiTheme.phoneDark(),
+      );
+      unawaited(harness.router.push('/item/series-friends'));
+      await settle(tester);
+      expect(find.byType(PhoneTopBar), findsOneWidget);
+      expect(find.byKey(const Key('phone-season-list')), findsNothing);
+      expect(find.byType(PhoneSeasonTab), findsNothing);
+      final poster = tester.getRect(find.byKey(PhoneItemBanner.posterKey));
+      expect(poster.height / poster.width, closeTo(1.5, 0.02));
+      expect(
+        poster.bottom,
+        lessThanOrEqualTo(poster.top + poster.width * 1.5 + 1),
+      );
+      await tester.ensureVisible(
+        find.byKey(const Key('phone-episode-watched')),
+      );
+      await settle(tester);
+      expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
+      expect(find.text('已看'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets('two seasons can switch to the second season', (tester) async {
+    final harness = await _startDetail(
+      tester,
+      width: 390,
+      reduceMotion: true,
+      theme: AppUiTheme.phoneLight(),
+      prepare: (server) {
+        server.setSeasons('series-friends', const [
+          FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+          FakeSeason(id: 'season-friends-2', name: '第 2 季', indexNumber: 2),
+        ]);
+        server.setEpisodes('series-friends', const [
+          FakeEpisode(
+            id: 'episode-s1',
+            name: '第一季试点',
+            seasonId: 'season-friends-1',
+            indexNumber: 1,
+            parentIndexNumber: 1,
+            played: true,
+          ),
+          FakeEpisode(
+            id: 'episode-s2',
+            name: '第二季试点',
+            seasonId: 'season-friends-2',
+            indexNumber: 1,
+            parentIndexNumber: 2,
+          ),
+        ]);
+      },
+    );
+    unawaited(harness.router.push('/item/series-friends'));
+    await settle(tester);
+    expect(find.byKey(const Key('phone-season-list')), findsOneWidget);
+    final second = find.byKey(CatalogKeys.season('season-friends-2'));
+    await tester.ensureVisible(second);
+    await tester.tap(second);
+    await settle(tester);
+    expect(
+      tester
+          .widget<PhoneSeasonTab>(find.widgetWithText(PhoneSeasonTab, '第 2 季'))
+          .selected,
+      isTrue,
+    );
+    expect(find.text('第二季试点'), findsOneWidget);
+    expect(find.text('第一季试点'), findsNothing);
+    expect(find.byKey(const Key('phone-episode-watched')), findsNothing);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 

@@ -12,6 +12,7 @@ import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/library/detail_extras.dart';
 import 'package:rillight/library/mobile_series_page.dart';
 import 'package:rillight/media_image/media_image.dart';
@@ -90,6 +91,35 @@ void main() {
       await tester.tap(find.byKey(CatalogKeys.season('season-friends-2')));
       await _artworkFrames(tester);
       expect(header().item.id, 'season-friends-2');
+      // 这条用例用 go 替换当前路由，栈上没有可返回页。顶栏仍是手机顶栏，
+      // 并按它的规则省略返回钮。从列表 push 进来时的返回钮在详情行测试里覆盖。
+      expect(find.byType(PhoneTopBar), findsOneWidget);
+      expect(find.byType(CupertinoNavigationBarBackButton), findsNothing);
+      expect(
+        ModalRoute.of(tester.element(find.byType(PhoneTopBar)))?.canPop,
+        isFalse,
+      );
+      expect(find.byKey(PhoneTopBar.backKey), findsNothing);
+      expect(
+        tester
+            .widget<PhoneSeasonTab>(
+              find.widgetWithText(PhoneSeasonTab, '第 2 季'),
+            )
+            .selected,
+        isTrue,
+      );
+      final poster = tester.getRect(find.byKey(PhoneItemBanner.posterKey));
+      final posterImage = tester.getRect(
+        find.descendant(
+          of: find.byKey(PhoneItemBanner.posterKey),
+          matching: find.byType(MediaImage),
+        ),
+      );
+      expect(poster.height / poster.width, closeTo(1.5, 0.02));
+      expect(posterImage.width, closeTo(poster.width, 1));
+      expect(posterImage.height, closeTo(poster.height, 1));
+      expect(poster.top, greaterThanOrEqualTo(0));
+      expect(poster.bottom, lessThanOrEqualTo(915));
       // 只有竖版季海报时复用已缓存的剧集横版背景。
       expect(header().item.parentBackdropItemId, 'series-friends');
       expect(

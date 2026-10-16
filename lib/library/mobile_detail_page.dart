@@ -824,6 +824,8 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
   }
 }
 
+/// 电影详情和剧集页共用的浮层顶栏。返回钮就是 [PhoneTopBar]；
+/// 头图还在时背景透明，滚过画面后交给手机顶栏自己的底色和标题。
 class _PhoneDetailBar extends StatelessWidget {
   const _PhoneDetailBar({required this.immersive, this.title});
 
@@ -832,64 +834,35 @@ class _PhoneDetailBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final onBar = immersive ? const Color(0xFFFFFFFF) : scheme.onSurface;
-    return ColoredBox(
-      color: immersive
-          ? const Color(0x00000000)
-          : theme.scaffoldBackgroundColor,
-      child: Padding(
-        padding: EdgeInsets.only(top: MediaQuery.viewPaddingOf(context).top),
-        child: SizedBox(
-          height: 44,
-          child: IconTheme(
-            data: IconThemeData(color: onBar),
-            child: Row(
-              children: [
-                // 压在画面上时给返回钮垫一枚深色圆底，亮画面上也看得清。
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    IgnorePointer(
-                      child: AnimatedContainer(
-                        duration: AppMotion.durationOf(context, AppMotion.fast),
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: immersive
-                              ? const Color(0xff000000).withValues(alpha: .32)
-                              : const Color(0x00000000),
-                        ),
-                      ),
-                    ),
-                    CupertinoNavigationBarBackButton(
-                      color: onBar,
-                      onPressed: () => context.pop(),
-                    ),
-                  ],
-                ),
-                Expanded(
-                  child: title == null
-                      ? const SizedBox.shrink()
-                      : Text(
-                          title!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: onBar,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 44),
-              ],
+    final label = title;
+    final top = MediaQuery.paddingOf(context).top;
+    return Stack(
+      children: [
+        // 压在画面上时给返回钮垫一枚深色圆底，亮画面上也看得清。
+        Positioned(
+          left: 4,
+          top: top + 4,
+          child: IgnorePointer(
+            child: AnimatedContainer(
+              duration: AppMotion.durationOf(context, AppMotion.fast),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: immersive
+                    ? const Color(0xff000000).withValues(alpha: .32)
+                    : const Color(0x00000000),
+              ),
             ),
           ),
         ),
-      ),
+        PhoneTopBar(
+          centerTitle: label != null,
+          backgroundColor: immersive ? const Color(0x00000000) : null,
+          foregroundColor: immersive ? const Color(0xFFFFFFFF) : null,
+          title: label == null ? null : Text(label),
+        ),
+      ],
     );
   }
 }
