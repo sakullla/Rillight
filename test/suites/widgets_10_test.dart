@@ -7,43 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'aggregation/playback_runtime_test.dart [part 1]',
-    caseEntrypoints['aggregation/playback_runtime_cases.dart#0']!,
+    'aggregation/playback_runtime_test.dart [part 2]',
+    caseEntrypoints['aggregation/playback_runtime_cases.dart#1']!,
   );
   group(
-    'catalog/desktop_provider_filter_test.dart',
-    caseEntrypoints['catalog/desktop_provider_filter_cases.dart']!,
+    'app/desktop_gestures_test.dart',
+    caseEntrypoints['app/desktop_gestures_cases.dart']!,
   );
   group(
-    'catalog/item_detail_test.dart [part 2]',
-    caseEntrypoints['catalog/item_detail_cases.dart#1']!,
+    'auth/provider_connect_management_test.dart',
+    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
   );
   group(
-    'home/library_tiles_test.dart',
-    caseEntrypoints['home/library_tiles_cases.dart']!,
+    'catalog/item_detail_test.dart [part 3]',
+    caseEntrypoints['catalog/item_detail_cases.dart#2']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 2]',
-    caseEntrypoints['library/source_detail_route_cases.dart#1']!,
+    'library/source_detail_route_test.dart [part 1]',
+    caseEntrypoints['library/source_detail_route_cases.dart#0']!,
+  );
+  group(
+    'mobile/mobile_flow_test.dart [part 1]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#0']!,
   );
   group(
     'mobile/phone_pages_test.dart [part 3]',
     caseEntrypoints['mobile/phone_pages_cases.dart#2']!,
   );
   group(
-    'player/buffer_snapshot_test.dart',
-    caseEntrypoints['player/buffer_snapshot_cases.dart']!,
+    'mobile/tv_shelf_focus_test.dart',
+    caseEntrypoints['mobile/tv_shelf_focus_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_renderer_test.dart',
     caseEntrypoints['player/danmaku/danmaku_renderer_cases.dart']!,
   );
   group(
-    'widgets/app_button_test.dart',
-    caseEntrypoints['widgets/app_button_cases.dart']!,
-  );
-  group(
-    'widgets/app_empty_view_test.dart',
-    caseEntrypoints['widgets/app_empty_view_cases.dart']!,
+    'widgets/poster_card_test.dart',
+    caseEntrypoints['widgets/poster_card_cases.dart']!,
   );
 }

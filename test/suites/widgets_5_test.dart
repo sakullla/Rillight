@@ -7,40 +7,36 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'app/desktop_performance_host_test.dart',
-    caseEntrypoints['app/desktop_performance_host_cases.dart']!,
-  );
-  group('app_shell_test.dart', caseEntrypoints['app_shell_cases.dart']!);
-  group(
-    'catalog/item_detail_test.dart [part 3]',
-    caseEntrypoints['catalog/item_detail_cases.dart#2']!,
+    'auth/line_management_test.dart',
+    caseEntrypoints['auth/line_management_cases.dart']!,
   );
   group(
-    'catalog/shelf_grid_scroll_rebuild_test.dart',
-    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
+    'auth/server_management_test.dart',
+    caseEntrypoints['auth/server_management_cases.dart']!,
   );
   group(
-    'library/source_detail_route_test.dart [part 3]',
-    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
+    'catalog/filter_panel_test.dart',
+    caseEntrypoints['catalog/filter_panel_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 4]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
+    'catalog/item_detail_test.dart [part 1]',
+    caseEntrypoints['catalog/item_detail_cases.dart#0']!,
   );
   group(
-    'mobile/phone_player_test.dart [part 2]',
-    caseEntrypoints['mobile/phone_player_cases.dart#1']!,
+    'library/album_test.dart',
+    caseEntrypoints['library/album_cases.dart']!,
   );
   group(
-    'player/android_seek_cancellation_test.dart',
-    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
   );
   group(
-    'player/desktop_player_page_test.dart',
-    caseEntrypoints['player/desktop_player_page_cases.dart']!,
+    'mobile/phone_home_rails_test.dart',
+    caseEntrypoints['mobile/phone_home_rails_cases.dart']!,
   );
   group(
-    'player/playback_overlay_widgets_test.dart',
-    caseEntrypoints['player/playback_overlay_widgets_cases.dart']!,
+    'mobile/phone_player_test.dart [part 3]',
+    caseEntrypoints['mobile/phone_player_cases.dart#2']!,
   );
+  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
 }

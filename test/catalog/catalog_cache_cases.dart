@@ -82,6 +82,14 @@ class _PausedReadDiskStore extends _FakeDiskStore {
   }
 }
 
+class _CountedJson {
+  int encodes = 0;
+  Map<String, Object> toJson() {
+    encodes++;
+    return {'value': 1};
+  }
+}
+
 void main() {
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;
@@ -110,6 +118,65 @@ void main() {
     cache.attachSession(serverId: 'server-a', userId: 'user-alice');
     return cache;
   }
+
+  test('memory-first lookup does not wait for disk initialization', () async {
+    final opening = Completer<CatalogDiskStore>();
+    final cache = CatalogCache(openDiskStore: () => opening.future)
+      ..attachSession(serverId: 'server-a', userId: 'user-alice');
+    const request = CatalogRequest('views');
+    await cache.write(request, {'items': <Object>[]});
+    try {
+      final hit = await cache
+          .lookupWhenReady(request)
+          .timeout(const Duration(seconds: 1));
+      expect(hit, isNotNull);
+    } finally {
+      opening.complete(_FakeDiskStore());
+      await cache.flushPendingWrites();
+    }
+  });
+
+  test('coalescing encodes only the last queued response', () async {
+    final disk = _BlockingDiskStore();
+    final cache = newCache(disk);
+    await cache.write(const CatalogRequest('blocked'), {'value': 0});
+    await disk.started.future;
+    final payloads = List.generate(20, (_) => _CountedJson());
+    for (final payload in payloads) {
+      await cache.write(const CatalogRequest('views'), payload);
+    }
+    expect(payloads.map((value) => value.encodes), everyElement(0));
+    disk.release.complete();
+    await cache.flushPendingWrites();
+    expect(payloads.take(19).map((value) => value.encodes), everyElement(0));
+    expect(payloads.last.encodes, 1);
+  });
+
+  test(
+    'serialization failure preserves memory and drains later writes',
+    () async {
+      final disk = _FakeDiskStore();
+      final cache = newCache(disk);
+      final payload = Object();
+      await cache.write(const CatalogRequest('bad'), payload);
+      await cache.write(const CatalogRequest('good'), {'value': 1});
+      await cache.flushPendingWrites();
+      expect(cache.diskWriteFailures, 1);
+      expect((await cache.lookup(const CatalogRequest('bad')))!.json, payload);
+      expect(disk.files, hasLength(1));
+    },
+  );
+
+  test('disabled persistence does not serialize responses', () async {
+    final cache = CatalogCache()
+      ..debugSetDiskStore(null)
+      ..attachSession(serverId: 'server-a', userId: 'user-alice');
+    final payload = _CountedJson();
+    await cache.write(const CatalogRequest('views'), payload);
+    await cache.flushPendingWrites();
+    expect(payload.encodes, 0);
+    expect((await cache.lookup(const CatalogRequest('views')))!.json, payload);
+  });
 
   test('concurrent cold lookups share one disk read and decode', () async {
     final disk = _PausedReadDiskStore();

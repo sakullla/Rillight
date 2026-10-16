@@ -11,35 +11,39 @@ void main() {
     caseEntrypoints['aggregation/playback_runtime_cases.dart#2']!,
   );
   group(
-    'home/hero_artwork_test.dart',
-    caseEntrypoints['home/hero_artwork_cases.dart']!,
+    'auth/provider_connect_dialog_test.dart',
+    caseEntrypoints['auth/provider_connect_dialog_cases.dart']!,
+  );
+  group(
+    'catalog/catalog_controller_test.dart',
+    caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );
   group(
     'home/hero_carousel_test.dart',
     caseEntrypoints['home/hero_carousel_cases.dart']!,
   );
   group(
-    'library/episode_list_scroll_test.dart',
-    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
+    'mobile/mobile_flow_test.dart [part 2]',
+    caseEntrypoints['mobile/mobile_flow_cases.dart#1']!,
   );
   group(
-    'mobile/motion_behaviors_test.dart',
-    caseEntrypoints['mobile/motion_behaviors_cases.dart']!,
+    'mobile/mobile_performance_timing_test.dart',
+    caseEntrypoints['mobile/mobile_performance_timing_cases.dart']!,
   );
   group(
-    'mobile/phone_nav_style_test.dart',
-    caseEntrypoints['mobile/phone_nav_style_cases.dart']!,
+    'mobile/phone_player_test.dart [part 2]',
+    caseEntrypoints['mobile/phone_player_cases.dart#1']!,
   );
   group(
-    'mobile/phone_player_test.dart [part 3]',
-    caseEntrypoints['mobile/phone_player_cases.dart#2']!,
+    'player/desktop_player_window_host_test.dart',
+    caseEntrypoints['player/desktop_player_window_host_cases.dart']!,
   );
   group(
-    'mobile/phone_player_interaction_test.dart',
-    caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
+    'tv/tv_lan_pair_test.dart [part 3]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#2']!,
   );
   group(
-    'widgets/scrim_icon_button_test.dart',
-    caseEntrypoints['widgets/scrim_icon_button_cases.dart']!,
+    'widgets/desktop_back_button_test.dart',
+    caseEntrypoints['widgets/desktop_back_button_cases.dart']!,
   );
 }

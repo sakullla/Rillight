@@ -35,7 +35,7 @@ python tool/test_execution/generate_suites.py --check
 flutter test test/player/playback_http_proxy_cases.dart
 ```
 
-较大的模块按注册顺序拆成互不重叠的分片，单独执行模块仍运行它的全部用例。分片数量与生成入口不一致会在收集时失败；新增/删除 case 模块而未更新登记也会失败。HTTP 测试不会与安装 Flutter HTTP mock 的 widget 注册混入同一进程。权重根据当前 Windows 数据分配，模块显著变化后需重新实测。
+较大的模块按注册顺序拆成互不重叠的分片，单独执行模块仍运行它的全部用例。生成器按当前用例数量重新平衡分片，因此修改现有模块的用例数量后也需重新生成，并在 Dart 格式化后执行 `--check`。CI 在安装 Flutter 前检查生成结果。分片数量与生成入口不一致会在收集时失败；新增/删除 case 模块而未更新登记也会失败。HTTP 测试不会与安装 Flutter HTTP mock 的 widget 注册混入同一进程。权重根据当前 Windows 数据分配，模块显著变化后需重新实测。
 
 本次减少默认用例数量的具体处理：
 

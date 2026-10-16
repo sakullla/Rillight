@@ -7,43 +7,43 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'auth/login_widgets_test.dart',
-    caseEntrypoints['auth/login_widgets_cases.dart']!,
+    'app/app_shell_top_bar_test.dart',
+    caseEntrypoints['app/app_shell_top_bar_cases.dart']!,
   );
   group(
-    'auth/provider_connect_management_test.dart',
-    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
+    'app/browsing_polish_test.dart',
+    caseEntrypoints['app/browsing_polish_cases.dart']!,
   );
   group(
-    'catalog/catalog_controller_test.dart',
-    caseEntrypoints['catalog/catalog_controller_cases.dart']!,
+    'app/desktop_scroll_test.dart',
+    caseEntrypoints['app/desktop_scroll_cases.dart']!,
   );
   group(
-    'home/hero_playback_actions_test.dart',
-    caseEntrypoints['home/hero_playback_actions_cases.dart']!,
+    'auth/backup_import/backup_import_flow_test.dart',
+    caseEntrypoints['auth/backup_import/backup_import_flow_cases.dart']!,
   );
   group(
-    'mobile/mobile_flow_test.dart [part 2]',
-    caseEntrypoints['mobile/mobile_flow_cases.dart#1']!,
+    'catalog/library_filter_test.dart',
+    caseEntrypoints['catalog/library_filter_cases.dart']!,
   );
   group(
-    'mobile/phone_home_rails_test.dart',
-    caseEntrypoints['mobile/phone_home_rails_cases.dart']!,
+    'library/source_detail_route_test.dart [part 3]',
+    caseEntrypoints['library/source_detail_route_cases.dart#2']!,
   );
   group(
-    'mobile/phone_player_test.dart [part 1]',
-    caseEntrypoints['mobile/phone_player_cases.dart#0']!,
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
   );
   group(
-    'player/subtitle_menu_test.dart',
-    caseEntrypoints['player/subtitle_menu_cases.dart']!,
+    'tv/tv_detail_test.dart [part 2]',
+    caseEntrypoints['tv/tv_detail_cases.dart#1']!,
   );
   group(
-    'settings_page_test.dart',
-    caseEntrypoints['settings_page_cases.dart']!,
+    'widgets/app_button_test.dart',
+    caseEntrypoints['widgets/app_button_cases.dart']!,
   );
   group(
-    'widgets/artwork_crop_test.dart',
-    caseEntrypoints['widgets/artwork_crop_cases.dart']!,
+    'widgets/app_hover_card_test.dart',
+    caseEntrypoints['widgets/app_hover_card_cases.dart']!,
   );
 }
