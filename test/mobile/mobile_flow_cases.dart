@@ -271,15 +271,15 @@ void main() {
 
       bool transparent() =>
           tester
-              .widget<PhoneShellBar>(find.byType(PhoneShellBar))
-              .backgroundColor
+              .widget<PhoneTopBar>(find.byType(PhoneTopBar))
+              .backgroundColor!
               .a ==
           0;
       expect(transparent(), isTrue);
       expect(tester.getTopLeft(find.byKey(PhoneHero.bannerKey)).dy, 0);
       expect(
         find.descendant(
-          of: find.byType(PhoneShellBar),
+          of: find.byType(PhoneTopBar),
           matching: find.text('首页'),
         ),
         findsNothing,
@@ -1046,6 +1046,21 @@ void main() {
 
       await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
       await settle(tester);
+      expect(find.text('alice'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.byKey(PhoneTopBar.backKey),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.text('我的'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(PhoneMinePage.changePasswordKey), findsOneWidget);
       expect(find.text('连接其他服务器'), findsOneWidget);
       expect(find.text('退出登录'), findsOneWidget);
@@ -1617,6 +1632,10 @@ void main() {
       await start(tester, server, signedIn: true);
       final pill = find.byKey(MobileShell.serverPillKey);
       expect(
+        find.descendant(of: find.byType(PhoneTopBar), matching: pill),
+        findsOneWidget,
+      );
+      expect(
         tester
             .widget<Text>(
               find.descendant(of: pill, matching: find.byType(Text)),
@@ -1649,6 +1668,13 @@ void main() {
       await tester.tap(pill);
       await settle(tester);
       expect(find.text('服务器管理'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.text('服务器管理'),
+        ),
+        findsOneWidget,
+      );
       expect(find.textContaining('emby.test:8096'), findsWidgets);
       expect(tester.takeException(), isNull);
     },

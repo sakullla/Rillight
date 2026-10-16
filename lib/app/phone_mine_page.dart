@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/product.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/settings/settings_page.dart';
@@ -77,7 +78,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
     Navigator.of(context).push(
       CupertinoPageRoute<void>(
         builder: (context) => CupertinoPageScaffold(
-          navigationBar: CupertinoNavigationBar(middle: Text(l10n.settings)),
+          navigationBar: PhoneTopBar(title: Text(l10n.settings)),
           child: SettingsPage(
             showTitle: false,
             settingsStore: PlayerScope.of(context).settingsStore,
@@ -156,11 +157,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         auth.client.serviceType == MediaServerType.plex ||
         auth.client.capabilities[ServiceCapability.changePassword].isAvailable;
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text(l10n.mobileMine),
-        border: null,
-        backgroundColor: theme.scaffoldBackgroundColor,
-      ),
+      navigationBar: PhoneTopBar(title: Text(l10n.mobileMine)),
       child: ListView(
         key: const PageStorageKey('mobile-mine-scroll'),
         padding: EdgeInsets.fromLTRB(

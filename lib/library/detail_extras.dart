@@ -8,6 +8,7 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -394,11 +395,7 @@ class _ExternalLinkPageState extends State<ExternalLinkPage> {
   Widget build(BuildContext context) {
     final surface = AppUiTheme.of(context).colorScheme.surface;
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        transitionBetweenRoutes: false,
-        leading: const CupertinoNavigationBarBackButton(),
-        middle: Text(widget.title),
-      ),
+      navigationBar: PhoneTopBar(title: Text(widget.title)),
       child: ColoredBox(
         color: surface,
         child: Stack(

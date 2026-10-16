@@ -4,6 +4,8 @@ import '../helpers/settle.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
+import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -210,5 +212,67 @@ void main() {
     );
     expect(position().pixels, lessThan(200));
     expect(position().isScrollingNotifier.value, isFalse);
+  });
+
+  testWidgets('reduced motion shows the phone top bar on the first frame', (
+    tester,
+  ) async {
+    for (final theme in [AppUiTheme.phoneLight(), AppUiTheme.phoneDark()]) {
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          theme: theme,
+          locale: const Locale('zh', 'CN'),
+          localizationsDelegates: [
+            AppLocalizations.delegate,
+            ...GlobalCupertinoLocalizations.delegates,
+          ],
+          supportedLocales: AppLocalizations.supportedLocales,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: Navigator(
+            pages: const [
+              CupertinoPage(child: SizedBox.shrink()),
+              CupertinoPage(
+                child: CupertinoPageScaffold(
+                  navigationBar: PhoneTopBar(title: Text('我的')),
+                  child: SizedBox.expand(),
+                ),
+              ),
+            ],
+            onDidRemovePage: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(PhoneTopBar), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.text('我的'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.byKey(PhoneTopBar.backKey),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<ColoredBox>(find.byKey(PhoneTopBar.backgroundKey)).color,
+        theme.scaffoldBackgroundColor,
+      );
+      expect(
+        DefaultTextStyle.of(tester.element(find.text('我的'))).style.color,
+        theme.colorScheme.onSurface,
+      );
+      expect(
+        AppMotion.durationOf(tester.element(find.text('我的'))),
+        Duration.zero,
+      );
+    }
   });
 }

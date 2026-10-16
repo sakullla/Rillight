@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/appearance_style.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/backup_import/backup_import_flow.dart';
@@ -285,12 +286,11 @@ class _AndroidConnectPageState extends State<AndroidConnectPage> {
     final auth = AuthScope.of(context);
     final l10n = AppLocalizations.of(context);
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        transitionBetweenRoutes: false,
-        backgroundColor: const Color(0x00000000),
+      navigationBar: const PhoneTopBar(
+        backgroundColor: Color(0x00000000),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             AppearanceMenuButton(buttonKey: Key('android-connect-appearance')),
           ],
         ),

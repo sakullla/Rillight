@@ -302,9 +302,8 @@ class _PersonPhoneWorks extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        transitionBetweenRoutes: false,
-        middle: Text(
+      navigationBar: PhoneTopBar(
+        title: Text(
           name,
           key: PersonWorksPage.titleKey,
           maxLines: 1,

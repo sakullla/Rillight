@@ -182,6 +182,15 @@ void main() {
       'path, extra line and User-Agent stay under 更多 until expanded',
       (tester) async {
         final auth = await pumpConnect(tester);
+        expect(find.byType(PhoneTopBar), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(PhoneTopBar),
+            matching: find.byKey(const Key('android-connect-appearance')),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byKey(PhoneTopBar.backKey), findsNothing);
         expect(find.byKey(_path), findsNothing);
         await tap(tester, find.byKey(_more));
         expect(find.byKey(_path), findsOneWidget);
@@ -2436,6 +2445,14 @@ void main() {
 
         await _pump(tester, auth: auth, catalog: catalog);
         expect(find.text('alice'), findsOneWidget);
+        expect(find.byKey(PhoneMinePage.userKey), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(PhoneTopBar),
+            matching: find.text('我的'),
+          ),
+          findsOneWidget,
+        );
         expect(
           tester.widget<Text>(find.byKey(PhoneMinePage.serverKey)).data,
           'emby · 家庭影院',
@@ -2463,6 +2480,13 @@ void main() {
         );
         final before = _itemRequests(lineA);
         await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
+        expect(
+          find.descendant(
+            of: find.byType(PhoneTopBar),
+            matching: find.text('服务器管理'),
+          ),
+          findsOneWidget,
+        );
         final option = find.byKey(PhoneMinePage.lineOptionKey(target.id));
         expect(tester.widget<AppListTile>(option).selected, isFalse);
         await _mineTap(tester, option);
@@ -2524,6 +2548,28 @@ void main() {
       },
     );
 
+    cases.testWidgets('canceling server deletion keeps that server', (
+      tester,
+    ) async {
+      final server = FakeEmbyServer(serverName: '家庭影院');
+      final auth = _auth([server]);
+      addTearDown(auth.dispose);
+      await _connect(tester, auth, server.baseUrl.toString());
+      await _pump(tester, auth: auth);
+      expect(find.byKey(PhoneMinePage.userKey), findsOneWidget);
+      await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
+      final saved = auth.savedServers.single;
+      await _mineTap(
+        tester,
+        find.byKey(PhoneMinePage.serverDeleteKey(saved.id)),
+      );
+      await tester.tap(find.byKey(PhoneMinePage.serverDeleteCancelKey));
+      await _mineSettle(tester);
+      expect(auth.savedServers.single.id, saved.id);
+      expect(find.text('家庭影院'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+
     cases.testWidgets('playback rate merges and the next playback uses it', (
       tester,
     ) async {
@@ -2548,6 +2594,20 @@ void main() {
       expect(find.text('解码后端'), findsNothing);
       expect(find.text('硬件解码'), findsNothing);
       await _openMineSettings(tester, '播放');
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.text('设置'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(PhoneTopBar),
+          matching: find.byKey(PhoneTopBar.backKey),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(SettingsPage.diskCacheLimitKey), findsOneWidget);
       await _mineTap(tester, find.byKey(const ValueKey('player-rate-1.5')));
 

@@ -19,6 +19,165 @@ class PhoneScrollBehavior extends ScrollBehavior {
   }
 }
 
+/// 顶栏取色。已经是手机主题时沿用当前主题，否则按明暗用 phoneLight 或 phoneDark。
+AppUiThemeData phoneChromeTheme(BuildContext context) {
+  final theme = AppUiTheme.of(context);
+  if (theme.phone) return theme;
+  return theme.brightness == Brightness.dark
+      ? AppUiTheme.phoneDark()
+      : AppUiTheme.phoneLight();
+}
+
+/// 手机顶栏。壳层、登录、我的、服务器管理、附加详情和演职员页共用这一条。
+///
+/// 返回、标题和右侧操作都画在这里。颜色来自 [phoneChromeTheme]：浅色是
+/// [AppUiTheme.phoneLight]，深色是 [AppUiTheme.phoneDark]。
+class PhoneTopBar extends StatelessWidget
+    implements ObstructingPreferredSizeWidget {
+  const PhoneTopBar({
+    super.key,
+    this.title,
+    this.leading,
+    this.trailing,
+    this.backgroundColor,
+    this.foregroundColor,
+    this.automaticallyImplyLeading = true,
+    this.centerTitle = false,
+    this.includeSafeTop = true,
+    this.height = bodyHeight,
+    this.border,
+    this.child,
+  });
+
+  /// 壳层叠在内容上。子组件放服务器胶囊、页面名和我的入口。
+  const PhoneTopBar.shell({
+    super.key,
+    required this.backgroundColor,
+    required this.child,
+    this.foregroundColor,
+    this.height = bodyHeight,
+  }) : title = null,
+       leading = null,
+       trailing = null,
+       automaticallyImplyLeading = false,
+       centerTitle = false,
+       includeSafeTop = true,
+       border = null;
+
+  /// 不含状态栏的顶栏高度。可点的返回钮沿用 44dp 图标按钮。
+  static const bodyHeight = 44.0;
+
+  static const backKey = Key('phone-top-bar-back');
+  static const backgroundKey = Key('phone-top-bar-background');
+
+  final Widget? title;
+  final Widget? leading;
+  final Widget? trailing;
+  final Color? backgroundColor;
+  final Color? foregroundColor;
+  final bool automaticallyImplyLeading;
+  final bool centerTitle;
+  final bool includeSafeTop;
+  final double height;
+  final Border? border;
+
+  /// 壳层自定义内容。设置后不再排返回和标题。
+  final Widget? child;
+
+  Color _background(BuildContext context) =>
+      backgroundColor ?? phoneChromeTheme(context).scaffoldBackgroundColor;
+
+  @override
+  bool shouldFullyObstruct(BuildContext context) => _background(context).a >= 1;
+
+  @override
+  Size get preferredSize => Size.fromHeight(height);
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = phoneChromeTheme(context);
+    final background = _background(context);
+    final foreground = foregroundColor ?? phone.colorScheme.onSurface;
+    final top = includeSafeTop ? MediaQuery.paddingOf(context).top : 0.0;
+    final titleStyle = (phone.textTheme.titleMedium ?? const TextStyle())
+        .copyWith(color: foreground, fontWeight: FontWeight.w700);
+    return ColoredBox(
+      key: backgroundKey,
+      color: background,
+      child: DecoratedBox(
+        decoration: BoxDecoration(border: border),
+        child: Padding(
+          padding: EdgeInsets.only(top: top),
+          child: SizedBox(
+            height: height,
+            child: MediaQuery.withClampedTextScaling(
+              maxScaleFactor: 1.3,
+              child: IconTheme(
+                data: IconThemeData(color: foreground),
+                child: DefaultTextStyle(
+                  style: titleStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  child: _content(context, foreground),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _content(BuildContext context, Color foreground) {
+    final custom = child;
+    if (custom != null) return custom;
+    final resolvedLeading = _leading(context, foreground);
+    final titleWidget = title;
+    return Row(
+      children: [
+        ?resolvedLeading,
+        Expanded(
+          child: titleWidget == null
+              ? const SizedBox.shrink()
+              : Padding(
+                  padding: EdgeInsets.only(
+                    left: resolvedLeading == null
+                        ? AppSpacing.md
+                        : AppSpacing.xs,
+                    right: AppSpacing.xs,
+                  ),
+                  child: Align(
+                    alignment: centerTitle
+                        ? Alignment.center
+                        : Alignment.centerLeft,
+                    child: titleWidget,
+                  ),
+                ),
+        ),
+        if (trailing != null)
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.xxs),
+            child: trailing,
+          ),
+      ],
+    );
+  }
+
+  Widget? _leading(BuildContext context, Color foreground) {
+    if (leading != null) return leading;
+    if (!automaticallyImplyLeading) return null;
+    final route = ModalRoute.of(context);
+    if (route?.canPop != true) return null;
+    return AppIconButton(
+      key: backKey,
+      tooltip: AppLocalizations.of(context).mobileBack,
+      color: foreground,
+      onPressed: () => Navigator.maybePop(context),
+      icon: const Icon(AppIcons.back, fill: AppIcons.filled),
+    );
+  }
+}
+
 /// 手机上的加载、空、失败三种画面。
 ///
 /// 颜色和字号跟随当前 [AppUiTheme]，出现过渡使用 [AppMotion]。

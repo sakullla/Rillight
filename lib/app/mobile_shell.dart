@@ -10,6 +10,7 @@ import 'package:rillight/media_server/media_server_client.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app_shell.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
@@ -137,7 +138,8 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
     final pillLabel = server == null || serverName.isEmpty
         ? l.phoneServerManagement
         : serverName;
-    final topInset = MediaQuery.viewPaddingOf(context).top;
+    final topInset = MediaQuery.paddingOf(context).top;
+    final chrome = phoneChromeTheme(context);
     final barBody = _index == 0
         ? MobileShell.homeBarHeight
         : MobileShell.titleBarHeight;
@@ -148,9 +150,9 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
       MobileShell.searchTab => l.search,
       _ => '',
     };
-    final onBar = homeImmersive && theme.brightness == Brightness.dark
+    final onBar = homeImmersive && chrome.brightness == Brightness.dark
         ? const Color(0xFFFFFFFF)
-        : scheme.onSurface;
+        : chrome.colorScheme.onSurface;
     return PopScope(
       canPop: _index == 0,
       onPopInvokedWithResult: (popped, _) {
@@ -280,152 +282,135 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
               top: 0,
               left: 0,
               right: 0,
-              child: PhoneShellBar(
+              child: PhoneTopBar.shell(
+                key: MobileShell.topBarKey,
                 backgroundColor: homeImmersive
                     ? const Color(0x00000000)
-                    : theme.scaffoldBackgroundColor,
-                child: Padding(
-                  padding: EdgeInsets.only(top: topInset),
-                  child: SizedBox(
-                    height: barBody,
-                    child: IconTheme(
-                      data: IconThemeData(color: onBar),
-                      child: Row(
-                        children: [
-                          if (_index == 0) ...[
-                            const SizedBox(width: AppSpacing.sm),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 220,
+                    : chrome.scaffoldBackgroundColor,
+                foregroundColor: onBar,
+                height: barBody,
+                child: Row(
+                  children: [
+                    if (_index == 0) ...[
+                      const SizedBox(width: AppSpacing.sm),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 220),
+                          child: AppSurfaceAction(
+                            key: MobileShell.serverPillKey,
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () =>
+                                showPhoneServerManagerSheet(context, auth),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: homeImmersive
+                                    ? scheme.scrim.withValues(alpha: 0.36)
+                                    : scheme.surfaceContainerHigh,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: homeImmersive
+                                      ? const Color(0x29FFFFFF)
+                                      : scheme.outlineVariant,
+                                  width: 0.8,
                                 ),
-                                child: AppSurfaceAction(
-                                  key: MobileShell.serverPillKey,
-                                  borderRadius: BorderRadius.circular(999),
-                                  onTap: () => showPhoneServerManagerSheet(
-                                    context,
-                                    auth,
-                                  ),
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: homeImmersive
-                                          ? scheme.scrim.withValues(alpha: 0.36)
-                                          : scheme.surfaceContainerHigh,
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 7,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (server == null)
+                                      Icon(
+                                        CupertinoIcons.dot_radiowaves_right,
+                                        size: 14,
                                         color: homeImmersive
-                                            ? const Color(0x29FFFFFF)
-                                            : scheme.outlineVariant,
-                                        width: 0.8,
+                                            ? const Color(0xFFFFFFFF)
+                                            : scheme.primary,
+                                      )
+                                    else
+                                      PhoneServerBrandSlot(
+                                        key: ValueKey(
+                                          '${server.serviceType.name}|${server.id}|${server.baseUrl}',
+                                        ),
+                                        serviceType: server.serviceType,
+                                        client: auth.client,
+                                        identity:
+                                            '${server.serviceType.name}|${server.id}|${server.baseUrl}',
                                       ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 7,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (server == null)
-                                            Icon(
-                                              CupertinoIcons
-                                                  .dot_radiowaves_right,
-                                              size: 14,
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        pillLabel,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
                                               color: homeImmersive
                                                   ? const Color(0xFFFFFFFF)
-                                                  : scheme.primary,
-                                            )
-                                          else
-                                            PhoneServerBrandSlot(
-                                              key: ValueKey(
-                                                '${server.serviceType.name}|${server.id}|${server.baseUrl}',
-                                              ),
-                                              serviceType: server.serviceType,
-                                              client: auth.client,
-                                              identity:
-                                                  '${server.serviceType.name}|${server.id}|${server.baseUrl}',
+                                                  : scheme.onSurface,
+                                              fontWeight: FontWeight.w600,
+                                              height: 1.15,
                                             ),
-                                          const SizedBox(width: 6),
-                                          Flexible(
-                                            child: Text(
-                                              pillLabel,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.labelMedium
-                                                  ?.copyWith(
-                                                    color: homeImmersive
-                                                        ? const Color(
-                                                            0xFFFFFFFF,
-                                                          )
-                                                        : scheme.onSurface,
-                                                    fontWeight: FontWeight.w600,
-                                                    height: 1.15,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 2),
-                                          Icon(
-                                            CupertinoIcons.chevron_down,
-                                            size: 11,
-                                            color: homeImmersive
-                                                ? const Color(0xCCFFFFFF)
-                                                : scheme.onSurfaceVariant,
-                                          ),
-                                        ],
                                       ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 2),
+                                    Icon(
+                                      CupertinoIcons.chevron_down,
+                                      size: 11,
+                                      color: homeImmersive
+                                          ? const Color(0xCCFFFFFF)
+                                          : scheme.onSurfaceVariant,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                          ] else
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(
-                                  left: AppSpacing.md,
-                                ),
-                                // 大标题已经够大，系统放大字号时只跟到 1.3 倍，
-                                // 不把固定高的顶栏撑破。
-                                child: MediaQuery.withClampedTextScaling(
-                                  maxScaleFactor: 1.3,
-                                  child: Text(
-                                    tabTitle,
-                                    key: MobileShell.titleKey,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: phoneLargeTitleStyle(theme),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_index == 0) const Spacer(),
-                          if (_index == 0)
-                            AppIconButton(
-                              key: const Key('phone-home-edit'),
-                              tooltip: l.phoneHomeEdit,
-                              color: onBar,
-                              icon: const Icon(
-                                CupertinoIcons.slider_horizontal_3,
-                              ),
-                              onPressed: () => context.push(AppRoutes.homeEdit),
-                            ),
-                          AppIconButton(
-                            key: const Key('mobile-shell-mine-entry'),
-                            tooltip: l.mobileMine,
-                            color: onBar,
-                            icon: _MineAvatar(
-                              name: auth.session?.username ?? '',
-                              immersive: homeImmersive,
-                            ),
-                            onPressed: () => context.push(AppRoutes.mine),
                           ),
-                          const SizedBox(width: AppSpacing.xxs),
-                        ],
+                        ),
                       ),
+                    ] else
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: AppSpacing.md),
+                          // 大标题已经够大，系统放大字号时只跟到 1.3 倍，
+                          // 不把固定高的顶栏撑破。
+                          child: MediaQuery.withClampedTextScaling(
+                            maxScaleFactor: 1.3,
+                            child: Text(
+                              tabTitle,
+                              key: MobileShell.titleKey,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: phoneLargeTitleStyle(chrome),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (_index == 0) const Spacer(),
+                    if (_index == 0)
+                      AppIconButton(
+                        key: const Key('phone-home-edit'),
+                        tooltip: l.phoneHomeEdit,
+                        color: onBar,
+                        icon: const Icon(CupertinoIcons.slider_horizontal_3),
+                        onPressed: () => context.push(AppRoutes.homeEdit),
+                      ),
+                    AppIconButton(
+                      key: const Key('mobile-shell-mine-entry'),
+                      tooltip: l.mobileMine,
+                      color: onBar,
+                      icon: _MineAvatar(
+                        name: auth.session?.username ?? '',
+                        immersive: homeImmersive,
+                      ),
+                      onPressed: () => context.push(AppRoutes.mine),
                     ),
-                  ),
+                    const SizedBox(width: AppSpacing.xxs),
+                  ],
                 ),
               ),
             ),
@@ -446,27 +431,6 @@ class _MobileShellState extends State<MobileShell> with WidgetsBindingObserver {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// 叠在内容上的手机顶栏。首页透明时横幅从窗口顶铺上来。
-class PhoneShellBar extends StatelessWidget {
-  const PhoneShellBar({
-    super.key,
-    required this.backgroundColor,
-    required this.child,
-  });
-
-  final Color backgroundColor;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      key: MobileShell.topBarKey,
-      color: backgroundColor,
-      child: child,
     );
   }
 }

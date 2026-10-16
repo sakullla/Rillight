@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -410,20 +411,18 @@ class _PhoneServerManagerState extends State<PhoneServerManager> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          l.phoneServerManagement,
-                          style: AppUiTheme.of(context).textTheme.titleLarge,
-                        ),
-                      ),
-                      AppIconButton(
-                        tooltip: l.cancelAction,
-                        onPressed: () => Navigator.pop(context),
-                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
-                      ),
-                    ],
+                  PhoneTopBar(
+                    includeSafeTop: false,
+                    automaticallyImplyLeading: false,
+                    backgroundColor: AppUiTheme.of(context)
+                        .colorScheme
+                        .surfaceContainerLow,
+                    title: Text(l.phoneServerManagement),
+                    trailing: AppIconButton(
+                      tooltip: l.cancelAction,
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                    ),
                   ),
                   AppTextField(
                     key: PhoneServerManager.searchKey,
