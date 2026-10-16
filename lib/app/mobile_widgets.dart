@@ -94,6 +94,7 @@ List<String> phoneCardBadgeLabels(
   MediaItem item, {
   bool includePlayback = true,
   bool includeResumeText = true,
+  bool includeSeriesSeason = true,
 }) {
   final labels = <String>[];
   if (item.isEpisode) {
@@ -101,7 +102,9 @@ List<String> phoneCardBadgeLabels(
     if (code != null) {
       labels.add(code);
     }
-  } else if (item.isSeries && (item.childCount ?? 0) > 0) {
+  } else if (includeSeriesSeason &&
+      item.isSeries &&
+      (item.childCount ?? 0) > 0) {
     labels.add(l10n.cardSeasonCount(item.childCount!));
   }
   if (includePlayback) {
@@ -246,10 +249,11 @@ class PhoneArtworkFrame extends StatelessWidget {
   }
 }
 
-/// 手机端 2:3 海报卡(ADR-2):裸海报 + 图下单行标题与「年份 ★评分」。
+/// 手机端 2:3 海报卡(ADR-2):裸海报 + 图下标题与「年份 ★评分」。
 ///
 /// 不给海报套卡片底和描边框:画面就是卡片本身,标题直接落在页面底色上。
-/// 角标叠在图左上,可续播时底边一条进度。
+/// 角标叠在图左上,可续播时底边一条进度。片库网格把标题放到两行,并把季数
+/// 单独写成 [AppLocalizations.seasonCount],不和评分挤在同一行。
 ///
 /// [width] 非空是横向行里的定宽卡(右侧留间距);为 null 时铺满父级
 /// 宽度,供网格单元格使用——网格 childAspectRatio 须按
@@ -264,6 +268,8 @@ class PhonePosterCard extends StatelessWidget {
     this.includePlaybackBadges = true,
     this.imageMaxWidth = PhoneMotion.posterRequestWidth,
     this.onTap,
+    this.titleMaxLines = 1,
+    this.seasonCountCaption = false,
   });
 
   final MediaItem item;
@@ -287,17 +293,27 @@ class PhonePosterCard extends StatelessWidget {
   /// 点按行为;默认 [PhoneMotion.openItem] 进详情。
   final VoidCallback? onTap;
 
+  /// 标题行数。片库网格用两行,首页横滑卡保持一行。
+  final int titleMaxLines;
+
+  /// 剧集季数改用 [AppLocalizations.seasonCount],单独排在评分下面。
+  final bool seasonCountCaption;
+
   @override
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context);
+    final seasonCount = item.childCount;
+    final showSeasonCaption =
+        seasonCountCaption && item.isSeries && (seasonCount ?? 0) > 0;
     final badges = phoneCardBadgeLabels(
       l10n,
       item,
       includePlayback: includePlaybackBadges,
       // 进度由底边进度条表达,不再重复写成「已看 n%」。
       includeResumeText: false,
+      includeSeriesSeason: !showSeasonCaption,
     );
     final image = MediaImage(
       item: item,
@@ -361,7 +377,7 @@ class PhonePosterCard extends StatelessWidget {
               children: [
                 Text(
                   item.name,
-                  maxLines: 1,
+                  maxLines: titleMaxLines,
                   overflow: TextOverflow.ellipsis,
                   style: phonePosterTitleStyle(theme),
                 ),
@@ -396,6 +412,16 @@ class PhonePosterCard extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (showSeasonCaption) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    l10n.seasonCount(seasonCount!),
+                    key: Key('phone-poster-season-${item.id}'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: phonePosterMetaStyle(theme),
+                  ),
+                ],
               ],
             ),
           ),
@@ -445,6 +471,8 @@ class PhoneGridPosterCard extends StatelessWidget {
     this.includePlaybackBadges = true,
     this.imageMaxWidth = PhoneMotion.posterRequestWidth,
     this.onTap,
+    this.titleMaxLines = 1,
+    this.seasonCountCaption = false,
   });
 
   final MediaItem item;
@@ -461,6 +489,12 @@ class PhoneGridPosterCard extends StatelessWidget {
   /// 点按行为;默认按有无图走 [PhoneMotion.openItem] 或直 push 详情。
   final VoidCallback? onTap;
 
+  /// 见 [PhonePosterCard.titleMaxLines]。
+  final int titleMaxLines;
+
+  /// 见 [PhonePosterCard.seasonCountCaption]。
+  final bool seasonCountCaption;
+
   @override
   Widget build(BuildContext context) {
     final hasImage = phonePosterHasImage(item);
@@ -470,6 +504,8 @@ class PhoneGridPosterCard extends StatelessWidget {
         hero: hero && hasImage,
         includePlaybackBadges: includePlaybackBadges,
         imageMaxWidth: imageMaxWidth,
+        titleMaxLines: titleMaxLines,
+        seasonCountCaption: seasonCountCaption,
         onTap:
             onTap ??
             () {
@@ -489,10 +525,16 @@ class PhoneGridPosterCard extends StatelessWidget {
   }
 }
 
-/// 网格海报卡图下文字区高度:7px 间距 + 单行标题 + 2px + 年份/评分行 + 4px 余量。
+/// 网格海报卡图下文字区高度:7px 间距 + 标题 + 2px + 年份/评分行 + 4px 余量。
 /// 网格 childAspectRatio 与骨架共用,保证单元格刚好容纳网格态
 /// [PhonePosterCard](年份缺失的卡片底部留空,不挤压图区 2:3)。
-double phonePosterCardLabelExtent(BuildContext context) {
+///
+/// 默认是单行标题。片库传入两行标题和季数行;不传时高度与原先一致。
+double phonePosterCardLabelExtent(
+  BuildContext context, {
+  int titleLines = 1,
+  bool includeSeasonLine = false,
+}) {
   final theme = AppUiTheme.of(context);
   double lineHeight(TextStyle? style) {
     final painter = TextPainter(
@@ -508,12 +550,19 @@ double phonePosterCardLabelExtent(BuildContext context) {
 
   final meta = lineHeight(phonePosterMetaStyle(theme));
   final star = MediaQuery.textScalerOf(context).scale(10);
+  final metaLine = meta > star ? meta : star;
+  final seasonLine = includeSeasonLine ? 2 + meta : 0;
   return 7 +
-      lineHeight(phonePosterTitleStyle(theme)) +
+      lineHeight(phonePosterTitleStyle(theme)) * titleLines +
       2 +
-      (meta > star ? meta : star) +
+      metaLine +
+      seasonLine +
       4;
 }
+
+/// 片库海报文字区:两行标题,评分下面再留一行季数。
+double phoneLibraryPosterLabelExtent(BuildContext context) =>
+    phonePosterCardLabelExtent(context, titleLines: 2, includeSeasonLine: true);
 
 /// Readable poster widths: 360dp uses two columns, 412dp uses three.
 /// System text scaling reduces columns instead of shrinking labels.

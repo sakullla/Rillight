@@ -235,215 +235,181 @@ class _MobileLibraryPageState extends State<MobileLibraryPage> {
     final controller = _controller!;
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    return CupertinoPageScaffold(
-      child: SafeArea(
-        bottom: false,
-        child: ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) {
-            final active = _hasCriteria(controller);
-            final total = controller.totalCount;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 56),
-                  child: Row(
-                    children: [
-                      CupertinoNavigationBarBackButton(
-                        color: scheme.onSurface,
-                        onPressed: () => context.pop(),
-                      ),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _libraryTitle(l10n),
-                              key: const Key('phone-library-title'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                height: 1.2,
-                              ),
-                            ),
-                            if (total != null && total > 0)
-                              Text(
-                                l10n.browseLoaded(total),
-                                key: const Key('phone-library-count'),
-                                maxLines: 1,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final active = _hasCriteria(controller);
+        final total = controller.totalCount;
+        return CupertinoPageScaffold(
+          navigationBar: PhoneTopBar(
+            title: Text(
+              _libraryTitle(l10n),
+              key: const Key('phone-library-title'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: AppButton.icon(
+              key: const Key('phone-library-filter'),
+              onPressed: _openFilters,
+              style: AppButtonStyle(
+                backgroundColor: active
+                    ? scheme.primary
+                    : scheme.surfaceContainerHigh,
+                foregroundColor: active ? scheme.onPrimary : scheme.onSurface,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                minimumSize: const Size(48, 44),
+                shape: const StadiumBorder(),
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              icon: Icon(
+                AppIcons.filter,
+                fill: active ? AppIcons.filled : AppIcons.outline,
+                size: 17,
+              ),
+              label: Text(l10n.libraryFilter),
+              variant: AppButtonVariant.tinted,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (total != null && total > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.xs,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  child: Text(
+                    l10n.browseLoaded(total),
+                    key: const Key('phone-library-count'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              _ActiveFilters(controller: controller, onClear: _clearFilters),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final gridWidth = constraints.maxWidth - AppSpacing.md * 2;
+                    return MediaImageScrollListener(
+                      child: AppRefresh(
+                        onRefresh: controller.load,
+                        child: CustomScrollView(
+                          controller: _scroll,
+                          key: PageStorageKey('library-${widget.viewId}'),
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          scrollCacheExtent: const ScrollCacheExtent.viewport(
+                            0.5,
+                          ),
+                          slivers: [
+                            if (controller.loading && controller.items.isEmpty)
+                              const SliverPadding(
+                                padding: EdgeInsets.all(AppSpacing.md),
+                                sliver: SliverToBoxAdapter(
+                                  child: _LibrarySkeleton(),
+                                ),
+                              )
+                            else
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  AppSpacing.md,
+                                  AppSpacing.xs,
+                                  AppSpacing.md,
+                                  AppSpacing.md +
+                                      MediaQuery.paddingOf(context).bottom,
+                                ),
+                                sliver: SliverMainAxisGroup(
+                                  slivers: [
+                                    if (controller.loadingMore ||
+                                        (controller.loading &&
+                                            controller.items.isNotEmpty))
+                                      const SliverToBoxAdapter(
+                                        child: AppLoadingBar(),
+                                      ),
+                                    if (controller.error != null)
+                                      SliverToBoxAdapter(
+                                        child: MobileFailureState(
+                                          message: catalogFailureMessage(
+                                            l10n,
+                                            controller.error!,
+                                          ),
+                                          onRetry: () => controller.load(
+                                            more:
+                                                controller.items.isNotEmpty &&
+                                                controller.hasMore,
+                                          ),
+                                        ),
+                                      ),
+                                    if (!controller.loading &&
+                                        controller.error == null &&
+                                        controller.items.isEmpty)
+                                      SliverToBoxAdapter(
+                                        child: MobileEmptyState(
+                                          message: l10n.mobileEmpty,
+                                          actionLabel: _hasCriteria(controller)
+                                              ? l10n.libraryFilterClear
+                                              : l10n.mobileRefresh,
+                                          onAction: _hasCriteria(controller)
+                                              ? _clearFilters
+                                              : () => controller.load(),
+                                        ),
+                                      ),
+                                    if (controller.items.isNotEmpty)
+                                      _PhonePosterSliver(
+                                        items: controller.items,
+                                        gridWidth: gridWidth,
+                                      ),
+                                    if (controller.hasMore &&
+                                        controller.error == null)
+                                      SliverToBoxAdapter(
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: AppSpacing.md,
+                                          ),
+                                          child: Align(
+                                            alignment: Alignment.center,
+                                            child: AppButton(
+                                              key: const Key(
+                                                'phone-library-more',
+                                              ),
+                                              style: AppButtonStyle(
+                                                minimumSize: const Size(48, 48),
+                                              ),
+                                              onPressed:
+                                                  controller.loading ||
+                                                      controller.loadingMore
+                                                  ? null
+                                                  : () => controller.load(
+                                                      more: true,
+                                                    ),
+                                              variant: AppButtonVariant.tinted,
+                                              child: Text(l10n.mobileLoadMore),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
                           ],
                         ),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: AppSpacing.md),
-                        child: AppButton.icon(
-                          key: const Key('phone-library-filter'),
-                          onPressed: _openFilters,
-                          style: AppButtonStyle(
-                            backgroundColor: active
-                                ? scheme.primary
-                                : scheme.surfaceContainerHigh,
-                            foregroundColor: active
-                                ? scheme.onPrimary
-                                : scheme.onSurface,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            minimumSize: const Size(0, 36),
-                            shape: const StadiumBorder(),
-                            textStyle: theme.textTheme.labelLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          icon: Icon(
-                            AppIcons.filter,
-                            fill: active ? AppIcons.filled : AppIcons.outline,
-                            size: 17,
-                          ),
-                          label: Text(l10n.libraryFilter),
-                          variant: AppButtonVariant.tinted,
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-                _ActiveFilters(controller: controller, onClear: _clearFilters),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final gridWidth =
-                          constraints.maxWidth - AppSpacing.md * 2;
-                      return MediaImageScrollListener(
-                        child: AppRefresh(
-                          onRefresh: controller.load,
-                          child: CustomScrollView(
-                            controller: _scroll,
-                            key: PageStorageKey('library-${widget.viewId}'),
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            scrollCacheExtent: const ScrollCacheExtent.viewport(
-                              0.5,
-                            ),
-                            slivers: [
-                              if (controller.loading &&
-                                  controller.items.isEmpty)
-                                const SliverPadding(
-                                  padding: EdgeInsets.all(AppSpacing.md),
-                                  sliver: SliverToBoxAdapter(
-                                    child: _LibrarySkeleton(),
-                                  ),
-                                )
-                              else
-                                SliverPadding(
-                                  padding: EdgeInsets.fromLTRB(
-                                    AppSpacing.md,
-                                    AppSpacing.xs,
-                                    AppSpacing.md,
-                                    AppSpacing.md +
-                                        MediaQuery.paddingOf(context).bottom,
-                                  ),
-                                  sliver: SliverMainAxisGroup(
-                                    slivers: [
-                                      if (controller.loadingMore ||
-                                          (controller.loading &&
-                                              controller.items.isNotEmpty))
-                                        const SliverToBoxAdapter(
-                                          child: AppLoadingBar(),
-                                        ),
-                                      if (controller.error != null)
-                                        SliverToBoxAdapter(
-                                          child: MobileFailureState(
-                                            message: catalogFailureMessage(
-                                              l10n,
-                                              controller.error!,
-                                            ),
-                                            onRetry: () => controller.load(
-                                              more:
-                                                  controller.items.isNotEmpty &&
-                                                  controller.hasMore,
-                                            ),
-                                          ),
-                                        ),
-                                      if (!controller.loading &&
-                                          controller.error == null &&
-                                          controller.items.isEmpty)
-                                        SliverToBoxAdapter(
-                                          child: MobileEmptyState(
-                                            message: l10n.mobileEmpty,
-                                            actionLabel:
-                                                _hasCriteria(controller)
-                                                ? l10n.libraryFilterClear
-                                                : l10n.mobileRefresh,
-                                            onAction: _hasCriteria(controller)
-                                                ? _clearFilters
-                                                : () => controller.load(),
-                                          ),
-                                        ),
-                                      if (controller.items.isNotEmpty)
-                                        _PhonePosterSliver(
-                                          items: controller.items,
-                                          gridWidth: gridWidth,
-                                        ),
-                                      if (controller.hasMore &&
-                                          controller.error == null)
-                                        SliverToBoxAdapter(
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(
-                                              top: AppSpacing.md,
-                                            ),
-                                            child: Align(
-                                              alignment: Alignment.center,
-                                              child: AppButton(
-                                                key: const Key(
-                                                  'phone-library-more',
-                                                ),
-                                                style: AppButtonStyle(
-                                                  minimumSize: const Size(
-                                                    48,
-                                                    48,
-                                                  ),
-                                                ),
-                                                onPressed:
-                                                    controller.loading ||
-                                                        controller.loadingMore
-                                                    ? null
-                                                    : () => controller.load(
-                                                        more: true,
-                                                      ),
-                                                variant:
-                                                    AppButtonVariant.tinted,
-                                                child: Text(
-                                                  l10n.mobileLoadMore,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -593,7 +559,7 @@ class _LibrarySkeleton extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     SizedBox(
-                      height: phonePosterCardLabelExtent(context) - 6,
+                      height: phoneLibraryPosterLabelExtent(context) - 6,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -639,7 +605,7 @@ class _PhonePosterSliver extends StatelessWidget {
       textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
     );
     final cellWidth = (gridWidth - spacing * (columns - 1)) / columns;
-    final label = phonePosterCardLabelExtent(context);
+    final label = phoneLibraryPosterLabelExtent(context);
     final imageWidth = catalogPosterMaxWidth(
       cellWidth,
       MediaQuery.devicePixelRatioOf(context),
@@ -668,6 +634,8 @@ class _PhonePosterDelegate extends SliverChildBuilderDelegate {
             // 与搜索页对齐关闭飞行,代价是片库→详情无 hero 动画(可接受)。
             hero: false,
             imageMaxWidth: imageMaxWidth,
+            titleMaxLines: 2,
+            seasonCountCaption: true,
             onTap: item.isPhotoAlbum
                 ? () => context.push(
                     AppRoutes.shelfItems(

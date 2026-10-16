@@ -8,8 +8,11 @@ import '../helpers/settle.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_widgets.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/library/shelf_sort.dart';
+import 'package:rillight/media_server/models.dart';
 
 void main() {
   test('panel scale follows the logical window, not a second DPI pass', () {
@@ -79,6 +82,7 @@ void main() {
 
       await tester.tap(find.text('open'));
       await settle(tester);
+      expect(find.byKey(const Key('filter-phone-sheet')), findsNothing);
       await tap('section-genre');
       await tap('genre-动画');
       await tap('genre-科幻');
@@ -250,12 +254,15 @@ void main() {
             ui.GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: AppLocalizations.supportedLocales,
-          home: Center(
-            child: LibraryFilterPanel(
-              television: true,
-              keyPrefix: 'tv-filter',
-              initial: const ShelfFilters(),
-              onApply: (_, _) {},
+          home: PresentationScope(
+            environment: PresentationEnvironment.phone,
+            child: Center(
+              child: LibraryFilterPanel(
+                television: true,
+                keyPrefix: 'tv-filter',
+                initial: const ShelfFilters(),
+                onApply: (_, _) {},
+              ),
             ),
           ),
           builder: (context, child) => ui.AppUiTheme(
@@ -270,6 +277,147 @@ void main() {
       final size = tester.getSize(find.byType(LibraryFilterPanel));
       expect(size.width, closeTo(width, 0.1));
       expect(size.height, closeTo(height, 0.1));
+      expect(find.byKey(const Key('tv-filter-phone-sheet')), findsNothing);
     }
   });
+
+  test(
+    'library and search widths stay two columns at 360 and three at 412',
+    () {
+      expect(mobileGridColumnCount(360), 2);
+      expect(mobileGridColumnCount(412), 3);
+      expect(mobileGridColumnCount(360 - 32), 2);
+      expect(mobileGridColumnCount(412 - 32), 3);
+      expect(mobileGridColumnCount(360, textScale: 2), lessThan(2));
+      expect(mobileGridColumnCount(412, textScale: 2), lessThan(3));
+    },
+  );
+
+  testWidgets('series poster uses seasonCount apart from the rating', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      CupertinoTestApp(
+        theme: AppUiTheme.phoneLight(),
+        locale: const Locale('zh'),
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const Center(
+          child: SizedBox(
+            width: 160,
+            child: PhonePosterCard(
+              item: MediaItem(
+                id: 'series-2',
+                name: '两季剧',
+                type: 'Series',
+                childCount: 2,
+                productionYear: 2020,
+                communityRating: 8.4,
+              ),
+              titleMaxLines: 2,
+              seasonCountCaption: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final season = tester.widget<Text>(
+      find.byKey(const Key('phone-poster-season-series-2')),
+    );
+    final title = tester.widget<Text>(find.text('两季剧'));
+    expect(season.data, '共2季');
+    expect(title.maxLines, 2);
+    expect(find.text('8.4'), findsOneWidget);
+    expect(season.data, isNot(contains('8.4')));
+    expect(find.text('2季'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'phone filter sheet keeps draft semantics and hides movie-only type',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      ShelfFilters? applied;
+      var calls = 0;
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          theme: AppUiTheme.phoneLight(),
+          locale: const Locale('zh'),
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Builder(
+            builder: (context) => CupertinoPageScaffold(
+              child: ui.AppButton(
+                onPressed: () => showAppModalSheet<void>(
+                  context: context,
+                  builder: (_) => PresentationScope(
+                    environment: PresentationEnvironment.phone,
+                    child: LibraryFilterPanel(
+                      keyPrefix: 'phone',
+                      typeFilterable: false,
+                      initial: const ShelfFilters(),
+                      years: const [2024, 2020],
+                      genres: const ['SciFi', 'Comedy'],
+                      onApply: (filters, _) {
+                        applied = filters;
+                        calls++;
+                      },
+                    ),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await settle(tester);
+      expect(find.byKey(const Key('phone-phone-sheet')), findsOneWidget);
+      expect(find.byKey(const Key('phone-section-type')), findsNothing);
+      expect(find.byKey(const Key('phone-section-watch')), findsOneWidget);
+      final section = tester.getSize(
+        find.byKey(const Key('phone-section-watch')),
+      );
+      expect(section.height, greaterThanOrEqualTo(48));
+      expect(section.width, greaterThanOrEqualTo(48));
+
+      Future<void> tap(String suffix) async {
+        final finder = find.byKey(Key('phone-$suffix'));
+        await tester.ensureVisible(finder);
+        await tester.tap(finder);
+        await settle(tester);
+      }
+
+      await tap('section-year');
+      await tap('year-2024');
+      await tap('year-2020');
+      await tap('section-genre');
+      await tap('genre-SciFi');
+      await tap('genre-Comedy');
+      expect(calls, 0);
+      await tap('cancel');
+      expect(calls, 0);
+      expect(applied, isNull);
+
+      await tester.tap(find.text('open'));
+      await settle(tester);
+      await tap('section-year');
+      await tap('year-2024');
+      await tap('year-2020');
+      await tap('section-genre');
+      await tap('genre-SciFi');
+      await tap('genre-Comedy');
+      final apply = tester.getRect(find.byKey(const Key('phone-apply')));
+      expect(apply.height, greaterThanOrEqualTo(48));
+      expect(apply.bottom, lessThanOrEqualTo(800));
+      await tap('apply');
+      expect(calls, 1);
+      expect(applied!.years, [2024, 2020]);
+      expect(applied!.genres, ['SciFi', 'Comedy']);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

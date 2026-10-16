@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/option_pill.dart';
 import 'package:rillight/library/shelf_sort.dart';
@@ -95,8 +96,12 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
 
   Key _key(String suffix) => Key('${widget.keyPrefix}-$suffix');
 
+  bool _phoneSheet(BuildContext context) =>
+      !widget.television && PresentationScope.isPhoneOf(context);
+
   @override
   Widget build(BuildContext context) {
+    if (_phoneSheet(context)) return _buildPhone(context);
     final l = AppLocalizations.of(context), theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
@@ -397,6 +402,101 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
     final label = _sections(l).firstWhere((s) => s.$1 == _section).$2;
     final searchable = _section == 'year' || _section == 'genre';
     final query = _search.text.trim().toLowerCase();
+    final options = _optionEntries(l, query);
+    return Padding(
+      padding: EdgeInsets.all(widget.television ? 24 : 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(label, style: theme.textTheme.titleMedium),
+          if (searchable) ...[
+            const SizedBox(height: 8),
+            if (widget.television)
+              TvInput(
+                label: l.filterSearchOptions,
+                controller: _search,
+                onSubmitted: () => setState(() {}),
+              )
+            else
+              AppTextField(
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                placeholder: l.filterSearchOptions,
+                prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
+                suffix: query.isEmpty
+                    ? null
+                    : AppIconButton(
+                        tooltip: l.filterReset,
+                        onPressed: () => setState(_search.clear),
+                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                      ),
+              ),
+            const SizedBox(height: 8),
+            Text(
+              l.filterChooseHint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (_section == 'genre' && _loadingGenres) const AppLoadingBar(),
+          if (_section == 'genre' && _genreFailed)
+            AppButton.icon(
+              onPressed: _loadGenres,
+              icon: const Icon(CupertinoIcons.arrow_clockwise),
+              label: Text(l.retry),
+              variant: AppButtonVariant.plain,
+            ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: SingleChildScrollView(
+              key: _key('$_section-section'),
+              child: Wrap(
+                spacing: widget.television ? 12 : 8,
+                runSpacing: widget.television ? 12 : 8,
+                children: [
+                  for (final option in options)
+                    if (widget.television)
+                      SizedBox(
+                        width: _section == 'year' ? 120 : 270,
+                        child: TvAction(
+                          key: _key('$_section-${option.$1}'),
+                          selected: option.$3,
+                          onPressed: () => setState(option.$4),
+                          child: Row(
+                            children: [
+                              Expanded(child: Text(option.$2)),
+                              if (option.$3)
+                                const Icon(CupertinoIcons.check_mark, size: 20),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      OptionPill(
+                        key: _key('$_section-${option.$1}'),
+                        label: option.$2,
+                        selected: option.$3,
+                        onPressed: () => setState(option.$4),
+                      ),
+                  if (options.isEmpty ||
+                      (_section == 'genre' &&
+                          options.length == 1 &&
+                          !_loadingGenres))
+                    Text(l.filterNoOptions),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<(String, String, bool, VoidCallback)> _optionEntries(
+    AppLocalizations l,
+    String query,
+  ) {
     final options = <(String, String, bool, VoidCallback)>[];
     void option(
       String value,
@@ -475,34 +575,237 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
           option(sort.sortBy, sort.label(l), _sort == sort, () => _sort = sort);
         }
     }
+    return options;
+  }
+
+  Widget _buildPhone(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final size = MediaQuery.sizeOf(context);
+    final sections = _sections(l);
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final compactSection = _section == 'type' || _section == 'watch';
+    final naturalHeight = (compactSection ? 480.0 : 640.0) * textScale;
+    final height = math.min(
+      naturalHeight,
+      (size.height - MediaQuery.viewInsetsOf(context).bottom) * .9,
+    );
+    return AnimatedSize(
+      duration: AppMotion.durationOf(context),
+      curve: AppMotion.standard,
+      alignment: Alignment.bottomCenter,
+      child: SizedBox(
+        key: _key('phone-sheet'),
+        width: size.width,
+        height: height,
+        child: ColoredBox(
+          color: scheme.surface,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const SizedBox(width: 36, height: 4),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            l.filterBrowseTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            l.filterSelectedCount(_count),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    AppIconButton(
+                      key: _key('cancel'),
+                      tooltip: l.libraryFilterCancel,
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                    ),
+                  ],
+                ),
+              ),
+              if (_count > 0)
+                SizedBox(
+                  height: math.max(48, 40 * textScale),
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: [
+                      if (_draft.type != CatalogTypeFilter.all)
+                        _summary(
+                          _draft.type.label,
+                          () => _draft = _draft.copyWith(
+                            type: CatalogTypeFilter.all,
+                          ),
+                        ),
+                      if (_draft.watch != CatalogWatchFilter.all)
+                        _summary(
+                          _watchLabel(l, _draft.watch),
+                          () => _draft = _draft.copyWith(
+                            watch: CatalogWatchFilter.all,
+                          ),
+                        ),
+                      for (final year in _draft.years)
+                        _summary(
+                          '$year',
+                          () => _draft = _draft.copyWith(
+                            years: [..._draft.years]..remove(year),
+                          ),
+                        ),
+                      for (final genre in _draft.genres)
+                        _summary(
+                          genre,
+                          () => _draft = _draft.copyWith(
+                            genres: [..._draft.genres]..remove(genre),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              SizedBox(
+                height: math.max(60, 48 * textScale + 12),
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                  children: [
+                    for (final section in sections) _phoneCategory(section),
+                  ],
+                ),
+              ),
+              const AppDivider(height: 1),
+              Expanded(child: _phoneOptions(context)),
+              const AppDivider(height: 1),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: Row(
+                    children: [
+                      AppButton(
+                        key: _key('clear'),
+                        onPressed: _reset,
+                        variant: AppButtonVariant.plain,
+                        child: Text(l.filterReset),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: AppButton(
+                          key: _key('apply'),
+                          onPressed: _apply,
+                          style: const AppButtonStyle(
+                            minimumSize: Size(48, 48),
+                          ),
+                          variant: AppButtonVariant.filled,
+                          child: Text(l.filterApply),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _phoneCategory((String, String, IconData) entry) {
+    final selected = _section == entry.$1;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     return Padding(
-      padding: EdgeInsets.all(widget.television ? 24 : 20),
+      padding: const EdgeInsets.only(right: 8),
+      child: Semantics(
+        selected: selected,
+        child: AppButton(
+          key: _key('section-${entry.$1}'),
+          onPressed: () => _chooseSection(entry.$1),
+          style: AppButtonStyle(
+            minimumSize: const Size(48, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            backgroundColor: selected
+                ? scheme.primaryContainer
+                : scheme.surfaceContainerHigh,
+            foregroundColor: selected
+                ? scheme.onPrimaryContainer
+                : scheme.onSurfaceVariant,
+            shape: const StadiumBorder(),
+            textStyle: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+          variant: AppButtonVariant.tinted,
+          child: Text(entry.$2),
+        ),
+      ),
+    );
+  }
+
+  Widget _phoneOptions(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final label = _sections(l)
+        .firstWhere((section) => section.$1 == _section)
+        .$2;
+    final searchable = _section == 'year' || _section == 'genre';
+    final query = _search.text.trim().toLowerCase();
+    final options = _optionEntries(l, query);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(label, style: theme.textTheme.titleMedium),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           if (searchable) ...[
             const SizedBox(height: 8),
-            if (widget.television)
-              TvInput(
-                label: l.filterSearchOptions,
-                controller: _search,
-                onSubmitted: () => setState(() {}),
-              )
-            else
-              AppTextField(
-                controller: _search,
-                onChanged: (_) => setState(() {}),
-                placeholder: l.filterSearchOptions,
-                prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
-                suffix: query.isEmpty
-                    ? null
-                    : AppIconButton(
-                        tooltip: l.filterReset,
-                        onPressed: () => setState(_search.clear),
-                        icon: const Icon(AppIcons.close, fill: AppIcons.filled),
-                      ),
-              ),
+            AppTextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              placeholder: l.filterSearchOptions,
+              prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
+              suffix: query.isEmpty
+                  ? null
+                  : AppIconButton(
+                      tooltip: l.filterReset,
+                      onPressed: () => setState(_search.clear),
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                    ),
+            ),
             const SizedBox(height: 8),
             Text(
               l.filterChooseHint,
@@ -524,33 +827,16 @@ class _LibraryFilterPanelState extends State<LibraryFilterPanel> {
             child: SingleChildScrollView(
               key: _key('$_section-section'),
               child: Wrap(
-                spacing: widget.television ? 12 : 8,
-                runSpacing: widget.television ? 12 : 8,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   for (final option in options)
-                    if (widget.television)
-                      SizedBox(
-                        width: _section == 'year' ? 120 : 270,
-                        child: TvAction(
-                          key: _key('$_section-${option.$1}'),
-                          selected: option.$3,
-                          onPressed: () => setState(option.$4),
-                          child: Row(
-                            children: [
-                              Expanded(child: Text(option.$2)),
-                              if (option.$3)
-                                const Icon(CupertinoIcons.check_mark, size: 20),
-                            ],
-                          ),
-                        ),
-                      )
-                    else
-                      OptionPill(
-                        key: _key('$_section-${option.$1}'),
-                        label: option.$2,
-                        selected: option.$3,
-                        onPressed: () => setState(option.$4),
-                      ),
+                    OptionPill(
+                      key: _key('$_section-${option.$1}'),
+                      label: option.$2,
+                      selected: option.$3,
+                      onPressed: () => setState(option.$4),
+                    ),
                   if (options.isEmpty ||
                       (_section == 'genre' &&
                           options.length == 1 &&

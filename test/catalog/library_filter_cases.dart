@@ -82,7 +82,11 @@ class _FilteringEmbyServer extends FakeEmbyServer {
     final recursive = (q['Recursive'] ?? 'false').toLowerCase() == 'true';
     final types = _splitValues(q['IncludeItemTypes']);
     final filters = _splitValues(q['Filters']);
-    final genres = _splitValues(q['Genres']);
+    final genres = (q['Genres'] ?? '')
+        .split(RegExp(r'[|,]'))
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet();
     final years = _splitValues(q['Years'])
         .map(int.tryParse)
         .whereType<int>()
@@ -388,4 +392,116 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets(
+    'cancel keeps the list, and two years plus two genres both apply',
+    (tester) async {
+      server.items
+        ..clear()
+        ..addAll([
+          _GenreItem(
+            id: 'year-genre-a',
+            name: '科幻新片',
+            type: 'Movie',
+            parentId: 'view-untyped',
+            productionYear: 2024,
+            genres: const ['SciFi'],
+          ),
+          _GenreItem(
+            id: 'year-genre-b',
+            name: '喜剧旧片',
+            type: 'Movie',
+            parentId: 'view-untyped',
+            productionYear: 2020,
+            genres: const ['Comedy'],
+          ),
+          _GenreItem(
+            id: 'year-genre-c',
+            name: '喜剧新片',
+            type: 'Movie',
+            parentId: 'view-untyped',
+            productionYear: 2024,
+            genres: const ['Comedy'],
+          ),
+          _GenreItem(
+            id: 'year-genre-d',
+            name: '科幻老片',
+            type: 'Movie',
+            parentId: 'view-untyped',
+            productionYear: 2010,
+            genres: const ['SciFi'],
+          ),
+          _GenreItem(
+            id: 'year-genre-e',
+            name: '动作新片',
+            type: 'Movie',
+            parentId: 'view-untyped',
+            productionYear: 2024,
+            genres: const ['Action'],
+          ),
+        ]);
+      await pumpLoggedIn(tester);
+      await openLibrary(tester, 'view-untyped');
+      final before = posterNames(tester);
+      expect(before, containsAll(['科幻新片', '喜剧旧片', '喜剧新片', '科幻老片', '动作新片']));
+      await openFilters(tester);
+      final requestsBeforeDraft = server.requests.length;
+      await tester.tap(
+        find.byKey(const Key('catalog-grid-filter-section-year')),
+      );
+      await settle(tester);
+      await tester.ensureVisible(
+        find.byKey(const Key('catalog-grid-filter-year-2024')),
+      );
+      await tester.tap(find.byKey(const Key('catalog-grid-filter-year-2024')));
+      await settle(tester);
+      expect(posterNames(tester), before);
+      expect(server.requests.length, requestsBeforeDraft);
+      await tester.tap(find.byKey(const Key('catalog-grid-filter-cancel')));
+      await settle(tester);
+      expect(posterNames(tester), before);
+      expect(server.requests.length, requestsBeforeDraft);
+
+      await openFilters(tester);
+      await tester.tap(
+        find.byKey(const Key('catalog-grid-filter-section-year')),
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('catalog-grid-filter-year-2024')));
+      await settle(tester);
+      await tester.ensureVisible(
+        find.byKey(const Key('catalog-grid-filter-year-2020')),
+      );
+      await tester.tap(find.byKey(const Key('catalog-grid-filter-year-2020')));
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('catalog-grid-filter-section-genre')),
+      );
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('catalog-grid-filter-genre-SciFi')),
+      );
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('catalog-grid-filter-genre-Comedy')),
+      );
+      await settle(tester);
+      expect(posterNames(tester), before);
+      await applyFilters(tester);
+      final names = posterNames(tester);
+      expect(names, containsAll(['科幻新片', '喜剧旧片', '喜剧新片']));
+      expect(names, isNot(contains('科幻老片')));
+      expect(names, isNot(contains('动作新片')));
+      final query = Uri.decodeQueryComponent(
+        server.requests.lastWhere(
+          (request) =>
+              request.contains('/Users/') && request.contains('/Items?'),
+        ),
+      );
+      expect(query, contains('Years=2024,2020'));
+      expect(query, contains('Genres=SciFi|Comedy'));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 }
