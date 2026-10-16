@@ -275,7 +275,10 @@ class OutputDeviceEvents : public IMMNotificationClient {
     Bump();
     return S_OK;
   }
-  HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override {
+    Bump();
+    return S_OK;
+  }
   HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override {
     Bump();
     return S_OK;
@@ -553,8 +556,6 @@ void AudioOutput::Run() {
                            IID_PPV_ARGS(&enumerator)),
           "WASAPI device enumerator unavailable");
     ComPtr<IMMDevice> device;
-    Check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device),
-          "WASAPI default output unavailable");
     NotificationRegistration notifications;
     notifications.events = new OutputDeviceEvents(&device_generation_);
     if (FAILED(enumerator->RegisterEndpointNotificationCallback(
@@ -564,7 +565,6 @@ void AudioOutput::Run() {
     } else {
       notifications.enumerator = enumerator.Get();
     }
-    const uint32_t route_at_start = device_generation_.load();
     WasapiEndpoint endpoint;
     RillightIec61937Mux mux;
     std::vector<uint8_t> burst;
@@ -581,11 +581,16 @@ void AudioOutput::Run() {
     rillight_windows::PcmOnsetRamp onset_ramp;
     bool running = false;
     int exclusive_stalls = 0;
-    uint32_t seen_generation = route_at_start;
+    rillight_windows::AudioRouteRecovery route_recovery;
     // Non-zero while the last probe was endpoint_lost. Shared Initialize
-    // waits until a newer default-device generation is actually openable.
+    // waits for a successful notification-driven or periodic re-probe.
     uint32_t awaiting_generation = 0;
     auto retire_route = [&] {
+      // The old hardware clock cannot advance once its endpoint is retired.
+      // Handoff before waiting for a replacement so video and decoding move on.
+      api_->report_audio_unavailable(core_, session, timeline);
+      handoff_policy.Reset();
+      onset_ramp.Reset();
       if (running && endpoint.client) endpoint.client->Stop();
       running = false;
       endpoint.Close();
@@ -652,6 +657,7 @@ void AudioOutput::Run() {
       }
       const auto opened = OpenShared(device.Get(), channels, &endpoint);
       if (opened == rillight_windows::SharedInitResult::kWaitForGeneration) {
+        retire_route();
         device.Reset();
         awaiting_generation = device_generation_.load();
         drop_compressed();
@@ -678,20 +684,7 @@ void AudioOutput::Run() {
       open_shared(std::max(2, max_pcm_channels_));
     };
     auto on_endpoint_lost = [&] {
-      if (running && endpoint.client) endpoint.client->Stop();
-      running = false;
-      endpoint.Close();
-      device_padding_ = 0;
-      drop_compressed();
-      if (pending) {
-        api_->release_frame(pending);
-        pending = nullptr;
-        pending_ = false;
-      }
-      submitted_media_end = -1;
-      audio_clock_started = false;
-      handed_off_audio_clock = false;
-      offset = 0;
+      retire_route();
       // Clear passthrough before probing so the snapshot cannot stay
       // passthrough while this endpoint is gone.
       publish_route(2, 0);
@@ -761,8 +754,9 @@ void AudioOutput::Run() {
         timeline = state.timeline_version;
       }
       const uint32_t generation = device_generation_.load();
-      if (generation != seen_generation) {
-        seen_generation = generation;
+      if (route_recovery.ShouldProbe(
+              generation, device.Get() != nullptr && awaiting_generation == 0,
+              std::chrono::steady_clock::now())) {
         // IsFormatSupported/Initialize return DEVICE_IN_USE while this
         // process still holds the endpoint. Release first, then probe.
         retire_route();
@@ -777,6 +771,18 @@ void AudioOutput::Run() {
           running = false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        continue;
+      }
+      if (!device || awaiting_generation != 0) {
+        // A temporary absence must not fill the bounded decoder audio queue
+        // and stall video. Keep listening/re-probing in this same worker.
+        api_->report_audio_unavailable(core_, session, timeline);
+        for (int count = 0; count < 32 && !stopped_; ++count) {
+          auto* frame = api_->take_frame(core_, RILLIGHT_CORE_AUDIO_S16);
+          if (!frame) break;
+          api_->release_frame(frame);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         continue;
       }
       UINT32 padding = 0;

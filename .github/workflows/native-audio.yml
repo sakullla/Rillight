@@ -5,12 +5,14 @@ on:
     paths:
       - 'packages/rillight_player/macos/**'
       - 'packages/rillight_player/linux/**'
+      - 'packages/rillight_player/windows/**'
       - 'packages/rillight_player/native/**'
       - '.github/workflows/native-audio.yml'
   pull_request:
     paths:
       - 'packages/rillight_player/macos/**'
       - 'packages/rillight_player/linux/**'
+      - 'packages/rillight_player/windows/**'
       - 'packages/rillight_player/native/**'
       - '.github/workflows/native-audio.yml'
   workflow_dispatch:
@@ -42,3 +44,18 @@ jobs:
           cmake -S packages/rillight_player/native/core_tests/linux -B build/audio-contracts -DRILLIGHT_PULSE_TEST=ON
           cmake --build build/audio-contracts --parallel 3
           ctest --test-dir build/audio-contracts --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile WASAPI output and test route recovery contracts
+        shell: pwsh
+        run: |
+          cmake -S packages/rillight_player/native/core_tests/windows -B build/windows-audio
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/windows-audio --config Release --parallel 3 --target rillight_windows_audio_output_compile rillight_windows_audio_route_test rillight_windows_audio_route_recovery_test rillight_windows_audio_schedule_test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build/windows-audio -C Release --output-on-failure -R 'rillight_windows_audio_(route|route_recovery|schedule)$'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

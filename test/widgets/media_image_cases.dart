@@ -1650,23 +1650,6 @@ void main() {
     MediaImage.debugResetCacheConfiguration();
   });
 
-  void addPosterItems(int count) {
-    for (var i = 0; i < count; i++) {
-      server.items.add(
-        FakeEmbyItem(
-          id: 'poster-$i',
-          name: '海报$i',
-          type: 'Movie',
-          primaryImageTag: 'tag-$i',
-        ),
-      );
-    }
-  }
-
-  String? requestedItemId(String request) {
-    return RegExp(r'/Items/([^/]+)/Images/').firstMatch(request)?.group(1);
-  }
-
   testWidgets(
     'viewport disk hits paint while scrolling and offscreen disk stays deferred',
     (tester) async {

@@ -71,3 +71,20 @@ if(RILLIGHT_CORE_PREFIX_WINDOWS_X64)
   add_test(NAME rillight_windows_audio_catchup
     COMMAND rillight_windows_audio_catchup_test)
 endif()
+
+# Compile the real WASAPI worker without requiring a core DLL or audio device.
+add_library(rillight_windows_audio_output_compile OBJECT
+  ../../../windows/audio_output.cpp)
+target_compile_features(rillight_windows_audio_output_compile PRIVATE cxx_std_17)
+target_compile_definitions(rillight_windows_audio_output_compile PRIVATE NOMINMAX)
+
+add_executable(rillight_windows_audio_route_recovery_test audio_route_recovery_test.cpp)
+target_compile_features(rillight_windows_audio_route_recovery_test PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(rillight_windows_audio_route_recovery_test PRIVATE /W4 /WX /UNDEBUG)
+else()
+  target_compile_options(rillight_windows_audio_route_recovery_test PRIVATE
+    -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME rillight_windows_audio_route_recovery
+  COMMAND rillight_windows_audio_route_recovery_test)
