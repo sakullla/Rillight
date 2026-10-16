@@ -1124,13 +1124,8 @@ class CaptureSession {
             .widget<AppSelectableText>(find.byKey(const Key('tv-lan-address')))
             .data,
       );
-      final fingerprint = tester
-          .widget<AppSelectableText>(
-            find.byKey(const Key('tv-lan-fingerprint')),
-          )
-          .data;
-      expect(manual.queryParameters.keys.toSet(), {'id', 'fp'});
-      expect(manual.queryParameters['fp'], fingerprint);
+      expect(manual.queryParameters.keys.toSet(), {'id'});
+      expect(manual.scheme, 'http');
       expect(manual.toString().contains(secret), isFalse);
 
       if (shouldCapture('tv-lan-qr')) {
@@ -1146,7 +1141,7 @@ class CaptureSession {
       final html = await tester.runAsync(() => _lanRequest(firstOffer));
       expect(html, isNotNull);
       expect(html!.contains(secret), isFalse);
-      final page = _lanPhonePage(html, fingerprint);
+      final page = _lanPhonePage(html);
       if (shouldCapture('tv-lan-phone')) {
         await _showPhone(_LanPhonePreview(page), 'tv-lan-phone');
       }
@@ -1338,7 +1333,7 @@ Future<String> _lanRequest(Uri uri, {String? body}) {
 Future<String> _lanRequestDirect(Uri uri, {String? body}) async {
   final client = HttpClient();
   try {
-    client.badCertificateCallback = (_, _, _) => true;
+    client.connectionTimeout = const Duration(seconds: 5);
     final request = await client
         .openUrl(body == null ? 'GET' : 'POST', uri)
         .timeout(const Duration(seconds: 5));
@@ -1364,20 +1359,16 @@ Future<String> _lanRequestDirect(Uri uri, {String? body}) async {
 class _LanPhonePage {
   const _LanPhonePage({
     required this.title,
-    required this.intro,
-    required this.fingerprint,
     required this.labels,
     required this.submit,
   });
 
   final String title;
-  final String intro;
-  final String fingerprint;
   final List<String> labels;
   final String submit;
 }
 
-_LanPhonePage _lanPhonePage(String html, String fingerprint) {
+_LanPhonePage _lanPhonePage(String html) {
   expect(html.contains('<script'), isFalse);
   String tag(String name) {
     final match = RegExp(
@@ -1398,14 +1389,12 @@ _LanPhonePage _lanPhonePage(String html, String fingerprint) {
   }
   final page = _LanPhonePage(
     title: tag('h1'),
-    intro: tag('p'),
-    fingerprint: tag('code'),
     labels: labels,
     submit: tag('button'),
   );
   expect(page.title, '灯川 Rillight');
-  expect(page.intro, '证书指纹');
-  expect(page.fingerprint, fingerprint);
+  expect(html, contains('在手机上为电视登录'));
+  expect(html.contains('<code'), isFalse);
   expect(page.labels, ['服务器地址', '用户名', '密码', 'User-Agent']);
   expect(page.submit, '提交到电视');
   return page;
@@ -1454,35 +1443,6 @@ class _LanPhonePreview extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Text(
-                    page.intro,
-                    style: const TextStyle(
-                      color: Color(0xFF9AA4B8),
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: const Color(0x59000000),
-                      border: Border.all(color: const Color(0x14FFFFFF)),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Text(
-                      page.fingerprint,
-                      style: const TextStyle(
-                        color: Color(0xFF8EA2C9),
-                        fontSize: 11,
-                        height: 1.6,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
                   for (final label in page.labels) ...[
                     Text(
                       label,

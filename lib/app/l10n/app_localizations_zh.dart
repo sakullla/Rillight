@@ -1817,9 +1817,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get tvLanFailed => '辅助连接未完成';
 
   @override
-  String get tvLanFingerprint => '证书指纹';
-
-  @override
   String get tvLanAddress => '局域网地址';
 
   @override

@@ -411,6 +411,7 @@ class _TvFeaturedState extends State<_TvFeatured> {
               AnimatedSwitcher(
                 duration: AppMotion.durationOf(context, heroBackdropDuration),
                 transitionBuilder: heroBackdropTransition,
+                layoutBuilder: heroBackdropLayout,
                 child: RepaintBoundary(
                   key: ValueKey('tv-featured-art-${item.id}'),
                   child: heroLayoutFor(artwork) == HeroLayout.fullBleed

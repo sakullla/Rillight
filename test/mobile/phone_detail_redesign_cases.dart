@@ -177,6 +177,24 @@ void main() {
       expect(find.byKey(const Key('phone-episode-watched')), findsOneWidget);
       expect(find.text('已看'), findsNothing);
       expect(find.byKey(const Key('phone-episode-current')), findsOneWidget);
+      final currentIcon = tester.widget<Icon>(
+        find.byKey(const Key('phone-episode-current')),
+      );
+      expect(currentIcon.color, const Color(0xffffffff));
+      final plate =
+          tester
+                  .widget<DecoratedBox>(
+                    find
+                        .ancestor(
+                          of: find.byKey(const Key('phone-episode-current')),
+                          matching: find.byType(DecoratedBox),
+                        )
+                        .first,
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(plate.shape, BoxShape.circle);
+      expect(plate.color!.a, greaterThan(0.7));
       expect(find.byKey(PhoneGenreChips.rowKey), findsOneWidget);
       expect(tester.takeException(), isNull);
     });

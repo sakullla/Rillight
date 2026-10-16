@@ -63,21 +63,19 @@ void main() {
   });
 
   cases.test(
-    'the QR and address carry only the origin, id, and fingerprint',
+    'the QR and address carry only the origin and pairing id',
     () async {
       assist = start();
       await assist!.open();
       final offer = assist!.offer!;
       final uri = Uri.parse(offer.manualUrl);
       expect(offer.qrText, offer.manualUrl);
-      expect(uri.scheme, 'https');
+      expect(uri.scheme, 'http');
       expect(uri.host, '127.0.0.1');
       expect(uri.port, offer.port);
       expect(uri.userInfo, isEmpty);
-      expect(uri.queryParameters.keys.toSet(), {'id', 'fp'});
+      expect(uri.queryParameters.keys.toSet(), {'id'});
       expect(uri.queryParameters['id'], offer.pairingId);
-      expect(uri.queryParameters['fp'], offer.fingerprint);
-      expect(offer.fingerprint, hasLength(64));
       expect(offer.qrText.contains(_password), isFalse);
       expect(offer.manualUrl.contains('token'), isFalse);
       expect(offer.qrModules.first.first, isTrue);
@@ -85,13 +83,11 @@ void main() {
 
       final page = await _exchange(offer);
       expect(page!.status, 200);
-      expect(page.body.contains(offer.fingerprint), isTrue);
       expect(page.body.contains(_password), isFalse);
       expect(page.body.contains('cdn'), isFalse);
       expect(page.body.contains('<script'), isFalse);
       expect(page.body, contains('name="userAgent"'));
-      expect(page.sawUntrustedCertificate, isTrue);
-      expect(page.certificateDer, orderedEquals(offer.certificateDer));
+      expect(page.body.contains('证书'), isFalse);
     },
   );
 
@@ -317,11 +313,17 @@ void main() {
 
       await tester.tap(assistButton);
       await _waitForLan(tester, () => opened);
+      await tester.pump();
       assist = opened;
       expect(assist!.phase, TvLanPhase.waiting);
+      expect(_focused(tester, const Key('tv-lan-waiting')), isTrue);
+      expect(_focused(tester, const Key('tv-connect-submit')), isFalse);
       expect(find.text(_password), findsNothing);
       final deadline = assist!.expiresAt;
       expect(deadline, isNotNull);
+      final remaining = deadline!.difference(DateTime.now());
+      expect(remaining, greaterThan(const Duration(minutes: 19, seconds: 30)));
+      expect(remaining, lessThan(const Duration(minutes: 20, seconds: 5)));
       final shown = tester
           .widget<Text>(find.byKey(const Key('tv-lan-expires')))
           .data!;
@@ -345,6 +347,15 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('tv-lan-server')), findsOneWidget);
       expect(find.byKey(const Key('tv-lan-account')), findsOneWidget);
+      final confirmFocus = tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: find.byKey(const Key('tv-lan-confirm')),
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode!;
+      expect(confirmFocus.hasFocus, isTrue);
       expect(find.text(server.baseUrl.toString()), findsWidgets);
       expect(find.text('alice'), findsWidgets);
       expect(find.text('correct-horse'), findsNothing);
@@ -391,7 +402,10 @@ void main() {
       await _waitForLan(tester, () => opened);
       assist = opened;
       expect(find.byKey(const Key('tv-connect-address')), findsOneWidget);
-      expect(find.text('辅助连接未完成'), findsOneWidget);
+      await tester.pump();
+      expect(_focused(tester, const Key('tv-lan-waiting')), isTrue);
+      expect(find.text('取消'), findsOneWidget);
+      expect(find.text('辅助连接未完成'), findsNothing);
 
       await tester.tap(find.byKey(const Key('tv-lan-incomplete')));
       await tester.pump();
@@ -401,7 +415,8 @@ void main() {
       expect(auth.isLoggedIn, isFalse);
       expect(find.byKey(const Key('tv-connect-address')), findsOneWidget);
       expect(find.byKey(const Key('tv-connect-submit')), findsOneWidget);
-      expect(find.text('辅助连接未完成'), findsWidgets);
+      expect(_focused(tester, const Key('tv-lan-assist')), isTrue);
+      expect(find.text('辅助连接未完成'), findsOneWidget);
     },
   );
 
@@ -430,7 +445,7 @@ void main() {
       );
       expect(posted!.status, 200);
       _expectPhone(posted.body, '待确认', secret: _password, token: token);
-      expect(_statusQuery(posted.body), {'id', 'fp'});
+      expect(_statusQuery(posted.body), {'id'});
 
       final connectingFuture = _exchange(offer, path: '/status');
       await _waitForPhone(assist!);
@@ -812,6 +827,18 @@ void main() {
   });
 }
 
+bool _focused(WidgetTester tester, Key key) {
+  return tester
+      .widget<FocusableActionDetector>(
+        find.descendant(
+          of: find.byKey(key),
+          matching: find.byType(FocusableActionDetector),
+        ),
+      )
+      .focusNode!
+      .hasFocus;
+}
+
 Future<void> _waitForLan(
   WidgetTester tester,
   TvLanAssist? Function() current,
@@ -856,7 +883,7 @@ Set<String> _statusQuery(String body) {
   final match = RegExp('url=([^"]+)').firstMatch(body);
   expect(match, isNotNull);
   final raw = match!.group(1)!.replaceAll('&amp;', '&');
-  final uri = Uri.parse('https://127.0.0.1$raw');
+  final uri = Uri.parse('http://127.0.0.1$raw');
   return uri.queryParameters.keys.toSet();
 }
 
@@ -873,17 +900,10 @@ String _form(
 }
 
 class _Page {
-  const _Page({
-    required this.status,
-    required this.body,
-    required this.sawUntrustedCertificate,
-    required this.certificateDer,
-  });
+  const _Page({required this.status, required this.body});
 
   final int status;
   final String body;
-  final bool sawUntrustedCertificate;
-  final List<int> certificateDer;
 }
 
 /// The widget binding replaces [HttpClient] with a client that never connects.
@@ -917,23 +937,13 @@ Future<_Page?> _exchangeDirect(
 }) async {
   final client = HttpClient()
     ..connectionTimeout = const Duration(milliseconds: 250);
-  var untrusted = false;
-  List<int> der = const [];
   try {
-    client.badCertificateCallback = (certificate, host, port) {
-      untrusted = true;
-      der = certificate.der;
-      return true;
-    };
     final uri = Uri(
-      scheme: 'https',
+      scheme: 'http',
       host: '127.0.0.1',
       port: offer.port,
       path: path,
-      queryParameters: {
-        'id': pairingId ?? offer.pairingId,
-        'fp': offer.fingerprint,
-      },
+      queryParameters: {'id': pairingId ?? offer.pairingId},
     );
     final request = await client
         .openUrl(method, uri)
@@ -948,12 +958,7 @@ Future<_Page?> _exchangeDirect(
     }
     final response = await request.close().timeout(const Duration(seconds: 5));
     final text = await utf8.decoder.bind(response).join();
-    return _Page(
-      status: response.statusCode,
-      body: text,
-      sawUntrustedCertificate: untrusted,
-      certificateDer: der,
-    );
+    return _Page(status: response.statusCode, body: text);
   } on Object {
     return null;
   } finally {

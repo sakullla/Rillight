@@ -321,6 +321,7 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
         AnimatedSwitcher(
           duration: AppMotion.durationOf(context, heroBackdropDuration),
           transitionBuilder: heroBackdropTransition,
+          layoutBuilder: heroBackdropLayout,
           child: RepaintBoundary(
             key: ValueKey('home-hero-slide-${item.id}'),
             child: backdrop,

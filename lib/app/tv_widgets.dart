@@ -1038,7 +1038,11 @@ class _TvCardState extends State<TvCard> {
             foregroundDecoration: BoxDecoration(
               borderRadius: radius,
               border: Border.all(
-                color: focused ? scheme.onSurface : const Color(0x00000000),
+                color: focused
+                    ? scheme.onSurface
+                    : widget.current
+                    ? scheme.primary
+                    : const Color(0x00000000),
                 width: TvAction.focusRingWidth * s,
                 strokeAlign: BorderSide.strokeAlignOutside,
               ),
@@ -1093,12 +1097,9 @@ class _TvCardState extends State<TvCard> {
                     ),
                   if (widget.current)
                     Center(
-                      child: Icon(
-                        AppIcons.nowPlaying,
-                        fill: AppIcons.filled,
-                        key: const Key('tv-episode-current'),
-                        size: 36 * s,
-                        color: const Color(0xffffffff).withValues(alpha: .92),
+                      child: EpisodeCurrentMark(
+                        size: 32 * s,
+                        iconKey: const Key('tv-episode-current'),
                       ),
                     ),
                 ],
@@ -1122,8 +1123,10 @@ class _TvCardState extends State<TvCard> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface,
-                  fontWeight: focused ? FontWeight.w700 : FontWeight.w500,
+                  color: widget.current ? scheme.primary : scheme.onSurface,
+                  fontWeight: focused || widget.current
+                      ? FontWeight.w700
+                      : FontWeight.w500,
                 ),
               ),
               if (subtitle != null && subtitle.isNotEmpty)

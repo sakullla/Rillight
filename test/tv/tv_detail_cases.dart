@@ -393,6 +393,26 @@ void main() {
         ),
         findsOneWidget,
       );
+      final currentIcon = tester.widget<Icon>(
+        find.byKey(const Key('tv-episode-current')),
+      );
+      expect(currentIcon.color, const Color(0xffffffff));
+      final disc = tester.widget<DecoratedBox>(
+        find
+            .ancestor(
+              of: find.byKey(const Key('tv-episode-current')),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      final plate = disc.decoration as BoxDecoration;
+      expect(plate.shape, BoxShape.circle);
+      expect(plate.color!.a, greaterThan(0.7));
+      final title = find.text('S1E2 The One with the Resume');
+      expect(
+        tester.widget<Text>(title).style?.color,
+        AppUiTheme.of(tester.element(title)).colorScheme.primary,
+      );
       expect(
         find.descendant(of: currentTile, matching: find.byType(AppLoadingBar)),
         findsOneWidget,

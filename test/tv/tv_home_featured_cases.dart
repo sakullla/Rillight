@@ -170,8 +170,23 @@ void main() {
 
       final next = find.byKey(TvHomeKeys.featuredNext);
       expect(next, findsOneWidget);
-      // Activate once; activation refocuses the control.
       await tester.tap(next);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      final stage = tester.getRect(find.byKey(TvHomeKeys.featured));
+      final clip = tester.getRect(
+        find
+            .descendant(
+              of: find.byKey(TvHomeKeys.featured),
+              matching: find.byType(ClipRect),
+            )
+            .first,
+      );
+      expect(
+        (stage.bottom - clip.bottom).abs(),
+        lessThanOrEqualTo(1),
+        reason: 'The carousel clip must stay flush with the stage while switching',
+      );
       await settle(tester);
       expect(featuredIndicator(tester), '2 / $count');
       expect(

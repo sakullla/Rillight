@@ -648,8 +648,10 @@ const heroSlideDuration = Duration(milliseconds: 420);
 const heroBackdropDuration = Duration(milliseconds: 680);
 
 /// 桌面舞台背景换页:新图在旧图之上淡入并由 1.03 收到 1,旧图保持不透明
-/// 直到被完全盖住。两层同时半透明的交叉淡化会在中途透出底色,大图上
-/// 看起来是一次「闪暗」。
+/// 直到被完全盖住。两层同时半透明的交叉淡化会在中途透出底色。
+///
+/// 缩放层比舞台各边多铺 2px 再硬裁。否则缩放落在半像素上时,底边会露出
+/// 舞台底色,切换瞬间看起来像一条缝。
 Widget heroBackdropTransition(Widget child, Animation<double> animation) {
   final entering = CurvedAnimation(
     parent: _EnterOnlyAnimation(animation),
@@ -657,11 +659,52 @@ Widget heroBackdropTransition(Widget child, Animation<double> animation) {
   );
   return FadeTransition(
     opacity: entering,
-    child: ScaleTransition(
-      scale: Tween<double>(begin: 1.03, end: 1).animate(entering),
-      child: child,
+    child: ClipRect(
+      clipBehavior: Clip.hardEdge,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 1.03, end: 1).animate(entering),
+        filterQuality: FilterQuality.none,
+        child: _HeroBackdropBleed(child: child),
+      ),
     ),
   );
+}
+
+/// 换页时两张图都铺满舞台,避免其中一张短暂变矮后在底部露出底色。
+Widget heroBackdropLayout(Widget? current, List<Widget> previous) {
+  return Stack(
+    fit: StackFit.expand,
+    clipBehavior: Clip.hardEdge,
+    alignment: Alignment.center,
+    children: [...previous, ?current],
+  );
+}
+
+class _HeroBackdropBleed extends StatelessWidget {
+  const _HeroBackdropBleed({required this.child});
+
+  final Widget child;
+
+  static const bleed = 2.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        if (!width.isFinite || !height.isFinite) return child;
+        return OverflowBox(
+          alignment: Alignment.center,
+          minWidth: width + bleed * 2,
+          maxWidth: width + bleed * 2,
+          minHeight: height + bleed * 2,
+          maxHeight: height + bleed * 2,
+          child: child,
+        );
+      },
+    );
+  }
 }
 
 /// 桌面舞台文字换页:旧文字先快速淡出,新文字随后上移淡入,两段文字

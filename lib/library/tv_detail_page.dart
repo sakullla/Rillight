@@ -671,7 +671,7 @@ class _TvEpisodeRowState extends State<_TvEpisodeRow> {
           }
           final episode = episodes[index];
           final current = episode.id == widget.currentId;
-          // 当前集由图标标出，续播由进度条标出，已看由角标标出。
+          // 当前集由实心圆标和主色标题标出，续播由进度条标出，已看由角标标出。
           final meta = <String>[
             if (episode.premiereDate != null)
               formatDateYmd(episode.premiereDate!),

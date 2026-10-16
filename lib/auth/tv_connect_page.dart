@@ -45,9 +45,13 @@ class _TvConnectPageState extends State<TvConnectPage> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   final _userAgent = TextEditingController();
+  final _assistFocus = FocusNode(debugLabel: 'tv-lan-assist');
+  final _submitFocus = FocusNode(debugLabel: 'tv-connect-submit');
   ConnectDraft? _draft;
   TvLanAssist? _lan;
   bool _openingLan = false;
+  bool _authBusy = false;
+  TvLanPhase _seenLan = TvLanPhase.idle;
 
   @override
   void didChangeDependencies() {
@@ -114,10 +118,43 @@ class _TvConnectPageState extends State<TvConnectPage> {
   }
 
   void _onLan() {
+    final phase = _lan?.phase ?? TvLanPhase.idle;
+    final previous = _seenLan;
+    _seenLan = phase;
     if (mounted) {
       setState(() {});
     }
+    if (_lanHandsBack(phase) && !_lanHandsBack(previous)) {
+      _focusLater(_assistFocus);
+    }
   }
+
+  void _noteAuth(bool busy, Object? failure) {
+    final wasBusy = _authBusy;
+    if (wasBusy == busy) return;
+    _authBusy = busy;
+    if (wasBusy && !busy && failure != null && !_lanHandsBack(_lan?.phase)) {
+      _focusLater(_submitFocus);
+    }
+  }
+
+  /// 禁用按钮会退出焦点树，同帧里最近的控件往往是「连接」。
+  /// 晚一帧再要焦点，等新按钮已经能接收遥控器。
+  void _focusLater(FocusNode node) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !node.canRequestFocus) return;
+        node.requestFocus();
+        FocusManager.instance.applyFocusChangesIfNeeded();
+      });
+    });
+  }
+
+  bool _lanHandsBack(TvLanPhase? phase) =>
+      phase == TvLanPhase.expired ||
+      phase == TvLanPhase.failed ||
+      phase == TvLanPhase.rejected ||
+      phase == TvLanPhase.cancelled;
 
   Future<void> _openLan() async {
     if (_openingLan) {
@@ -159,6 +196,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
   void dispose() {
     _lan?.removeListener(_onLan);
     _lan?.dispose();
+    _assistFocus.dispose();
+    _submitFocus.dispose();
     for (final field in [_address, _username, _password, _userAgent]) {
       field.dispose();
     }
@@ -169,12 +208,15 @@ class _TvConnectPageState extends State<TvConnectPage> {
     final lan = _lan;
     if (_openingLan) return true;
     if (lan == null) return false;
-    return lan.phase == TvLanPhase.waiting || lan.phase == TvLanPhase.pending;
+    return lan.phase == TvLanPhase.waiting ||
+        lan.phase == TvLanPhase.pending ||
+        lan.phase == TvLanPhase.connecting;
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.of(context);
+    _noteAuth(auth.isBusy, auth.failure);
     final l10n = AppLocalizations.of(context);
     final appearance = AppearanceScope.maybeOf(context);
     return TvFrame(
@@ -368,6 +410,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
               key: const Key('tv-connect-submit'),
               emphasized: true,
               expand: true,
+              focusNode: _submitFocus,
               onPressed: auth.isBusy ? null : _submit,
               child: Center(
                 child: Text(
@@ -419,6 +462,7 @@ class _TvConnectPageState extends State<TvConnectPage> {
             TvAction(
               key: const Key('tv-lan-assist'),
               expand: true,
+              focusNode: _assistFocus,
               leading: const Icon(AppIcons.qrCode, fill: AppIcons.filled),
               onPressed: auth.isBusy || _openingLan || _lanActive
                   ? null
@@ -454,7 +498,8 @@ class _TvConnectPageState extends State<TvConnectPage> {
     if (phase == TvLanPhase.waiting && offer != null) {
       return [_TvLanWaiting(offer: offer, lan: lan!, expiresAt: lan.expiresAt)];
     }
-    if (phase == TvLanPhase.pending && pending != null) {
+    if ((phase == TvLanPhase.pending || phase == TvLanPhase.connecting) &&
+        pending != null) {
       return [
         _TvLanPending(
           pending: pending,
@@ -535,7 +580,11 @@ class _TvLanHeader extends StatelessWidget {
 }
 
 /// 等待手机扫码:左侧白底二维码,右侧说明、有效期、地址与指纹。
-class _TvLanWaiting extends StatelessWidget {
+///
+/// 打开扫码会禁用「手机辅助连接」。若不再指定焦点，遥控器会落到紧挨着的
+/// 「连接」上，按确认就会用表单登录。这里把焦点放在不会取消、也不会登录的
+/// 等待状态上。
+class _TvLanWaiting extends StatefulWidget {
   const _TvLanWaiting({
     required this.offer,
     required this.lan,
@@ -547,7 +596,37 @@ class _TvLanWaiting extends StatelessWidget {
   final DateTime? expiresAt;
 
   @override
+  State<_TvLanWaiting> createState() => _TvLanWaitingState();
+}
+
+class _TvLanWaitingState extends State<_TvLanWaiting> {
+  final _holdFocus = FocusNode(debugLabel: 'tv-lan-waiting');
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_holdFocus.canRequestFocus) return;
+        _holdFocus.requestFocus();
+        FocusManager.instance.applyFocusChangesIfNeeded();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _holdFocus.dispose();
+    super.dispose();
+  }
+
+  void _keepWaiting() {}
+
+  @override
   Widget build(BuildContext context) {
+    final offer = widget.offer;
+    final lan = widget.lan;
+    final expiresAt = widget.expiresAt;
     final l10n = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
@@ -618,20 +697,23 @@ class _TvLanWaiting extends StatelessWidget {
           key: const Key('tv-lan-address'),
           style: mono,
         ),
-        SizedBox(height: 8 * s),
-        Text(l10n.tvLanFingerprint, style: label),
-        AppSelectableText(
-          offer.fingerprint,
-          key: const Key('tv-lan-fingerprint'),
-          style: mono?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-        ),
         SizedBox(height: 14 * s),
+        TvAction(
+          key: const Key('tv-lan-waiting'),
+          focusNode: _holdFocus,
+          pill: true,
+          emphasized: true,
+          leading: const Icon(AppIcons.schedule, fill: AppIcons.filled),
+          onPressed: _keepWaiting,
+          child: Text(l10n.tvLanWaiting),
+        ),
+        SizedBox(height: 10 * s),
         TvAction(
           key: const Key('tv-lan-incomplete'),
           pill: true,
           leading: const Icon(AppIcons.close, fill: AppIcons.filled),
           onPressed: lan.markIncomplete,
-          child: Text(l10n.tvLanFailed),
+          child: Text(l10n.cancelAction),
         ),
       ],
     );
@@ -639,7 +721,10 @@ class _TvLanWaiting extends StatelessWidget {
 }
 
 /// 手机已提交:复核服务器与账号,确认/拒绝。
-class _TvLanPending extends StatelessWidget {
+///
+/// 等待页和右侧地址栏在提交前已经占着焦点。后插入的按钮只设 autofocus
+/// 不会改掉已有焦点,所以确认按钮出现后要自己把遥控器焦点要过来。
+class _TvLanPending extends StatefulWidget {
   const _TvLanPending({
     required this.pending,
     required this.busy,
@@ -653,7 +738,34 @@ class _TvLanPending extends StatelessWidget {
   final VoidCallback onReject;
 
   @override
+  State<_TvLanPending> createState() => _TvLanPendingState();
+}
+
+class _TvLanPendingState extends State<_TvLanPending> {
+  final _confirmFocus = FocusNode(debugLabel: 'tv-lan-confirm');
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_confirmFocus.canRequestFocus) return;
+      _confirmFocus.requestFocus();
+      FocusManager.instance.applyFocusChangesIfNeeded();
+    });
+  }
+
+  @override
+  void dispose() {
+    _confirmFocus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final pending = widget.pending;
+    final busy = widget.busy;
+    final onConfirm = widget.onConfirm;
+    final onReject = widget.onReject;
     final l10n = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final s = TvDesign.scaleOf(context);
@@ -717,6 +829,7 @@ class _TvLanPending extends StatelessWidget {
               emphasized: true,
               pill: true,
               autofocus: true,
+              focusNode: _confirmFocus,
               leading: const Icon(AppIcons.check, fill: AppIcons.filled),
               onPressed: busy ? null : onConfirm,
               child: Text(l10n.tvLanConfirm),

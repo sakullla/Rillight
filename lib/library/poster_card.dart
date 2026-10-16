@@ -4,6 +4,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/widgets/app_hover_card.dart';
 import 'package:rillight/media_server/models.dart';
 import 'package:rillight/home/catalog_keys.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_window_host.dart';
@@ -216,6 +217,10 @@ class EpisodeThumbCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                      if (selected && !highlighted)
+                        const Center(
+                          child: IgnorePointer(child: EpisodeCurrentMark()),
+                        ),
                       if (item.userData.played)
                         Positioned(
                           top: 6,
@@ -250,7 +255,9 @@ class EpisodeThumbCard extends StatelessWidget {
                 width: width,
                 style: AppUiTheme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: selected ? FontWeight.w700 : null,
-                  color: AppUiTheme.of(context).colorScheme.onSurface,
+                  color: selected
+                      ? AppUiTheme.of(context).colorScheme.primary
+                      : AppUiTheme.of(context).colorScheme.onSurface,
                 ),
               ),
             ],

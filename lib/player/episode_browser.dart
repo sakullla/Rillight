@@ -5,6 +5,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/media_server/models.dart';
+import 'package:rillight/library/episode_list.dart';
 import 'package:rillight/library/item_format.dart';
 import 'package:rillight/media_image/media_image.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -406,7 +407,7 @@ class _EpisodeRow extends StatelessWidget {
                   maxLines: overview == null ? 1 : 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
-                    color: scheme.onSurface,
+                    color: isCurrent ? scheme.primary : scheme.onSurface,
                     fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
@@ -504,16 +505,7 @@ class _EpisodeThumb extends StatelessWidget {
                 maxWidth: 240,
               ),
             ),
-            if (isCurrent)
-              ColoredBox(
-                color: scheme.scrim.withValues(alpha: 0.42),
-                child: Icon(
-                  AppIcons.nowPlaying,
-                  fill: AppIcons.filled,
-                  color: scheme.onSurface,
-                  size: 26,
-                ),
-              ),
+            if (isCurrent) const Center(child: EpisodeCurrentMark(size: 22)),
             if (played && !isCurrent)
               Align(
                 alignment: Alignment.topRight,

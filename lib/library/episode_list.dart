@@ -656,6 +656,16 @@ class _EpisodeThumb extends StatelessWidget {
                     bottom: resumable ? 9 : 6,
                     child: EpisodeThumbBadge(label: runtime),
                   ),
+                if (selected)
+                  Center(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: hovered ? 0 : 1,
+                        duration: fade,
+                        child: const EpisodeCurrentMark(size: 22),
+                      ),
+                    ),
+                  ),
                 // 只有中央的圆钮开播；卡片其余位置（含剧照）进入集详情。
                 Center(
                   child: AnimatedOpacity(
@@ -776,6 +786,44 @@ class EpisodeThumbBadge extends StatelessWidget {
             fontWeight: FontWeight.w600,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 当前集标记:实心圆底上的播放图标,亮暗剧照都能看清。
+class EpisodeCurrentMark extends StatelessWidget {
+  const EpisodeCurrentMark({super.key, this.size = 22, this.iconKey});
+
+  final double size;
+  final Key? iconKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final light = scheme.brightness == Brightness.light;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: light
+            ? scheme.primary
+            : const Color(0xff000000).withValues(alpha: .86),
+        shape: BoxShape.circle,
+        border: light
+            ? null
+            : Border.all(
+                color: const Color(0xffffffff).withValues(alpha: .92),
+                width: (size * .07).clamp(1.5, 2.5).toDouble(),
+              ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(size * .28),
+        child: Icon(
+          AppIcons.play,
+          key: iconKey,
+          fill: AppIcons.filled,
+          size: size,
+          color: light ? scheme.onPrimary : const Color(0xffffffff),
         ),
       ),
     );
