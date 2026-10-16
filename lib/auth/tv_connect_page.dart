@@ -677,7 +677,7 @@ class _TvLanWaitingState extends State<_TvLanWaiting> {
                         SizedBox(width: 6 * s),
                         Flexible(
                           child: Text(
-                            l10n.tvLanValidUntil(_lanClock(expiresAt!)),
+                            l10n.tvLanValidUntil(_lanClock(expiresAt)),
                             key: const Key('tv-lan-expires'),
                             style: secondary,
                           ),

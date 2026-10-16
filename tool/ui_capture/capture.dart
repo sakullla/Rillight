@@ -67,6 +67,13 @@ void main() {
           rootBundle.load('packages/cupertino_icons/assets/CupertinoIcons.ttf'),
         ))
         .load();
+    await (FontLoader('packages/material_symbols_icons/MaterialSymbolsRounded')
+          ..addFont(
+            rootBundle.load(
+              'packages/material_symbols_icons/lib/fonts/MaterialSymbolsRounded.ttf',
+            ),
+          ))
+        .load();
   });
   final configurations = <(String, PresentationEnvironment, Size)>[
     ('desktop', PresentationEnvironment.desktop, const Size(1440, 1000)),

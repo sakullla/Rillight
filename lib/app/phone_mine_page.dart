@@ -119,6 +119,9 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
           decoration: BoxDecoration(
             color: scheme.surfaceContainer,
             borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.45),
+            ),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -179,6 +182,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   scheme.surfaceContainer,
                 ],
               ),
+              border: Border.all(color: scheme.primary.withValues(alpha: 0.24)),
             ),
             clipBehavior: Clip.antiAlias,
             child: AppSurfaceAction(
@@ -196,14 +200,7 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [
-                            scheme.primary,
-                            Color.lerp(
-                              scheme.primary,
-                              const Color(0xFF7A3E00),
-                              .55,
-                            )!,
-                          ],
+                          colors: [scheme.primary, scheme.secondary],
                         ),
                       ),
                       child: initial == null
@@ -451,6 +448,9 @@ class _MineTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainer,
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.45),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: AppSurfaceAction(
@@ -464,7 +464,7 @@ class _MineTile extends StatelessWidget {
                 DecoratedBox(
                   decoration: BoxDecoration(
                     color: scheme.primary.withValues(alpha: .16),
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(8),

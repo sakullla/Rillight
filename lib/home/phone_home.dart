@@ -685,28 +685,40 @@ class _WideCard extends StatelessWidget {
                         Positioned(
                           left: 10,
                           bottom: 12,
-                          child: AppIconButton(
-                            key: Key('phone-resume-play-${item.id}'),
-                            tooltip: l10n.resumePlay,
-                            style: AppButtonStyle(
-                              minimumSize: const Size(48, 48),
-                              fixedSize: const Size(48, 48),
-                              padding: EdgeInsets.zero,
-                              backgroundColor: const Color(0xF2FFFFFF),
-                              foregroundColor: const Color(0xff000000),
-                              shape: const CircleBorder(),
+                          child: DecoratedBox(
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Color(0x52000000),
+                                  blurRadius: 12,
+                                  offset: Offset(0, 4),
+                                ),
+                              ],
                             ),
-                            onPressed: () => context.push<void>(
-                              '/play/${item.id}',
-                              extra: PlayerOpenRequest(
-                                itemId: item.id,
-                                autoResume: true,
+                            child: AppIconButton(
+                              key: Key('phone-resume-play-${item.id}'),
+                              tooltip: l10n.resumePlay,
+                              style: AppButtonStyle(
+                                minimumSize: const Size(48, 48),
+                                fixedSize: const Size(48, 48),
+                                padding: EdgeInsets.zero,
+                                backgroundColor: const Color(0xF2FFFFFF),
+                                foregroundColor: const Color(0xff000000),
+                                shape: const CircleBorder(),
                               ),
-                            ),
-                            icon: const Icon(
-                              AppIcons.play,
-                              size: 20,
-                              fill: AppIcons.filled,
+                              onPressed: () => context.push<void>(
+                                '/play/${item.id}',
+                                extra: PlayerOpenRequest(
+                                  itemId: item.id,
+                                  autoResume: true,
+                                ),
+                              ),
+                              icon: const Icon(
+                                AppIcons.play,
+                                size: 22,
+                                fill: AppIcons.filled,
+                              ),
                             ),
                           ),
                         ),

@@ -198,6 +198,10 @@ class _EpisodeListState extends State<EpisodeList> {
   void _seek(int target, int generation, int attempt) {
     if (!mounted || generation != _seekGeneration || attempt >= 24) return;
     if (target >= widget.episodes.length) return;
+    final columns = _metrics?.columns ?? 4;
+    if (widget.revealToken == 0 && target < columns) {
+      return;
+    }
     final id = widget.episodes[target].id;
     final targetContext = _rows[id]?.currentContext;
     if (targetContext != null) {

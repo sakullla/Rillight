@@ -61,53 +61,64 @@ class PosterCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: width,
-                  height: height,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      RepaintBoundary(
-                        child: AnimatedScale(
-                          scale: zoom ? hoverScale : 1,
-                          duration: AppMotion.durationOf(
-                            context,
-                            AppMotion.fast,
-                          ),
-                          curve: AppMotion.standard,
-                          child: MediaImage(
-                            key: ValueKey(item.id),
-                            item: item,
-                            width: width,
-                            height: height,
-                            preferBackdrop: preferBackdrop ?? wide,
-                            maxWidth: wide ? 360 : 280,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                      _PosterRevealOverlay(
-                        item: item,
-                        revealed: highlighted,
-                        showMeta: !wide,
-                        playKey: PosterCard.playButtonKey(item.id),
-                        onRemoveFromResume: onRemoveFromResume,
-                      ),
-                      if (showProgress && item.canResume)
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: _ResumeProgressBar(
-                            key: CatalogKeys.resumeProgress,
-                            value: progress,
-                            label: l10n.playbackProgress(
-                              (progress * 100).round(),
+              DecoratedBox(
+                position: DecorationPosition.foreground,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  border: Border.all(
+                    color: AppUiTheme.of(context).colorScheme.onSurface
+                        .withValues(alpha: 0.08),
+                    width: 0.8,
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox(
+                    width: width,
+                    height: height,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        RepaintBoundary(
+                          child: AnimatedScale(
+                            scale: zoom ? hoverScale : 1,
+                            duration: AppMotion.durationOf(
+                              context,
+                              AppMotion.fast,
+                            ),
+                            curve: AppMotion.standard,
+                            child: MediaImage(
+                              key: ValueKey(item.id),
+                              item: item,
+                              width: width,
+                              height: height,
+                              preferBackdrop: preferBackdrop ?? wide,
+                              maxWidth: wide ? 360 : 280,
+                              fit: BoxFit.cover,
                             ),
                           ),
                         ),
-                    ],
+                        _PosterRevealOverlay(
+                          item: item,
+                          revealed: highlighted,
+                          showMeta: !wide,
+                          playKey: PosterCard.playButtonKey(item.id),
+                          onRemoveFromResume: onRemoveFromResume,
+                        ),
+                        if (showProgress && item.canResume)
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: _ResumeProgressBar(
+                              key: CatalogKeys.resumeProgress,
+                              value: progress,
+                              label: l10n.playbackProgress(
+                                (progress * 100).round(),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),

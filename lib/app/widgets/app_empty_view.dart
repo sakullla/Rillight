@@ -29,43 +29,58 @@ class AppEmptyView extends StatelessWidget {
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHigh,
-                shape: BoxShape.circle,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Icon(
-                  icon,
-                  fill: AppIcons.filled,
-                  size: 28,
-                  color: colorScheme.onSurfaceVariant,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      colorScheme.surfaceContainerHighest,
+                      colorScheme.surfaceContainerHigh,
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Icon(
+                    icon,
+                    fill: AppIcons.filled,
+                    size: 30,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: AppUiTheme.of(context).textTheme.bodyLarge
-                  ?.copyWith(color: colorScheme.onSurfaceVariant),
-            ),
-            if (action != null) ...[
               const SizedBox(height: AppSpacing.md),
-              action!,
-            ] else if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              AppButton(
-                onPressed: onAction,
-                variant: AppButtonVariant.outlined,
-                child: Text(actionLabel!),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppUiTheme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.45,
+                ),
               ),
+              if (action != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                action!,
+              ] else if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  onPressed: onAction,
+                  variant: AppButtonVariant.outlined,
+                  child: Text(actionLabel!),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

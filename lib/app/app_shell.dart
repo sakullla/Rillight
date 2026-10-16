@@ -518,9 +518,11 @@ class _TopBar extends StatelessWidget {
                         ),
                       if (AppRoutes.showsBrowseNav(location)) ...[
                         _HomeNav(selected: location == AppRoutes.home),
+                        const SizedBox(width: AppSpacing.xxs),
                         _NavTextButton(
                           buttonKey: const Key('app-shell-aggregation'),
                           label: l10n.aggregation,
+                          icon: AppIcons.aggregation,
                           selected: location == AppRoutes.aggregation,
                           onPressed: () => context.go(AppRoutes.aggregation),
                         ),
@@ -601,6 +603,7 @@ class _HomeNav extends StatelessWidget {
     return _NavTextButton(
       buttonKey: AppShell.homeNavKey,
       label: l10n.home,
+      icon: AppIcons.home,
       selected: selected,
       onPressed: () {
         if (GoRouterState.of(context).uri.path != AppRoutes.home) {
@@ -615,12 +618,14 @@ class _NavTextButton extends StatelessWidget {
   const _NavTextButton({
     required this.buttonKey,
     required this.label,
+    this.icon,
     required this.selected,
     required this.onPressed,
   });
 
   final Key buttonKey;
   final String label;
+  final IconData? icon;
   final bool selected;
   final VoidCallback onPressed;
 
@@ -628,15 +633,14 @@ class _NavTextButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final colorScheme = theme.colorScheme;
+    final fg = selected ? colorScheme.onSurface : colorScheme.onSurfaceVariant;
     return AppButton(
       key: buttonKey,
       onPressed: onPressed,
       style: AppButtonStyle(
-        foregroundColor: selected
-            ? colorScheme.onSurface
-            : colorScheme.onSurfaceVariant,
+        foregroundColor: fg,
         textStyle: theme.textTheme.titleMedium?.copyWith(
-          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
         minimumSize: const Size(44, kWindowChromeHeight),
@@ -645,20 +649,30 @@ class _NavTextButton extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(label),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(
+                  icon,
+                  size: 17,
+                  fill: selected ? AppIcons.filled : AppIcons.outline,
+                  color: selected ? colorScheme.primary : fg,
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(label),
+            ],
+          ),
           const SizedBox(height: 4),
           AnimatedContainer(
             duration: AppMotion.fast,
             curve: AppMotion.standard,
-            height: 2,
-            width: selected ? 18 : 0,
+            height: 2.5,
+            width: selected ? 22 : 0,
             decoration: BoxDecoration(
-              color: selected
-                  ? (colorScheme.brightness == Brightness.light
-                        ? colorScheme.primary
-                        : colorScheme.onSurface)
-                  : const Color(0x00000000),
-              borderRadius: BorderRadius.circular(1),
+              color: selected ? colorScheme.primary : const Color(0x00000000),
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
         ],

@@ -53,32 +53,50 @@ class HeroKicker extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final color = onScrim
-        ? const Color(0xffffffff).withValues(alpha: .82)
+        ? const Color(0xffffffff).withValues(alpha: .92)
         : theme.colorScheme.primary;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 3,
-          height: 12,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-          ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: onScrim
+            ? const Color(0x24ffffff)
+            : theme.colorScheme.primaryContainer.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: onScrim
+              ? const Color(0x33ffffff)
+              : theme.colorScheme.primary.withValues(alpha: 0.24),
         ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: color,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-            height: 1.2,
-          ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: onScrim
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+                height: 1.2,
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -104,25 +122,38 @@ class HeroRatingBadge extends StatelessWidget {
     final value = rating;
     if (value == null) return const SizedBox.shrink();
     final theme = AppUiTheme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(
-          CupertinoIcons.star_fill,
-          size: 15,
-          color: Color(0xffffc107),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xffffc107).withValues(alpha: onScrim ? 0.18 : 0.14),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: const Color(0xffffc107).withValues(alpha: 0.32),
         ),
-        const SizedBox(width: 3),
-        Text(
-          value.toStringAsFixed(1),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: onScrim
-                ? const Color(0xffffffff)
-                : theme.colorScheme.onSurface,
-            fontWeight: FontWeight.w600,
-          ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              CupertinoIcons.star_fill,
+              size: 13,
+              color: Color(0xffffc107),
+            ),
+            const SizedBox(width: 3),
+            Text(
+              value.toStringAsFixed(1),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: onScrim
+                    ? const Color(0xffffffff)
+                    : theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -164,10 +195,10 @@ class HeroScrim extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  stops: const [0.22, 0.48, 0.72],
+                  stops: const [0.38, 0.72, 0.96],
                   colors: [
                     fade.withValues(alpha: 0),
-                    fade.withValues(alpha: 0.72),
+                    fade.withValues(alpha: 0.56),
                     fade,
                   ],
                 ),

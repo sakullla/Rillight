@@ -673,7 +673,15 @@ class AppTextField extends FormField<String> {
          initialValue: controller?.text ?? initialValue ?? '',
          autovalidateMode: autovalidateMode,
          builder: (field) {
-           final colors = AppUiTheme.of(field.context).colorScheme;
+           final state = field as _AppTextFieldState;
+           final theme = AppUiTheme.of(field.context);
+           final colors = theme.colorScheme;
+           final focused = state._hasFocus;
+           final borderColor = field.hasError
+               ? colors.error
+               : focused
+               ? colors.primary
+               : colors.outlineVariant;
            return Column(
              crossAxisAlignment: CrossAxisAlignment.start,
              mainAxisSize: MainAxisSize.min,
@@ -681,11 +689,19 @@ class AppTextField extends FormField<String> {
                if (label != null)
                  Padding(
                    padding: const EdgeInsets.only(bottom: 6),
-                   child: Text(label),
+                   child: Text(
+                     label,
+                     style: theme.textTheme.labelMedium?.copyWith(
+                       color: focused
+                           ? colors.primary
+                           : colors.onSurfaceVariant,
+                       fontWeight: FontWeight.w600,
+                     ),
+                   ),
                  ),
                CupertinoTextField(
-                 controller: (field as _AppTextFieldState)._controller,
-                 focusNode: focusNode,
+                 controller: state._controller,
+                 focusNode: state._effectiveFocusNode,
                  autofocus: autofocus,
                  obscureText: obscureText,
                  enabled: enabled,
@@ -702,16 +718,50 @@ class AppTextField extends FormField<String> {
                  enableSuggestions: enableSuggestions,
                  enableInteractiveSelection: enableInteractiveSelection,
                  placeholder: placeholder,
-                 prefix: prefix,
-                 suffix: suffix,
+                 placeholderStyle: TextStyle(
+                   color: colors.onSurfaceVariant.withValues(alpha: 0.62),
+                 ),
+                 prefix: prefix == null
+                     ? null
+                     : Padding(
+                         padding: const EdgeInsets.only(left: 12),
+                         child: IconTheme.merge(
+                           data: IconThemeData(
+                             color: focused
+                                 ? colors.primary
+                                 : colors.onSurfaceVariant,
+                             size: 18,
+                           ),
+                           child: prefix,
+                         ),
+                       ),
+                 suffix: suffix == null
+                     ? null
+                     : Padding(
+                         padding: const EdgeInsets.only(right: 4),
+                         child: suffix,
+                       ),
                  padding: padding,
                  style: style ?? TextStyle(color: colors.onSurface),
                  decoration: BoxDecoration(
                    color: colors.surfaceContainerLowest,
-                   borderRadius: BorderRadius.circular(AppRadii.sm),
+                   borderRadius: BorderRadius.circular(AppRadii.md),
                    border: Border.all(
-                     color: field.hasError ? colors.error : colors.outline,
+                     color: borderColor,
+                     width: focused || field.hasError ? 1.5 : 1,
                    ),
+                   boxShadow: focused
+                       ? [
+                           BoxShadow(
+                             color:
+                                 (field.hasError
+                                         ? colors.error
+                                         : colors.primary)
+                                     .withValues(alpha: 0.14),
+                             blurRadius: 10,
+                           ),
+                         ]
+                       : null,
                  ),
                  onChanged: (value) {
                    field.didChange(value);
@@ -757,8 +807,12 @@ class AppTextField extends FormField<String> {
 
 class _AppTextFieldState extends FormFieldState<String> {
   TextEditingController? _owned;
+  FocusNode? _ownedFocus;
   AppTextField get _field => widget as AppTextField;
   TextEditingController get _controller => _field.controller ?? _owned!;
+  FocusNode get _effectiveFocusNode =>
+      _field.focusNode ?? (_ownedFocus ??= FocusNode());
+  bool get _hasFocus => _effectiveFocusNode.hasFocus;
 
   @override
   void initState() {
@@ -767,6 +821,11 @@ class _AppTextFieldState extends FormFieldState<String> {
       _owned = TextEditingController(text: widget.initialValue);
     }
     _controller.addListener(_sync);
+    _effectiveFocusNode.addListener(_onFocusChanged);
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   void _sync() {
@@ -776,6 +835,14 @@ class _AppTextFieldState extends FormFieldState<String> {
   @override
   void didUpdateWidget(covariant AppTextField oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_field.focusNode != oldWidget.focusNode) {
+      (oldWidget.focusNode ?? _ownedFocus)?.removeListener(_onFocusChanged);
+      if (_field.focusNode != null) {
+        _ownedFocus?.dispose();
+        _ownedFocus = null;
+      }
+      _effectiveFocusNode.addListener(_onFocusChanged);
+    }
     if (_field.controller == oldWidget.controller) return;
     final oldController = oldWidget.controller ?? _owned!;
     final previousValue = oldController.value;
@@ -796,6 +863,8 @@ class _AppTextFieldState extends FormFieldState<String> {
 
   @override
   void dispose() {
+    (_field.focusNode ?? _ownedFocus)?.removeListener(_onFocusChanged);
+    _ownedFocus?.dispose();
     _controller.removeListener(_sync);
     _owned?.dispose();
     super.dispose();

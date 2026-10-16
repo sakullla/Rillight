@@ -836,26 +836,33 @@ class _PhoneDetailBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final label = title;
     final top = MediaQuery.paddingOf(context).top;
+    final canPop = ModalRoute.of(context)?.canPop == true;
     return Stack(
       children: [
         // 压在画面上时给返回钮垫一枚深色圆底，亮画面上也看得清。
-        Positioned(
-          left: 4,
-          top: top + 4,
-          child: IgnorePointer(
-            child: AnimatedContainer(
-              duration: AppMotion.durationOf(context, AppMotion.fast),
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: immersive
-                    ? const Color(0xff000000).withValues(alpha: .32)
-                    : const Color(0x00000000),
+        if (canPop)
+          Positioned(
+            left: 4,
+            top: top + 4,
+            child: IgnorePointer(
+              child: AnimatedContainer(
+                duration: AppMotion.durationOf(context, AppMotion.fast),
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: immersive
+                      ? const Color(0xff000000).withValues(alpha: .38)
+                      : const Color(0x00000000),
+                  border: immersive
+                      ? Border.all(
+                          color: const Color(0xffffffff).withValues(alpha: .16),
+                        )
+                      : null,
+                ),
               ),
             ),
           ),
-        ),
         PhoneTopBar(
           centerTitle: label != null,
           backgroundColor: immersive ? const Color(0x00000000) : null,
@@ -1042,10 +1049,10 @@ class _DetailPlayActions extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
-              for (final action in secondary) Expanded(child: action),
-              // 只有一两个操作时不拉满整行，按钮保持图标加文字的紧凑形状。
-              for (var i = secondary.length; i < 5; i++)
-                const Expanded(child: SizedBox.shrink()),
+              for (var i = 0; i < secondary.length; i++) ...[
+                if (i > 0) const SizedBox(width: AppSpacing.xs),
+                Expanded(child: secondary[i]),
+              ],
             ],
           ),
         ],
@@ -1054,7 +1061,7 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 次级操作：上图标下文字，无底色，触控高度 56。
+/// 次级操作：上图标下文字，精致圆角底衬，触控高度 56。
 class _SecondaryAction extends StatelessWidget {
   const _SecondaryAction({
     super.key,
@@ -1087,34 +1094,47 @@ class _SecondaryAction extends StatelessWidget {
         : scheme.onSurface;
     return AppTooltip(
       message: tooltip ?? label,
-      child: AppSurfaceAction(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 56),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 24, color: color, fill: iconFill),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: enabled
-                        ? (highlighted
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant)
-                        : color,
-                    fontWeight: FontWeight.w600,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: highlighted
+              ? scheme.primaryContainer.withValues(alpha: 0.42)
+              : scheme.surfaceContainerHigh.withValues(alpha: 0.58),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          border: Border.all(
+            color: highlighted
+                ? scheme.primary.withValues(alpha: 0.36)
+                : scheme.outlineVariant.withValues(alpha: 0.45),
+          ),
+        ),
+        child: AppSurfaceAction(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 22, color: color, fill: iconFill),
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: enabled
+                          ? (highlighted
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant)
+                          : color,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

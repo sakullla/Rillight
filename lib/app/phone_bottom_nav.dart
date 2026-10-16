@@ -54,7 +54,8 @@ class PhoneBottomNav extends StatelessWidget {
             backgroundColor: const Color(0x00000000),
             currentIndex: index,
             onTap: onSelected,
-            iconSize: 26,
+            iconSize: 24,
+            border: null,
             items: [
               BottomNavigationBarItem(
                 icon: const Icon(AppIcons.home, fill: AppIcons.outline),
@@ -90,9 +91,9 @@ class PhoneBottomNav extends StatelessWidget {
           borderRadius: radius,
           boxShadow: const [
             BoxShadow(
-              color: Color(0x47000000),
-              blurRadius: 12,
-              offset: Offset(0, 4),
+              color: Color(0x52000000),
+              blurRadius: 20,
+              offset: Offset(0, 6),
             ),
           ],
         ),
@@ -114,29 +115,31 @@ class PhoneBottomNav extends StatelessWidget {
       return padded;
     }
     final surface = AppUiTheme.of(context).colorScheme.surface;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IgnorePointer(
-          child: SizedBox(
-            height: AppMobileNav.fadeHeight,
-            width: double.infinity,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    surface.withValues(alpha: 0),
-                    surface.withValues(alpha: 0.72),
-                  ],
-                ),
-              ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0, 0.35, 1],
+          colors: [
+            surface.withValues(alpha: 0),
+            surface.withValues(alpha: 0.48),
+            surface.withValues(alpha: 0.86),
+          ],
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const IgnorePointer(
+            child: SizedBox(
+              height: AppMobileNav.fadeHeight,
+              width: double.infinity,
             ),
           ),
-        ),
-        ColoredBox(color: surface.withValues(alpha: 0.72), child: padded),
-      ],
+          padded,
+        ],
+      ),
     );
   }
 }

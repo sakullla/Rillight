@@ -53,6 +53,11 @@ class SessionActions extends StatelessWidget {
         }
         final l10n = AppLocalizations.of(context);
         final server = auth.session!.server;
+        final username = auth.session?.username.trim() ?? '';
+        final initial = username.isEmpty
+            ? null
+            : String.fromCharCode(username.runes.first).toUpperCase();
+        final scheme = AppUiTheme.of(context).colorScheme;
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -63,7 +68,35 @@ class SessionActions extends StatelessWidget {
               padding: EdgeInsets.zero,
               constraints: kTitleBarIconConstraints,
               size: 18,
-              icon: const Icon(AppIcons.person, fill: AppIcons.filled),
+              icon: initial == null
+                  ? const Icon(AppIcons.person, fill: AppIcons.filled)
+                  : SizedBox.square(
+                      dimension: 24,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [scheme.primary, scheme.secondary],
+                          ),
+                          border: Border.all(
+                            color: scheme.onSurface.withValues(alpha: 0.16),
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            initial,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: scheme.onPrimary,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
               onPressed: () => _openSwitcher(context, auth),
             ),
           ],

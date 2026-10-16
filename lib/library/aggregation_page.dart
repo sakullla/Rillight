@@ -1521,11 +1521,14 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
   }
 
   Widget _segments(AppLocalizations l) {
-    final track = AppUiTheme.of(context).colorScheme.surfaceContainerHigh;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: track.withValues(alpha: 0.55),
+        color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.65),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(3),
@@ -1565,13 +1568,20 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
       key: Key(keyName),
       onPressed: () => setState(() => _segment = value),
       style: AppButtonStyle(
-        foregroundColor: selected ? scheme.onSurface : scheme.onSurfaceVariant,
-        backgroundColor: selected ? scheme.surface : const Color(0x00000000),
+        foregroundColor: selected
+            ? scheme.onPrimaryContainer
+            : scheme.onSurfaceVariant,
+        backgroundColor: selected
+            ? scheme.primaryContainer
+            : const Color(0x00000000),
+        side: selected
+            ? BorderSide(color: scheme.primary.withValues(alpha: 0.35))
+            : null,
         textStyle: theme.textTheme.labelLarge?.copyWith(
-          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        minimumSize: const Size(0, 32),
+        minimumSize: const Size(0, 34),
         shape: const StadiumBorder(),
       ),
       variant: AppButtonVariant.plain,
@@ -1745,11 +1755,14 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
   }
 
   Widget _phoneSegments(AppLocalizations l) {
-    final track = AppUiTheme.of(context).colorScheme.surfaceContainerHigh;
+    final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: track.withValues(alpha: 0.55),
+        color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.65),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(3),
@@ -1791,10 +1804,17 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
       key: Key(keyName),
       onPressed: () => setState(() => _segment = value),
       style: AppButtonStyle(
-        foregroundColor: selected ? scheme.onSurface : scheme.onSurfaceVariant,
-        backgroundColor: selected ? scheme.surface : const Color(0x00000000),
+        foregroundColor: selected
+            ? scheme.onPrimaryContainer
+            : scheme.onSurfaceVariant,
+        backgroundColor: selected
+            ? scheme.primaryContainer
+            : const Color(0x00000000),
+        side: selected
+            ? BorderSide(color: scheme.primary.withValues(alpha: 0.35))
+            : null,
         textStyle: theme.textTheme.labelLarge?.copyWith(
-          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16),
         minimumSize: const Size(48, 48),

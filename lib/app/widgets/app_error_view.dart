@@ -49,40 +49,46 @@ class AppErrorView extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: colorScheme.errorContainer,
-                shape: BoxShape.circle,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Icon(
-                  AppIcons.error,
-                  fill: AppIcons.filled,
-                  size: 28,
-                  color: colorScheme.onErrorContainer,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colorScheme.errorContainer,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: colorScheme.error.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Icon(
+                    AppIcons.error,
+                    fill: AppIcons.filled,
+                    size: 30,
+                    color: colorScheme.onErrorContainer,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: AppUiTheme.of(context).textTheme.bodyLarge
-                  ?.copyWith(color: colorScheme.onSurface),
-            ),
-            if (onRetry != null) ...[
               const SizedBox(height: AppSpacing.md),
-              AppButton(
-                onPressed: onRetry,
-                variant: AppButtonVariant.filled,
-                child: Text(l10n.retry),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppUiTheme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: colorScheme.onSurface, height: 1.45),
               ),
+              if (onRetry != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  onPressed: onRetry,
+                  variant: AppButtonVariant.filled,
+                  child: Text(l10n.retry),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

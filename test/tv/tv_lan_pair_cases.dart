@@ -327,7 +327,7 @@ void main() {
       final shown = tester
           .widget<Text>(find.byKey(const Key('tv-lan-expires')))
           .data!;
-      final local = deadline!.toLocal();
+      final local = deadline.toLocal();
       String two(int value) => value.toString().padLeft(2, '0');
       expect(
         shown,

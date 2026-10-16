@@ -703,6 +703,15 @@ class _ConnectPageState extends State<ConnectPage> {
         ],
         const Spacer(),
         AppButton.icon(
+          key: ConnectFormKeys.importBackup,
+          onPressed: auth.isBusy
+              ? null
+              : () => unawaited(showBackupImportFlow(context, auth: auth)),
+          icon: const Icon(AppIcons.download, fill: AppIcons.filled, size: 18),
+          label: Text(l10n.backupImportEntry),
+          variant: AppButtonVariant.plain,
+        ),
+        AppButton.icon(
           key: ConnectFormKeys.addServer,
           onPressed: auth.isBusy ? null : _startNewServer,
           icon: const Icon(AppIcons.add, fill: AppIcons.filled, size: 18),
@@ -735,22 +744,6 @@ class _ConnectPageState extends State<ConnectPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           header,
-          Align(
-            alignment: Alignment.centerLeft,
-            child: AppButton.icon(
-              key: ConnectFormKeys.importBackup,
-              onPressed: auth.isBusy
-                  ? null
-                  : () => unawaited(showBackupImportFlow(context, auth: auth)),
-              icon: const Icon(
-                AppIcons.download,
-                fill: AppIcons.filled,
-                size: 18,
-              ),
-              label: Text(l10n.backupImportEntry),
-              variant: AppButtonVariant.plain,
-            ),
-          ),
           if (auth.savedServers.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -785,22 +778,6 @@ class _ConnectPageState extends State<ConnectPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         header,
-        Align(
-          alignment: Alignment.centerLeft,
-          child: AppButton.icon(
-            key: ConnectFormKeys.importBackup,
-            onPressed: auth.isBusy
-                ? null
-                : () => unawaited(showBackupImportFlow(context, auth: auth)),
-            icon: const Icon(
-              AppIcons.download,
-              fill: AppIcons.filled,
-              size: 18,
-            ),
-            label: Text(l10n.backupImportEntry),
-            variant: AppButtonVariant.plain,
-          ),
-        ),
         const SizedBox(height: AppSpacing.sm),
         if (auth.savedServers.isEmpty)
           AppEmptyView(message: l10n.noSavedServers, icon: AppIcons.server)

@@ -1357,6 +1357,17 @@ class _EpisodeOverlay extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHigh.withValues(alpha: .97),
+                borderRadius: BorderRadius.circular(AppRadii.xl),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.65),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: scheme.scrim.withValues(alpha: 0.45),
+                    blurRadius: 28,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
               child: PlayerEpisodeBrowser(
                 controller: controller,
@@ -1941,7 +1952,14 @@ class _DanmakuSearchPanelState extends State<_DanmakuSearchPanel> {
             width: panelWidth,
             child: Container(
               key: DanmakuKeys.searchPanel,
-              decoration: BoxDecoration(color: scheme.surfaceContainerHigh),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                border: Border(
+                  left: BorderSide(
+                    color: scheme.outlineVariant.withValues(alpha: 0.65),
+                  ),
+                ),
+              ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.md,

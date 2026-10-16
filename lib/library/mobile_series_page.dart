@@ -1148,13 +1148,18 @@ class _EpisodeRow extends StatelessWidget {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.xs, 1, AppSpacing.xs, 1),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 3, AppSpacing.sm, 3),
       child: Container(
         decoration: BoxDecoration(
           color: current
-              ? scheme.primary.withValues(alpha: .10)
-              : const Color(0x00000000),
+              ? scheme.primary.withValues(alpha: .12)
+              : scheme.surfaceContainerLow.withValues(alpha: .42),
           borderRadius: BorderRadius.circular(AppRadii.lg),
+          border: Border.all(
+            color: current
+                ? scheme.primary.withValues(alpha: .32)
+                : scheme.outlineVariant.withValues(alpha: .28),
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: AppSurfaceAction(

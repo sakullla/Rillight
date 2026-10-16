@@ -18,6 +18,7 @@ class PosterPlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final colorScheme = AppUiTheme.of(context).colorScheme;
+    final dark = colorScheme.brightness == Brightness.dark;
 
     return Semantics(
       label: semanticLabel ?? l10n.posterPlaceholder,
@@ -26,20 +27,51 @@ class PosterPlaceholder extends StatelessWidget {
         height: height,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: LayoutBuilder(
-            builder: (context, constraints) => Center(
-              child: ExcludeSemantics(
-                child: Icon(
-                  AppIcons.photo,
-                  fill: AppIcons.filled,
-                  size: (constraints.biggest.shortestSide * .2).clamp(16, 40),
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: .65),
-                ),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                colorScheme.surfaceContainerHighest,
+                colorScheme.surfaceContainer,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(AppRadii.sm),
+            border: Border.all(
+              color: colorScheme.outlineVariant.withValues(
+                alpha: dark ? 0.45 : 0.7,
               ),
             ),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final iconExtent = (constraints.biggest.shortestSide * .22).clamp(
+                16.0,
+                36.0,
+              );
+              return Center(
+                child: ExcludeSemantics(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colorScheme.onSurface.withValues(
+                        alpha: dark ? 0.06 : 0.05,
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(iconExtent * 0.45),
+                      child: Icon(
+                        AppIcons.photo,
+                        fill: AppIcons.filled,
+                        size: iconExtent,
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: .68,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ),

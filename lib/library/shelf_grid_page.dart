@@ -1178,16 +1178,21 @@ class _Header extends StatelessWidget {
 }
 
 class _HeaderChip extends StatelessWidget {
-  const _HeaderChip({required this.child});
+  const _HeaderChip({required this.child, this.active = false});
 
   final Widget child;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: AppUiTheme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        color: active ? scheme.primaryContainer : scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: active ? scheme.primary : scheme.outlineVariant,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: child,
@@ -1250,16 +1255,17 @@ class _FilterBar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _HeaderChip(
+          active: filters.isNotEmpty,
           child: AppTooltip(
             message: l10n.libraryFilter,
             child: AppSurfaceAction(
               key: gridFilterMenuKey,
-              borderRadius: BorderRadius.circular(AppRadii.md),
+              borderRadius: BorderRadius.circular(999),
               onTap: () => _openPanel(context),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.xs,
+                  horizontal: 14,
+                  vertical: 8,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1271,11 +1277,18 @@ class _FilterBar extends StatelessWidget {
                           : AppIcons.outline,
                       size: 18,
                       color: filters.isNotEmpty
-                          ? colorScheme.primary
+                          ? colorScheme.onPrimaryContainer
                           : colorScheme.onSurfaceVariant,
                     ),
                     const SizedBox(width: AppSpacing.xs),
-                    Text(l10n.libraryFilter, style: textTheme.labelLarge),
+                    Text(
+                      l10n.libraryFilter,
+                      style: textTheme.labelLarge?.copyWith(
+                        color: filters.isNotEmpty
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurface,
+                      ),
+                    ),
                   ],
                 ),
               ),

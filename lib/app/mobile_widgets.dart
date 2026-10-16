@@ -132,8 +132,14 @@ class _PhoneCardBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: accent
             ? scheme.primary
-            : const Color(0xff000000).withValues(alpha: 0.62),
+            : const Color(0xff000000).withValues(alpha: 0.68),
         borderRadius: BorderRadius.circular(6),
+        border: accent
+            ? null
+            : Border.all(
+                color: const Color(0xffffffff).withValues(alpha: 0.16),
+                width: 0.6,
+              ),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -219,7 +225,7 @@ class PhoneArtworkFrame extends StatelessWidget {
     this.radius = PhoneArtworkFrame.defaultRadius,
   });
 
-  static const double defaultRadius = 10;
+  static const double defaultRadius = 12;
 
   final Widget child;
   final double radius;
@@ -238,8 +244,8 @@ class PhoneArtworkFrame extends StatelessWidget {
         borderRadius: shape,
         border: Border.all(
           color: light
-              ? const Color(0xff000000).withValues(alpha: 0.06)
-              : const Color(0xffffffff).withValues(alpha: 0.07),
+              ? const Color(0xff000000).withValues(alpha: 0.08)
+              : const Color(0xffffffff).withValues(alpha: 0.10),
           width: 0.8,
         ),
       ),

@@ -692,19 +692,22 @@ class _SettingsSection extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.48),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: AppDisclosure(
         key: ValueKey('settings-section-$title'),
-        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
         onExpansionChanged: (expanded) {
           if (!expanded) FocusScope.of(context).unfocus();
         },
         leading: DecoratedBox(
           decoration: BoxDecoration(
             color: scheme.primaryContainer,
-            borderRadius: BorderRadius.circular(AppRadii.sm),
+            borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           child: SizedBox.square(
             dimension: 40,
@@ -732,9 +735,10 @@ class _SettingsSection extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const AppDivider(height: 8),
               if (trailing != null)
                 Align(alignment: Alignment.centerRight, child: trailing),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.xs),
               for (var i = 0; i < children.length; i++) ...[
                 if (i > 0) const SizedBox(height: AppSpacing.sm),
                 children[i],

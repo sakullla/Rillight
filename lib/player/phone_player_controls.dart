@@ -706,11 +706,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     final actions = _buildActionRow(context);
     final body = wide
         ? Row(children: [transport, const Spacer(), actions])
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [transport, const SizedBox(height: 8), actions],
+        : Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [transport, const SizedBox(height: 8), actions],
+            ),
           );
     return Stack(
+      alignment: wide ? AlignmentDirectional.topStart : Alignment.center,
       children: [
         Positioned.fill(
           child: IgnorePointer(
@@ -719,6 +724,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               decoration: const BoxDecoration(
                 color: phonePlayerDockColor,
                 borderRadius: BorderRadius.all(Radius.circular(24)),
+                border: Border.fromBorderSide(
+                  BorderSide(color: Color(0x24FFFFFF), width: 0.8),
+                ),
               ),
             ),
           ),

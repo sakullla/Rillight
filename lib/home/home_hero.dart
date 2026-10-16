@@ -664,14 +664,16 @@ class _HomeHeroState extends State<HomeHero> with HeroAutoRotate {
     final scheme = AppUiTheme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: scheme.outlineVariant),
+        color: scheme.surfaceContainerLowest.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(AppRadii.xl),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.65),
+        ),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(alpha: 0.12),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
+            color: scheme.shadow.withValues(alpha: 0.10),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
           ),
         ],
       ),

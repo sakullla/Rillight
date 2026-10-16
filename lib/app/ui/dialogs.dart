@@ -46,11 +46,18 @@ class AppDialog extends StatelessWidget {
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(AppRadii.xl),
-                border: Border.all(color: theme.colorScheme.outlineVariant),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: theme.brightness == Brightness.dark ? 0.65 : 0.9,
+                  ),
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: theme.colorScheme.scrim.withValues(alpha: .2),
-                    blurRadius: 24,
+                    color: theme.colorScheme.scrim.withValues(
+                      alpha: theme.brightness == Brightness.dark ? .42 : .16,
+                    ),
+                    blurRadius: 32,
+                    offset: const Offset(0, 12),
                   ),
                 ],
               ),
@@ -66,7 +73,9 @@ class AppDialog extends StatelessWidget {
                           namesRoute: true,
                           header: true,
                           child: DefaultTextStyle(
-                            style: theme.textTheme.titleLarge!,
+                            style: theme.textTheme.titleLarge!.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                             child: title!,
                           ),
                         ),
@@ -111,25 +120,41 @@ class AppModalFrame extends StatelessWidget {
   final EdgeInsets insetPadding;
   final Clip clipBehavior;
   @override
-  Widget build(BuildContext context) => SafeArea(
-    child: Padding(
-      padding:
-          insetPadding +
-          EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Center(
-        child: Container(
-          clipBehavior: clipBehavior,
-          decoration: BoxDecoration(
-            color:
-                backgroundColor ??
-                AppUiTheme.of(context).colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(AppRadii.xl),
+  Widget build(BuildContext context) {
+    final theme = AppUiTheme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    return SafeArea(
+      child: Padding(
+        padding:
+            insetPadding +
+            EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: Center(
+          child: Container(
+            clipBehavior: clipBehavior,
+            decoration: BoxDecoration(
+              color: backgroundColor ?? theme.colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(AppRadii.xl),
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant.withValues(
+                  alpha: dark ? 0.55 : 0.85,
+                ),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.scrim.withValues(
+                    alpha: dark ? .38 : .14,
+                  ),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: child,
           ),
-          child: child,
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// Captures local artwork/TV theme across the navigator boundary. Escape/back
@@ -283,10 +308,21 @@ Future<T?> showAppMenu<T>({
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: AppUiTheme.of(context).colorScheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(AppRadii.md),
+              borderRadius: BorderRadius.circular(AppRadii.lg),
               border: Border.all(
                 color: AppUiTheme.of(context).colorScheme.outlineVariant,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppUiTheme.of(context).colorScheme.scrim.withValues(
+                    alpha: AppUiTheme.of(context).brightness == Brightness.dark
+                        ? 0.42
+                        : 0.16,
+                  ),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(6),
@@ -544,17 +580,26 @@ class _NoticeState extends State<_Notice> {
     key: const Key('app-notice'),
     left: 16,
     right: 16,
-    bottom: 16 + MediaQuery.paddingOf(context).bottom,
+    bottom: 20 + MediaQuery.paddingOf(context).bottom,
     child: AppUiTheme(
       data: widget.theme,
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600),
+          constraints: const BoxConstraints(maxWidth: 560),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: widget.theme.colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: widget.theme.colorScheme.outline),
+              borderRadius: BorderRadius.circular(AppRadii.lg),
+              border: Border.all(
+                color: widget.theme.colorScheme.outlineVariant,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: widget.theme.colorScheme.scrim.withValues(alpha: 0.28),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -563,7 +608,13 @@ class _NoticeState extends State<_Notice> {
                   Expanded(
                     child: Semantics(
                       liveRegion: true,
-                      child: Text(widget.message, key: widget.messageKey),
+                      child: Text(
+                        widget.message,
+                        key: widget.messageKey,
+                        style: widget.theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ),
                   if (widget.actionLabel != null)
@@ -576,7 +627,7 @@ class _NoticeState extends State<_Notice> {
                     ),
                   AppIconButton(
                     tooltip: '关闭提示',
-                    icon: const Icon(CupertinoIcons.xmark),
+                    icon: const Icon(CupertinoIcons.xmark, size: 16),
                     onPressed: _dismiss,
                   ),
                 ],

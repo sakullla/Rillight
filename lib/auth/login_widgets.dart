@@ -143,21 +143,17 @@ class LoginBrandMark extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [scheme.primary, scheme.tertiary],
+          colors: [scheme.primary, scheme.secondary],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.primary.withValues(alpha: .3),
-            blurRadius: size * .4,
-            offset: Offset(0, size * .12),
-          ),
-        ],
+        border: Border.all(
+          color: const Color(0xffffffff).withValues(alpha: 0.24),
+        ),
       ),
       child: Icon(
         AppIcons.play,
         fill: AppIcons.filled,
         color: scheme.onPrimary,
-        size: size * .62,
+        size: size * .58,
       ),
     );
   }

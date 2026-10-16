@@ -458,15 +458,12 @@ class _MineAvatar extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              scheme.primary,
-              Color.lerp(scheme.primary, const Color(0xFF7A3E00), .55)!,
-            ],
+            colors: [scheme.primary, scheme.secondary],
           ),
           border: Border.all(
             color: immersive
                 ? const Color(0x66FFFFFF)
-                : scheme.onSurface.withValues(alpha: .12),
+                : scheme.onSurface.withValues(alpha: .16),
           ),
         ),
         child: Center(

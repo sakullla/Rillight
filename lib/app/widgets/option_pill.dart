@@ -18,8 +18,8 @@ class OptionPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
     final light = scheme.brightness == Brightness.light;
-    final foreground = selected && light
-        ? scheme.onPrimaryContainer
+    final foreground = selected
+        ? (light ? scheme.onPrimaryContainer : scheme.onPrimaryContainer)
         : scheme.onSurface;
     return Opacity(
       opacity: onPressed == null ? .45 : 1,
@@ -30,16 +30,16 @@ class OptionPill extends StatelessWidget {
         child: AppSurfaceAction(
           onTap: onPressed,
           borderRadius: BorderRadius.circular(999),
-          child: DecoratedBox(
+          child: AnimatedContainer(
+            duration: AppMotion.durationOf(context, AppMotion.fast),
+            curve: AppMotion.standard,
             decoration: ShapeDecoration(
               color: selected
-                  ? (light ? scheme.primaryContainer : scheme.surfaceBright)
-                  : scheme.surfaceContainerHighest,
+                  ? scheme.primaryContainer
+                  : scheme.surfaceContainerHigh,
               shape: StadiumBorder(
                 side: BorderSide(
-                  color: selected
-                      ? (light ? scheme.primary : scheme.onSurface)
-                      : scheme.outlineVariant,
+                  color: selected ? scheme.primary : scheme.outlineVariant,
                   width: selected ? 1.5 : 1,
                 ),
               ),
