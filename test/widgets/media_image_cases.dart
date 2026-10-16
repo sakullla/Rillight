@@ -1748,54 +1748,25 @@ void main() {
   testWidgets('visible posters start during scrolling before offscreen ones', (
     tester,
   ) async {
-    addPosterItems(2);
-    final auth = await connect(tester);
-    // Keep the idle timer in fake time. Real I/O can take longer than the
-    // idle window on loaded CI runners without meaning scrolling has stopped.
+    final client = _ControlledImageClient()..hold = true;
+    final auth = detachedAuth(client);
+    addTearDown(auth.dispose);
+    // Test scheduling independently of Dio's event-loop timers and image
+    // decoding. Keep the real viewport/queue and explicitly advance idle time.
     MediaImageCache.instance.markScrollActivity();
     await pumpPosterStrip(tester, auth, count: 2);
-    MediaImageCache.instance.markScrollActivity();
     await tester.pump();
-    // Drive I/O without advancing the scroll clock; retain the priority gate
-    // until the visible request starts, then explicitly end scrolling below.
-    var visibleStarted = false;
-    for (var i = 0; i < 100; i++) {
-      if (imageRequests().map(requestedItemId).contains('poster-0')) {
-        visibleStarted = true;
-        break;
-      }
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      await tester.pump();
-    }
-    expect(visibleStarted, isTrue);
     expect(MediaImageCache.instance.isScrollBusy, isTrue);
-    expect(imageRequests().map(requestedItemId), isNot(contains('poster-1')));
-    expect(find.byType(MediaImage), findsWidgets);
+    expect(client.requested, ['poster-0']);
+    expect(find.byType(MediaImage), findsNWidgets(2));
 
     await tester.pump(MediaImageCache.defaultScrollIdle);
     expect(MediaImageCache.instance.isScrollBusy, isFalse);
-    var offscreenStarted = false;
-    for (var i = 0; i < 100; i++) {
-      if (imageRequests().map(requestedItemId).contains('poster-1')) {
-        offscreenStarted = true;
-        break;
-      }
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      await tester.pump();
-    }
-    expect(offscreenStarted, isTrue);
-    final ids = imageRequests().map(requestedItemId).whereType<String>();
-    expect(ids, contains('poster-0'));
-    expect(ids, contains('poster-1'));
-    expect(
-      ids.toList().indexOf('poster-0'),
-      lessThan(ids.toList().indexOf('poster-1')),
-    );
+    expect(client.requested, ['poster-0', 'poster-1']);
     await tester.pumpWidget(const SizedBox.shrink());
+    for (final pending in client.pending.values) {
+      if (!pending.isCompleted) pending.complete(kTinyPng);
+    }
     await tester.pump(MediaImageCache.defaultFetchTimeout);
   });
 
