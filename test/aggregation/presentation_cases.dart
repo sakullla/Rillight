@@ -26,6 +26,9 @@ import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
+import 'package:rillight/app/mobile_widgets.dart';
+import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/server_library_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
@@ -1605,6 +1608,51 @@ void main() {
         );
         expect(libraryImage.preferBackdrop, isFalse);
         expect(libraryImage.height, libraryImage.width! * 9 / 16);
+        final aggregation = find.byType(AggregationPage);
+        if (environment.isDesktop) {
+          expect(
+            find.descendant(of: aggregation, matching: find.byType(MediaShelf)),
+            findsWidgets,
+          );
+          expect(
+            find.descendant(
+              of: aggregation,
+              matching: find.byType(PhoneSectionHeader),
+            ),
+            findsNothing,
+          );
+        } else if (environment.isTv) {
+          expect(
+            find.descendant(of: aggregation, matching: find.byType(TvItemRow)),
+            findsWidgets,
+          );
+          expect(
+            find.descendant(of: aggregation, matching: find.byType(MediaShelf)),
+            findsNothing,
+          );
+        } else {
+          expect(
+            find.descendant(
+              of: aggregation,
+              matching: find.byType(PhoneSectionHeader),
+            ),
+            findsWidgets,
+          );
+          expect(
+            find.descendant(of: aggregation, matching: find.byType(MediaShelf)),
+            findsNothing,
+          );
+          expect(
+            find.descendant(of: aggregation, matching: find.byType(TvItemRow)),
+            findsNothing,
+          );
+          expect(
+            tester
+                .getSize(find.byKey(const Key('aggregation-segment-libraries')))
+                .height,
+            greaterThanOrEqualTo(48),
+          );
+        }
         expect(find.text('重试'), findsOneWidget);
         f.b.viewsStatus = null;
         await tester.tap(find.text('重试'));
@@ -2869,6 +2917,20 @@ void main() {
     );
     expect(find.byKey(ValueKey('aggregation-search-${f.aId}')), findsOneWidget);
     expect(find.byKey(ValueKey('aggregation-search-${f.bId}')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(AggregationPage),
+        matching: find.byType(MediaShelf),
+      ),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(AggregationPage),
+        matching: find.byType(PhonePosterCard),
+      ),
+      findsNothing,
+    );
     await tester.tap(find.byKey(const Key('aggregation-search-filters')));
     await _settle(tester);
     expect(find.byType(ui.AppChoiceChip), findsNothing);
@@ -3068,6 +3130,170 @@ void main() {
     },
     tags: ['integration'],
   );
+
+  cases.testWidgets(
+    'phone search opens a known title, shows no results, and retries one failed server',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(f.close);
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.phone);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CupertinoTabBar),
+          matching: find.text('搜索'),
+        ),
+      );
+      await _settle(tester);
+      expect(find.text('想看点什么？'), findsOneWidget);
+      expect(find.text('没有结果'), findsNothing);
+      expect(find.byType(MediaShelf), findsNothing);
+      expect(find.byType(TvItemRow), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        '合成',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      final serverA = find.byKey(ValueKey('aggregation-search-${f.aId}'));
+      final serverB = find.byKey(ValueKey('aggregation-search-${f.bId}'));
+      expect(
+        find.descendant(of: serverA, matching: find.text('合成作品')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: serverA, matching: find.text('来源 A')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: serverB, matching: find.text('来源 B')),
+        findsOneWidget,
+      );
+      final search = find.ancestor(
+        of: find.byKey(const Key('aggregation-keyword')),
+        matching: find.byType(AggregationPage),
+      );
+      expect(
+        find.descendant(of: search, matching: find.byType(PhonePosterCard)),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: search, matching: find.byType(MediaShelf)),
+        findsNothing,
+      );
+      await tester.tap(
+        find.descendant(of: serverA, matching: find.text('合成作品')),
+      );
+      await _settle(tester);
+      expect(find.byType(MobileDetailPage), findsOneWidget);
+
+      app.router.pop();
+      await _settle(tester);
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        '不可能命中xyz',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      expect(find.text('没有结果'), findsOneWidget);
+      expect(serverA, findsNothing);
+      expect(serverB, findsNothing);
+
+      f.b.searchStatus = 503;
+      await tester.enterText(
+        find.byKey(const Key('aggregation-keyword')),
+        '合成',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await _settle(tester);
+      expect(find.text('部分来源失败，已保留成功结果'), findsOneWidget);
+      expect(
+        find.descendant(of: serverA, matching: find.text('合成作品')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: serverB, matching: find.text('来源 B')),
+        findsOneWidget,
+      );
+      final retry = find.widgetWithText(AppButton, '重试');
+      expect(retry, findsOneWidget);
+      await tester.ensureVisible(retry);
+      await tester.drag(
+        find.byKey(const PageStorageKey('aggregation-search')),
+        const Offset(0, -120),
+      );
+      await tester.pump();
+      expect(tester.getSize(retry).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(retry).width, greaterThanOrEqualTo(48));
+      f.b.searchStatus = null;
+      await tester.tap(retry);
+      await _settle(tester);
+      expect(find.text('重试'), findsNothing);
+      expect(
+        find.descendant(of: serverA, matching: find.text('合成作品')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: serverB, matching: find.text('合成作品')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets('tv search stays on the television field and rows', (
+    tester,
+  ) async {
+    isolateImageCache();
+    final f = _Fixture();
+    await tester.runAsync(f.open);
+    addTearDown(f.close);
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final app = f.app(PresentationEnvironment.tv);
+    await tester.pumpWidget(app);
+    await _settle(tester);
+    await tester.tap(find.byKey(const ValueKey('tv-nav-2')));
+    await _settle(tester);
+    expect(find.byType(TvInput), findsOneWidget);
+    expect(find.byKey(const Key('aggregation-keyword')), findsOneWidget);
+    expect(find.byType(PhonePosterCard), findsNothing);
+    expect(find.byType(PhoneSectionHeader), findsNothing);
+    expect(find.text('想看点什么？'), findsNothing);
+    await tester.tap(find.byKey(const Key('aggregation-keyword')));
+    await _settle(tester);
+    await tester.enterText(find.byKey(const Key('tv-input-editor')), '合成');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await _settle(tester);
+    final search = find.ancestor(
+      of: find.byKey(const Key('aggregation-keyword')),
+      matching: find.byType(AggregationPage),
+    );
+    expect(
+      find.descendant(of: search, matching: find.byType(TvItemRow)),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(of: search, matching: find.byType(MediaShelf)),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    app.router.dispose();
+  }, tags: ['integration']);
 }
 
 String _posterServer(WidgetTester tester, String shelfKey) {

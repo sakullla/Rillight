@@ -20,8 +20,12 @@ import '../auth/auth_scope.dart';
 import '../auth/source_management.dart';
 
 import '../app/l10n/app_localizations.dart';
+import '../app/mobile_chrome.dart';
+import '../app/phone_bottom_nav.dart';
+import '../app/phone_nav_style.dart';
 import '../app/presentation_environment.dart';
 import '../app/routes.dart';
+import '../app/widgets/skeleton.dart';
 import '../app/tv_top_nav.dart';
 import '../app/tv_widgets.dart';
 import '../app/widgets/app_empty_view.dart';
@@ -42,7 +46,6 @@ import 'detail_source_scope.dart';
 import 'episode_mapping_dialog.dart';
 import 'poster_card.dart';
 import '../app/mobile_widgets.dart';
-import '../app/widgets/app_error_view.dart';
 import '../home/catalog_failure.dart';
 import '../home/catalog_keys.dart';
 import 'server_library_page.dart';
@@ -1592,6 +1595,7 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
     if (PresentationScope.of(context).isTv) {
       return _tvBuild(context, loader, servers, rows);
     }
+    if (!desktop) return _phoneBuild(context, loader, servers, rows);
     return Container(
       decoration: BoxDecoration(),
       child: Column(
@@ -1695,6 +1699,313 @@ class _AggregationBrowseState extends State<_AggregationBrowse> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// 手机聚合:分段、来源管理和每台服务器的海报行。失败只换掉该行。
+  Widget _phoneBuild(
+    BuildContext context,
+    ServerSectionsLoader? loader,
+    List<ServerSections> servers,
+    List<ServerSections> rows,
+  ) {
+    final l = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.xs,
+            AppSpacing.xs,
+          ),
+          child: Row(
+            children: [
+              Expanded(child: _phoneSegments(l)),
+              const SizedBox(width: AppSpacing.xxs),
+              AppIconButton(
+                key: const Key('aggregation-source-management'),
+                tooltip: l.sourceManagement,
+                minimumSize: const Size(48, 48),
+                onPressed: () => showSourceManagement(
+                  context,
+                  region: AccessRegion.ordinary,
+                ),
+                icon: const Icon(CupertinoIcons.slider_horizontal_3),
+              ),
+              const PrivateRegionButton(),
+            ],
+          ),
+        ),
+        Expanded(child: _phoneBody(context, loader, servers, rows)),
+      ],
+    );
+  }
+
+  Widget _phoneSegments(AppLocalizations l) {
+    final track = AppUiTheme.of(context).colorScheme.surfaceContainerHigh;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: track.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(3),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _phoneSegmentButton(
+                l.resumePlay,
+                'aggregation-segment-continue',
+                _AggregationSegment.continueWatching,
+              ),
+              _phoneSegmentButton(
+                l.filterFavorite,
+                'aggregation-segment-favorites',
+                _AggregationSegment.favorites,
+              ),
+              _phoneSegmentButton(
+                l.libraries,
+                'aggregation-segment-libraries',
+                _AggregationSegment.libraries,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _phoneSegmentButton(
+    String label,
+    String keyName,
+    _AggregationSegment value,
+  ) {
+    final selected = _segment == value;
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return AppButton(
+      key: Key(keyName),
+      onPressed: () => setState(() => _segment = value),
+      style: AppButtonStyle(
+        foregroundColor: selected ? scheme.onSurface : scheme.onSurfaceVariant,
+        backgroundColor: selected ? scheme.surface : const Color(0x00000000),
+        textStyle: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        minimumSize: const Size(48, 48),
+        shape: const StadiumBorder(),
+      ),
+      variant: AppButtonVariant.plain,
+      child: Text(label, maxLines: 1),
+    );
+  }
+
+  Widget _phoneBody(
+    BuildContext context,
+    ServerSectionsLoader? loader,
+    List<ServerSections> servers,
+    List<ServerSections> rows,
+  ) {
+    final l = AppLocalizations.of(context);
+    final bottom = _phoneScrollBottom(context);
+    if (loader == null || (loader.loading && servers.isEmpty)) {
+      return ListView(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.sm,
+          AppSpacing.md,
+          bottom,
+        ),
+        children: const [
+          SkeletonBlock(width: 112, height: 20),
+          SizedBox(height: AppSpacing.sm),
+          MobileLoadingPlaceholder.row(),
+        ],
+      );
+    }
+    if (servers.isEmpty) {
+      return _PhoneNotice(
+        message: '没有已登录的服务器',
+        icon: AppIcons.library,
+        actionLabel: l.addServer,
+        onAction: () => context.push('${AppRoutes.connect}?add=1'),
+      );
+    }
+    if (rows.isEmpty) {
+      return _PhoneNotice(message: l.aggregationEmpty, icon: AppIcons.movie);
+    }
+    final captioned = _segment == _AggregationSegment.continueWatching;
+    final libraries = _segment == _AggregationSegment.libraries;
+    final indices = {for (var i = 0; i < rows.length; i++) rows[i].serverId: i};
+    return MediaImageScrollListener(
+      key: const PageStorageKey('aggregation'),
+      child: ListView.builder(
+        key: PageStorageKey('aggregation-$_segment'),
+        scrollCacheExtent: const ScrollCacheExtent.viewport(0.5),
+        padding: EdgeInsets.only(bottom: bottom),
+        itemCount: rows.length,
+        findChildIndexCallback: (key) =>
+            indices[(key as ValueKey<String>).value],
+        itemBuilder: (context, index) {
+          final section = rows[index];
+          final slice = _slice(section);
+          return KeyedSubtree(
+            key: ValueKey(section.serverId),
+            child: scopeServerPosters(
+              account: section.account,
+              serverId: section.serverId,
+              child: _phoneServerSection(
+                context,
+                loader,
+                section,
+                slice,
+                captioned: captioned,
+                libraries: libraries,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _phoneServerSection(
+    BuildContext context,
+    ServerSectionsLoader loader,
+    ServerSections section,
+    ServerSectionSlice slice, {
+    required bool captioned,
+    required bool libraries,
+  }) {
+    final l = AppLocalizations.of(context);
+    final failed = slice.error != null && slice.items.isEmpty && !slice.loading;
+    return Padding(
+      key: ValueKey('aggregation-server-${section.serverId}'),
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: PhoneSectionHeader(
+              title: section.serverName,
+              onMore: captioned && slice.items.isNotEmpty
+                  ? () => context.push(AppRoutes.serverResume(section.serverId))
+                  : null,
+            ),
+          ),
+          if (slice.loading && slice.items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: MobileLoadingPlaceholder.row(wide: libraries),
+            ),
+          if (failed)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: _PhoneSectionFailure(
+                message: catalogFailureMessage(l, slice.error!),
+                onRetry: () => loader.retry(section.serverId),
+              ),
+            ),
+          if (slice.error != null && slice.items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.sm,
+              ),
+              child: _PhoneSectionFailure(
+                message: catalogFailureMessage(l, slice.error!),
+                onRetry: () => loader.retry(section.serverId),
+              ),
+            ),
+          if (slice.items.isNotEmpty)
+            SizedBox(
+              height: libraries
+                  ? _phoneLibraryRailHeight(context)
+                  : phoneHomeRailHeight(context, wide: false),
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                itemCount: slice.items.length,
+                itemBuilder: (context, index) {
+                  final item = slice.items[index];
+                  if (libraries) {
+                    return _phoneLibraryCard(context, section, item);
+                  }
+                  return PhonePosterCard(
+                    item: item,
+                    width: phoneHomePosterCardWidth(
+                      MediaQuery.sizeOf(context).width,
+                    ),
+                    hero: false,
+                    onTap: () => _open(section, item),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  double _phoneLibraryRailHeight(BuildContext context) {
+    final width = phoneHomeLibraryCardWidth(MediaQuery.sizeOf(context).width);
+    final scaler = MediaQuery.textScalerOf(context);
+    final fontSize =
+        AppUiTheme.of(context).textTheme.bodyMedium?.fontSize ?? 14;
+    final title = scaler.scale(fontSize) * 1.25;
+    return width * 9 / 16 + 8 + title + 6;
+  }
+
+  /// 媒体库主图保持 16:9,封面不改走背景图。
+  Widget _phoneLibraryCard(
+    BuildContext context,
+    ServerSections section,
+    MediaItem item,
+  ) {
+    final width = phoneHomeLibraryCardWidth(MediaQuery.sizeOf(context).width);
+    final height = width * 9 / 16;
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      child: SizedBox(
+        width: width,
+        child: MobilePressable(
+          onTap: () => _open(section, item),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: width,
+                height: height,
+                child: PhoneArtworkFrame(
+                  radius: 12,
+                  child: MediaImage(
+                    item: item,
+                    width: width,
+                    height: height,
+                    preferBackdrop: false,
+                    maxWidth: 480,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: phonePosterTitleStyle(AppUiTheme.of(context)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2184,6 +2495,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
         if (row.items.isNotEmpty || row.error != null || row.loading) row,
     ];
     if (presentation.isTv) return _tvBuild(context, servers, visible);
+    if (!presentation.isDesktop) {
+      return _phoneSearchBuild(context, servers, visible);
+    }
     final field = presentation.isTv
         ? TvInput(
             key: const Key('aggregation-keyword'),
@@ -2327,7 +2641,165 @@ class _AggregationSearchState extends State<_AggregationSearch> {
     );
   }
 
-  /// 手机搜索结果:每个服务器一段,标题带结果数,下面是三列海报网格。
+  Widget _phoneSearchBuild(
+    BuildContext context,
+    List<SavedServer> servers,
+    List<_SearchHit> visible,
+  ) {
+    final l = AppLocalizations.of(context);
+    final phoneTop = PhoneShellContentInset.clearedOf(context)
+        ? 8.0
+        : MediaQuery.viewPaddingOf(context).top + 8;
+    final showBackButton =
+        (ModalRoute.of(context)?.canPop ?? false) &&
+        context.findAncestorWidgetOfExactType<SearchRouteGuard>() == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, phoneTop, 8, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  if (showBackButton)
+                    CupertinoNavigationBarBackButton(
+                      onPressed: () => context.pop(),
+                    ),
+                  Expanded(child: _phoneSearchField(l)),
+                  if (servers.isNotEmpty) ...[
+                    const SizedBox(width: AppSpacing.xxs),
+                    AppIconButton(
+                      key: const Key('aggregation-search-filters'),
+                      tooltip: l.searchServerFilter,
+                      minimumSize: const Size(48, 48),
+                      onPressed: () =>
+                          setState(() => _filtersOpen = !_filtersOpen),
+                      icon: Icon(
+                        AppIcons.filter,
+                        fill: _filtersOpen || _servers != null
+                            ? AppIcons.filled
+                            : AppIcons.outline,
+                        color: _servers == null
+                            ? null
+                            : AppUiTheme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                  if (widget.onClose != null)
+                    AppIconButton(
+                      key: SearchOverlay.closeKey,
+                      tooltip: '关闭',
+                      minimumSize: const Size(48, 48),
+                      onPressed: widget.onClose,
+                      icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+                    ),
+                ],
+              ),
+              if (_filtersOpen)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, right: 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final server in servers)
+                        OptionPill(
+                          key: ValueKey(
+                            'aggregation-search-server-${server.id}',
+                          ),
+                          label: server.displayName,
+                          selected:
+                              _servers == null || _servers!.contains(server.id),
+                          onPressed: () {
+                            final selected =
+                                _servers == null ||
+                                _servers!.contains(server.id);
+                            _toggleServer(servers, server.id, !selected);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(child: _phoneSearchBody(context, visible)),
+      ],
+    );
+  }
+
+  Widget _phoneSearchField(AppLocalizations l) {
+    return AppTextField(
+      key: const Key('aggregation-keyword'),
+      focusNode: widget.focusNode,
+      controller: _keyword,
+      autofocus: widget.focusNode == null,
+      textInputAction: TextInputAction.search,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      onSubmitted: (_) {
+        unawaited(RecentSearches.instance.add(_keyword.text));
+        _submit();
+      },
+      placeholder: l.searchHint,
+      prefix: const Icon(AppIcons.search, fill: AppIcons.filled),
+      suffix: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _keyword,
+        builder: (context, value, _) {
+          if (_searching && value.text.isNotEmpty) {
+            return const Padding(
+              padding: EdgeInsets.all(15),
+              child: SizedBox.square(
+                dimension: 18,
+                child: CupertinoActivityIndicator(),
+              ),
+            );
+          }
+          if (value.text.isEmpty) return const SizedBox.shrink();
+          return AppIconButton(
+            key: const Key('aggregation-search-clear'),
+            tooltip: '删除',
+            minimumSize: const Size(48, 48),
+            onPressed: () {
+              _keyword.clear();
+              _submit();
+              widget.focusNode?.requestFocus();
+            },
+            icon: const Icon(AppIcons.close, fill: AppIcons.filled),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _phoneSearchBody(BuildContext context, List<_SearchHit> visible) {
+    final l = AppLocalizations.of(context);
+    if (_term.isEmpty) {
+      return _PhoneSearchIdle(onPick: _searchRecent);
+    }
+    if (_searching && visible.isEmpty) {
+      return ListView(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.xs,
+          AppSpacing.md,
+          _phoneScrollBottom(context),
+        ),
+        children: const [
+          SkeletonBlock(width: 128, height: 20),
+          SizedBox(height: AppSpacing.sm),
+          _PhonePosterGridSkeleton(),
+        ],
+      );
+    }
+    if (visible.isEmpty) {
+      return _PhoneNotice(message: l.searchNoResults, icon: AppIcons.search);
+    }
+    return _phoneResults(context, visible);
+  }
+
+  /// 手机搜索结果:每个服务器一段,标题带结果数,下面是海报网格。
   Widget _phoneResults(BuildContext context, List<_SearchHit> visible) {
     final l = AppLocalizations.of(context);
     final failed = visible.where((row) => row.error != null).length;
@@ -2338,13 +2810,13 @@ class _AggregationSearchState extends State<_AggregationSearch> {
           AppSpacing.md,
           AppSpacing.xs,
           AppSpacing.md,
-          AppSpacing.xl + MediaQuery.paddingOf(context).bottom,
+          _phoneScrollBottom(context),
         ),
         children: [
           if (failed > 0 && failed < visible.length)
-            Text(l.aggregationPartialFailure),
+            _PhoneStatusNote(message: l.aggregationPartialFailure),
           if (failed == visible.length && visible.isNotEmpty)
-            Text(l.aggregationAllFailed),
+            _PhoneStatusNote(message: l.aggregationAllFailed),
           for (final row in visible)
             Padding(
               key: ValueKey('aggregation-search-${row.serverId}'),
@@ -2359,12 +2831,9 @@ class _AggregationSearchState extends State<_AggregationSearch> {
                         : l.phoneSearchResultCount(row.items.length),
                   ),
                   if (row.loading && row.items.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(AppSpacing.md),
-                      child: Center(child: CupertinoActivityIndicator()),
-                    ),
+                    const _PhonePosterGridSkeleton(count: 2),
                   if (row.error != null)
-                    AppErrorView(
+                    _PhoneSectionFailure(
                       message: catalogFailureMessage(l, row.error!),
                       onRetry: () => _retry(row.serverId),
                     ),
@@ -2579,15 +3048,8 @@ class _AggregationSearchState extends State<_AggregationSearch> {
 
   Widget _results(BuildContext context, List<_SearchHit> visible) {
     final l = AppLocalizations.of(context);
-    final phone = PresentationScope.isPhoneOf(context);
     if (_term.isEmpty) {
-      if (phone) {
-        return _PhoneSearchIdle(onPick: _searchRecent);
-      }
       return AppEmptyView(icon: AppIcons.search, message: l.searchEmptyQuery);
-    }
-    if (phone && !(_searching && visible.isEmpty) && visible.isNotEmpty) {
-      return _phoneResults(context, visible);
     }
     if (_searching && visible.isEmpty) {
       return const Center(child: CupertinoActivityIndicator());
@@ -2668,23 +3130,16 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
                 shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    scheme.primary.withValues(alpha: .28),
-                    scheme.primary.withValues(alpha: .06),
-                  ],
-                ),
               ),
               child: Padding(
-                padding: const EdgeInsets.all(22),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Icon(
                   AppIcons.search,
                   fill: AppIcons.filled,
-                  size: 34,
-                  color: scheme.primary,
+                  size: 28,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -2720,7 +3175,7 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
                 trailing: AppButton(
                   key: _PhoneSearchIdle.clearKey,
                   style: AppButtonStyle(
-                    minimumSize: const Size(44, 36),
+                    minimumSize: const Size(48, 48),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     foregroundColor: scheme.onSurfaceVariant,
                   ),
@@ -2746,35 +3201,38 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
                       clipBehavior: Clip.antiAlias,
                       child: AppSurfaceAction(
                         onTap: () => widget.onPick(term),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 9,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                CupertinoIcons.clock,
-                                size: 14,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 6),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 220,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 48),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  CupertinoIcons.clock,
+                                  size: 14,
+                                  color: scheme.onSurfaceVariant,
                                 ),
-                                child: Text(
-                                  term,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.labelLarge?.copyWith(
-                                    color: scheme.onSurface,
-                                    fontWeight: FontWeight.w500,
+                                const SizedBox(width: 6),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 220,
+                                  ),
+                                  child: Text(
+                                    term,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelLarge?.copyWith(
+                                      color: scheme.onSurface,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -2785,6 +3243,231 @@ class _PhoneSearchIdleState extends State<_PhoneSearchIdle> {
             ] else
               const SizedBox(height: 96),
             guide,
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 贴底导航盖住内容时，滚动到底仍能把最后一个按钮留在导航上方。
+double _phoneScrollBottom(BuildContext context) {
+  final overlaid = PhoneNavStyle.floatingOf(context)
+      ? 0.0
+      : AppMobileNav.dockedHeight;
+  return AppSpacing.xl + phoneScrollClearance(context) + overlaid;
+}
+
+/// 手机聚合和搜索共用的空状态。有下一步时那一颗是实心主按钮。
+class _PhoneNotice extends StatelessWidget {
+  const _PhoneNotice({
+    required this.message,
+    required this.icon,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final String message;
+  final IconData icon;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    final action = actionLabel != null && onAction != null
+        ? AppButton(
+            style: const AppButtonStyle(minimumSize: Size(48, 48)),
+            onPressed: onAction,
+            variant: AppButtonVariant.filled,
+            child: Text(actionLabel!),
+          )
+        : null;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHigh,
+                shape: BoxShape.circle,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Icon(
+                  icon,
+                  fill: AppIcons.filled,
+                  size: 28,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: AppUiTheme.of(context).textTheme.bodyLarge
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            if (action != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              action,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 部分失败或全部失败的说明，贴在仍保留的结果上面。
+class _PhoneStatusNote extends StatelessWidget {
+  const _PhoneStatusNote({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                AppIcons.error,
+                fill: AppIcons.filled,
+                size: 18,
+                color: scheme.onErrorContainer,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  message,
+                  style: AppUiTheme.of(context).textTheme.bodyMedium
+                      ?.copyWith(color: scheme.onErrorContainer),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 单个服务器失败时的说明和重试。重试不小于 48dp。
+class _PhoneSectionFailure extends StatelessWidget {
+  const _PhoneSectionFailure({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = AppUiTheme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: Column(
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.errorContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Icon(
+                AppIcons.error,
+                fill: AppIcons.filled,
+                size: 28,
+                color: scheme.onErrorContainer,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: AppUiTheme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          AppButton(
+            style: const AppButtonStyle(minimumSize: Size(48, 48)),
+            onPressed: onRetry,
+            variant: AppButtonVariant.filled,
+            child: Text(AppLocalizations.of(context).retry),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 搜索海报网格的加载骨架，单元格比例与完成后的网格一致。
+class _PhonePosterGridSkeleton extends StatelessWidget {
+  const _PhonePosterGridSkeleton({this.count = 4});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const spacing = AppSpacing.sm;
+        final columns = mobileGridColumnCount(
+          constraints.maxWidth,
+          textScale: MediaQuery.textScalerOf(context).scale(16) / 16,
+        );
+        final cellWidth =
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
+        final imageHeight = cellWidth * 1.5;
+        final label = phonePosterCardLabelExtent(context);
+        final rows = (count / columns).ceil();
+        return Column(
+          children: [
+            for (var row = 0; row < rows; row++) ...[
+              if (row > 0) const SizedBox(height: AppSpacing.lg),
+              Row(
+                children: [
+                  for (var column = 0; column < columns; column++) ...[
+                    if (column > 0) const SizedBox(width: spacing),
+                    if (row * columns + column < count)
+                      SizedBox(
+                        width: cellWidth,
+                        height: imageHeight + label,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SkeletonBlock(
+                              width: cellWidth,
+                              height: imageHeight,
+                              borderRadius: BorderRadius.circular(
+                                PhoneArtworkFrame.defaultRadius,
+                              ),
+                            ),
+                            const Spacer(),
+                            SkeletonBlock(width: cellWidth * 0.72, height: 12),
+                          ],
+                        ),
+                      )
+                    else
+                      SizedBox(width: cellWidth),
+                  ],
+                ],
+              ),
+            ],
           ],
         );
       },
