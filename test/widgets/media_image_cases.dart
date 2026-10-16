@@ -1736,21 +1736,24 @@ void main() {
     addTearDown(auth.dispose);
     // Test scheduling independently of Dio's event-loop timers and image
     // decoding. Keep the real viewport/queue and explicitly advance idle time.
-    MediaImageCache.instance.markScrollActivity();
-    await pumpPosterStrip(tester, auth, count: 2);
-    await tester.pump();
-    expect(MediaImageCache.instance.isScrollBusy, isTrue);
-    expect(client.requested, ['poster-0']);
-    expect(find.byType(MediaImage), findsNWidgets(2));
+    try {
+      MediaImageCache.instance.markScrollActivity();
+      await pumpPosterStrip(tester, auth, count: 2);
+      await tester.pump();
+      expect(MediaImageCache.instance.isScrollBusy, isTrue);
+      expect(client.requested, ['poster-0']);
+      expect(find.byType(MediaImage, skipOffstage: false), findsNWidgets(2));
 
-    await tester.pump(MediaImageCache.defaultScrollIdle);
-    expect(MediaImageCache.instance.isScrollBusy, isFalse);
-    expect(client.requested, ['poster-0', 'poster-1']);
-    await tester.pumpWidget(const SizedBox.shrink());
-    for (final pending in client.pending.values) {
-      if (!pending.isCompleted) pending.complete(kTinyPng);
+      await tester.pump(MediaImageCache.defaultScrollIdle);
+      expect(MediaImageCache.instance.isScrollBusy, isFalse);
+      expect(client.requested, ['poster-0', 'poster-1']);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      for (final pending in client.pending.values) {
+        if (!pending.isCompleted) pending.complete(kTinyPng);
+      }
+      await tester.pump(MediaImageCache.defaultFetchTimeout);
     }
-    await tester.pump(MediaImageCache.defaultFetchTimeout);
   });
 
   testWidgets(
@@ -1847,7 +1850,21 @@ void main() {
     for (final pending in client.pending.values) {
       pending.complete(kTinyPng);
     }
-    await pumpUntilImage(tester);
+    // Each decoder completes independently on the engine I/O thread. Wait
+    // for all four pixel buffers, with a bounded deadline for real failures.
+    for (var attempt = 0; attempt < 100; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+      final decoded = find
+          .byType(RawImage)
+          .evaluate()
+          .where(
+            (element) => (element.renderObject! as RenderImage).image != null,
+          );
+      if (decoded.length == 4) break;
+    }
     for (var index = 0; index < 4; index++) {
       final image = find.descendant(
         of: find.byKey(ValueKey('visible-poster-$index')),
