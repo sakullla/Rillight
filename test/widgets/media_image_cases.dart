@@ -1750,15 +1750,14 @@ void main() {
   ) async {
     addPosterItems(2);
     final auth = await connect(tester);
-    await tester.runAsync(() async {
-      MediaImageCache.instance.markScrollActivity();
-      await pumpPosterStrip(tester, auth, count: 2);
-      MediaImageCache.instance.markScrollActivity();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-    });
+    // Keep the idle timer in fake time. Real I/O can take longer than the
+    // idle window on loaded CI runners without meaning scrolling has stopped.
+    MediaImageCache.instance.markScrollActivity();
+    await pumpPosterStrip(tester, auth, count: 2);
+    MediaImageCache.instance.markScrollActivity();
     await tester.pump();
-    // 满载机器上首个可见请求可能晚于固定窗口启动;轮询至 poster-0 已
-    // 开始(有界),再核对滚动优先级门仍按住屏外项。
+    // Drive I/O without advancing the scroll clock; retain the priority gate
+    // until the visible request starts, then explicitly end scrolling below.
     var visibleStarted = false;
     for (var i = 0; i < 100; i++) {
       if (imageRequests().map(requestedItemId).contains('poster-0')) {
@@ -1771,9 +1770,12 @@ void main() {
       await tester.pump();
     }
     expect(visibleStarted, isTrue);
+    expect(MediaImageCache.instance.isScrollBusy, isTrue);
     expect(imageRequests().map(requestedItemId), isNot(contains('poster-1')));
     expect(find.byType(MediaImage), findsWidgets);
 
+    await tester.pump(MediaImageCache.defaultScrollIdle);
+    expect(MediaImageCache.instance.isScrollBusy, isFalse);
     var offscreenStarted = false;
     for (var i = 0; i < 100; i++) {
       if (imageRequests().map(requestedItemId).contains('poster-1')) {
