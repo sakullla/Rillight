@@ -422,21 +422,18 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final title = _title(l10n);
+    final phone = phoneChromeTheme(context);
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        transitionBetweenRoutes: false,
-        middle: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_filterable)
-              CatalogFilterButton(
+      backgroundColor: phone.scaffoldBackgroundColor,
+      navigationBar: PhoneTopBar(
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: _filterable
+            ? CatalogFilterButton(
                 watch: _watch,
                 onChanged: _selectWatch,
                 buttonKey: const Key('phone-shelf-filter'),
-              ),
-          ],
-        ),
+              )
+            : null,
       ),
       child: _body(l10n),
     );
@@ -499,7 +496,12 @@ class _PhoneShelfPageState extends State<PhoneShelfPage> {
                   ),
                 ),
               SliverPadding(
-                padding: const EdgeInsets.all(AppSpacing.md),
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                  AppSpacing.md + MediaQuery.paddingOf(context).bottom,
+                ),
                 sliver: SliverGrid(
                   key: PhoneShelfPage.imageGridKey,
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -625,7 +627,12 @@ class _ShelfGridSkeleton extends StatelessWidget {
           return const SizedBox.shrink();
         }
         return Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md + MediaQuery.paddingOf(context).bottom,
+          ),
           child: GridView.builder(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: metrics.columns,

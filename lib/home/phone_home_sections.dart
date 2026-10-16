@@ -329,13 +329,18 @@ class PhoneHomeSectionEditor extends StatelessWidget {
       for (final id in order)
         if (controller.isHidden(id)) id,
     ];
+    final scheme = theme.colorScheme;
+    final groupLabel = theme.textTheme.labelLarge?.copyWith(
+      color: scheme.onSurfaceVariant,
+      fontWeight: FontWeight.w600,
+    );
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.md,
-              AppSpacing.sm,
+              AppSpacing.md,
               AppSpacing.md,
               AppSpacing.xs,
             ),
@@ -345,57 +350,63 @@ class PhoneHomeSectionEditor extends StatelessWidget {
                 Text(
                   l10n.phoneHomeEditHint,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                Text(l10n.phoneHomeShown, style: theme.textTheme.titleSmall),
+                Text(l10n.phoneHomeShown, style: groupLabel),
               ],
             ),
           ),
         ),
-        SliverReorderableList(
-          itemCount: shown.length,
-          onReorderItem: (oldIndex, newIndex) {
-            unawaited(controller.reorderVisible(oldIndex, newIndex, libraries));
-          },
-          itemBuilder: (context, index) => _row(
-            context,
-            id: shown[index],
-            label: _label(l10n, shown[index], names),
-            index: index,
+        SliverPadding(
+          padding: const EdgeInsets.only(top: AppSpacing.xs),
+          sliver: SliverReorderableList(
+            itemCount: shown.length,
+            onReorderItem: (oldIndex, newIndex) {
+              unawaited(
+                controller.reorderVisible(oldIndex, newIndex, libraries),
+              );
+            },
+            itemBuilder: (context, index) => _row(
+              context,
+              id: shown[index],
+              label: _label(l10n, shown[index], names),
+              index: index,
+              top: index == 0,
+              bottom: index == shown.length - 1,
+            ),
           ),
         ),
         SliverToBoxAdapter(
           child: hidden.isEmpty
-              ? null
+              ? const SizedBox(height: AppSpacing.lg)
               : Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.md,
+                    AppSpacing.lg,
                     AppSpacing.md,
-                    AppSpacing.md,
-                    0,
+                    AppSpacing.lg,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        l10n.phoneHomeHidden,
-                        style: theme.textTheme.titleSmall,
-                      ),
+                      Text(l10n.phoneHomeHidden, style: groupLabel),
                       const SizedBox(height: AppSpacing.xs),
-                      for (final id in hidden)
+                      for (var i = 0; i < hidden.length; i++)
                         _row(
                           context,
-                          id: id,
-                          label: _label(l10n, id, names),
+                          id: hidden[i],
+                          label: _label(l10n, hidden[i], names),
                           draggable: false,
+                          inset: false,
+                          top: i == 0,
+                          bottom: i == hidden.length - 1,
                         ),
                     ],
                   ),
                 ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
       ],
     );
   }
@@ -422,18 +433,35 @@ class PhoneHomeSectionEditor extends StatelessWidget {
     required String label,
     int? index,
     bool draggable = true,
+    bool inset = true,
+    bool top = false,
+    bool bottom = false,
   }) {
     final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
     final visible = !controller.isHidden(id);
     final handle = Icon(
       CupertinoIcons.line_horizontal_3,
-      color: theme.colorScheme.onSurfaceVariant,
+      color: scheme.onSurfaceVariant,
     );
-    return Container(
-      decoration: BoxDecoration(color: const Color(0x00000000)),
-      key: tileKey(id),
+    final radius = BorderRadius.vertical(
+      top: top ? const Radius.circular(AppRadii.lg) : Radius.zero,
+      bottom: bottom ? const Radius.circular(AppRadii.lg) : Radius.zero,
+    );
+    final row = DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainer,
+        borderRadius: radius,
+        border: bottom
+            ? null
+            : Border(
+                bottom: BorderSide(
+                  color: scheme.onSurface.withValues(alpha: .06),
+                ),
+              ),
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        padding: const EdgeInsets.only(right: AppSpacing.sm),
         child: Row(
           children: [
             if (draggable && index != null)
@@ -453,7 +481,7 @@ class PhoneHomeSectionEditor extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyLarge?.copyWith(
-                  color: visible ? null : theme.colorScheme.onSurfaceVariant,
+                  color: visible ? null : scheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -465,6 +493,13 @@ class PhoneHomeSectionEditor extends StatelessWidget {
           ],
         ),
       ),
+    );
+    return Padding(
+      key: tileKey(id),
+      padding: inset
+          ? const EdgeInsets.symmetric(horizontal: AppSpacing.md)
+          : EdgeInsets.zero,
+      child: row,
     );
   }
 }

@@ -12,12 +12,14 @@ import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/phone_bottom_nav.dart';
+import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/mobile_widgets.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -27,6 +29,7 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_hero.dart';
 import 'package:rillight/home/phone_home.dart';
+import 'package:rillight/home/phone_home_edit_page.dart';
 import 'package:rillight/home/phone_home_sections.dart';
 import 'package:rillight/home/phone_shelf_page.dart';
 import 'package:rillight/library/mobile_detail_page.dart';
@@ -783,6 +786,249 @@ void main() {
     await tester.pump(Duration.zero);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
+
+  testWidgets('continue watching sits against the hero action', (tester) async {
+    await _pumpRails(tester, width: 360, height: 800);
+    final hero = tester.getRect(find.byKey(PhoneHero.bannerKey));
+    final play = tester.getRect(
+      find.descendant(
+        of: find.byKey(PhoneHero.bannerKey),
+        matching: find.text('播放'),
+      ),
+    );
+    final resume = tester.getTopLeft(find.byKey(CatalogKeys.resumeRow));
+    final navTop = tester.getTopLeft(find.byType(PhoneBottomNav)).dy;
+    final card = tester.getRect(find.byKey(CatalogKeys.item('ep-1')));
+    expect(_homeScroll(tester).pixels, 0);
+    expect(play.bottom, lessThanOrEqualTo(hero.bottom));
+    expect(resume.dy, greaterThanOrEqualTo(play.bottom - 0.5));
+    expect(resume.dy - hero.bottom, closeTo(phoneHomeHeroFollowGap, 1));
+    expect(card.bottom, lessThanOrEqualTo(navTop + 0.5));
+    expect(
+      tester.getTopLeft(find.text('继续观看')).dy,
+      lessThan(
+        tester
+            .getTopLeft(
+              find.descendant(
+                of: find.byKey(const Key('phone-home-libraries')),
+                matching: find.text('媒体库'),
+              ),
+            )
+            .dy,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
+  testWidgets('home leaves docked and floating nav preference unchanged', (
+    tester,
+  ) async {
+    await _pumpSurface(tester, width: 360, height: 800);
+    final auth = AuthController.memory();
+    final catalog = CatalogController(auth: auth);
+    addTearDown(catalog.dispose);
+    addTearDown(auth.dispose);
+    for (final floating in [false, true]) {
+      final store = MemoryPhoneNavStyleStore(floating);
+      await tester.pumpWidget(
+        PhoneNavStyleHost(store: store, child: _homeApp(catalog)),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        PhoneNavStyle.floatingOf(tester.element(find.byType(PhoneHome))),
+        floating,
+      );
+      expect(store.value, floating);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(store.value, floating);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('empty home failure is one page retry; a row failure stays put', (
+    tester,
+  ) async {
+    await _pumpSurface(tester, width: 360, height: 800);
+    final auth = AuthController.memory();
+    final catalog = CatalogController(auth: auth);
+    addTearDown(catalog.dispose);
+    addTearDown(auth.dispose);
+    const failure = MediaServerException(
+      MediaServerFailureKind.unknown,
+      statusCode: 503,
+    );
+    catalog
+      ..resume = const CatalogRowState(error: failure)
+      ..nextUp = const CatalogRowState(hidden: true)
+      ..latestMovies = const CatalogRowState(hidden: true)
+      ..latestSeries = const CatalogRowState(hidden: true)
+      ..libraries = const []
+      ..librariesLoading = false;
+    await tester.pumpWidget(_homeApp(catalog));
+    await tester.pump();
+    expect(find.byType(MobileFailureState), findsOneWidget);
+    expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+    expect(find.byKey(MobileFailureState.retryKey), findsOneWidget);
+    await tester.tap(find.byKey(MobileFailureState.retryKey));
+    await tester.pump();
+    expect(find.byKey(CatalogKeys.resumeRow), findsNothing);
+
+    catalog
+      ..resume = const CatalogRowState(
+        items: [MediaItem(id: 'movie-keep', name: '留下', type: 'Movie')],
+      )
+      ..nextUp = const CatalogRowState(error: failure);
+    catalog.notifyListeners();
+    await tester.pump();
+    expect(find.byKey(CatalogKeys.item('movie-keep')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(CatalogKeys.nextUpRow),
+        matching: find.byType(MobileFailureState),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final theme in [AppUiTheme.phoneLight(), AppUiTheme.phoneDark()]) {
+    testWidgets(
+      'edit page uses the phone top bar and hiding a row keeps libraries '
+      '(${theme.brightness.name})',
+      (tester) async {
+        await _pumpSurface(tester, width: 360, height: 800);
+        final auth = AuthController.memory();
+        final catalog = CatalogController(auth: auth);
+        addTearDown(catalog.dispose);
+        addTearDown(auth.dispose);
+        catalog
+          ..resume = const CatalogRowState(hidden: true)
+          ..nextUp = const CatalogRowState(hidden: true)
+          ..latestMovies = const CatalogRowState(hidden: true)
+          ..latestSeries = const CatalogRowState(hidden: true)
+          ..libraries = const [
+            MediaItem(id: 'movies', name: '电影', type: 'CollectionFolder'),
+            MediaItem(id: 'tv', name: '剧集', type: 'CollectionFolder'),
+          ]
+          ..librariesLoading = false;
+        await tester.pumpWidget(
+          CupertinoTestApp(
+            theme: theme,
+            locale: const Locale('zh'),
+            supportedLocales: AppLocalizations.supportedLocales,
+            localizationsDelegates: [
+              AppLocalizations.delegate,
+              ...GlobalCupertinoLocalizations.delegates,
+            ],
+            home: Builder(
+              builder: (context) => CupertinoPageScaffold(
+                child: Center(
+                  child: AppButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        CupertinoPageRoute<void>(
+                          builder: (context) => AuthScope(
+                            controller: auth,
+                            child: CatalogScope(
+                              controller: catalog,
+                              child: const PhoneHomeEditPage(),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                    child: const Text('打开'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('打开'));
+        await tester.pumpAndSettle();
+        _expectPhoneBar(tester, theme, '编辑首页');
+        expect(
+          find.descendant(
+            of: find.byType(PhoneTopBar),
+            matching: find.byKey(PhoneTopBar.backKey),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byType(CupertinoNavigationBar), findsNothing);
+        expect(
+          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'),
+          findsOneWidget,
+        );
+
+        Future<void> hide(String id) async {
+          await tester.tap(find.byKey(PhoneHomeSectionEditor.visibleKey(id)));
+          await tester.pump();
+        }
+
+        await hide(PhoneHomeSectionId.libraries);
+        await hide(PhoneHomeSectionId.libraryLatest('movies'));
+        await hide(PhoneHomeSectionId.libraryLatest('tv'));
+        expect(catalog.libraries.map((item) => item.name), ['电影', '剧集']);
+        expect(
+          PhoneHomeSectionController.app().visibleIds(catalog.libraries),
+          isNot(contains(PhoneHomeSectionId.libraries)),
+        );
+
+        await tester.pumpWidget(_themedHome(catalog, theme));
+        await tester.pump();
+        expect(find.byKey(const Key('phone-home-libraries')), findsNothing);
+        expect(
+          find.byKey(const Key('phone-home-library-latest-movies')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('phone-home-library-latest-tv')),
+          findsNothing,
+        );
+        expect(catalog.libraries.map((item) => item.name), ['电影', '剧集']);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  for (final theme in [
+    AppUiTheme.dark(),
+    AppUiTheme.light(),
+    AppUiTheme.phoneLight(),
+    AppUiTheme.phoneDark(),
+  ]) {
+    testWidgets(
+      'shelf page uses the phone top bar (${theme.brightness.name} ${theme.phone})',
+      (tester) async {
+        final harness = await _pumpShelf(
+          tester,
+          width: 360,
+          source: 'latest-series',
+          theme: theme,
+          items: _series(1),
+        );
+        final painted = theme.phone
+            ? theme
+            : theme.brightness == Brightness.dark
+            ? AppUiTheme.phoneDark()
+            : AppUiTheme.phoneLight();
+        _expectPhoneBar(tester, painted, '货架');
+        expect(
+          find.descendant(
+            of: find.byType(PhoneTopBar),
+            matching: find.byKey(const Key('phone-shelf-filter')),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byType(CupertinoNavigationBar), findsNothing);
+        harness.hold.release();
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }
 
 bool _isRatio(SkeletonBlock block, double ratio) {
@@ -882,12 +1128,40 @@ Future<void> _tapUnplayed(WidgetTester tester) async {
   await tester.tap(find.byKey(const Key('catalog-filter-watch-unplayed')));
 }
 
+void _expectPhoneBar(WidgetTester tester, AppUiThemeData theme, String title) {
+  expect(find.byType(CupertinoNavigationBar), findsNothing);
+  final bar = find.byType(PhoneTopBar);
+  expect(bar, findsOneWidget);
+  expect(find.descendant(of: bar, matching: find.text(title)), findsOneWidget);
+  expect(
+    tester.widget<ColoredBox>(find.byKey(PhoneTopBar.backgroundKey)).color,
+    theme.scaffoldBackgroundColor,
+  );
+}
+
+Widget _themedHome(CatalogController catalog, AppUiThemeData theme) {
+  return CupertinoTestApp(
+    theme: theme,
+    locale: const Locale('zh'),
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
+    home: AuthScope(
+      controller: catalog.auth,
+      child: CatalogScope(controller: catalog, child: const PhoneHome()),
+    ),
+  );
+}
+
 Future<_ShelfHarness> _pumpShelf(
   WidgetTester tester, {
   required double width,
   required String source,
   double height = 800,
   List<FakeEmbyItem>? items,
+  AppUiThemeData? theme,
 }) async {
   await _pumpSurface(tester, width: width, height: height);
   final server = FakeEmbyServer(
@@ -914,7 +1188,7 @@ Future<_ShelfHarness> _pumpShelf(
     AuthScope(
       controller: auth,
       child: CupertinoTestApp(
-        theme: AppUiTheme.dark(),
+        theme: theme ?? AppUiTheme.dark(),
         locale: const Locale('zh'),
         supportedLocales: AppLocalizations.supportedLocales,
         localizationsDelegates: [

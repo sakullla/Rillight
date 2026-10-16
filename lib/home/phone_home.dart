@@ -27,6 +27,12 @@ import 'package:rillight/player/player_window_host.dart';
 /// 首页行请求的 Limit。满这一页说明货架查询后面还有条目。
 const int phoneHomeRowLimit = 24;
 
+/// 首屏作品主操作和下一段之间的间距。继续观看紧挨在这段空白之后。
+const double phoneHomeHeroFollowGap = 12;
+
+/// 其余首页区块之间的垂直节奏。
+const double phoneHomeSectionGap = 28;
+
 /// 手机首页：轮播图、继续观看、下一集、片库入口和每个片库的最近添加。
 /// 拖动手柄排序，关掉的行归到「未显示」。片库页仍列出全部片库。
 class PhoneHome extends StatefulWidget {
@@ -171,8 +177,8 @@ class _PhoneHomeState extends State<PhoneHome> {
           };
           // 横向海报行从屏幕边缘滑入滑出，页边距由标题和行内留白负责。
           const sectionMargin = EdgeInsets.zero;
-          // 区块之间统一 28 的垂直节奏；隐藏的区块不占位。横幅全出血,
-          // 排在第一位时伸进状态栏与透明顶栏之下。
+          // 头图后面只留一小段，让继续观看紧挨主操作。其余区块保持 28。
+          // 隐藏的区块不占位。横幅全出血，排在第一位时伸进状态栏与透明顶栏之下。
           final children = <Widget>[];
           for (final id in visible) {
             if (id == PhoneHomeSectionId.banner) {
@@ -254,8 +260,11 @@ class _PhoneHomeState extends State<PhoneHome> {
             visible.isNotEmpty &&
             visible.first == PhoneHomeSectionId.banner &&
             hasBanner;
+        // 轮播不在第一位时，第一行要躲开壳层那条手机顶栏。
         final topInset = sectionChildren != null && !bannerLeads
-            ? MediaQuery.viewPaddingOf(context).top + 56 + AppSpacing.md
+            ? MediaQuery.viewPaddingOf(context).top +
+                  PhoneTopBar.bodyHeight +
+                  AppSpacing.md
             : 0.0;
         final page = AppRefresh(
           onRefresh: () => catalog.reload(showCachedFirst: false),
@@ -283,7 +292,12 @@ class _PhoneHomeState extends State<PhoneHome> {
               final sections = sectionChildren;
               if (sections == null) return body;
               if (index.isOdd) {
-                return const SizedBox(height: 28);
+                final before = sections[index ~/ 2];
+                return SizedBox(
+                  height: before is PhoneHero
+                      ? phoneHomeHeroFollowGap
+                      : phoneHomeSectionGap,
+                );
               }
               return sections[index ~/ 2];
             },

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
+import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/home/phone_home_sections.dart';
@@ -35,12 +36,11 @@ class _PhoneHomeEditPageState extends State<PhoneHomeEditPage> {
     final l10n = AppLocalizations.of(context);
     final catalog = CatalogScope.of(context);
     final sections = PhoneHomeSectionController.app();
+    final phone = phoneChromeTheme(context);
     return CupertinoPageScaffold(
       key: PhoneHomeEditPage.pageKey,
-      navigationBar: CupertinoNavigationBar(
-        transitionBetweenRoutes: false,
-        middle: Text(l10n.phoneHomeEdit),
-      ),
+      backgroundColor: phone.scaffoldBackgroundColor,
+      navigationBar: PhoneTopBar(title: Text(l10n.phoneHomeEdit)),
       child: ListenableBuilder(
         listenable: Listenable.merge([sections, catalog]),
         builder: (context, _) {
