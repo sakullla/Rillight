@@ -7,35 +7,39 @@ import 'modules.dart';
 void main() {
   verifySuiteManifest();
   group(
-    'library/episode_thumb_test.dart',
-    caseEntrypoints['library/episode_thumb_cases.dart']!,
+    'catalog/shelf_grid_scroll_rebuild_test.dart',
+    caseEntrypoints['catalog/shelf_grid_scroll_rebuild_cases.dart']!,
+  );
+  group(
+    'home/hero_logo_test.dart',
+    caseEntrypoints['home/hero_logo_cases.dart']!,
+  );
+  group(
+    'library/external_link_test.dart',
+    caseEntrypoints['library/external_link_cases.dart']!,
   );
   group(
     'media_image/blurred_artwork_test.dart',
     caseEntrypoints['media_image/blurred_artwork_cases.dart']!,
   );
   group(
-    'mobile/phone_detail_redesign_test.dart',
-    caseEntrypoints['mobile/phone_detail_redesign_cases.dart']!,
+    'player/android_seek_cancellation_test.dart',
+    caseEntrypoints['player/android_seek_cancellation_cases.dart']!,
   );
   group(
-    'mobile/phone_detail_rows_test.dart',
-    caseEntrypoints['mobile/phone_detail_rows_cases.dart']!,
-  );
-  group(
-    'mobile/tv_shell_navigation_test.dart',
-    caseEntrypoints['mobile/tv_shell_navigation_cases.dart']!,
+    'player/playback_image_release_test.dart',
+    caseEntrypoints['player/playback_image_release_cases.dart']!,
   );
   group(
     'player/player_cache_status_test.dart',
     caseEntrypoints['player/player_cache_status_cases.dart']!,
   );
   group(
-    'player/player_window_test.dart',
-    caseEntrypoints['player/player_window_cases.dart']!,
-  );
-  group(
     'player/seek_preview_test.dart',
     caseEntrypoints['player/seek_preview_cases.dart']!,
+  );
+  group(
+    'widgets/media_image_test.dart',
+    caseEntrypoints['widgets/media_image_cases.dart']!,
   );
 }

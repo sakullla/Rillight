@@ -1650,23 +1650,6 @@ void main() {
     MediaImage.debugResetCacheConfiguration();
   });
 
-  void addPosterItems(int count) {
-    for (var i = 0; i < count; i++) {
-      server.items.add(
-        FakeEmbyItem(
-          id: 'poster-$i',
-          name: '海报$i',
-          type: 'Movie',
-          primaryImageTag: 'tag-$i',
-        ),
-      );
-    }
-  }
-
-  String? requestedItemId(String request) {
-    return RegExp(r'/Items/([^/]+)/Images/').firstMatch(request)?.group(1);
-  }
-
   testWidgets(
     'viewport disk hits paint while scrolling and offscreen disk stays deferred',
     (tester) async {
@@ -1748,53 +1731,29 @@ void main() {
   testWidgets('visible posters start during scrolling before offscreen ones', (
     tester,
   ) async {
-    addPosterItems(2);
-    final auth = await connect(tester);
-    await tester.runAsync(() async {
+    final client = _ControlledImageClient()..hold = true;
+    final auth = detachedAuth(client);
+    addTearDown(auth.dispose);
+    // Test scheduling independently of Dio's event-loop timers and image
+    // decoding. Keep the real viewport/queue and explicitly advance idle time.
+    try {
       MediaImageCache.instance.markScrollActivity();
       await pumpPosterStrip(tester, auth, count: 2);
-      MediaImageCache.instance.markScrollActivity();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-    });
-    await tester.pump();
-    // 满载机器上首个可见请求可能晚于固定窗口启动;轮询至 poster-0 已
-    // 开始(有界),再核对滚动优先级门仍按住屏外项。
-    var visibleStarted = false;
-    for (var i = 0; i < 100; i++) {
-      if (imageRequests().map(requestedItemId).contains('poster-0')) {
-        visibleStarted = true;
-        break;
-      }
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
       await tester.pump();
-    }
-    expect(visibleStarted, isTrue);
-    expect(imageRequests().map(requestedItemId), isNot(contains('poster-1')));
-    expect(find.byType(MediaImage), findsWidgets);
+      expect(MediaImageCache.instance.isScrollBusy, isTrue);
+      expect(client.requested, ['poster-0']);
+      expect(find.byType(MediaImage, skipOffstage: false), findsNWidgets(2));
 
-    var offscreenStarted = false;
-    for (var i = 0; i < 100; i++) {
-      if (imageRequests().map(requestedItemId).contains('poster-1')) {
-        offscreenStarted = true;
-        break;
+      await tester.pump(MediaImageCache.defaultScrollIdle);
+      expect(MediaImageCache.instance.isScrollBusy, isFalse);
+      expect(client.requested, ['poster-0', 'poster-1']);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      for (final pending in client.pending.values) {
+        if (!pending.isCompleted) pending.complete(kTinyPng);
       }
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      await tester.pump();
+      await tester.pump(MediaImageCache.defaultFetchTimeout);
     }
-    expect(offscreenStarted, isTrue);
-    final ids = imageRequests().map(requestedItemId).whereType<String>();
-    expect(ids, contains('poster-0'));
-    expect(ids, contains('poster-1'));
-    expect(
-      ids.toList().indexOf('poster-0'),
-      lessThan(ids.toList().indexOf('poster-1')),
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(MediaImageCache.defaultFetchTimeout);
   });
 
   testWidgets(
@@ -1891,7 +1850,21 @@ void main() {
     for (final pending in client.pending.values) {
       pending.complete(kTinyPng);
     }
-    await pumpUntilImage(tester);
+    // Each decoder completes independently on the engine I/O thread. Wait
+    // for all four pixel buffers, with a bounded deadline for real failures.
+    for (var attempt = 0; attempt < 100; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+      final decoded = find
+          .byType(RawImage)
+          .evaluate()
+          .where(
+            (element) => (element.renderObject! as RenderImage).image != null,
+          );
+      if (decoded.length == 4) break;
+    }
     for (var index = 0; index < 4; index++) {
       final image = find.descendant(
         of: find.byKey(ValueKey('visible-poster-$index')),

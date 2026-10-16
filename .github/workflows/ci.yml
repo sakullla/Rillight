@@ -23,6 +23,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Check test collection
+        run: python3 tool/test_execution/generate_suites.py --check
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -35,9 +38,6 @@ jobs:
 
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed lib test packages/rillight_player/lib packages/rillight_player/test integration_test/android_app_probe.dart integration_test/android_player_smoke.dart
-
-      - name: Check test collection
-        run: python3 tool/test_execution/generate_suites.py --check
 
       - name: Analyze
         run: flutter analyze --no-pub

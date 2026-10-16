@@ -132,3 +132,20 @@ does not require D3D11. The production shared fallback retains 16-bit YUV while
 resizing and consumes the same per-frame RPU constants as Windows, then maps
 PQ/HLG and Dolby Vision to SDR using persistent row workers. Passing this test
 does not establish real-time playback on macOS, Linux, or an Android device.
+
+## Default output device recovery
+
+`rillight_windows_audio_route_recovery_test` checks initial absence, delayed
+endpoint readiness after a single notification, a missing second notification,
+retry throttling, and immediate switching from a healthy endpoint. Native audio
+CI now compiles the production WASAPI worker on Windows and runs route/schedule
+contracts. These tests do not prove physical sound or Bluetooth/HDMI hardware
+handoff.
+
+On a Windows machine, play stereo and multichannel media, switch default output
+between speakers/headphones/Bluetooth/HDMI, temporarily remove every endpoint,
+and reconnect without reopening the player. Repeat while paused, then resume.
+Confirm position continues during output absence, playback resumes on the new
+endpoint, and physical sound reaches only the selected output. The retry interval
+is 500 ms after a failed probe; device-open/driver latency is additional. Keep
+these hardware results separate from the deterministic contract tests.

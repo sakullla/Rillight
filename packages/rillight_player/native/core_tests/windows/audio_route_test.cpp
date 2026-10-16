@@ -19,6 +19,8 @@ void expect_kept(const rillight_windows::RouteCommit& commit, int channels,
 }  // namespace
 
 int main() {
+  static_assert(static_cast<uint32_t>(AUDCLNT_E_SERVICE_NOT_RUNNING) == 0x88890010u);
+  static_assert(static_cast<uint32_t>(AUDCLNT_E_RESOURCES_INVALIDATED) == 0x88890026u);
   using namespace rillight_windows;
   for (int kind : {RILLIGHT_CORE_PASSTHROUGH_AC3, RILLIGHT_CORE_PASSTHROUGH_EAC3,
                    RILLIGHT_CORE_PASSTHROUGH_DTS, RILLIGHT_CORE_PASSTHROUGH_DTSHD,

@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:cryptography/dart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -241,7 +242,7 @@ Future<CatalogDiskStore> openDefaultCatalogDiskStore() async {
   return FileCatalogDiskStore(directory);
 }
 
-/// 默认磁盘存储:文件名由缓存 key base64Url 编码而来,以文件修改时间近似
+/// 默认磁盘存储:固定长度 SHA-256 文件名,以文件修改时间近似
 /// LRU,总占用超过上限时淘汰最久未写的条目。
 class FileCatalogDiskStore implements PrefixCatalogDiskStore {
   FileCatalogDiskStore(
@@ -256,21 +257,40 @@ class FileCatalogDiskStore implements PrefixCatalogDiskStore {
   static int _temporaryFileId = 0;
 
   static String _fileName(String key) {
-    final encoded = base64Url.encode(utf8.encode(key)).replaceAll('=', '');
-    return '$encoded$_fileSuffix';
+    final digest = const DartSha256().hashSync(utf8.encode(key));
+    final hex = digest.bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return 'v2-$hex$_fileSuffix';
   }
 
   File _fileFor(String key) {
     return File('${directory.path}${Platform.pathSeparator}${_fileName(key)}');
   }
 
+  File? _legacyFileFor(String key) {
+    final name =
+        '${base64Url.encode(utf8.encode(key)).replaceAll('=', '')}'
+        '$_fileSuffix';
+    // Longer legacy names could never have been written on supported hosts.
+    if (name.length > 255) return null;
+    return File('${directory.path}${Platform.pathSeparator}$name');
+  }
+
   @override
   Future<String?> read(String key) async {
     final file = _fileFor(key);
-    if (!await file.exists()) {
+    if (await file.exists()) {
+      final entry = jsonDecode(await file.readAsString());
+      if (entry is Map && entry['cacheKey'] == key) {
+        return entry['cacheBody'] as String?;
+      }
       return null;
     }
-    return file.readAsString();
+    final legacy = _legacyFileFor(key);
+    return legacy != null && await legacy.exists()
+        ? legacy.readAsString()
+        : null;
   }
 
   @override
@@ -281,19 +301,24 @@ class FileCatalogDiskStore implements PrefixCatalogDiskStore {
       '${target.path}.${DateTime.now().microsecondsSinceEpoch}-${_temporaryFileId++}.tmp',
     );
     try {
-      await temporary.writeAsString(body, flush: true);
+      await temporary.writeAsString(
+        jsonEncode({'cacheKey': key, 'cacheBody': body}),
+        flush: true,
+      );
       await temporary.rename(target.path);
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
+    // Do not let eviction of the new entry resurrect its legacy snapshot.
+    final legacy = _legacyFileFor(key);
+    if (legacy != null && await legacy.exists()) await legacy.delete();
     await _trimToLimit();
   }
 
   @override
   Future<void> remove(String key) async {
-    final file = _fileFor(key);
-    if (await file.exists()) {
-      await file.delete();
+    for (final file in [_fileFor(key), _legacyFileFor(key)]) {
+      if (file != null && await file.exists()) await file.delete();
     }
   }
 
@@ -316,9 +341,17 @@ class FileCatalogDiskStore implements PrefixCatalogDiskStore {
           continue;
         }
         final name = entity.uri.pathSegments.last;
-        final key = _decodeKey(
-          name.substring(0, name.length - _fileSuffix.length),
-        );
+        String? key;
+        if (name.startsWith('v2-')) {
+          try {
+            final entry = jsonDecode(await entity.readAsString());
+            if (entry is Map) key = entry['cacheKey'] as String?;
+          } catch (_) {
+            continue;
+          }
+        } else {
+          key = _decodeKey(name.substring(0, name.length - _fileSuffix.length));
+        }
         if (key != null && key.startsWith(prefix)) {
           try {
             await entity.delete();
@@ -384,8 +417,9 @@ class _CatalogMemoryEntry {
 }
 
 class _PendingCatalogWrite {
-  const _PendingCatalogWrite(this.body, this.generation);
-  final String body;
+  const _PendingCatalogWrite(this.json, this.storedAt, this.generation);
+  final Object json;
+  final DateTime storedAt;
   final int generation;
 }
 
@@ -399,11 +433,16 @@ class _PendingCatalogWrite {
 ///   成功后立即更新内存并排队落盘;失败原样抛出,不动已有缓存;
 /// - 磁盘读写失败静默降级为仅内存/直连,不影响正常显示。
 class CatalogCache {
-  CatalogCache({this.ttl = defaultTtl}) {
+  CatalogCache({
+    this.ttl = defaultTtl,
+    Future<CatalogDiskStore> Function()? openDiskStore,
+  }) : _openDiskStore = openDiskStore ?? openDefaultCatalogDiskStore {
     // 启动即后台解析磁盘层,重启后的首次先显有尽可能大的机会命中。
     // 解析完成前的读写仅走内存(测试环境无平台通道,解析静默不完成)。
     unawaited(_ensureDiskStore());
   }
+
+  final Future<CatalogDiskStore> Function() _openDiskStore;
 
   /// TTL 兜底默认值:约 10 分钟。
   static const Duration defaultTtl = Duration(minutes: 10);
@@ -614,8 +653,13 @@ class CatalogCache {
   /// wait. Callers start their network request first and consume this result
   /// only while the same request is still pending.
   Future<CatalogCacheHit?> lookupWhenReady(CatalogRequest request) async {
+    if (!hasSession) return null;
     final identity = identityToken;
-    if (!_diskResolved) await _ensureDiskStore();
+    final diskWasResolved = _diskResolved;
+    final hit = await lookup(request);
+    if (identity != identityToken) return null;
+    if (hit != null || diskWasResolved) return hit;
+    await _ensureDiskStore();
     if (identity != identityToken) return null;
     return lookup(request);
   }
@@ -648,12 +692,13 @@ class CatalogCache {
     final storedAt = clock();
     _diskReads.remove(key);
     _storeMemory(key, json, storedAt);
-    final body = jsonEncode({
-      'storedAt': storedAt.toIso8601String(),
-      'data': json,
-    });
+    if (_diskResolved && _diskStore == null) return Future<void>.value();
     _pendingWrites.remove(key);
-    _pendingWrites[key] = _PendingCatalogWrite(body, _writeGeneration);
+    _pendingWrites[key] = _PendingCatalogWrite(
+      json,
+      storedAt,
+      _writeGeneration,
+    );
     while (_pendingWrites.length > maxPendingDiskWrites) {
       _pendingWrites.remove(_pendingWrites.keys.first);
       droppedDiskWrites++;
@@ -670,7 +715,13 @@ class CatalogCache {
         final pending = _pendingWrites.remove(key)!;
         if (store == null || pending.generation != _writeGeneration) continue;
         try {
-          await store.write(key, pending.body);
+          // Encode only surviving writes, after coalescing and session checks.
+          // Serialization failures degrade to memory just like disk failures.
+          final body = jsonEncode({
+            'storedAt': pending.storedAt.toIso8601String(),
+            'data': pending.json,
+          });
+          await store.write(key, body);
         } catch (error) {
           lastDiskWriteError = error;
           diskWriteFailures++;
@@ -770,7 +821,7 @@ class CatalogCache {
       return Future<CatalogDiskStore?>.value(_diskStore);
     }
     final configuration = _diskConfiguration;
-    return _diskResolveFuture ??= openDefaultCatalogDiskStore()
+    return _diskResolveFuture ??= _openDiskStore()
         .then<CatalogDiskStore?>((store) {
           if (configuration != _diskConfiguration) return _diskStore;
           _diskStore = store;

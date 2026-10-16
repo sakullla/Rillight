@@ -1,10 +1,30 @@
 #pragma once
 
 #include <cstdint>
+#include <chrono>
 
 #include "../native/core/rillight_core.h"
 
 namespace rillight_windows {
+
+// Device notifications can precede endpoint readiness, or registration can
+// fail. Retry unavailable routes without requiring another notification, but
+// never continuously probe a healthy endpoint (exclusive probes interrupt it).
+class AudioRouteRecovery {
+ public:
+  using Clock = std::chrono::steady_clock;
+  bool ShouldProbe(uint32_t generation, bool available, Clock::time_point now) {
+    if (generation == seen_generation_ &&
+        (available || now < next_probe_)) return false;
+    seen_generation_ = generation;
+    next_probe_ = now + std::chrono::milliseconds(500);
+    return true;
+  }
+
+ private:
+  uint32_t seen_generation_ = 0;
+  Clock::time_point next_probe_{};
+};
 
 // Thrown-away exclusive probes and the live stream share one classification.
 // DEVICE_IN_USE means a client still holds the endpoint; it is not evidence
@@ -83,6 +103,8 @@ inline bool ExclusiveEndpointLost(int32_t hr) {
   switch (static_cast<uint32_t>(hr)) {
     case 0x88890004u:  // AUDCLNT_E_DEVICE_INVALIDATED
     case 0x8889000Fu:  // AUDCLNT_E_ENDPOINT_CREATE_FAILED
+    case 0x88890010u:  // AUDCLNT_E_SERVICE_NOT_RUNNING
+    case 0x88890026u:  // AUDCLNT_E_RESOURCES_INVALIDATED
       return true;
     default:
       return false;
