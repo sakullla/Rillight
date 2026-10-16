@@ -36,4 +36,30 @@ void main() {
     releasePanel();
     expect(interaction.occupied, isFalse);
   });
+
+  testWidgets(
+    'lock drops the open panel and a reveal stays locked until unlock',
+    (tester) async {
+      final interaction = PhonePlayerInteraction();
+      addTearDown(interaction.dispose);
+      final release = interaction.occupy();
+      interaction.setPanel('more');
+      interaction.lock();
+      expect(interaction.locked, isTrue);
+      expect(interaction.unlockVisible, isTrue);
+      expect(interaction.occupied, isFalse);
+      expect(interaction.panel, isNull);
+      release();
+      expect(interaction.locked, isTrue);
+      expect(interaction.occupied, isFalse);
+      await tester.pump(const Duration(seconds: 5));
+      expect(interaction.unlockVisible, isFalse);
+      interaction.revealUnlock();
+      expect(interaction.locked, isTrue);
+      expect(interaction.unlockVisible, isTrue);
+      interaction.unlock();
+      expect(interaction.locked, isFalse);
+      expect(interaction.unlockVisible, isFalse);
+    },
+  );
 }

@@ -778,29 +778,42 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     super.dispose();
   }
 
-  Widget _centerStatus(PlayerController c) {
+  Widget _centerStatus(BuildContext context, PlayerController c) {
     final l = AppLocalizations.of(context);
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    final message = c.sessionExpired
+        ? l.playbackSessionExpired
+        : c.disconnected
+        ? l.playbackDisconnected
+        : c.error == PlayerErrorKind.noStream
+        ? l.noPlayableStream
+        : l.playbackFailed;
     return Center(
       child: c.loading
-          ? const CupertinoActivityIndicator()
+          ? CupertinoActivityIndicator(color: scheme.primary)
           : c.error != null || c.sessionExpired || c.disconnected
           ? SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(
+                    AppIcons.info,
+                    fill: AppIcons.filled,
+                    size: 28,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(height: 12),
                   Text(
-                    c.sessionExpired
-                        ? l.playbackSessionExpired
-                        : c.disconnected
-                        ? l.playbackDisconnected
-                        : c.error == PlayerErrorKind.noStream
-                        ? l.noPlayableStream
-                        : l.playbackFailed,
+                    message,
                     textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge,
                   ),
                   const SizedBox(height: 16),
                   AppButton(
+                    variant: AppButtonVariant.filled,
+                    style: const AppButtonStyle(minimumSize: Size(48, 48)),
                     onPressed: c.sessionExpired
                         ? () async {
                             await _close();
@@ -818,7 +831,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
 
   @override
   Widget build(BuildContext context) => AppUiTheme(
-    data: AppUiTheme.dark(),
+    data: AppUiTheme.phoneDark(),
     child: Builder(key: _presentationThemeKey, builder: _buildPlayer),
   );
 
@@ -910,7 +923,7 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                               : _enterPip,
                           onOpenDanmakuPanel: _openDanmakuPanel,
                           onOpenDanmakuSearch: _openDanmakuSearch,
-                          center: _centerStatus(c),
+                          center: _centerStatus(context, c),
                           interaction: _interaction,
                           fillFrame: _fillFrame,
                           onFillFrame: (fill) {
@@ -1006,29 +1019,38 @@ class _PhoneDanmakuFailure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return Container(
+    final theme = AppUiTheme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
       key: const Key('mobile-danmaku-failure'),
       decoration: BoxDecoration(
-        color: CupertinoColors.black.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(12),
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(danmakuStatusText(l10n, danmaku)),
+            Text(
+              danmakuStatusText(l10n, danmaku),
+              style: theme.textTheme.bodyMedium,
+            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 AppButton(
                   key: const Key('mobile-danmaku-off'),
+                  style: const AppButtonStyle(minimumSize: Size(48, 48)),
                   onPressed: onDisable,
                   child: Text(l10n.danmaku),
                 ),
                 AppButton(
                   key: const Key('mobile-danmaku-retry'),
+                  variant: AppButtonVariant.filled,
+                  style: const AppButtonStyle(minimumSize: Size(48, 48)),
                   onPressed: onRetry,
                   child: Text(l10n.retry),
                 ),

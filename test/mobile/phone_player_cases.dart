@@ -376,14 +376,82 @@ void main() {
       await tester.tap(find.byKey(const Key('mobile-player-more')));
       await settle(tester);
       final panel = find.byKey(const Key('mobile-player-options'));
-      expect(AppUiTheme.of(tester.element(panel)).brightness, Brightness.dark);
+      final panelTheme = AppUiTheme.of(tester.element(panel));
+      expect(panelTheme.brightness, Brightness.dark);
+      expect(
+        panelTheme.colorScheme.primary,
+        AppUiTheme.phoneDark().colorScheme.primary,
+      );
       expect(
         (tester.widget<Container>(panel).decoration! as BoxDecoration).color,
-        AppUiTheme.dark().colorScheme.surface,
+        AppUiTheme.phoneDark().colorScheme.surface,
       );
       await tester.tap(find.byKey(const Key('mobile-player-panel-close')));
       await settle(tester);
       await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'phone player keeps a black stage and phone-dark control chrome',
+    (tester) async {
+      await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+        size: const Size(360, 640),
+      );
+      final scaffold = tester.widget<CupertinoPageScaffold>(
+        find.descendant(
+          of: find.byType(MobilePlayerPage),
+          matching: find.byType(CupertinoPageScaffold),
+        ),
+      );
+      expect(scaffold.backgroundColor, CupertinoColors.black);
+      final video = find.byWidgetPredicate(
+        (widget) =>
+            widget is ColoredBox && widget.color == const Color(0xFF000000),
+      );
+      expect(video, findsOneWidget);
+      final theme = AppUiTheme.of(
+        tester.element(find.byKey(const Key('mobile-player-toggle'))),
+      );
+      expect(theme.brightness, Brightness.dark);
+      expect(
+        theme.colorScheme.primary,
+        AppUiTheme.phoneDark().colorScheme.primary,
+      );
+      expect(
+        theme.colorScheme.surface,
+        AppUiTheme.phoneDark().colorScheme.surface,
+      );
+      final play = tester.widget<AnimatedContainer>(
+        find.descendant(
+          of: find.byKey(const Key('mobile-player-toggle')),
+          matching: find.byType(AnimatedContainer),
+        ),
+      );
+      final playDecoration = play.decoration! as ShapeDecoration;
+      expect(playDecoration.color, theme.colorScheme.primary);
+      expect(playDecoration.shape, isA<CircleBorder>());
+      final rewind = tester.widget<AnimatedContainer>(
+        find.descendant(
+          of: find.byKey(const Key('mobile-player-rewind')),
+          matching: find.byType(AnimatedContainer),
+        ),
+      );
+      expect(
+        (rewind.decoration! as ShapeDecoration).color,
+        const Color(0x29FFFFFF),
+      );
+      final dock = tester.widget<DecoratedBox>(
+        find.byKey(const Key('mobile-player-dock')),
+      );
+      expect((dock.decoration as BoxDecoration).color, phonePlayerDockColor);
+      expect(phonePlayerDockColor, const Color(0xCC140C18));
+      await closePlayer(tester);
+      expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
   );
@@ -792,6 +860,19 @@ void main() {
         await tester.pump(const Duration(milliseconds: 20));
       }
       final view = tester.widget<DanmakuView>(find.byType(DanmakuView));
+      final danmakuRect = tester.getRect(find.byType(DanmakuView));
+      final closeRect = tester.getRect(
+        find.byKey(const Key('mobile-player-close')),
+      );
+      final titleRect = tester.getRect(
+        find.byKey(const Key('mobile-player-title')),
+      );
+      final insets = phonePlayerControlInsets(
+        MediaQuery.of(tester.element(find.byType(DanmakuView))),
+      );
+      expect(danmakuRect.top, closeTo(insets.top + 56, 0.01));
+      expect(danmakuRect.top, greaterThanOrEqualTo(closeRect.bottom - 0.01));
+      expect(danmakuRect.top, greaterThanOrEqualTo(titleRect.bottom - 0.01));
       expect(view.controller.danmakuOn, isTrue);
       expect(view.controller.comments.single.text, '滚动评论');
       expect(backend.isPlaying, isTrue);
@@ -1055,6 +1136,7 @@ void main() {
           ? Duration(hours: parts[0], minutes: parts[1], seconds: parts[2])
           : Duration(minutes: parts[0], seconds: parts[1]);
       expect(target, greaterThan(initial));
+      expect(backend.position, initial);
       await gesture.up();
       await tester.pump();
       expect(backend.position, target);
@@ -1068,12 +1150,16 @@ void main() {
     'failed system brightness gesture shows no invented percent',
     (tester) async {
       final display = _FailDisplayControl();
+      final backend = FakeVideoBackend(duration: const Duration(hours: 2));
       await showPlayer(
         tester,
         itemId: 'movie-inception',
+        backend: backend,
         display: display,
+        mediaDuration: const Duration(hours: 2),
         wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
       );
+      final initial = backend.position;
       final drag = await tester.startGesture(const Offset(200, 170));
       await drag.moveBy(const Offset(0, -40));
       await drag.moveBy(const Offset(0, -40));
@@ -1083,7 +1169,10 @@ void main() {
         find.byKey(const Key('mobile-player-gesture-value')),
         findsNothing,
       );
+      expect(backend.position, initial);
       await drag.up();
+      await tester.pump();
+      expect(backend.position, initial);
       final volume = await tester.startGesture(const Offset(600, 170));
       await volume.moveBy(const Offset(0, -40));
       await volume.moveBy(const Offset(0, -40));
@@ -1126,6 +1215,33 @@ void main() {
     );
     await volume.up();
     await closePlayer(tester);
+  }, tags: ['integration']);
+
+  cases.testWidgets('unavailable volume gesture keeps the playback position', (
+    tester,
+  ) async {
+    final backend = FakeVideoBackend(duration: const Duration(hours: 2));
+    await showPlayer(
+      tester,
+      itemId: 'movie-inception',
+      backend: backend,
+      display: _FailVolumeDisplayControl(),
+      mediaDuration: const Duration(hours: 2),
+      wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
+    );
+    final initial = backend.position;
+    final drag = await tester.startGesture(const Offset(600, 170));
+    await drag.moveBy(const Offset(0, -40));
+    await drag.moveBy(const Offset(0, -40));
+    await tester.pump();
+    expect(find.text('系统调节暂不可用'), findsOneWidget);
+    expect(find.byKey(const Key('mobile-player-gesture-value')), findsNothing);
+    expect(backend.position, initial);
+    await drag.up();
+    await tester.pump();
+    expect(backend.position, initial);
+    await closePlayer(tester);
+    expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
   cases.testWidgets('locked screen needs an explicit unlock button tap', (
@@ -1182,7 +1298,10 @@ void main() {
     await tester.tapAt(const Offset(400, 150));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const Key('mobile-player-toggle')), findsNothing);
+    expect(find.byKey(const Key('mobile-player-more')), findsNothing);
+    expect(find.byKey(const Key('mobile-player-close')), findsNothing);
     expect(find.byKey(const Key('mobile-player-unlock')), findsOneWidget);
+    expect(backend.position, initial);
     await tester.tap(find.byKey(const Key('mobile-player-unlock')));
     await tester.pump();
     expect(find.byKey(const Key('mobile-player-unlock')), findsNothing);
@@ -2522,6 +2641,13 @@ class _FailDisplayControl extends _FakeDisplayControl {
   @override
   Future<void> setBrightness(double value) async {
     throw StateError('platform denied brightness');
+  }
+}
+
+class _FailVolumeDisplayControl extends _FakeDisplayControl {
+  @override
+  Future<void> setVolume(double value) async {
+    throw StateError('platform denied volume');
   }
 }
 

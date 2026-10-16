@@ -71,7 +71,9 @@ String? _phoneSubtitleImportNotice(AppLocalizations l, PlayerController c) {
 }
 
 /// Phone controls with a title bar, a timeline, and transport sitting on the
-/// timeline instead of covering the picture. Series playback gets an episode
+/// timeline instead of covering the picture. The stage stays black. Chrome
+/// uses the phone dark palette: a sakura primary transport button, light
+/// secondary targets, and a phone-dark dock. Series playback gets an episode
 /// list. Less frequent picture, volume and media choices stay in the panel.
 ///
 /// The video surface and control scrims extend to the screen edges. Buttons
@@ -181,11 +183,17 @@ Future<int?> _androidSdkInt() async {
   }
 }
 
+const Color phonePlayerDockColor = Color(0xCC140C18);
+
 final AppButtonStyle _phoneChromeButton = AppButtonStyle(
+  foregroundColor: CupertinoColors.white,
+  backgroundColor: const Color(0x33FFFFFF),
   minimumSize: const Size(48, 48),
   padding: EdgeInsets.zero,
   shape: const CircleBorder(),
 );
+
+const Color _phoneSecondaryFill = Color(0x29FFFFFF);
 
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
   double? _seek;
@@ -273,6 +281,21 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       _controller.error == null &&
       !_controller.disconnected &&
       !_controller.sessionExpired;
+
+  TextStyle _stageReadout({
+    double size = 12,
+    FontWeight weight = FontWeight.w500,
+    bool strong = false,
+  }) {
+    final color = AppUiTheme.of(context).colorScheme.onSurface;
+    return TextStyle(
+      fontSize: size,
+      fontWeight: weight,
+      height: 1.2,
+      color: strong ? color : color.withValues(alpha: .74),
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -434,6 +457,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
   }
 
   Widget _title(AppLocalizations l) {
+    final scheme = AppUiTheme.of(context).colorScheme;
     final item = _controller.item;
     final rawTitle = item?.name ?? l.playerLoading;
     final series = item != null && item.isEpisode ? item.seriesName : null;
@@ -445,6 +469,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         ? rawTitle
         : '$code · $rawTitle';
     return Column(
+      key: const Key('mobile-player-title'),
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -453,17 +478,23 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
             series,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: Color(0xb3ffffff),
+              fontWeight: FontWeight.w600,
+              height: 1.15,
+              color: scheme.primary,
             ),
           ),
         Text(
           title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            height: 1.15,
+            color: scheme.onSurface,
+          ),
         ),
       ],
     );
@@ -515,18 +546,14 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       message: l.playerNetworkSpeedTooltip,
       child: NetworkSpeedReadout(
         bytesPerSecond: c.cacheSpeedBytesPerSec,
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-        color: const Color(0xb3ffffff),
+        textStyle: _stageReadout(),
+        color: _stageReadout().color,
       ),
     );
     final clock = Text(
       '${phonePlayerClock(Duration(milliseconds: (_seek ?? c.position.inMilliseconds).round()))}  /  ${phonePlayerClock(c.duration)}',
       key: const Key('mobile-player-clock'),
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        fontFeatures: [FontFeature.tabularFigures()],
-      ),
+      style: _stageReadout(size: 13, weight: FontWeight.w600, strong: true),
     );
     final notices = [
       if (c.progressSyncFailed) l.progressSyncFailed,
@@ -552,13 +579,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      l.networkSlowHint,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xb3ffffff),
-                      ),
-                    ),
+                    child: Text(l.networkSlowHint, style: _stageReadout()),
                   ),
                   AppIconButton(
                     key: const Key('mobile-dismiss-network-hint'),
@@ -576,7 +597,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               Text(
                 l.playbackLineFailed(c.playbackLineFailure!),
                 key: const Key('playback-line-failure'),
-                style: const TextStyle(fontSize: 12, color: Color(0xb3ffffff)),
+                style: _stageReadout(),
               ),
             if (c.trackFailure != null)
               Row(
@@ -584,10 +605,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   Expanded(
                     child: Text(
                       l.mobileTrackUnavailable,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xb3ffffff),
-                      ),
+                      style: _stageReadout(),
                     ),
                   ),
                   AppIconButton(
@@ -606,13 +624,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 40),
                 child: SingleChildScrollView(
-                  child: Text(
-                    notices.join(' · '),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xb3ffffff),
-                    ),
-                  ),
+                  child: Text(notices.join(' · '), style: _stageReadout()),
                 ),
               ),
             // Buffering text and accessibility scaling can exceed a phone's
@@ -628,19 +640,15 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const SizedBox.square(
+                      SizedBox.square(
                         dimension: 12,
-                        child: CupertinoActivityIndicator(),
+                        child: CupertinoActivityIndicator(
+                          color: AppUiTheme.of(context).colorScheme.primary,
+                        ),
                       ),
                       const SizedBox(width: 6),
                       Flexible(
-                        child: Text(
-                          l.playerBuffering,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xb3ffffff),
-                          ),
-                        ),
+                        child: Text(l.playerBuffering, style: _stageReadout()),
                       ),
                     ],
                   ),
@@ -696,13 +704,28 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     final wide = MediaQuery.sizeOf(context).width >= 640;
     final transport = _buildTransport(context);
     final actions = _buildActionRow(context);
-    if (!wide) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [transport, const SizedBox(height: 8), actions],
-      );
-    }
-    return Row(children: [transport, const Spacer(), actions]);
+    final body = wide
+        ? Row(children: [transport, const Spacer(), actions])
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [transport, const SizedBox(height: 8), actions],
+          );
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              key: const Key('mobile-player-dock'),
+              decoration: const BoxDecoration(
+                color: phonePlayerDockColor,
+                borderRadius: BorderRadius.all(Radius.circular(24)),
+              ),
+            ),
+          ),
+        ),
+        body,
+      ],
+    );
   }
 
   Widget _buildActionRow(BuildContext context) {
@@ -719,9 +742,12 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       _actionButton(
         keyName: 'mobile-player-speed',
         tooltip: l.playbackRate,
-        icon: Text(
-          playerRateLabel(c.playbackRate),
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        icon: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            playerRateLabel(c.playbackRate),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
         ),
         action: () => _openMore(section: 'speed'),
       ),
@@ -768,10 +794,12 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
       tooltip: tooltip,
       onPressed: _controller.loading ? null : () => unawaited(action()),
       icon: icon,
-      style: AppButtonStyle(
+      style: const AppButtonStyle(
         foregroundColor: CupertinoColors.white,
-        minimumSize: const Size(48, 48),
-        fixedSize: const Size(48, 48),
+        backgroundColor: _phoneSecondaryFill,
+        shape: CircleBorder(),
+        minimumSize: Size(48, 48),
+        fixedSize: Size(48, 48),
         padding: EdgeInsets.zero,
       ),
     );
@@ -795,9 +823,9 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         onPressed: onPressed,
         icon: Icon(icon, fill: AppIcons.filled, size: primary ? 30 : 24),
         style: AppButtonStyle(
-          foregroundColor: primary ? scheme.surface : CupertinoColors.white,
-          backgroundColor: primary ? scheme.onSurface : null,
-          shape: primary ? const CircleBorder() : null,
+          foregroundColor: primary ? scheme.onPrimary : CupertinoColors.white,
+          backgroundColor: primary ? scheme.primary : _phoneSecondaryFill,
+          shape: const CircleBorder(),
           fixedSize: const Size(size, size),
           minimumSize: const Size(size, size),
           padding: EdgeInsets.zero,
@@ -1728,6 +1756,10 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
                       color: AppUiTheme.of(context).colorScheme.surface,
                       borderRadius: const BorderRadius.horizontal(
                         left: Radius.circular(20),
+                      ),
+                      border: Border.all(
+                        color: AppUiTheme.of(context).colorScheme.primary
+                            .withValues(alpha: .55),
                       ),
                     ),
                     child: builder(context),
