@@ -552,7 +552,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             selectedSeason.id == _artworkSeasonId;
         final entryItem = handoff?.item ?? item;
         final seasonArt = userSeason
-            ? seasonArtworkItem(selectedSeason!, item!)
+            ? seasonArtworkItem(selectedSeason, item)
             : null;
         final imageSource = failed ? null : seasonArt ?? entryItem;
         final preferBackdrop = handoff?.preferBackdrop ?? true;
@@ -1005,9 +1005,7 @@ class _DetailPlayActions extends StatelessWidget {
           onPressed: onNext,
         ),
     ];
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(14),
-    );
+    const shape = StadiumBorder();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

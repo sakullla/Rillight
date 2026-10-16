@@ -391,6 +391,7 @@ class _SubtitleTrackMenuState extends State<SubtitleTrackMenu> {
           focusNode: _buttonFocus,
           tooltip: l.subtitleTrack,
           color: scheme.onSurface,
+          size: 24,
           icon: Icon(
             AppIcons.subtitles,
             fill:

@@ -114,6 +114,7 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
             focusNode: _buttonFocus,
             tooltip: l10n.playerPlaybackSettings,
             color: scheme.onSurface,
+            size: 24,
             icon: const Icon(AppIcons.settings, fill: AppIcons.filled),
             onPressed: () => menu.isOpen ? menu.close() : menu.open(),
           ),
@@ -270,24 +271,18 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
           selected: selected,
           child: Semantics(
             selected: selected,
-            child: AppButton.icon(
+            child: AppButton(
               key: info.$3,
               onPressed: () => setState(() => _section = key),
-              icon: Icon(info.$2, fill: AppIcons.filled, size: 16),
-              label: Text(info.$1),
               style: AppButtonStyle(
                 minimumSize: Size(rail ? double.infinity : 0, rail ? 44 : 36),
                 foregroundColor: selected
                     ? scheme.onSurface
                     : scheme.onSurfaceVariant,
                 backgroundColor: selected
-                    ? scheme.surfaceBright
+                    ? scheme.surfaceContainerHighest
                     : const Color(0x00000000),
-                shape: rail
-                    ? RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                      )
-                    : const StadiumBorder(),
+                shape: const StadiumBorder(),
                 side: selected && !rail
                     ? BorderSide(color: scheme.onSurface.withValues(alpha: .7))
                     : BorderSide.none,
@@ -295,6 +290,28 @@ class _PlaybackSettingsMenuState extends State<PlaybackSettingsMenu> {
                 textStyle: theme.textTheme.labelLarge?.copyWith(
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 ),
+              ),
+              child: Row(
+                mainAxisSize: rail ? MainAxisSize.max : MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Icon(info.$2, fill: AppIcons.filled, size: 20),
+                  ),
+                  const SizedBox(width: 8),
+                  if (rail)
+                    Expanded(
+                      child: Text(
+                        info.$1,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.start,
+                      ),
+                    )
+                  else
+                    Text(info.$1, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
               ),
             ),
           ),

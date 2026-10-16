@@ -1222,7 +1222,12 @@ AppButtonStyle _endedActionStyle(AppUiThemeData theme) {
     horizontal: AppSpacing.lg,
     vertical: AppSpacing.sm,
   );
-  return AppButtonStyle(minimumSize: size, padding: padding, textStyle: label);
+  return AppButtonStyle(
+    minimumSize: size,
+    padding: padding,
+    textStyle: label,
+    shape: const StadiumBorder(),
+  );
 }
 
 class _NextEpisodeBanner extends StatelessWidget {
@@ -1630,7 +1635,7 @@ class _ControlsRow extends StatelessWidget {
           key: PlayerKeys.playPause,
           tooltip: controller.isPlaying ? l10n.pause : l10n.play,
           onPressed: controller.togglePlay,
-          iconSize: 30,
+          iconSize: 22,
           filled: true,
           icon: controller.isPlaying ? AppIcons.pause : AppIcons.play,
         ),
@@ -2206,7 +2211,9 @@ class _PlayerIconButton extends StatelessWidget {
         foregroundColor: scheme.surface,
         backgroundColor: scheme.onSurface,
         disabledForegroundColor: scheme.surface.withValues(alpha: .45),
-        fixedSize: const Size(46, 46),
+        fixedSize: const Size(44, 44),
+        padding: EdgeInsets.zero,
+        shape: const CircleBorder(),
       ),
       icon: Icon(icon, fill: symbolFill),
     );

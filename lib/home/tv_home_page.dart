@@ -503,7 +503,10 @@ class _TvFeaturedState extends State<_TvFeatured> {
                         TvAction(
                           key: TvHomeKeys.featuredOpen,
                           pill: true,
-                          leading: const Icon(CupertinoIcons.info_circle),
+                          leading: const Icon(
+                            AppIcons.info,
+                            fill: AppIcons.filled,
+                          ),
                           onPressed: () =>
                               context.push(AppRoutes.item(item.id)),
                           child: Text(l.details),

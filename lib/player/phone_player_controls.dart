@@ -183,6 +183,8 @@ Future<int?> _androidSdkInt() async {
 
 final AppButtonStyle _phoneChromeButton = AppButtonStyle(
   minimumSize: const Size(48, 48),
+  padding: EdgeInsets.zero,
+  shape: const CircleBorder(),
 );
 
 class PhonePlayerControlsState extends State<PhonePlayerControls> {
@@ -711,7 +713,7 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         _actionButton(
           keyName: 'mobile-player-episodes',
           tooltip: l.playerEpisodes,
-          icon: const Icon(AppIcons.episodes, fill: AppIcons.filled, size: 22),
+          icon: const Icon(AppIcons.episodes, fill: AppIcons.filled, size: 24),
           action: _openEpisodes,
         ),
       _actionButton(
@@ -727,20 +729,20 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         _actionButton(
           keyName: 'mobile-player-tracks',
           tooltip: c.canSwitchAudioTrack ? l.mobileTracks : l.subtitleTrack,
-          icon: const Icon(AppIcons.subtitles, fill: AppIcons.filled, size: 22),
+          icon: const Icon(AppIcons.subtitles, fill: AppIcons.filled, size: 24),
           action: () => _openMore(section: 'tracks'),
         ),
       if (widget.danmaku?.isConfigured == true)
         _actionButton(
           keyName: 'mobile-player-danmaku',
           tooltip: l.danmaku,
-          icon: const Icon(AppIcons.danmaku, fill: AppIcons.filled, size: 22),
+          icon: const Icon(AppIcons.danmaku, fill: AppIcons.filled, size: 24),
           action: () => _openMore(section: 'danmaku'),
         ),
       _actionButton(
         keyName: 'mobile-player-more',
         tooltip: l.mobileMore,
-        icon: const Icon(AppIcons.settings, fill: AppIcons.filled, size: 22),
+        icon: const Icon(AppIcons.settings, fill: AppIcons.filled, size: 24),
         action: () => _openMore(),
       ),
     ];
@@ -794,13 +796,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
         icon: Icon(icon, fill: AppIcons.filled, size: primary ? 30 : 24),
         style: AppButtonStyle(
           foregroundColor: primary ? scheme.surface : CupertinoColors.white,
-          backgroundColor: primary
-              ? scheme.onSurface
-              : CupertinoColors.white.withValues(alpha: .16),
-          side: primary
-              ? null
-              : BorderSide(color: CupertinoColors.white.withValues(alpha: .28)),
-          shape: const CircleBorder(),
+          backgroundColor: primary ? scheme.onSurface : null,
+          shape: primary ? const CircleBorder() : null,
           fixedSize: const Size(size, size),
           minimumSize: const Size(size, size),
           padding: EdgeInsets.zero,

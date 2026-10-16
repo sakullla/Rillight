@@ -113,6 +113,10 @@ class PlaybackEndedPanel extends StatelessWidget {
                                   AppButton.icon(
                                     key: PlayerKeys.replay,
                                     variant: AppButtonVariant.filled,
+                                    style: const AppButtonStyle(
+                                      minimumSize: Size(0, 44),
+                                      shape: StadiumBorder(),
+                                    ),
                                     onPressed: onReplay,
                                     icon: const Icon(
                                       AppIcons.replay,
@@ -124,6 +128,10 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     AppButton.icon(
                                       key: PlayerKeys.endedViewSeries,
                                       variant: AppButtonVariant.outlined,
+                                      style: const AppButtonStyle(
+                                        minimumSize: Size(0, 44),
+                                        shape: StadiumBorder(),
+                                      ),
                                       onPressed: onViewSeries,
                                       icon: const Icon(
                                         AppIcons.series,
@@ -135,6 +143,10 @@ class PlaybackEndedPanel extends StatelessWidget {
                                     message: l.closePlayer,
                                     child: AppButton.icon(
                                       key: PlayerKeys.endedClose,
+                                      style: const AppButtonStyle(
+                                        minimumSize: Size(0, 44),
+                                        shape: StadiumBorder(),
+                                      ),
                                       onPressed: onClose,
                                       icon: const Icon(
                                         AppIcons.close,

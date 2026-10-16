@@ -400,19 +400,30 @@ void main() {
     final panel = tester.getRect(
       find.byKey(const Key('player-settings-panel')),
     );
-    for (final key in [
+    final categoryKeys = [
       PlayerKeys.speed,
+      const Key('player-skip-settings-section'),
+      const Key('player-subtitle-size-section'),
       PlayerKeys.audio,
       PlayerKeys.quality,
       PlayerKeys.mediaSource,
       const Key('player-output-section'),
-    ]) {
+    ];
+    double? iconLeft;
+    for (final key in categoryKeys) {
       expect(find.descendant(of: rail, matching: find.byKey(key)), findsOne);
       final rect = tester.getRect(find.byKey(key));
       expect(
         panel.contains(rect.topLeft) && panel.contains(rect.bottomRight),
         isTrue,
       );
+      final left = tester
+          .getTopLeft(
+            find.descendant(of: find.byKey(key), matching: find.byType(Icon)),
+          )
+          .dx;
+      iconLeft ??= left;
+      expect(left, closeTo(iconLeft, 0.5));
     }
     await tester.tap(find.byKey(PlayerKeys.quality));
     await settle(tester);

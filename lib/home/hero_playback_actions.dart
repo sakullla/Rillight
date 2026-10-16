@@ -127,7 +127,8 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
       style: AppButtonStyle(
-        minimumSize: const Size(0, 48),
+        minimumSize: Size(0, expand ? 48 : 44),
+        shape: const StadiumBorder(),
         // 手机头图上的播放钮用反相实底:深色是白底黑字,浅色是墨底白字。
         backgroundColor: onScrim
             ? const Color(0xffffffff)
@@ -148,6 +149,7 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
             onPressed: widget.onDetails,
             style: AppButtonStyle(
               minimumSize: const Size(0, 48),
+              shape: const StadiumBorder(),
               foregroundColor: scheme.onSurface,
               side: BorderSide(color: scheme.outline),
             ),
@@ -157,16 +159,15 @@ class _HeroPlaybackActionsState extends State<HeroPlaybackActions> {
         : AppButton(
             onPressed: widget.onDetails,
             style: AppButtonStyle(
-              minimumSize: const Size(0, 48),
+              minimumSize: const Size(0, 44),
+              shape: const StadiumBorder(),
               foregroundColor: onScrim
                   ? const Color(0xffffffff)
                   : scheme.onSurface,
-              backgroundColor: onScrim
-                  ? const Color(0xffffffff).withValues(alpha: .16)
-                  : scheme.surfaceContainerLowest,
+              backgroundColor: onScrim ? null : scheme.surfaceContainerLowest,
               side: BorderSide(
                 color: onScrim
-                    ? const Color(0xffffffff).withValues(alpha: .28)
+                    ? const Color(0xffffffff).withValues(alpha: .72)
                     : scheme.outline,
               ),
             ),

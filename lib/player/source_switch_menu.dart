@@ -98,7 +98,7 @@ class _PlaybackLineEntry extends StatelessWidget {
     if (!focusable) {
       return AppListTile(
         key: const Key('player-playback-lines'),
-        leading: const Icon(AppIcons.route, fill: AppIcons.filled),
+        leading: const Icon(AppIcons.swap, fill: AppIcons.filled),
         title: Text(label),
         trailing: const Icon(AppIcons.chevronRight, fill: AppIcons.filled),
         onTap: onPressed,
@@ -172,7 +172,7 @@ class _FocusableLineButtonState extends State<_FocusableLineButton> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      AppIcons.route,
+                      AppIcons.swap,
                       fill: AppIcons.filled,
                       size: 20 * s,
                       color: foreground,
@@ -205,7 +205,7 @@ class _PlaybackLinePopup extends StatelessWidget {
     return AppIconButton(
       key: const Key('player-playback-lines'),
       tooltip: label,
-      icon: const Icon(AppIcons.route, fill: AppIcons.filled),
+      icon: const Icon(AppIcons.swap, fill: AppIcons.filled, size: 24),
       onPressed: () => unawaited(_open(context)),
     );
   }

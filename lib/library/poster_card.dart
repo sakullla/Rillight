@@ -564,13 +564,14 @@ class _PosterRevealOverlay extends StatelessWidget {
                             foregroundColor: light
                                 ? scheme.onPrimary
                                 : const Color(0xff000000),
-                            padding: const EdgeInsets.all(AppSpacing.sm),
-                            minimumSize: const Size(52, 52),
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(44, 44),
+                            shape: const CircleBorder(),
                           ),
                           icon: const Icon(
                             AppIcons.play,
                             fill: AppIcons.filled,
-                            size: 32,
+                            size: 22,
                           ),
                         ),
                       ),

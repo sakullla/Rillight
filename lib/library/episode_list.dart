@@ -668,7 +668,12 @@ class _EpisodeThumb extends StatelessWidget {
                       child: AppTooltip(
                         message: playLabel,
                         child: Container(
-                          decoration: BoxDecoration(color: scheme.primary),
+                          decoration: BoxDecoration(
+                            color: scheme.brightness == Brightness.light
+                                ? scheme.primary
+                                : const Color(0xffffffff),
+                            shape: BoxShape.circle,
+                          ),
                           key: CatalogKeys.episodePlay(item.id),
                           clipBehavior: Clip.antiAlias,
                           child: AppSurfaceAction(
@@ -680,7 +685,9 @@ class _EpisodeThumb extends StatelessWidget {
                               child: Icon(
                                 AppIcons.play,
                                 fill: AppIcons.filled,
-                                color: scheme.onPrimary,
+                                color: scheme.brightness == Brightness.light
+                                    ? scheme.onPrimary
+                                    : const Color(0xff000000),
                                 size: height * .22,
                               ),
                             ),

@@ -97,11 +97,12 @@ class NextEpisodeCard extends StatelessWidget {
                         key: PlayerKeys.nextEpisodePlay,
                         focusNode: playFocus,
                         onPressed: controller.playNextEpisode,
-                        style: AppButtonStyle(
+                        style: const AppButtonStyle(
                           backgroundColor: CupertinoColors.white,
                           foregroundColor: CupertinoColors.black,
-                          minimumSize: const Size(0, 40),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          minimumSize: Size(0, 40),
+                          padding: EdgeInsets.symmetric(horizontal: 14),
+                          shape: StadiumBorder(),
                         ),
                         icon: const Icon(
                           AppIcons.skipNext,
@@ -117,11 +118,12 @@ class NextEpisodeCard extends StatelessWidget {
                             ? l10n.nextEpisodeKeepWatching
                             : l10n.nextEpisodeStay,
                         onPressed: controller.cancelNextEpisode,
-                        style: AppButtonStyle(
-                          foregroundColor: const Color(0xB3FFFFFF),
-                          minimumSize: const Size(40, 40),
-                          fixedSize: const Size(40, 40),
+                        style: const AppButtonStyle(
+                          foregroundColor: Color(0xB3FFFFFF),
+                          minimumSize: Size(40, 40),
+                          fixedSize: Size(40, 40),
                           padding: EdgeInsets.zero,
+                          shape: CircleBorder(),
                         ),
                         icon: const Icon(
                           AppIcons.close,

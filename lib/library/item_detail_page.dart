@@ -2883,7 +2883,8 @@ AppButtonStyle _detailGhostButtonStyle(AppColorScheme scheme) {
   return AppButtonStyle(
     foregroundColor: scheme.onSurface,
     side: BorderSide(color: scheme.onSurface.withValues(alpha: 0.22)),
-    minimumSize: const Size(0, 48),
+    minimumSize: const Size(0, 44),
+    shape: const StadiumBorder(),
     padding: const EdgeInsets.symmetric(
       horizontal: AppSpacing.lg,
       vertical: AppSpacing.sm,
@@ -2976,13 +2977,14 @@ class _DetailActions extends StatelessWidget {
           key: PlayerKeys.open,
           onPressed: onPlay,
           style: AppButtonStyle(
-            minimumSize: const Size(0, 48),
+            minimumSize: const Size(0, 44),
+            shape: const StadiumBorder(),
             padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xxl,
+              horizontal: AppSpacing.xl,
               vertical: AppSpacing.sm,
             ),
           ),
-          icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 26),
+          icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 22),
           label: Text(playLabel),
           variant: AppButtonVariant.filled,
         ),

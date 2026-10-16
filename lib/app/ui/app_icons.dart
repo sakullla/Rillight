@@ -20,7 +20,7 @@ abstract final class AppIcons {
   static const IconData settings = Symbols.settings_rounded;
 
   /// 对话气泡。弹幕只用这一个图形。
-  static const IconData danmaku = Symbols.chat_bubble_rounded;
+  static const IconData danmaku = Symbols.chat_rounded;
 
   /// 指向后退方向的箭头。
   static const IconData back = Symbols.arrow_back_rounded;
@@ -95,8 +95,8 @@ abstract final class AppIcons {
   static const IconData empty = Symbols.inbox_rounded;
   static const IconData movie = Symbols.movie_rounded;
 
-  /// 编号列表。选集只用这一个图形，和 [playlist] 不同。
-  static const IconData episodes = Symbols.format_list_numbered_rounded;
+  /// 条目列表。选集只用这一个图形，和 [playlist] 不同。
+  static const IconData episodes = Symbols.format_list_bulleted_rounded;
   static const IconData series = Symbols.tv_rounded;
   static const IconData mediaSource = Symbols.video_file_rounded;
   static const IconData music = Symbols.music_note_rounded;
@@ -113,7 +113,7 @@ abstract final class AppIcons {
   static const IconData wifi = Symbols.wifi_rounded;
   static const IconData wifiOff = Symbols.wifi_off_rounded;
   static const IconData speed = Symbols.speed_rounded;
-  static const IconData subtitles = Symbols.subtitles_rounded;
+  static const IconData subtitles = Symbols.closed_caption_rounded;
 
   /// 摄像机。片源里的视频轨只用这一个图形，影片库仍用 [movie]，片源文件仍用 [mediaSource]。
   static const IconData video = Symbols.videocam_rounded;
