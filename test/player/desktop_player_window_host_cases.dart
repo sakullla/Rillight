@@ -7,12 +7,13 @@ import 'dart:async';
 import 'package:fake_async/fake_async.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
-import 'package:go_router/go_router.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
+
+import '../auth/server_ui_harness.dart';
+
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -808,7 +809,9 @@ void main() {
 
       await tester.tap(find.byKey(SessionActions.serverMenuKey));
       await settle(tester);
-      await tester.tap(find.text('退出登录'));
+      await openServerEditor(tester, auth.session!.server.id);
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
       await pumpUntil(tester, () => !auth.isLoggedIn);
       await settle(tester);
 
@@ -821,7 +824,7 @@ void main() {
     }, tags: ['integration']);
 
     testWidgets(
-      'a failed line switch keeps the player window; success closes it',
+      'line selection delegates to playback without closing the current window',
       (tester) async {
         final lan = FakeEmbyServer(
           baseUrl: Uri.parse('http://host-lan.test:8096'),
@@ -869,54 +872,25 @@ void main() {
         await tester.pump();
         expect(host.current?.itemId, 'movie-up');
 
-        lan.publicInfoStatus = 500;
-        lan.publicInfoRawBody = 'upstream timeout';
+        final choices = <LineSelection>[];
+        auth.playbackLineSelection = (id, selection, guard) async {
+          choices.add(selection);
+        };
         await tester.tap(find.byKey(SessionActions.serverMenuKey));
         await settle(tester);
         final saved = auth.savedServers.single;
         final lanLine = saved.lines.firstWhere(
           (line) => line.address == lan.baseUrl.toString(),
         );
-
-        // 切换失败:播放窗口保留,不触发停播,会话仍在原线路。
-        await tester.tap(
-          find.byKey(ServerSwitcherDialog.lineOptionKey(saved.id, lanLine.id)),
-        );
-        await settle(tester);
-        expect(auth.isLoggedIn, isTrue);
+        await serverUiTap(tester, Key('server-lines-${saved.id}'));
+        expect(host.current?.itemId, 'movie-up');
+        await serverUiTap(tester, Key('server-line-choice-${lanLine.id}'));
+        expect(choices.single, LineSelection.fixed(lanLine.id));
         expect(auth.client.baseUrl, wan.baseUrl);
         expect(host.current?.itemId, 'movie-up');
-        expect(
-          calls.where(
-            (entry) =>
-                entry.startsWith('requestClose:') || entry.startsWith('kill:'),
-          ),
-          isEmpty,
-        );
-        expect(find.byKey(SessionActions.lineSwitchFailureKey), findsOneWidget);
-        expect(find.textContaining('切换线路失败'), findsOneWidget);
-
-        // 恢复后同一入口切换成功:播放窗口被关闭,路由回到首页。
-        lan.publicInfoStatus = null;
-        lan.publicInfoRawBody = null;
-        await tester.tap(find.byKey(SessionActions.serverMenuKey));
+        expect(calls, isNot(contains('requestClose:$pid')));
+        await host.close();
         await settle(tester);
-        await tester.tap(
-          find.byKey(ServerSwitcherDialog.lineOptionKey(saved.id, lanLine.id)),
-        );
-        await pumpUntil(tester, () => host.current == null);
-        await settle(tester);
-        expect(auth.client.baseUrl, lan.baseUrl);
-        expect(auth.lineSwitchFailure, isNull);
-        expect(host.current, isNull);
-        expect(calls, contains('requestClose:$pid'));
-        expect(
-          GoRouter.of(tester.element(find.byKey(SessionActions.serverMenuKey)))
-              .state
-              .uri
-              .path,
-          '/',
-        );
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],

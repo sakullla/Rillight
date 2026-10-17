@@ -13,9 +13,8 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/phone_server_manager.dart';
+import 'package:rillight/auth/server_selection_page.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/auth/tv_connect_page.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -367,12 +366,8 @@ void main() {
         home: CupertinoPageScaffold(
           child: Builder(
             builder: (context) => AppButton(
-              onPressed: () => showPhoneServerManager(
-                context,
-                auth: auth,
-                onSelect: (_, _) async {},
-                onAddServer: () {},
-              ),
+              onPressed: () =>
+                  showServerSelection(context, auth: auth, phone: true),
               child: const Text('open-manager'),
             ),
           ),
@@ -382,7 +377,10 @@ void main() {
     await tester.tap(find.text('open-manager'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(PhoneServerManager.importKey));
+    await tester.tap(find.byKey(const Key('server-add')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(ServerSelectionPage.importKey));
+    await tester.tap(find.byKey(ServerSelectionPage.importKey));
     await tester.pumpAndSettle();
 
     expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
@@ -397,7 +395,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 底表仍在,列表刷新出新增服务器;已有配置未被覆盖。
-    expect(find.byType(PhoneServerManager), findsOneWidget);
+    expect(find.byType(ServerSelectionPage), findsNothing);
     expect(auth.savedServers, hasLength(3));
     final one = auth.savedServers.firstWhere((s) => s.id == 'one');
     expect(one.lines.single.address, 'http://home.test:8096');
@@ -516,13 +514,16 @@ void main() {
 
     await tester.tap(find.byKey(SessionActions.serverMenuKey));
     await _settle(tester);
-    await tester.tap(find.byKey(ServerSwitcherDialog.importBackupKey));
+    await tester.tap(find.byKey(const Key('server-add')));
+    await _settle(tester);
+    await tester.ensureVisible(find.byKey(const Key('server-add-import')));
+    await tester.tap(find.byKey(const Key('server-add-import')));
     await _settle(tester);
 
     expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
     expect(_text(tester, BackupImportFlowKeys.added), '新增 1 台');
     expect(_text(tester, BackupImportFlowKeys.duplicate), '重复跳过 1 台');
-    expect(find.byKey(ServerSwitcherDialog.panelKey), findsNothing);
+    expect(find.byType(ServerSelectionPage), findsNothing);
 
     await tester.tap(find.byKey(BackupImportFlowKeys.close));
     await _settle(tester);

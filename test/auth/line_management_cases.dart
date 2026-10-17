@@ -13,18 +13,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/line_address_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
+
+import 'server_ui_harness.dart';
+
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
-import 'package:rillight/home/catalog_controller.dart';
-import 'package:rillight/home/catalog_scope.dart';
 import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_settings.dart';
@@ -510,384 +508,65 @@ void main() {
     expect(result, isNull);
   });
 
-  // ---------- desktop switcher ----------
-
-  testWidgets('switcher offers add/edit/delete per line; the last line stays', (
-    tester,
-  ) async {
-    final added = <String>[];
-    final edited = <(String, ServerLine)>[];
-    final deletedLines = <(String, ServerLine)>[];
-    final selected = <(String, String)>[];
-
-    SavedServer saved(String id, String name, List<String> addresses) {
-      return SavedServer(
-        id: id,
-        name: name,
-        username: 'alice',
-        lines: [
-          for (var i = 0; i < addresses.length; i++)
-            ServerLine(id: 'line-${i + 1}', address: addresses[i]),
-        ],
-        activeLineId: 'line-1',
-      );
-    }
-
-    // 改版前的旧 JSON:线路带 per-line UA,迁移后线路只剩地址。
-    final legacy = SavedServer.fromJson(const {
-      'id': 'server-id-legacy',
-      'name': '旧数据',
-      'username': 'alice',
-      'activeLineId': 'line-2',
-      'lines': [
-        {
-          'id': 'line-1',
-          'address': 'http://legacy-lan.test:8096',
-          'userAgent': 'OldUA/1',
-        },
-        {
-          'id': 'line-2',
-          'address': 'http://legacy-wan.test:8096',
-          'userAgent': 'OldUA/2',
-        },
-      ],
-    });
-    expect(legacy.normalizedUserAgent, 'OldUA/2');
-
-    await tester.pumpWidget(
-      CupertinoTestApp(
-        theme: AppUiTheme.dark(),
-        locale: const Locale('zh'),
-        supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: [
-          ...[
-            AppLocalizations.delegate,
-            ...GlobalCupertinoLocalizations.delegates,
-          ],
-          ui.GlobalCupertinoLocalizations.delegate,
-        ],
-        home: CupertinoPageScaffold(
-          child: ServerSwitcherDialog(
-            servers: [
-              saved('server-id-1', '家庭影院', ['http://emby.test:8096']),
-              legacy,
-            ],
-            activeServerId: 'server-id-1',
-            activeLineId: 'line-1',
-            onSelect: (serverId, lineId) => selected.add((serverId, lineId)),
-            onAddServer: () {},
-            onLogout: () {},
-            onDelete: (_) {},
-            onChangePassword: () {},
-            onAddLine: added.add,
-            onEditLine: (serverId, line) => edited.add((serverId, line)),
-            onDeleteLine: (serverId, line) =>
-                deletedLines.add((serverId, line)),
+  for (final phone in [false, true]) {
+    testWidgets(
+      'concentrated line draft validates then saves on ${phone ? "phone" : "desktop"}',
+      (tester) async {
+        tester.view.physicalSize = Size(phone ? 360 : 1200, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final lan = FakeEmbyServer();
+        final wan = FakeEmbyServer(
+          serverId: lan.serverId,
+          baseUrl: Uri.parse('http://draft-wan.test:8096'),
+        );
+        final auth = AuthController.memory(
+          client: EmbyClient(
+            device: _device,
+            dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
           ),
-        ),
-        builder: (context, child) => ui.AppUiTheme(
-          data: AppUiTheme.of(context).brightness == Brightness.dark
-              ? ui.AppUiTheme.dark()
-              : ui.AppUiTheme.light(),
-          child: child ?? const SizedBox.shrink(),
-        ),
-      ),
-    );
-    await settle(tester);
-
-    // Traverse actual server rows: primary action and every nested control
-    // must remain separately reachable without firing the row callback.
-    Future<void> keyboardActivate(Finder target) async {
-      bool focusedWithin() {
-        final elements = target.evaluate().toSet();
-        var found = false;
-        FocusManager.instance.primaryFocus?.context?.visitAncestorElements((e) {
-          if (elements.contains(e)) found = true;
-          return !found;
-        });
-        return found;
-      }
-
-      for (var i = 0; i < 35 && !focusedWithin(); i++) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-      }
-      expect(focusedWithin(), isTrue, reason: 'Keyboard cannot reach $target');
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await settle(tester);
-    }
-
-    await keyboardActivate(
-      find.byKey(ServerSwitcherDialog.addLineKey('server-id-1')),
-    );
-    expect(added, ['server-id-1']);
-    await keyboardActivate(
-      find.byKey(ServerSwitcherDialog.editLineKey('server-id-1', 'line-1')),
-    );
-    expect(edited.single.$1, 'server-id-1');
-    await keyboardActivate(
-      find.byKey(ServerSwitcherDialog.deleteKey('server-id-1')),
-    );
-    expect(find.byKey(ServerSwitcherDialog.deleteCancelKey), findsOneWidget);
-    await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
-    await settle(tester);
-    expect(selected, isEmpty);
-    added.clear();
-    edited.clear();
-
-    // 面板列表可滚动:先滚到目标再点击。
-    final dialogScrollable = find
-        .descendant(
-          of: find.byType(ServerSwitcherDialog),
-          matching: find.byType(Scrollable),
-        )
-        .first;
-    Future<void> dialogTap(Finder finder) async {
-      await tester.scrollUntilVisible(
-        finder,
-        120,
-        scrollable: dialogScrollable,
-      );
-      await settle(tester);
-      await tester.tap(finder);
-      await settle(tester);
-    }
-
-    // 只剩一条线路的服务器:点击条目直接切换;不提供删除线路入口,
-    // 但仍可添加线路与修改地址。
-    await dialogTap(find.text('家庭影院'));
-    expect(selected, [('server-id-1', 'line-1')]);
-    expect(
-      find.byKey(ServerSwitcherDialog.deleteLineKey('server-id-1', 'line-1')),
-      findsNothing,
-    );
-    expect(
-      find.byKey(ServerSwitcherDialog.addLineKey('server-id-1')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(ServerSwitcherDialog.editLineKey('server-id-1', 'line-1')),
-      findsOneWidget,
-    );
-
-    // 改版前的线路仍可见:展开旧数据服务器。
-    await keyboardActivate(
-      find
-          .ancestor(of: find.text('旧数据'), matching: find.byType(ui.AppListTile))
-          .first,
-    );
-    expect(find.text('legacy-lan.test:8096'), findsOneWidget);
-    expect(find.text('legacy-wan.test:8096'), findsOneWidget);
-    await keyboardActivate(
-      find.byKey(ServerSwitcherDialog.deleteKey('server-id-legacy')),
-    );
-    await tester.tap(find.byKey(ServerSwitcherDialog.deleteCancelKey));
-    await settle(tester);
-    expect(find.text('legacy-lan.test:8096'), findsOneWidget);
-
-    // 旧线路可选。
-    await keyboardActivate(
-      find.byKey(
-        ServerSwitcherDialog.lineOptionKey('server-id-legacy', 'line-1'),
-      ),
-    );
-    expect(selected.last, ('server-id-legacy', 'line-1'));
-
-    // 修改地址与删除线路入口回调正确的线路。
-    final legacyLan = legacy.lines.first;
-    await keyboardActivate(
-      find.byKey(
-        ServerSwitcherDialog.editLineKey('server-id-legacy', 'line-1'),
-      ),
-    );
-    expect(edited.single, ('server-id-legacy', legacyLan));
-
-    await keyboardActivate(
-      find.byKey(
-        ServerSwitcherDialog.deleteLineKey('server-id-legacy', 'line-1'),
-      ),
-    );
-    expect(deletedLines.single, ('server-id-legacy', legacyLan));
-    expect(selected, [
-      ('server-id-1', 'line-1'),
-      ('server-id-legacy', 'line-1'),
-    ]);
-
-    // 添加线路入口按服务器回调。
-    await dialogTap(
-      find.byKey(ServerSwitcherDialog.addLineKey('server-id-legacy')),
-    );
-    expect(added, ['server-id-legacy']);
-    expect(tester.takeException(), isNull);
-  });
-
-  // ---------- phone mine sheet ----------
-
-  testWidgets('phone mine sheet adds, edits and deletes lines', (tester) async {
-    tester.view.physicalSize = const Size(360, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final lan = FakeEmbyServer(baseUrl: Uri.parse('http://mine-lan.test:8096'));
-    final wan = FakeEmbyServer(
-      serverId: lan.serverId,
-      serverName: lan.serverName,
-      baseUrl: Uri.parse('http://mine-wan.test:8096'),
-    );
-    final wan3 = FakeEmbyServer(
-      serverId: lan.serverId,
-      serverName: lan.serverName,
-      baseUrl: Uri.parse('http://mine-wan3.test:8096'),
-    );
-    final wan4 = FakeEmbyServer(
-      serverId: lan.serverId,
-      serverName: lan.serverName,
-      baseUrl: Uri.parse('http://mine-wan4.test:8096'),
-    );
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: _device,
-        dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3, wan4])),
-      ),
-    );
-    addTearDown(auth.dispose);
-    await tester.runAsync(() async {
-      await auth.connect(
-        address: lan.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-      await auth.connect(
-        address: wan.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      );
-    });
-    expect(auth.savedServers.single.lines, hasLength(2));
-    final catalog = CatalogController(auth: auth)
-      ..cache.debugSetDiskStore(null);
-    addTearDown(catalog.dispose);
-
-    await tester.pumpWidget(
-      AuthScope(
-        controller: auth,
-        child: PlayerScope(
-          bindings: PlayerBindings(settingsStore: MemoryPlayerSettingsStore()),
-          child: CupertinoTestApp(
-            theme: AppUiTheme.dark(),
-            locale: const Locale('zh'),
-            supportedLocales: AppLocalizations.supportedLocales,
-            localizationsDelegates: [
-              ...[
-                AppLocalizations.delegate,
-                ...GlobalCupertinoLocalizations.delegates,
-              ],
-              ui.GlobalCupertinoLocalizations.delegate,
-            ],
-            home: CupertinoPageScaffold(
-              child: CatalogScope(
-                controller: catalog,
-                child: const PhoneMinePage(),
-              ),
-            ),
-            builder: (context, child) => ui.AppUiTheme(
-              data: AppUiTheme.of(context).brightness == Brightness.dark
-                  ? ui.AppUiTheme.dark()
-                  : ui.AppUiTheme.light(),
-              child: child ?? const SizedBox.shrink(),
-            ),
+        );
+        addTearDown(auth.dispose);
+        await tester.runAsync(
+          () => auth.connect(
+            address: lan.baseUrl.toString(),
+            username: 'alice',
+            password: 'correct-horse',
           ),
-        ),
-      ),
+        );
+        final id = auth.session!.server.id;
+        await pumpServerSelection(tester, auth, phone: phone);
+        await openServerEditor(tester, id);
+        await serverUiTap(tester, const Key('server-editor-add-line'));
+        await tester.enterText(
+          find.byKey(const Key('server-line-address')),
+          lan.baseUrl.toString(),
+        );
+        await serverUiTap(tester, const Key('server-line-done'));
+        expect(find.text('请填写服务器名称和有效地址；线路地址不能重复。'), findsOneWidget);
+        expect(auth.savedServers.single.lines, hasLength(1));
+        await tester.enterText(
+          find.byKey(const Key('server-line-address')),
+          wan.baseUrl.toString(),
+        );
+        await tester.enterText(find.byKey(const Key('server-line-name')), '外网');
+        await serverUiTap(tester, const Key('server-line-done'));
+        expect(auth.savedServers.single.lines, hasLength(1));
+        await serverUiTap(tester, const Key('server-editor-save'));
+        expect(auth.savedServers.single.lines, hasLength(2));
+        expect(auth.savedServers.single.lines.last.nickname, '外网');
+        expect(auth.client.baseUrl, lan.baseUrl);
+        await serverUiTap(tester, Key('server-lines-$id'));
+        expect(find.byKey(const Key('server-line-auto')), findsOneWidget);
+        expect(find.byKey(const Key('server-editor-add-line')), findsNothing);
+        await serverUiTap(tester, const Key('server-line-auto'));
+        expect(auth.savedServers.single.lineSelection.isAutomatic, isTrue);
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
     );
-    await settle(tester);
-
-    Future<void> sheetTap(Finder finder) async {
-      await tester.ensureVisible(finder);
-      await settle(tester);
-      await tester.tap(finder);
-      await settle(tester);
-    }
-
-    final serverId = auth.savedServers.single.id;
-    await sheetTap(find.byKey(PhoneMinePage.lineKey));
-
-    // 添加线路:只填地址,不改当前线路。
-    await sheetTap(find.byKey(PhoneMinePage.lineAddKey(serverId)));
-    expect(find.byKey(LineAddressDialog.fieldKey), findsOneWidget);
-    expect(find.text('User-Agent'), findsNothing);
-    await tester.enterText(
-      find.byKey(LineAddressDialog.fieldKey),
-      wan3.baseUrl.toString(),
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await settle(tester);
-    expect(
-      auth.savedServers.single.lines.map((l) => l.address),
-      contains(wan3.baseUrl.toString()),
-    );
-    expect(auth.client.baseUrl, wan.baseUrl);
-    expect(find.text('mine-wan3.test:8096'), findsOneWidget);
-
-    // 修改当前线路地址:仅地址变化,浏览与播放改走新地址。
-    final wanLine = auth.savedServers.single.lines.firstWhere(
-      (l) => l.address == wan.baseUrl.toString(),
-    );
-    await sheetTap(find.byKey(PhoneMinePage.lineEditKey(serverId, wanLine.id)));
-    expect(
-      tester
-          .widget<ui.AppTextField>(find.byKey(LineAddressDialog.fieldKey))
-          .controller!
-          .text,
-      wan.baseUrl.toString(),
-    );
-    await tester.enterText(
-      find.byKey(LineAddressDialog.fieldKey),
-      wan4.baseUrl.toString(),
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(LineAddressDialog.submitKey));
-    await settle(tester);
-    expect(auth.client.baseUrl, wan4.baseUrl);
-    expect(auth.session?.username, 'alice');
-
-    // 删除线路:删到只剩一条后删除入口不可用。
-    ServerLine lineByAddress(String address) {
-      return auth.savedServers.single.lines.firstWhere(
-        (l) => l.address == address,
-      );
-    }
-
-    await sheetTap(
-      find.byKey(
-        PhoneMinePage.lineDeleteKey(
-          serverId,
-          lineByAddress(lan.baseUrl.toString()).id,
-        ),
-      ),
-    );
-    expect(auth.savedServers.single.lines, hasLength(2));
-    await sheetTap(
-      find.byKey(
-        PhoneMinePage.lineDeleteKey(
-          serverId,
-          lineByAddress(wan3.baseUrl.toString()).id,
-        ),
-      ),
-    );
-    expect(auth.savedServers.single.lines, hasLength(1));
-    final last = auth.savedServers.single.lines.single;
-    expect(
-      tester
-          .widget<ui.AppIconButton>(
-            find.byKey(PhoneMinePage.lineDeleteKey(serverId, last.id)),
-          )
-          .onPressed,
-      isNull,
-    );
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
+  }
 
   // ---------- tv settings pane ----------
 

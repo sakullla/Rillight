@@ -20,8 +20,6 @@ import 'package:rillight/auth/backup_import/backup_import_flow.dart';
 import 'package:rillight/auth/backup_import/backup_import_models.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/connect_page.dart';
-import 'package:rillight/auth/phone_server_manager.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/home/catalog_keys.dart';
 import 'package:rillight/library/detail_extras.dart';
@@ -655,50 +653,10 @@ extension PageCaptures on CaptureSession {
     final server = auth.session!.server;
     final id = server.id;
     final lineId = server.activeLineId!;
-    if (platform == 'desktop') {
-      await tap(SessionActions.serverMenuKey);
-      await save('server-manager');
-      await tap(ServerSwitcherDialog.addLineKey(id));
-      await save('server-add-line');
-      await dismiss();
-      await tap(SessionActions.serverMenuKey);
-      await tap(ServerSwitcherDialog.editLineKey(id, lineId));
-      await save('server-edit-line');
-      await dismiss();
-      await tap(SessionActions.serverMenuKey);
-      await tap(ServerSwitcherDialog.deleteKey(id));
-      await save('server-delete-confirm');
-      await tap(ServerSwitcherDialog.deleteCancelKey);
-      await dismiss();
-      await tap(SessionActions.serverMenuKey);
-      await tap(ServerSwitcherDialog.changePasswordKey);
-    } else if (platform == 'phone') {
-      await tap(const Key('mobile-shell-mine-entry'));
-      await save('account');
-      await tap(PhoneMinePage.lineKey);
-      await save('server-manager');
-      await modal(PhoneMinePage.lineAddKey(id), 'server-add-line');
-      await modal(PhoneMinePage.lineEditKey(id, lineId), 'server-edit-line');
-      final selectedServerCard = find.ancestor(
-        of: find.byKey(PhoneMinePage.serverDeleteKey(id)),
-        matching: find.byType(Column),
-      );
-      await activate(
-        find.descendant(
-          of: selectedServerCard.first,
-          matching: findAppTooltip('修改显示名称'),
-        ),
-      );
-      await save('server-rename');
-      await dismiss();
-      await tap(PhoneMinePage.serverDeleteKey(id));
-      await save('server-delete-confirm');
-      await tap(PhoneMinePage.serverDeleteCancelKey);
-      await tester.enterText(find.byKey(PhoneServerManager.searchKey), '不存在');
-      await advance(200);
-      await save('server-search-empty');
-      await dismiss();
-      await tap(PhoneMinePage.changePasswordKey);
+    if (platform != 'tv') {
+      await _modernServerPages(app, auth, id, lineId);
+      await _backupImportStates(app, auth);
+      return;
     } else {
       await tap(const ValueKey('tv-nav-3'));
       await save('server-manager');
@@ -737,6 +695,126 @@ extension PageCaptures on CaptureSession {
       await save('server-add-advanced');
     }
     await _backupImportStates(app, auth);
+  }
+
+  Future<void> _modernServerPages(
+    RillightApp app,
+    AuthController auth,
+    String id,
+    String lineId,
+  ) async {
+    Future<void> open() async {
+      if (platform == 'desktop') {
+        await tap(SessionActions.serverMenuKey);
+      } else {
+        app.router.go('/mine');
+        await advance(600);
+        await save('account');
+        await tap(PhoneMinePage.lineKey);
+      }
+    }
+
+    Future<void> back() => tap(const Key('server-flow-back'));
+    Future<void> edit() async {
+      await tap(Key('server-more-$id'));
+      await tap(Key('server-action-edit-$id'));
+    }
+
+    await open();
+    await save('server-manager');
+    await tap(Key('server-lines-$id'));
+    await save('server-line-selector');
+    await back();
+    await edit();
+    await save('server-editor');
+    await save('server-rename');
+    await tap(const Key('server-editor-add-line'));
+    await save('server-add-line');
+    await back();
+    await tap(Key('server-editor-line-$lineId'));
+    await save('server-edit-line');
+    await back();
+    await tap(const Key('server-editor-password'));
+    await save('server-password-form');
+    await back();
+    await tap(const Key('server-editor-remote-password'));
+    await save('account-change-password');
+    await tester.enterText(
+      find.byKey(ChangePasswordDialog.newPasswordField),
+      'capture-only',
+    );
+    await tester.enterText(
+      find.byKey(ChangePasswordDialog.confirmField),
+      'mismatch',
+    );
+    await advance(150);
+    await save('account-password-mismatch');
+    await tap(ChangePasswordDialog.cancelKey);
+    await back();
+    await tap(Key('server-more-$id'));
+    await tap(Key('server-action-remove-$id'));
+    await save('server-delete-confirm');
+    await tap(const Key('server-remove-cancel'));
+    await tester.enterText(find.byKey(const Key('server-search')), '不存在');
+    await advance(200);
+    await save('server-search-empty');
+    await tester.enterText(find.byKey(const Key('server-search')), '');
+    await tap(const Key('server-add'));
+    await save('server-add');
+    await tap(const Key('provider-advanced'));
+    await save('server-add-advanced');
+    await tap(const Key('server-add-paste'));
+    await tester.enterText(
+      find.byKey(const Key('server-paste-text')),
+      '名称：家庭影院\n地址：https://home.example.com\n用户：alice\n密码：synthetic\n名称：朋友的影院\n地址：https://friend.example.com\n用户：bob',
+    );
+    await tap(const Key('server-paste-parse'));
+    await save('server-paste-groups');
+    await tap(const Key('server-paste-group-1'));
+    await save('server-paste-preview');
+    await back();
+    await back();
+    if ([
+      'server-locked-list',
+      'server-unlock',
+      'server-unlock-error',
+    ].any(shouldCapture)) {
+      final protected = auth.savedServers.last;
+      await tester.runAsync(() async {
+        await auth.serverAccess.register(protected);
+        await auth.serverAccess.setPassword(
+          protected.id,
+          'capture-entry',
+          'capture-entry',
+          persistReference: (ref) =>
+              auth.sources.persistProtectionReference(protected.id, ref),
+        );
+        await auth.refreshServers();
+      });
+      await advance(150);
+      await save('server-locked-list');
+      await tap(Key('server-enter-${protected.id}'));
+      await save('server-unlock');
+      await tester.enterText(
+        find.byKey(const Key('server-unlock-password')),
+        'wrong',
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('server-unlock-submit')));
+        for (
+          var i = 0;
+          i < 500 && auth.serverAccess.retryAt(protected.id) == null;
+          i++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      await advance(150);
+      expect(find.text('密码不正确。'), findsOneWidget);
+      await save('server-unlock-error');
+      await back();
+    }
+    await back();
   }
 
   /// 备份导入:合成凭据样本走真实的解析与提交。入口、加载、部分成功、
@@ -793,13 +871,15 @@ extension PageCaptures on CaptureSession {
           await advance(700);
           await tap(SessionActions.serverMenuKey);
           await advance(400);
-          return ServerSwitcherDialog.importBackupKey;
+          await tap(const Key('server-add'));
+          return const Key('server-add-import');
         case 'phone':
           app.router.go('/mine');
           await advance(700);
           await tap(PhoneMinePage.lineKey);
           await advance(600);
-          return PhoneServerManager.importKey;
+          await tap(const Key('server-add'));
+          return const Key('server-add-import');
         default:
           app.router.go('/connect?add=1');
           await advance(700);
@@ -865,8 +945,8 @@ extension PageCaptures on CaptureSession {
 
     // 整体失败:未知格式零写入,失败面板给出安全分类原因。
     Key next = entry;
-    if (platform == 'desktop') {
-      // 切换面板在导入前已自行关闭;重新打开。手机底表与电视连接页仍在。
+    if (platform != 'tv') {
+      // 桌面与手机都先关闭服务器流程再导入；返回后重新打开。
       next = await openEntry();
     }
     await runImport(next, brokenBytes);
@@ -876,7 +956,7 @@ extension PageCaptures on CaptureSession {
     await tap(BackupImportFlowKeys.close);
 
     // 私密锁定:备份中的私密记录按条跳过并说明原因。
-    if (platform == 'desktop') {
+    if (platform != 'tv') {
       next = await openEntry();
     }
     auth.backupImportKeys = hillsKeys();
@@ -885,12 +965,6 @@ extension PageCaptures on CaptureSession {
     expect(find.byKey(BackupImportFlowKeys.result), findsOneWidget);
     await save('server-import-private');
     await tap(BackupImportFlowKeys.close);
-    if (platform == 'phone') {
-      // 返回键关闭仍在的手机服务底表,避免遮挡后续页面捕获。
-      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
-      await tester.binding.handlePopRoute();
-      await advance(500);
-    }
     auth.backupImportKeys = const BackupImportKeys();
     auth.backupImportPicker = null;
   }

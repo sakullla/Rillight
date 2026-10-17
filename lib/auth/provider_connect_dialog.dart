@@ -15,6 +15,7 @@ import 'auth_controller.dart';
 import 'login_widgets.dart';
 import 'provider_connect_controller.dart';
 import 'server_list_store.dart';
+import 'server_paste_draft.dart';
 
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -96,6 +97,8 @@ class ProviderConnectDialog extends StatefulWidget {
     this.initialType,
     this.inline = false,
     this.onConnected,
+    this.initialDraft,
+    this.showTypePicker = false,
   });
   final AuthController auth;
   final SavedServer? existing;
@@ -105,6 +108,8 @@ class ProviderConnectDialog extends StatefulWidget {
   final MediaServerType? initialType;
   final bool inline;
   final VoidCallback? onConnected;
+  final ServerPasteDraft? initialDraft;
+  final bool showTypePicker;
   @override
   State<ProviderConnectDialog> createState() => _ProviderConnectDialogState();
 }
@@ -116,6 +121,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       userAgent = TextEditingController(),
       password = TextEditingController(),
       pin = TextEditingController();
+  final displayName = TextEditingController(),
+      extraLines = TextEditingController();
   HomeUser? homeUser;
   bool _passwordVisible = false;
   bool _completionScheduled = false;
@@ -139,6 +146,15 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     address.text = widget.existing?.baseUrl ?? '';
     username.text = widget.existing?.username ?? '';
     userAgent.text = controller.userAgent;
+    final draft = widget.initialDraft;
+    if (draft != null) {
+      controller.type = draft.serviceType;
+      displayName.text = draft.name;
+      address.text = draft.lines.firstOrNull ?? '';
+      extraLines.text = draft.lines.skip(1).join('\n');
+      username.text = draft.username;
+      password.text = draft.password;
+    }
     userAgent.addListener(() => controller.userAgent = userAgent.text);
     widget.auth.regionAccess.addListener(_accessChanged);
     if (widget.home) {
@@ -183,6 +199,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     username.dispose();
     password.dispose();
     pin.dispose();
+    displayName.dispose();
+    extraLines.dispose();
     super.dispose();
   }
 
@@ -466,10 +484,34 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         ? userAgentInput
         : LoginAdvancedSection(
             toggleKey: const Key('provider-advanced'),
-            initiallyExpanded: userAgent.text.trim().isNotEmpty,
+            initiallyExpanded: false,
             children: [userAgentInput],
           );
-    void submit() => c.password(address.text, username.text, password.text);
+    void prepareDraft() {
+      c.displayName = displayName.text.trim().isEmpty
+          ? null
+          : displayName.text.trim();
+      c.extraLines
+        ..clear()
+        ..addAll(
+          [
+                // Plex authorization discovers the primary connection. Every
+                // pasted endpoint must still join the same identity transaction.
+                if (c.type == MediaServerType.plex) address.text,
+                extraLines.text,
+              ]
+              .join('\n')
+              .split('\n')
+              .map((s) => s.trim())
+              .where((s) => s.isNotEmpty),
+        );
+    }
+
+    void submit() {
+      prepareDraft();
+      c.password(address.text, username.text, password.text);
+    }
+
     if (c.type == MediaServerType.plex) {
       final s = _tv ? TvDesign.scaleOf(context) : 1.0;
       Widget step(int index, String text) => Padding(
@@ -509,6 +551,33 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         ),
       );
       return [
+        if (widget.existing == null && !_tv)
+          _input(
+            'provider-display-name',
+            displayName,
+            l.serversPasteName,
+            action: TextInputAction.next,
+          ),
+        if (widget.initialDraft != null) ...[
+          _input(
+            'provider-address',
+            address,
+            l.serverAddress,
+            keyboardType: TextInputType.url,
+            icon: AppIcons.link,
+            action: TextInputAction.next,
+          ),
+          AppTextField(
+            key: const Key('provider-extra-lines'),
+            controller: extraLines,
+            label: l.serversPasteExtra,
+            minLines: 2,
+            maxLines: 5,
+            keyboardType: TextInputType.multiline,
+            autocorrect: false,
+          ),
+          SizedBox(height: 16 * s),
+        ],
         Container(
           padding: EdgeInsets.all(16 * s),
           decoration: BoxDecoration(
@@ -549,7 +618,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         _primary(
           'provider-authorize',
           l.providerPlexAuthorize,
-          c.busy ? null : () => c.authorize(address.text),
+          c.busy
+              ? null
+              : () {
+                  prepareDraft();
+                  c.authorize(address.text);
+                },
           icon: AppIcons.openInNew,
           busy: c.busy,
         ),
@@ -558,6 +632,13 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       ];
     }
     return [
+      if (widget.existing == null && !_tv)
+        _input(
+          'provider-display-name',
+          displayName,
+          l.serversPasteName,
+          action: TextInputAction.next,
+        ),
       AutofillGroup(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -593,6 +674,18 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
           ],
         ),
       ),
+      if (widget.initialDraft != null) ...[
+        const SizedBox(height: 12),
+        AppTextField(
+          key: const Key('provider-extra-lines'),
+          controller: extraLines,
+          label: l.serversPasteExtra,
+          minLines: 2,
+          maxLines: 5,
+          keyboardType: TextInputType.multiline,
+          autocorrect: false,
+        ),
+      ],
       if (_tv) userAgentInput,
       const SizedBox(height: 14),
       _primary(
@@ -608,7 +701,12 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         _secondary(
           'provider-authorize',
           l.providerQuickConnect,
-          c.busy ? null : () => c.authorize(address.text),
+          c.busy
+              ? null
+              : () {
+                  prepareDraft();
+                  c.authorize(address.text);
+                },
           icon: AppIcons.bolt,
         ),
       ],
@@ -1138,7 +1236,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                           child: const AppLoadingBar(minHeight: 3),
                         ),
                       ),
-                    if (!widget.inline &&
+                    if ((!widget.inline || widget.showTypePicker) &&
                         c.stage == ProviderConnectStage.credentials) ...[
                       _typeSwitcher(c),
                       SizedBox(height: 10 * s),

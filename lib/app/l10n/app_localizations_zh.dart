@@ -2373,4 +2373,306 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get updateLater => '稍后处理';
+
+  @override
+  String get serversTitle => '服务器';
+
+  @override
+  String get serversSearch => '搜索名称或地址';
+
+  @override
+  String get serversEmptyTitle => '添加你的第一台服务器';
+
+  @override
+  String get serversEmptyHint => '连接 Emby、Jellyfin 或 Plex，开始观看。';
+
+  @override
+  String get serversNoResults => '没有找到服务器';
+
+  @override
+  String get serversClearSearch => '清除搜索';
+
+  @override
+  String get serversMore => '更多操作';
+
+  @override
+  String get serversEdit => '编辑服务器';
+
+  @override
+  String get serversRemove => '移除服务器';
+
+  @override
+  String get serversRemoveHint => '只移除此设备上的配置和登录，不会删除服务器上的内容。';
+
+  @override
+  String get serversCurrentImpact => '这是当前使用的服务器。继续将结束这台服务器的当前连接。';
+
+  @override
+  String get serversUp => '上移';
+
+  @override
+  String get serversDown => '下移';
+
+  @override
+  String get serversCurrent => '当前使用';
+
+  @override
+  String get serversLocked => '已锁定';
+
+  @override
+  String get serversEnter => '进入服务器';
+
+  @override
+  String get serversLines => '连接线路';
+
+  @override
+  String get serversAutomatic => '自动选择';
+
+  @override
+  String get serversAutomaticHint => '连接失败时尝试同一服务器的备用线路。';
+
+  @override
+  String get serversFixedHint => '选中具体线路后固定使用，失败时由你决定是否更换。';
+
+  @override
+  String get serversActualLine => '正在使用';
+
+  @override
+  String get serversNotChecked => '尚未检查';
+
+  @override
+  String get serversCheck => '检查连接';
+
+  @override
+  String get serversCheckPassed => '连接正常';
+
+  @override
+  String get serversCheckFailed => '连接失败，可重试或换线';
+
+  @override
+  String get serversCheckIdentity => '这个地址属于另一台服务器';
+
+  @override
+  String get serversCheckLogin => '请重新登录';
+
+  @override
+  String get serversCheckUnknown => '检查未完成';
+
+  @override
+  String get serversCheckedAt => '检查于';
+
+  @override
+  String get serversSave => '保存';
+
+  @override
+  String get serversCancel => '取消';
+
+  @override
+  String get serversBack => '返回';
+
+  @override
+  String get serversName => '显示名称';
+
+  @override
+  String get serversIcon => '图标';
+
+  @override
+  String get serversIconDefault => '服务默认';
+
+  @override
+  String get serversIconHome => '家';
+
+  @override
+  String get serversIconCinema => '影院';
+
+  @override
+  String get serversIconCloud => '云端';
+
+  @override
+  String get serversAccount => '服务器账号';
+
+  @override
+  String get serversReauthorize => '重新登录 / 更换账号';
+
+  @override
+  String get serversSignOut => '退出此账号';
+
+  @override
+  String get serversSignOutHint => '保留服务器配置，下次进入时重新登录。';
+
+  @override
+  String get serversLinesHint => '同一服务器的不同地址。按顺序使用备用线路。';
+
+  @override
+  String get serversLineName => '线路名称（可选）';
+
+  @override
+  String get serversLineAddress => '服务器地址';
+
+  @override
+  String get serversLineAdd => '添加线路';
+
+  @override
+  String get serversLineEdit => '编辑线路';
+
+  @override
+  String get serversLineRemove => '移除这条线路';
+
+  @override
+  String get serversLineLast => '至少保留一条线路';
+
+  @override
+  String get serversLineDraftHint => '返回后继续编辑，点击服务器表单的“保存”才生效。';
+
+  @override
+  String get serversAdvanced => '高级设置';
+
+  @override
+  String get serversPassword => '进入时需要密码';
+
+  @override
+  String get serversPasswordHint => '本机进入密码；服务器账号保持登录。';
+
+  @override
+  String get serversPasswordSet => '设置进入密码';
+
+  @override
+  String get serversPasswordChange => '修改进入密码';
+
+  @override
+  String get serversPasswordDisable => '关闭进入密码';
+
+  @override
+  String get serversPasswordOld => '原进入密码';
+
+  @override
+  String get serversPasswordNew => '新进入密码';
+
+  @override
+  String get serversPasswordConfirm => '再次输入密码';
+
+  @override
+  String get serversPasswordInput => '本机进入密码';
+
+  @override
+  String get serversPasswordPrompt => '输入此服务器的本机进入密码，继续到原来的页面。';
+
+  @override
+  String get serversPasswordWrong => '密码不正确。';
+
+  @override
+  String get serversPasswordUnavailable => '无法读取进入密码。可返回后移除此本机条目，再正常登录添加。';
+
+  @override
+  String get serversPasswordMismatch => '两次密码不一致';
+
+  @override
+  String get serversPasswordRequired => '请输入 1–1024 个字符的密码';
+
+  @override
+  String get serversPasswordSaveFailed => '密码未保存。请检查原密码，稍后重试。';
+
+  @override
+  String get serversPasswordPending => '将在保存服务器时更新';
+
+  @override
+  String get serversConnectionImpact => '你正在修改当前连接。保存成功后将重新连接；取消会保留原连接。';
+
+  @override
+  String get serversSaveFailed => '未保存，请检查输入或连接后重试。';
+
+  @override
+  String get serversInvalidDraft => '请填写服务器名称和有效地址；线路地址不能重复。';
+
+  @override
+  String get serversAddTitle => '添加服务器';
+
+  @override
+  String get serversPaste => '粘贴导入';
+
+  @override
+  String get serversPasteHint => '仅在你点击后读取剪贴板。确认识别结果后再登录。';
+
+  @override
+  String get serversPasteText => '粘贴服务器信息';
+
+  @override
+  String get serversParse => '识别并预览';
+
+  @override
+  String get serversPasteGroups => '识别到多个账号，请选择要添加的一组';
+
+  @override
+  String get serversPasteIncomplete => '请检查并补全信息。每次只添加你选择的一组。';
+
+  @override
+  String get serversPasteUnknown => '未识别到服务器信息，可以修改原文后重试。';
+
+  @override
+  String get serversPasteExtra => '备用线路（每行一个地址）';
+
+  @override
+  String get serversPasteName => '名称（可选）';
+
+  @override
+  String get serversPastePreview => '确认服务器信息';
+
+  @override
+  String get serversContinue => '继续';
+
+  @override
+  String get serversBusy => '正在连接…';
+
+  @override
+  String get serversConnectionFailed => '连接失败，原连接已保留。请检查线路或重新登录。';
+
+  @override
+  String get serversRetry => '重试';
+
+  @override
+  String get serversDone => '完成';
+
+  @override
+  String get serversChangeAccountHint => '重新授权成功后才替换账号；更换账号会结束原账号的播放。取消保留原登录。';
+
+  @override
+  String get serversPasswordOff => '未启用';
+
+  @override
+  String get serversPasswordOn => '已启用';
+
+  @override
+  String get serversImportFile => '从备份文件导入';
+
+  @override
+  String get serversSelectType => '选择服务类型';
+
+  @override
+  String get serversDismiss => '关闭';
+
+  @override
+  String get serversPasteGroup => '账号组';
+
+  @override
+  String get serversAddressHidden => '解锁后查看连接信息';
+
+  @override
+  String get serversNoAccount => '尚未登录';
+
+  @override
+  String get serversActionFailed => '操作未完成，请稍后重试。';
+
+  @override
+  String get serversPasswordBackoff => '密码错误。请稍后重试，或返回选择其他服务器。';
+
+  @override
+  String get serversRemotePassword => '修改服务器账号密码';
+
+  @override
+  String get serversBasic => '基本信息';
+
+  @override
+  String serversPasswordRetryAfter(int seconds) {
+    return '$seconds 秒后可重试';
+  }
 }

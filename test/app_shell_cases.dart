@@ -23,7 +23,10 @@ import 'package:rillight/auth/connect_page.dart';
 
 import 'helpers/synthetic_source_fixture.dart';
 
-import 'package:rillight/auth/server_switcher_dialog.dart';
+import 'package:rillight/auth/server_selection_page.dart';
+
+import 'auth/server_ui_harness.dart';
+
 import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/home/catalog_keys.dart';
@@ -345,15 +348,14 @@ void main() {
         final lineATarget = server.lines.firstWhere(
           (line) => line.address == lineA.baseUrl.toString(),
         );
+        await serverUiTap(tester, Key('server-lines-${server.id}'));
         await tester.tap(
-          find.byKey(
-            ServerSwitcherDialog.lineOptionKey(server.id, lineATarget.id),
-          ),
+          find.byKey(Key('server-line-choice-${lineATarget.id}')),
         );
         await settle(tester);
 
         // 原线路、原会话、当前页面与已加载目录都保持。
-        expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+
         expect(auth.client.baseUrl, lineB.baseUrl);
         expect(
           auth.session?.server.activeLine?.address,
@@ -362,13 +364,9 @@ void main() {
         expect(find.byType(LibraryPage), findsOneWidget);
         expect(find.byType(HomePage), findsNothing);
         expect(lineB.requests.where(isHomeCatalog).length, homeBefore);
-        // 失败原因以 SnackBar 可见。
-        expect(find.byKey(SessionActions.lineSwitchFailureKey), findsOneWidget);
-        expect(find.textContaining('切换线路失败'), findsOneWidget);
-        expect(
-          find.textContaining('HTTP 500: upstream timeout'),
-          findsOneWidget,
-        );
+        // Failure stays local and does not reveal arbitrary server bodies.
+        expect(find.textContaining('upstream timeout'), findsNothing);
+        expect(find.byKey(const Key('server-line-auto')), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -594,14 +592,10 @@ void main() {
         });
         await tester.tap(find.byKey(SessionActions.serverMenuKey));
         await settle(tester);
-        expect(find.byKey(SessionActions.addServerKey), findsOneWidget);
-        expect(
-          find.byKey(ServerSwitcherDialog.changePasswordKey),
-          findsOneWidget,
-        );
-        expect(find.text('退出登录'), findsOneWidget);
-        expect(find.byKey(ServerSwitcherDialog.privateKey), findsNothing);
-        expect(find.byType(ServerSwitcherDialog), findsOneWidget);
+        expect(find.byKey(const Key('server-add')), findsOneWidget);
+        expect(find.text('退出登录'), findsNothing);
+        expect(find.text('服务与范围管理'), findsNothing);
+        expect(find.byType(ServerSelectionPage), findsOneWidget);
         expect(path(), AppRoutes.library('view-movies'));
         expect(tester.takeException(), isNull);
       },

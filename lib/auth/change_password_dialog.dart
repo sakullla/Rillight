@@ -13,7 +13,15 @@ import 'package:rillight/auth/failure_message.dart';
 /// 电视呈现把输入和确认取消放进同一纵向焦点序列;手机与桌面仍用文本框和
 /// Cupertino 按钮。
 class ChangePasswordDialog extends StatefulWidget {
-  const ChangePasswordDialog({super.key, required this.auth});
+  const ChangePasswordDialog({
+    super.key,
+    required this.auth,
+    this.inline = false,
+    this.onDone,
+  });
+
+  final bool inline;
+  final VoidCallback? onDone;
 
   final AuthController auth;
 
@@ -75,7 +83,11 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
     if (!mounted || !changed) {
       return;
     }
-    Navigator.of(context).pop();
+    if (widget.inline) {
+      widget.onDone?.call();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -91,10 +103,12 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
             _confirm.text.isNotEmpty && _confirm.text != _newPassword.text;
         final canSubmit =
             !auth.isBusy && _newPassword.text.isNotEmpty && !mismatch;
-        return AppDialog(
+        final dialog = AppDialog(
           title: Text(l10n.changePassword),
           content: SizedBox(
-            width: tv
+            width: widget.inline
+                ? double.infinity
+                : tv
                 ? context.tvdp(420)
                 : AppViewport.fit(
                     360,
@@ -155,7 +169,13 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                           pill: true,
                           onPressed: auth.isBusy
                               ? null
-                              : () => Navigator.of(context).pop(),
+                              : () {
+                                  if (widget.inline) {
+                                    widget.onDone?.call();
+                                  } else {
+                                    Navigator.of(context).pop();
+                                  }
+                                },
                           child: Text(l10n.cancelAction),
                         ),
                         SizedBox(width: context.tvdp(10)),
@@ -185,7 +205,13 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                     key: ChangePasswordDialog.cancelKey,
                     onPressed: auth.isBusy
                         ? null
-                        : () => Navigator.of(context).pop(),
+                        : () {
+                            if (widget.inline) {
+                              widget.onDone?.call();
+                            } else {
+                              Navigator.of(context).pop();
+                            }
+                          },
                     variant: AppButtonVariant.plain,
                     child: Text(l10n.cancelAction),
                   ),
@@ -203,6 +229,16 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
                   ),
                 ],
         );
+        return widget.inline
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  dialog.content,
+                  const SizedBox(height: 20),
+                  Wrap(spacing: 8, runSpacing: 8, children: dialog.actions),
+                ],
+              )
+            : dialog;
       },
     );
   }

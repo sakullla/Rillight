@@ -1,3 +1,5 @@
+import 'server_ui_harness.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -123,7 +125,9 @@ void main() {
       await _settle(tester);
       expect(find.byKey(const Key('server-manage-providers')), findsNothing);
       expect(find.text('服务与范围管理'), findsNothing);
-      await tester.tap(find.text('退出登录'));
+      await openServerEditor(tester, auth.session!.server.id);
+      await serverUiTap(tester, const Key('server-editor-logout'));
+      await serverUiTap(tester, const Key('server-logout-confirm'));
       await _settle(tester);
 
       expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
@@ -260,7 +264,9 @@ void main() {
 
     await tester.tap(find.byKey(SessionActions.serverMenuKey));
     await _settle(tester);
-    await tester.tap(find.text('退出登录'));
+    await openServerEditor(tester, auth.session!.server.id);
+    await serverUiTap(tester, const Key('server-editor-logout'));
+    await serverUiTap(tester, const Key('server-logout-confirm'));
     await _settle(tester);
 
     // Selecting the saved server fills the server-level UA back into the form.

@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import 'package:rillight/auth/server_entry_coordinator.dart';
+import 'package:rillight/auth/server_access_credentials.dart';
+import 'package:rillight/auth/credential_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -20,6 +25,104 @@ class _FailingStore extends MemoryServerAccessStore {
 }
 
 void main() {
+  test('entry cancellation discards late password and preserves original destination', () async {
+    final access = ServerAccessController(store: MemoryServerAccessStore());
+    addTearDown(access.dispose);
+    final server = _server('protected');
+    await access.register(server);
+    await access.setPassword(server.id, 'local', 'local');
+    final coordinator = ServerEntryCoordinator(access);
+    final answer = Completer<String?>();
+    final requested = Completer<void>();
+    var connected = false, navigated = false;
+    final pending = coordinator.enter<String>(
+      server: server,
+      destination: '/item/original',
+      requestPassword: () {
+        requested.complete();
+        return answer.future;
+      },
+      connect: (_) async {
+        connected = true;
+        return true;
+      },
+      navigate: (_) async {
+        navigated = true;
+      },
+    );
+    final rejected = expectLater(pending, throwsStateError);
+    await requested.future;
+    coordinator.cancel();
+    answer.complete('local');
+    await rejected;
+    expect(connected, isFalse);
+    expect(navigated, isFalse);
+    expect(access.allows(server.id), isFalse);
+  });
+
+  test('entry only publishes unlock and locks old server after a successful connection', () async {
+    final access = ServerAccessController(store: MemoryServerAccessStore());
+    addTearDown(access.dispose);
+    final old = _server('old'), next = _server('next');
+    for (final server in [old, next]) {
+      await access.register(server);
+      await access.setPassword(server.id, 'local', 'local');
+    }
+    await access.unlock(old.id, 'local');
+    final coordinator = ServerEntryCoordinator(access);
+    String? reached;
+    Future<bool> enter(bool connected) => coordinator.enter<String>(
+      server: next,
+      destination: '/item/target?resume=1',
+      requestPassword: () async => 'local',
+      connect: (guard) async {
+        guard();
+        expect(access.allows(next.id), isFalse);
+        return connected;
+      },
+      navigate: (destination) async {
+        reached = destination;
+      },
+    );
+    expect(await enter(false), isFalse);
+    expect(access.allows(old.id), isTrue);
+    expect(access.allows(next.id), isFalse);
+    expect(reached, isNull);
+    expect(await enter(true), isTrue);
+    expect(access.allows(old.id), isFalse);
+    expect(access.allows(next.id), isTrue);
+    expect(reached, '/item/target?resume=1');
+  });
+
+  test('credential-backed entry verifier survives a fresh controller without touching remote login', () async {
+    final credentials = MemoryCredentialStore({
+      'a': const StoredCredentials(
+        accessToken: 'remote-token',
+        userId: 'u',
+        username: 'alice',
+      ),
+    });
+    final store = CredentialServerAccessStore(credentials);
+    final access = ServerAccessController(store: store);
+    addTearDown(access.dispose);
+    await access.register(_server('a'));
+    String? reference;
+    await access.setPassword(
+      'a',
+      ' 本机 password ',
+      ' 本机 password ',
+      persistReference: (value) async {
+        reference = value;
+      },
+    );
+    final restored = ServerAccessController(store: store);
+    addTearDown(restored.dispose);
+    await restored.register(_server('a', protection: reference));
+    expect(restored.allows('a'), isFalse);
+    expect(await restored.unlock('a', ' 本机 password '), isTrue);
+    expect((await credentials.read('a'))!.accessToken, 'remote-token');
+  });
+
   test(
     'failed configuration commit leaves the previous password and permit valid',
     () async {

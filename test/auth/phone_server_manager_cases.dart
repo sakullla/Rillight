@@ -14,8 +14,11 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/phone_server_manager.dart';
+import 'package:rillight/auth/server_selection_page.dart';
 import 'package:rillight/auth/server_list_store.dart';
+
+import 'server_ui_harness.dart';
+
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 
@@ -92,12 +95,8 @@ Future<void> _pump(
       home: CupertinoPageScaffold(
         child: Builder(
           builder: (context) => ui.AppButton(
-            onPressed: () => showPhoneServerManager(
-              context,
-              auth: auth,
-              onSelect: (_, _) async {},
-              onAddServer: () {},
-            ),
+            onPressed: () =>
+                showServerSelection(context, auth: auth, phone: true),
             child: const Text('open-manager'),
           ),
         ),
@@ -109,89 +108,74 @@ Future<void> _pump(
 }
 
 void main() {
-  testWidgets('current logged-in server deletion redirects and undo survives', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(360, 780);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final server = FakeEmbyServer();
-    final auth = AuthController.memory(
-      client: EmbyClient(
-        device: const ClientDeviceInfo(
-          clientName: 'test',
-          deviceName: 'phone',
-          deviceId: 'delete-current-test',
-          version: '1',
+  testWidgets(
+    'current server removal redirects and clears only its local login',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final server = FakeEmbyServer();
+      final auth = AuthController.memory(
+        client: EmbyClient(
+          device: const ClientDeviceInfo(
+            clientName: 'test',
+            deviceName: 'phone',
+            deviceId: 'delete-current-test',
+            version: '1',
+          ),
+          dio: dioForFakeEmby(FakeEmbyAdapter([server])),
         ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-      ),
-    );
-    addTearDown(auth.dispose);
-    await tester.runAsync(
-      () => auth.connect(
-        address: server.baseUrl.toString(),
-        username: 'alice',
-        password: 'correct-horse',
-      ),
-    );
-    expect(auth.isLoggedIn, isTrue);
-    final saved = auth.savedServers.single;
-    final credentials = await auth.credentials.read(saved.id);
-    final app = RillightApp(
-      auth: auth,
-      environment: PresentationEnvironment.phone,
-    );
-    addTearDown(() async {
-      await tester.pumpWidget(const SizedBox.shrink());
-      app.router.dispose();
-    });
-    app.router.go(AppRoutes.mine);
-    await tester.pumpWidget(app);
-    await settle(tester);
-    await tester.tap(find.byKey(PhoneMinePage.lineKey));
-    await settle(tester);
-    await tester.tap(find.byKey(Key('phone-mine-server-delete-${saved.id}')));
-    await settle(tester);
-    await tester.tap(find.byKey(PhoneMinePage.serverDeleteConfirmKey));
-    await settle(tester);
-    expect(auth.isLoggedIn, isFalse);
-    expect(app.router.state.uri.path, AppRoutes.connect);
-    expect(find.byType(PhoneServerManager), findsNothing);
-    expect(auth.savedServers, isEmpty);
-    expect(await auth.credentials.read(saved.id), isNull);
-    expect(find.text('撤销'), findsOneWidget);
-    await tester.tap(find.text('撤销'));
-    await settle(tester);
-    expect(auth.savedServers.single.id, saved.id);
-    expect(
-      (await auth.credentials.read(saved.id))?.accessToken,
-      credentials!.accessToken,
-    );
-    expect(auth.isLoggedIn, isFalse);
-    expect((await auth.servers.load()).lastServerId, isNull);
-    expect(app.router.state.uri.path, AppRoutes.connect);
-    expect(tester.takeException(), isNull);
-  }, tags: ['integration']);
+      );
+      addTearDown(auth.dispose);
+      await tester.runAsync(
+        () => auth.connect(
+          address: server.baseUrl.toString(),
+          username: 'alice',
+          password: 'correct-horse',
+        ),
+      );
+      expect(auth.isLoggedIn, isTrue);
+      final saved = auth.savedServers.single;
+      final app = RillightApp(
+        auth: auth,
+        environment: PresentationEnvironment.phone,
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        app.router.dispose();
+      });
+      app.router.go(AppRoutes.mine);
+      await tester.pumpWidget(app);
+      await settle(tester);
+      await tester.tap(find.byKey(PhoneMinePage.lineKey));
+      await settle(tester);
+      await serverUiTap(tester, Key('server-more-${saved.id}'));
+      await serverUiTap(tester, Key('server-action-remove-${saved.id}'));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('server-remove-confirm')));
+      await settle(tester);
+      expect(auth.isLoggedIn, isFalse);
+      expect(app.router.state.uri.path, AppRoutes.connect);
+      expect(find.byType(ServerSelectionPage), findsNothing);
+      expect(auth.savedServers, isEmpty);
+      expect(await auth.credentials.read(saved.id), isNull);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
 
-  testWidgets('phone management deletes locally and offers a reachable undo', (
-    tester,
-  ) async {
+  testWidgets('phone removal requires a separate confirmation', (tester) async {
     final auth = await _auth();
     addTearDown(auth.dispose);
     await _pump(tester, auth);
-    await tester.tap(find.byKey(const Key('phone-mine-server-delete-one')));
+    await serverUiTap(tester, const Key('server-more-one'));
+    await serverUiTap(tester, const Key('server-action-remove-one'));
     await settle(tester);
-    await tester.tap(find.byKey(const Key('phone-mine-server-delete-confirm')));
+    await tester.tap(find.byKey(const Key('server-remove-confirm')));
     await settle(tester);
     expect(auth.savedServers.map((s) => s.id), ['two']);
     expect(await auth.credentials.read('one'), isNull);
-    await tester.tap(find.text('撤销'));
-    await settle(tester);
-    expect(auth.savedServers.map((s) => s.id), contains('one'));
-    expect((await auth.credentials.read('one'))?.accessToken, 'synthetic');
-    expect(auth.isLoggedIn, isFalse);
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 
@@ -202,29 +186,69 @@ void main() {
       addTearDown(auth.dispose);
       await _pump(tester, auth, scale: 1.8);
       await tester.enterText(
-        find.byKey(PhoneServerManager.searchKey),
+        find.byKey(ServerSelectionPage.searchKey),
         'backup',
       );
       tester.view.viewInsets = const FakeViewPadding(bottom: 260);
       addTearDown(tester.view.resetViewInsets);
       await settle(tester);
-      expect(
-        find.byKey(const Key('phone-mine-server-delete-one')),
-        findsNothing,
-      );
-      final remove = find.byKey(const Key('phone-mine-server-delete-two'));
+      expect(find.byKey(const Key('server-more-one')), findsNothing);
+      final remove = find.byKey(const Key('server-more-two'));
       await tester.ensureVisible(remove);
       await tester.tap(remove);
       await settle(tester);
-      await tester.tap(
-        find.byKey(const Key('phone-mine-server-delete-cancel')),
-      );
+      await serverUiTap(tester, const Key('server-action-remove-two'));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('server-remove-cancel')));
       await settle(tester);
       expect(auth.savedServers, hasLength(2));
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
   );
+
+  for (final width in [360.0, 412.0]) {
+    testWidgets(
+      'phone editor keeps its draft through child back with keyboard at $width',
+      (tester) async {
+        final auth = await _auth();
+        addTearDown(auth.dispose);
+        await _pump(tester, auth, scale: 1.8);
+        tester.view.physicalSize = Size(width, 780);
+        await tester.pump();
+        await openServerEditor(tester, 'one');
+        await tester.enterText(
+          find.byKey(const Key('server-editor-name')),
+          '仍然保留的草稿',
+        );
+        tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+        addTearDown(tester.view.resetViewInsets);
+        await serverUiTap(tester, const Key('server-editor-add-line'));
+        await tester.enterText(
+          find.byKey(const Key('server-line-address')),
+          'https://draft-only.test',
+        );
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(
+          tester
+              .widget<ui.AppTextField>(
+                find.byKey(const Key('server-editor-name')),
+              )
+              .controller!
+              .text,
+          '仍然保留的草稿',
+        );
+        expect(find.byKey(const Key('server-editor-save')), findsOneWidget);
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(auth.savedServers.first.displayName, _first.name);
+        expect(auth.savedServers.first.lines, hasLength(1));
+        expect(tester.takeException(), isNull);
+      },
+      tags: ['integration'],
+    );
+  }
 
   test(
     'local names and restored entries do not select a different startup server',

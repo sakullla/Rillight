@@ -15,6 +15,7 @@ import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/provider_connect_controller.dart';
 import 'package:rillight/auth/provider_connect_dialog.dart';
 import 'package:rillight/auth/server_list_store.dart';
+import 'package:rillight/auth/server_paste_draft.dart';
 import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/library/shelf_sort.dart';
 import 'package:rillight/media_server/authentication.dart';
@@ -24,6 +25,64 @@ import 'package:rillight/media_server/models.dart';
 import 'package:rillight/plex/plex_client.dart';
 
 void main() {
+  testWidgets(
+    'Plex pasted name and every endpoint stay editable before authorization',
+    (tester) async {
+      final auth = AuthController.memory();
+      addTearDown(auth.dispose);
+      final draft = ServerPasteDraft()
+        ..serviceType = MediaServerType.plex
+        ..name = '我的 Plex'
+        ..lines.addAll([
+          'https://first.test/prefix',
+          'https://second.test:32400',
+        ]);
+      await tester.pumpWidget(
+        CupertinoTestApp(
+          home: ProviderConnectDialog(auth: auth, initialDraft: draft),
+        ),
+      );
+      expect(
+        tester
+            .widget<AppTextField>(
+              find.byKey(const Key('provider-display-name')),
+            )
+            .controller
+            ?.text,
+        '我的 Plex',
+      );
+      expect(
+        tester
+            .widget<AppTextField>(find.byKey(const Key('provider-address')))
+            .controller
+            ?.text,
+        draft.lines.first,
+      );
+      expect(
+        tester
+            .widget<AppTextField>(find.byKey(const Key('provider-extra-lines')))
+            .controller
+            ?.text,
+        draft.lines.last,
+      );
+      await tester.enterText(
+        find.byKey(const Key('provider-address')),
+        'https://edited.test/prefix',
+      );
+      expect(
+        tester
+            .widget<AppTextField>(find.byKey(const Key('provider-address')))
+            .controller
+            ?.text,
+        'https://edited.test/prefix',
+      );
+      expect(auth.savedServers, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(auth.savedServers, isEmpty);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets('selecting Child hides Owner resources before Home exchange', (
     tester,
   ) async {

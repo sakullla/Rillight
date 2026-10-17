@@ -26,6 +26,7 @@ import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
+import 'package:rillight/auth/server_management_widgets.dart';
 import 'package:rillight/emby/catalog_cache.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -2519,14 +2520,11 @@ void main() {
         );
         final before = _itemRequests(lineA);
         await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
-        expect(
-          find.descendant(
-            of: find.byType(PhoneTopBar),
-            matching: find.text('服务器管理'),
-          ),
-          findsOneWidget,
+        await _mineTap(
+          tester,
+          find.byKey(Key('server-lines-${auth.savedServers.single.id}')),
         );
-        final option = find.byKey(PhoneMinePage.lineOptionKey(target.id));
+        final option = find.byKey(Key('server-line-choice-${target.id}'));
         expect(tester.widget<AppListTile>(option).selected, isFalse);
         await _mineTap(tester, option);
         await _mineUntil(
@@ -2537,14 +2535,20 @@ void main() {
         expect(auth.client.baseUrl, lineA.baseUrl);
         expect(_itemRequests(lineA), greaterThan(before));
         expect(catalog.latestMovies.items.map((item) => item.name), ['甲线电影']);
+        await _mineTap(tester, find.byKey(const Key('server-flow-back')));
+        await _mineTap(tester, find.byKey(const Key('server-flow-back')));
         await _scrollToTop(tester);
         expect(find.text('line-a.test:8096'), findsOneWidget);
         expect(find.text('line-b.test:8096'), findsNothing);
         await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
+        await _mineTap(
+          tester,
+          find.byKey(Key('server-lines-${auth.savedServers.single.id}')),
+        );
         expect(
           tester
               .widget<AppListTile>(
-                find.byKey(PhoneMinePage.lineOptionKey(target.id)),
+                find.byKey(Key('server-line-choice-${target.id}')),
               )
               .selected,
           isTrue,
@@ -2560,12 +2564,11 @@ void main() {
         final beforeFailA = _itemRequests(lineA);
         await _mineTap(
           tester,
-          find.byKey(PhoneMinePage.lineOptionKey(lineBTarget.id)),
+          find.byKey(Key('server-line-choice-${lineBTarget.id}')),
         );
 
-        // 失败的线路切换保持当前线路、会话与已加载目录,原因经 lineSwitchFailure 暴露。
-        expect(auth.lineSwitchFailure?.address, lineB.baseUrl.toString());
-        expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+        // Failure belongs to this selector; the live session remains usable.
+        expect(auth.lineSwitchFailure, isNull);
         expect(auth.failure, isNull);
         expect(auth.session, isNotNull);
         expect(
@@ -2576,13 +2579,9 @@ void main() {
         expect(_itemRequests(lineB), beforeFail);
         // 原线路也未被刷新:失败后不再无条件 reload 目录。
         expect(_itemRequests(lineA), beforeFailA);
-        // 失败原因在页面顶部以错误行可见。
-        expect(find.byKey(PhoneMinePage.lineSwitchFailureKey), findsOneWidget);
-        expect(find.textContaining('切换线路失败'), findsOneWidget);
-        expect(
-          find.textContaining('HTTP 500: upstream timeout'),
-          findsOneWidget,
-        );
+        expect(find.byType(ServerFeedback), findsOneWidget);
+        expect(find.text('未保存，请检查输入或连接后重试。'), findsOneWidget);
+        expect(find.textContaining('upstream timeout'), findsNothing);
         expect(tester.takeException(), isNull);
       },
     );
@@ -2598,11 +2597,12 @@ void main() {
       expect(find.byKey(PhoneMinePage.userKey), findsOneWidget);
       await _mineTap(tester, find.byKey(PhoneMinePage.lineKey));
       final saved = auth.savedServers.single;
+      await _mineTap(tester, find.byKey(Key('server-more-${saved.id}')));
       await _mineTap(
         tester,
-        find.byKey(PhoneMinePage.serverDeleteKey(saved.id)),
+        find.byKey(Key('server-action-remove-${saved.id}')),
       );
-      await tester.tap(find.byKey(PhoneMinePage.serverDeleteCancelKey));
+      await tester.tap(find.byKey(const Key('server-remove-cancel')));
       await _mineSettle(tester);
       expect(auth.savedServers.single.id, saved.id);
       expect(find.text('家庭影院'), findsWidgets);

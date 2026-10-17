@@ -16,8 +16,9 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
-import 'package:rillight/auth/server_list_store.dart';
-import 'package:rillight/auth/server_switcher_dialog.dart';
+
+import 'server_ui_harness.dart';
+
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -306,86 +307,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('desktop switcher exposes the change-password entry', (
-    tester,
-  ) async {
-    var requested = false;
-    await tester.pumpWidget(
-      CupertinoTestApp(
-        theme: AppUiTheme.dark(),
-        locale: const Locale('zh'),
-        supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: [
-          ...[
-            AppLocalizations.delegate,
-            ...GlobalCupertinoLocalizations.delegates,
-          ],
-          ui.GlobalCupertinoLocalizations.delegate,
-        ],
-        home: CupertinoPageScaffold(
-          child: Builder(
-            builder: (context) => Center(
-              child: ui.AppButton(
-                key: const Key('open-switcher'),
-                onPressed: () => showAppDialog<void>(
-                  context: context,
-                  builder: (dialogContext) => ServerSwitcherDialog(
-                    servers: [
-                      SavedServer(
-                        id: 'server-id-1',
-                        name: '家庭影院',
-                        username: 'alice',
-                        lines: const [
-                          ServerLine(
-                            id: 'line-1',
-                            address: 'http://emby.test:8096',
-                          ),
-                        ],
-                        activeLineId: 'line-1',
-                      ),
-                    ],
-                    activeServerId: 'server-id-1',
-                    activeLineId: 'line-1',
-                    onSelect: (_, _) {},
-                    onAddServer: () {},
-                    onLogout: () {},
-                    onDelete: (_) {},
-                    onAddLine: (_) {},
-                    onEditLine: (_, _) {},
-                    onDeleteLine: (_, _) {},
-
-                    onChangePassword: () {
-                      requested = true;
-                      Navigator.of(dialogContext).pop();
-                    },
-                  ),
-                ),
-                child: const Text('open'),
-              ),
-            ),
-          ),
-        ),
-        builder: (context, child) => ui.AppUiTheme(
-          data: AppUiTheme.of(context).brightness == Brightness.dark
-              ? ui.AppUiTheme.dark()
-              : ui.AppUiTheme.light(),
-          child: child ?? const SizedBox.shrink(),
-        ),
-      ),
-    );
-    await tester.tap(find.byKey(const Key('open-switcher')));
-    await settle(tester);
-    expect(find.byType(ServerSwitcherDialog), findsOneWidget);
-    expect(find.text('修改密码'), findsOneWidget);
-
-    await tester.tap(find.byKey(ServerSwitcherDialog.changePasswordKey));
-    await settle(tester);
-
-    expect(requested, isTrue);
-    // 宿主接管弹改密对话框,切换面板关闭。
-    expect(find.byType(ServerSwitcherDialog), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'desktop editor exposes the server account password separately from entry protection',
+    (tester) async {
+      final auth = await connected(tester);
+      await pumpServerSelection(tester, auth);
+      await openServerEditor(tester, auth.session!.server.id);
+      await serverUiTap(tester, const Key('server-editor-remote-password'));
+      expect(find.byKey(ChangePasswordDialog.newPasswordField), findsOneWidget);
+      expect(find.byKey(const Key('server-password-new')), findsNothing);
+      await serverUiTap(tester, ChangePasswordDialog.cancelKey);
+      expect(find.byKey(const Key('server-editor-name')), findsOneWidget);
+    },
+    tags: ['integration'],
+  );
 
   testWidgets('phone mine page opens the change-password dialog', (
     tester,

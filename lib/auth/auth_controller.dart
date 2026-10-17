@@ -2,6 +2,9 @@ import '../media_server/provider_registry.dart';
 import '../plex/plex_authentication.dart';
 import 'cloud_credentials.dart';
 import 'connection_failure.dart';
+import 'server_access.dart';
+import 'server_access_credentials.dart';
+import 'server_entry_coordinator.dart';
 import 'provider_identity.dart';
 import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
@@ -52,10 +55,15 @@ class AuthController extends ChangeNotifier {
     required ServerListStore servers,
     SourceSessionRegistry? sources,
     RegionAccessController? regionAccess,
+    ServerAccessController? serverAccess,
     this.persistPin,
     MediaServerClient Function(MediaServerType)? providerClientFactory,
     PlexAuthentication? plexAuthentication,
   }) : _client = client {
+    this.serverAccess =
+        serverAccess ??
+        ServerAccessController(store: CredentialServerAccessStore(credentials));
+    serverEntry = ServerEntryCoordinator(this.serverAccess);
     _providerClientFactory =
         providerClientFactory ??
         (type) => type == client.serviceType
@@ -174,6 +182,32 @@ class AuthController extends ChangeNotifier {
   final CredentialStore credentials;
   late final ServerListStore servers;
   late final SourceSessionRegistry sources;
+  late final ServerAccessController serverAccess;
+  late final ServerEntryCoordinator serverEntry;
+
+  /// Playback installs its transaction here. Opening a selector or editing
+  /// metadata never closes a player. Null means an ordinary browsing switch.
+  Future<void> Function(
+    String serverId,
+    LineSelection selection,
+    void Function() guard,
+  )?
+  playbackLineSelection;
+  Future<void> chooseConnection(
+    String id,
+    LineSelection selection, {
+    void Function()? guard,
+  }) async {
+    final current = guard ?? () {};
+    current();
+    final playback = playbackLineSelection;
+    if (playback != null) {
+      await playback(id, selection, current);
+    } else {
+      await selectLine(id, selection, guard: current);
+    }
+  }
+
   RegionAccessController get regionAccess => sources.access;
   final Future<void> Function(PinVerifier)? persistPin;
   Future<void> setPrivatePin(String pin, String confirmation) =>
@@ -683,6 +717,7 @@ class AuthController extends ChangeNotifier {
     required String userAgent,
     required List<ServerLine> lines,
     LineSelection? lineSelection,
+    String? protectionRef,
   }) => _lineMutation(
     id,
     () => sources.saveConfiguration(
@@ -692,6 +727,7 @@ class AuthController extends ChangeNotifier {
       userAgent: userAgent,
       lines: lines,
       lineSelection: lineSelection,
+      protectionRef: protectionRef,
     ),
   );
 
@@ -753,8 +789,14 @@ class AuthController extends ChangeNotifier {
     await _lineMutation(serverId, () => sources.removeLine(serverId, lineId));
   }
 
-  Future<void> selectLine(String serverId, LineSelection selection) =>
-      _lineMutation(serverId, () => sources.selectLine(serverId, selection));
+  Future<void> selectLine(
+    String serverId,
+    LineSelection selection, {
+    void Function()? guard,
+  }) => _lineMutation(
+    serverId,
+    () => sources.selectLine(serverId, selection, guard: guard),
+  );
 
   Future<void> deleteServer(String serverId) async {
     try {
@@ -1197,6 +1239,8 @@ class AuthController extends ChangeNotifier {
 
   @override
   void dispose() {
+    serverEntry.cancel();
+    serverAccess.dispose();
     _disposed = true;
     _activationGeneration++;
     _client.clearSession();

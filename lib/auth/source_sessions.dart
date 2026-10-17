@@ -1509,6 +1509,9 @@ class SourceSessionRegistry {
               ? candidate.iconId
               : _allowed(id).iconId,
           userAgent: candidate.userAgent,
+          protectionRef: candidate.protectionRef != original.protectionRef
+              ? candidate.protectionRef
+              : _allowed(id).protectionRef,
         );
         final next = _servers.map((s) => s.id == id ? latest : s).toList();
         try {
@@ -1570,6 +1573,7 @@ class SourceSessionRegistry {
     required String userAgent,
     required List<ServerLine> lines,
     LineSelection? lineSelection,
+    String? protectionRef,
   }) => _editLines(id, (server) {
     if (userAgent.contains(RegExp(r'[\r\n]'))) {
       throw ArgumentError('Invalid user agent');
@@ -1600,6 +1604,7 @@ class SourceSessionRegistry {
           normalized.any((l) => l.id == server.lastSuccessfulLineId)
           ? server.lastSuccessfulLineId
           : activeId,
+      protectionRef: protectionRef,
     );
   });
 

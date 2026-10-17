@@ -1183,6 +1183,7 @@
     "id": "server-rename",
     "feature": "servers",
     "platforms": [
+      "desktop",
       "phone"
     ]
   },
@@ -1190,6 +1191,7 @@
     "id": "server-search-empty",
     "feature": "servers",
     "platforms": [
+      "desktop",
       "phone"
     ]
   },
@@ -1959,6 +1961,70 @@
       "desktop",
       "phone",
       "tv"
+    ]
+  },
+  {
+    "id": "server-editor",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-line-selector",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-password-form",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-paste-groups",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-paste-preview",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-locked-list",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-unlock",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
+    ]
+  },
+  {
+    "id": "server-unlock-error",
+    "feature": "servers",
+    "platforms": [
+      "desktop",
+      "phone"
     ]
   }
 ]

@@ -37,24 +37,6 @@ class PhoneMinePage extends StatefulWidget {
 
   static const playbackRates = <double>[0.5, 1.0, 1.25, 1.5, 2.0];
 
-  static Key lineOptionKey(String lineId) => Key('phone-mine-line-$lineId');
-
-  static Key lineAddKey(String serverId) =>
-      Key('phone-mine-line-add-$serverId');
-
-  static Key lineEditKey(String serverId, String lineId) =>
-      Key('phone-mine-line-edit-$serverId-$lineId');
-
-  static Key lineDeleteKey(String serverId, String lineId) =>
-      Key('phone-mine-line-delete-$serverId-$lineId');
-
-  static Key serverDeleteKey(String serverId) =>
-      Key('phone-mine-server-delete-$serverId');
-
-  static const serverDeleteConfirmKey = Key('phone-mine-server-delete-confirm');
-
-  static const serverDeleteCancelKey = Key('phone-mine-server-delete-cancel');
-
   static const changePasswordKey = Key('phone-mine-change-password');
 
   static const privateKey = Key('phone-mine-private');

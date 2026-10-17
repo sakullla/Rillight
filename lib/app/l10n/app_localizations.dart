@@ -4569,6 +4569,606 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'稍后处理'**
   String get updateLater;
+
+  /// No description provided for @serversTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器'**
+  String get serversTitle;
+
+  /// No description provided for @serversSearch.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索名称或地址'**
+  String get serversSearch;
+
+  /// No description provided for @serversEmptyTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加你的第一台服务器'**
+  String get serversEmptyTitle;
+
+  /// No description provided for @serversEmptyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接 Emby、Jellyfin 或 Plex，开始观看。'**
+  String get serversEmptyHint;
+
+  /// No description provided for @serversNoResults.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有找到服务器'**
+  String get serversNoResults;
+
+  /// No description provided for @serversClearSearch.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除搜索'**
+  String get serversClearSearch;
+
+  /// No description provided for @serversMore.
+  ///
+  /// In zh, this message translates to:
+  /// **'更多操作'**
+  String get serversMore;
+
+  /// No description provided for @serversEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑服务器'**
+  String get serversEdit;
+
+  /// No description provided for @serversRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除服务器'**
+  String get serversRemove;
+
+  /// No description provided for @serversRemoveHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只移除此设备上的配置和登录，不会删除服务器上的内容。'**
+  String get serversRemoveHint;
+
+  /// No description provided for @serversCurrentImpact.
+  ///
+  /// In zh, this message translates to:
+  /// **'这是当前使用的服务器。继续将结束这台服务器的当前连接。'**
+  String get serversCurrentImpact;
+
+  /// No description provided for @serversUp.
+  ///
+  /// In zh, this message translates to:
+  /// **'上移'**
+  String get serversUp;
+
+  /// No description provided for @serversDown.
+  ///
+  /// In zh, this message translates to:
+  /// **'下移'**
+  String get serversDown;
+
+  /// No description provided for @serversCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前使用'**
+  String get serversCurrent;
+
+  /// No description provided for @serversLocked.
+  ///
+  /// In zh, this message translates to:
+  /// **'已锁定'**
+  String get serversLocked;
+
+  /// No description provided for @serversEnter.
+  ///
+  /// In zh, this message translates to:
+  /// **'进入服务器'**
+  String get serversEnter;
+
+  /// No description provided for @serversLines.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接线路'**
+  String get serversLines;
+
+  /// No description provided for @serversAutomatic.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动选择'**
+  String get serversAutomatic;
+
+  /// No description provided for @serversAutomaticHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接失败时尝试同一服务器的备用线路。'**
+  String get serversAutomaticHint;
+
+  /// No description provided for @serversFixedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选中具体线路后固定使用，失败时由你决定是否更换。'**
+  String get serversFixedHint;
+
+  /// No description provided for @serversActualLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在使用'**
+  String get serversActualLine;
+
+  /// No description provided for @serversNotChecked.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未检查'**
+  String get serversNotChecked;
+
+  /// No description provided for @serversCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查连接'**
+  String get serversCheck;
+
+  /// No description provided for @serversCheckPassed.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接正常'**
+  String get serversCheckPassed;
+
+  /// No description provided for @serversCheckFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接失败，可重试或换线'**
+  String get serversCheckFailed;
+
+  /// No description provided for @serversCheckIdentity.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个地址属于另一台服务器'**
+  String get serversCheckIdentity;
+
+  /// No description provided for @serversCheckLogin.
+  ///
+  /// In zh, this message translates to:
+  /// **'请重新登录'**
+  String get serversCheckLogin;
+
+  /// No description provided for @serversCheckUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查未完成'**
+  String get serversCheckUnknown;
+
+  /// No description provided for @serversCheckedAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查于'**
+  String get serversCheckedAt;
+
+  /// No description provided for @serversSave.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get serversSave;
+
+  /// No description provided for @serversCancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get serversCancel;
+
+  /// No description provided for @serversBack.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回'**
+  String get serversBack;
+
+  /// No description provided for @serversName.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示名称'**
+  String get serversName;
+
+  /// No description provided for @serversIcon.
+  ///
+  /// In zh, this message translates to:
+  /// **'图标'**
+  String get serversIcon;
+
+  /// No description provided for @serversIconDefault.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务默认'**
+  String get serversIconDefault;
+
+  /// No description provided for @serversIconHome.
+  ///
+  /// In zh, this message translates to:
+  /// **'家'**
+  String get serversIconHome;
+
+  /// No description provided for @serversIconCinema.
+  ///
+  /// In zh, this message translates to:
+  /// **'影院'**
+  String get serversIconCinema;
+
+  /// No description provided for @serversIconCloud.
+  ///
+  /// In zh, this message translates to:
+  /// **'云端'**
+  String get serversIconCloud;
+
+  /// No description provided for @serversAccount.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器账号'**
+  String get serversAccount;
+
+  /// No description provided for @serversReauthorize.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新登录 / 更换账号'**
+  String get serversReauthorize;
+
+  /// No description provided for @serversSignOut.
+  ///
+  /// In zh, this message translates to:
+  /// **'退出此账号'**
+  String get serversSignOut;
+
+  /// No description provided for @serversSignOutHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'保留服务器配置，下次进入时重新登录。'**
+  String get serversSignOutHint;
+
+  /// No description provided for @serversLinesHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'同一服务器的不同地址。按顺序使用备用线路。'**
+  String get serversLinesHint;
+
+  /// No description provided for @serversLineName.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路名称（可选）'**
+  String get serversLineName;
+
+  /// No description provided for @serversLineAddress.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器地址'**
+  String get serversLineAddress;
+
+  /// No description provided for @serversLineAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加线路'**
+  String get serversLineAdd;
+
+  /// No description provided for @serversLineEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑线路'**
+  String get serversLineEdit;
+
+  /// No description provided for @serversLineRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'移除这条线路'**
+  String get serversLineRemove;
+
+  /// No description provided for @serversLineLast.
+  ///
+  /// In zh, this message translates to:
+  /// **'至少保留一条线路'**
+  String get serversLineLast;
+
+  /// No description provided for @serversLineDraftHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回后继续编辑，点击服务器表单的“保存”才生效。'**
+  String get serversLineDraftHint;
+
+  /// No description provided for @serversAdvanced.
+  ///
+  /// In zh, this message translates to:
+  /// **'高级设置'**
+  String get serversAdvanced;
+
+  /// No description provided for @serversPassword.
+  ///
+  /// In zh, this message translates to:
+  /// **'进入时需要密码'**
+  String get serversPassword;
+
+  /// No description provided for @serversPasswordHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机进入密码；服务器账号保持登录。'**
+  String get serversPasswordHint;
+
+  /// No description provided for @serversPasswordSet.
+  ///
+  /// In zh, this message translates to:
+  /// **'设置进入密码'**
+  String get serversPasswordSet;
+
+  /// No description provided for @serversPasswordChange.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改进入密码'**
+  String get serversPasswordChange;
+
+  /// No description provided for @serversPasswordDisable.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭进入密码'**
+  String get serversPasswordDisable;
+
+  /// No description provided for @serversPasswordOld.
+  ///
+  /// In zh, this message translates to:
+  /// **'原进入密码'**
+  String get serversPasswordOld;
+
+  /// No description provided for @serversPasswordNew.
+  ///
+  /// In zh, this message translates to:
+  /// **'新进入密码'**
+  String get serversPasswordNew;
+
+  /// No description provided for @serversPasswordConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'再次输入密码'**
+  String get serversPasswordConfirm;
+
+  /// No description provided for @serversPasswordInput.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机进入密码'**
+  String get serversPasswordInput;
+
+  /// No description provided for @serversPasswordPrompt.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入此服务器的本机进入密码，继续到原来的页面。'**
+  String get serversPasswordPrompt;
+
+  /// No description provided for @serversPasswordWrong.
+  ///
+  /// In zh, this message translates to:
+  /// **'密码不正确。'**
+  String get serversPasswordWrong;
+
+  /// No description provided for @serversPasswordUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取进入密码。可返回后移除此本机条目，再正常登录添加。'**
+  String get serversPasswordUnavailable;
+
+  /// No description provided for @serversPasswordMismatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'两次密码不一致'**
+  String get serversPasswordMismatch;
+
+  /// No description provided for @serversPasswordRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'请输入 1–1024 个字符的密码'**
+  String get serversPasswordRequired;
+
+  /// No description provided for @serversPasswordSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'密码未保存。请检查原密码，稍后重试。'**
+  String get serversPasswordSaveFailed;
+
+  /// No description provided for @serversPasswordPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'将在保存服务器时更新'**
+  String get serversPasswordPending;
+
+  /// No description provided for @serversConnectionImpact.
+  ///
+  /// In zh, this message translates to:
+  /// **'你正在修改当前连接。保存成功后将重新连接；取消会保留原连接。'**
+  String get serversConnectionImpact;
+
+  /// No description provided for @serversSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未保存，请检查输入或连接后重试。'**
+  String get serversSaveFailed;
+
+  /// No description provided for @serversInvalidDraft.
+  ///
+  /// In zh, this message translates to:
+  /// **'请填写服务器名称和有效地址；线路地址不能重复。'**
+  String get serversInvalidDraft;
+
+  /// No description provided for @serversAddTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加服务器'**
+  String get serversAddTitle;
+
+  /// No description provided for @serversPaste.
+  ///
+  /// In zh, this message translates to:
+  /// **'粘贴导入'**
+  String get serversPaste;
+
+  /// No description provided for @serversPasteHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'仅在你点击后读取剪贴板。确认识别结果后再登录。'**
+  String get serversPasteHint;
+
+  /// No description provided for @serversPasteText.
+  ///
+  /// In zh, this message translates to:
+  /// **'粘贴服务器信息'**
+  String get serversPasteText;
+
+  /// No description provided for @serversParse.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别并预览'**
+  String get serversParse;
+
+  /// No description provided for @serversPasteGroups.
+  ///
+  /// In zh, this message translates to:
+  /// **'识别到多个账号，请选择要添加的一组'**
+  String get serversPasteGroups;
+
+  /// No description provided for @serversPasteIncomplete.
+  ///
+  /// In zh, this message translates to:
+  /// **'请检查并补全信息。每次只添加你选择的一组。'**
+  String get serversPasteIncomplete;
+
+  /// No description provided for @serversPasteUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'未识别到服务器信息，可以修改原文后重试。'**
+  String get serversPasteUnknown;
+
+  /// No description provided for @serversPasteExtra.
+  ///
+  /// In zh, this message translates to:
+  /// **'备用线路（每行一个地址）'**
+  String get serversPasteExtra;
+
+  /// No description provided for @serversPasteName.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称（可选）'**
+  String get serversPasteName;
+
+  /// No description provided for @serversPastePreview.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认服务器信息'**
+  String get serversPastePreview;
+
+  /// No description provided for @serversContinue.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续'**
+  String get serversContinue;
+
+  /// No description provided for @serversBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接…'**
+  String get serversBusy;
+
+  /// No description provided for @serversConnectionFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接失败，原连接已保留。请检查线路或重新登录。'**
+  String get serversConnectionFailed;
+
+  /// No description provided for @serversRetry.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试'**
+  String get serversRetry;
+
+  /// No description provided for @serversDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'完成'**
+  String get serversDone;
+
+  /// No description provided for @serversChangeAccountHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新授权成功后才替换账号；更换账号会结束原账号的播放。取消保留原登录。'**
+  String get serversChangeAccountHint;
+
+  /// No description provided for @serversPasswordOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'未启用'**
+  String get serversPasswordOff;
+
+  /// No description provided for @serversPasswordOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'已启用'**
+  String get serversPasswordOn;
+
+  /// No description provided for @serversImportFile.
+  ///
+  /// In zh, this message translates to:
+  /// **'从备份文件导入'**
+  String get serversImportFile;
+
+  /// No description provided for @serversSelectType.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择服务类型'**
+  String get serversSelectType;
+
+  /// No description provided for @serversDismiss.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get serversDismiss;
+
+  /// No description provided for @serversPasteGroup.
+  ///
+  /// In zh, this message translates to:
+  /// **'账号组'**
+  String get serversPasteGroup;
+
+  /// No description provided for @serversAddressHidden.
+  ///
+  /// In zh, this message translates to:
+  /// **'解锁后查看连接信息'**
+  String get serversAddressHidden;
+
+  /// No description provided for @serversNoAccount.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未登录'**
+  String get serversNoAccount;
+
+  /// No description provided for @serversActionFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作未完成，请稍后重试。'**
+  String get serversActionFailed;
+
+  /// No description provided for @serversPasswordBackoff.
+  ///
+  /// In zh, this message translates to:
+  /// **'密码错误。请稍后重试，或返回选择其他服务器。'**
+  String get serversPasswordBackoff;
+
+  /// No description provided for @serversRemotePassword.
+  ///
+  /// In zh, this message translates to:
+  /// **'修改服务器账号密码'**
+  String get serversRemotePassword;
+
+  /// No description provided for @serversBasic.
+  ///
+  /// In zh, this message translates to:
+  /// **'基本信息'**
+  String get serversBasic;
+
+  /// No description provided for @serversPasswordRetryAfter.
+  ///
+  /// In zh, this message translates to:
+  /// **'{seconds} 秒后可重试'**
+  String serversPasswordRetryAfter(int seconds);
 }
 
 class _AppLocalizationsDelegate

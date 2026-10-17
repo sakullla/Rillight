@@ -130,7 +130,21 @@ void main() {
           views: server.views,
           items: server.items,
         );
-        final adapter = CaptureAdapter([server, mirror]);
+        final backup = FakeEmbyServer(
+          serverId: server.serverId,
+          serverName: server.serverName,
+          baseUrl: Uri.parse('http://capture-backup.test:8096'),
+          views: server.views,
+          items: server.items,
+        );
+        final remote = FakeEmbyServer(
+          serverId: server.serverId,
+          serverName: server.serverName,
+          baseUrl: Uri.parse('http://capture-remote.test:8096'),
+          views: server.views,
+          items: server.items,
+        );
+        final adapter = CaptureAdapter([server, mirror, backup, remote]);
         final credentials = MemoryCredentialStore();
         await tester.runAsync(() async {
           CaptureProviders.reset();
@@ -223,6 +237,22 @@ void main() {
             libraryIds: {'view-movies', 'view-tv'},
           );
           await auth.switchTo(firstId);
+          await auth.addLine(firstId, backup.baseUrl.toString());
+          await auth.addLine(firstId, remote.baseUrl.toString());
+          final configured = auth.sources.server(firstId);
+          await auth.saveConfiguration(
+            firstId,
+            nickname: configured.displayName,
+            userAgent: configured.userAgent ?? '',
+            lines: [
+              configured.lines[0].copyWith(nickname: '家庭直连'),
+              configured.lines[1].copyWith(nickname: '外网入口 · 长名称测试的备用连接'),
+              configured.lines[2].copyWith(nickname: '备用入口'),
+            ],
+          );
+          backup.publicInfoStatus = 503;
+          await sources.check(firstId, lineId: configured.lines[1].id);
+          await auth.refreshServers();
           await appearance.setStyle(
             theme == 'dark' ? AppearanceStyle.dark : AppearanceStyle.light,
           );

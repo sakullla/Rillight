@@ -368,7 +368,8 @@ FakeEmbyServer captureServer() {
 
 /// In-memory transport: no real server, credentials, image host or native core.
 class CaptureAdapter extends FakeEmbyAdapter {
-  CaptureAdapter(super.servers);
+  CaptureAdapter(this.servers) : super(servers);
+  final List<FakeEmbyServer> servers;
   Completer<void>? catalogGate;
   Completer<void>? detailGate;
   bool failAggregationMirror = false;
@@ -380,6 +381,16 @@ class CaptureAdapter extends FakeEmbyAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    // Aliases in this fixture are routes to the same remote server and share
+    // issued credentials; independent server identities remain isolated.
+    for (final server in servers) {
+      server.issuedTokens.addAll(
+        servers
+            .where((other) => other.serverId == server.serverId)
+            .expand((other) => other.issuedTokens)
+            .toList(),
+      );
+    }
     if (failAggregationMirror &&
         options.uri.host == 'capture-mirror.test' &&
         options.uri.path.endsWith('/Items')) {
