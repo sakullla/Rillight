@@ -726,15 +726,6 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     return danmaku.danmakuOn && danmaku.hasComments;
   }
 
-  EdgeInsets _phoneChromeInsets(BuildContext context) {
-    return phonePlayerControlInsets(MediaQuery.of(context));
-  }
-
-  /// Title row is the inset plus a 48dp control and its 12dp padding.
-  double _phoneNextEpisodeTop(BuildContext context) {
-    return _phoneChromeInsets(context).top + 48 + 12 + 8;
-  }
-
   bool _danmakuNeedsAttention(DanmakuController danmaku) {
     if (!danmaku.danmakuOn) return false;
     switch (danmaku.status) {
@@ -957,9 +948,8 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                           !c.disconnected &&
                           !c.playbackEnded;
                       if (!show) return const SizedBox.shrink();
-                      final insets = phonePlayerControlInsets(
-                        MediaQuery.of(context),
-                      );
+                      final media = MediaQuery.of(context);
+                      final insets = phonePlayerControlInsets(media);
                       final controls = _interaction.controlsVisibleFor(c);
                       return Positioned(
                         right: insets.right + 12,
@@ -975,11 +965,27 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                     c.nextEpisode != null &&
                     c.error == null &&
                     !c.sessionExpired)
-                  Positioned(
-                    left: 12 + _phoneChromeInsets(context).left,
-                    right: 12 + _phoneChromeInsets(context).right,
-                    top: _phoneNextEpisodeTop(context),
-                    child: NextEpisodeCard(controller: c),
+                  ListenableBuilder(
+                    listenable: _interaction,
+                    builder: (context, _) {
+                      final media = MediaQuery.of(context);
+                      final insets = phonePlayerControlInsets(media);
+                      final controls = _interaction.controlsVisibleFor(c);
+                      final wide = media.size.width >= 640;
+                      final maxCardWidth =
+                          (media.size.width - insets.left - insets.right - 24)
+                              .clamp(0.0, 412.0);
+                      return Positioned(
+                        right: 12 + insets.right,
+                        bottom:
+                            insets.bottom +
+                            (controls ? (wide ? 128 : 168) : 16),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: maxCardWidth),
+                          child: NextEpisodeCard(controller: c),
+                        ),
+                      );
+                    },
                   ),
                 if (!ended &&
                     !_interaction.locked &&
@@ -989,19 +995,10 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                     !c.loading &&
                     _danmakuNeedsAttention(danmaku))
                   Positioned(
-                    top: c.nextEpisode != null
-                        ? _phoneNextEpisodeTop(context) + 96
-                        : 8,
-                    left: c.nextEpisode != null
-                        ? 12 + _phoneChromeInsets(context).left
-                        : 12,
-                    right: c.nextEpisode != null
-                        ? 12 + _phoneChromeInsets(context).right
-                        : 12,
+                    top: 8,
+                    left: 12,
+                    right: 12,
                     child: SafeArea(
-                      top: c.nextEpisode == null,
-                      left: c.nextEpisode == null,
-                      right: c.nextEpisode == null,
                       child: _PhoneDanmakuFailure(
                         danmaku: danmaku,
                         onRetry: _retryDanmaku,
@@ -1048,25 +1045,57 @@ class _PhoneSkipSegmentButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final scheme = AppUiTheme.of(context).colorScheme;
-    return AppButton.icon(
-      key: const Key('mobile-player-skip-segment'),
-      onPressed: () => unawaited(controller.skipCurrentSegment()),
-      style: AppButtonStyle(
-        minimumSize: const Size(48, 48),
-        backgroundColor: scheme.surface.withValues(alpha: 0.94),
-        foregroundColor: scheme.onSurface,
-        shape: const StadiumBorder(),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+    final label = segment.kind == PlayerSkipKind.outro
+        ? l.skipOutro
+        : l.skipIntro;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 18,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
-      icon: Icon(
-        AppIcons.skipNext,
-        fill: AppIcons.filled,
-        size: 20,
-        color: scheme.primary,
-      ),
-      label: Text(
-        segment.kind == PlayerSkipKind.outro ? l.skipOutro : l.skipIntro,
-        style: const TextStyle(fontWeight: FontWeight.w700),
+      child: AppButton.icon(
+        key: const Key('mobile-player-skip-segment'),
+        onPressed: () => unawaited(controller.skipCurrentSegment()),
+        style: AppButtonStyle(
+          minimumSize: const Size(48, 46),
+          backgroundColor: const Color(0xEB151822),
+          foregroundColor: CupertinoColors.white,
+          side: BorderSide(
+            color: scheme.primary.withValues(alpha: 0.55),
+            width: 1.2,
+          ),
+          shape: const StadiumBorder(),
+          padding: const EdgeInsets.fromLTRB(12, 8, 16, 8),
+        ),
+        icon: Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.22),
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            AppIcons.skipNext,
+            fill: AppIcons.filled,
+            size: 16,
+            color: scheme.primary,
+          ),
+        ),
+        label: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
       ),
     );
   }

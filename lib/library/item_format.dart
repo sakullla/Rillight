@@ -155,21 +155,81 @@ String phoneSourceVersionLabel(
   final index = sources.indexWhere((other) => other.id == source.id);
   final number = index < 0 ? 1 : index + 1;
   if (marker == null) return '$tech · $number';
-  final twins = same.where((other) => sourceVersionMarker(other) == marker);
+  final twins = same
+      .where((other) => sourceVersionMarker(other) == marker)
+      .toList();
   if (twins.length == 1) return '$tech · $marker';
+  final extra = _distinguishingTwinToken(source, twins);
+  if (extra != null) return '$tech · $marker · $extra';
   return '$tech · $marker · $number';
 }
 
 /// 发布串里用来区分同规格片源的组名。体积和码率不算。
 String? sourceVersionMarker(ItemMediaSource source) {
+  final parts = _nonStatDetailParts(source);
+  if (parts.isEmpty) return null;
+  return parts.last;
+}
+
+List<String> _nonStatDetailParts(ItemMediaSource source) {
   final detail = source.presentation.detail?.trim();
-  if (detail == null || detail.isEmpty) return null;
-  final parts = [
+  if (detail == null || detail.isEmpty) return const [];
+  return [
     for (final part in detail.split(' · '))
       if (part.isNotEmpty && !_sourceStat.hasMatch(part)) part,
   ];
-  if (parts.isEmpty) return null;
-  return parts.last;
+}
+
+String? _distinguishingTwinToken(
+  ItemMediaSource source,
+  List<ItemMediaSource> twins,
+) {
+  final own = _nonStatDetailParts(source);
+  if (own.length <= 1) return null;
+  for (final token in own.take(own.length - 1)) {
+    final sharedByAll = twins.every(
+      (other) => _nonStatDetailParts(other).contains(token),
+    );
+    if (!sharedByAll) return token;
+  }
+  return null;
+}
+
+/// 手机片源弹窗卡片的规格副标题（容器、体积、码率、主音轨），帮助区分同组片源。
+String? phoneSourceVersionSubtitle(ItemMediaSource source) {
+  final parts = <String>[];
+  final container = source.container?.trim();
+  if (container != null && container.isNotEmpty) {
+    parts.add(container.toUpperCase());
+  }
+  final detail = source.presentation.detail?.trim();
+  if (detail != null && detail.isNotEmpty) {
+    for (final part in detail.split(' · ')) {
+      if (_sourceStat.hasMatch(part)) parts.add(part);
+    }
+  }
+  final audio =
+      source.streams
+          .where((s) => s.isAudio && s.isDefault == true)
+          .firstOrNull ??
+      source.streams.where((s) => s.isAudio).firstOrNull;
+  if (audio != null) {
+    final codec = audio.codec?.trim().toUpperCase();
+    if (codec != null && codec.isNotEmpty) {
+      final ch = audio.channels;
+      final layout = ch == null
+          ? null
+          : ch >= 8
+          ? '7.1'
+          : ch >= 6
+          ? '5.1'
+          : ch == 2
+          ? '2.0'
+          : null;
+      parts.add(layout == null ? codec : '$codec $layout');
+    }
+  }
+  return parts.isEmpty ? null : parts.join(' · ');
 }
 
 final _sourceStat = RegExp(

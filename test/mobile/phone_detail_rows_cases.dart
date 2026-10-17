@@ -211,24 +211,29 @@ void main() {
       final actor0 = find.byKey(const ValueKey('episode-person-Actor-0'));
       final actor1 = find.byKey(const ValueKey('episode-person-Actor-1'));
       final actor2 = find.byKey(const ValueKey('episode-person-Actor-2'));
+      final actor3 = find.byKey(const ValueKey('episode-person-Actor-3'));
       expect(actor0, findsOneWidget);
       expect(actor1, findsOneWidget);
-      expect(actor2, findsNothing);
+      expect(actor2, findsOneWidget);
+      expect(actor3, findsNothing);
 
       final first = tester.getRect(actor0);
       final second = tester.getRect(actor1);
+      final third = tester.getRect(actor2);
       _expectOnScreen(first, width, height);
       _expectOnScreen(second, width, height);
+      _expectOnScreen(third, width, height);
       expect(first.left, closeTo(16, 1));
       expect(second.left, greaterThanOrEqualTo(first.right - 0.5));
       expect(second.left - first.right, closeTo(AppSpacing.xs, 1));
+      expect(third.left - second.right, closeTo(AppSpacing.xs, 1));
 
       final image = find.descendant(
         of: actor1,
         matching: find.byKey(EpisodePeopleSection.imageKey),
       );
       final poster = tester.getRect(image);
-      final cardWidth = phoneHomePosterCardWidth(width);
+      final cardWidth = EpisodePeopleSection.phoneCardWidth(width);
       _expectOnScreen(poster, width, height);
       expect(poster.width, closeTo(cardWidth, 0.5));
       expect(poster.height, closeTo(cardWidth * 1.5, 0.5));
@@ -318,7 +323,7 @@ void main() {
       _expectOnScreen(last, width, height);
       expect(last.right, closeTo(width - first.left, 1));
       expect(
-        find.byKey(const ValueKey('episode-person-Actor-3')),
+        find.byKey(const ValueKey('episode-person-Actor-0')),
         findsNothing,
       );
       expect(tester.takeException(), isNull);

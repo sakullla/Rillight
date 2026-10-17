@@ -537,7 +537,9 @@ void main() {
             item: const MediaItem(
               id: 'next',
               name: '一个很长的下一集标题用于检查窄屏截断',
+              seriesName: '乱世千金倪亚·利斯顿转生为娇弱千金的弑神武人华丽无双录',
               type: 'Episode',
+              parentIndexNumber: 1,
               indexNumber: 9,
             ),
           );
@@ -551,6 +553,8 @@ void main() {
             ),
           );
           await settle(tester);
+          expect(find.text('S1E9 · 一个很长的下一集标题用于检查窄屏截断'), findsOneWidget);
+          expect(find.textContaining('乱世千金倪亚'), findsNothing);
           expect(
             tester.getSize(find.byKey(PlayerKeys.nextEpisode)).height,
             lessThanOrEqualTo(88),

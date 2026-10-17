@@ -58,6 +58,7 @@ class PhoneItemBanner extends StatelessWidget {
     this.imagePrefersBackdrop,
     this.maxWidth = PhoneMotion.pageRequestWidth,
     this.posterItem,
+    this.hideTitle = false,
   });
 
   static const bannerKey = Key('phone-detail-banner');
@@ -93,6 +94,9 @@ class PhoneItemBanner extends StatelessWidget {
   final bool? imagePrefersBackdrop;
   final int maxWidth;
 
+  /// 顶栏已经变实并接管标题时隐藏横幅内的标题块，避免滚到半截出现双标题叠字。
+  final bool hideTitle;
+
   bool get _imagePrefersBackdrop => imagePrefersBackdrop ?? preferBackdrop;
 
   /// 背景高度：约 3:2 加状态栏，横屏/矮窗封顶半屏多一点，标题与主操作首屏可达。
@@ -108,11 +112,10 @@ class PhoneItemBanner extends StatelessWidget {
 
   /// 海报卡宽：窄屏收一档，给标题留出两行半汉字的宽度。
   static double posterWidthOf(BuildContext context) =>
-      MediaQuery.sizeOf(context).width < 380 ? 104 : 118;
+      MediaQuery.sizeOf(context).width < 380 ? 104 : 114;
 
-  /// 单集默认不画海报卡（背景就是本集剧照）；从海报点进来的单集仍保留，
-  /// 共享图才有落点。
-  bool get _showPoster => !item.isEpisode || !preferBackdrop;
+  /// 单集的主图本身就是 16:9 剧照，已铺在背景上，不再画竖版 2:3 裁切海报卡。
+  bool get _showPoster => !item.isEpisode;
 
   /// 是否有可铺满横幅的横版画面。单集的主图本身就是 16:9 剧照。
   static bool hasLandscapeArt(MediaItem item) =>
@@ -129,32 +132,33 @@ class PhoneItemBanner extends StatelessWidget {
     final showPoster = _showPoster;
     final posterWidth = posterWidthOf(context);
     final posterHeight = posterWidth * 1.5;
-    // 海报卡上半截压在画面上，标题块与海报底边对齐。
-    final rise = showPoster ? posterHeight * .62 : AppSpacing.xxl;
+    // 海报卡上半截压在画面上，标题块与海报底边对齐；单集无海报卡时让标题块稳稳压在画面底带内。
+    final rise = showPoster ? posterHeight * .62 : 76.0;
     final landscape = hasLandscapeArt(item);
     final sameAsEntry = _imagePrefersBackdrop == preferBackdrop;
+    final handoffOnBackdrop = preferBackdrop || !showPoster;
     // 和点进来的那一张用同一请求宽度，内存里已有的画面才能在第一帧画上。
     // 季画面用页面宽度；旧图由 [MediaImage.retainVisibleFrame] 留到新帧。
     final imageMaxWidth = sameAsEntry ? maxWidth : PhoneMotion.pageRequestWidth;
     Widget backdrop = MediaImage(
-      key: preferBackdrop ? handoffImageKey : backdropKey,
+      key: handoffOnBackdrop ? handoffImageKey : backdropKey,
       item: item,
-      contributesToTheme: preferBackdrop && sameAsEntry,
+      contributesToTheme: handoffOnBackdrop && sameAsEntry,
       preferBackdrop: _imagePrefersBackdrop,
       smartCrop: landscape && _imagePrefersBackdrop,
       fit: BoxFit.cover,
       maxWidth: imageMaxWidth,
       retainVisibleFrame: true,
     );
-    if (preferBackdrop) {
+    if (handoffOnBackdrop) {
       backdrop = PhoneMotion.sharedImage(
         itemId: item.id,
-        preferBackdrop: true,
+        preferBackdrop: preferBackdrop,
         child: backdrop,
       );
     }
 
-    final titleBlock = Column(
+    final rawTitleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -170,6 +174,15 @@ class PhoneItemBanner extends StatelessWidget {
           pendingMeta ?? _MetaLine(entries: meta),
         ],
       ],
+    );
+    final titleBlock = IgnorePointer(
+      ignoring: hideTitle,
+      child: AnimatedOpacity(
+        opacity: hideTitle ? 0.0 : 1.0,
+        duration: AppMotion.durationOf(context, AppMotion.fast),
+        curve: AppMotion.standard,
+        child: rawTitleBlock,
+      ),
     );
 
     return Column(
@@ -204,16 +217,16 @@ class PhoneItemBanner extends StatelessWidget {
                       ),
                     ),
                   ),
-                  // 底带:画面下缘溶进页面底色，海报卡与标题压在上面也读得清。
+                  // 底带:画面下缘溶进页面底色，长标题与海报压在上面也清晰锐利。
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        stops: const [.36, .74, .97],
+                        stops: const [.22, .65, .96],
                         colors: [
                           page.withValues(alpha: 0),
-                          page.withValues(alpha: .78),
+                          page.withValues(alpha: .84),
                           page,
                         ],
                       ),
@@ -355,18 +368,31 @@ class _PosterCard extends StatelessWidget {
   }
 }
 
-/// 头部标题字阶：比全局 headlineLarge 收一档；海报右侧再收一档，
-/// 两行长标题也不把海报卡顶高。
+/// 头部标题字阶：比全局 headlineLarge 收一档；海报右侧再按字数自适应收一档，
+/// 轻小说/长名番剧三行标题也不拥挤、不把海报卡顶高。
 TextStyle? phoneDetailTitleStyle(
   AppUiThemeData theme, {
   bool compact = false,
-}) => theme.textTheme.headlineLarge?.copyWith(
-  color: theme.colorScheme.onSurface,
-  fontSize: compact ? 23 : 28,
-  fontWeight: FontWeight.w800,
-  height: 1.2,
-  letterSpacing: -0.3,
-);
+  int? titleLength,
+}) {
+  final double size;
+  if (!compact) {
+    size = (titleLength ?? 0) > 18 ? 24 : 27;
+  } else if ((titleLength ?? 0) > 20) {
+    size = 19.5;
+  } else if ((titleLength ?? 0) > 13) {
+    size = 21;
+  } else {
+    size = 23;
+  }
+  return theme.textTheme.headlineLarge?.copyWith(
+    color: theme.colorScheme.onSurface,
+    fontSize: size,
+    fontWeight: FontWeight.w800,
+    height: 1.22,
+    letterSpacing: -0.3,
+  );
+}
 
 class _MetaLine extends StatelessWidget {
   const _MetaLine({required this.entries});
@@ -438,7 +464,11 @@ class _BannerTitle extends StatelessWidget {
       title,
       maxLines: compact ? 3 : 2,
       overflow: TextOverflow.ellipsis,
-      style: phoneDetailTitleStyle(theme, compact: compact),
+      style: phoneDetailTitleStyle(
+        theme,
+        compact: compact,
+        titleLength: title.runes.length,
+      ),
     );
     final hint = this.hint;
     if (hint == null || hint.isEmpty) {
@@ -707,10 +737,12 @@ class MobileSeriesPage extends StatelessWidget {
     this.focusEpisodeId,
     this.scrollCoordinator,
     required this.similar,
+    this.mediaStreamsSection,
     this.onPickEpisode,
     this.onOpenGenre,
     required this.onSelectSeason,
     required this.onOpenEpisode,
+    this.onPlayEpisode,
     required this.onRetryEpisodes,
     required this.onLoadMore,
     required this.onOpenItem,
@@ -733,10 +765,12 @@ class MobileSeriesPage extends StatelessWidget {
   final String? focusEpisodeId;
   final EpisodeScrollCoordinator? scrollCoordinator;
   final List<MediaItem> similar;
+  final Widget? mediaStreamsSection;
   final VoidCallback? onPickEpisode;
   final ValueChanged<String>? onOpenGenre;
   final ValueChanged<String> onSelectSeason;
   final ValueChanged<String> onOpenEpisode;
+  final ValueChanged<String>? onPlayEpisode;
   final VoidCallback? onRetryEpisodes;
   final VoidCallback? onLoadMore;
   final ValueChanged<String> onOpenItem;
@@ -782,6 +816,9 @@ class MobileSeriesPage extends StatelessWidget {
       episode: episode,
       current: episode.id == (focusEpisodeId ?? playTargetId),
       onTap: () => onOpenEpisode(episode.id),
+      onPlay: onPlayEpisode != null && episode.isPlayable
+          ? () => onPlayEpisode!(episode.id)
+          : null,
     ),
   );
 
@@ -813,6 +850,7 @@ class MobileSeriesPage extends StatelessWidget {
           collapsedLines: 3,
         ),
       PhoneGenreChips(genres: item.genres, onTap: onOpenGenre),
+      ?mediaStreamsSection,
       if (showHeader)
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -1115,13 +1153,15 @@ class _EpisodeRow extends StatelessWidget {
     required this.episode,
     required this.current,
     required this.onTap,
+    this.onPlay,
   });
 
   final MediaItem episode;
   final bool current;
   final VoidCallback onTap;
+  final VoidCallback? onPlay;
 
-  static const double _thumbWidth = 140;
+  static const double _thumbWidth = 136;
 
   @override
   Widget build(BuildContext context) {
@@ -1152,19 +1192,19 @@ class _EpisodeRow extends StatelessWidget {
       ),
     );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 3, AppSpacing.sm, 3),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 4, AppSpacing.sm, 4),
       child: MobilePressFeedback(
         scale: .985,
         brighten: .04,
         child: Container(
           decoration: BoxDecoration(
             color: current
-                ? scheme.primary.withValues(alpha: .12)
-                : scheme.surfaceContainerLow.withValues(alpha: .42),
+                ? scheme.primary.withValues(alpha: .14)
+                : scheme.surfaceContainerLow.withValues(alpha: .52),
             borderRadius: BorderRadius.circular(AppRadii.lg),
             border: Border.all(
               color: current
-                  ? scheme.primary.withValues(alpha: .32)
+                  ? scheme.primary.withValues(alpha: .38)
                   : scheme.outlineVariant.withValues(alpha: .28),
             ),
           ),
@@ -1176,7 +1216,7 @@ class _EpisodeRow extends StatelessWidget {
               // 外距 sm + 内距 sm，剧照左缘与「剧集」标题、季标签同一条 16 竖线。
               padding: const EdgeInsets.symmetric(
                 horizontal: AppSpacing.sm - 1,
-                vertical: 8,
+                vertical: 9,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1190,6 +1230,7 @@ class _EpisodeRow extends StatelessWidget {
                         current: current,
                         played: played,
                         progress: progress,
+                        onPlay: onPlay,
                       ),
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
@@ -1199,7 +1240,7 @@ class _EpisodeRow extends StatelessWidget {
                           children: [
                             title,
                             if (facts.isNotEmpty || date != null) ...[
-                              const SizedBox(height: 3),
+                              const SizedBox(height: 4),
                               _EpisodeFacts(
                                 facts: facts,
                                 date: date,
@@ -1214,12 +1255,18 @@ class _EpisodeRow extends StatelessWidget {
                           ],
                         ),
                       ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        AppIcons.chevronRight,
+                        size: 16,
+                        color: scheme.onSurfaceVariant.withValues(alpha: .48),
+                      ),
                     ],
                   ),
 
                   if (overview != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 6),
+                      padding: const EdgeInsets.only(top: 7),
                       child: Text(
                         overview,
                         key: const Key('phone-episode-overview'),
@@ -1296,6 +1343,7 @@ class _EpisodeThumb extends StatelessWidget {
     required this.current,
     required this.played,
     required this.progress,
+    this.onPlay,
   });
 
   final MediaItem episode;
@@ -1303,17 +1351,18 @@ class _EpisodeThumb extends StatelessWidget {
   final bool current;
   final bool played;
   final double progress;
+  final VoidCallback? onPlay;
 
   @override
   Widget build(BuildContext context) {
     final scheme = AppUiTheme.of(context).colorScheme;
     final showProgress = progress > 0 && !played;
-    return SizedBox(
+    final thumb = SizedBox(
       width: width,
       child: AspectRatio(
         aspectRatio: 16 / 9,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.sm),
+          borderRadius: BorderRadius.circular(AppRadii.md),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -1360,11 +1409,42 @@ class _EpisodeThumb extends StatelessWidget {
                     size: 16,
                     iconKey: Key('phone-episode-current'),
                   ),
+                )
+              else if (onPlay != null)
+                Positioned(
+                  left: 6,
+                  bottom: showProgress ? 8 : 6,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xff000000).withValues(alpha: .58),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xffffffff).withValues(alpha: .22),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.all(5),
+                      child: Icon(
+                        AppIcons.play,
+                        fill: AppIcons.filled,
+                        size: 13,
+                        color: Color(0xffffffff),
+                      ),
+                    ),
+                  ),
                 ),
             ],
           ),
         ),
       ),
+    );
+    if (onPlay == null) return thumb;
+    return GestureDetector(
+      key: CatalogKeys.episodePlay(episode.id),
+      behavior: HitTestBehavior.opaque,
+      onTap: onPlay,
+      child: thumb,
     );
   }
 }

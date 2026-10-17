@@ -89,5 +89,43 @@ void main() {
       ),
       '1080p · H.265',
     );
+    const twinA = ItemMediaSource(
+      id: 'twin-a',
+      name: 'Show.2160p.BILI.WEB-DL.H265.AAC-SonyHD',
+      height: 2160,
+      container: 'mkv',
+      size: 2400000000,
+      bitrate: 12000000,
+      streams: [
+        ItemMediaStream(index: 0, type: 'Video', codec: 'hevc', height: 2160),
+        ItemMediaStream(
+          index: 1,
+          type: 'Audio',
+          codec: 'aac',
+          channels: 2,
+          isDefault: true,
+        ),
+      ],
+    );
+    const twinB = ItemMediaSource(
+      id: 'twin-b',
+      name: 'Show.2160p.TX.WEB-DL.H265.AAC-SonyHD',
+      height: 2160,
+      streams: [
+        ItemMediaStream(index: 0, type: 'Video', codec: 'hevc', height: 2160),
+      ],
+    );
+    expect(
+      phoneSourceVersionLabel(twinA, const [twinA, twinB]),
+      '4K · H.265 · SonyHD · BILI',
+    );
+    expect(
+      phoneSourceVersionLabel(twinB, const [twinA, twinB]),
+      '4K · H.265 · SonyHD · TX',
+    );
+    expect(
+      phoneSourceVersionSubtitle(twinA),
+      'MKV · 2.4 GB · 12 Mbps · AAC 2.0',
+    );
   });
 }

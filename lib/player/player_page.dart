@@ -1257,7 +1257,7 @@ class _NextEpisodeBanner extends StatelessWidget {
 }
 
 /// 播放到片头/片尾区间时右下角的跳过按钮:点击跳到区间终点。
-/// 用贴合文字的玻璃胶囊,不再套主题 [AppButton],避免两侧空一截。
+/// 用贴合文字的黑曜玻璃胶囊,与下一集提示卡视觉同源。
 class _SkipSegmentButton extends StatelessWidget {
   const _SkipSegmentButton({required this.controller});
 
@@ -1276,24 +1276,42 @@ class _SkipSegmentButton extends StatelessWidget {
         key: const Key('player-skip-segment'),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: scheme.surface.withValues(alpha: 0.94),
+          color: const Color(0xEB151822),
           borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: scheme.primary.withValues(alpha: 0.55),
+            width: 1.2,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 18,
+              offset: Offset(0, 6),
+            ),
+          ],
         ),
         child: AppSurfaceAction(
           onTap: () => unawaited(controller.skipCurrentSegment()),
+          borderRadius: BorderRadius.circular(999),
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.xs,
-            ),
+            padding: const EdgeInsets.fromLTRB(10, 7, 16, 7),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  AppIcons.skipNext,
-                  fill: AppIcons.filled,
-                  size: 18,
-                  color: scheme.primary,
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.22),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    AppIcons.skipNext,
+                    fill: AppIcons.filled,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
                 ),
                 const SizedBox(width: AppSpacing.xs),
                 Text(
@@ -1301,6 +1319,7 @@ class _SkipSegmentButton extends StatelessWidget {
                       ? l10n.skipOutro
                       : l10n.skipIntro,
                   style: theme.textTheme.labelLarge?.copyWith(
+                    color: CupertinoColors.white,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

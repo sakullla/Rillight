@@ -8,7 +8,6 @@ import 'package:rillight/home/catalog_keys.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
-import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/tv_widgets.dart';
@@ -297,6 +296,12 @@ class EpisodePeopleSection extends StatelessWidget {
   static double desktopAvatarWidth(double screenWidth) =>
       (MediaShelf.posterWidthFor(screenWidth) * 0.72).clamp(104.0, 148.0);
 
+  /// 手机演职员肖像卡宽：一行完整放下 3 张卡片，消除行尾大片空白。
+  static double phoneCardWidth(double screenWidth) {
+    final inner = screenWidth - AppSpacing.md * 2;
+    return ((inner - AppSpacing.xs * 2) / 3).floorToDouble().clamp(88.0, 140.0);
+  }
+
   /// 分组顺序:演员 → 导演 → 编剧 → 其他。
   static const _typeOrder = ['Actor', 'Director', 'Writer'];
 
@@ -433,7 +438,7 @@ _PersonMetrics _personMetrics(BuildContext context) {
     );
   }
   if (phone) {
-    final width = phoneHomePosterCardWidth(screen);
+    final width = EpisodePeopleSection.phoneCardWidth(screen);
     return _PersonMetrics(
       width: width,
       cardGap: AppSpacing.xs,
@@ -448,7 +453,7 @@ _PersonMetrics _personMetrics(BuildContext context) {
         color: scheme.onSurfaceVariant,
         height: 1.2,
       ),
-      titlePadding: const EdgeInsets.symmetric(horizontal: 10),
+      titlePadding: const EdgeInsets.symmetric(horizontal: 6),
       imageMaxWidth: catalogPosterMaxWidth(
         width,
         MediaQuery.devicePixelRatioOf(context),
@@ -1462,10 +1467,10 @@ class _PhoneStreamCard extends StatelessWidget {
         title: group.title,
         options: [
           for (final choice in group.choices)
-            (
-              ValueKey('media-stream-${choice.index}'),
-              choice.index,
-              choice.line,
+            _PhoneSheetOption(
+              key: ValueKey('media-stream-${choice.index}'),
+              value: choice.index,
+              label: choice.line,
             ),
         ],
         selected: highlighted,
@@ -1482,10 +1487,11 @@ class _PhoneStreamCard extends StatelessWidget {
         title: l10n.mediaSource,
         options: [
           for (final item in sources)
-            (
-              ValueKey('phone-detail-version-${item.id}'),
-              item.id,
-              _PhoneVersionRow.versionLabel(item, sources: sources),
+            _PhoneSheetOption(
+              key: ValueKey('phone-detail-version-${item.id}'),
+              value: item.id,
+              label: _PhoneVersionRow.versionLabel(item, sources: sources),
+              subtitle: phoneSourceVersionSubtitle(item),
             ),
         ],
         selected: selectedSourceId ?? source.id,
@@ -1524,8 +1530,9 @@ class _PhoneStreamCard extends StatelessWidget {
     ];
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh.withValues(alpha: .6),
+        color: scheme.surfaceContainerHigh.withValues(alpha: .62),
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: .32)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1535,7 +1542,7 @@ class _PhoneStreamCard extends StatelessWidget {
               AppDivider(
                 height: 1,
                 indent: AppSpacing.md + 26,
-                endIndent: 0,
+                endIndent: AppSpacing.md,
                 color: scheme.onSurface.withValues(alpha: .07),
               ),
             rows[i],
@@ -1557,7 +1564,7 @@ class _PhoneStreamCard extends StatelessWidget {
   }
 }
 
-/// 一行选择器：图标、类名（带可选数）、右侧当前值和下拉箭头。
+/// 一行选择器：图标、类名（带胶囊可选数）、右侧单行当前值和下拉箭头。
 class _PhoneSelectorRow extends StatelessWidget {
   const _PhoneSelectorRow({
     super.key,
@@ -1580,6 +1587,7 @@ class _PhoneSelectorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
+    final interactive = onTap != null;
     final row = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 52),
       child: Padding(
@@ -1593,40 +1601,56 @@ class _PhoneSelectorRow extends StatelessWidget {
               icon,
               size: 18,
               fill: AppIcons.filled,
-              color: scheme.onSurfaceVariant,
+              color: interactive ? scheme.primary : scheme.onSurfaceVariant,
             ),
             const SizedBox(width: 8),
             Text(
               title,
               style: theme.textTheme.labelLarge?.copyWith(
                 color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
               ),
             ),
             if (count > 1) ...[
-              const SizedBox(width: 4),
-              Text(
-                '$count',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant.withValues(alpha: .7),
+              const SizedBox(width: 6),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1.5,
+                  ),
+                  child: Text(
+                    '$count',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 ),
               ),
             ],
-            const SizedBox(width: AppSpacing.md),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
                 value,
                 key: valueKey,
-                maxLines: 2,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.right,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurface,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            if (onTap != null) ...[
+            if (interactive) ...[
               const SizedBox(width: 6),
               Icon(
                 AppIcons.chevronDown,
@@ -1639,7 +1663,7 @@ class _PhoneSelectorRow extends StatelessWidget {
         ),
       ),
     );
-    if (onTap == null) return row;
+    if (!interactive) return row;
     return AppSurfaceAction(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadii.lg),
@@ -1648,7 +1672,21 @@ class _PhoneSelectorRow extends StatelessWidget {
   }
 }
 
-/// 底部单选表：标题和逐行选项，当前项打勾，点按即选并收起。
+class _PhoneSheetOption<T> {
+  const _PhoneSheetOption({
+    required this.key,
+    required this.value,
+    required this.label,
+    this.subtitle,
+  });
+
+  final Key key;
+  final T value;
+  final String label;
+  final String? subtitle;
+}
+
+/// 底部单选表：顶部拖拽指示条、标题计数与圆角卡片选项，当前项高亮描边并打勾。
 class _PhoneChoiceSheet<T> extends StatelessWidget {
   const _PhoneChoiceSheet({
     required this.title,
@@ -1657,7 +1695,7 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
   });
 
   final String title;
-  final List<(Key, T, String)> options;
+  final List<_PhoneSheetOption<T>> options;
   final T? selected;
 
   @override
@@ -1668,54 +1706,135 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.md,
-            AppSpacing.lg,
-            AppSpacing.xs,
-          ),
-          child: Text(
-            title,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
+        const SizedBox(height: 10),
+        Center(
+          child: Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: scheme.onSurfaceVariant.withValues(alpha: .32),
+              borderRadius: BorderRadius.circular(999),
             ),
           ),
         ),
-        Flexible(
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.sm,
+          ),
+          child: Row(
             children: [
-              for (final (key, value, label) in options)
-                AppSurfaceAction(
-                  key: key,
-                  onTap: () => Navigator.of(context).pop(value),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    '${options.length}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Flexible(
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              0,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
+            itemCount: options.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final option = options[index];
+              final isSelected = option.value == selected;
+              final subtitle = option.subtitle;
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? scheme.primary.withValues(alpha: .14)
+                      : scheme.surfaceContainerHigh.withValues(alpha: .55),
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  border: Border.all(
+                    color: isSelected
+                        ? scheme.primary.withValues(alpha: .48)
+                        : scheme.outlineVariant.withValues(alpha: .28),
+                  ),
+                ),
+                child: AppSurfaceAction(
+                  key: option.key,
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  onTap: () => Navigator.of(context).pop(option.value),
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 48),
+                    constraints: const BoxConstraints(minHeight: 50),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.lg,
-                        vertical: 10,
+                        horizontal: AppSpacing.md,
+                        vertical: 11,
                       ),
                       child: Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: value == selected
-                                    ? scheme.primary
-                                    : scheme.onSurface,
-                                fontWeight: value == selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  option.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    color: isSelected
+                                        ? scheme.primary
+                                        : scheme.onSurface,
+                                    fontSize: 15,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w700
+                                        : FontWeight.w600,
+                                  ),
+                                ),
+                                if (subtitle != null &&
+                                    subtitle.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                          if (value == selected) ...[
+                          if (isSelected) ...[
                             const SizedBox(width: 12),
                             Icon(
                               AppIcons.check,
@@ -1729,7 +1848,8 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                     ),
                   ),
                 ),
-            ],
+              );
+            },
           ),
         ),
       ],

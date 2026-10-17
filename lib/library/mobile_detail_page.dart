@@ -216,6 +216,12 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
       // /play 目前只把 autoResume 交给播放页。在它读取起点前写上章节时间。
       _deliverStartPosition(context, position);
     }
+    final isTargetEpisode =
+        !item.isSeries || itemId == controller.playTarget?.id;
+    final hasExplicitStreamChoice =
+        _selectedSourceId != null ||
+        _audioStreamIndex != null ||
+        _subtitleStreamIndex != null;
     await context.push(
       '/play/$itemId',
       extra: PlayerOpenRequest(
@@ -225,17 +231,16 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         regionGeneration: request.regionGeneration,
         // The displayed first source is a default, not an explicit choice.
         // Only pin it when the user picked a version or one of its tracks on this page.
-        mediaSourceId:
-            !item.isSeries &&
-                (_selectedSourceId != null ||
-                    _audioStreamIndex != null ||
-                    _subtitleStreamIndex != null)
-            ? (_selectedSourceId ?? controller.mediaSourceId)
+        mediaSourceId: isTargetEpisode && hasExplicitStreamChoice
+            ? (_selectedSourceId ??
+                  (item.isSeries
+                      ? controller.playTarget?.mediaSources.firstOrNull?.id
+                      : controller.mediaSourceId))
             : null,
         autoResume:
             !fromStart && (position == null || position <= Duration.zero),
-        audioStreamIndex: item.isSeries ? null : _audioStreamIndex,
-        subtitleStreamIndex: item.isSeries ? null : _subtitleStreamIndex,
+        audioStreamIndex: isTargetEpisode ? _audioStreamIndex : null,
+        subtitleStreamIndex: isTargetEpisode ? _subtitleStreamIndex : null,
         startPosition: position,
       ),
     );
@@ -397,6 +402,17 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: scheme.onSurfaceVariant.withValues(alpha: .32),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.md,
@@ -404,12 +420,38 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 AppSpacing.md,
                 AppSpacing.sm,
               ),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  l.pickEpisode,
-                  style: AppUiTheme.of(context).textTheme.titleMedium,
-                ),
+              child: Row(
+                children: [
+                  Text(
+                    l.pickEpisode,
+                    style: AppUiTheme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        l.episodeCount(total),
+                        style: AppUiTheme.of(context).textTheme.labelSmall
+                            ?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             SizedBox(
@@ -749,6 +791,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                                     : preferBackdrop,
                                 maxWidth: imageWidth,
                                 posterItem: handoff?.item ?? item,
+                                hideTitle: _barSolid,
                               ),
                             ),
                           if (pending)
@@ -786,6 +829,22 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                           focusEpisodeId: widget.initialEpisodeId,
                           scrollCoordinator: _episodeScrollCoordinator,
                           similar: _similar,
+                          mediaStreamsSection:
+                              target != null && target.mediaSources.length > 1
+                              ? EpisodeMediaStreamsSection(
+                                  source: _source(target),
+                                  sources: target.mediaSources,
+                                  selectedSourceId: _source(target)?.id,
+                                  onSelectSource: _selectSource,
+                                  selectedAudioIndex: _audioStreamIndex,
+                                  selectedSubtitleIndex: _subtitleStreamIndex,
+                                  onAudio: (index) =>
+                                      setState(() => _audioStreamIndex = index),
+                                  onSubtitle: (index) => setState(
+                                    () => _subtitleStreamIndex = index,
+                                  ),
+                                )
+                              : null,
                           onPickEpisode: _pickEpisode,
                           onOpenGenre:
                               DetailSourceScope.maybeOf(context) == null
@@ -793,6 +852,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                               : null,
                           onSelectSeason: _changeSeason,
                           onOpenEpisode: _openItem,
+                          onPlayEpisode: _openPlayer,
                           onRetryEpisodes: controller.seasonId == null
                               ? null
                               : () => _changeSeason(
@@ -922,6 +982,15 @@ class _PhoneDetailBar extends StatelessWidget {
           centerTitle: label != null,
           backgroundColor: immersive ? const Color(0x00000000) : null,
           foregroundColor: immersive ? const Color(0xFFFFFFFF) : null,
+          border: immersive
+              ? null
+              : Border(
+                  bottom: BorderSide(
+                    color: phoneChromeTheme(context).colorScheme.outlineVariant
+                        .withValues(alpha: .35),
+                    width: 0.5,
+                  ),
+                ),
           title: label == null ? null : Text(label),
         ),
       ],
@@ -987,6 +1056,12 @@ class _DetailPlayActions extends StatelessWidget {
     final favorite = this.favorite;
     final progress = this.progress;
     final progressLabel = this.progressLabel;
+    final singleSecondary =
+        favorite != null &&
+        played == null &&
+        !showRestart &&
+        onPrevious == null &&
+        onNext == null;
     final secondary = <Widget>[
       if (favorite != null)
         Semantics(
@@ -997,6 +1072,7 @@ class _DetailPlayActions extends StatelessWidget {
             iconFill: favorite ? AppIcons.filled : AppIcons.outline,
             label: favorite ? l.phoneFavorited : l.phoneFavorite,
             highlighted: favorite,
+            inline: singleSecondary,
             onPressed: onToggleFavorite,
           ),
         ),
@@ -1036,30 +1112,40 @@ class _DetailPlayActions extends StatelessWidget {
         ),
     ];
     const shape = StadiumBorder();
+    final playButton = AppTooltip(
+      message: tooltip ?? label,
+      child: AppButton.icon(
+        key: const Key('mobile-detail-play'),
+        style: AppButtonStyle(
+          minimumSize: const Size(48, _height),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          backgroundColor: scheme.primary,
+          foregroundColor: scheme.onPrimary,
+          shape: shape,
+          textStyle: theme.textTheme.titleSmall?.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onPressed: enabled ? onPlay : null,
+        icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 24),
+        label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
+        variant: AppButtonVariant.filled,
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppTooltip(
-          message: tooltip ?? label,
-          child: AppButton.icon(
-            key: const Key('mobile-detail-play'),
-            style: AppButtonStyle(
-              minimumSize: const Size(48, _height),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              backgroundColor: scheme.primary,
-              foregroundColor: scheme.onPrimary,
-              shape: shape,
-              textStyle: theme.textTheme.titleSmall?.copyWith(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            onPressed: enabled ? onPlay : null,
-            icon: const Icon(AppIcons.play, fill: AppIcons.filled, size: 24),
-            label: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
-            variant: AppButtonVariant.filled,
-          ),
-        ),
+        if (singleSecondary)
+          Row(
+            children: [
+              Expanded(child: playButton),
+              const SizedBox(width: AppSpacing.xs),
+              secondary.single,
+            ],
+          )
+        else
+          playButton,
         if (progress != null && progress > 0) ...[
           const SizedBox(height: AppSpacing.sm),
           Semantics(
@@ -1069,11 +1155,11 @@ class _DetailPlayActions extends StatelessWidget {
               children: [
                 Expanded(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(999),
                     child: AppLoadingBar(
                       key: const Key('phone-detail-progress'),
                       value: progress.clamp(0, 1),
-                      minHeight: 4,
+                      minHeight: 5,
                       color: scheme.primary,
                       backgroundColor: scheme.onSurface.withValues(alpha: .14),
                     ),
@@ -1086,6 +1172,7 @@ class _DetailPlayActions extends StatelessWidget {
                       progressLabel,
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
@@ -1095,24 +1182,15 @@ class _DetailPlayActions extends StatelessWidget {
             ),
           ),
         ],
-        if (secondary.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.md),
-          // 次级操作是固定宽度的「圆钮 + 文字」，从左排起：只有一个「收藏」时
-          // 不再被拉成一整条宽块，四个也能在 360dp 上排下（不够时均分）。
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final share = constraints.maxWidth / secondary.length;
-              // 大字号时格子跟着变宽，标签不被截成「标记…」。
-              final preferred = MediaQuery.textScalerOf(context)
-                  .scale(_SecondaryAction.slotWidth);
-              final slot = share < preferred ? share : preferred;
-              return Row(
-                children: [
-                  for (final action in secondary)
-                    SizedBox(width: slot, child: action),
-                ],
-              );
-            },
+        if (secondary.isNotEmpty && !singleSecondary) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              for (var i = 0; i < secondary.length; i++) ...[
+                if (i > 0) const SizedBox(width: AppSpacing.xs),
+                Expanded(child: secondary[i]),
+              ],
+            ],
           ),
         ],
       ],
@@ -1120,8 +1198,8 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 次级操作：44 圆钮 + 下方文字，与通栏胶囊播放钮同属圆润形状，整格可点。
-/// 开启态（已收藏/已看）圆钮转为主色浅底、实心图标，切换时图标轻微弹出。
+/// 次级操作：单操作（如剧集收藏）与主播放钮同行胶囊排布；
+/// 多操作（电影/单集）为均分圆角卡片，图标与文字上下居中，消除单侧空白。
 class _SecondaryAction extends StatelessWidget {
   const _SecondaryAction({
     super.key,
@@ -1131,11 +1209,8 @@ class _SecondaryAction extends StatelessWidget {
     this.iconFill = AppIcons.filled,
     this.tooltip,
     this.highlighted = false,
+    this.inline = false,
   });
-
-  /// 每格最大宽度：放得下四字标签，也让四个操作在 360dp 上排得下。
-  static const double slotWidth = 80;
-  static const double _circle = 44;
 
   final IconData icon;
   final double? iconFill;
@@ -1145,6 +1220,7 @@ class _SecondaryAction extends StatelessWidget {
   final String? tooltip;
   final VoidCallback? onPressed;
   final bool highlighted;
+  final bool inline;
 
   @override
   Widget build(BuildContext context) {
@@ -1152,11 +1228,9 @@ class _SecondaryAction extends StatelessWidget {
     final scheme = theme.colorScheme;
     final enabled = onPressed != null;
     final duration = AppMotion.durationOf(context, AppMotion.fast);
-    // 圆钮随字号适度放大（至多 1.4 倍），不至于在大字标签上方显得过小。
     final grow = (MediaQuery.textScalerOf(context).scale(14) / 14)
-        .clamp(1.0, 1.4)
+        .clamp(1.0, 1.35)
         .toDouble();
-    final circle = _circle * grow;
     final iconColor = !enabled
         ? scheme.onSurface.withValues(alpha: .38)
         : highlighted
@@ -1167,68 +1241,90 @@ class _SecondaryAction extends StatelessWidget {
         : highlighted
         ? scheme.primary
         : scheme.onSurfaceVariant;
+    final animatedIcon = AnimatedSwitcher(
+      duration: duration,
+      switchInCurve: AppMotion.emphasized,
+      transitionBuilder: (child, animation) => ScaleTransition(
+        scale: Tween<double>(begin: .6, end: 1).animate(animation),
+        child: FadeTransition(opacity: animation, child: child),
+      ),
+      child: Icon(
+        icon,
+        key: ValueKey(highlighted),
+        size: (inline ? 20 : 21) * grow,
+        color: iconColor,
+        fill: iconFill,
+      ),
+    );
+    final borderRadius = BorderRadius.circular(inline ? 999 : AppRadii.lg);
     return AppTooltip(
       message: tooltip ?? label,
-      child: AppSurfaceAction(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              MobilePressFeedback(
-                enabled: enabled,
-                scale: .9,
-                child: AnimatedContainer(
-                  duration: duration,
-                  curve: AppMotion.standard,
-                  width: circle,
-                  height: circle,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: highlighted
-                        ? scheme.primary.withValues(alpha: .18)
-                        : scheme.surfaceContainerHigh.withValues(alpha: .72),
-                    border: Border.all(
-                      color: highlighted
-                          ? scheme.primary.withValues(alpha: .42)
-                          : scheme.outlineVariant.withValues(alpha: .5),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: AnimatedSwitcher(
-                    duration: duration,
-                    switchInCurve: AppMotion.emphasized,
-                    transitionBuilder: (child, animation) => ScaleTransition(
-                      scale: Tween<double>(
-                        begin: .6,
-                        end: 1,
-                      ).animate(animation),
-                      child: FadeTransition(opacity: animation, child: child),
-                    ),
-                    child: Icon(
-                      icon,
-                      key: ValueKey(highlighted),
-                      size: 22 * grow,
-                      color: iconColor,
-                      fill: iconFill,
-                    ),
-                  ),
-                ),
+      child: MobilePressFeedback(
+        enabled: enabled,
+        scale: .94,
+        child: AnimatedContainer(
+          duration: duration,
+          curve: AppMotion.standard,
+          constraints: BoxConstraints(
+            minHeight: inline ? _DetailPlayActions._height : 58,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: borderRadius,
+            color: highlighted
+                ? scheme.primary.withValues(alpha: .18)
+                : scheme.surfaceContainerHigh.withValues(alpha: .68),
+            border: Border.all(
+              color: highlighted
+                  ? scheme.primary.withValues(alpha: .44)
+                  : scheme.outlineVariant.withValues(alpha: .38),
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AppSurfaceAction(
+            onTap: onPressed,
+            borderRadius: borderRadius,
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: inline ? 16 : 6,
+                vertical: inline ? 10 : 8,
               ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: labelColor,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+              child: inline
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        animatedIcon,
+                        const SizedBox(width: 6),
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: iconColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        animatedIcon,
+                        const SizedBox(height: 5),
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: labelColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
           ),
         ),
       ),
@@ -1323,12 +1419,16 @@ class _ChapterStrip extends StatelessWidget {
   final List<ItemChapter> chapters;
   final ValueChanged<ItemChapter>? onChapter;
 
-  static const double _cardWidth = 148;
+  static double cardWidthOf(double viewportWidth) {
+    final inner = viewportWidth - AppSpacing.md * 2;
+    return ((inner - AppSpacing.sm) / 2).floorToDouble().clamp(140.0, 220.0);
+  }
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
+    final cardWidth = cardWidthOf(MediaQuery.sizeOf(context).width);
     final labelHeight =
         MediaQuery.textScalerOf(context)
             .scale(theme.textTheme.labelLarge?.fontSize ?? 14) *
@@ -1355,9 +1455,9 @@ class _ChapterStrip extends StatelessWidget {
         ),
         WholeCardStrip(
           key: const Key('phone-chapter-strip'),
-          height: _cardWidth * 9 / 16 + AppSpacing.xs + labelHeight + 6,
+          height: cardWidth * 9 / 16 + AppSpacing.xs + labelHeight + 6,
           itemCount: chapters.length,
-          cardWidth: _cardWidth,
+          cardWidth: cardWidth,
           gap: AppSpacing.sm,
           margin: AppSpacing.md,
           itemBuilder: (context, index) {
@@ -1366,6 +1466,7 @@ class _ChapterStrip extends StatelessWidget {
               itemId: itemId,
               chapter: chapters[index],
               index: index,
+              width: cardWidth,
               onTap: onChapter == null
                   ? null
                   : () => onChapter!(chapters[index]),
@@ -1383,12 +1484,14 @@ class _ChapterCard extends StatelessWidget {
     required this.itemId,
     required this.chapter,
     required this.index,
+    required this.width,
     required this.onTap,
   });
 
   final String itemId;
   final ItemChapter chapter;
   final int index;
+  final double width;
   final VoidCallback? onTap;
 
   @override
@@ -1397,7 +1500,7 @@ class _ChapterCard extends StatelessWidget {
     final name = chapter.name.trim().isEmpty ? '${index + 1}' : chapter.name;
     final hasImage = chapter.imageTag != null && chapter.imageTag!.isNotEmpty;
     return SizedBox(
-      width: _ChapterStrip._cardWidth,
+      width: width,
       child: AppSurfaceAction(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -1407,8 +1510,8 @@ class _ChapterCard extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadii.md),
               child: SizedBox(
-                width: _ChapterStrip._cardWidth,
-                height: _ChapterStrip._cardWidth * 9 / 16,
+                width: width,
+                height: width * 9 / 16,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
