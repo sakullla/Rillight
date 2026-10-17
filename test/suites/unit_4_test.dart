@@ -11,28 +11,32 @@ void main() {
     caseEntrypoints['aggregation/history_cases.dart']!,
   );
   group(
-    'aggregation/playback_switch_test.dart',
-    caseEntrypoints['aggregation/playback_switch_cases.dart']!,
-  );
-  group(
     'aggregation/query_test.dart',
     caseEntrypoints['aggregation/query_cases.dart']!,
+  );
+  group(
+    'aggregation/work_index_regression_test.dart',
+    caseEntrypoints['aggregation/work_index_regression_cases.dart']!,
   );
   group(
     'auth/provider_connect_controller_test.dart',
     caseEntrypoints['auth/provider_connect_controller_cases.dart']!,
   );
   group(
-    'auth/provider_line_boundaries_test.dart',
-    caseEntrypoints['auth/provider_line_boundaries_cases.dart']!,
+    'auth/provider_user_agent_test.dart',
+    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
   );
   group(
     'auth/server_import_test.dart',
     caseEntrypoints['auth/server_import_cases.dart']!,
   );
   group(
-    'emby/emby_device_test.dart',
-    caseEntrypoints['emby/emby_device_cases.dart']!,
+    'auth/source_sessions_test.dart',
+    caseEntrypoints['auth/source_sessions_cases.dart']!,
+  );
+  group(
+    'emby/aggregation_metadata_test.dart',
+    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
   );
   group(
     'emby/emby_socket_test.dart',
@@ -51,12 +55,8 @@ void main() {
     caseEntrypoints['player/cache/cache_contract_cases.dart#1']!,
   );
   group(
-    'player/cache/directory_inventory_test.dart',
-    caseEntrypoints['player/cache/directory_inventory_cases.dart']!,
-  );
-  group(
-    'player/cache/hls_proxy_timeline_test.dart',
-    caseEntrypoints['player/cache/hls_proxy_timeline_cases.dart']!,
+    'player/danmaku/danmaku_hash_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_hash_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_layout_test.dart',
@@ -67,6 +67,10 @@ void main() {
     caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
   );
   group(
+    'player/emby_playback_client_test.dart',
+    caseEntrypoints['player/emby_playback_client_cases.dart']!,
+  );
+  group(
     'player/hls_redirect_chain_test.dart',
     caseEntrypoints['player/hls_redirect_chain_cases.dart']!,
   );
@@ -75,12 +79,8 @@ void main() {
     caseEntrypoints['player/playback_http_proxy_cases.dart#2']!,
   );
   group(
-    'player/playback_metadata_test.dart',
-    caseEntrypoints['player/playback_metadata_cases.dart']!,
-  );
-  group(
-    'player/player_process_protocol_test.dart',
-    caseEntrypoints['player/player_process_protocol_cases.dart']!,
+    'player/playback_transport_session_test.dart',
+    caseEntrypoints['player/playback_transport_session_cases.dart']!,
   );
   group(
     'player/player_settings_test.dart',
@@ -89,6 +89,10 @@ void main() {
   group(
     'player/provider_part_playback_test.dart',
     caseEntrypoints['player/provider_part_playback_cases.dart']!,
+  );
+  group(
+    'player/provider_process_boundary_test.dart',
+    caseEntrypoints['player/provider_process_boundary_cases.dart']!,
   );
   group(
     'player/provider_scoped_preference_test.dart',

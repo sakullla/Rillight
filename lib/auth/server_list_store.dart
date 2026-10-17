@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'line_selection.dart';
+export 'line_selection.dart';
+
 import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
 
@@ -149,6 +152,11 @@ class SavedServer {
     required this.username,
     required this.lines,
     this.activeLineId,
+    this.lineSelection = const LineSelection.auto(),
+    this.lastSuccessfulLineId,
+    this.iconId,
+    this.credentialRef,
+    this.protectionRef,
     this.userAgent,
     this.nickname,
     this.region = AccessRegion.ordinary,
@@ -197,6 +205,14 @@ class SavedServer {
   final String username;
   final List<ServerLine> lines;
   final String? activeLineId;
+  final LineSelection lineSelection;
+  final String? lastSuccessfulLineId;
+
+  /// Null selects the provider's built-in default icon.
+  final String? iconId;
+  final String? credentialRef;
+  final String? protectionRef;
+  String get effectiveCredentialRef => credentialRef ?? id;
 
   /// Server-level HTTP User-Agent; every line of this server shares it.
   final String? userAgent;
@@ -220,7 +236,7 @@ class SavedServer {
         }
       }
     }
-    return lines.first;
+    return activeLineId == null && lines.length == 1 ? lines.single : null;
   }
 
   String get baseUrl => activeLine?.address ?? '';
@@ -245,9 +261,21 @@ class SavedServer {
     'checkedAt': checkedAt?.toIso8601String(),
     'checkStatus': checkStatus,
     'activeLineId': activeLineId,
+    'lineSelection': lineSelection.toJson(),
+    'lastSuccessfulLineId': lastSuccessfulLineId,
+    'iconId': iconId,
+    'credentialRef': effectiveCredentialRef,
+    'protectionRef': protectionRef,
     if (normalizedUserAgent != null) 'userAgent': normalizedUserAgent,
     'lines': lines.map((line) => line.toJson()).toList(),
   };
+
+  /// The new format has no region or user-selected library authorization.
+  Map<String, dynamic> toConfigurationJson() => toJson()
+    ..remove('region')
+    ..remove('participates')
+    ..remove('libraryIds')
+    ..remove('scopeKnown');
 
   factory SavedServer.fromJson(Map<String, dynamic> json) {
     final lines = <ServerLine>[];
@@ -273,7 +301,24 @@ class SavedServer {
     if (activeLineId != null && !lines.any((line) => line.id == activeLineId)) {
       throw const FormatException('Unknown active line');
     }
-    final resolvedActiveLineId = activeLineId ?? lines.first.id;
+    if (activeLineId == null &&
+        lines.length > 1 &&
+        !json.containsKey('lineSelection')) {
+      throw const FormatException(
+        'Missing active line; explicit choice required',
+      );
+    }
+    final resolvedActiveLineId =
+        activeLineId ?? (lines.length == 1 ? lines.single.id : null);
+    final selection = json.containsKey('lineSelection')
+        ? LineSelection.fromJson(json['lineSelection'])
+        : LineSelection.fixed(resolvedActiveLineId!);
+    final lastSuccessful = _storedString(json, 'lastSuccessfulLineId');
+    for (final id in [selection.fixedLineId, lastSuccessful]) {
+      if (id != null && !lines.any((line) => line.id == id)) {
+        throw const FormatException('Unknown selected line');
+      }
+    }
     final rawLibraryIds = json.containsKey('libraryIds')
         ? json['libraryIds']
         : const [];
@@ -304,6 +349,11 @@ class SavedServer {
       resourceCredentialRef: _storedString(json, 'resourceCredentialRef'),
       lines: List<ServerLine>.unmodifiable(lines),
       activeLineId: resolvedActiveLineId,
+      lineSelection: selection,
+      lastSuccessfulLineId: lastSuccessful,
+      iconId: _storedString(json, 'iconId'),
+      credentialRef: _storedString(json, 'credentialRef'),
+      protectionRef: _storedString(json, 'protectionRef'),
       userAgent: _resolveUserAgent(json, resolvedActiveLineId),
       region: _storedEnum(
         json,
@@ -364,6 +414,12 @@ class SavedServer {
     String? username,
     List<ServerLine>? lines,
     String? activeLineId,
+    LineSelection? lineSelection,
+    String? lastSuccessfulLineId,
+    String? iconId,
+    String? credentialRef,
+    String? protectionRef,
+    bool clearProtection = false,
     String? userAgent,
     String? nickname,
     AccessRegion? region,
@@ -388,6 +444,13 @@ class SavedServer {
       username: username ?? this.username,
       lines: List<ServerLine>.unmodifiable(lines ?? this.lines),
       activeLineId: activeLineId ?? this.activeLineId,
+      lineSelection: lineSelection ?? this.lineSelection,
+      lastSuccessfulLineId: lastSuccessfulLineId ?? this.lastSuccessfulLineId,
+      iconId: iconId ?? this.iconId,
+      credentialRef: credentialRef ?? this.credentialRef,
+      protectionRef: clearProtection
+          ? null
+          : protectionRef ?? this.protectionRef,
       userAgent: userAgent ?? this.userAgent,
       region: region ?? this.region,
       participates: participates ?? this.participates,
@@ -440,10 +503,16 @@ class FileServerListStore implements ServerListStore {
   FileServerListStore(this.file);
 
   final File file;
+  Future<void> _tail = Future.value();
 
   @override
   Future<ServerListSnapshot> load() async {
     if (!await file.exists()) {
+      if (await File('${file.path}.migration-v4.json').exists()) {
+        throw const FormatException(
+          'Upgraded configuration missing; original retained',
+        );
+      }
       return const ServerListSnapshot(servers: []);
     }
     try {
@@ -451,7 +520,7 @@ class FileServerListStore implements ServerListStore {
       if (decoded is! Map ||
           decoded['servers'] is! List ||
           (decoded['version'] != null &&
-              !const [1, 2, 3].contains(decoded['version']))) {
+              !const [1, 2, 3, 4].contains(decoded['version']))) {
         throw const FormatException('Invalid server configuration');
       }
       final servers = <SavedServer>[];
@@ -459,6 +528,12 @@ class FileServerListStore implements ServerListStore {
       for (final item in decoded['servers'] as List) {
         if (item is! Map) throw const FormatException('Invalid server record');
         final server = SavedServer.fromJson(Map<String, dynamic>.from(item));
+        if (decoded['version'] == 4 &&
+            (!item.containsKey('lineSelection') ||
+                item['credentialRef'] is! String ||
+                (item['credentialRef'] as String).isEmpty)) {
+          throw const FormatException('Incomplete server configuration');
+        }
         if (server.id.isEmpty || server.lines.isEmpty || !ids.add(server.id)) {
           throw const FormatException('Invalid or duplicate source identity');
         }
@@ -479,18 +554,47 @@ class FileServerListStore implements ServerListStore {
   }
 
   @override
-  Future<void> save(ServerListSnapshot snapshot) async {
+  Future<void> save(ServerListSnapshot snapshot) {
+    final next = _tail.then((_) => _save(snapshot));
+    _tail = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return next;
+  }
+
+  Future<void> _save(ServerListSnapshot snapshot) async {
     // Validate the existing document before replacing it; corruption is never empty.
-    if (await file.exists()) await load();
+    if (await file.exists() ||
+        await File('${file.path}.migration-v4.json').exists()) {
+      await load();
+    }
     await file.parent.create(recursive: true);
+    // Activation is owned by ServerConfigurationMigration. Until then retain
+    // the existing format for consumers that still use the old access model.
+    final version =
+        await file.exists() &&
+            (jsonDecode(await file.readAsString()) as Map)['version'] == 4
+        ? 4
+        : 3;
     final payload = <String, dynamic>{
-      'version': 3,
+      'version': version,
       'lastServerId': snapshot.lastServerId,
-      'servers': snapshot.servers.map((server) => server.toJson()).toList(),
+      'servers': snapshot.servers
+          .map(
+            (server) =>
+                version == 4 ? server.toConfigurationJson() : server.toJson(),
+          )
+          .toList(),
     };
+    final ids = <String>{};
+    for (final raw in payload['servers'] as List) {
+      final server = SavedServer.fromJson(raw as Map<String, dynamic>);
+      if (!ids.add(server.id)) {
+        throw const FormatException('Duplicate source identity');
+      }
+    }
     final tmp = File('${file.path}.tmp');
     await tmp.writeAsString(
       const JsonEncoder.withIndent('  ').convert(payload),
+      flush: true,
     );
     await tmp.rename(file.path);
   }
