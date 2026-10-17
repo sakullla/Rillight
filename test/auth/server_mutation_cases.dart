@@ -521,6 +521,75 @@ void main() {
     expect((await store.load()).servers.single.lines, hasLength(2));
   });
 
+  test(
+    'paste grouping keeps explicit backup lines with their named account',
+    () {
+      final preview = ServerPastePreview.parse(
+        '名称: A\n地址: https://a.test\n用户名: alice\n密码: one\n'
+        '线路2: https://backup-a.test\n名称: B\n地址: https://b.test\n'
+        '用户名: bob\n密码: two',
+      );
+      expect(preview.needsGroupSelection, isTrue);
+      expect(preview.groups, hasLength(2));
+      final a = preview.groups.first;
+      final b = preview.groups.last;
+      expect([a.name, a.username, a.password], ['A', 'alice', 'one']);
+      expect(a.lines, ['https://a.test', 'https://backup-a.test']);
+      expect([b.name, b.username, b.password], ['B', 'bob', 'two']);
+      expect(b.lines, ['https://b.test']);
+    },
+  );
+
+  test(
+    'paste grouping keeps explicit lines across unnamed account boundaries',
+    () {
+      final preview = ServerPastePreview.parse(
+        '地址: https://a.test\n用户名: alice\n密码: one\n'
+        '线路2: https://backup-a.test\n地址: https://b.test\n'
+        '用户名: bob\n密码: two\n线路3: https://backup-b.test',
+      );
+      expect(preview.groups, hasLength(2));
+      expect(preview.groups.first.username, 'alice');
+      expect(preview.groups.first.lines, [
+        'https://a.test',
+        'https://backup-a.test',
+      ]);
+      expect(preview.groups.last.username, 'bob');
+      expect(preview.groups.last.lines, [
+        'https://b.test',
+        'https://backup-b.test',
+      ]);
+    },
+  );
+
+  test('paste grouping leaves ambiguous plain addresses in an editable account-free group', () {
+    for (final text in [
+      '名称: A\n地址: https://a.test\n用户名: alice\n密码: one\n'
+          'https://unassigned.test\n名称: B\n地址: https://b.test\n用户名: bob\n密码: two',
+      '地址: https://a.test\n用户名: alice\n密码: one\n'
+          'https://unassigned.test\nhttps://second-unassigned.test\n用户名: bob\n密码: two',
+    ]) {
+      final preview = ServerPastePreview.parse(text);
+      expect(preview.needsGroupSelection, isTrue);
+      expect(preview.groups, hasLength(3));
+      expect(preview.groups.first.lines, ['https://a.test']);
+      final unassigned = preview.groups[1];
+      expect(unassigned.username, isEmpty);
+      expect(unassigned.password, isEmpty);
+      expect(unassigned.lines, contains('https://unassigned.test'));
+      expect(preview.groups.last.username, 'bob');
+      expect(
+        preview.groups.last.lines,
+        isNot(contains('https://unassigned.test')),
+      );
+      // The explicit preview edit assigns an account without mutating either
+      // parsed neighboring account.
+      unassigned.username = 'chosen-account';
+      expect(preview.groups.first.username, 'alice');
+      expect(preview.groups.last.username, 'bob');
+    }
+  });
+
   test('address-first accounts stay separated and same-account lines stay together', () {
     final preview = ServerPastePreview.parse(
       '地址: https://a.test\n用户名: alice\n密码: one\n'

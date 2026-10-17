@@ -50,16 +50,45 @@ class ServerPastePreview {
       addressFirst = false;
     }
 
-    void nextAccount() {
+    List<String> takePendingLines() {
       final next = List<String>.of(pendingLines);
       pendingLines.clear();
-      finish();
-      draft.lines.addAll(next);
-      addressFirst = next.isNotEmpty;
+      return next;
     }
 
-    void address(String value) {
-      if (addressFirst &&
+    void keepUnassigned(List<String> lines) {
+      if (lines.isEmpty) return;
+      // A partial, address-only group requires the caller to choose and supply
+      // its account; never borrow credentials from either neighboring group.
+      draft.lines.addAll(lines);
+      finish();
+    }
+
+    void nextNamedRecord() {
+      final unassigned = takePendingLines();
+      finish();
+      keepUnassigned(unassigned);
+    }
+
+    void nextAccount() {
+      final next = takePendingLines();
+      finish();
+      if (next.length > 1) {
+        // Several plain URLs could be backups or the next account's addresses.
+        keepUnassigned(next);
+      } else {
+        draft.lines.addAll(next);
+        addressFirst = next.isNotEmpty;
+      }
+    }
+
+    void address(String value, {bool explicitLine = false}) {
+      if (explicitLine) {
+        // A labeled line belongs to the current server regardless of whether
+        // the username/password appeared before it.
+        pendingLines.remove(value);
+        if (!draft.lines.contains(value)) draft.lines.add(value);
+      } else if (addressFirst &&
           (draft.username.isNotEmpty || draft.password.isNotEmpty)) {
         if (!pendingLines.contains(value)) pendingLines.add(value);
       } else {
@@ -81,7 +110,11 @@ class ServerPastePreview {
         final key = field[1]!.toLowerCase();
         final value = field[2]!;
         if (['名称', '服务器名称', 'name'].contains(key)) {
-          if (draft.name.isNotEmpty) nextAccount();
+          if (draft.name.isNotEmpty ||
+              draft.username.isNotEmpty ||
+              draft.password.isNotEmpty) {
+            nextNamedRecord();
+          }
           draft.name = value;
           continue;
         }
@@ -105,7 +138,10 @@ class ServerPastePreview {
           }
         } else {
           try {
-            address(normalizeServerAddress(value).toString());
+            address(
+              normalizeServerAddress(value).toString(),
+              explicitLine: key.startsWith('线路'),
+            );
             continue;
           } on MediaServerException {
             /* keep the invalid field for correction */
