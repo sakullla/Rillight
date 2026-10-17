@@ -319,6 +319,11 @@ FakeEmbyServer captureServer() {
         parentIndexNumber: 1,
         primaryImageTag: 'e$i',
         runtime: Duration(microseconds: (14400000000) ~/ 10),
+        premiereDate: DateTime.utc(
+          1994,
+          9,
+          22,
+        ).add(Duration(days: 7 * (i - 1))),
         overview: '朋友们相聚在熟悉的咖啡馆，一次意料之外的邀请打破了平静的日常。',
         mediaStreams: streams,
         nextUp: i == 2,

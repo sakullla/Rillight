@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
@@ -69,6 +70,82 @@ class _MobilePressableState extends State<MobilePressable> {
         curve: AppMotion.standard,
         child: ColorFiltered(
           colorFilter: _pressed
+              ? ColorFilter.mode(
+                  const Color(0xffffffff).withValues(alpha: widget.brighten),
+                  BlendMode.plus,
+                )
+              : const ColorFilter.mode(Color(0x00000000), BlendMode.plus),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+/// 只管视觉的按压反馈:按下时轻微缩放与提亮,不参与手势竞技场。
+///
+/// 包在已有点击目标(如 [AppSurfaceAction])的外层,点击、焦点与键盘激活
+/// 仍由内层负责;手指移动超过触摸阈值(开始滚动)即复原,不会在滑动列表时
+/// 让整行一直处于按下态。[enabled] 为 false 时不响应。
+class MobilePressFeedback extends StatefulWidget {
+  const MobilePressFeedback({
+    super.key,
+    required this.child,
+    this.enabled = true,
+    this.scale = AppMobileCard.pressScale,
+    this.brighten = AppMobileCard.pressBrighten,
+  });
+
+  final Widget child;
+  final bool enabled;
+  final double scale;
+  final double brighten;
+
+  @override
+  State<MobilePressFeedback> createState() => _MobilePressFeedbackState();
+}
+
+class _MobilePressFeedbackState extends State<MobilePressFeedback> {
+  bool _pressed = false;
+  Offset? _origin;
+
+  void _set(bool value) {
+    if (_pressed != value && mounted) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = AppMotion.durationOf(context, AppMobileCard.pressDuration);
+    final pressed = _pressed && widget.enabled;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: widget.enabled
+          ? (event) {
+              _origin = event.position;
+              _set(true);
+            }
+          : null,
+      onPointerMove: (event) {
+        final origin = _origin;
+        if (origin != null && (event.position - origin).distance > kTouchSlop) {
+          _origin = null;
+          _set(false);
+        }
+      },
+      onPointerUp: (_) {
+        _origin = null;
+        _set(false);
+      },
+      onPointerCancel: (_) {
+        _origin = null;
+        _set(false);
+      },
+      child: AnimatedScale(
+        scale: pressed ? widget.scale : 1,
+        duration: duration,
+        curve: AppMotion.standard,
+        child: ColorFiltered(
+          colorFilter: pressed
               ? ColorFilter.mode(
                   const Color(0xffffffff).withValues(alpha: widget.brighten),
                   BlendMode.plus,

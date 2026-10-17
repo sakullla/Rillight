@@ -365,13 +365,31 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
     if (controller == null || seasonId == null || total <= 0) {
       return;
     }
+    // 已载入的分集按位置映射到格子：标出当前集与已看集。
+    final currentId = widget.initialEpisodeId ?? controller.playTarget?.id;
+    int? current;
+    final played = <int>{};
+    for (var i = 0; i < controller.episodes.length; i++) {
+      final episode = controller.episodes[i];
+      final number = controller.windowStart + i + 1;
+      if (episode.id == currentId) current = number;
+      if (episode.userData.played) played.add(number);
+    }
+    const columns = 6;
+    const gap = 8.0;
+    const cellExtent = 44.0;
+    final currentRow = current == null ? 0 : (current - 1) ~/ columns;
+    // 当前集不在前两行时，打开就滚到它的上一行，不用自己翻找。
+    final scroll = ScrollController(
+      initialScrollOffset: currentRow <= 1
+          ? 0
+          : (currentRow - 1) * (cellExtent + gap),
+    );
     final selected = await showAppModalSheet<int>(
       context: context,
       builder: (context) {
         final l = AppLocalizations.of(context);
-        const columns = 6;
-        const gap = 8.0;
-        const cellExtent = 44.0;
+        final scheme = AppUiTheme.of(context).colorScheme;
         final rows = (total / columns).ceil();
         final raw = rows * cellExtent + gap * (rows - 1);
         final maxGrid = MediaQuery.sizeOf(context).height * 0.5;
@@ -397,6 +415,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
             SizedBox(
               height: gridHeight,
               child: GridView.builder(
+                controller: scroll,
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.md,
                   0,
@@ -412,10 +431,45 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
                 itemCount: total,
                 itemBuilder: (context, index) {
                   final number = index + 1;
+                  final isCurrent = number == current;
+                  final isPlayed = !isCurrent && played.contains(number);
                   return AppButton(
-                    style: AppButtonStyle(padding: EdgeInsets.zero),
+                    key: Key('phone-episode-pick-$number'),
+                    style: AppButtonStyle(
+                      padding: EdgeInsets.zero,
+                      foregroundColor: isCurrent
+                          ? scheme.onPrimary
+                          : isPlayed
+                          ? scheme.onSurfaceVariant
+                          : scheme.onSurface,
+                      side: isCurrent
+                          ? BorderSide(color: scheme.primary)
+                          : BorderSide(
+                              color: scheme.outlineVariant.withValues(
+                                alpha: isPlayed ? .35 : .8,
+                              ),
+                            ),
+                      backgroundColor: isCurrent
+                          ? scheme.primary
+                          : isPlayed
+                          ? scheme.surfaceContainerHigh.withValues(alpha: .5)
+                          : null,
+                      textStyle: AppUiTheme.of(context).textTheme.labelLarge
+                          ?.copyWith(
+                            fontWeight: isCurrent
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                    ),
                     onPressed: () => Navigator.pop(context, number),
-                    variant: AppButtonVariant.outlined,
+                    variant: isCurrent
+                        ? AppButtonVariant.filled
+                        : AppButtonVariant.outlined,
+                    selected: isCurrent,
+                    semanticLabel: isPlayed
+                        ? '$number \u00b7 ${l.mobileWatched}'
+                        : null,
                     child: Text('$number'),
                   );
                 },
@@ -425,6 +479,7 @@ class _MobileDetailPageState extends State<MobileDetailPage> {
         );
       },
     );
+    scroll.dispose();
     if (!mounted || selected == null) {
       return;
     }
@@ -1041,14 +1096,23 @@ class _DetailPlayActions extends StatelessWidget {
           ),
         ],
         if (secondary.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              for (var i = 0; i < secondary.length; i++) ...[
-                if (i > 0) const SizedBox(width: AppSpacing.xs),
-                Expanded(child: secondary[i]),
-              ],
-            ],
+          const SizedBox(height: AppSpacing.md),
+          // 次级操作是固定宽度的「圆钮 + 文字」，从左排起：只有一个「收藏」时
+          // 不再被拉成一整条宽块，四个也能在 360dp 上排下（不够时均分）。
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final share = constraints.maxWidth / secondary.length;
+              // 大字号时格子跟着变宽，标签不被截成「标记…」。
+              final preferred = MediaQuery.textScalerOf(context)
+                  .scale(_SecondaryAction.slotWidth);
+              final slot = share < preferred ? share : preferred;
+              return Row(
+                children: [
+                  for (final action in secondary)
+                    SizedBox(width: slot, child: action),
+                ],
+              );
+            },
           ),
         ],
       ],
@@ -1056,7 +1120,8 @@ class _DetailPlayActions extends StatelessWidget {
   }
 }
 
-/// 次级操作：上图标下文字，精致圆角底衬，触控高度 56。
+/// 次级操作：44 圆钮 + 下方文字，与通栏胶囊播放钮同属圆润形状，整格可点。
+/// 开启态（已收藏/已看）圆钮转为主色浅底、实心图标，切换时图标轻微弹出。
 class _SecondaryAction extends StatelessWidget {
   const _SecondaryAction({
     super.key,
@@ -1067,6 +1132,10 @@ class _SecondaryAction extends StatelessWidget {
     this.tooltip,
     this.highlighted = false,
   });
+
+  /// 每格最大宽度：放得下四字标签，也让四个操作在 360dp 上排得下。
+  static const double slotWidth = 80;
+  static const double _circle = 44;
 
   final IconData icon;
   final double? iconFill;
@@ -1082,55 +1151,84 @@ class _SecondaryAction extends StatelessWidget {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
     final enabled = onPressed != null;
-    final color = !enabled
+    final duration = AppMotion.durationOf(context, AppMotion.fast);
+    // 圆钮随字号适度放大（至多 1.4 倍），不至于在大字标签上方显得过小。
+    final grow = (MediaQuery.textScalerOf(context).scale(14) / 14)
+        .clamp(1.0, 1.4)
+        .toDouble();
+    final circle = _circle * grow;
+    final iconColor = !enabled
         ? scheme.onSurface.withValues(alpha: .38)
         : highlighted
         ? scheme.primary
         : scheme.onSurface;
+    final labelColor = !enabled
+        ? scheme.onSurface.withValues(alpha: .38)
+        : highlighted
+        ? scheme.primary
+        : scheme.onSurfaceVariant;
     return AppTooltip(
       message: tooltip ?? label,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: highlighted
-              ? scheme.primaryContainer.withValues(alpha: 0.42)
-              : scheme.surfaceContainerHigh.withValues(alpha: 0.58),
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(
-            color: highlighted
-                ? scheme.primary.withValues(alpha: 0.36)
-                : scheme.outlineVariant.withValues(alpha: 0.45),
-          ),
-        ),
-        child: AppSurfaceAction(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 56),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: 22, color: color, fill: iconFill),
-                  const SizedBox(height: 4),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: enabled
-                          ? (highlighted
-                                ? scheme.primary
-                                : scheme.onSurfaceVariant)
-                          : color,
-                      fontWeight: FontWeight.w600,
+      child: AppSurfaceAction(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              MobilePressFeedback(
+                enabled: enabled,
+                scale: .9,
+                child: AnimatedContainer(
+                  duration: duration,
+                  curve: AppMotion.standard,
+                  width: circle,
+                  height: circle,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: highlighted
+                        ? scheme.primary.withValues(alpha: .18)
+                        : scheme.surfaceContainerHigh.withValues(alpha: .72),
+                    border: Border.all(
+                      color: highlighted
+                          ? scheme.primary.withValues(alpha: .42)
+                          : scheme.outlineVariant.withValues(alpha: .5),
                     ),
                   ),
-                ],
+                  alignment: Alignment.center,
+                  child: AnimatedSwitcher(
+                    duration: duration,
+                    switchInCurve: AppMotion.emphasized,
+                    transitionBuilder: (child, animation) => ScaleTransition(
+                      scale: Tween<double>(
+                        begin: .6,
+                        end: 1,
+                      ).animate(animation),
+                      child: FadeTransition(opacity: animation, child: child),
+                    ),
+                    child: Icon(
+                      icon,
+                      key: ValueKey(highlighted),
+                      size: 22 * grow,
+                      color: iconColor,
+                      fill: iconFill,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: labelColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ),
       ),

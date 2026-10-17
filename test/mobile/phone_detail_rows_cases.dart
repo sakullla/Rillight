@@ -1918,6 +1918,48 @@ void main() {
     },
   );
 
+  testWidgets('narrow episode rows move the air date to its own line', (
+    tester,
+  ) async {
+    final harness = await _startDetail(
+      tester,
+      width: 360,
+      reduceMotion: true,
+      prepare: (server) {
+        server.setSeasons('series-friends', const [
+          FakeSeason(id: 'season-friends-1', name: '第 1 季', indexNumber: 1),
+        ]);
+        server.setEpisodes('series-friends', [
+          FakeEpisode(
+            id: 'episode-1',
+            name: '连恩，初次尝试使用魔法',
+            seasonId: 'season-friends-1',
+            indexNumber: 1,
+            parentIndexNumber: 1,
+            runtime: const Duration(minutes: 24),
+            premiereDate: DateTime.utc(2025, 1, 7),
+          ),
+        ]);
+      },
+    );
+    unawaited(harness.router.push('/item/series-friends'));
+    await settle(tester);
+    final row = find.byKey(CatalogKeys.episode('episode-1'));
+    await Scrollable.ensureVisible(tester.element(row), alignment: 0.5);
+    await settle(tester);
+
+    // 日期是独立一行的完整文本，不再和编号、时长挤在一行里被省略号截断。
+    final date = find.descendant(of: row, matching: find.text('2025-01-07'));
+    expect(date, findsOneWidget);
+    final paragraph = tester.renderObject<RenderParagraph>(date);
+    expect(paragraph.didExceedMaxLines, isFalse);
+    expect(
+      find.descendant(of: row, matching: find.textContaining('S1E1 \u00b7 24')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  }, tags: ['integration']);
+
   testWidgets('episode picker does not tint the loaded episode page', (
     tester,
   ) async {
@@ -1969,12 +2011,22 @@ void main() {
     expect(tester.getSize(grid).height, lessThan(500));
     expect(tester.getTopLeft(grid).dy, greaterThan(300));
     expect(find.widgetWithText(AppButton, '29'), findsOneWidget);
+    // 已载入的一整页不上色；只有续播目标（按列表位置）标为当前集，
+    // 本例没有已看集，其余格子都保持中性。
     final tinted = tester
         .widgetList<AppButton>(
           find.descendant(of: grid, matching: find.byType(AppButton)),
         )
-        .where((button) => button.style?.backgroundColor != null);
-    expect(tinted, isEmpty);
+        .where((button) => button.style?.backgroundColor != null)
+        .map((button) => button.key)
+        .toList();
+    expect(tinted, [const Key('phone-episode-pick-29')]);
+    expect(
+      tester
+          .widget<AppButton>(find.byKey(const Key('phone-episode-pick-29')))
+          .selected,
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   }, tags: ['integration']);
 

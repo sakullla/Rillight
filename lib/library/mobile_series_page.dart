@@ -653,26 +653,33 @@ class PhoneSeasonTab extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      child: Container(
-        decoration: BoxDecoration(
-          color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: AppSurfaceAction(
-          onTap: onPressed,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 64, minHeight: 36),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Center(
-                widthFactor: 1,
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: selected ? scheme.surface : scheme.onSurface,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      child: MobilePressFeedback(
+        enabled: onPressed != null && !selected,
+        scale: .95,
+        child: AnimatedContainer(
+          duration: AppMotion.durationOf(context, AppMotion.fast),
+          curve: AppMotion.standard,
+          decoration: BoxDecoration(
+            color: selected ? scheme.onSurface : scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AppSurfaceAction(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onPressed,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 64, minHeight: 36),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Center(
+                  widthFactor: 1,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: selected ? scheme.surface : scheme.onSurface,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
@@ -1127,11 +1134,8 @@ class _EpisodeRow extends StatelessWidget {
     final progress = episode.playbackProgress;
     final played = episode.userData.played;
     final premiere = episode.premiereDate;
-    final facts = <String>[
-      ?code,
-      ?runtime,
-      if (premiere != null) formatDateYmd(premiere),
-    ];
+    final facts = <String>[?code, ?runtime];
+    final date = premiere == null ? null : formatDateYmd(premiere);
     final title = Text(
       episode.name,
       maxLines: 2,
@@ -1149,86 +1153,138 @@ class _EpisodeRow extends StatelessWidget {
     );
     return Padding(
       padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 3, AppSpacing.sm, 3),
-      child: Container(
-        decoration: BoxDecoration(
-          color: current
-              ? scheme.primary.withValues(alpha: .12)
-              : scheme.surfaceContainerLow.withValues(alpha: .42),
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          border: Border.all(
+      child: MobilePressFeedback(
+        scale: .985,
+        brighten: .04,
+        child: Container(
+          decoration: BoxDecoration(
             color: current
-                ? scheme.primary.withValues(alpha: .32)
-                : scheme.outlineVariant.withValues(alpha: .28),
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: AppSurfaceAction(
-          key: CatalogKeys.episode(episode.id),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xs,
-              vertical: 8,
+                ? scheme.primary.withValues(alpha: .12)
+                : scheme.surfaceContainerLow.withValues(alpha: .42),
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(
+              color: current
+                  ? scheme.primary.withValues(alpha: .32)
+                  : scheme.outlineVariant.withValues(alpha: .28),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _EpisodeThumb(
-                      episode: episode,
-                      width: _thumbWidth,
-                      current: current,
-                      played: played,
-                      progress: progress,
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          title,
-                          if (facts.isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text(
-                              facts.join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: AppSurfaceAction(
+            key: CatalogKeys.episode(episode.id),
+            onTap: onTap,
+            child: Padding(
+              // 外距 sm + 内距 sm，剧照左缘与「剧集」标题、季标签同一条 16 竖线。
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm - 1,
+                vertical: 8,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      _EpisodeThumb(
+                        episode: episode,
+                        width: _thumbWidth,
+                        current: current,
+                        played: played,
+                        progress: progress,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            title,
+                            if (facts.isNotEmpty || date != null) ...[
+                              const SizedBox(height: 3),
+                              _EpisodeFacts(
+                                facts: facts,
+                                date: date,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
                               ),
-                            ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-
-                if (overview != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      overview,
-                      key: const Key('phone-episode-overview'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        height: 1.45,
-                      ),
-                    ),
+                    ],
                   ),
-              ],
+
+                  if (overview != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        overview,
+                        key: const Key('phone-episode-overview'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 「编号 · 时长 · 播出日期」：一行放得下就一行；放不下时日期换到第二行，
+/// 不再用省略号把日期截掉（窄屏、大字号、长时长标签时都会发生）。
+class _EpisodeFacts extends StatelessWidget {
+  const _EpisodeFacts({
+    required this.facts,
+    required this.date,
+    required this.style,
+  });
+
+  static const _separator = ' · ';
+
+  final List<String> facts;
+  final String? date;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = this.date;
+    final lead = facts.join(_separator);
+    final single = [lead, ?date].where((s) => s.isNotEmpty).join(_separator);
+    Text line(String value) =>
+        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+    if (date == null || lead.isEmpty) return line(single);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: single,
+            style: DefaultTextStyle.of(context).style.merge(style),
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          maxLines: 1,
+        )..layout();
+        final fits =
+            !painter.didExceedMaxLines && painter.width <= constraints.maxWidth;
+        painter.dispose();
+        if (fits) return line(single);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [line(lead), line(date)],
+        );
+      },
     );
   }
 }
@@ -1301,7 +1357,7 @@ class _EpisodeThumb extends StatelessWidget {
               if (current)
                 const Center(
                   child: EpisodeCurrentMark(
-                    size: 24,
+                    size: 16,
                     iconKey: Key('phone-episode-current'),
                   ),
                 ),
