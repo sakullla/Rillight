@@ -344,7 +344,10 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                                                   search: true,
                                                 ),
                                               ),
-                                              const _TvSession(),
+                                              _TvSession(
+                                                onServerEntered: () =>
+                                                    _selectPane(0, enter: true),
+                                              ),
                                             ][i],
                                           ),
                                         ),
@@ -376,6 +379,8 @@ class _TvShellState extends State<TvShell> with WidgetsBindingObserver {
                               onSelect: (i) => _selectPane(i),
                               onEnter: (i) => _selectPane(i, enter: true),
                               homeNode: _home,
+                              onServerEntered: () =>
+                                  _selectPane(0, enter: true),
                               username: auth.session?.username,
                               overImage: overImage,
                             );
@@ -405,7 +410,8 @@ class _TvLibraries extends StatelessWidget {
 
 /// Appearance and application settings remain separate from server editing.
 class _TvSession extends StatelessWidget {
-  const _TvSession();
+  const _TvSession({required this.onServerEntered});
+  final VoidCallback onServerEntered;
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
@@ -427,6 +433,7 @@ class _TvSession extends StatelessWidget {
             auth: AuthScope.of(context),
             onEntered: () async {
               CatalogScope.maybeOf(context)?.reload();
+              onServerEntered();
             },
             onLineChanged: () async {
               CatalogScope.maybeOf(context)?.reload();

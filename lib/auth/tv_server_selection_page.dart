@@ -11,6 +11,7 @@ import 'server_management_widgets.dart';
 import 'provider_connect_dialog.dart';
 import 'backup_import/backup_import_flow.dart';
 import 'tv_server_editor_page.dart';
+import 'tv_server_add_panel.dart';
 import 'tv_line_selection_page.dart';
 import 'tv_server_access_page.dart';
 import 'tv_server_flow_frame.dart';
@@ -116,41 +117,33 @@ class _TvServerSelectionState extends ServerSelectionPageState {
             busy: unlockBusy,
           ),
         );
-      } else if (step == 'add' || step == 'login') {
-        content = TvServerFlowFrame(
-          title: step == 'add' ? l.addServer : l.serversAccount,
+      } else if (step == 'add') {
+        content = TvServerAddPanel(
+          key: addKey,
+          auth: widget.auth,
           onBack: returnToList,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              ProviderConnectDialog(
-                auth: widget.auth,
-                existing: step == 'login' ? target : null,
-                inline: true,
-                showTypePicker: step == 'add',
-                onConnected: () async {
-                  await register();
-                  if (!mounted) return;
-                  if (step == 'login') {
-                    await enter(widget.auth.sources.server(target!.id));
-                  } else {
-                    await finishEntry();
-                  }
-                },
-              ),
-              if (step == 'add') ...[
-                const SizedBox(height: 20),
-                TvAction(
-                  key: const Key('server-add-import'),
-                  onPressed: () {
-                    final outer = Navigator.of(context).context;
-                    Navigator.of(context).pop();
-                    unawaited(showBackupImportFlow(outer, auth: widget.auth));
-                  },
-                  child: Text(l.serversImportFile),
-                ),
-              ],
-            ],
+          onConnected: () async {
+            await register();
+            if (mounted) await finishEntry();
+          },
+          onImport: () {
+            final outer = Navigator.of(context).context;
+            Navigator.of(context).pop();
+            unawaited(showBackupImportFlow(outer, auth: widget.auth));
+          },
+        );
+      } else if (step == 'login') {
+        content = TvServerFlowFrame(
+          title: l.serversAccount,
+          onBack: returnToList,
+          child: ProviderConnectDialog(
+            auth: widget.auth,
+            existing: target,
+            inline: true,
+            onConnected: () async {
+              await register();
+              if (mounted) await enter(widget.auth.sources.server(target!.id));
+            },
           ),
         );
       } else if (step == 'more') {
@@ -413,11 +406,7 @@ class _TvServerSelectionState extends ServerSelectionPageState {
         canPop: step == 'list',
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) {
-            if (step == 'add') {
-              returnToList();
-            } else {
-              back();
-            }
+            back();
           }
         },
         child: content,

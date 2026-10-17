@@ -19,24 +19,24 @@ void main() {
     caseEntrypoints['auth/phone_server_manager_cases.dart']!,
   );
   group(
-    'catalog/catalog_browse_test.dart',
-    caseEntrypoints['catalog/catalog_browse_cases.dart']!,
+    'library/episode_thumb_test.dart',
+    caseEntrypoints['library/episode_thumb_cases.dart']!,
   );
   group(
     'mobile/phone_home_rails_test.dart',
     caseEntrypoints['mobile/phone_home_rails_cases.dart']!,
   );
   group(
-    'mobile/phone_player_test.dart [part 3]',
-    caseEntrypoints['mobile/phone_player_cases.dart#2']!,
+    'mobile/phone_player_test.dart [part 2]',
+    caseEntrypoints['mobile/phone_player_cases.dart#1']!,
   );
   group(
     'player/phone_presentation_lifecycle_test.dart',
     caseEntrypoints['player/phone_presentation_lifecycle_cases.dart']!,
   );
   group(
-    'player/subtitle_menu_test.dart',
-    caseEntrypoints['player/subtitle_menu_cases.dart']!,
+    'tv/tv_lan_pair_test.dart [part 1]',
+    caseEntrypoints['tv/tv_lan_pair_cases.dart#0']!,
   );
   group(
     'widgets/scrim_icon_button_test.dart',

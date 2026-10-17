@@ -11,6 +11,10 @@ void main() {
     caseEntrypoints['auth/login_widgets_cases.dart']!,
   );
   group(
+    'auth/provider_connect_management_test.dart',
+    caseEntrypoints['auth/provider_connect_management_cases.dart']!,
+  );
+  group(
     'catalog/catalog_controller_test.dart',
     caseEntrypoints['catalog/catalog_controller_cases.dart']!,
   );
@@ -19,12 +23,12 @@ void main() {
     caseEntrypoints['home/hero_playback_actions_cases.dart']!,
   );
   group(
-    'library/episode_list_scroll_test.dart',
-    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
-  );
-  group(
     'library/source_detail_route_test.dart [part 3]',
     caseEntrypoints['library/source_detail_route_cases.dart#2']!,
+  );
+  group(
+    'player/subtitle_viewport_test.dart',
+    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
   );
   group(
     'widgets/app_button_test.dart',

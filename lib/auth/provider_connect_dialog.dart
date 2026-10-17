@@ -262,6 +262,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: TvInput(
           key: Key(id),
+          autofocus:
+              widget.initialDraft != null && id == 'provider-display-name',
           label: label,
           controller: value,
           secret: secret,
@@ -470,6 +472,24 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     );
   }
 
+  Widget _draftLines(AppLocalizations l) => _tv
+      ? TvInput(
+          key: const Key('provider-extra-lines'),
+          controller: extraLines,
+          label: l.serversPasteExtra,
+          maxLines: 3,
+          keyboardType: TextInputType.multiline,
+        )
+      : AppTextField(
+          key: const Key('provider-extra-lines'),
+          controller: extraLines,
+          label: l.serversPasteExtra,
+          minLines: 2,
+          maxLines: 5,
+          keyboardType: TextInputType.multiline,
+          autocorrect: false,
+        );
+
   List<Widget> _credentials(AppLocalizations l, ProviderConnectController c) {
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
@@ -551,7 +571,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
         ),
       );
       return [
-        if (widget.existing == null && !_tv)
+        if (widget.existing == null && (!_tv || widget.initialDraft != null))
           _input(
             'provider-display-name',
             displayName,
@@ -567,15 +587,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
             icon: AppIcons.link,
             action: TextInputAction.next,
           ),
-          AppTextField(
-            key: const Key('provider-extra-lines'),
-            controller: extraLines,
-            label: l.serversPasteExtra,
-            minLines: 2,
-            maxLines: 5,
-            keyboardType: TextInputType.multiline,
-            autocorrect: false,
-          ),
+          _draftLines(l),
           SizedBox(height: 16 * s),
         ],
         Container(
@@ -632,7 +644,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       ];
     }
     return [
-      if (widget.existing == null && !_tv)
+      if (widget.existing == null && (!_tv || widget.initialDraft != null))
         _input(
           'provider-display-name',
           displayName,
@@ -676,15 +688,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       ),
       if (widget.initialDraft != null) ...[
         const SizedBox(height: 12),
-        AppTextField(
-          key: const Key('provider-extra-lines'),
-          controller: extraLines,
-          label: l.serversPasteExtra,
-          minLines: 2,
-          maxLines: 5,
-          keyboardType: TextInputType.multiline,
-          autocorrect: false,
-        ),
+        _draftLines(l),
       ],
       if (_tv) userAgentInput,
       const SizedBox(height: 14),

@@ -21,12 +21,14 @@ class TvTopNavBar extends StatelessWidget {
     required this.onSelect,
     required this.onEnter,
     this.homeNode,
+    this.onServerEntered,
     this.username,
     this.overImage = false,
   });
 
   /// 当前面板下标。
   final int index;
+  final VoidCallback? onServerEntered;
 
   /// 确认/点按:只切换面板,焦点留在导航栏。
   final ValueChanged<int> onSelect;
@@ -119,6 +121,7 @@ class TvTopNavBar extends StatelessWidget {
                       auth: AuthScope.of(context),
                       onEntered: () async {
                         CatalogScope.maybeOf(context)?.reload();
+                        onServerEntered?.call();
                       },
                       onLineChanged: () async {
                         CatalogScope.maybeOf(context)?.reload();

@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/app/tv_top_nav.dart';
+import 'package:rillight/app/tv_widgets.dart';
+import 'package:rillight/home/tv_home_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/tv_server_selection_page.dart';
 import 'package:rillight/auth/tv_server_editor_page.dart';
@@ -20,7 +23,10 @@ import 'package:rillight/player/playback_session_snapshot.dart';
 import 'package:rillight/player/player_settings.dart';
 import 'package:rillight/player/video_backend.dart';
 
-Future<AuthController> setupTv(WidgetTester tester) async {
+Future<AuthController> setupTv(
+  WidgetTester tester, {
+  List<FakeEmbyServer> extra = const [],
+}) async {
   tester.view.physicalSize = const Size(1920, 1080);
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.resetPhysicalSize);
@@ -41,7 +47,7 @@ Future<AuthController> setupTv(WidgetTester tester) async {
         deviceId: 'tv-management',
         version: '1',
       ),
-      dio: dioForFakeEmby(FakeEmbyAdapter([a, b])),
+      dio: dioForFakeEmby(FakeEmbyAdapter([a, b, ...extra])),
     ),
   );
   await tester.runAsync(() async {
@@ -77,6 +83,203 @@ Future<AuthController> setupTv(WidgetTester tester) async {
 
 void main() {
   setUp(isolateImageCache);
+  for (final entry in [
+    (2, 'tv-nav-user'),
+    (3, 'tv-nav-user'),
+    (3, 'tv-settings-servers'),
+  ]) {
+    testWidgets('TV server entry from ${entry.$1}/${entry.$2} opens home', (
+      tester,
+    ) async {
+      final auth = await setupTv(tester);
+      final id = auth.savedServers.last.id;
+      await tvBack(tester);
+      await tvPress(tester, Key('tv-nav-${entry.$1}'));
+      expect(
+        tester.widget<TvTopNavBar>(find.byType(TvTopNavBar)).index,
+        entry.$1,
+      );
+      await tvPress(tester, Key(entry.$2));
+      // Merely inspecting lines must preserve the original pane and server.
+      await tvPress(tester, Key('server-lines-${auth.session!.server.id}'));
+      await tvPress(tester, const Key('server-line-auto'));
+      await tvBack(tester);
+      await tvBack(tester);
+      expect(
+        tester.widget<TvTopNavBar>(find.byType(TvTopNavBar)).index,
+        entry.$1,
+      );
+      await tvPress(tester, Key(entry.$2));
+      await tvPress(tester, Key('server-enter-$id'));
+      expect(auth.session!.server.id, id);
+      expect(find.byType(TvServerSelectionPage), findsNothing);
+      expect(tester.widget<TvTopNavBar>(find.byType(TvTopNavBar)).index, 0);
+      expect(find.byType(TvHomePage).hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
+  }
+
+  testWidgets(
+    'TV explicit paste groups editable lines and cancels without writes',
+    (tester) async {
+      final auth = await setupTv(tester);
+      final original = auth.savedServers.toList();
+      final current = auth.session;
+      var reads = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            if (call.method == 'Clipboard.getData') {
+              reads++;
+              return {
+                'text': '名称：第一台\n线路1：https://first.test\n用户：alice\n密码：private-one\n名称：第二台\n线路1：https://second.test\n线路2：https://backup.test\n用户：bob\n备注：待补密码',
+              };
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      await tvPress(tester, const Key('server-add'));
+      expect(reads, 0);
+      await tvPress(tester, const Key('server-add-paste'));
+      expect(reads, 1);
+      expect(find.byKey(const Key('server-paste-group-0')), findsOneWidget);
+      expect(find.byKey(const Key('server-paste-group-1')), findsOneWidget);
+      expect(find.text('private-one'), findsNothing);
+      expect(find.byKey(const Key('provider-username')), findsNothing);
+      await tvPress(tester, const Key('server-paste-group-1'));
+      expect(
+        tvTarget(tester, const Key('provider-display-name')).hasFocus,
+        isTrue,
+      );
+      String field(String id) =>
+          tester.widget<TvInput>(find.byKey(Key(id))).controller.text;
+      expect(field('provider-display-name'), '第二台');
+      expect(field('provider-address'), 'https://second.test');
+      expect(field('provider-extra-lines'), 'https://backup.test');
+      expect(field('provider-username'), 'bob');
+      expect(field('provider-password'), '');
+      await tvEdit(tester, const Key('provider-display-name'), '客厅');
+      await tvEdit(
+        tester,
+        const Key('provider-extra-lines'),
+        'https://backup.test/prefix\nhttps://third.test:8443',
+      );
+      await tvEdit(tester, const Key('provider-password'), 'completed-secret');
+      expect(
+        field('provider-extra-lines'),
+        contains('https://third.test:8443'),
+      );
+      expect(field('provider-password'), 'completed-secret');
+      await tvBack(tester);
+      expect(find.byKey(const Key('server-add-paste')), findsOneWidget);
+      await tvBack(tester);
+      expect(auth.savedServers, original);
+      expect(auth.session, same(current));
+      expect(tvTarget(tester, const Key('server-add')).hasFocus, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'TV manual paste retains unknown input and accepts partial draft',
+    (tester) async {
+      final auth = await setupTv(tester);
+      final current = auth.session;
+      await tvPress(tester, const Key('server-add'));
+      await tvPress(tester, const Key('server-add-paste'));
+      await tvEdit(tester, const Key('server-paste-text'), '尚未识别的内容');
+      await tvPress(tester, const Key('server-paste-parse'));
+      expect(
+        tester
+            .widget<TvInput>(find.byKey(const Key('server-paste-text')))
+            .controller
+            .text,
+        '尚未识别的内容',
+      );
+      await tvEdit(
+        tester,
+        const Key('server-paste-text'),
+        '线路1：https://one.test\n线路2：https://two.test\n用户：partial',
+      );
+      await tvPress(tester, const Key('server-paste-parse'));
+      expect(
+        tester
+            .widget<TvInput>(find.byKey(const Key('provider-username')))
+            .controller
+            .text,
+        'partial',
+      );
+      expect(
+        tester
+            .widget<TvInput>(find.byKey(const Key('provider-extra-lines')))
+            .controller
+            .text,
+        'https://two.test',
+      );
+      expect(
+        tester
+            .widget<TvInput>(find.byKey(const Key('provider-password')))
+            .controller
+            .text,
+        isEmpty,
+      );
+      await tvBack(tester);
+      await tvBack(tester);
+      expect(auth.savedServers, hasLength(2));
+      expect(auth.session, same(current));
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
+  testWidgets(
+    'TV confirms pasted two-line account as one server and opens home',
+    (tester) async {
+      final primary = FakeEmbyServer(
+        serverId: 'tv-import',
+        baseUrl: Uri.parse('http://import.test:8096'),
+      );
+      final backup = FakeEmbyServer(
+        serverId: 'tv-import',
+        baseUrl: Uri.parse('http://backup.test:8096'),
+      );
+      // Both endpoints represent the same service and accept its issued token.
+      backup.issuedTokens.add('token-tv-import-alice-1');
+      final auth = await setupTv(tester, extra: [primary, backup]);
+      await tvBack(tester);
+      await tvPress(tester, const Key('tv-nav-3'));
+      await tvPress(tester, const Key('tv-settings-servers'));
+      await tvPress(tester, const Key('server-add'));
+      await tvPress(tester, const Key('server-add-paste'));
+      await tvEdit(
+        tester,
+        const Key('server-paste-text'),
+        '名称：导入影院\n线路1：http://import.test:8096\n线路2：http://backup.test:8096\n用户：alice\n密码：correct-horse',
+      );
+      await tvPress(tester, const Key('server-paste-parse'));
+      expect(auth.savedServers, hasLength(2));
+      await tvPress(tester, const Key('provider-password-submit'));
+      expect(auth.savedServers, hasLength(3));
+      final added = auth.savedServers.singleWhere(
+        (s) => s.displayName == '导入影院',
+      );
+      expect(added.lines.map((l) => l.address), [
+        'http://import.test:8096',
+        'http://backup.test:8096',
+      ]);
+      expect(added.username, 'alice');
+      expect(auth.session!.server.id, added.id);
+      expect(auth.hasSavedAuthorization(added.id), isTrue);
+      expect(find.byType(TvServerSelectionPage), findsNothing);
+      expect(tester.widget<TvTopNavBar>(find.byType(TvTopNavBar)).index, 0);
+      expect(tester.takeException(), isNull);
+    },
+    tags: ['integration'],
+  );
+
   testWidgets(
     'TV home entry exposes separate D-pad body line and more targets',
     (tester) async {

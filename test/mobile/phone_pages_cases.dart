@@ -2580,7 +2580,7 @@ void main() {
         // 原线路也未被刷新:失败后不再无条件 reload 目录。
         expect(_itemRequests(lineA), beforeFailA);
         expect(find.byType(ServerFeedback), findsOneWidget);
-        expect(find.text('未保存，请检查输入或连接后重试。'), findsOneWidget);
+        expect(find.text('连接失败，原连接已保留。请检查线路或重新登录。'), findsOneWidget);
         expect(find.textContaining('upstream timeout'), findsNothing);
         expect(tester.takeException(), isNull);
       },

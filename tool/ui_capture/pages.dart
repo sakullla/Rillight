@@ -778,20 +778,43 @@ extension PageCaptures on CaptureSession {
     if (platform != 'tv') {
       await tap(const Key('provider-advanced'));
       await save('server-add-advanced');
-      await tap(const Key('server-add-paste'));
+    }
+    await tap(const Key('server-add-paste'));
+    const pasteSample =
+        '名称：家庭影院\n地址：https://home.example.com\n用户：alice\n密码：synthetic\n名称：朋友的影院\n线路1：https://friend.example.com\n线路2：https://backup.example.com/emby\n用户：bob';
+    if (platform == 'tv') {
+      await _editTvField(const Key('server-paste-text'), pasteSample);
+    } else {
       await tester.enterText(
         find.byKey(const Key('server-paste-text')),
-        '名称：家庭影院\n地址：https://home.example.com\n用户：alice\n密码：synthetic\n名称：朋友的影院\n地址：https://friend.example.com\n用户：bob',
+        pasteSample,
       );
-      await tap(const Key('server-paste-parse'));
-      await save('server-paste-groups');
-      await tap(const Key('server-paste-group-1'));
-      await save('server-paste-preview');
-      await back();
-      await back();
-    } else {
-      await back();
     }
+    if (platform == 'tv') await save('server-paste-input');
+    await tap(const Key('server-paste-parse'));
+    await save('server-paste-groups');
+    await tap(const Key('server-paste-group-1'));
+    await save('server-paste-preview');
+    if (platform == 'tv') {
+      final lines = find.byKey(const Key('provider-extra-lines'));
+      tester
+          .widget<FocusableActionDetector>(
+            find.descendant(
+              of: lines,
+              matching: find.byType(FocusableActionDetector),
+            ),
+          )
+          .focusNode!
+          .requestFocus();
+      await advance(500);
+      await save('server-paste-lines');
+      await tap(const Key('provider-extra-lines'));
+      await save('server-paste-keyboard');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await advance(350);
+    }
+    await back();
+    await back();
     if (shouldCapture('server-needs-login') ||
         shouldCapture('server-account-needs-login')) {
       final other = auth.savedServers.last;

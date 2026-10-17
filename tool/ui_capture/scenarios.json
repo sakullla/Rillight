@@ -1998,7 +1998,8 @@
     "feature": "servers",
     "platforms": [
       "desktop",
-      "phone"
+      "phone",
+      "tv"
     ]
   },
   {
@@ -2006,7 +2007,8 @@
     "feature": "servers",
     "platforms": [
       "desktop",
-      "phone"
+      "phone",
+      "tv"
     ]
   },
   {
@@ -2087,6 +2089,27 @@
     "platforms": [
       "desktop",
       "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-lines",
+    "feature": "servers",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-input",
+    "feature": "servers",
+    "platforms": [
+      "tv"
+    ]
+  },
+  {
+    "id": "server-paste-keyboard",
+    "feature": "servers",
+    "platforms": [
       "tv"
     ]
   }
