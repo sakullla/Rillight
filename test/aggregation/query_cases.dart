@@ -42,6 +42,9 @@ class _HttpSource {
   Future<Object> Function(HttpRequest request) items = (_) async =>
       _page([], total: 0);
   int status = 200;
+  int viewsStatus = 200;
+  Future<void> Function()? viewsGate;
+  List<String> viewIds = ['library'];
   Future<void> Function()? authenticationGate;
   Future<void> open() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -53,8 +56,11 @@ class _HttpSource {
         await authenticationGate?.call();
         data = {'Id': id, 'ServerName': id};
       } else if (request.uri.path.endsWith('/Views')) {
+        await viewsGate?.call();
+        code = viewsStatus;
         data = _page([
-          {'Id': 'library', 'Name': 'Library', 'Type': 'CollectionFolder'},
+          for (final viewId in viewIds)
+            {'Id': viewId, 'Name': viewId, 'Type': 'CollectionFolder'},
         ]);
       } else if (request.uri.path.endsWith('/Items') ||
           request.uri.path.endsWith('/Shows/NextUp')) {
@@ -157,6 +163,106 @@ Future<void> _until(bool Function() predicate) async {
 
 void main() {
   late _Fixture f;
+  for (final filtered in [false, true]) {
+    test(
+      'discovery retry rebuilds real libraries and preserves siblings filtered=$filtered',
+      () async {
+        await f.open();
+        f.a.viewsStatus = 503;
+        f.a.viewIds = ['library', 'excluded'];
+        f.a.items = (request) async {
+          final parent = request.uri.queryParameters['ParentId'];
+          expect(parent, isNotEmpty);
+          return _page([_movie('a-$parent')], total: 1);
+        };
+        f.b.items = (_) async => _page([_movie('b-result')], total: 1);
+        await f.query.start(
+          QueryScope(
+            libraries: {
+              if (filtered) 'a': {'library'},
+            },
+          ),
+        );
+        final failed = f.query.sources
+            .where((s) => s.key.serverId == 'a')
+            .single;
+        expect(failed.failed, isTrue);
+        expect(f.query.summary, QuerySummary.partialFailure);
+        expect(f.query.items.map((i) => i.item.id), ['b-result']);
+        expect(f.a.itemRequests, isEmpty);
+        final bRequests = f.b.requests.length;
+        final initialDiscoveries = f.a.requests
+            .where((r) => r.path.endsWith('/Views'))
+            .length;
+        await f.query.retry(failed.key);
+        expect(
+          f.query.sources.where((s) => s.key.serverId == 'a').single.failed,
+          isTrue,
+        );
+        expect(f.a.itemRequests, isEmpty);
+        f.a.viewsStatus = 200;
+        await f.query.retryServer('a');
+        expect(
+          f.a.requests.where((r) => r.path.endsWith('/Views')).length,
+          initialDiscoveries + 2,
+        );
+        expect(f.b.requests.length, bRequests);
+        expect(
+          f.query.sources.every((s) => s.key.libraryId.isNotEmpty),
+          isTrue,
+        );
+        expect(
+          f.query.items.every((item) => item.libraryId.isNotEmpty),
+          isTrue,
+        );
+        expect(
+          f.query.items.map((i) => i.item.id),
+          unorderedEquals([
+            'a-library',
+            if (!filtered) 'a-excluded',
+            'b-result',
+          ]),
+        );
+        expect(
+          f.a.itemRequests.map((r) => r.queryParameters['ParentId']).toSet(),
+          filtered ? {'library'} : {'library', 'excluded'},
+        );
+        expect(f.query.summary, QuerySummary.available);
+      },
+    );
+  }
+
+  test('late discovery retry cannot publish results after changing selected servers', () async {
+    await f.open();
+    f.a.viewsStatus = 503;
+    await f.query.start(
+      QueryScope(
+        serverIds: {'a'},
+        libraries: {
+          'a': {'library'},
+        },
+      ),
+    );
+    final failed = f.query.sources.single;
+    expect(failed.failed, isTrue);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    f.a.viewsStatus = 200;
+    f.a.viewsGate = () async {
+      entered.complete();
+      await release.future;
+    };
+    final retry = f.query.retry(failed.key);
+    await entered.future;
+    f.b.items = (_) async => _page([_movie('selected-b')], total: 1);
+    await f.query.start(QueryScope(serverIds: {'b'}));
+    release.complete();
+    await retry;
+    expect(f.a.itemRequests, isEmpty);
+    expect(f.query.sources.map((s) => s.key.serverId), ['b']);
+    expect(f.query.items.map((i) => i.item.id), ['selected-b']);
+  });
+
   test('nextup uses allowed-library endpoint, keeps zero progress, pages and rejects late revoked response', () async {
     await f.open();
     f.a.items = (request) async {

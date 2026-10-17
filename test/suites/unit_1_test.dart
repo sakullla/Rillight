@@ -11,32 +11,20 @@ void main() {
     caseEntrypoints['aggregation/access_boundary_cases.dart']!,
   );
   group(
-    'aggregation/history_store_test.dart',
-    caseEntrypoints['aggregation/history_store_cases.dart']!,
-  );
-  group(
-    'aggregation/playback_switch_test.dart',
-    caseEntrypoints['aggregation/playback_switch_cases.dart']!,
-  );
-  group(
-    'app/window_geometry_test.dart',
-    caseEntrypoints['app/window_geometry_cases.dart']!,
-  );
-  group(
     'auth/auth_controller_test.dart',
     caseEntrypoints['auth/auth_controller_cases.dart']!,
+  );
+  group(
+    'auth/backup_import/backup_import_test.dart',
+    caseEntrypoints['auth/backup_import/backup_import_cases.dart']!,
   );
   group(
     'auth/provider_identity_test.dart',
     caseEntrypoints['auth/provider_identity_cases.dart']!,
   );
   group(
-    'auth/server_configuration_migration_test.dart',
-    caseEntrypoints['auth/server_configuration_migration_cases.dart']!,
-  );
-  group(
-    'auth/server_list_store_test.dart',
-    caseEntrypoints['auth/server_list_store_cases.dart']!,
+    'auth/provider_line_boundaries_test.dart',
+    caseEntrypoints['auth/provider_line_boundaries_cases.dart']!,
   );
   group(
     'emby/emby_client_test.dart',
@@ -47,16 +35,20 @@ void main() {
     caseEntrypoints['emby/emby_device_cases.dart']!,
   );
   group(
+    'emby/emby_socket_test.dart',
+    caseEntrypoints['emby/emby_socket_cases.dart']!,
+  );
+  group(
+    'emby/media_source_format_test.dart',
+    caseEntrypoints['emby/media_source_format_cases.dart']!,
+  );
+  group(
     'home/library_nav_prefs_test.dart',
     caseEntrypoints['home/library_nav_prefs_cases.dart']!,
   );
   group(
     'jellyfin/jellyfin_client_test.dart',
     caseEntrypoints['jellyfin/jellyfin_client_cases.dart']!,
-  );
-  group(
-    'media_server/contract_test.dart',
-    caseEntrypoints['media_server/contract_cases.dart']!,
   );
   group(
     'player/cache/directory_inventory_test.dart',
@@ -79,8 +71,8 @@ void main() {
     caseEntrypoints['player/danmaku/danmaku_controller_cases.dart']!,
   );
   group(
-    'player/danmaku/danmaku_timeline_test.dart',
-    caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
+    'player/emby_playback_client_test.dart',
+    caseEntrypoints['player/emby_playback_client_cases.dart']!,
   );
   group(
     'player/hls_redirect_chain_test.dart',
@@ -103,15 +95,23 @@ void main() {
     caseEntrypoints['player/playback_session_cases.dart']!,
   );
   group(
+    'player/playback_transport_session_test.dart',
+    caseEntrypoints['player/playback_transport_session_cases.dart']!,
+  );
+  group(
+    'player/playback_wake_lock_test.dart',
+    caseEntrypoints['player/playback_wake_lock_cases.dart']!,
+  );
+  group(
     'player/player_window_launch_test.dart',
     caseEntrypoints['player/player_window_launch_cases.dart']!,
   );
   group(
-    'player/provider_part_playback_test.dart',
-    caseEntrypoints['player/provider_part_playback_cases.dart']!,
-  );
-  group(
     'player/response_read_ahead_test.dart [part 3]',
     caseEntrypoints['player/response_read_ahead_cases.dart#2']!,
+  );
+  group(
+    'plex/plex_review_regression_test.dart',
+    caseEntrypoints['plex/plex_review_regression_cases.dart']!,
   );
 }

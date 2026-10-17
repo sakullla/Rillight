@@ -1,4 +1,40 @@
 [
+{
+  "id": "entry-comparison-locked",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-comparison-password",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-comparison-candidate",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "entry-history-recovery",
+  "feature": "entry",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
   {
     "id": "aggregation-ready",
     "feature": "aggregation",

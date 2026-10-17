@@ -109,6 +109,7 @@ void main() {
     for (final theme in ['dark', 'light']) {
       final selectedTheme = Platform.environment['RILLIGHT_CAPTURE_THEME'];
       if (selectedTheme != 'all' && selectedTheme != theme) continue;
+      final records = <Map<String, Object>>[];
       testWidgets('${config.$1} ${config.$3} $theme', (tester) async {
         isolateImageCache();
         tester.view.devicePixelRatio = pixelRatioOf(config);
@@ -121,6 +122,7 @@ void main() {
           config.$1,
           theme,
           config.$3,
+          records: records,
         );
         final server = captureServer();
         final mirror = FakeEmbyServer(
@@ -807,6 +809,35 @@ void main() {
         appearance.dispose();
         CaptureProviders.closeClients();
       }, tags: ['integration']);
+      final states = (Platform.environment['RILLIGHT_CAPTURE_STATES'] ?? '')
+          .split(',')
+          .where((state) => state.isNotEmpty)
+          .toSet();
+      final features = (Platform.environment['RILLIGHT_CAPTURE_FEATURES'] ?? '')
+          .split(',')
+          .where((feature) => feature.isNotEmpty)
+          .toSet();
+      if ((features.isEmpty || features.contains('entry')) &&
+          (states.isEmpty || states.contains('entry-history-recovery'))) {
+        testWidgets('${config.$1} ${config.$3} $theme startup recovery', (
+          tester,
+        ) async {
+          isolateImageCache();
+          tester.view.devicePixelRatio = pixelRatioOf(config);
+          tester.view.physicalSize = config.$3;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final capture = CaptureSession(
+            tester,
+            out,
+            config.$1,
+            theme,
+            config.$3,
+            records: records,
+          );
+          await capture.entryRecovery();
+        }, tags: ['integration']);
+      }
     }
   }
 }
@@ -822,12 +853,19 @@ Future<void> revealPhoneHero(
 }
 
 class CaptureSession {
-  CaptureSession(this.tester, this.out, this.platform, this.theme, this.size);
+  CaptureSession(
+    this.tester,
+    this.out,
+    this.platform,
+    this.theme,
+    this.size, {
+    List<Map<String, Object>>? records,
+  }) : records = records ?? [];
   final WidgetTester tester;
   final String out, platform, theme;
   final Size size;
   final boundary = GlobalKey();
-  final records = <Map<String, Object>>[];
+  final List<Map<String, Object>> records;
   static final knownStates = (jsonDecode(
     File('tool/ui_capture/scenarios.json').readAsStringSync(),
   ) as List).map((entry) => (entry as Map)['id'] as String).toSet();
@@ -955,7 +993,7 @@ class CaptureSession {
     await tap(const Key('mobile-player-panel-close'));
   }
 
-  Future<void> save(String state) async {
+  Future<void> save(String state, {String? renderedTheme}) async {
     expect(
       knownStates.contains(state),
       isTrue,
@@ -983,13 +1021,15 @@ class CaptureSession {
         'height': height,
         'profileWidth': size.width.toInt(),
         'renderedTheme':
-            state.startsWith('player') ||
-                (state.startsWith('provider-') && state.contains('-player')) ||
-                state.startsWith('danmaku') ||
-                state.startsWith('detail-gallery') ||
-                state == 'tv-lan-phone'
-            ? 'dark'
-            : theme,
+            renderedTheme ??
+            (state.startsWith('player') ||
+                    (state.startsWith('provider-') &&
+                        state.contains('-player')) ||
+                    state.startsWith('danmaku') ||
+                    state.startsWith('detail-gallery') ||
+                    state == 'tv-lan-phone'
+                ? 'dark'
+                : theme),
         'file': file,
       });
       await File('$out/$platform-${size.width.toInt()}-$theme.json')

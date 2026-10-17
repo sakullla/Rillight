@@ -1,3 +1,5 @@
+import 'server_entry_coordinator.dart';
+
 import 'dart:async';
 
 import 'package:go_router/go_router.dart';
@@ -28,6 +30,8 @@ Future<void> showServerSelection(
   String? initialServerId,
   Future<void> Function()? onEntered,
   Future<void> Function()? onLineChanged,
+  Future<bool> Function(String serverId, ServerEntryTicket ticket)?
+  validateEntry,
 }) => showAppDialog<void>(
   context: context,
   barrierDismissible: false,
@@ -37,6 +41,7 @@ Future<void> showServerSelection(
     initialServerId: initialServerId,
     onEntered: onEntered,
     onLineChanged: onLineChanged,
+    validateEntry: validateEntry,
   ),
 );
 
@@ -55,7 +60,10 @@ class ServerSelectionPage extends StatefulWidget {
     this.initialServerId,
     this.onEntered,
     this.onLineChanged,
+    this.validateEntry,
   });
+  final Future<bool> Function(String serverId, ServerEntryTicket ticket)?
+  validateEntry;
   final AuthController auth;
   final bool phone;
   final bool routePage;
@@ -280,6 +288,9 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
               destination: next,
               requestPassword: requestPassword,
               connect: connect,
+              validate: widget.validateEntry == null
+                  ? null
+                  : (ticket) => widget.validateEntry!(server.id, ticket),
               navigate: navigate,
               onPasswordRejected: () => passwordRejected = true,
             )

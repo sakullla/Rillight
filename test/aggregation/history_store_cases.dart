@@ -1,5 +1,9 @@
 import 'dart:io';
 
+import 'package:rillight/auth/startup_recovery.dart';
+import 'package:rillight/auth/auth_controller.dart';
+import 'package:rillight/player/playback_runtime.dart';
+
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -33,6 +37,161 @@ Map<String, dynamic> _source(
 };
 
 void main() {
+  test('production wraps post-migration history decoding failure and releases its writer', () async {
+    final dir = await Directory.systemTemp.createTemp(
+      'history-production-recovery-',
+    );
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/watch-history.json');
+    final bytes = utf8.encode(
+      jsonEncode({
+        'version': 1,
+        'sourceIdentityVersion': 2,
+        'order': 1,
+        'revision': 1,
+        'sessions': 1,
+        'records': [
+          {'source': 'invalid-source'},
+        ],
+        'preferences': [],
+        'legacyConsumed': [],
+      }),
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    final auth = AuthController.memory();
+    addTearDown(auth.dispose);
+    await expectLater(
+      PlaybackRuntime.production(auth, directory: dir),
+      throwsA(
+        isA<ConfigurationUpgradeFailure>()
+            .having((e) => e.history, 'history', isTrue)
+            .having(
+              (e) => File(e.originalPath!).uri,
+              'original',
+              file.absolute.uri,
+            )
+            .having((e) => e.backupPath, 'backup', isNull),
+      ),
+    );
+    expect(await file.readAsBytes(), bytes);
+    await file.writeAsString(
+      jsonEncode({
+        'version': 1,
+        'sourceIdentityVersion': 2,
+        'order': 1,
+        'revision': 1,
+        'sessions': 1,
+        'records': [],
+        'preferences': [],
+        'legacyConsumed': [],
+      }),
+    );
+    final runtime = await PlaybackRuntime.production(auth, directory: dir);
+    await runtime.history.close();
+  });
+
+  for (final provider in MediaServerType.values) {
+    for (final failure in [
+      'corrupt',
+      'root-type',
+      'identity-conflict',
+      'backup-write',
+      'replace-write',
+    ]) {
+      test(
+        '${provider.name} failed history $failure preserves original and exposes recovery paths',
+        () async {
+          final dir = await Directory.systemTemp.createTemp(
+            'history-recovery-',
+          );
+          addTearDown(() => dir.delete(recursive: true));
+          final file = File('${dir.path}/watch-history.json');
+          Map<String, dynamic> source(String region) => {
+            ..._source('configured', 'alice', region: region),
+            'serviceType': provider.name,
+            'cloudAccountId': provider == MediaServerType.plex ? 'cloud' : null,
+            'homeUserId': provider == MediaServerType.plex ? 'alice' : null,
+          };
+          Map<String, dynamic> history({bool conflict = false}) => {
+            'version': 1,
+            'revision': 7,
+            'records': [
+              for (final region in ['private', if (conflict) 'ordinary'])
+                {
+                  'source': source(region),
+                  'work': source(region),
+                  'position': 1234,
+                },
+            ],
+            'preferences': [
+              {
+                'owner': source('private'),
+                'target': source('private'),
+                'settings': {'speed': 1.5},
+              },
+            ],
+          };
+          final original = switch (failure) {
+            'corrupt' => '{invalid history bytes',
+            'root-type' => '[]',
+            _ => jsonEncode(history(conflict: failure == 'identity-conflict')),
+          };
+          await file.writeAsString(original, flush: true);
+          final before = await file.readAsBytes();
+          Directory? obstacle;
+          if (failure == 'backup-write' || failure == 'replace-write') {
+            obstacle = Directory(
+              '${file.path}.${failure == 'backup-write' ? 'pre-source-v2' : 'next'}',
+            );
+            await obstacle.create();
+          }
+          ConfigurationUpgradeFailure? error;
+          try {
+            final unexpected = await FileHistoryStore.open(file);
+            await unexpected.close();
+            fail('Expected recoverable startup failure');
+          } on ConfigurationUpgradeFailure catch (caught) {
+            error = caught;
+          }
+          expect(error, isNotNull);
+          expect(error.history, isTrue);
+          expect(Directory(error.directory).uri, dir.absolute.uri);
+          expect(File(error.originalPath!).uri, file.absolute.uri);
+          expect(await file.readAsBytes(), before);
+          if (failure == 'replace-write') {
+            expect(
+              File(error.backupPath!).uri,
+              File('${file.absolute.path}.pre-source-v2').uri,
+            );
+            expect(await File(error.backupPath!).readAsBytes(), before);
+          } else {
+            expect(error.backupPath, isNull);
+          }
+          if (obstacle != null) await obstacle.delete();
+          // A corrected original or repaired directory can be retried: the failed
+          // open must release its process lease and never install empty history.
+          await file.writeAsString(jsonEncode(history()), flush: true);
+          final recovered = await FileHistoryStore.open(file);
+          try {
+            final value = (await recovered.read())!;
+            expect(value['sourceIdentityVersion'], 2);
+            expect(
+              (value['records'] as List).single['source']['serviceType'],
+              provider.name,
+            );
+            expect((value['records'] as List).single['position'], 1234);
+            expect(
+              (value['preferences'] as List).single['settings']['speed'],
+              1.5,
+            );
+          } finally {
+            await recovered.close();
+          }
+        },
+      );
+    }
+  }
+
   test(
     'old Emby keys and new keys migrate idempotently without account rebinding',
     () {

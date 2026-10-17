@@ -52,8 +52,14 @@ Future<void> _createDesktopApp() async {
   final appearance = AppearanceController();
   final appearanceReady = appearance.ready;
   final auth = await createProductionAuth();
+  late final PlaybackRuntime playback;
+  try {
+    playback = await PlaybackRuntime.production(auth);
+  } catch (_) {
+    auth.dispose();
+    rethrow;
+  }
   final router = createAppRouter(auth: auth);
-  final playback = await PlaybackRuntime.production(auth);
   final playerHost = DesktopPlayerWindowHost(auth: auth, runtime: playback);
   // 外观先读持久化偏好再上屏,避免启动闪一下错误亮度。
   await appearanceReady;

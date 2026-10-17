@@ -69,6 +69,7 @@
   "aggregationMore": "加载此来源更多",
   "aggregationLocalRecord": "本机确认观看记录",
   "aggregationResumeActual": "从本机记录的实际来源继续",
+  "aggregationVerifySource": "验证并查找",
   "aggregationSources": "查找同源",
   "aggregationConfirmed": "已确认来源",
   "aggregationCandidate": "待辨认候选（非确认续播来源）",
@@ -1635,6 +1636,8 @@
   },
   "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。",
   "configurationUpgradeFailed": "配置升级未完成，原始配置已保留。",
+  "historyRecoveryFailed": "播放记录暂时无法读取",
+  "historyRecoveryHint": "请保留下面的原始文件；修复文件或从已存在的备份恢复后重试。",
   "configurationRecoveryHint": "请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。",
   "@phoneHomeEditHint": {
     "description": "Explains that the home editor does not change the libraries tab."
@@ -2423,5 +2426,33 @@
         "type": "int"
       }
     }
-  }
+  },
+  "comparisonHint": "选择来源查看详情，播放不会自动切换。",
+  "comparisonVerified": "已确认是同一作品",
+  "comparisonUnverified": "尚未确认是同一作品，请先核对详情",
+  "comparisonSearchDone": "查找完成",
+  "comparisonSearchPending": "正在查找其他版本…",
+  "comparisonSearchPartial": "部分内容未能加载",
+  "comparisonNoVersionDetails": "版本信息未知，可进入详情查看",
+  "comparisonVersions": "共 {count} 个版本",
+  "@comparisonVersions": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "comparisonTracks": "音轨 {audio} 条 · 字幕 {subtitles} 条",
+  "@comparisonTracks": {
+    "placeholders": {
+      "audio": {
+        "type": "int"
+      },
+      "subtitles": {
+        "type": "int"
+      }
+    }
+  },
+  "comparisonPasswordTitle": "验证进入密码",
+  "comparisonPasswordPrompt": "验证后查找这台服务器中的对应影片。"
 }

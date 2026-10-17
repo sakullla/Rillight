@@ -1,3 +1,5 @@
+import '../auth/server_entry_coordinator.dart';
+
 import 'package:rillight/player/playback_persistence.dart';
 
 import 'dart:async';
@@ -35,7 +37,6 @@ import '../auth/server_list_store.dart';
 import '../aggregation/history/history_writer.dart';
 import '../aggregation/identity/media_identity.dart';
 import '../aggregation/query/same_source_query.dart';
-import '../library/local_session_permit.dart';
 
 import 'package:rillight/player/playback_switch_preflight.dart';
 export 'package:rillight/player/playback_switch_preflight.dart';
@@ -165,9 +166,11 @@ class PlayerController extends ChangeNotifier {
     this.subtitleFilePicker,
     this.settingsStore,
     this.runtime,
+    this.requestSourcePassword,
     this.observationSink,
     this.switchDispatcher,
     this.reportOutcomeSink,
+    this.sourceOpenResult,
     this.openRequest,
     this.routeLeaseKey,
     this.playbackLineSnapshot = const [],
@@ -213,9 +216,14 @@ class PlayerController extends ChangeNotifier {
 
   MediaServerClient client;
   final PlaybackRuntime? runtime;
+  final Future<String?> Function(SavedServer server)? requestSourcePassword;
+  ServerEntryTicket? _switchEntry;
+  ServerEntryTicket? _pendingEntryCommit;
   final PlaybackObservationSink? observationSink;
   final PlaybackSwitchDispatcher? switchDispatcher;
   final PlaybackReportOutcomeSink? reportOutcomeSink;
+  final Future<void> Function(String itemId, String? version, bool succeeded)?
+  sourceOpenResult;
   bool get _scopedPlayback => runtime != null || observationSink != null;
   final PlayerOpenRequest? openRequest;
   final Object? routeLeaseKey;
@@ -3547,6 +3555,8 @@ class PlayerController extends ChangeNotifier {
   }) async {
     final plan = switchConfirmation;
     if (choice == SwitchResumeChoice.cancel) {
+      _switchEntry?.cancel();
+      _switchEntry = null;
       if (_hostSwitchPending) {
         await switchDispatcher!({'action': 'cancel'});
         _hostSwitchPending = false;
@@ -3664,36 +3674,48 @@ class PlayerController extends ChangeNotifier {
       return;
     }
     final original = origin!;
-    final permit = permitForAccount(
-      runtime!.registry,
-      reference.account,
-      libraryId: candidate.source.libraryId,
+    _switchEntry?.cancel();
+    final entry = await runtime!.prepareSourceEntry(
+      reference.account.configuredServerId,
+      requestPassword: requestSourcePassword,
     );
-    if (permit == null || !permit.isValid) {
-      throw StateError('A permitted confirmed source is required');
+    if (entry == null) return;
+    _switchEntry = entry;
+    try {
+      final target = await runtime!.resolve(
+        PlayerOpenRequest(
+          itemId: reference.itemId,
+          source: reference,
+          work: candidate.source.reference.item,
+          libraryId: candidate.source.libraryId,
+          mediaSourceId: version,
+          accessGeneration: entry.generation,
+        ),
+        entry: entry,
+      );
+      await runtime!.requireEquivalent(
+        original,
+        target,
+        numberingScheme: episode?.lookup.source?.numberingScheme,
+      );
+      target.permit.requireValid();
+      if (!identical(origin, original) || _revoked || _disposed) return;
+      _switchTargetItem = await target.permit.dispatch(
+        (c) => c.getItem(reference.itemId),
+      );
+      _switchTarget = target;
+      await switchMediaSource(version);
+      if (switchConfirmation == null && !entry.isCommitted) {
+        entry.cancel();
+        _switchEntry = null;
+        _switchTarget = null;
+        _switchTargetItem = null;
+      }
+    } catch (_) {
+      entry.cancel();
+      _switchEntry = null;
+      rethrow;
     }
-    final target = await runtime!.resolve(
-      PlayerOpenRequest(
-        itemId: reference.itemId,
-        source: reference,
-        work: candidate.source.reference.item,
-        libraryId: candidate.source.libraryId,
-        mediaSourceId: version,
-        accessGeneration: permit.accessGeneration,
-      ),
-    );
-    await runtime!.requireEquivalent(
-      original,
-      target,
-      numberingScheme: episode?.lookup.source?.numberingScheme,
-    );
-    target.permit.requireValid();
-    if (!identical(origin, original) || _revoked || _disposed) return;
-    _switchTargetItem = await target.permit.dispatch(
-      (c) => c.getItem(reference.itemId),
-    );
-    _switchTarget = target;
-    await switchMediaSource(version);
   }
 
   /// Identity is checked anonymously before attaching credentials to a line.
@@ -4083,6 +4105,9 @@ class PlayerController extends ChangeNotifier {
     int? subtitleIndex,
   }) async {
     final old = origin!;
+    final entry = _switchEntry;
+    _switchEntry = null;
+    _pendingEntryCommit = entry;
     final previous = resolved!;
     _restoreOrigin = (
       origin: old,
@@ -4130,7 +4155,23 @@ class PlayerController extends ChangeNotifier {
         startPaused: plan.paused,
         strictTracks: true,
       ).timeout(recoveryTimeout);
+      if (entry != null && !entry.isCommitted) {
+        _pendingEntryCommit = null;
+        entry.cancel();
+        await restoreOriginalSource();
+      } else {
+        _restoreOrigin = null;
+      }
     } catch (failure) {
+      _pendingEntryCommit = null;
+      entry?.cancel();
+      if (old.permit.isValid && !_disposed && !_revoked) {
+        await restoreOriginalSource();
+        return;
+      }
+      await _operations
+          .interrupt(backend.stop, ensureRetired: true)
+          .timeout(disposeTimeout);
       loading = false;
       isPlaying = false;
       state.phase = PlaybackPhase.failed;
@@ -4265,6 +4306,10 @@ class PlayerController extends ChangeNotifier {
     bool reportStopped = true,
     bool notifyStopped = true,
   }) async {
+    _switchEntry?.cancel();
+    _pendingEntryCommit?.cancel();
+    _switchEntry = null;
+    _pendingEntryCommit = null;
     unawaited(_discardNextPrefix());
     _operations.close();
     state.phase = PlaybackPhase.closing;
@@ -4732,15 +4777,17 @@ class PlayerController extends ChangeNotifier {
         );
         preparing = info.resources;
         if (!_accepts(operation)) return;
-        await _writePreparationSnapshot(
-          operation,
-          info,
-          startTicks: startTicks,
-        );
+        if (_pendingEntryCommit == null) {
+          await _writePreparationSnapshot(
+            operation,
+            info,
+            startTicks: startTicks,
+          );
+        }
         sources = info.mediaSources;
       }
       mediaSources = sources;
-      if (runtime != null && origin != null) {
+      if (runtime != null && origin != null && _pendingEntryCommit == null) {
         await runtime!.importLegacyPreferences(
           origin!,
           item!,
@@ -5092,7 +5139,10 @@ class PlayerController extends ChangeNotifier {
           operation,
           () => backend.setRate(playbackRate),
         );
-        if (isRecovering && (!volumeApplied || !rateApplied)) {
+        if ((isRecovering ||
+                _pendingEntryCommit != null ||
+                sourceOpenResult != null) &&
+            (!volumeApplied || !rateApplied)) {
           throw StateError('Required playback settings were not restored');
         }
         stage('restore audio track');
@@ -5115,6 +5165,15 @@ class PlayerController extends ChangeNotifier {
         if (!_accepts(operation)) return;
         if (!_pauseIntent && !backend.isPlaying) await backend.play();
         if (!_accepts(operation)) return;
+        await sourceOpenResult?.call(itemId, chosenId, true);
+        if (!_accepts(operation)) return;
+        final entry = _pendingEntryCommit;
+        if (entry != null) {
+          await entry.prepareCommit();
+          if (!_accepts(operation)) return;
+          if (!entry.commit()) throw StateError('Source entry commit failed');
+          _pendingEntryCommit = null;
+        }
         isPlaying = backend.isPlaying;
         // The ordinary player's source is confirmed by the successful native
         // open/settings restore. Optional subtitles and server reporting must
@@ -5308,6 +5367,16 @@ class PlayerController extends ChangeNotifier {
     String? detail,
   }) async {
     if (!_accepts(operation)) return;
+    try {
+      await sourceOpenResult?.call(
+        itemId,
+        resolved?.mediaSource.id ?? preferredMediaSourceId,
+        false,
+      );
+    } catch (_) {
+      /* Host expiry already cancels this launch. */
+    }
+
     final stopped = _session?.id == operation.id
         ? _stopSession()
         : Future<void>.value();
@@ -6274,7 +6343,11 @@ class PlayerController extends ChangeNotifier {
     final id =
         origin?.source.account.configuredServerId ??
         openRequest?.source?.account.configuredServerId;
-    if (id == null || runtime?.registry.access.revokingServerId != id) return;
+    if (id == null ||
+        (runtime?.registry.access.revokingServerId != id &&
+            origin?.permit.isValid != false)) {
+      return;
+    }
     _revokePlayback();
   }
 
@@ -6300,7 +6373,8 @@ class PlayerController extends ChangeNotifier {
         (_switchTarget == null || _switchTarget!.permit.isValid)) {
       return;
     }
-    if (origin?.source.account.configuredServerId != serverId &&
+    if (origin?.permit.isValid != false &&
+        origin?.source.account.configuredServerId != serverId &&
         _switchTarget?.source.account.configuredServerId != serverId) {
       return;
     }

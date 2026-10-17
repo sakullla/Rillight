@@ -466,6 +466,12 @@ abstract class AppLocalizations {
   /// **'从本机记录的实际来源继续'**
   String get aggregationResumeActual;
 
+  /// No description provided for @aggregationVerifySource.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证并查找'**
+  String get aggregationVerifySource;
+
   /// No description provided for @aggregationSources.
   ///
   /// In zh, this message translates to:
@@ -2980,6 +2986,18 @@ abstract class AppLocalizations {
   /// **'配置升级未完成，原始配置已保留。'**
   String get configurationUpgradeFailed;
 
+  /// No description provided for @historyRecoveryFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'播放记录暂时无法读取'**
+  String get historyRecoveryFailed;
+
+  /// No description provided for @historyRecoveryHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'请保留下面的原始文件；修复文件或从已存在的备份恢复后重试。'**
+  String get historyRecoveryHint;
+
   /// No description provided for @configurationRecoveryHint.
   ///
   /// In zh, this message translates to:
@@ -5187,6 +5205,72 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'{seconds} 秒后可重试'**
   String serversPasswordRetryAfter(int seconds);
+
+  /// No description provided for @comparisonHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择来源查看详情，播放不会自动切换。'**
+  String get comparisonHint;
+
+  /// No description provided for @comparisonVerified.
+  ///
+  /// In zh, this message translates to:
+  /// **'已确认是同一作品'**
+  String get comparisonVerified;
+
+  /// No description provided for @comparisonUnverified.
+  ///
+  /// In zh, this message translates to:
+  /// **'尚未确认是同一作品，请先核对详情'**
+  String get comparisonUnverified;
+
+  /// No description provided for @comparisonSearchDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'查找完成'**
+  String get comparisonSearchDone;
+
+  /// No description provided for @comparisonSearchPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在查找其他版本…'**
+  String get comparisonSearchPending;
+
+  /// No description provided for @comparisonSearchPartial.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分内容未能加载'**
+  String get comparisonSearchPartial;
+
+  /// No description provided for @comparisonNoVersionDetails.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本信息未知，可进入详情查看'**
+  String get comparisonNoVersionDetails;
+
+  /// No description provided for @comparisonVersions.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 个版本'**
+  String comparisonVersions(int count);
+
+  /// No description provided for @comparisonTracks.
+  ///
+  /// In zh, this message translates to:
+  /// **'音轨 {audio} 条 · 字幕 {subtitles} 条'**
+  String comparisonTracks(int audio, int subtitles);
+
+  /// No description provided for @comparisonPasswordTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证进入密码'**
+  String get comparisonPasswordTitle;
+
+  /// No description provided for @comparisonPasswordPrompt.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证后查找这台服务器中的对应影片。'**
+  String get comparisonPasswordPrompt;
 }
 
 class _AppLocalizationsDelegate

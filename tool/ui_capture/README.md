@@ -61,3 +61,5 @@ macOS 若运行磁盘缓存测试时出现 `disk-unavailable`，先检查系统�
 画中画隐藏状态通过注入原生事实的测试 backend 驱动同一 Flutter 树，仅验证覆盖层显隐；
 它不是系统小窗、原生字幕像素或连续视频／音频证据。系统 PiP 使用隔离 Android 验证包，
 由 `tool/android_release_checks.py` 的 `phone_pip_flow` 另验 pinned task、连续会话和变化画面。
+
+`--feature entry` captures the real comparison dialog before verification, its password form and privately verified candidates, plus the recoverable startup history failure page. Synthetic paths identify retained files; these captures do not establish native playback or device acceptance.

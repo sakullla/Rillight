@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../auth/server_configuration_migration.dart';
+import '../../auth/startup_recovery.dart';
 
 /// Only the application main process opens this store. Playback processes send
 /// events to its HistoryWriter; they must never open the history file.
@@ -52,17 +53,21 @@ class FileHistoryStore implements HistoryStore {
       lease = await File('$path.lock').open(mode: FileMode.append);
       await lease.lock(FileLock.exclusive);
       final store = FileHistoryStore._(File(path), lease);
-      final value = await store.read();
-      if (value != null && value['sourceIdentityVersion'] != 2) {
-        final migrated = const ServerSourceMapping([]).migrateHistory(value);
-        final backup = File('$path.pre-source-v2');
-        if (!await backup.exists()) {
-          await backup.writeAsString(
-            await store.file.readAsString(),
-            flush: true,
-          );
+      try {
+        final value = await store.read();
+        if (value != null && value['sourceIdentityVersion'] != 2) {
+          final migrated = const ServerSourceMapping([]).migrateHistory(value);
+          final backup = File('$path.pre-source-v2');
+          if (!await backup.exists()) {
+            await backup.writeAsString(
+              await store.file.readAsString(),
+              flush: true,
+            );
+          }
+          await store.replace(migrated);
         }
-        await store.replace(migrated);
+      } catch (_) {
+        throw await recoveryFailure(store.file);
       }
       return store;
     } catch (_) {
@@ -70,6 +75,25 @@ class FileHistoryStore implements HistoryStore {
       _openPaths.remove(path);
       rethrow;
     }
+  }
+
+  static Future<ConfigurationUpgradeFailure> recoveryFailure(File file) async {
+    final original = file.absolute;
+    final backup = File('${original.path}.pre-source-v2');
+    var backupExists = false;
+    try {
+      backupExists =
+          await FileSystemEntity.type(backup.path, followLinks: false) ==
+          FileSystemEntityType.file;
+    } catch (_) {
+      /* The original path still provides a recovery target. */
+    }
+    return ConfigurationUpgradeFailure(
+      original.parent.path,
+      originalPath: original.path,
+      backupPath: backupExists ? backup.path : null,
+      history: true,
+    );
   }
 
   void _requireOpen() {

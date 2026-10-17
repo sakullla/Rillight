@@ -1,3 +1,4 @@
+import 'server_entry_coordinator.dart';
 import '../media_server/server_address.dart';
 
 import 'package:rillight/media_server/capabilities.dart';
@@ -141,6 +142,7 @@ class OperationPermit {
     this.authorizationRevision,
     this.accessGeneration,
     this.libraryId,
+    this.entry,
   );
   final SourceSessionRegistry _owner;
   final SourceAccount account;
@@ -148,6 +150,7 @@ class OperationPermit {
   final int authorizationRevision;
   final int accessGeneration;
   final String? libraryId;
+  final ServerEntryTicket? entry;
 
   bool get isValid => _owner.accepts(this);
   void requireValid() {
@@ -2127,10 +2130,18 @@ class SourceSessionRegistry {
     }
   }
 
-  OperationPermit permit(SourceAccount account, {String? libraryId}) {
+  OperationPermit permit(
+    SourceAccount account, {
+    String? libraryId,
+    ServerEntryTicket? entry,
+  }) {
     final server = _allowed(account.configuredServerId);
     final session = _sessions[server.id];
-    requireContentAccess(server.id);
+    if (entry == null) {
+      requireContentAccess(server.id);
+    } else if (!entry.authorizes(access, server.id)) {
+      throw StateError('Entry preparation revoked');
+    }
     if (_cloudDisconnects.contains(server.cloudCredentialRef) ||
         _credentialChanges.contains(server.id) ||
         session?.account != account) {
@@ -2141,8 +2152,9 @@ class SourceSessionRegistry {
       account,
       session!.revision,
       _authorizations[server.id] ?? 0,
-      access.generation(server.id),
+      entry?.generation ?? access.generation(server.id),
       libraryId,
+      entry,
     );
   }
 
@@ -2154,13 +2166,15 @@ class SourceSessionRegistry {
       return !_cloudDisconnects.contains(server.cloudCredentialRef) &&
           !_credentialChanges.contains(server.id) &&
           server.serviceType == permit.account.serviceType &&
-          access.allows(server.id) &&
+          (permit.entry?.authorizes(access, server.id) ??
+              access.allows(server.id)) &&
           session?.account == permit.account &&
           session?.client.hasSession == true &&
           session?.client.userId == permit.account.userId &&
           session?.revision == permit.sessionRevision &&
           (_authorizations[server.id] ?? 0) == permit.authorizationRevision &&
-          access.generation(server.id) == permit.accessGeneration;
+          (permit.entry?.generation ?? access.generation(server.id)) ==
+              permit.accessGeneration;
     } on StateError {
       return false;
     }

@@ -1,3 +1,9 @@
+import 'package:rillight/library/aggregation_page.dart';
+import 'package:rillight/app/startup_failure.dart';
+import 'package:rillight/app/android_bootstrap.dart';
+import 'package:rillight/app/presentation_environment.dart';
+import 'package:rillight/auth/startup_recovery.dart';
+
 import '../../test/helpers/cupertino_test_app.dart';
 
 import 'dart:async';
@@ -36,6 +42,75 @@ import 'capture.dart';
 import 'fixtures.dart';
 
 extension PageCaptures on CaptureSession {
+  /// Startup failure owns a fresh root; do not replace an active detail app.
+  Future<void> entryRecovery() async {
+    const recovery = ConfigurationUpgradeFailure(
+      '/synthetic/rillight',
+      originalPath: '/synthetic/rillight/watch-history.json',
+      backupPath: '/synthetic/rillight/watch-history.json.pre-source-v2',
+      history: true,
+    );
+    tester.platformDispatcher.platformBrightnessTestValue = theme == 'dark'
+        ? Brightness.dark
+        : Brightness.light;
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: boundary,
+        child: platform == 'desktop'
+            ? StartupFailureApp(upgrade: recovery, retry: () async {})
+            : AndroidBootstrap(
+                resolveEnvironment: () async => platform == 'tv'
+                    ? PresentationEnvironment.tv
+                    : PresentationEnvironment.phone,
+                createAuth: () async => AuthController.memory(),
+                createRuntime: (_) async => throw recovery,
+              ),
+      ),
+    );
+    for (var i = 0; i < 40 && find.text('播放记录暂时无法读取').evaluate().isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await advance(100);
+    }
+    expect(find.text('播放记录暂时无法读取'), findsOneWidget);
+    await save(
+      'entry-history-recovery',
+      renderedTheme: platform == 'desktop' ? theme : 'dark',
+    );
+    tester.platformDispatcher.clearPlatformBrightnessTestValue();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await advance(100);
+  }
+
+  Future<void> _driveEntryCapture(Future<void> Function() action) async {
+    var done = false;
+    Object? failure;
+    await tester.runAsync(() async {
+      unawaited(
+        action().then(
+          (_) {
+            done = true;
+          },
+          onError: (Object error) {
+            failure = error;
+            done = true;
+          },
+        ),
+      );
+    });
+    for (var step = 0; step < 100 && !done; step++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await advance(100);
+    }
+    if (!done) {
+      throw TimeoutException('Entry capture fixture operation did not finish');
+    }
+    if (failure != null) throw failure!;
+  }
+
   Future<void> activate(Finder finder) async {
     expect(finder, findsOneWidget);
     await Scrollable.ensureVisible(tester.element(finder), alignment: .5);
@@ -97,6 +172,110 @@ extension PageCaptures on CaptureSession {
     FakeEmbyServer server,
     CaptureAdapter adapter,
   ) async {
+    if (wants('entry')) {
+      if ([
+        'entry-comparison-locked',
+        'entry-comparison-password',
+        'entry-comparison-candidate',
+      ].any(shouldCapture)) {
+        final source = auth.savedServers.first;
+        final target = auth.savedServers.last;
+        await _driveEntryCapture(() async {
+          await auth.serverAccess.setPassword(
+            target.id,
+            'capture-entry',
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(target.id, ref),
+          );
+          await auth.refreshServers();
+        });
+        final session = (await tester.runAsync(
+          () => auth.sources.ensureSession(source.id),
+        ))!;
+        app.router.go(
+          '/item/movie-up',
+          extra: PlayerHostOpenItemCommand(
+            itemId: 'movie-up',
+            source: SourceReference(
+              account: session.account,
+              itemId: 'movie-up',
+            ),
+            libraryId: 'view-movies',
+            accessGeneration: auth.serverAccess.generation(source.id),
+          ),
+        );
+        await advance(1200);
+        await activate(
+          find
+              .descendant(
+                of: find.byType(SourceComparisonAction),
+                matching: find.byType(AppButton),
+              )
+              .first,
+        );
+        await advance(800);
+        expect(
+          find.byKey(ValueKey('comparison-verify-${target.id}')),
+          findsOneWidget,
+        );
+        await save('entry-comparison-locked');
+        await activate(find.byKey(ValueKey('comparison-verify-${target.id}')));
+        await save('entry-comparison-password');
+        if (platform == 'tv') {
+          await _editTvField(
+            const Key('server-unlock-password'),
+            'capture-entry',
+          );
+        } else {
+          await tester.enterText(
+            find.byKey(const Key('server-unlock-password')),
+            'capture-entry',
+          );
+        }
+        await activate(find.byKey(const Key('server-unlock-submit')));
+        for (
+          var i = 0;
+          i < 60 &&
+              find
+                  .byKey(ValueKey('comparison-item-${target.id}-movie-up'))
+                  .evaluate()
+                  .isEmpty;
+          i++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)),
+          );
+          await advance(100);
+        }
+        expect(
+          find.byKey(ValueKey('comparison-item-${target.id}-movie-up')),
+          findsOneWidget,
+        );
+        expect(auth.session?.server.id, source.id);
+        expect(auth.serverAccess.allows(target.id), isFalse);
+        await Scrollable.ensureVisible(
+          tester.element(
+            find.byKey(ValueKey('comparison-item-${target.id}-movie-up')),
+          ),
+          alignment: .2,
+        );
+        await advance(250);
+        await save('entry-comparison-candidate');
+        await activate(find.byKey(const Key('comparison-close')));
+        await _driveEntryCapture(() async {
+          await auth.serverAccess.disablePassword(
+            target.id,
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(target.id, ref),
+          );
+          await auth.refreshServers();
+        });
+      }
+      app.router.go('/');
+      await advance(500);
+    }
     if (wants('aggregation')) {
       app.router.go('/');
       await advance(700);

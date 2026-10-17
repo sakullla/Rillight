@@ -199,6 +199,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aggregationResumeActual => '从本机记录的实际来源继续';
 
   @override
+  String get aggregationVerifySource => '验证并查找';
+
+  @override
   String get aggregationSources => '查找同源';
 
   @override
@@ -1520,6 +1523,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get configurationUpgradeFailed => '配置升级未完成，原始配置已保留。';
 
   @override
+  String get historyRecoveryFailed => '播放记录暂时无法读取';
+
+  @override
+  String get historyRecoveryHint => '请保留下面的原始文件；修复文件或从已存在的备份恢复后重试。';
+
+  @override
   String get configurationRecoveryHint =>
       '请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。';
 
@@ -2685,4 +2694,41 @@ class AppLocalizationsZh extends AppLocalizations {
   String serversPasswordRetryAfter(int seconds) {
     return '$seconds 秒后可重试';
   }
+
+  @override
+  String get comparisonHint => '选择来源查看详情，播放不会自动切换。';
+
+  @override
+  String get comparisonVerified => '已确认是同一作品';
+
+  @override
+  String get comparisonUnverified => '尚未确认是同一作品，请先核对详情';
+
+  @override
+  String get comparisonSearchDone => '查找完成';
+
+  @override
+  String get comparisonSearchPending => '正在查找其他版本…';
+
+  @override
+  String get comparisonSearchPartial => '部分内容未能加载';
+
+  @override
+  String get comparisonNoVersionDetails => '版本信息未知，可进入详情查看';
+
+  @override
+  String comparisonVersions(int count) {
+    return '共 $count 个版本';
+  }
+
+  @override
+  String comparisonTracks(int audio, int subtitles) {
+    return '音轨 $audio 条 · 字幕 $subtitles 条';
+  }
+
+  @override
+  String get comparisonPasswordTitle => '验证进入密码';
+
+  @override
+  String get comparisonPasswordPrompt => '验证后查找这台服务器中的对应影片。';
 }

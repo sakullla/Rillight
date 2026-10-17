@@ -1,3 +1,6 @@
+import '../auth/server_entry_coordinator.dart';
+import '../auth/server_list_store.dart';
+
 import 'package:rillight/player/playback_persistence.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/errors.dart';
@@ -84,7 +87,10 @@ class PlaybackRuntime {
   PlaybackOrigin? mountedPlayerOrigin(Object request) =>
       _mountedPlayers[request]?.call();
 
-  static Future<PlaybackRuntime> production(AuthController auth) async {
+  static Future<PlaybackRuntime> production(
+    AuthController auth, {
+    Directory? directory,
+  }) async {
     final validation =
         Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'] ??
         Platform.environment['RILLIGHT_VALIDATION_DATA_DIR'];
@@ -93,32 +99,70 @@ class PlaybackRuntime {
       throw ArgumentError('Validation directory must be absolute');
     }
     final root =
+        directory?.absolute.path ??
         validation ??
         '${(await getApplicationSupportDirectory()).path}/rillight';
-    final store = await FileHistoryStore.open(File('$root/watch-history.json'));
-    return PlaybackRuntime(
-      auth: auth,
-      history: await HistoryWriter.open(registry: auth.sources, store: store),
-    );
+    final file = File('$root/watch-history.json');
+    final store = await FileHistoryStore.open(file);
+    try {
+      return PlaybackRuntime(
+        auth: auth,
+        history: await HistoryWriter.open(registry: auth.sources, store: store),
+      );
+    } catch (_) {
+      await store.close();
+      throw await FileHistoryStore.recoveryFailure(file);
+    }
   }
+
+  Future<ServerEntryTicket?> prepareSourceEntry(
+    String serverId, {
+    Future<String?> Function(SavedServer server)? requestPassword,
+  }) => auth.serverEntry.prepareEntry(
+    server: registry.server(serverId),
+    requestPassword: () async => requestPassword == null
+        ? null
+        : await requestPassword(registry.server(serverId)),
+    connect: (guard) => auth.prepareServerEntry(serverId, guard: guard),
+  );
 
   Future<(SourceAccount, OperationPermit)> _playbackPermit(
     SourceReference source,
-    String library,
-  ) async {
-    final account = await registry.acquireAccount(
-      source.account.configuredServerId,
-      libraryId: library,
-    );
+    String library, {
+    ServerEntryTicket? entry,
+  }) async {
+    final account = entry != null
+        ? (await registry.prepareEntrySession(
+            source.account.configuredServerId,
+          )).account
+        : await registry.acquireAccount(
+            source.account.configuredServerId,
+            libraryId: library,
+          );
     if (account != source.account) {
       throw StateError('Playback account changed');
     }
-    return (account, registry.permit(account, libraryId: library));
+    return (
+      account,
+      registry.permit(account, libraryId: library, entry: entry),
+    );
   }
 
-  Future<PlaybackOrigin> resolve(PlayerOpenRequest request) async {
+  Future<PlaybackOrigin> resolve(
+    PlayerOpenRequest request, {
+    ServerEntryTicket? entry,
+  }) async {
     SourceReference? source = request.source;
     String? library = request.libraryId;
+    if (entry != null &&
+        (source == null ||
+            !entry.authorizes(
+              registry.access,
+              source.account.configuredServerId,
+            ) ||
+            request.accessGeneration != entry.generation)) {
+      throw StateError('Playback entry does not authorize this request');
+    }
     if (source == null) {
       final selected = auth.session;
       if (selected == null) throw StateError('No selected source');
@@ -148,12 +192,17 @@ class PlaybackRuntime {
       throw ArgumentError('Source and library must belong to playback item');
     }
     // Reject old decoded private intent before authentication/acquisition IO.
-    if (registry.access.isProtected(source.account.configuredServerId) &&
+    if (entry == null &&
+        registry.access.isProtected(source.account.configuredServerId) &&
         request.accessGeneration !=
             registry.access.generation(source.account.configuredServerId)) {
       throw StateError('Private playback route generation was revoked');
     }
-    final (account, permit) = await _playbackPermit(source, library);
+    final (account, permit) = await _playbackPermit(
+      source,
+      library,
+      entry: entry,
+    );
     // A decoded route is still only a value reference. Unlocking must not
     // reacquire the authority of a pre-lock private playback intent.
     if (registry.access.isProtected(account.configuredServerId) &&
@@ -239,6 +288,7 @@ class PlaybackRuntime {
         mediaSourceId: mediaSourceId,
         accessGeneration: origin.permit.accessGeneration,
       ),
+      entry: origin.permit.entry,
     );
     origin.permit.requireValid();
     return resolved;

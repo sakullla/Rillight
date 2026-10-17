@@ -83,6 +83,33 @@ class _Movie extends FakeEmbyItem {
   };
 }
 
+class _ComparisonMovie extends _Movie {
+  @override
+  Map<String, dynamic> toJson() => {
+    ...super.toJson(),
+    'MediaSources': [
+      for (var version = 0; version < 3; version++)
+        {
+          'Id': 'internal-version-$version',
+          'Name': version == 0 ? '剧场版 1080p' : '收藏版 4K',
+          'Width': version == 0 ? 1920 : 3840,
+          'Height': version == 0 ? 1080 : 2160,
+          'MediaStreams': [
+            {'Index': 0, 'Type': 'Video', 'Codec': 'h264'},
+            {'Index': 1, 'Type': 'Audio', 'Codec': 'aac', 'Language': 'eng'},
+            for (var subtitle = 0; subtitle < 24; subtitle++)
+              {
+                'Index': subtitle + 2,
+                'Type': 'Subtitle',
+                'Codec': 'subrip',
+                'Language': 'chi',
+              },
+          ],
+        },
+    ],
+  };
+}
+
 class _ControlledHistoryStore extends MemoryHistoryStore {
   bool fail = false;
   Completer<void>? gate;
@@ -354,6 +381,41 @@ class _Fixture {
     if (unlock) expect(await auth.serverAccess.unlock(id, '1234'), isTrue);
   }
 
+  /// Recreate process-owned state from the same persisted configuration. A
+  /// protected remembered server retains credentials but has no live session.
+  Future<void> reopen() async {
+    final credentials = auth.credentials;
+    final servers = auth.sources.store;
+    final accessStore = auth.serverAccess.store;
+    final historyStore = history.store;
+    await close();
+    MediaServerClient client() => _PresentationClient(
+      device: const ClientDeviceInfo(
+        clientName: 'test',
+        deviceName: 'test',
+        deviceId: 'test',
+        version: '1',
+      ),
+      dio: dioForFakeEmby(adapter),
+    );
+    final sources = SourceSessionRegistry(
+      access: TestServerAccessController(store: accessStore),
+      store: servers,
+      credentials: credentials,
+      createClient: client,
+    );
+    await sources.load();
+    auth = AuthController(
+      client: client(),
+      credentials: credentials,
+      servers: servers,
+      sources: sources,
+    );
+    await auth.restore();
+    history = await HistoryWriter.open(registry: sources, store: historyStore);
+    runtime = PlaybackRuntime(auth: auth, history: history);
+  }
+
   RillightApp app(
     PresentationEnvironment environment, {
     FakeVideoBackend? backend,
@@ -406,6 +468,26 @@ Future<void> _drive(WidgetTester tester, Future<void> work) async {
   }
   if (failure != null) throw failure!;
   if (!finished) throw StateError('playback switch did not finish');
+}
+
+Future<void> _typeEntryPassword(
+  WidgetTester tester,
+  PresentationEnvironment environment,
+  String password,
+) async {
+  final input = find.byKey(const Key('server-unlock-password'));
+  expect(input, findsOneWidget);
+  if (environment.isTv) {
+    await tester.tap(input);
+    await _settle(tester);
+    await tester.enterText(find.byKey(const Key('tv-input-editor')), password);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await _settle(tester);
+  } else {
+    await tester.enterText(input, password);
+  }
+  await tester.tap(find.byKey(const Key('server-unlock-submit')));
+  await _settle(tester);
 }
 
 Future<void> _finishRevocation(
@@ -2092,6 +2174,296 @@ void main() {
     tags: ['integration'],
   );
 
+  for (final environment in [
+    PresentationEnvironment.desktop,
+    PresentationEnvironment.phone,
+    PresentationEnvironment.tv,
+  ]) {
+    cases.testWidgets(
+      '${environment.presentation.name} comparison verifies locked target privately and commits only chosen detail',
+      (tester) async {
+        isolateImageCache();
+        tester.view.physicalSize = environment.isTv
+            ? const Size(1920, 1080)
+            : environment.isDesktop
+            ? const Size(1024, 900)
+            : const Size(412, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final f = _Fixture();
+        f.b.items = [_ComparisonMovie()];
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
+        await tester.runAsync(() async {
+          await f.protect(f.aId, unlock: true);
+          await f.auth.switchTo(f.aId);
+          await f.protect(f.bId);
+        });
+        final backend = FakeVideoBackend();
+        final app = f.app(environment, backend: backend);
+        await tester.pumpWidget(app);
+        await _settle(tester);
+        await _openOwnedDetail(
+          tester,
+          f,
+          app,
+          serverId: f.aId,
+          itemId: 'shared-id',
+        );
+        final detailType = environment.isDesktop
+            ? ItemDetailPage
+            : environment.isTv
+            ? TvDetailPage
+            : MobileDetailPage;
+        final original = DetailSourceScope.maybeOf(
+          tester.element(find.byType(detailType)),
+        )!;
+        f.b.requests.clear();
+        Future<void> showComparison() async {
+          final action = find.widgetWithText(ui.AppButton, '查找同源');
+          await tester.ensureVisible(action);
+          await tester.tap(action);
+          await _settle(tester);
+        }
+
+        Future<void> verifyTarget() async {
+          final action = find.byKey(Key('comparison-verify-${f.bId}'));
+          await tester.ensureVisible(action);
+          await tester.tap(action);
+          await _settle(tester);
+          expect(find.text('验证进入密码'), findsOneWidget);
+          expect(find.text('验证后查找这台服务器中的对应影片。'), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('server-unlock-submit')),
+              matching: find.text('验证并查找'),
+            ),
+            findsOneWidget,
+          );
+          await _typeEntryPassword(tester, environment, '1234');
+        }
+
+        void expectOriginalAccess() {
+          expect(f.auth.session!.server.id, f.aId);
+          expect(original.permit.isValid, isTrue);
+          expect(f.auth.serverAccess.allows(f.aId), isTrue);
+          expect(f.auth.serverAccess.allows(f.bId), isFalse);
+          expect(backend.openCount, 0);
+        }
+
+        await showComparison();
+        expect(find.byKey(Key('comparison-server-${f.bId}')), findsOneWidget);
+        expect(
+          find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+          findsNothing,
+        );
+        expect(f.b.requests, isEmpty);
+        await tester.tap(find.byKey(Key('comparison-verify-${f.bId}')));
+        await _settle(tester);
+        await tester.tap(
+          find.byKey(const Key('comparison-verification-cancel')),
+        );
+        await _settle(tester);
+        expectOriginalAccess();
+        expect(f.b.requests, isEmpty);
+        if (environment.isTv) {
+          await tester.binding.handlePopRoute();
+          await _settle(tester);
+          expect(find.byKey(const Key('comparison-title')), findsNothing);
+          expectOriginalAccess();
+          await showComparison();
+        }
+        await verifyTarget();
+        expect(
+          find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+          findsOneWidget,
+        );
+        expectOriginalAccess();
+        expect(find.text('已确认是同一作品'), findsOneWidget);
+        expect(find.text('共 3 个版本'), findsOneWidget);
+        expect(find.text('音轨 1 条 · 字幕 24 条'), findsNWidgets(2));
+        final visibleCopy = tester
+            .widgetList<Text>(find.byType(Text))
+            .map((text) => text.data ?? '')
+            .join('\n');
+        for (final internal in [
+          'commonProvider',
+          'providerConflict',
+          'view-movies',
+          'internal-version-',
+          'Video:',
+          'Audio:',
+          'Subtitle:',
+        ]) {
+          expect(visibleCopy, isNot(contains(internal)));
+        }
+        final titlePosition = tester.getTopLeft(
+          find.byKey(const Key('comparison-title')),
+        );
+        final closePosition = tester.getTopLeft(
+          find.byKey(const Key('comparison-close')),
+        );
+        await tester.drag(
+          find.byKey(const Key('comparison-content')),
+          const Offset(0, -300),
+        );
+        await _settle(tester);
+        expect(
+          tester.getTopLeft(find.byKey(const Key('comparison-title'))),
+          titlePosition,
+        );
+        expect(
+          tester.getTopLeft(find.byKey(const Key('comparison-close'))),
+          closePosition,
+        );
+        expect(
+          find.byKey(const Key('comparison-close')).hitTestable(),
+          findsOneWidget,
+        );
+        // Another query cannot consume the comparison's private entry ticket.
+        final global = AggregationQueryController(
+          registry: f.auth.sources,
+          history: f.history,
+        );
+        await _drive(tester, global.start(QueryScope()));
+        expect(
+          global.items.any(
+            (item) => item.reference.account.configuredServerId == f.bId,
+          ),
+          isFalse,
+        );
+        global.dispose();
+        final close = find.byKey(const Key('comparison-close'));
+        if (environment.isTv) {
+          bool closeHasFocus() {
+            var found = false;
+            FocusManager.instance.primaryFocus?.context?.visitAncestorElements((
+              element,
+            ) {
+              if (element.widget.key == const Key('comparison-close')) {
+                found = true;
+              }
+              return !found;
+            });
+            return found;
+          }
+
+          for (var step = 0; step < 16 && !closeHasFocus(); step++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+            await _settle(tester);
+          }
+          expect(
+            closeHasFocus(),
+            isTrue,
+            reason: 'The remote must reach the close button without a pointer',
+          );
+          expect(
+            (Offset.zero & tester.view.physicalSize).contains(
+              tester.getCenter(close),
+            ),
+            isTrue,
+            reason: 'Directional focus must scroll the close action into view',
+          );
+          await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        } else {
+          await tester.ensureVisible(close);
+          await tester.tap(close);
+        }
+        await _settle(tester);
+        expectOriginalAccess();
+        await showComparison();
+        // Closing discarded the previous candidate authorization.
+        expect(find.byKey(Key('comparison-server-${f.bId}')), findsOneWidget);
+        expect(
+          find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+          findsNothing,
+        );
+        await verifyTarget();
+        expectOriginalAccess();
+        final target = find.byKey(Key('comparison-item-${f.bId}-shared-id'));
+        await tester.ensureVisible(target);
+        await tester.tap(target);
+        await _settle(tester);
+        expect(f.auth.session!.server.id, f.bId);
+        expect(f.auth.serverAccess.allows(f.aId), isFalse);
+        expect(original.permit.isValid, isFalse);
+        expect(f.auth.serverAccess.allows(f.bId), isTrue);
+        expect(find.byKey(const Key('comparison-title')), findsNothing);
+        expect(find.byType(detailType), findsOneWidget);
+        final destination = DetailSourceScope.maybeOf(
+          tester.element(find.byType(detailType)),
+        )!;
+        expect(destination.source.account.configuredServerId, f.bId);
+        expect(destination.permit.isValid, isTrue);
+        expect(app.router.state.uri.path, '/item/shared-id');
+        expect(backend.openCount, 0);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester);
+        app.router.dispose();
+      },
+      tags: ['integration'],
+    );
+  }
+
+  cases.testWidgets(
+    'comparison target proof failure preserves original protected server and cancels target entry',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
+      await tester.runAsync(() async {
+        await f.protect(f.aId, unlock: true);
+        await f.auth.switchTo(f.aId);
+        await f.protect(f.bId);
+      });
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
+      final original = DetailSourceScope.maybeOf(
+        tester.element(find.byType(ItemDetailPage)),
+      )!;
+      await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
+      await _settle(tester);
+      await tester.tap(find.byKey(Key('comparison-verify-${f.bId}')));
+      await _settle(tester);
+      await _typeEntryPassword(tester, PresentationEnvironment.desktop, '1234');
+      final target = find.byKey(Key('comparison-item-${f.bId}-shared-id'));
+      expect(target, findsOneWidget);
+      f.b.itemStatus = 503;
+      await tester.ensureVisible(target);
+      await tester.tap(target);
+      await _settle(tester);
+      expect(f.auth.session!.server.id, f.aId);
+      expect(original.permit.isValid, isTrue);
+      expect(f.auth.serverAccess.allows(f.aId), isTrue);
+      expect(f.auth.serverAccess.allows(f.bId), isFalse);
+      expect(find.byKey(Key('comparison-server-${f.bId}')), findsOneWidget);
+      expect(
+        find.byKey(Key('comparison-item-${f.bId}-shared-id')),
+        findsNothing,
+      );
+      expect(app.router.state.uri.path, '/item/shared-id');
+      await tester.tap(find.byKey(const Key('comparison-close')));
+      await _settle(tester);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _settle(tester);
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
   cases.testWidgets(
     'source comparison distinguishes title candidate and unknown metadata without confirmed resume',
     (tester) async {
@@ -2119,12 +2491,12 @@ void main() {
       );
       await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
-      expect(find.textContaining('待辨认候选'), findsOneWidget);
-      expect(find.textContaining('已确认来源'), findsNothing);
+      expect(find.text('尚未确认是同一作品，请先核对详情'), findsOneWidget);
+      expect(find.text('已确认是同一作品'), findsNothing);
       expect(find.textContaining('未知'), findsWidgets);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await _settle(tester);
-      expect(find.byType(ui.AppDialog), findsNothing);
+      expect(find.byKey(const Key('comparison-title')), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -2171,7 +2543,7 @@ void main() {
       await _settle(tester);
       await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
-      expect(find.textContaining('已确认来源'), findsOneWidget);
+      expect(find.text('已确认是同一作品'), findsOneWidget);
       await tester.tap(find.text('查找此集'));
       await _settle(tester);
       await tester.tap(find.text('已核对，按季与集对应'));
@@ -2290,10 +2662,10 @@ void main() {
       );
       await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
-      expect(find.byType(ui.AppDialog), findsOneWidget);
+      expect(find.byKey(const Key('comparison-title')), findsOneWidget);
       await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
       await _settle(tester);
-      expect(find.byType(ui.AppDialog), findsNothing);
+      expect(find.byKey(const Key('comparison-title')), findsNothing);
       expect(find.byType(ItemDetailPage), findsNothing);
       expect(
         app.router.routeInformationProvider.value.uri.path,
@@ -2695,13 +3067,274 @@ void main() {
     );
   }
 
+  cases.testWidgets(
+    'forged protected detail cannot switch selection or unlock its target during reauthorization',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
+      final b = (await tester.runAsync(
+        () => f.auth.sources.ensureSession(f.bId),
+      ))!.account;
+      await tester.runAsync(() async {
+        await f.protect(f.aId, unlock: true);
+        await f.auth.switchTo(f.aId);
+        await f.protect(f.bId);
+      });
+      final a = (await tester.runAsync(
+        () => f.auth.sources.ensureSession(f.aId),
+      ))!;
+      final originalPermit = f.auth.sources.permit(a.account);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      final before = f.b.requests.length;
+      app.router.go(
+        '/item/shared-id',
+        extra: PlayerHostOpenItemCommand(
+          itemId: 'shared-id',
+          source: SourceReference(
+            account: SourceAccount(
+              configuredServerId: f.bId,
+              verifiedServerId: 'forged-server',
+              userId: b.userId,
+            ),
+            itemId: 'shared-id',
+          ),
+          libraryId: 'view-movies',
+          accessGeneration: f.auth.serverAccess.generation(f.bId),
+        ),
+      );
+      await _settle(tester);
+      if (find
+          .byKey(const Key('server-unlock-password'))
+          .evaluate()
+          .isNotEmpty) {
+        await _typeEntryPassword(
+          tester,
+          PresentationEnvironment.desktop,
+          '1234',
+        );
+      }
+      expect(f.auth.session!.server.id, f.aId);
+      expect(originalPermit.isValid, isTrue);
+      expect(f.auth.serverAccess.allows(f.aId), isTrue);
+      expect(f.auth.serverAccess.allows(f.bId), isFalse);
+      expect(find.byType(DetailSourceScope), findsNothing);
+      expect(
+        f.b.requests.skip(before).where((r) => r.contains('/Items/shared-id')),
+        isEmpty,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _settle(tester);
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'detail without a remembered server offers selection and preserves the original destination',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
+      await tester.runAsync(() async {
+        await f.protect(f.bId);
+        final persisted = await f.auth.sources.store.load();
+        await f.auth.sources.store.save(
+          ServerListSnapshot(servers: persisted.servers),
+        );
+        await f.reopen();
+      });
+      expect(f.auth.session, isNull);
+      expect(f.auth.prefill, isNull);
+      f.a.requests.clear();
+      f.b.requests.clear();
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      const destination = '/item/shared-id?showComparison=0';
+      app.router.go(destination);
+      await _settle(tester);
+      expect(find.byKey(const Key('detail-choose-server')), findsOneWidget);
+      expect(find.text('合成作品'), findsNothing);
+      await tester.tap(find.byKey(const Key('detail-choose-server')));
+      await _settle(tester);
+      await tester.tap(find.byKey(Key('server-enter-${f.bId}')));
+      await _settle(tester);
+      await _typeEntryPassword(tester, PresentationEnvironment.desktop, '1234');
+      expect(app.router.state.uri.toString(), destination);
+      expect(f.auth.session!.server.id, f.bId);
+      expect(find.byType(ItemDetailPage), findsOneWidget);
+      expect(f.b.requests.any((r) => r.contains('/Items/shared-id')), isTrue);
+      expect(
+        f.a.requests.where((r) => r.contains('/Items/shared-id')),
+        isEmpty,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _settle(tester);
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
   for (final environment in [
     PresentationEnvironment.desktop,
     PresentationEnvironment.phone,
     PresentationEnvironment.tv,
   ]) {
+    for (final withExtra in [false, true]) {
+      cases.testWidgets(
+        '${environment.presentation.name} cold protected detail restores its destination after local verification extra=$withExtra',
+        (tester) async {
+          isolateImageCache();
+          tester.view.physicalSize = environment.isTv
+              ? const Size(1920, 1080)
+              : environment.isDesktop
+              ? const Size(1024, 900)
+              : const Size(412, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final f = _Fixture();
+          await tester.runAsync(f.open);
+          addTearDown(() => _drive(tester, f.close()));
+          await tester.runAsync(() async {
+            await f.protect(f.bId, unlock: true);
+            await f.auth.switchTo(f.bId);
+          });
+          final account = (await tester.runAsync(
+            () =>
+                f.auth.sources.acquireAccount(f.bId, libraryId: 'view-movies'),
+          ))!;
+          final oldGeneration = f.auth.serverAccess.generation(f.bId);
+          final source = SourceReference(account: account, itemId: 'shared-id');
+          const codec = SourceRouteExtraCodec();
+          final oldDetail = codec.decode(
+            jsonDecode(
+              jsonEncode(
+                codec.encode(
+                  PlayerHostOpenItemCommand(
+                    itemId: 'shared-id',
+                    source: source,
+                    libraryId: 'view-movies',
+                    accessGeneration: oldGeneration,
+                  ),
+                ),
+              ),
+            ),
+          );
+          final oldPlayback = PlayerOpenRequest(
+            itemId: 'shared-id',
+            source: source,
+            libraryId: 'view-movies',
+            accessGeneration: oldGeneration,
+          );
+          final credentials = await tester.runAsync(
+            () => f.auth.credentials.read(f.bId),
+          );
+          await tester.runAsync(f.reopen);
+          expect(f.auth.session, isNull);
+          expect(f.auth.serverAccess.allows(f.bId), isFalse);
+          expect(
+            (await tester.runAsync(() => f.auth.credentials.read(f.bId)))!
+                .accessToken,
+            credentials!.accessToken,
+          );
+          f.a.requests.clear();
+          f.b.requests.clear();
+          final backend = FakeVideoBackend();
+          final app = f.app(environment, backend: backend);
+          await tester.pumpWidget(app);
+          await _settle(tester);
+          const destination = '/item/shared-id?showComparison=0';
+          app.router.go(destination, extra: withExtra ? oldDetail : null);
+          await _settle(tester);
+          expect(
+            find.byKey(const Key('server-unlock-password')),
+            findsOneWidget,
+          );
+          expect(
+            f.b.requests.where((r) => r.contains('/Items/shared-id')),
+            isEmpty,
+          );
+          expect(find.text('合成作品'), findsNothing);
+          // Back cancels this attempt, not the original detail destination.
+          for (
+            var step = 0;
+            step < 3 &&
+                (find.byType(ServerSelectionPage).evaluate().isNotEmpty ||
+                    find.byType(TvServerSelectionPage).evaluate().isNotEmpty);
+            step++
+          ) {
+            await tester.binding.handlePopRoute();
+            await _settle(tester);
+          }
+          expect(app.router.state.uri.toString(), destination);
+          expect(f.auth.session, isNull);
+          expect(f.auth.serverAccess.allows(f.bId), isFalse);
+          await tester.tap(find.text('进入服务器'));
+          await _settle(tester);
+          await _typeEntryPassword(tester, environment, 'wrong');
+          expect(f.auth.session, isNull);
+          expect(f.auth.serverAccess.allows(f.bId), isFalse);
+          expect(
+            f.b.requests.where((r) => r.contains('/Items/shared-id')),
+            isEmpty,
+          );
+          // The form and access controller share the production wall clock.
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 2100)),
+          );
+          await _settle(tester);
+          await _typeEntryPassword(tester, environment, '1234');
+          expect(app.router.state.uri.toString(), destination);
+          expect(f.auth.session!.server.id, f.bId);
+          expect(f.auth.serverAccess.allows(f.bId), isTrue);
+          expect(
+            find.byType(
+              environment.isDesktop
+                  ? ItemDetailPage
+                  : environment.isTv
+                  ? TvDetailPage
+                  : MobileDetailPage,
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('合成作品'), findsWidgets);
+          expect(
+            f.b.requests.any((r) => r.contains('/Items/shared-id')),
+            isTrue,
+          );
+          expect(
+            f.a.requests.where((r) => r.contains('/Items/shared-id')),
+            isEmpty,
+          );
+          expect(f.auth.serverAccess.generation(f.bId), isNot(oldGeneration));
+          Object? rejected;
+          await tester.runAsync(() async {
+            try {
+              await f.runtime.resolve(oldPlayback);
+            } catch (error) {
+              rejected = error;
+            }
+          });
+          expect(rejected, isA<StateError>());
+          expect(backend.openCount, 0);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+          await _settle(tester);
+          app.router.dispose();
+        },
+        tags: ['integration'],
+      );
+    }
     cases.testWidgets(
-      '${environment.presentation.name} decoded protected extras cannot revive after lock unlock or forged account restore',
+      '${environment.presentation.name} old playback leases and forged accounts stay rejected after detail reauthorization',
       (tester) async {
         isolateImageCache();
         tester.view.physicalSize = environment.isTv
@@ -2781,7 +3414,12 @@ void main() {
         );
         app.router.go('/item/shared-id', extra: detail);
         await _settle(tester);
-        expect(find.byType(DetailSourceScope), findsNothing);
+        final refreshed = tester.widget<DetailSourceScope>(
+          find.byType(DetailSourceScope),
+        );
+        expect(refreshed.origin.source.account, account);
+        expect(refreshed.origin.permit.isValid, isTrue);
+        expect(refreshed.origin.permit.accessGeneration, isNot(generation));
         app.router.go('/play/shared-id', extra: request);
         await _settle(tester);
         expect(app.router.state.uri.path.startsWith('/play/'), isFalse);
@@ -2801,6 +3439,25 @@ void main() {
             accessGeneration: f.auth.serverAccess.generation(f.bId),
           ),
         ) as PlayerOpenRequest;
+        final beforeForgedDetail = f.b.requests.length;
+        app.router.go(
+          '/item/shared-id',
+          extra: PlayerHostOpenItemCommand(
+            itemId: 'shared-id',
+            source: forged.source,
+            libraryId: 'view-movies',
+            accessGeneration: forged.accessGeneration,
+          ),
+        );
+        await _settle(tester);
+        expect(find.byType(DetailSourceScope), findsNothing);
+        expect(
+          f.b.requests
+              .skip(beforeForgedDetail)
+              .where((request) => request.contains('/Items/shared-id')),
+          isEmpty,
+          reason: 'A detail destination can renew permission only for the same verified account',
+        );
         app.router.go('/play/shared-id', extra: forged);
         await _settle(tester);
         expect(app.router.state.uri.path.startsWith('/play/'), isFalse);
@@ -2810,8 +3467,20 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
         await _settle(tester);
-        expect(find.byType(ItemDetailPage), findsNothing);
-        expect(find.byType(DetailSourceScope), findsNothing);
+        // Back/forward may revisit a legitimate detail destination, but each
+        // visible subtree must own a freshly authorized, matching account.
+        for (final scope in tester.widgetList<DetailSourceScope>(
+          find.byType(DetailSourceScope),
+        )) {
+          expect(scope.origin.source.account, account);
+          expect(scope.origin.permit.isValid, isTrue);
+          expect(
+            scope.origin.permit.accessGeneration,
+            f.auth.serverAccess.generation(f.bId),
+          );
+        }
+        expect(find.byType(MobilePlayerPage), findsNothing);
+        expect(find.byType(TvPlayerPage), findsNothing);
         expect(backend.openCount, 0);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());

@@ -141,9 +141,12 @@ class ServerUnlockForm extends StatefulWidget {
     this.unavailable = false,
     this.retryAt,
     this.clock,
+    this.prompt,
+    this.submitLabel,
   });
   final ValueChanged<String> onSubmit;
   final String? error;
+  final String? prompt, submitLabel;
   final bool busy, unavailable;
   final DateTime? retryAt;
   final DateTime Function()? clock;
@@ -205,7 +208,7 @@ class ServerUnlockFormState extends State<ServerUnlockForm> {
         Text(
           widget.unavailable
               ? l.serversPasswordUnavailable
-              : l.serversPasswordPrompt,
+              : widget.prompt ?? l.serversPasswordPrompt,
         ),
         const SizedBox(height: 24),
         if (!widget.unavailable) ...[
@@ -232,7 +235,7 @@ class ServerUnlockFormState extends State<ServerUnlockForm> {
                   ? l.serversPasswordRetryAfter(remaining)
                   : widget.busy
                   ? l.serversBusy
-                  : l.serversEnter,
+                  : widget.submitLabel ?? l.serversEnter,
             ),
           ),
         ],

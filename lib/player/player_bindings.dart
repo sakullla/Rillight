@@ -46,6 +46,7 @@ class PlayerBindings {
     this.observationSink,
     this.switchDispatcher,
     this.reportOutcomeSink,
+    this.sourceOpenResult,
     this.startupData,
     this.playbackLineSnapshot,
     this.verifiedPlaybackServerId,
@@ -59,6 +60,8 @@ class PlayerBindings {
   final PlaybackObservationSink? observationSink;
   final PlaybackSwitchDispatcher? switchDispatcher;
   final PlaybackReportOutcomeSink? reportOutcomeSink;
+  final Future<void> Function(String itemId, String? version, bool succeeded)?
+  sourceOpenResult;
   final Future<PlayerStartupData?>? startupData;
 
   /// Desktop playback process reads this snapshot. Null means the page

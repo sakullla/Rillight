@@ -1,3 +1,5 @@
+import '../auth/server_entry_coordinator.dart';
+
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/provider_registry.dart';
 import 'package:rillight/player/playback_persistence.dart';
@@ -61,6 +63,7 @@ class PlayerWindowLaunch {
     this.protocol,
     this.accessGeneration,
     this.preparedStartup = false,
+    this.entryPending = false,
     this.lines = const [],
     this.verifiedServerId,
     this.startupHandoff,
@@ -76,6 +79,7 @@ class PlayerWindowLaunch {
   final PlayerProcessProtocol? protocol;
   final int? accessGeneration;
   final bool preparedStartup;
+  final bool entryPending;
   final List<ServerLine> lines;
   final String? verifiedServerId;
 
@@ -175,6 +179,7 @@ class PlayerWindowLaunch {
       userId: json['userId'] as String? ?? '',
       userAgent: json['userAgent'] as String?,
       preparedStartup: json['preparedStartup'] == true,
+      entryPending: json['entryPending'] == true,
       verifiedServerId: json['verifiedServerId'] as String?,
       lines: [
         for (final item in json['lines'] as List? ?? const [])
@@ -209,6 +214,7 @@ class PlayerWindowLaunch {
       if (request.libraryId != null) 'libraryId': request.libraryId,
       if (accessGeneration != null) 'accessGeneration': accessGeneration,
       if (preparedStartup) 'preparedStartup': true,
+      if (entryPending) 'entryPending': true,
       ...?protocol?.fields,
       'itemId': request.itemId,
       'autoResume': request.autoResume,
@@ -263,12 +269,14 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   DesktopPlayerWindowHost({
     required this.auth,
     this.runtime,
+    this.requestSourcePassword,
     PlayerProcessControl? processControl,
     this._snapshotStoreForPid,
     this._consumeOpenItem,
     this.closeTimeout = const Duration(seconds: 1),
     this.reportTimeout = const Duration(seconds: 3),
     this.watchInterval = const Duration(milliseconds: 400),
+    this.entryOpenTimeout = const Duration(seconds: 150),
   }) : _control = processControl ?? createPlayerProcessControl() {
     auth.addListener(_onAuth);
     auth.serverAccess.addRevocationHook(_revokePrivate);
@@ -280,6 +288,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   final AuthController auth;
   final PlaybackRuntime? runtime;
+  final Future<String?> Function(SavedServer server)? requestSourcePassword;
+  ServerEntryTicket? _switchEntry;
   PlaybackOrigin? _origin;
   WatchSession? _watchSession;
   bool _privateRevoked = false;
@@ -317,6 +327,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   /// 探测播放进程是否仍存活的轮询间隔。
   final Duration watchInterval;
+  final Duration entryOpenTimeout;
+  ServerEntryTicket? _pendingEntry;
+  Timer? _entryOpenTimer;
 
   final PlayerProcessControl _control;
   final PlaybackSnapshotStoreLocator? _snapshotStoreForPid;
@@ -367,6 +380,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> open(PlayerOpenRequest request) {
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _entryOpenTimer?.cancel();
+    _switchEntry?.cancel();
+    _switchEntry = null;
     _pendingSwitch = null;
     _restoreSwitch = null;
     switchFailure = null;
@@ -376,6 +394,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   Future<void> _openWithOrigin(
     PlayerOpenRequest request, {
     PlaybackOrigin? prepared,
+    ServerEntryTicket? entry,
   }) {
     final revision = ++_requestRevision;
     _opening = true;
@@ -439,12 +458,14 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           user: handoffUser,
           versions: versions,
         ).payload;
-        await runtime!.importLegacyPreferences(
-          origin,
-          item,
-          versions,
-          await (await openPlayerSettingsStore()).read(),
-        );
+        if (entry == null) {
+          await runtime!.importLegacyPreferences(
+            origin,
+            item,
+            versions,
+            await (await openPlayerSettingsStore()).read(),
+          );
+        }
         if (_disposed || revision != _requestRevision) return;
         final pref = runtime!.preference(origin, item, versions);
         final usePreference =
@@ -523,6 +544,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           lines: lines,
           verifiedServerId: origin.source.account.verifiedServerId,
           startupHandoff: handoff,
+          entryPending: entry != null,
         );
       } else {
         launch = PlayerWindowLaunch.fromAuth(
@@ -580,9 +602,19 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         _authIdentity = _currentAuthIdentity;
         _epoch++;
         _current = launch.request;
+        _pendingEntry = entry;
+        _entryOpenTimer?.cancel();
+        if (entry != null) {
+          _entryOpenTimer = Timer(entryOpenTimeout, () {
+            if (identical(_pendingEntry, entry) && _pid == pid) {
+              unawaited(_rejectPendingEntry('Target playback open timed out'));
+            }
+          });
+        }
         notifyListeners();
         _startWatch(pid);
       } catch (error) {
+        entry?.cancel();
         preparation?.cancel();
         if (error is PlayerProcessStartupException) {
           await _reconcileSnapshot(error.pid);
@@ -597,6 +629,26 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         if (!_disposed) notifyListeners();
       }
     });
+  }
+
+  Future<void> _rejectPendingEntry(String message) async {
+    final entry = _pendingEntry;
+    if (entry == null) return;
+    _pendingEntry = null;
+    _entryOpenTimer?.cancel();
+    entry.cancel();
+    await _runInFlight(_stopProcess);
+    if (!_disposed && _restoreSwitch?.origin.permit.isValid == true) {
+      try {
+        await restoreOriginalSource();
+      } catch (_) {
+        /* Keep retryable A. */
+      }
+    }
+    if (!_disposed) {
+      switchFailure = message;
+      notifyListeners();
+    }
   }
 
   @override
@@ -626,6 +678,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> close() {
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _switchEntry?.cancel();
+    _switchEntry = null;
+    _entryOpenTimer?.cancel();
     final revision = ++_requestRevision;
     _control.cancelPendingSpawns(includePrepared: true);
     return _runInFlight(() async {
@@ -640,6 +697,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> forceClose() async {
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _switchEntry?.cancel();
+    _switchEntry = null;
+    _entryOpenTimer?.cancel();
     _startupPreparation?.cancel();
     _startupPreparation = null;
     _requestRevision++;
@@ -717,8 +779,13 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             if (watch != null) runtime?.history.endSession(watch);
             _watchSession = null;
             _clearWindow();
-            unawaited(prepare());
+            if (_pendingEntry == null) unawaited(prepare());
           });
+          if (_pendingEntry != null) {
+            await _rejectPendingEntry(
+              'Target player exited before successful open',
+            );
+          }
         } catch (_) {
           // A close may remove the mailbox while a watcher read is in flight.
         } finally {
@@ -923,6 +990,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         throw StateError('Stale or foreign playback event');
       }
       origin.permit.requireValid();
+      if (_pendingEntry != null) {
+        throw StateError('Target has not opened successfully');
+      }
       final version = event['version'] as String;
       if (_watchSession?.source.mediaSourceId != version ||
           _watchSession?.source.itemId != event['item']) {
@@ -1119,6 +1189,43 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       actual.permit.requireValid();
       _lastSwitchCommand = sequence;
       switch (command['action']) {
+        case 'opened':
+          final entry = _pendingEntry;
+          if (entry == null ||
+              command['item'] != _current?.itemId ||
+              command['version'] != _current?.mediaSourceId) {
+            throw StateError('No matching target open transaction');
+          }
+          final target = await runtime!.resolveItem(
+            actual,
+            command['item'] as String,
+            mediaSourceId: command['version'] as String,
+          );
+          final info = await target.permit.dispatch(
+            (c) => c.inspectPlaybackInfo(
+              itemId: target.source.itemId,
+              mediaSourceId: command['version'] as String,
+            ),
+          );
+          if (!info.mediaSources.any((v) => v.id == command['version'])) {
+            throw StateError('Unknown opened target version');
+          }
+          await entry.prepareCommit();
+          if (!identical(_pendingEntry, entry) || _pid != pid || _disposed) {
+            throw StateError('Target open superseded');
+          }
+          if (!entry.commit()) throw StateError('Source entry commit failed');
+          _pendingEntry = null;
+          _entryOpenTimer?.cancel();
+          _restoreSwitch = null;
+          _saveSwitchPreference = true;
+          switchFailure = null;
+        case 'openFailed':
+          if (_pendingEntry == null || command['item'] != _current?.itemId) {
+            throw StateError('No matching target open transaction');
+          }
+          commit = () => _rejectPendingEntry('Target playback failed to open');
+
         case 'lock':
           if (!auth.serverAccess.isProtected(
             actual.source.account.configuredServerId,
@@ -1277,6 +1384,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           );
           final line = command['line'] as String?;
           final oldVersion = command['version'] as String;
+          _switchEntry?.cancel();
+          _switchEntry = null;
+          if (line == null) {
+            final reference = decodeAuthorizedSource(
+              Map<String, dynamic>.from(command['target'] as Map),
+            );
+            _switchEntry = await runtime!.prepareSourceEntry(
+              reference.account.configuredServerId,
+              requestPassword: requestSourcePassword,
+            );
+            if (_switchEntry == null) {
+              throw StateError('Source entry cancelled');
+            }
+          }
           final target = line != null
               ? await runtime!.resolveLine(old, line, oldVersion)
               : await runtime!.resolve(
@@ -1291,8 +1412,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                       Map<String, dynamic>.from(command['work'] as Map),
                     ),
                     libraryId: command['library'] as String,
-                    accessGeneration: actual.permit.accessGeneration,
+                    accessGeneration: _switchEntry!.generation,
                   ),
+                  entry: _switchEntry,
                 );
           if (line == null) {
             await runtime!.requireEquivalent(
@@ -1302,10 +1424,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             );
           }
           final oldInfo = await old.permit.dispatch(
-            (_) => old.client.getPlaybackInfo(itemId: itemId),
+            (_) => old.client.inspectPlaybackInfo(itemId: itemId),
           );
           final newInfo = await target.permit.dispatch(
-            (_) => target.client.getPlaybackInfo(
+            (_) => target.client.inspectPlaybackInfo(
               itemId: target.source.itemId,
               maxStreamingBitrate: command['bitrate'] as int,
             ),
@@ -1352,6 +1474,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           );
           receipt['plan'] = plan.toJson();
         case 'cancel':
+          _switchEntry?.cancel();
+          _switchEntry = null;
           _pendingSwitch = null;
         case 'confirm':
           final pending = _pendingSwitch;
@@ -1371,6 +1495,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             turnSubtitlesOff: command['turnSubtitlesOff'] == true,
           );
           if (choice == SwitchResumeChoice.cancel) {
+            _switchEntry?.cancel();
+            _switchEntry = null;
             _pendingSwitch = null;
             break;
           }
@@ -1397,7 +1523,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           );
           _restoreSwitch = (origin: pending.original, request: pending.restore);
           _pendingSwitch = null;
-          commit = () => _openWithOrigin(request, prepared: target);
+          final entry = _switchEntry;
+          _switchEntry = null;
+          commit = () =>
+              _openWithOrigin(request, prepared: target, entry: entry);
         case 'restore':
           final restore = _restoreSwitch;
           if (restore == null) {
@@ -1411,6 +1540,10 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       }
       receipt['accepted'] = true;
     } catch (error) {
+      if (command['action'] == 'inspect') {
+        _switchEntry?.cancel();
+        _switchEntry = null;
+      }
       receipt['accepted'] = false;
       receipt['error'] = '$error';
     }
@@ -1436,6 +1569,16 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                 _privateRevoked ||
                 !identical(_restoreSwitch, transaction)) {
               return;
+            }
+            final targetEntry = _origin?.permit.entry;
+            if (targetEntry != null &&
+                !targetEntry.isCommitted &&
+                transaction?.origin.permit.isValid == true) {
+              try {
+                await restoreOriginalSource();
+              } catch (_) {
+                /* A remains retryable. */
+              }
             }
             switchFailure = '$error';
             notifyListeners();
@@ -1556,6 +1699,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   void dispose() {
+    _pendingEntry?.cancel();
+    _pendingEntry = null;
+    _entryOpenTimer?.cancel();
+    _switchEntry?.cancel();
+    _switchEntry = null;
     _disposed = true;
     _requestRevision++;
     _control.cancelPendingSpawns(includePrepared: true);
@@ -1650,6 +1798,7 @@ class PlayerWindowApp extends StatefulWidget {
 
 class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   late PlayerWindowLaunch _launch;
+  bool _entryResultSent = false;
   late AuthController _auth;
   var _playerKey = GlobalKey<PlayerPageState>();
   Future<void>? _closing;
@@ -1972,6 +2121,17 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           progressInterval:
               widget._bindings?.progressInterval ?? const Duration(seconds: 10),
           observationSink: _launch.request.source == null ? null : _observe,
+          sourceOpenResult: !_launch.entryPending
+              ? null
+              : (item, version, succeeded) async {
+                  if (_entryResultSent) return;
+                  _entryResultSent = true;
+                  await _dispatchSwitch({
+                    'action': succeeded ? 'opened' : 'openFailed',
+                    'item': item,
+                    'version': version,
+                  });
+                },
           reportOutcomeSink: _launch.request.source == null
               ? null
               : _reportOutcome,

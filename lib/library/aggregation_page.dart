@@ -21,6 +21,9 @@ import '../aggregation/history/history_models.dart'
 import '../emby/catalog_cache.dart';
 import '../auth/auth_scope.dart';
 import '../auth/server_selection_page.dart';
+import '../auth/server_entry_coordinator.dart';
+import '../auth/server_password_form.dart';
+import '../auth/tv_server_access_page.dart';
 
 import '../app/l10n/app_localizations.dart';
 import '../app/mobile_chrome.dart';
@@ -897,8 +900,9 @@ void _open(BuildContext context, QueryItem item) {
 }
 
 class _DialogKeyboard extends StatelessWidget {
-  const _DialogKeyboard({required this.child});
+  const _DialogKeyboard({required this.child, this.autofocus = true});
   final Widget child;
+  final bool autofocus;
   @override
   Widget build(BuildContext context) => Shortcuts(
     shortcuts: const {
@@ -911,7 +915,11 @@ class _DialogKeyboard extends StatelessWidget {
         const SingleActivator(LogicalKeyboardKey.goBack): () =>
             Navigator.of(context).pop(),
       },
-      child: Focus(autofocus: true, child: child),
+      child: Focus(
+        autofocus: autofocus,
+        skipTraversal: !autofocus,
+        child: child,
+      ),
     ),
   );
 }
@@ -1075,17 +1083,138 @@ class _QueryCardState extends State<_QueryCard> {
   }
 }
 
-String _versionFacts(MediaItem item, AppLocalizations l) {
-  String fact(Object? value) => value?.toString() ?? l.aggregationUnknown;
-  if (item.mediaSources.isEmpty) return l.aggregationUnknown;
-  return item.mediaSources
-      .map(
-        (s) =>
-            '${fact(s.name)}\n'
-            '分辨率 ${fact(s.width)}×${fact(s.height)} · 码率 ${fact(s.bitrate)} · 大小 ${fact(s.size)} · 时长 ${fact(s.runtime)}\n'
-            '${s.streams.map((v) => '${v.type}: ${fact(v.codec)} / ${fact(v.language)} / ${fact(v.videoRange)}').join('; ')}',
-      )
-      .join('\n');
+class _ComparisonFrame extends StatelessWidget {
+  const _ComparisonFrame({
+    required this.title,
+    required this.content,
+    required this.action,
+  });
+  final String title;
+  final Widget content;
+  final Widget action;
+  @override
+  Widget build(BuildContext context) => AppModalFrame(
+    insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+    child: ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: 688,
+        maxHeight: MediaQuery.sizeOf(context).height - 48,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    key: const Key('comparison-title'),
+                    style: AppUiTheme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Flexible(
+            child: SingleChildScrollView(
+              key: const Key('comparison-content'),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: content,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+            child: Align(alignment: Alignment.centerRight, child: action),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ComparisonVersions extends StatelessWidget {
+  const _ComparisonVersions(this.item);
+  final MediaItem item;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (item.mediaSources.isEmpty) Text(l.comparisonNoVersionDetails),
+        if (item.mediaSources.length > 1)
+          Text(l.comparisonVersions(item.mediaSources.length)),
+        for (final source in item.mediaSources.take(2)) ...[
+          Text(
+            source.presentation.headline == '—'
+                ? l.comparisonNoVersionDetails
+                : source.presentation.headline,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (source.streams.isNotEmpty)
+            Text(
+              l.comparisonTracks(
+                source.audioStreams.length,
+                source.subtitleStreams.length,
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ComparisonServerStatus extends StatelessWidget {
+  const _ComparisonServerStatus({
+    required this.name,
+    required this.sources,
+    required this.retry,
+    required this.more,
+  });
+  final String name;
+  final List<SourceQuerySnapshot> sources;
+  final VoidCallback retry, more;
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final loading = sources.any((s) => s.status == SourceQueryStatus.loading);
+    final failed = sources.any((s) => s.failed);
+    final hasMore = sources.any(
+      (s) => s.hasMore && !s.failed && s.status != SourceQueryStatus.loading,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            '$name · ${loading
+                ? l.comparisonSearchPending
+                : failed
+                ? l.comparisonSearchPartial
+                : l.comparisonSearchDone}',
+          ),
+          if (loading) const CupertinoActivityIndicator(),
+          if (failed)
+            AppButton(
+              onPressed: retry,
+              variant: AppButtonVariant.plain,
+              child: Text(l.aggregationRetry),
+            ),
+          if (hasMore)
+            AppButton(
+              onPressed: more,
+              variant: AppButtonVariant.plain,
+              child: Text(l.aggregationMore),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Mounted in every gated detail tree, independent of global search.
@@ -1125,7 +1254,9 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
       unawaited(controller.start(origin: item, scope: QueryScope()));
       await showAppDialog<void>(
         context: context,
-        useRootNavigator: false,
+        // Desktop overlays must cover the shell header. TV keeps its route-local
+        // navigator so the underlying D-pad focus scope becomes inactive.
+        useRootNavigator: !PresentationScope.of(context).isTv,
         builder: (context) =>
             _ComparisonDialog(controller: controller!, episode: episode),
       );
@@ -1180,11 +1311,147 @@ class _SourceComparisonActionState extends State<SourceComparisonAction> {
   }
 }
 
-class _ComparisonDialog extends StatelessWidget {
+class _ComparisonDialog extends StatefulWidget {
   const _ComparisonDialog({required this.controller, this.episode});
   final SameSourceQueryController controller;
   final EpisodeSource? episode;
+  @override
+  State<_ComparisonDialog> createState() => _ComparisonDialogState();
+}
+
+class _ComparisonDialogState extends State<_ComparisonDialog> {
+  SameSourceQueryController get controller => widget.controller;
+  EpisodeSource? get episode => widget.episode;
+  SavedServer? _passwordTarget;
+  ServerEntryTicket? _pendingEntry;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _pendingEntry?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _verifyTarget(String password) async {
+    final target = _passwordTarget;
+    final runtime = PlayerScope.of(context).runtime;
+    if (_busy || target == null || runtime == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    ServerEntryTicket? entry;
+    try {
+      entry = await runtime.prepareSourceEntry(
+        target.id,
+        requestPassword: (_) async => password,
+      );
+      if (!mounted || controller.origin == null) {
+        entry?.cancel();
+        return;
+      }
+      if (entry == null) {
+        setState(
+          () => _error = runtime.registry.access.retryAt(target.id) != null
+              ? AppLocalizations.of(context).serversPasswordWrong
+              : AppLocalizations.of(context).serversConnectionFailed,
+        );
+        return;
+      }
+      _pendingEntry = entry;
+      await controller.addEntry(entry);
+      if (!mounted || controller.origin == null) {
+        entry.cancel();
+        return;
+      }
+      setState(() => _passwordTarget = null);
+    } catch (_) {
+      entry?.cancel();
+      if (mounted) {
+        setState(
+          () => _error = AppLocalizations.of(context).serversConnectionFailed,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openTarget(QueryItem item) async {
+    if (_busy || controller.origin == null) return;
+    final runtime = PlayerScope.of(context).runtime;
+    if (runtime == null) return;
+    final auth = AuthScope.of(context);
+    final router = GoRouter.of(context);
+    final navigator = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    final overlay = SearchOverlayController.maybeOf(context);
+    final serverId = item.reference.account.configuredServerId;
+    ServerEntryTicket? entry = controller.entryFor(serverId);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (entry == null && auth.session?.server.id != serverId) {
+        entry = await runtime.prepareSourceEntry(serverId);
+        if (entry == null) throw StateError('Target entry needs verification');
+        _pendingEntry = entry;
+      }
+      final permit = entry == null ? controller.permitForItem(item) : null;
+      // Verify the actual account, item and ancestry before any selection or
+      // access publication. A comparison card alone is not navigation proof.
+      final target = await runtime.resolve(
+        PlayerOpenRequest(
+          itemId: item.reference.itemId,
+          source: item.reference,
+          libraryId: item.libraryId,
+          accessGeneration: entry?.generation ?? permit!.accessGeneration,
+        ),
+        entry: entry,
+      );
+      if (!mounted || controller.origin == null) {
+        entry?.cancel();
+        return;
+      }
+      if (entry != null) {
+        await entry.prepareCommit();
+        if (!mounted || controller.origin == null) {
+          entry.cancel();
+          return;
+        }
+        if (!entry.commit()) throw StateError('Target entry revoked');
+      }
+      final generation = auth.serverAccess.generation(serverId);
+      final destination = PlayerHostOpenItemCommand(
+        itemId: target.source.itemId,
+        source: target.source,
+        libraryId: target.libraryId,
+        accessGeneration: generation,
+      );
+      // Entering B can revoke the detail hosting this dialog. Navigation uses
+      // the captured router, never that soon-to-be-unmounted A context.
+      if (navigator.mounted && route?.isCurrent == true) navigator.pop();
+      overlay?.close();
+      router.go(
+        '/item/${Uri.encodeComponent(target.source.itemId)}',
+        extra: destination,
+      );
+    } catch (_) {
+      entry?.cancel();
+      if (mounted) {
+        setState(
+          () => _error = AppLocalizations.of(context).serversConnectionFailed,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _lookupEpisode(BuildContext context, QueryItem target) async {
+    if (_busy) return;
     final verified = await confirmEpisodeMapping(context);
     if (!context.mounted) return;
     if (controller.origin == null) {
@@ -1215,125 +1482,223 @@ class _ComparisonDialog extends StatelessWidget {
         return const SizedBox.shrink();
       }
       final servers = controller.query.registry.project();
-      return _DialogKeyboard(
-        child: AppDialog(
-          title: Text(l.aggregationSources),
-          maxWidth: 688,
-          content: SizedBox(
-            width: 640,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    controller.complete
-                        ? l.aggregationComplete
-                        : l.aggregationIncomplete,
-                  ),
-                  for (final source in controller.sources)
-                    _SourceStatus(
-                      source: source,
-                      name:
-                          servers
-                              .where((s) => s.id == source.key.serverId)
-                              .firstOrNull
-                              ?.displayName ??
-                          '',
-                      retry: () => controller.retry(source.key),
-                      more: () => controller.loadMore(source.key),
-                    ),
-                  for (final comparison in controller.comparisons)
-                    AppListTile(
-                      title: Text(
-                        '${comparison.decision.confirmed ? l.aggregationConfirmed : l.aggregationCandidate} · ${comparison.source.item.name}',
+      final access = controller.query.registry.access;
+      final comparisons = [...controller.comparisons]
+        ..sort(
+          (a, b) => (b.decision.confirmed ? 1 : 0).compareTo(
+            a.decision.confirmed ? 1 : 0,
+          ),
+        );
+      final passwordTarget = _passwordTarget;
+      if (passwordTarget != null) {
+        return _DialogKeyboard(
+          autofocus: false,
+          child: _ComparisonFrame(
+            title: l.comparisonPasswordTitle,
+            content: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(passwordTarget.displayName),
+                const SizedBox(height: 12),
+                PresentationScope.of(context).isTv
+                    ? TvServerUnlockForm(
+                        onSubmit: _verifyTarget,
+                        prompt: l.comparisonPasswordPrompt,
+                        submitLabel: l.aggregationVerifySource,
+                        busy: _busy,
+                        unavailable: access.isUnavailable(passwordTarget.id),
+                        retryAt: access.retryAt(passwordTarget.id),
+                        error: _error,
+                      )
+                    : ServerUnlockForm(
+                        onSubmit: _verifyTarget,
+                        prompt: l.comparisonPasswordPrompt,
+                        submitLabel: l.aggregationVerifySource,
+                        busy: _busy,
+                        unavailable: access.isUnavailable(passwordTarget.id),
+                        retryAt: access.retryAt(passwordTarget.id),
+                        error: _error,
                       ),
-                      subtitle: Text(
-                        '${servers.where((s) => s.id == comparison.source.reference.account.configuredServerId).firstOrNull?.displayName ?? ''}\n'
-                        '${comparison.decision.reason.name} · ${_versionFacts(comparison.source.item, l)}',
-                      ),
-                      trailing:
-                          episode != null &&
-                              comparison.decision.confirmed &&
-                              comparison.source.item.isSeries
-                          ? AppButton(
-                              onPressed: () =>
-                                  _lookupEpisode(context, comparison.source),
-                              variant: AppButtonVariant.plain,
-                              child: Text(l.aggregationEpisodeLookup),
-                            )
-                          : null,
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        _open(context, comparison.source);
-                      },
-                    ),
-                  for (final result in controller.episodes)
-                    AppListTile(
-                      title: Text(
-                        result.lookup.status == EpisodeLookupStatus.missing
-                            ? l.aggregationMissingEpisode
-                            : result.lookup.status ==
-                                  EpisodeLookupStatus.queryFailed
-                            ? l.aggregationEpisodeFailed
-                            : result.lookup.status ==
-                                  EpisodeLookupStatus.confirmed
-                            ? l.aggregationEpisodeConfirmed
-                            : l.aggregationEpisodeUncertain,
-                      ),
-                      subtitle: Text(_sourceStatusLabel(result.status, l)),
-                      trailing:
-                          result.lookup.status ==
-                              EpisodeLookupStatus.queryFailed
-                          ? AppButton(
-                              onPressed: () => _lookupEpisode(
-                                context,
-                                controller.comparisons
-                                    .firstWhere(
-                                      (c) =>
-                                          c.source.reference == result.target,
-                                    )
-                                    .source,
-                              ),
-                              variant: AppButtonVariant.plain,
-                              child: Text(l.aggregationRetry),
-                            )
-                          : null,
-                      onTap: result.lookup.source == null
-                          ? null
-                          : () {
-                              final target = controller.comparisons
-                                  .firstWhere(
-                                    (c) => c.source.reference == result.target,
-                                  )
-                                  .source;
-                              final ref = result.lookup.source!.reference;
-                              Navigator.pop(context);
-                              _open(
-                                context,
-                                QueryItem(
-                                  ref,
-                                  target.libraryId,
-                                  MediaItem(
-                                    id: ref.itemId,
-                                    name: l.aggregationEpisodeConfirmed,
-                                    type: 'Episode',
-                                  ),
-                                ),
-                              );
-                            },
-                    ),
-                ],
-              ),
+              ],
+            ),
+            action: AppButton(
+              key: const Key('comparison-verification-cancel'),
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _passwordTarget = null;
+                      _error = null;
+                    }),
+              variant: AppButtonVariant.plain,
+              child: Text(l.cancelAction),
             ),
           ),
-          actions: [
-            AppButton(
-              onPressed: () => Navigator.pop(context),
-              variant: AppButtonVariant.plain,
-              child: Text('关闭'),
-            ),
-          ],
+        );
+      }
+      return _DialogKeyboard(
+        autofocus: false,
+        child: _ComparisonFrame(
+          title: l.aggregationSources,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_error != null) Text(_error!),
+              Text(l.comparisonHint),
+              for (final server in servers)
+                if (!access.allows(server.id) &&
+                    controller.entryFor(server.id)?.isValid != true)
+                  AppListTile(
+                    key: ValueKey('comparison-server-${server.id}'),
+                    leading: const Icon(CupertinoIcons.lock),
+                    title: Text(server.displayName),
+                    subtitle: Text(l.serversLocked),
+                    trailing: AppButton(
+                      key: ValueKey('comparison-verify-${server.id}'),
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() {
+                              _passwordTarget = server;
+                              _error = null;
+                            }),
+                      variant: AppButtonVariant.plain,
+                      child: Text(l.aggregationVerifySource),
+                    ),
+                  ),
+              for (final server in servers)
+                if (controller.sources.any((s) => s.key.serverId == server.id))
+                  _ComparisonServerStatus(
+                    name: server.displayName,
+                    sources: controller.sources
+                        .where((s) => s.key.serverId == server.id)
+                        .toList(),
+                    retry: () {
+                      for (final source in controller.sources.where(
+                        (s) => s.key.serverId == server.id && s.failed,
+                      )) {
+                        unawaited(controller.retry(source.key));
+                      }
+                    },
+                    more: () {
+                      for (final source in controller.sources.where(
+                        (s) =>
+                            s.key.serverId == server.id &&
+                            s.hasMore &&
+                            !s.failed,
+                      )) {
+                        unawaited(controller.loadMore(source.key));
+                      }
+                    },
+                  ),
+              for (final comparison in comparisons)
+                AppListTile(
+                  key: ValueKey(
+                    'comparison-item-${comparison.source.reference.account.configuredServerId}-${comparison.source.reference.itemId}',
+                  ),
+                  title: Text(
+                    comparison.source.item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        servers
+                                .where(
+                                  (s) =>
+                                      s.id ==
+                                      comparison
+                                          .source
+                                          .reference
+                                          .account
+                                          .configuredServerId,
+                                )
+                                .firstOrNull
+                                ?.displayName ??
+                            '',
+                      ),
+                      Text(
+                        comparison.decision.confirmed
+                            ? l.comparisonVerified
+                            : l.comparisonUnverified,
+                      ),
+                      const SizedBox(height: 4),
+                      _ComparisonVersions(comparison.source.item),
+                    ],
+                  ),
+                  trailing:
+                      episode != null &&
+                          comparison.decision.confirmed &&
+                          comparison.source.item.isSeries
+                      ? AppButton(
+                          onPressed: () =>
+                              _lookupEpisode(context, comparison.source),
+                          variant: AppButtonVariant.plain,
+                          child: Text(l.aggregationEpisodeLookup),
+                        )
+                      : null,
+                  onTap: _busy ? null : () => _openTarget(comparison.source),
+                ),
+              for (final result in controller.episodes)
+                AppListTile(
+                  title: Text(
+                    result.lookup.status == EpisodeLookupStatus.missing
+                        ? l.aggregationMissingEpisode
+                        : result.lookup.status ==
+                              EpisodeLookupStatus.queryFailed
+                        ? l.aggregationEpisodeFailed
+                        : result.lookup.status == EpisodeLookupStatus.confirmed
+                        ? l.aggregationEpisodeConfirmed
+                        : l.aggregationEpisodeUncertain,
+                  ),
+                  subtitle: Text(_sourceStatusLabel(result.status, l)),
+                  trailing:
+                      result.lookup.status == EpisodeLookupStatus.queryFailed
+                      ? AppButton(
+                          onPressed: () => _lookupEpisode(
+                            context,
+                            controller.comparisons
+                                .firstWhere(
+                                  (c) => c.source.reference == result.target,
+                                )
+                                .source,
+                          ),
+                          variant: AppButtonVariant.plain,
+                          child: Text(l.aggregationRetry),
+                        )
+                      : null,
+                  onTap: result.lookup.source == null
+                      ? null
+                      : () {
+                          final target = controller.comparisons
+                              .firstWhere(
+                                (c) => c.source.reference == result.target,
+                              )
+                              .source;
+                          final ref = result.lookup.source!.reference;
+                          _openTarget(
+                            QueryItem(
+                              ref,
+                              target.libraryId,
+                              MediaItem(
+                                id: ref.itemId,
+                                name: l.aggregationEpisodeConfirmed,
+                                type: 'Episode',
+                              ),
+                            ),
+                          );
+                        },
+                ),
+            ],
+          ),
+          action: AppButton(
+            key: const Key('comparison-close'),
+            autofocus: PresentationScope.of(context).isTv,
+            onPressed: () => Navigator.pop(context),
+            variant: AppButtonVariant.plain,
+            child: Text('关闭'),
+          ),
         ),
       );
     },

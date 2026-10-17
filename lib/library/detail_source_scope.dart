@@ -1,4 +1,7 @@
+import '../auth/server_entry_coordinator.dart';
 import '../auth/server_content_entry.dart';
+import '../auth/server_selection_page.dart';
+import '../auth/tv_server_selection_page.dart';
 
 import 'dart:async';
 
@@ -142,26 +145,84 @@ class SourceDetailGate extends StatelessWidget {
   final Widget child;
   final bool showComparison;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: auth,
+    builder: (context, _) => _buildEntry(context),
+  );
+
+  Widget _buildEntry(BuildContext context) {
+    Future<bool> validateEntry(
+      String serverId,
+      ServerEntryTicket ticket,
+    ) async {
+      final source = command?.source;
+      if (command != null && command!.itemId != itemId) return false;
+      if (source != null && source.itemId != itemId) return false;
+      final session = await auth.sources.prepareEntrySession(serverId);
+      if (source != null && session.account != source.account) return false;
+      final permit = auth.sources.permit(session.account, entry: ticket);
+      final item = await permit.dispatch((client) => client.getItem(itemId));
+      if (item.id != itemId) return false;
+      final claimed = command?.libraryId;
+      if (claimed != null && claimed.isNotEmpty) {
+        var cursor = item;
+        final visited = <String>{};
+        while (cursor.id != claimed) {
+          if (!visited.add(cursor.id) ||
+              cursor.hierarchyParentId == null ||
+              visited.length > 32) {
+            return false;
+          }
+          cursor = await permit.dispatch(
+            (client) => client.getItem(cursor.hierarchyParentId!),
+          );
+        }
+      }
+      return permit.isValid;
+    }
+
     final id =
-        command?.source?.account.configuredServerId ?? auth.session?.server.id;
-    if (id == null) return const SizedBox.shrink();
-    final generation = command?.accessGeneration;
-    if (command?.source != null &&
-        auth.serverAccess.isProtected(id) &&
-        generation != auth.serverAccess.generation(id)) {
+        command?.source?.account.configuredServerId ??
+        auth.session?.server.id ??
+        auth.prefill?.id;
+    if (id == null) {
       return Center(
-        child: Text(AppLocalizations.of(context).aggregationUnavailableDetail),
+        child: AppButton(
+          key: const Key('detail-choose-server'),
+          onPressed: () => PresentationScope.of(context).isTv
+              ? showTvServerSelection(
+                  context,
+                  auth: auth,
+                  validateEntry: validateEntry,
+                )
+              : showServerSelection(
+                  context,
+                  auth: auth,
+                  validateEntry: validateEntry,
+                  phone: !PresentationScope.of(context).isDesktop,
+                ),
+          child: Text(AppLocalizations.of(context).serversTitle),
+        ),
       );
     }
     return ServerContentGate(
+      key: ValueKey(id),
       auth: auth,
       serverId: id,
+      validateEntry: validateEntry,
       builder: (generation) => _AuthorizedDetailGate(
         auth: auth,
         itemId: itemId,
         showComparison: showComparison,
-        command: command,
+        command: command?.source == null
+            ? command
+            : PlayerHostOpenItemCommand(
+                itemId: command!.itemId,
+                seasonId: command!.seasonId,
+                source: command!.source,
+                libraryId: command!.libraryId,
+                accessGeneration: generation,
+              ),
         child: child,
       ),
     );

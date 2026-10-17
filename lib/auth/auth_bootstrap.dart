@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'startup_recovery.dart';
+export 'startup_recovery.dart';
+
 import 'cloud_credentials.dart';
 import 'provider_identity.dart';
 import 'server_access_credentials.dart';
@@ -19,11 +22,6 @@ import 'package:rillight/auth/pin_store.dart';
 
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
-
-class ConfigurationUpgradeFailure implements Exception {
-  const ConfigurationUpgradeFailure(this.directory);
-  final String directory;
-}
 
 Future<AuthController> createProductionAuth() async {
   final validation = Platform.environment['RILLIGHT_VALIDATION_DIRECTORY'];

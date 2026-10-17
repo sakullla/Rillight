@@ -1,3 +1,5 @@
+import '../../auth/server_entry_coordinator.dart';
+
 import 'package:rillight/media_server/media_server_client.dart';
 
 import 'dart:async';
@@ -149,6 +151,11 @@ class SameSourceQueryController extends ChangeNotifier {
     );
   }
 
+  Future<void> addEntry(ServerEntryTicket entry) => query.addEntry(entry);
+  ServerEntryTicket? entryFor(String serverId) => query.entryFor(serverId);
+  OperationPermit permitForItem(QueryItem item) =>
+      query.permitFor(item.reference.account, libraryId: item.libraryId);
+
   Future<void> loadMore(QuerySourceKey key) => query.loadMore(key);
   Future<void> retry(QuerySourceKey key) => query.retry(key);
 
@@ -198,12 +205,7 @@ class SameSourceQueryController extends ChangeNotifier {
     final available = <EpisodeSource>[];
     var uncertainRows = false;
     try {
-      permit = permitForAccount(
-        query.registry,
-        target.reference.account,
-        libraryId: target.libraryId,
-      );
-      if (permit == null) throw StateError('Source access revoked');
+      permit = permitForItem(target);
       while (true) {
         if (!owns()) return;
         final page = await permit

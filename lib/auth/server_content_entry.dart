@@ -1,3 +1,4 @@
+import 'server_entry_coordinator.dart';
 import '../app/presentation_environment.dart';
 import '../app/ui/ui.dart';
 import '../app/l10n/app_localizations.dart';
@@ -10,8 +11,10 @@ import 'tv_server_selection_page.dart';
 Future<bool> enterServerContent(
   BuildContext context,
   AuthController auth,
-  String serverId,
-) async {
+  String serverId, {
+  Future<bool> Function(String serverId, ServerEntryTicket ticket)?
+  validateEntry,
+}) async {
   if (auth.session?.server.id == serverId &&
       auth.serverAccess.allows(serverId)) {
     return true;
@@ -27,6 +30,7 @@ Future<bool> enterServerContent(
       auth: auth,
       initialServerId: serverId,
       onEntered: done,
+      validateEntry: validateEntry,
     );
   } else {
     await showServerSelection(
@@ -35,6 +39,7 @@ Future<bool> enterServerContent(
       phone: !PresentationScope.of(context).isDesktop,
       initialServerId: serverId,
       onEntered: done,
+      validateEntry: validateEntry,
     );
   }
   return entered &&
@@ -52,7 +57,10 @@ class ServerContentGate extends StatefulWidget {
     required this.builder,
     this.activeContentAllowed,
     this.onAccessRevoked,
+    this.validateEntry,
   });
+  final Future<bool> Function(String serverId, ServerEntryTicket ticket)?
+  validateEntry;
   final AuthController auth;
   final String serverId;
   final Widget Function(int accessGeneration) builder;
@@ -88,7 +96,12 @@ class _ServerContentGateState extends State<ServerContentGate> {
     if (busy) return;
     setState(() => busy = true);
     try {
-      if (await enterServerContent(context, widget.auth, widget.serverId) &&
+      if (await enterServerContent(
+            context,
+            widget.auth,
+            widget.serverId,
+            validateEntry: widget.validateEntry,
+          ) &&
           mounted) {
         accepted = widget.auth.serverAccess.generation(widget.serverId);
       }

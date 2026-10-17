@@ -13,6 +13,8 @@ class TvServerUnlockForm extends ServerUnlockForm {
     super.busy,
     super.unavailable,
     super.retryAt,
+    super.prompt,
+    super.submitLabel,
   });
   @override
   State<ServerUnlockForm> createState() => _TvUnlockState();
@@ -28,7 +30,7 @@ class _TvUnlockState extends ServerUnlockFormState {
         Text(
           widget.unavailable
               ? l.serversPasswordUnavailable
-              : l.serversPasswordPrompt,
+              : widget.prompt ?? l.serversPasswordPrompt,
         ),
         const SizedBox(height: 20),
         if (!widget.unavailable) ...[
@@ -51,7 +53,7 @@ class _TvUnlockState extends ServerUnlockFormState {
                   ? l.serversPasswordRetryAfter(remaining)
                   : widget.busy
                   ? l.serversBusy
-                  : l.serversEnter,
+                  : widget.submitLabel ?? l.serversEnter,
             ),
           ),
         ],

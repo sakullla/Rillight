@@ -1,3 +1,5 @@
+import 'server_entry_coordinator.dart';
+
 import 'dart:async';
 
 import '../app/l10n/app_localizations.dart';
@@ -22,6 +24,8 @@ Future<void> showTvServerSelection(
   String? initialServerId,
   Future<void> Function()? onEntered,
   Future<void> Function()? onLineChanged,
+  Future<bool> Function(String serverId, ServerEntryTicket ticket)?
+  validateEntry,
 }) => Navigator.of(context).push<void>(
   CupertinoPageRoute(
     builder: (_) => TvServerSelectionPage(
@@ -29,6 +33,7 @@ Future<void> showTvServerSelection(
       initialServerId: initialServerId,
       onEntered: onEntered,
       onLineChanged: onLineChanged,
+      validateEntry: validateEntry,
     ),
   ),
 );
@@ -43,6 +48,7 @@ class TvServerSelectionPage extends ServerSelectionPage {
     super.routePage,
     super.onEntered,
     super.onLineChanged,
+    super.validateEntry,
   });
   @override
   State<ServerSelectionPage> createState() => _TvServerSelectionState();

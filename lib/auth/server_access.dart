@@ -34,10 +34,16 @@ class ServerAccessPermit {
 
 /// A correct password is only a candidate until the entry intent is committed.
 class ServerUnlockCandidate {
-  ServerUnlockCandidate._(this._owner, this.serverId, this.generation);
+  ServerUnlockCandidate._(
+    this._owner,
+    this.serverId,
+    this.generation,
+    this.authorizedGeneration,
+  );
   final ServerAccessController _owner;
   final String serverId;
   final int generation;
+  final int authorizedGeneration;
   bool _consumed = false;
   bool get isValid => !_consumed && _owner.generation(serverId) == generation;
   void cancel() {
@@ -205,7 +211,7 @@ class ServerAccessController extends ChangeNotifier {
     try {
       final valid = !entry.record.enabled || await _verify(entry, password);
       if (!valid || captured != entry.generation || _disposed) return null;
-      return ServerUnlockCandidate._(this, serverId, captured);
+      return ServerUnlockCandidate._(this, serverId, captured, ++_epoch);
     } finally {
       entry.busy = false;
     }
@@ -218,7 +224,7 @@ class ServerAccessController extends ChangeNotifier {
     candidate._consumed = true;
     final entry = _entries[candidate.serverId]!;
     entry.unlocked = true;
-    entry.generation = ++_epoch;
+    entry.generation = candidate.authorizedGeneration;
     _notify();
     return true;
   }
@@ -269,7 +275,7 @@ class ServerAccessController extends ChangeNotifier {
       candidate._consumed = true;
       final entry = _entries[serverId]!;
       entry.unlocked = true;
-      entry.generation = ++_epoch;
+      entry.generation = candidate.authorizedGeneration;
     }
     publishConnection?.call();
     _notify();

@@ -20,6 +20,7 @@ const caseModules = <String>[
   'app/desktop_scroll_cases.dart',
   'app/desktop_scroll_pages_cases.dart',
   'app/source_route_extra_codec_cases.dart',
+  'app/startup_history_recovery_cases.dart',
   'app/window_geometry_cases.dart',
   'app_shell_cases.dart',
   'auth/auth_controller_cases.dart',

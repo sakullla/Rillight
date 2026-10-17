@@ -153,6 +153,7 @@ class PlayerPageState extends State<PlayerPage> {
       observationSink: bindings.observationSink,
       switchDispatcher: bindings.switchDispatcher,
       reportOutcomeSink: bindings.reportOutcomeSink,
+      sourceOpenResult: bindings.sourceOpenResult,
       openRequest: widget.sourceRequest,
       itemId: widget.itemId,
       backend: _createBackend(bindings),
