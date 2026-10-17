@@ -31,8 +31,8 @@ void main() {
     caseEntrypoints['auth/server_import_cases.dart']!,
   );
   group(
-    'emby/emby_device_test.dart',
-    caseEntrypoints['emby/emby_device_cases.dart']!,
+    'auth/source_sessions_test.dart',
+    caseEntrypoints['auth/source_sessions_cases.dart']!,
   );
   group(
     'emby/emby_socket_test.dart',
@@ -43,6 +43,10 @@ void main() {
     caseEntrypoints['emby/media_source_format_cases.dart']!,
   );
   group(
+    'emby/video_preview_test.dart',
+    caseEntrypoints['emby/video_preview_cases.dart']!,
+  );
+  group(
     'library/item_format_test.dart',
     caseEntrypoints['library/item_format_cases.dart']!,
   );
@@ -51,24 +55,12 @@ void main() {
     caseEntrypoints['player/cache/cache_contract_cases.dart#1']!,
   );
   group(
-    'player/cache/directory_inventory_test.dart',
-    caseEntrypoints['player/cache/directory_inventory_cases.dart']!,
-  );
-  group(
-    'player/cache/hls_proxy_timeline_test.dart',
-    caseEntrypoints['player/cache/hls_proxy_timeline_cases.dart']!,
-  );
-  group(
     'player/danmaku/danmaku_layout_test.dart',
     caseEntrypoints['player/danmaku/danmaku_layout_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_timeline_test.dart',
     caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
-  );
-  group(
-    'player/hls_redirect_chain_test.dart',
-    caseEntrypoints['player/hls_redirect_chain_cases.dart']!,
   );
   group(
     'player/playback_http_proxy_test.dart [part 3]',
@@ -87,6 +79,10 @@ void main() {
     caseEntrypoints['player/player_settings_cases.dart']!,
   );
   group(
+    'player/provider_failed_preparation_recovery_test.dart',
+    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
+  );
+  group(
     'player/provider_part_playback_test.dart',
     caseEntrypoints['player/provider_part_playback_cases.dart']!,
   );
@@ -101,5 +97,9 @@ void main() {
   group(
     'player/rillight_video_backend_test.dart [part 2]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#1']!,
+  );
+  group(
+    'player/strm_quality_confirmation_test.dart',
+    caseEntrypoints['player/strm_quality_confirmation_cases.dart']!,
   );
 }

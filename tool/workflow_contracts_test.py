@@ -1,4 +1,4 @@
-"""Exercise macOS provisioning control flow with lightweight native-tool stubs."""
+"""Check backup-key workflow contracts and stubbed macOS provisioning."""
 
 import hashlib
 import os
@@ -8,8 +8,62 @@ import subprocess
 import tempfile
 import unittest
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / '.github/scripts/macos_core.sh'
+
+
+class BackupKeyWorkflowTest(unittest.TestCase):
+    def test_secretless_ci_and_required_release_keys(self):
+        # BaseLoader keeps the YAML `on` key and boolean scalars as strings.
+        def read(path):
+            return yaml.load((ROOT / path).read_text(encoding='utf-8'),
+                             Loader=yaml.BaseLoader)
+
+        ci = read('.github/workflows/ci.yml')['jobs']
+        release = read('.github/workflows/release.yml')['jobs']
+        self.assertEqual(read('.github/workflows/release.yml')['on']['push']['tags'], ['v*'])
+        steps = []
+        for platform in ('linux', 'macos'):
+            workflow = read(f'.github/workflows/{platform}-package.yml')
+            self.assertNotIn('secrets', ci[f'{platform}-package'])
+            self.assertEqual(release[platform]['secrets'], 'inherit')
+            for key in ('HILLS', 'COMMON', 'RPB'):
+                self.assertEqual(workflow['on']['workflow_call']['secrets']
+                                 [f'RILLIGHT_{key}_KEY']['required'], 'false')
+            steps.append(next(step for step in workflow['jobs']['build']['steps']
+                              if step.get('name') == 'Check backup import key secrets'))
+        windows = read('.github/actions/windows-build/action.yml')
+        steps.append(windows['runs']['steps'][0])
+        release_windows = next(step for step in release['windows']['steps']
+                               if step.get('uses') == './.github/actions/windows-build')
+        for key in ('hills', 'common', 'rpb'):
+            self.assertEqual(windows['inputs'][f'{key}-key']['required'], 'false')
+            self.assertIn(f'secrets.RILLIGHT_{key.upper()}_KEY',
+                          release_windows['with'][f'{key}-key'])
+        bash = shutil.which('bash')
+        git_bash = Path('C:/Program Files/Git/bin/bash.exe')
+        if os.name == 'nt' and git_bash.is_file():
+            bash = str(git_bash)
+        for step in steps:
+            # PR and main callers skip validation; tag callers must execute it.
+            self.assertEqual(step['if'], "startsWith(github.ref, 'refs/tags/')")
+            for scenario in ('missing', 'partial', 'malformed', 'valid'):
+                with self.subTest(step=step['name'], scenario=scenario):
+                    environment = os.environ.copy()
+                    for key in step['env']:
+                        length = 32 if 'RPB' in key else 64
+                        value = 'a' * length
+                        if scenario == 'missing' or (scenario == 'partial' and 'RPB' in key):
+                            value = ''
+                        elif scenario == 'malformed':
+                            value = 'z' * length
+                        environment[key] = value
+                    result = subprocess.run([bash, '-c', step['run']], env=environment,
+                                            capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode == 0, scenario == 'valid',
+                                     result.stdout + result.stderr)
 
 
 class MacosProvisioningTest(unittest.TestCase):

@@ -19,12 +19,12 @@ void main() {
     caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
   );
   group(
-    'auth/provider_user_agent_test.dart',
-    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
+    'catalog/detail_controller_test.dart',
+    caseEntrypoints['catalog/detail_controller_cases.dart']!,
   );
   group(
-    'emby/aggregation_metadata_test.dart',
-    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
+    'emby/emby_device_test.dart',
+    caseEntrypoints['emby/emby_device_cases.dart']!,
   );
   group(
     'emby/emby_item_image_test.dart',
@@ -35,12 +35,20 @@ void main() {
     caseEntrypoints['player/cache/cache_contract_cases.dart#2']!,
   );
   group(
+    'player/cache/range_lease_index_test.dart',
+    caseEntrypoints['player/cache/range_lease_index_cases.dart']!,
+  );
+  group(
     'player/cache_crc32_test.dart',
     caseEntrypoints['player/cache_crc32_cases.dart']!,
   );
   group(
     'player/capability_record_test.dart',
     caseEntrypoints['player/capability_record_cases.dart']!,
+  );
+  group(
+    'player/catalog_preference_negotiation_test.dart',
+    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
   );
   group(
     'player/danmaku/dandanplay_client_test.dart',
@@ -73,10 +81,6 @@ void main() {
   group(
     'player/rillight_video_backend_test.dart [part 3]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#2']!,
-  );
-  group(
-    'player/strm_quality_confirmation_test.dart',
-    caseEntrypoints['player/strm_quality_confirmation_cases.dart']!,
   );
   group(
     'player/subtitle_slots_test.dart',

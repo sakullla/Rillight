@@ -1,8 +1,45 @@
 name: Verified Windows release build
 description: Warm default-branch dependency caches and build the candidate with release audits
+inputs:
+  hills-key:
+    description: Hex AES-256 key for Hills backup imports (64 hex chars, from secrets)
+    required: false
+    default: ''
+  common-key:
+    description: Hex AES-256 key for RodelPlayer common-config imports (64 hex chars, from secrets)
+    required: false
+    default: ''
+  rpb-key:
+    description: Hex AES-128 key for .rpb config imports (32 hex chars, from secrets)
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
+    - name: Validate backup import key inputs
+      # PR/main validation runs without secrets, including fork PRs.
+      if: startsWith(github.ref, 'refs/tags/')
+      shell: bash
+      env:
+        HILLS_KEY: ${{ inputs.hills-key }}
+        COMMON_KEY: ${{ inputs.common-key }}
+        RPB_KEY: ${{ inputs.rpb-key }}
+      run: |
+        set -euo pipefail
+        check() {
+          local name="$1" value="$2" length="$3"
+          if [ -z "$value" ]; then
+            echo "::error::$name was not provided; release builds must carry backup import keys."
+            return 1
+          fi
+          if [[ ! "$value" =~ ^[0-9a-fA-F]+$ ]] || [ "${#value}" -ne "$length" ]; then
+            echo "::error::$name must be exactly $length hex characters."
+            return 1
+          fi
+        }
+        check RILLIGHT_HILLS_KEY "$HILLS_KEY" 64
+        check RILLIGHT_COMMON_KEY "$COMMON_KEY" 64
+        check RILLIGHT_RPB_KEY "$RPB_KEY" 32
     - name: Set up Flutter
       uses: subosito/flutter-action@v2
       with:
@@ -59,8 +96,16 @@ runs:
       run: flutter pub get
 
     - name: Build Windows
-      shell: pwsh
-      run: flutter build windows --release --no-pub
+      shell: bash
+      env:
+        HILLS_KEY: ${{ inputs.hills-key }}
+        COMMON_KEY: ${{ inputs.common-key }}
+        RPB_KEY: ${{ inputs.rpb-key }}
+      run: >-
+        flutter build windows --release --no-pub
+        --dart-define=RILLIGHT_HILLS_KEY="$HILLS_KEY"
+        --dart-define=RILLIGHT_COMMON_KEY="$COMMON_KEY"
+        --dart-define=RILLIGHT_RPB_KEY="$RPB_KEY"
 
     - name: Audit Windows release bundle
       shell: pwsh

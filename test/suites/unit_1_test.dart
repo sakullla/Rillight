@@ -11,6 +11,10 @@ void main() {
     caseEntrypoints['aggregation/access_boundary_cases.dart']!,
   );
   group(
+    'aggregation/work_index_regression_test.dart',
+    caseEntrypoints['aggregation/work_index_regression_cases.dart']!,
+  );
+  group(
     'app/window_geometry_test.dart',
     caseEntrypoints['app/window_geometry_cases.dart']!,
   );
@@ -23,12 +27,12 @@ void main() {
     caseEntrypoints['auth/provider_identity_cases.dart']!,
   );
   group(
-    'catalog/catalog_cache_test.dart',
-    caseEntrypoints['catalog/catalog_cache_cases.dart']!,
+    'auth/provider_selection_test.dart',
+    caseEntrypoints['auth/provider_selection_cases.dart']!,
   );
   group(
-    'catalog/detail_controller_test.dart',
-    caseEntrypoints['catalog/detail_controller_cases.dart']!,
+    'catalog/catalog_cache_test.dart',
+    caseEntrypoints['catalog/catalog_cache_cases.dart']!,
   );
   group(
     'emby/emby_client_test.dart',
@@ -55,8 +59,12 @@ void main() {
     caseEntrypoints['mobile/catalog_controllers_cases.dart']!,
   );
   group(
-    'player/catalog_preference_negotiation_test.dart',
-    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
+    'player/cache/directory_inventory_test.dart',
+    caseEntrypoints['player/cache/directory_inventory_cases.dart']!,
+  );
+  group(
+    'player/cache/hls_proxy_timeline_test.dart',
+    caseEntrypoints['player/cache/hls_proxy_timeline_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_controller_test.dart',
@@ -69,10 +77,6 @@ void main() {
   group(
     'player/next_episode_prefix_authorization_test.dart',
     caseEntrypoints['player/next_episode_prefix_authorization_cases.dart']!,
-  );
-  group(
-    'player/playback_check_in_test.dart',
-    caseEntrypoints['player/playback_check_in_cases.dart']!,
   );
   group(
     'player/playback_http_proxy_test.dart [part 4]',
@@ -93,10 +97,6 @@ void main() {
   group(
     'player/player_window_launch_test.dart',
     caseEntrypoints['player/player_window_launch_cases.dart']!,
-  );
-  group(
-    'player/provider_failed_preparation_recovery_test.dart',
-    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
   );
   group(
     'player/provider_transport_test.dart',

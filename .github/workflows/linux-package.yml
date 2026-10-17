@@ -6,6 +6,13 @@ on:
       version:
         type: string
         default: v0.0.0-ci
+    secrets:
+      RILLIGHT_HILLS_KEY:
+        required: false
+      RILLIGHT_COMMON_KEY:
+        required: false
+      RILLIGHT_RPB_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -16,6 +23,24 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+      - name: Check backup import key secrets
+        # PR/main validation runs without secrets, including fork PRs.
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RILLIGHT_HILLS_KEY: ${{ secrets.RILLIGHT_HILLS_KEY }}
+          RILLIGHT_COMMON_KEY: ${{ secrets.RILLIGHT_COMMON_KEY }}
+          RILLIGHT_RPB_KEY: ${{ secrets.RILLIGHT_RPB_KEY }}
+        run: |
+          set -euo pipefail
+          check() {
+            local name="$1" value="$2" length="$3"
+            [ -n "$value" ] || { echo "::error::$name is not configured; release builds must carry backup import keys."; exit 1; }
+            [[ "$value" =~ ^[0-9a-fA-F]+$ ]] && [ "${#value}" -eq "$length" ] \
+              || { echo "::error::$name must be exactly $length hex characters."; exit 1; }
+          }
+          check RILLIGHT_HILLS_KEY "$RILLIGHT_HILLS_KEY" 64
+          check RILLIGHT_COMMON_KEY "$RILLIGHT_COMMON_KEY" 64
+          check RILLIGHT_RPB_KEY "$RILLIGHT_RPB_KEY" 32
       - name: Install native build dependencies
         run: |
           sudo apt-get update
@@ -50,6 +75,10 @@ jobs:
           path: ${{ runner.temp }}/rillight-native
           key: ${{ steps.sdk-cache.outputs.cache-primary-key }}
       - name: Build and audit the complete Flutter bundle
+        env:
+          RILLIGHT_HILLS_KEY: ${{ secrets.RILLIGHT_HILLS_KEY }}
+          RILLIGHT_COMMON_KEY: ${{ secrets.RILLIGHT_COMMON_KEY }}
+          RILLIGHT_RPB_KEY: ${{ secrets.RILLIGHT_RPB_KEY }}
         run: |
           export RILLIGHT_CORE_PREFIX="$RUNNER_TEMP/rillight-native"
           python3 packages/rillight_player/native/verify_core_dependencies.py \
@@ -58,7 +87,10 @@ jobs:
           # Link-time discovery only; bundle audit explicitly removes this.
           export LD_LIBRARY_PATH="$RILLIGHT_CORE_PREFIX/lib"
           flutter pub get
-          flutter build linux --release --no-pub
+          flutter build linux --release --no-pub \
+            --dart-define=RILLIGHT_HILLS_KEY="$RILLIGHT_HILLS_KEY" \
+            --dart-define=RILLIGHT_COMMON_KEY="$RILLIGHT_COMMON_KEY" \
+            --dart-define=RILLIGHT_RPB_KEY="$RILLIGHT_RPB_KEY"
           python3 tool/linux_release_checks.py verify build/linux/x64/release/bundle
       - name: Package real system dependencies
         env:

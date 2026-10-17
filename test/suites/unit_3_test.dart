@@ -11,10 +11,6 @@ void main() {
     caseEntrypoints['aggregation/server_sections_cases.dart']!,
   );
   group(
-    'aggregation/work_index_regression_test.dart',
-    caseEntrypoints['aggregation/work_index_regression_cases.dart']!,
-  );
-  group(
     'auth/auth_controller_test.dart',
     caseEntrypoints['auth/auth_controller_cases.dart']!,
   );
@@ -23,24 +19,24 @@ void main() {
     caseEntrypoints['auth/backup_import/backup_import_cases.dart']!,
   );
   group(
-    'auth/provider_selection_test.dart',
-    caseEntrypoints['auth/provider_selection_cases.dart']!,
+    'auth/backup_import/environment_keys_test.dart',
+    caseEntrypoints['auth/backup_import/environment_keys_cases.dart']!,
+  );
+  group(
+    'auth/provider_user_agent_test.dart',
+    caseEntrypoints['auth/provider_user_agent_cases.dart']!,
   );
   group(
     'auth/server_list_store_test.dart',
     caseEntrypoints['auth/server_list_store_cases.dart']!,
   );
   group(
-    'auth/source_sessions_test.dart',
-    caseEntrypoints['auth/source_sessions_cases.dart']!,
-  );
-  group(
     'catalog/emby_catalog_client_test.dart',
     caseEntrypoints['catalog/emby_catalog_client_cases.dart']!,
   );
   group(
-    'emby/video_preview_test.dart',
-    caseEntrypoints['emby/video_preview_cases.dart']!,
+    'emby/aggregation_metadata_test.dart',
+    caseEntrypoints['emby/aggregation_metadata_cases.dart']!,
   );
   group(
     'jellyfin/jellyfin_client_test.dart',
@@ -59,10 +55,6 @@ void main() {
     caseEntrypoints['player/cache/proxy_progressive_timeline_cases.dart']!,
   );
   group(
-    'player/cache/range_lease_index_test.dart',
-    caseEntrypoints['player/cache/range_lease_index_cases.dart']!,
-  );
-  group(
     'player/danmaku/danmaku_hash_test.dart',
     caseEntrypoints['player/danmaku/danmaku_hash_cases.dart']!,
   );
@@ -73,6 +65,14 @@ void main() {
   group(
     'player/emby_playback_client_test.dart',
     caseEntrypoints['player/emby_playback_client_cases.dart']!,
+  );
+  group(
+    'player/hls_redirect_chain_test.dart',
+    caseEntrypoints['player/hls_redirect_chain_cases.dart']!,
+  );
+  group(
+    'player/playback_check_in_test.dart',
+    caseEntrypoints['player/playback_check_in_cases.dart']!,
   );
   group(
     'player/playback_http_proxy_test.dart [part 2]',

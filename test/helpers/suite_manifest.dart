@@ -24,6 +24,7 @@ const caseModules = <String>[
   'auth/auth_controller_cases.dart',
   'auth/backup_import/backup_import_cases.dart',
   'auth/backup_import/backup_import_flow_cases.dart',
+  'auth/backup_import/environment_keys_cases.dart',
   'auth/change_password_cases.dart',
   'auth/connect_page_cases.dart',
   'auth/library_counts_cases.dart',
