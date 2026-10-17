@@ -942,6 +942,35 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                       return built;
                     },
                   ),
+                if (!ended && !_interaction.locked)
+                  ListenableBuilder(
+                    listenable: Listenable.merge([c, _interaction]),
+                    builder: (context, _) {
+                      final segment = c.activeSkipSegment;
+                      final show =
+                          segment != null &&
+                          c.skipPromptVisible &&
+                          c.nextEpisode == null &&
+                          !c.loading &&
+                          c.error == null &&
+                          !c.sessionExpired &&
+                          !c.disconnected &&
+                          !c.playbackEnded;
+                      if (!show) return const SizedBox.shrink();
+                      final insets = phonePlayerControlInsets(
+                        MediaQuery.of(context),
+                      );
+                      final controls = _interaction.controlsVisibleFor(c);
+                      return Positioned(
+                        right: insets.right + 12,
+                        bottom: insets.bottom + (controls ? 168 : 16),
+                        child: _PhoneSkipSegmentButton(
+                          controller: c,
+                          segment: segment,
+                        ),
+                      );
+                    },
+                  ),
                 if (!_interaction.locked &&
                     c.nextEpisode != null &&
                     c.error == null &&
@@ -1000,6 +1029,44 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 片头/片尾提示独立于控制条：控制条收起后按钮仍留在画面右下角。
+class _PhoneSkipSegmentButton extends StatelessWidget {
+  const _PhoneSkipSegmentButton({
+    required this.controller,
+    required this.segment,
+  });
+
+  final PlayerController controller;
+  final PlayerSkipSegment segment;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final scheme = AppUiTheme.of(context).colorScheme;
+    return AppButton.icon(
+      key: const Key('mobile-player-skip-segment'),
+      onPressed: () => unawaited(controller.skipCurrentSegment()),
+      style: AppButtonStyle(
+        minimumSize: const Size(48, 48),
+        backgroundColor: scheme.surface.withValues(alpha: 0.94),
+        foregroundColor: scheme.onSurface,
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+      ),
+      icon: Icon(
+        AppIcons.skipNext,
+        fill: AppIcons.filled,
+        size: 20,
+        color: scheme.primary,
+      ),
+      label: Text(
+        segment.kind == PlayerSkipKind.outro ? l.skipOutro : l.skipIntro,
+        style: const TextStyle(fontWeight: FontWeight.w700),
       ),
     );
   }

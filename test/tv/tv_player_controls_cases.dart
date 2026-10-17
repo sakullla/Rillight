@@ -44,8 +44,10 @@ void main() {
     String itemId = 'movie-inception',
     String? extraLine,
     bool multipleSources = false,
+    void Function(FakeEmbyServer server)? prepare,
   }) async {
     final server = FakeEmbyServer();
+    prepare?.call(server);
     if (multipleSources) {
       server.items.firstWhere((i) => i.id == itemId).extraSources = const [
         FakeMediaSource(id: 'alternate', name: 'HDR60 alternate'),
@@ -1014,6 +1016,81 @@ void main() {
     await tester.tap(find.byKey(const Key('player-episodes-close')));
     await settle(tester);
     expect(find.byKey(const Key('player-episodes-panel')), findsNothing);
+    expect(tester.takeException(), isNull);
+    await finish(tester);
+  }, tags: ['integration']);
+
+  testWidgets('TV playback shows skip intro after the controls hide', (
+    tester,
+  ) async {
+    const second = 10000000;
+    final backend = FakeVideoBackend();
+    final current = await start(
+      tester,
+      backend,
+      itemId: 'episode-friends-s1e1',
+      prepare: (server) {
+        final episode = server.items.firstWhere(
+          (item) => item.id == 'episode-friends-s1e1',
+        );
+        episode.played = false;
+        episode.playedPercentage = 0;
+        episode.chapters = const [
+          FakeChapter(
+            name: 'Intro',
+            startPosition: Duration(microseconds: 0),
+            markerType: 'IntroStart',
+          ),
+          FakeChapter(
+            name: 'Intro End',
+            startPosition: Duration(microseconds: (90 * second) ~/ 10),
+            markerType: 'IntroEnd',
+          ),
+        ];
+      },
+    );
+    const skip = Key('tv-player-skip-segment');
+    for (var i = 0; i < 40 && find.byKey(skip).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(current.loading, isFalse);
+    expect(find.byKey(skip), findsOneWidget);
+    expect(find.text('跳过片头'), findsOneWidget);
+    if (!current.controlsVisible) current.onUserActivity();
+    await tester.pump();
+    final skipRect = tester.getRect(find.byKey(skip));
+    final seekRect = tester.getRect(find.byKey(const Key('tv-player-seek')));
+    expect(skipRect.bottom, lessThanOrEqualTo(seekRect.top));
+    expect(skipRect.top, greaterThanOrEqualTo(0));
+    expect(skipRect.right, lessThanOrEqualTo(960));
+    for (var i = 0; i < 10 && !focused(tester, 'tv-player-skip-segment'); i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(focused(tester, 'tv-player-skip-segment'), isTrue);
+    if (current.controlsVisible) current.toggleControls();
+    await tester.pump();
+    expect(current.controlsVisible, isFalse);
+    expect(find.byKey(skip), findsOneWidget);
+    expect(focused(tester, 'tv-player-skip-segment'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    for (
+      var i = 0;
+      i < 20 && backend.position != const Duration(seconds: 90);
+      i++
+    ) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(backend.position, const Duration(seconds: 90));
+    for (var i = 0; i < 10 && find.byKey(skip).evaluate().isNotEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(
+      find.byKey(skip),
+      findsNothing,
+      reason:
+          'position ${current.position} segment ${current.activeSkipSegment} '
+          'prompt ${current.skipPromptVisible}',
+    );
     expect(tester.takeException(), isNull);
     await finish(tester);
   }, tags: ['integration']);

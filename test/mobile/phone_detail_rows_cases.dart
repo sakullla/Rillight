@@ -3,6 +3,8 @@ import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
@@ -13,6 +15,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:go_router/go_router.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
+import 'package:rillight/app/content_theme.dart';
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
@@ -2020,24 +2023,46 @@ void main() {
     tags: ['integration'],
   );
 
-  testWidgets('phone detail play button uses the phone accent', (tester) async {
+  testWidgets('phone detail play button follows the artwork palette', (
+    tester,
+  ) async {
+    ContentTheme.debugClear();
+    addTearDown(ContentTheme.debugClear);
+    final bytes = (await tester.runAsync(
+      () => _solidPng(const Color(0xff007aff)),
+    ))!;
     final harness = await _startDetail(
       tester,
       width: 360,
       reduceMotion: true,
       theme: AppUiTheme.phoneLight(),
+      prepare: (server) => server.itemImageBytes = bytes,
     );
+    MediaImageCache.instance.fetchTimeout = const Duration(seconds: 2);
     unawaited(harness.router.push('/item/movie-inception'));
     await settle(tester);
     final play = find.byKey(const Key('mobile-detail-play'));
     expect(play, findsOneWidget);
-    final box = tester.widget<AnimatedContainer>(
-      find.descendant(of: play, matching: find.byType(AnimatedContainer)).first,
-    );
-    final color = (box.decoration! as ShapeDecoration).color;
+    Color buttonColor() {
+      final box = tester.widget<AnimatedContainer>(
+        find
+            .descendant(of: play, matching: find.byType(AnimatedContainer))
+            .first,
+      );
+      return (box.decoration! as ShapeDecoration).color!;
+    }
+
     final phone = AppUiTheme.phoneLight().colorScheme;
-    expect(color, phone.primary);
-    expect(color, isNot(phone.inverseSurface));
+    for (var i = 0; i < 20 && buttonColor() == phone.primary; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    final themed = AppUiTheme.of(tester.element(play)).colorScheme;
+    expect(buttonColor(), themed.primary);
+    expect(themed.primary, isNot(phone.primary));
+    expect(buttonColor(), isNot(phone.inverseSurface));
     expect(
       tester
           .widget<Icon>(
@@ -2108,7 +2133,7 @@ void main() {
       final row = find.byKey(EpisodeMediaStreamsSection.phoneVersionRowKey);
       expect(row, findsOneWidget);
       expect(
-        find.descendant(of: row, matching: find.text('1080p · H.264 · 1')),
+        find.descendant(of: row, matching: find.text('1080p · H.264 · SonyHD')),
         findsOneWidget,
       );
       expect(find.text('NF.WD.264.AAC-SonyHD'), findsNothing);
@@ -2116,7 +2141,8 @@ void main() {
       await tester.tap(row);
       await tester.pumpAndSettle();
       expect(find.text('导演剪辑版'), findsOneWidget);
-      expect(find.text('1080p · H.264 · 3'), findsOneWidget);
+      expect(find.text('1080p · H.264 · Group'), findsOneWidget);
+      expect(find.text('NF · WEB-DL · SonyHD'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -2706,6 +2732,16 @@ Future<_Started> _start(
   );
   await tester.pump();
   return _Started(router: router, auth: auth, catalog: catalog);
+}
+
+Future<Uint8List> _solidPng(Color color) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  canvas.drawRect(const Rect.fromLTWH(0, 0, 16, 16), Paint()..color = color);
+  final image = await recorder.endRecording().toImage(16, 16);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return data!.buffer.asUint8List();
 }
 
 void _useSurface(WidgetTester tester, double width, double height) {

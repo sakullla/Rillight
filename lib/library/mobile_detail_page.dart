@@ -928,11 +928,6 @@ class _DetailPlayActions extends StatelessWidget {
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
-    final accentTheme = theme.phone
-        ? (theme.brightness == Brightness.light
-              ? AppUiTheme.phoneLight()
-              : AppUiTheme.phoneDark())
-        : theme;
     final played = this.played;
     final favorite = this.favorite;
     final progress = this.progress;
@@ -996,8 +991,8 @@ class _DetailPlayActions extends StatelessWidget {
             style: AppButtonStyle(
               minimumSize: const Size(48, _height),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              backgroundColor: accentTheme.colorScheme.primary,
-              foregroundColor: accentTheme.colorScheme.onPrimary,
+              backgroundColor: scheme.primary,
+              foregroundColor: scheme.onPrimary,
               shape: shape,
               textStyle: theme.textTheme.titleSmall?.copyWith(
                 fontSize: 16,

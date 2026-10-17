@@ -74,6 +74,8 @@ class TvPlayerPageState extends State<TvPlayerPage> {
   final _nextPlayFocus = FocusNode();
   final _nextCancelFocus = FocusNode();
   final _endedReplayFocus = FocusNode();
+  final _skipFocus = FocusNode();
+  String? _focusedSkipId;
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -142,11 +144,22 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       _focusedNextId = nextId;
       _requestFocus(_nextPlayFocus);
     }
+    final skipId = _skipPromptId(c);
+    if (skipId == null) {
+      if (_focusedSkipId != null && _skipFocus.hasFocus) {
+        _requestFocus(ended ? _endedReplayFocus : _surfaceFocus);
+      }
+      _focusedSkipId = null;
+    } else if (skipId != _focusedSkipId) {
+      _focusedSkipId = skipId;
+      _requestFocus(_skipFocus);
+    }
     final cardFocused = _nextPlayFocus.hasFocus || _nextCancelFocus.hasFocus;
     if (!c.controlsVisible &&
         _surfaceFocus.hasFocus &&
         !_surfaceFocus.hasPrimaryFocus &&
-        !cardFocused) {
+        !cardFocused &&
+        !_skipFocus.hasFocus) {
       _requestFocus(_surfaceFocus);
     }
     if (c.loading) return;
@@ -242,8 +255,33 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       controller!.error != null ||
       controller!.sessionExpired ||
       controller!.disconnected;
+
+  /// 当前片头/片尾提示。同一段只抢一次焦点，控制条收起后按钮仍留在画面上。
+  String? _skipPromptId(PlayerController c) {
+    final segment = c.activeSkipSegment;
+    if (segment == null ||
+        !c.skipPromptVisible ||
+        c.nextEpisode != null ||
+        c.loading ||
+        _failed ||
+        c.playbackEnded ||
+        c.permissionRevoked) {
+      return null;
+    }
+    return '${segment.kind.name}:${segment.start.inMilliseconds}';
+  }
+
   void _back() {
     final c = controller!;
+    if (_skipFocus.hasPrimaryFocus) {
+      _seek = null;
+      c.setControlsPinned(false);
+      if (c.controlsVisible && !_failed && !c.loading && !c.playbackEnded) {
+        c.toggleControls();
+      }
+      _surfaceFocus.requestFocus();
+      return;
+    }
     if (c.controlsVisible && !_failed && !c.loading && !c.playbackEnded) {
       _seek = null;
       c.setControlsPinned(false);
@@ -334,9 +372,26 @@ class TvPlayerPageState extends State<TvPlayerPage> {
       if (key == LogicalKeyboardKey.arrowUp ||
           key == LogicalKeyboardKey.arrowDown) {
         c.onUserActivity();
-        _requestFocus(c.nextEpisode == null ? _playFocus : _nextPlayFocus);
+        if (c.nextEpisode != null) {
+          _requestFocus(_nextPlayFocus);
+        } else if (_skipPromptId(c) != null) {
+          _requestFocus(_skipFocus);
+        } else {
+          _requestFocus(_playFocus);
+        }
         return KeyEventResult.handled;
       }
+    }
+    if (_skipFocus.hasPrimaryFocus &&
+        (key == LogicalKeyboardKey.arrowDown ||
+            key == LogicalKeyboardKey.arrowUp)) {
+      if (key == LogicalKeyboardKey.arrowDown) {
+        c.onUserActivity();
+        _requestFocus(_playFocus);
+      } else {
+        _requestFocus(_surfaceFocus);
+      }
+      return KeyEventResult.handled;
     }
     if (horizontal ||
         key == LogicalKeyboardKey.arrowUp ||
@@ -921,6 +976,7 @@ class TvPlayerPageState extends State<TvPlayerPage> {
     _nextPlayFocus.dispose();
     _nextCancelFocus.dispose();
     _endedReplayFocus.dispose();
+    _skipFocus.dispose();
     final c = controller;
     if (c != null) {
       c.removeListener(_playerChanged);
@@ -1507,6 +1563,32 @@ class TvPlayerPageState extends State<TvPlayerPage> {
                       ? l.playerPlaying
                       : l.pause;
                   return _overlay(context, c, l, status, ready);
+                },
+              ),
+              ListenableBuilder(
+                listenable: c,
+                builder: (context, _) {
+                  final segment = c.activeSkipSegment;
+                  if (_skipPromptId(c) == null || segment == null) {
+                    return const SizedBox.shrink();
+                  }
+                  final screen = MediaQuery.sizeOf(context);
+                  final lifted = c.controlsVisible;
+                  return Positioned(
+                    right: tvSafeGutter(screen.width),
+                    bottom:
+                        tvSafeVertical(screen.height) +
+                        (lifted ? context.tvdp(148) : context.tvdp(28)),
+                    child: _action(
+                      'tv-player-skip-segment',
+                      AppIcons.skipNext,
+                      segment.kind == PlayerSkipKind.outro
+                          ? l.skipOutro
+                          : l.skipIntro,
+                      () => c.skipCurrentSegment(),
+                      focusNode: _skipFocus,
+                    ),
+                  );
                 },
               ),
               ListenableBuilder(

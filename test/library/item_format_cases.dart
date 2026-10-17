@@ -79,9 +79,9 @@ void main() {
     expect(isReleaseSourceName(release.name!), isTrue);
     expect(isReleaseSourceName(edition.name!), isFalse);
     expect(isReleaseSourceName(readable.name!), isFalse);
-    expect(phoneSourceVersionLabel(release, sources), '1080p · H.264 · 1');
+    expect(phoneSourceVersionLabel(release, sources), '1080p · H.264 · SonyHD');
     expect(phoneSourceVersionLabel(edition, sources), '导演剪辑版');
-    expect(phoneSourceVersionLabel(twin, sources), '1080p · H.264 · 3');
+    expect(phoneSourceVersionLabel(twin, sources), '1080p · H.264 · TEAM');
     expect(phoneSourceVersionLabel(readable, [readable]), '1080p SDR');
     expect(
       releaseSourcePrimaryText(

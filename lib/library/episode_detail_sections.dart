@@ -1692,17 +1692,19 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                   key: key,
                   onTap: () => Navigator.of(context).pop(value),
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 52),
+                    constraints: const BoxConstraints(minHeight: 48),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.lg,
-                        vertical: 12,
+                        vertical: 10,
                       ),
                       child: Row(
                         children: [
                           Expanded(
                             child: Text(
                               label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyLarge?.copyWith(
                                 color: value == selected
                                     ? scheme.primary
@@ -1713,13 +1715,15 @@ class _PhoneChoiceSheet<T> extends StatelessWidget {
                               ),
                             ),
                           ),
-                          if (value == selected)
+                          if (value == selected) ...[
+                            const SizedBox(width: 12),
                             Icon(
                               AppIcons.check,
                               fill: AppIcons.filled,
                               size: 18,
                               color: scheme.primary,
                             ),
+                          ],
                         ],
                       ),
                     ),

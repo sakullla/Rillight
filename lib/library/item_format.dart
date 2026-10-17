@@ -133,7 +133,7 @@ String releaseSourcePrimaryText(ItemMediaSource source) {
 }
 
 /// 详情片源行主文字。发布串改用分辨率和编码；人读版本名保持原样。
-/// 分辨率和编码相同的发布串用片源序号区分。
+/// 规格相同时用发行组区分，组名也相同才退回片源序号。
 String phoneSourceVersionLabel(
   ItemMediaSource source,
   List<ItemMediaSource> sources,
@@ -150,12 +150,32 @@ String phoneSourceVersionLabel(
     final name = (other.name ?? '').trim();
     return isReleaseSourceName(name) && releaseSourcePrimaryText(other) == tech;
   });
-  if (same.length > 1) {
-    final index = sources.indexWhere((other) => other.id == source.id);
-    return '$tech · ${index < 0 ? 1 : index + 1}';
-  }
-  return tech;
+  if (same.length <= 1) return tech;
+  final marker = sourceVersionMarker(source);
+  final index = sources.indexWhere((other) => other.id == source.id);
+  final number = index < 0 ? 1 : index + 1;
+  if (marker == null) return '$tech · $number';
+  final twins = same.where((other) => sourceVersionMarker(other) == marker);
+  if (twins.length == 1) return '$tech · $marker';
+  return '$tech · $marker · $number';
 }
+
+/// 发布串里用来区分同规格片源的组名。体积和码率不算。
+String? sourceVersionMarker(ItemMediaSource source) {
+  final detail = source.presentation.detail?.trim();
+  if (detail == null || detail.isEmpty) return null;
+  final parts = [
+    for (final part in detail.split(' · '))
+      if (part.isNotEmpty && !_sourceStat.hasMatch(part)) part,
+  ];
+  if (parts.isEmpty) return null;
+  return parts.last;
+}
+
+final _sourceStat = RegExp(
+  r'^\d+(?:\.\d+)?\s*(?:GB|MB|Mbps|kbps)$',
+  caseSensitive: false,
+);
 
 final _releaseSourceToken = RegExp(
   r'^(?:480p|720p|1080p|1440p|2160p|4k|uhd|x26[45]|h\.?26[45]|hevc|avc|av1|vp9|'

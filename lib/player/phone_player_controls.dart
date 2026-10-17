@@ -72,8 +72,8 @@ String? _phoneSubtitleImportNotice(AppLocalizations l, PlayerController c) {
 
 /// Phone controls with a title bar, a timeline, and transport sitting on the
 /// timeline instead of covering the picture. The stage stays black. Chrome
-/// uses the phone dark palette: a sakura primary transport button, light
-/// secondary targets, and a phone-dark dock. Series playback gets an episode
+/// uses the phone dark palette: a sakura primary transport button and light
+/// secondary targets, with no bar behind them. Series playback gets an episode
 /// list. Less frequent picture, volume and media choices stay in the panel.
 ///
 /// The video surface and control scrims extend to the screen edges. Buttons
@@ -182,8 +182,6 @@ Future<int?> _androidSdkInt() async {
     return null;
   }
 }
-
-const Color phonePlayerDockColor = Color(0xCC140C18);
 
 final AppButtonStyle _phoneChromeButton = AppButtonStyle(
   foregroundColor: CupertinoColors.white,
@@ -353,8 +351,8 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
 
   /// A decorated box hit-tests its entire rectangle, including empty padding
   /// and spacers. Paint the scrim in a separate, pointer-transparent layer so
-  /// dock gaps reach PhonePlayerGestures underneath without involving button
-  /// taps in the surface's double-tap recognizer.
+  /// gaps between controls reach PhonePlayerGestures underneath without
+  /// involving button taps in the surface's double-tap recognizer.
   Widget _scrimBehindControls(
     BuildContext context, {
     required Key key,
@@ -704,35 +702,16 @@ class PhonePlayerControlsState extends State<PhonePlayerControls> {
     final wide = MediaQuery.sizeOf(context).width >= 640;
     final transport = _buildTransport(context);
     final actions = _buildActionRow(context);
-    final body = wide
-        ? Row(children: [transport, const Spacer(), actions])
-        : Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [transport, const SizedBox(height: 8), actions],
-            ),
-          );
-    return Stack(
-      alignment: wide ? AlignmentDirectional.topStart : Alignment.center,
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: DecoratedBox(
-              key: const Key('mobile-player-dock'),
-              decoration: const BoxDecoration(
-                color: phonePlayerDockColor,
-                borderRadius: BorderRadius.all(Radius.circular(24)),
-                border: Border.fromBorderSide(
-                  BorderSide(color: Color(0x24FFFFFF), width: 0.8),
-                ),
-              ),
-            ),
-          ),
-        ),
-        body,
-      ],
+    if (wide) {
+      return Row(children: [transport, const Spacer(), actions]);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [transport, const SizedBox(height: 8), actions],
+      ),
     );
   }
 
