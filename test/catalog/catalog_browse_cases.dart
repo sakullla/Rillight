@@ -366,8 +366,8 @@ void main() {
         findsOneWidget,
       );
       final episode = find.byKey(CatalogKeys.episode('episode-friends-s1e1'));
-      await tester.ensureVisible(episode);
-      await tester.tap(episode);
+      await ensureVisibleBelowTopBar(tester, episode);
+      await tapBelowTopBar(tester, episode);
       await settle(tester);
       expect(find.textContaining('The Pilot'), findsWidgets);
       expect(find.byKey(CatalogKeys.overview), findsNothing);

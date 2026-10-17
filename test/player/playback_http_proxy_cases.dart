@@ -1,4 +1,5 @@
 import '../helpers/case_shard.dart';
+import '../helpers/temporary_directory.dart';
 
 import 'package:rillight/emby/emby_playback.dart';
 
@@ -4247,7 +4248,7 @@ class _CacheFixture {
       fixture.client.close(force: true);
       await fixture.proxy.close();
       await fixture.server.close(force: true);
-      if (root != null) await root.delete(recursive: true);
+      if (root != null) await deleteTemporaryDirectory(root);
     });
     return fixture;
   }

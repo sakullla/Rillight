@@ -185,7 +185,8 @@ void main() {
       expect(
         (stage.bottom - clip.bottom).abs(),
         lessThanOrEqualTo(1),
-        reason: 'The carousel clip must stay flush with the stage while switching',
+        reason:
+            'The carousel clip must stay flush with the stage while switching',
       );
       await settle(tester);
       expect(featuredIndicator(tester), '2 / $count');

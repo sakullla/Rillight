@@ -31,8 +31,6 @@ import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_shell.dart';
-import 'package:rillight/app/widgets/app_empty_view.dart';
-import 'package:rillight/app/widgets/app_error_view.dart';
 import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
@@ -707,14 +705,14 @@ void main() {
       expect(find.byType(AggregationPage), findsOneWidget);
       await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
       await settle(tester);
-      expect(find.byType(AppErrorView), findsOneWidget);
+      expect(find.text('HTTP 503: views failed'), findsOneWidget);
       expect(find.text('重试'), findsOneWidget);
       server.viewsStatus = null;
       await tester.ensureVisible(find.text('重试'));
       await tester.tap(find.text('重试'));
       await settle(tester);
       expect(find.text('重试'), findsNothing);
-      expect(find.byType(AppErrorView), findsNothing);
+      expect(find.text('HTTP 503: views failed'), findsNothing);
       expect(find.text('电影'), findsWidgets);
       // Lazy cards started cache IO on their last mount. Drain real reads and
       // fake-time HTTP/image deadlines before the test-body invariant check.
@@ -1090,8 +1088,8 @@ void main() {
         CupertinoPageRoute<void>(builder: (context) => const AggregationPage()),
       );
       await settle(tester);
-      expect(find.widgetWithText(AppEmptyView, '没有已登录的服务器'), findsOneWidget);
-      expect(find.widgetWithText(AppEmptyView, '添加服务器'), findsOneWidget);
+      expect(find.text('没有已登录的服务器'), findsOneWidget);
+      expect(find.widgetWithText(AppButton, '添加服务器'), findsOneWidget);
       navigator.pop();
       await settle(tester);
       await login(tester, server);
@@ -1107,8 +1105,8 @@ void main() {
       await tester.tap(find.text('聚合').last);
       await settle(tester);
       expect(find.byType(AggregationPage), findsOneWidget);
-      expect(find.widgetWithText(AppEmptyView, '所选范围没有匹配作品'), findsOneWidget);
-      expect(find.widgetWithText(AppEmptyView, '添加服务器'), findsNothing);
+      expect(find.text('所选范围没有匹配作品'), findsOneWidget);
+      expect(find.widgetWithText(AppButton, '添加服务器'), findsNothing);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
       // Declare a real synthetic library before testing an allowed but
       // unsupported stream; empty/unknown scope must never bypass the gate.
