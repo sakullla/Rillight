@@ -27,8 +27,8 @@ void main() {
     caseEntrypoints['library/source_detail_route_cases.dart#2']!,
   );
   group(
-    'player/subtitle_viewport_test.dart',
-    caseEntrypoints['player/subtitle_viewport_cases.dart']!,
+    'player/subtitle_menu_test.dart',
+    caseEntrypoints['player/subtitle_menu_cases.dart']!,
   );
   group(
     'widgets/app_button_test.dart',

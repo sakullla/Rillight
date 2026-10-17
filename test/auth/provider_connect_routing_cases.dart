@@ -3,7 +3,9 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
 
-import 'package:rillight/auth/source_management.dart';
+import 'package:rillight/auth/server_editor.dart';
+
+import 'server_ui_harness.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -115,10 +117,7 @@ void main() {
       final oldSource = await tester.runAsync(
         () => auth.sources.ensureSession(auth.session!.server.id),
       );
-      final oldPermit = auth.sources.permit(
-        oldSource!.account,
-        sessionOnly: true,
-      );
+      final oldPermit = auth.sources.permit(oldSource!.account);
       expect(oldPermit.isValid, isTrue);
       expect(oldClient.accessToken, 'owner-resource');
       final homeGate = Completer<void>();
@@ -186,9 +185,10 @@ void main() {
         );
         app.router.go(AppRoutes.mine);
         await settle(tester);
-        showSourceManagement(tester.element(manage));
+        app.router.go('/servers');
         await settle(tester);
-        final home = find.text('切换 Plex Home 用户');
+        await openServerEditor(tester, auth.session!.server.id);
+        final home = find.byKey(const Key('server-editor-home-account'));
         await tester.ensureVisible(home);
         await tester.tap(home);
         await tester.pump();
@@ -222,7 +222,7 @@ void main() {
         await settle(tester);
         expect(find.byKey(const Key('provider-home-user')), findsOneWidget);
         expect(
-          find.byKey(const Key('provider-cancel')).hitTestable(),
+          find.byKey(const Key('server-flow-back')).hitTestable(),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
@@ -314,26 +314,26 @@ void main() {
           throwsStateError,
         );
         expect(
-          auth.sources.project(AccessRegion.ordinary).single.libraryIds,
-          isEmpty,
+          auth.sources.project().single.id,
+          oldSource.account.configuredServerId,
         );
         // Cancelling another Home selection preserves the committed child.
-        await tester.ensureVisible(find.text('切换 Plex Home 用户'));
-        await tester.tap(find.text('切换 Plex Home 用户'));
+        await tester.ensureVisible(
+          find.byKey(const Key('server-editor-home-account')),
+        );
+        await tester.tap(find.byKey(const Key('server-editor-home-account')));
         await waitUntil(
           () =>
               find.byKey(const Key('provider-home-user')).evaluate().isNotEmpty,
         );
         await settle(tester);
-        await tester.tap(find.byKey(const Key('provider-cancel')));
+        await tester.tap(find.byKey(const Key('server-flow-back')));
         await settle(tester);
         expect(
-          find.byWidgetPredicate(
-            (w) => w is ProviderConnectDialog && !w.inline,
-          ),
+          find.byWidgetPredicate((w) => w is ProviderConnectDialog),
           findsNothing,
         );
-        expect(find.byType(SourceManagement), findsOneWidget);
+        expect(find.byType(ServerEditor), findsOneWidget);
         expect(auth.session?.userId, '2');
         expect(
           app.router.routeInformationProvider.value.uri.path,

@@ -1,5 +1,4 @@
 import 'helpers/cupertino_test_app.dart';
-import 'helpers/region_access_fixture.dart';
 import 'helpers/image_cache_fixture.dart';
 import 'helpers/settle.dart';
 
@@ -116,9 +115,7 @@ void main() {
       'stored appearance applies on startup and switching keeps the login '
       'page and its inputs',
       (tester) async {
-        final auth = AuthController.memory(
-          regionAccess: TestRegionAccessController(),
-        );
+        final auth = AuthController.memory();
         final appearance = AppearanceController(
           store: MemoryPlayerSettingsStore(
             const PlayerSettings(appearanceStyle: 'light'),
@@ -587,8 +584,16 @@ void main() {
         expect(path(), AppRoutes.library('view-movies'));
 
         await tester.runAsync(() async {
-          await auth.setPrivatePin('1234', '1234');
-          await auth.regionAccess.unlock('1234');
+          final id = auth.session!.server.id;
+          await auth.serverAccess.setPassword(
+            id,
+            '1234',
+            '1234',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(id, ref),
+          );
+          await auth.serverAccess.unlock(id, '1234');
+          await auth.sources.ensureSession(id);
         });
         await tester.tap(find.byKey(SessionActions.serverMenuKey));
         await settle(tester);

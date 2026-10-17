@@ -36,6 +36,7 @@ class AndroidBootstrap extends StatefulWidget {
 class _AndroidBootstrapState extends State<AndroidBootstrap> {
   RillightApp? _app;
   bool _failed = false;
+  ConfigurationUpgradeFailure? _upgradeFailure;
   bool _detectionFailed = false;
   bool _busy = false;
 
@@ -50,6 +51,7 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
     setState(() {
       _busy = true;
       _failed = false;
+      _upgradeFailure = null;
       _detectionFailed = false;
     });
     try {
@@ -82,7 +84,14 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
       // 外观仍在上屏前就绪,避免启动闪一下错误亮度。
       final appearance = AppearanceController();
       final (auth, _, supportDirectory) = await (
-        (widget.createAuth ?? createProductionAuth)(),
+        () async {
+          try {
+            return await (widget.createAuth ?? createProductionAuth)();
+          } on ConfigurationUpgradeFailure catch (error) {
+            _upgradeFailure = error;
+            rethrow;
+          }
+        }(),
         appearance.ready,
         widget.createAuth != null
             ? Future<Directory?>.value()
@@ -164,8 +173,15 @@ class _AndroidBootstrapState extends State<AndroidBootstrap> {
                           Text(
                             _detectionFailed
                                 ? l10n.deviceDetectionFailed
+                                : _upgradeFailure != null
+                                ? l10n.configurationUpgradeFailed
                                 : l10n.appInitializationFailed,
                           ),
+                          if (_upgradeFailure != null) ...[
+                            const SizedBox(height: 12),
+                            Text(l10n.configurationRecoveryHint),
+                            AppSelectableText(_upgradeFailure!.directory),
+                          ],
                           const SizedBox(height: 16),
                           AppButton(
                             autofocus: true,

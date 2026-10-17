@@ -9,11 +9,30 @@
     ]
   },
   {
+    "id": "aggregation-locked",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
+    "id": "aggregation-unlock",
+    "feature": "aggregation",
+    "platforms": [
+      "desktop",
+      "phone",
+      "tv"
+    ]
+  },
+  {
     "id": "aggregation-segment-favorites",
     "feature": "aggregation",
     "platforms": [
       "desktop",
-      "phone"
+        "phone",
+        "tv"
     ]
   },
   {
@@ -21,31 +40,8 @@
     "feature": "aggregation",
     "platforms": [
       "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-management",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-pin-setup",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
-    ]
-  },
-  {
-    "id": "aggregation-pin-error",
-    "feature": "aggregation",
-    "platforms": [
-      "desktop",
-      "phone"
+        "phone",
+        "tv"
     ]
   },
   {
@@ -57,7 +53,7 @@
     ]
   },
   {
-    "id": "aggregation-empty-scope",
+    "id": "aggregation-filter-empty",
     "feature": "aggregation",
     "platforms": [
       "desktop",
@@ -1600,7 +1596,7 @@
     ]
   },
   {
-    "id": "provider-emby-libraries",
+    "id": "provider-emby-connected",
     "feature": "login",
     "platforms": [
       "desktop",
@@ -1645,7 +1641,7 @@
     ]
   },
   {
-    "id": "provider-jellyfin-libraries",
+    "id": "provider-jellyfin-connected",
     "feature": "login",
     "platforms": [
       "desktop",
@@ -1690,7 +1686,7 @@
     ]
   },
   {
-    "id": "provider-plex-libraries",
+    "id": "provider-plex-connected",
     "feature": "login",
     "platforms": [
       "desktop",

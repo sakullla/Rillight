@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:dio/dio.dart';
 
@@ -8,14 +8,12 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/auth/pin_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
-import 'package:rillight/media_server/models.dart';
 import 'package:rillight/media_server/errors.dart';
 
 class TestClient extends EmbyClient {
@@ -28,6 +26,22 @@ class TestClient extends EmbyClient {
           version: '1',
         ),
       );
+  @override
+  MediaServerClient withRequestGuard(void Function() guard) {
+    final copy = _GuardedTestClient(this, guard);
+    if (hasSession) {
+      copy.attachSession(
+        baseUrl: baseUrl!,
+        accessToken: accessToken!,
+        userId: userId!,
+        userAgent: customUserAgent,
+      );
+    }
+    copy.onSessionExpired = onSessionExpired;
+    copy.onRefreshSession = onRefreshSession;
+    return copy;
+  }
+
   Completer<void>? gate;
   final List<Uri> publicUrls = [];
   String? identity;
@@ -46,7 +60,7 @@ class TestClient extends EmbyClient {
   }) async {
     loginStarted?.complete();
     await loginGate?.future;
-    if (rejectLogin) {
+    if (rejectLogin || password == 'bad') {
       throw const MediaServerException(
         MediaServerFailureKind.invalidCredentials,
       );
@@ -103,6 +117,45 @@ class TestClient extends EmbyClient {
   }
 }
 
+class _GuardedTestClient extends TestClient {
+  _GuardedTestClient(this.delegate, this.guard);
+  final TestClient delegate;
+  final void Function() guard;
+  Future<T> checked<T>(Future<T> Function() operation) async {
+    guard();
+    final value = await operation();
+    guard();
+    return value;
+  }
+
+  @override
+  Future<PublicServerInfo> getPublicInfo(Uri url) =>
+      checked(() => delegate.getPublicInfo(url));
+  @override
+  Future<MediaUser> getUser({CancelToken? cancelToken}) =>
+      checked(() => delegate.getUser(cancelToken: cancelToken));
+  @override
+  Future<List<MediaItem>> getViews() => checked(delegate.getViews);
+  @override
+  Future<LibraryCounts> getItemCounts() => checked(delegate.getItemCounts);
+  @override
+  Future<void> logout() => checked(delegate.logout);
+  @override
+  Future<AuthenticationResult> authenticateByName({
+    required Uri baseUrl,
+    required String username,
+    required String password,
+    String? serverId,
+  }) => checked(
+    () => delegate.authenticateByName(
+      baseUrl: baseUrl,
+      username: username,
+      password: password,
+      serverId: serverId,
+    ),
+  );
+}
+
 class GatedCredentials extends MemoryCredentialStore {
   GatedCredentials(super.seed);
   final started = Completer<void>();
@@ -129,23 +182,20 @@ class FailingStore extends MemoryServerListStore {
   }
 }
 
-SavedServer server(String id, {AccessRegion region = AccessRegion.ordinary}) =>
-    SavedServer(
-      id: id,
-      name: id,
-      username: 'user',
-      region: region,
-      lines: [
-        ServerLine(id: 'one', address: 'https://$id'),
-        ServerLine(id: 'two', address: 'https://$id/emby'),
-      ],
-      activeLineId: 'one',
-      libraryIds: const ['movies'],
-      scopeKnown: true,
-    );
+SavedServer server(String id, {bool protected = false}) => SavedServer(
+  id: id,
+  name: id,
+  username: 'user',
+  protectionRef: protected ? 'test:$id' : null,
+  lines: [
+    ServerLine(id: 'one', address: 'https://$id'),
+    ServerLine(id: 'two', address: 'https://$id/emby'),
+  ],
+  activeLineId: 'one',
+);
 
 Future<SourceSessionRegistry> registry(
-  RegionAccessController access,
+  ServerAccessController access,
   List<SavedServer> servers,
   List<TestClient> clients, {
   MemoryServerListStore? store,
@@ -168,98 +218,14 @@ Future<SourceSessionRegistry> registry(
     },
   );
   await result.load();
+  for (final saved in servers) {
+    if (saved.protectionRef != null) await access.unlock(saved.id, '1234');
+  }
   addTearDown(result.dispose);
   return result;
 }
 
 void main() {
-  late PinVerifier verifier;
-  setUpAll(() async {
-    verifier = await TestPinVerifier.create('1234');
-  });
-  for (final operation in ['delete', 'replace', 'migrate', 'lock']) {
-    test(
-      'management credential.write gate serializes $operation without revival',
-      () async {
-        final access = TestRegionAccessController(verifier: verifier);
-        await access.unlock('1234');
-        final credentials = GatedCredentials({
-          'a': const StoredCredentials(
-            accessToken: 'old',
-            userId: 'old',
-            username: 'old',
-          ),
-        });
-        final r = SourceSessionRegistry(
-          access: access,
-          store: MemoryServerListStore(
-            ServerListSnapshot(
-              servers: [
-                server(
-                  'a',
-                  region: operation == 'lock'
-                      ? AccessRegion.private
-                      : AccessRegion.ordinary,
-                ),
-              ],
-            ),
-          ),
-          credentials: credentials,
-          createClient: TestClient.new,
-        );
-        await r.load();
-        addTearDown(r.dispose);
-        Object? loginFailure;
-        final login = r.login('a', 'new', 'secret').catchError((Object error) {
-          loginFailure = error;
-        });
-        await credentials.started.future;
-        Future<void>? competing;
-        var committed = false;
-        if (operation == 'delete' || operation == 'replace') {
-          final ticket = await r.beginOrdinaryCredentials('a');
-          competing = r
-              .commitOrdinaryCredentials(
-                ticket,
-                operation == 'delete'
-                    ? null
-                    : const StoredCredentials(
-                        accessToken: 'latest',
-                        userId: 'latest',
-                        username: 'latest',
-                      ),
-              )
-              .then((_) {
-                committed = true;
-              });
-          await Future<void>.delayed(Duration.zero);
-          // Observe the ordering as well as the final credential value below.
-        } else if (operation == 'migrate') {
-          competing = r.move('a', AccessRegion.private);
-        } else {
-          await access.lock();
-        }
-        final committedBeforeRelease = committed;
-        credentials.release.complete();
-        await login;
-        await competing;
-        expect(
-          (await credentials.read('a'))?.accessToken,
-          operation == 'delete'
-              ? null
-              : operation == 'replace'
-              ? 'latest'
-              : 'old',
-        );
-        expect(committedBeforeRelease, isFalse);
-        expect(
-          loginFailure,
-          operation == 'lock' || operation == 'migrate' ? isStateError : isNull,
-        );
-      },
-    );
-  }
-
   test('management write gate makes actual Auth logout wait then delete permanently', () async {
     final credentials = GatedCredentials({
       'a': const StoredCredentials(
@@ -268,13 +234,15 @@ void main() {
         username: 'old',
       ),
     });
+    final selectedClient = TestClient()..logoutStarted = Completer<void>();
+    var createdClients = 0;
     final r = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(
         ServerListSnapshot(servers: [server('a')], lastServerId: 'a'),
       ),
       credentials: credentials,
-      createClient: TestClient.new,
+      createClient: () => createdClients++ == 0 ? selectedClient : TestClient(),
     );
     await r.load();
     final client = TestClient()..logoutStarted = Completer<void>();
@@ -291,7 +259,6 @@ void main() {
     await credentials.started.future;
     var loggedOut = false;
     final logout = auth.logout().then((_) => loggedOut = true);
-    await client.logoutStarted!.future;
     await Future<void>.delayed(Duration.zero);
     expect(loggedOut, isFalse);
     credentials.release.complete();
@@ -306,8 +273,9 @@ void main() {
   test(
     'queued private login rechecks generation before credential IO',
     () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      await access.unlock('1234');
+      final access = TestServerAccessController(
+        passwords: const {'a': '1234', 'b': '1234', 'secret': '1234'},
+      );
       final credentials = GatedCredentials({
         for (final id in ['a', 'b'])
           id: const StoredCredentials(
@@ -320,19 +288,19 @@ void main() {
         access: access,
         store: MemoryServerListStore(
           ServerListSnapshot(
-            servers: [
-              server('a', region: AccessRegion.private),
-              server('b'),
-            ],
+            servers: [server('a', protected: true), server('b')],
           ),
         ),
         credentials: credentials,
         createClient: TestClient.new,
       );
       await r.load();
+      for (final saved in r.project()) {
+        if (saved.protectionRef != null) await access.unlock(saved.id, '1234');
+      }
       addTearDown(r.dispose);
-      final ticket = await r.beginOrdinaryCredentials('b');
-      final blocking = r.commitOrdinaryCredentials(
+      final ticket = await r.beginCredentials('b');
+      final blocking = r.commitCredentials(
         ticket,
         const StoredCredentials(
           accessToken: 'b-new',
@@ -344,7 +312,7 @@ void main() {
       final login = r.login('a', 'new', 'secret');
       final rejected = expectLater(login, throwsStateError);
       await Future<void>.delayed(Duration.zero);
-      await access.lock();
+      await access.lock('a');
       credentials.release.complete();
       await blocking;
       await rejected;
@@ -364,7 +332,7 @@ void main() {
         File('${directory.path}/credentials.json'),
       );
       final r = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: MemoryServerListStore(
           ServerListSnapshot(servers: [server('a'), server('b')]),
         ),
@@ -403,7 +371,7 @@ void main() {
         if (expected == ManualCheckStatus.needsLogin) checking.expired = true;
         var forCheck = false;
         final r = SourceSessionRegistry(
-          access: TestRegionAccessController(),
+          access: TestServerAccessController(),
           store: MemoryServerListStore(
             ServerListSnapshot(servers: [server('a')]),
           ),
@@ -456,7 +424,7 @@ void main() {
       final second = TestClient()..identity = 'wrong';
       final clients = [first, second];
       final r = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: MemoryServerListStore(
           ServerListSnapshot(servers: [server('a')]),
         ),
@@ -489,7 +457,7 @@ void main() {
   );
 
   test('ordinary stale line editor preserves checks until the target address changes', () async {
-    final r = await registry(TestRegionAccessController(), [server('a')], []);
+    final r = await registry(TestServerAccessController(), [server('a')], []);
     final auth = AuthController(
       client: TestClient(),
       credentials: r.credentials,
@@ -511,78 +479,9 @@ void main() {
     expect(line.nickname, '备用');
   });
 
-  test('management independent login replaces only target identity and discovery never broadens scope', () async {
-    final access = TestRegionAccessController();
-    final clients = <TestClient>[];
-    final sources = await registry(access, [server('a'), server('b')], clients);
-    addTearDown(sources.dispose);
-    final a = await sources.authenticate('a');
-    final permit = sources.permit(a.account, libraryId: 'movies');
-    await sources.login('b', 'bob', 'secret');
-    expect(permit.isValid, isTrue);
-    final b = await sources.authenticate('b');
-    expect(b.account.userId, 'replacement');
-    final libraries = await sources.discoverLibraries('b');
-    expect(libraries.keys, containsAll(['movies', 'new-library']));
-    // Replacing the effective user invalidates that user's former selection.
-    expect(sources.project(AccessRegion.ordinary).last.libraryIds, isEmpty);
-    expect(permit.isValid, isTrue);
-  });
-  test('management login late after private lock cannot persist replacement credentials', () async {
-    final access = TestRegionAccessController();
-    await access.setPin('1234', '1234', (_) async {});
-    await access.unlock('1234');
-    final clients = <TestClient>[];
-    final sources = await registry(access, [
-      server('b', region: AccessRegion.private),
-    ], clients);
-    addTearDown(sources.dispose);
-    final gate = Completer<void>();
-    final started = Completer<void>();
-    final login = sources.login('b', 'bob', 'secret');
-    clients.last.loginGate = gate;
-    clients.last.loginStarted = started;
-    await started.future;
-    final failed = expectLater(login, throwsStateError);
-    await access.lock();
-    gate.complete();
-    await failed;
-    expect((await sources.credentials.read('b'))!.userId, 'user-b');
-  });
-  test(
-    'salted versioned PIN, persisted startup locked and wrong PIN throttled',
-    () async {
-      final verifier = await PinVerifier.create('1234');
-      final second = await PinVerifier.create('1234');
-      expect(verifier.iterations, 210000);
-      expect(second.salt, isNot(verifier.salt));
-      expect(verifier.toJson().toString(), isNot(contains('1234')));
-      final dir = await Directory.systemTemp.createTemp('rillight-pin-');
-      addTearDown(() => dir.delete(recursive: true));
-      final store = FilePinStore(File('${dir.path}/pin.json'));
-      await store.save(verifier);
-      var now = DateTime(2026);
-      final access = RegionAccessController(
-        verifier: await store.load(),
-        clock: () => now,
-      );
-      expect(access.state, PrivateAccessState.locked);
-      expect(await access.unlock('9999'), false);
-      expect(access.retryAt, isNotNull);
-      expect(await access.unlock('1234'), false);
-      now = now.add(const Duration(seconds: 3));
-      expect(await access.unlock('1234'), true);
-      expect(
-        RegionAccessController(verifier: await store.load()).state,
-        PrivateAccessState.locked,
-      );
-      await access.lock();
-      expect(access.state, PrivateAccessState.locked);
-    },
-  );
   test('two independent services, isolated expiry, nickname and ordering preserve session', () async {
     final clients = <TestClient>[];
-    final r = await registry(TestRegionAccessController(), [
+    final r = await registry(TestServerAccessController(), [
       server('a'),
       server('b'),
     ], clients);
@@ -600,105 +499,14 @@ void main() {
     );
     await r.rename('a', 'new name');
     await r.renameLine('a', 'two', 'backup');
-    await r.reorder(AccessRegion.ordinary, ['b', 'a']);
+    await r.reorderServers(['b', 'a']);
     await r.reorderLines('a', ['two', 'one']);
-    expect(r.project(AccessRegion.ordinary).last.activeLineId, 'one');
+    expect(r.project().last.activeLineId, 'one');
     expect(pa.isValid, true);
     a.client.onSessionExpired!();
     expect(pa.isValid, false);
     expect(pb.isValid, true);
     expect(b.client.accessToken, 'token-b');
-  });
-  test(
-    'lock revokes late results, hides private projection and bounds cleanup',
-    () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      await access.unlock('1234');
-      final r = await registry(access, [
-        server('public'),
-        server('secret', region: AccessRegion.private),
-      ], []);
-      final session = await r.authenticate('secret');
-      final permit = r.permit(session.account);
-      final gate = Completer<String>();
-      final pending = permit.dispatch((_) => gate.future);
-      final rejected = expectLater(pending, throwsStateError);
-      RestrictedStopPermit? stop;
-      var terminated = false;
-      access.addTerminationHook(() {
-        terminated = true;
-      });
-      access.addCleanupHook((p) {
-        stop = p;
-        return Completer<void>().future;
-      });
-      final locking = access.lock(budget: const Duration(milliseconds: 5));
-      expect(permit.isValid, false);
-      expect(access.state, PrivateAccessState.locking);
-      expect(stop!.isValid, true);
-      gate.complete('secret response');
-      await rejected;
-      await locking;
-      expect(terminated, true);
-      expect(stop!.isValid, false);
-      expect(session.client.hasSession, false);
-      expect(r.project(AccessRegion.private), isEmpty);
-      expect(r.project(AccessRegion.ordinary).map((s) => s.id), ['public']);
-      await expectLater(r.check('secret'), throwsStateError);
-    },
-  );
-  test('member migration clears contribution before commit, failure retains original region', () async {
-    final access = TestRegionAccessController(verifier: verifier);
-    await access.unlock('1234');
-    final r = await registry(access, [server('a')], []);
-    final session = await r.authenticate('a');
-    final permit = r.permit(session.account);
-    final gate = Completer<void>();
-    Future<void> hook(SourceAccount? account, String id) => gate.future;
-    r.addMembershipCleanup(hook);
-    final moving = r.move('a', AccessRegion.private);
-    expect(permit.isValid, false);
-    expect(r.project(AccessRegion.ordinary), isEmpty);
-    gate.complete();
-    await moving;
-    expect(r.project(AccessRegion.ordinary), isEmpty);
-    expect(r.project(AccessRegion.private).single.id, 'a');
-    r.removeMembershipCleanup(hook);
-    r.addMembershipCleanup((_, _) async {
-      throw StateError('stop failed');
-    });
-    await expectLater(r.move('a', AccessRegion.ordinary), throwsStateError);
-    expect(r.project(AccessRegion.private).single.id, 'a');
-  });
-  test('legacy scope stays unknown, removed libraries never widen', () async {
-    final legacy = SavedServer.fromJson({
-      'id': 'a',
-      'name': 'A',
-      'baseUrl': 'https://a',
-      'username': 'user',
-    });
-    expect(legacy.region, AccessRegion.ordinary);
-    expect(legacy.participates, true);
-    final store = MemoryServerListStore(ServerListSnapshot(servers: [legacy]));
-    final r = await registry(
-      TestRegionAccessController(),
-      [legacy],
-      [],
-      store: store,
-    );
-    final session = await r.authenticate('a');
-    expect(() => r.permit(session.account), throwsStateError);
-    await r.configureScope(
-      'a',
-      participates: true,
-      libraryIds: {'movies', 'removed'},
-    );
-    final permit = r.permit(session.account);
-    await r.reconcileLibraries('a', {'movies', 'new'});
-    expect(permit.isValid, false);
-    expect((await store.load()).servers.single.libraryIds, ['movies']);
-    final json = (await store.load()).servers.single.toJson();
-    expect(SavedServer.fromJson(json).libraryIds, ['movies']);
   });
   test('manual check classification does not switch session and persists timestamp', () async {
     final clients = <TestClient>[];
@@ -706,7 +514,7 @@ void main() {
       ServerListSnapshot(servers: [server('a')]),
     );
     final r = await registry(
-      TestRegionAccessController(),
+      TestServerAccessController(),
       [server('a')],
       clients,
       store: store,
@@ -720,38 +528,43 @@ void main() {
     expect(permit.isValid, true);
   });
   test('late check after lock never sends authentication request', () async {
-    final access = TestRegionAccessController(verifier: verifier);
-    await access.unlock('1234');
+    final access = TestServerAccessController(
+      passwords: const {'a': '1234', 'b': '1234', 'secret': '1234'},
+    );
     final gate = Completer<void>();
     final client = TestClient()..gate = gate;
     final r = SourceSessionRegistry(
       access: access,
       store: MemoryServerListStore(
-        ServerListSnapshot(
-          servers: [server('secret', region: AccessRegion.private)],
-        ),
+        ServerListSnapshot(servers: [server('secret', protected: true)]),
       ),
       credentials: MemoryCredentialStore(),
       createClient: () => client,
     );
     addTearDown(r.dispose);
     await r.load();
+    for (final saved in r.project()) {
+      if (saved.protectionRef != null) await access.unlock(saved.id, '1234');
+    }
     final check = r.check('secret', lineId: 'two');
     final rejected = expectLater(check, throwsStateError);
-    await access.lock();
+    await access.lock('secret');
     gate.complete();
     await rejected;
     expect(client.userRequests, 0);
     expect(client.hasSession, false);
     expect((await r.store.load()).servers.single.lines.last.checkedAt, isNull);
-    await expectLater(r.check('secret', lineId: 'two'), throwsStateError);
-    expect(client.publicUrls, hasLength(1));
+    final lockedCheck = await r.check('secret', lineId: 'two');
+    expect(lockedCheck.status, ManualCheckStatus.needsLogin);
+    expect(client.userRequests, 0);
+    expect(access.allows('secret'), isFalse);
   });
   test(
     'backup check user response after private lock cannot publish status',
     () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      await access.unlock('1234');
+      final access = TestServerAccessController(
+        passwords: const {'a': '1234', 'b': '1234', 'secret': '1234'},
+      );
       final client = TestClient()
         ..userGate = Completer<void>()
         ..userStarted = Completer<void>();
@@ -765,19 +578,20 @@ void main() {
       final r = SourceSessionRegistry(
         access: access,
         store: MemoryServerListStore(
-          ServerListSnapshot(
-            servers: [server('secret', region: AccessRegion.private)],
-          ),
+          ServerListSnapshot(servers: [server('secret', protected: true)]),
         ),
         credentials: credentials,
         createClient: () => client,
       );
       await r.load();
+      for (final saved in r.project()) {
+        if (saved.protectionRef != null) await access.unlock(saved.id, '1234');
+      }
       addTearDown(r.dispose);
       final check = r.check('secret', lineId: 'two');
       final rejected = expectLater(check, throwsStateError);
       await client.userStarted!.future;
-      await access.lock();
+      await access.lock('secret');
       client.userGate!.complete();
       await rejected;
       expect(
@@ -786,65 +600,15 @@ void main() {
       );
       expect((await credentials.read('secret'))?.accessToken, 'old');
       expect(client.hasSession, isFalse);
-      expect(r.project(AccessRegion.private), isEmpty);
+      expect(r.project().single.id, 'secret');
+      expect(access.allows('secret'), isFalse);
     },
   );
 
-  test('ordinary Auth compatibility cannot leak private or overwrite managed scope', () async {
-    final ordinary = server('a');
-    final secret = server('secret', region: AccessRegion.private);
-    final store = MemoryServerListStore(
-      ServerListSnapshot(servers: [ordinary, secret], lastServerId: 'secret'),
-    );
-    final access = TestRegionAccessController(verifier: verifier);
-    final r = await registry(access, [ordinary, secret], [], store: store);
-    final auth = AuthController(
-      client: TestClient(),
-      credentials: r.credentials,
-      servers: store,
-      sources: r,
-    );
-    addTearDown(auth.dispose);
-    await auth.restore();
-    expect(auth.session, isNull);
-    expect(auth.savedServers.map((s) => s.id), ['a']);
-    expect(
-      await auth.connect(
-        address: 'https://secret',
-        username: 'attacker',
-        password: '0000',
-      ),
-      false,
-    );
-    expect((await r.credentials.read('secret'))!.accessToken, 'token-secret');
-    final oldSnapshot = await auth.servers.load();
-    await r.configureScope('a', participates: false, libraryIds: {'chosen'});
-    await r.rename('a', 'managed nickname');
-    await auth.servers.save(
-      ServerListSnapshot(
-        servers: [oldSnapshot.servers.single.copyWith(name: 'new server name')],
-        lastServerId: 'a',
-      ),
-    );
-    final persisted = await store.load();
-    expect(persisted.servers.last.region, AccessRegion.private);
-    expect(persisted.servers.first.libraryIds, ['chosen']);
-    expect(persisted.servers.first.participates, false);
-    expect(persisted.servers.first.nickname, 'managed nickname');
-    await auth.restore();
-    expect(auth.session?.server.id, 'a');
-    await access.unlock('1234');
-    await r.move('a', AccessRegion.private);
-    expect(auth.session, isNull);
-    expect(auth.client.hasSession, false);
-    expect(auth.savedServers, isEmpty);
-    expect(r.project(AccessRegion.ordinary), isEmpty);
-    expect(r.project(AccessRegion.private), hasLength(2));
-  });
   test(
     'new account preserves sibling permits and logout revokes only its own',
     () async {
-      final r = await registry(TestRegionAccessController(), [server('a')], []);
+      final r = await registry(TestServerAccessController(), [server('a')], []);
       final auth = AuthController(
         client: TestClient(),
         credentials: r.credentials,
@@ -865,10 +629,7 @@ void main() {
       expect(original.isValid, true);
       final addedId = auth.session!.server.id;
       expect(addedId, isNot('a'));
-      final replacement = r.permit(
-        (await r.authenticate(addedId)).account,
-        sessionOnly: true,
-      );
+      final replacement = r.permit((await r.authenticate(addedId)).account);
       await auth.logout();
       expect(replacement.isValid, false);
       expect(await r.credentials.read(addedId), isNull);
@@ -878,7 +639,10 @@ void main() {
   );
 
   test('failed login may preserve an unchanged authorized account', () async {
-    final r = await registry(TestRegionAccessController(), [server('a')], []);
+    final clients = <TestClient>[];
+    final r = await registry(TestServerAccessController(), [
+      server('a'),
+    ], clients);
     final auth = AuthController(
       client: TestClient()..rejectLogin = true,
       credentials: r.credentials,
@@ -889,6 +653,9 @@ void main() {
     await auth.restore();
     await auth.switchTo('a');
     final permit = r.permit((await r.authenticate('a')).account);
+    for (final client in clients) {
+      client.rejectLogin = true;
+    }
     expect(
       await auth.connect(
         address: 'https://a',
@@ -903,65 +670,9 @@ void main() {
     expect(permit.isValid, true);
   });
 
-  test('late login cannot overwrite migrated locked credentials', () async {
-    final access = TestRegionAccessController(verifier: verifier);
-    await access.unlock('1234');
-    final r = await registry(access, [server('a')], []);
-    final client = TestClient()
-      ..loginGate = Completer<void>()
-      ..loginStarted = Completer<void>();
-    final auth = AuthController(
-      client: client,
-      credentials: r.credentials,
-      servers: r.store,
-      sources: r,
-    );
-    addTearDown(auth.dispose);
-    await auth.restore();
-    await auth.switchTo('a');
-    final login = auth.connect(
-      address: 'https://a',
-      username: 'user',
-      password: 'pw',
-      preserveSessionOnFailure: true,
-    );
-    await client.loginStarted!.future;
-    await r.move('a', AccessRegion.private);
-    await access.lock();
-    client.loginGate!.complete();
-    expect(await login, false);
-    expect(auth.session, isNull);
-    expect(auth.client.hasSession, false);
-    expect((await r.credentials.read('a'))!.accessToken, 'token-a');
-    await expectLater(
-      auth.restoreSavedServer(
-        server('a'),
-        const StoredCredentials(
-          accessToken: 'undo',
-          userId: 'undo',
-          username: 'undo',
-        ),
-      ),
-      throwsStateError,
-    );
-    expect((await r.credentials.read('a'))!.accessToken, 'token-a');
-    await expectLater(
-      auth.restoreSavedServer(
-        server('unknown-secret', region: AccessRegion.private),
-        const StoredCredentials(
-          accessToken: 'undo',
-          userId: 'undo',
-          username: 'undo',
-        ),
-      ),
-      throwsStateError,
-    );
-    expect(await r.credentials.read('unknown-secret'), isNull);
-  });
-
   for (final lineId in ['one', 'two']) {
     test('editing loaded named line $lineId preserves its metadata', () async {
-      final r = await registry(TestRegionAccessController(), [server('a')], []);
+      final r = await registry(TestServerAccessController(), [server('a')], []);
       await r.renameLine('a', lineId, 'named backup');
       final auth = AuthController(
         client: TestClient(),
@@ -1012,7 +723,7 @@ void main() {
   }
 
   test('login address rebuild preserves a loaded line nickname', () async {
-    final r = await registry(TestRegionAccessController(), [server('a')], []);
+    final r = await registry(TestServerAccessController(), [server('a')], []);
     await r.renameLine('a', 'two', 'named backup');
     final auth = AuthController(
       client: TestClient(),
@@ -1039,7 +750,7 @@ void main() {
   });
 
   test('stale Auth edits preserve registry line and service order', () async {
-    final r = await registry(TestRegionAccessController(), [
+    final r = await registry(TestServerAccessController(), [
       server('a'),
       server('b'),
     ], []);
@@ -1053,7 +764,7 @@ void main() {
     await auth.restore();
     await r.renameLine('a', 'two', 'backup');
     await r.reorderLines('a', ['two', 'one']);
-    await r.reorder(AccessRegion.ordinary, ['b', 'a']);
+    await r.reorderServers(['b', 'a']);
     await auth.renameServer('b', 'B');
     await auth.renameServer('a', 'A');
     final saved = (await r.store.load()).servers;
@@ -1061,55 +772,6 @@ void main() {
     expect(saved.last.lines.map((l) => l.id), ['two', 'one']);
     expect(saved.last.lines.first.nickname, 'backup');
   });
-
-  test(
-    'credential IO rolls back before competing private migration commits',
-    () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      await access.unlock('1234');
-      final credentials = GatedCredentials({
-        'a': const StoredCredentials(
-          accessToken: 'old',
-          userId: 'old',
-          username: 'old',
-        ),
-      });
-      final r = SourceSessionRegistry(
-        access: access,
-        store: MemoryServerListStore(
-          ServerListSnapshot(servers: [server('a')]),
-        ),
-        credentials: credentials,
-        createClient: TestClient.new,
-      );
-      addTearDown(r.dispose);
-      await r.load();
-      final old = r.permit((await r.authenticate('a')).account);
-      final ticket = await r.beginOrdinaryCredentials('a');
-      final write = r.commitOrdinaryCredentials(
-        ticket,
-        const StoredCredentials(
-          accessToken: 'new',
-          userId: 'new',
-          username: 'new',
-        ),
-      );
-      final rejected = expectLater(write, throwsStateError);
-      await credentials.started.future;
-      expect(old.isValid, false);
-      await expectLater(r.authenticate('a'), throwsStateError);
-      final migration = r.move('a', AccessRegion.private);
-      credentials.release.complete();
-      await rejected;
-      await migration;
-      await access.lock();
-      expect((await credentials.read('a'))!.accessToken, 'old');
-      expect(
-        (await r.store.load()).servers.single.region,
-        AccessRegion.private,
-      );
-    },
-  );
 
   test(
     'pending source authentication is revoked by account replacement',
@@ -1123,7 +785,7 @@ void main() {
         ),
       });
       final r = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: MemoryServerListStore(
           ServerListSnapshot(servers: [server('a')]),
         ),
@@ -1134,8 +796,8 @@ void main() {
       await r.load();
       final pending = r.authenticate('a');
       final rejected = expectLater(pending, throwsStateError);
-      await r.commitOrdinaryCredentials(
-        await r.beginOrdinaryCredentials('a'),
+      await r.commitCredentials(
+        await r.beginCredentials('a'),
         const StoredCredentials(
           accessToken: 'new',
           userId: 'new',
@@ -1146,159 +808,16 @@ void main() {
       await rejected;
       final current = await r.authenticate('a');
       expect(current.account.userId, 'new');
-      expect(() => r.permit(current.account), throwsStateError);
-      expect(r.permit(current.account, sessionOnly: true).isValid, true);
+      expect(r.permit(current.account).isValid, isTrue);
+      expect(r.permit(current.account).isValid, true);
     },
   );
 
-  test(
-    'pending verified account response cannot revive a migrated locked session',
-    () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      await access.unlock('1234');
-      final gate = Completer<void>();
-      final started = Completer<void>();
-      final client = TestClient()
-        ..userGate = gate
-        ..userStarted = started;
-      final r = SourceSessionRegistry(
-        access: access,
-        store: MemoryServerListStore(
-          ServerListSnapshot(servers: [server('a')]),
-        ),
-        credentials: MemoryCredentialStore({
-          'a': const StoredCredentials(
-            accessToken: 'old',
-            userId: 'old',
-            username: 'old',
-          ),
-        }),
-        createClient: () => client,
-      );
-      addTearDown(r.dispose);
-      await r.load();
-      final pending = r.authenticate('a');
-      final rejected = expectLater(pending, throwsStateError);
-      await started.future;
-      await r.move('a', AccessRegion.private);
-      await access.lock();
-      gate.complete();
-      await rejected;
-      expect(client.hasSession, false);
-      expect(r.project(AccessRegion.ordinary), isEmpty);
-      expect((await r.credentials.read('a'))!.accessToken, 'old');
-      await expectLater(r.authenticate('a'), throwsStateError);
-    },
-  );
-
-  test('late logout does not delete migrated private credentials', () async {
-    final access = TestRegionAccessController(verifier: verifier);
-    await access.unlock('1234');
-    final r = await registry(access, [server('a')], []);
-    final client = TestClient()
-      ..logoutGate = Completer<void>()
-      ..logoutStarted = Completer<void>();
-    final auth = AuthController(
-      client: client,
-      credentials: r.credentials,
-      servers: r.store,
-      sources: r,
-    );
-    addTearDown(auth.dispose);
-    await auth.restore();
-    await auth.switchTo('a');
-    final logout = auth.logout();
-    await client.logoutStarted!.future;
-    await r.move('a', AccessRegion.private);
-    await access.lock();
-    client.logoutGate!.complete();
-    await logout;
-    expect((await r.credentials.read('a'))!.accessToken, 'token-a');
-    expect(auth.isBusy, false);
-  });
-
-  test(
-    'stale ordinary snapshot does not remove a migrated-in member',
-    () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      final r = await registry(access, [
-        server('a', region: AccessRegion.private),
-        server('b'),
-      ], []);
-      final auth = AuthController(
-        client: TestClient(),
-        credentials: r.credentials,
-        servers: r.store,
-        sources: r,
-      );
-      addTearDown(auth.dispose);
-      await auth.restore();
-      await access.unlock('1234');
-      await r.move('a', AccessRegion.ordinary);
-      await auth.renameServer('b', 'B');
-      expect((await r.store.load()).servers.map((s) => s.id), ['a', 'b']);
-    },
-  );
-
-  test(
-    'failed member persistence is not committed and writer recovers',
-    () async {
-      final access = TestRegionAccessController(verifier: verifier);
-      await access.unlock('1234');
-      final store = FailingStore(ServerListSnapshot(servers: [server('a')]));
-      final r = await registry(access, [server('a')], [], store: store);
-      store.fail = true;
-      await expectLater(
-        r.move('a', AccessRegion.private),
-        throwsA(isA<FileSystemException>()),
-      );
-      expect(r.project(AccessRegion.ordinary).single.id, 'a');
-      expect(r.project(AccessRegion.private), isEmpty);
-      store.fail = false;
-      await r.rename('a', 'recovered');
-      expect((await store.load()).servers.single.nickname, 'recovered');
-      await Future.wait([
-        r.rename('a', 'parallel'),
-        r.renameLine('a', 'two', 'parallel line'),
-      ]);
-      expect((await store.load()).servers.single.nickname, 'parallel');
-      expect(
-        (await store.load()).servers.single.lines.last.nickname,
-        'parallel line',
-      );
-    },
-  );
-  test(
-    'PIN setup requires confirmation and persistence before activation',
-    () async {
-      final access = TestRegionAccessController();
-      await expectLater(
-        access.setPin('1234', '0000', (_) async {}),
-        throwsArgumentError,
-      );
-      expect(access.hasPin, false);
-      await expectLater(
-        access.setPin('1234', '1234', (_) async {
-          throw StateError('disk');
-        }),
-        throwsStateError,
-      );
-      expect(access.hasPin, false);
-      await access.setPin('1234', '1234', (_) async {});
-      expect(access.hasPin, true);
-      expect(access.state, PrivateAccessState.locked);
-      await expectLater(
-        access.setPin('5678', '5678', (_) async {}),
-        throwsStateError,
-      );
-      expect(await access.unlock('1234'), true);
-    },
-  );
   test('timeout check does not continue to authenticated requests', () async {
     final gate = Completer<void>();
     final client = TestClient()..gate = gate;
     final r = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(ServerListSnapshot(servers: [server('a')])),
       credentials: MemoryCredentialStore(),
       createClient: () => client,
@@ -1313,4 +832,199 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(client.userRequests, 0);
   });
+
+  test('all configured servers stay visible while content requires their own permit', () async {
+    final access = TestServerAccessController(passwords: const {'a': '1234'});
+    final r = SourceSessionRegistry(
+      access: access,
+      store: MemoryServerListStore(
+        ServerListSnapshot(
+          servers: [server('a', protected: true), server('b')],
+        ),
+      ),
+      credentials: MemoryCredentialStore({
+        for (final id in ['a', 'b'])
+          id: StoredCredentials(
+            accessToken: 'token-$id',
+            userId: 'user-$id',
+            username: 'user',
+          ),
+      }),
+      createClient: TestClient.new,
+    );
+    addTearDown(r.dispose);
+    await r.load();
+    expect(r.project().map((s) => s.id), ['a', 'b']);
+    await expectLater(r.authenticate('a'), throwsStateError);
+    await expectLater(r.ensureSession('a'), throwsStateError);
+    final b = await r.authenticate('b');
+    final permitB = r.permit(b.account, libraryId: 'unconfigured-library');
+    expect(permitB.isValid, isTrue);
+    expect(await access.unlock('a', 'bad'), isFalse);
+    expect(permitB.isValid, isTrue);
+    expect(await r.credentials.read('a'), isNotNull);
+  });
+
+  test(
+    'preparing protected entry never publishes content before password commit',
+    () async {
+      final access = TestServerAccessController(passwords: const {'a': '1234'});
+      final r = await registry(access, [
+        server('a', protected: true),
+        server('b'),
+      ], []);
+      await access.lock('a');
+      final candidate = await r.prepareEntrySession('a');
+      expect(candidate.account.configuredServerId, 'a');
+      expect(access.allows('a'), isFalse);
+      expect(() => r.permit(candidate.account), throwsStateError);
+      final unlock = await access.prepareUnlock('a', '1234');
+      expect(access.allows('a'), isFalse);
+      expect(access.commitEntry('a', unlock), isTrue);
+      expect(r.permit(candidate.account).isValid, isTrue);
+    },
+  );
+
+  for (final phase in ['identity', 'account']) {
+    test(
+      'locking during $phase preparation rejects late results without deleting credentials',
+      () async {
+        final access = TestServerAccessController(
+          passwords: const {'a': '1234'},
+        );
+        final client = TestClient();
+        final r = SourceSessionRegistry(
+          access: access,
+          store: MemoryServerListStore(
+            ServerListSnapshot(servers: [server('a', protected: true)]),
+          ),
+          credentials: MemoryCredentialStore({
+            'a': const StoredCredentials(
+              accessToken: 'token-a',
+              userId: 'user-a',
+              username: 'user',
+            ),
+          }),
+          createClient: () => client,
+        );
+        addTearDown(r.dispose);
+        await r.load();
+        await access.unlock('a', '1234');
+        final gate = Completer<void>();
+        if (phase == 'identity') {
+          client.gate = gate;
+        } else {
+          client.userGate = gate;
+          client.userStarted = Completer<void>();
+        }
+        final pending = r.authenticate('a');
+        final rejected = expectLater(pending, throwsStateError);
+        if (phase == 'account') {
+          await client.userStarted!.future;
+        } else {
+          while (client.publicUrls.isEmpty) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
+        await access.lock('a');
+        gate.complete();
+        await rejected;
+        expect(r.project().single.id, 'a');
+        expect((await r.credentials.read('a'))!.accessToken, 'token-a');
+        expect(client.hasSession, isFalse);
+        if (phase == 'identity') expect(client.userRequests, 0);
+      },
+    );
+  }
+
+  test('successful other-server entry revokes only protected source and keeps remote login', () async {
+    final access = TestServerAccessController(passwords: const {'a': '1234'});
+    final r = await registry(access, [
+      server('a', protected: true),
+      server('b'),
+    ], []);
+    final a = await r.authenticate('a');
+    final b = await r.authenticate('b');
+    final permitA = r.permit(a.account), permitB = r.permit(b.account);
+    access.didEnter('a');
+    expect(permitA.isValid, isTrue);
+    access.didEnter('b');
+    expect(permitA.isValid, isFalse);
+    expect(permitB.isValid, isTrue);
+    expect((await r.credentials.read('a'))!.accessToken, 'token-a');
+    expect(r.project(), hasLength(2));
+  });
+
+  test(
+    'cancelled unlock cannot reveal target or revoke current source',
+    () async {
+      final access = TestServerAccessController(
+        passwords: const {'a': '1234', 'b': '1234'},
+      );
+      final r = await registry(access, [
+        server('a', protected: true),
+        server('b', protected: true),
+      ], []);
+      await access.lock('b');
+      final a = await r.authenticate('a');
+      final permitA = r.permit(a.account);
+      final candidate = (await access.prepareUnlock('b', '1234'))!;
+      candidate.cancel();
+      expect(access.commitEntry('b', candidate), isFalse);
+      expect(permitA.isValid, isTrue);
+      expect(access.allows('b'), isFalse);
+    },
+  );
+
+  test(
+    'password persistence failure preserves original permit and configuration',
+    () async {
+      final store = FailingStore(ServerListSnapshot(servers: [server('a')]));
+      final access = TestServerAccessController();
+      final r = await registry(access, [server('a')], [], store: store);
+      final a = await r.authenticate('a');
+      final permit = r.permit(a.account);
+      store.fail = true;
+      await expectLater(
+        access.setPassword(
+          'a',
+          '1234',
+          '1234',
+          persistReference: (ref) => r.persistProtectionReference('a', ref),
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(permit.isValid, isTrue);
+      expect(r.project().single.protectionRef, isNull);
+      store.fail = false;
+      await access.setPassword(
+        'a',
+        '1234',
+        '1234',
+        persistReference: (ref) => r.persistProtectionReference('a', ref),
+      );
+      expect(permit.isValid, isFalse);
+      expect(access.allows('a'), isFalse);
+      expect((await r.credentials.read('a'))!.accessToken, 'token-a');
+    },
+  );
+
+  test(
+    'missing verifier remains locked yet removal needs no password',
+    () async {
+      final access = TestServerAccessController();
+      final r = await registry(access, [
+        server('a', protected: true),
+        server('b'),
+      ], []);
+      expect(access.isUnavailable('a'), isTrue);
+      await expectLater(r.authenticate('a'), throwsStateError);
+      final b = await r.authenticate('b');
+      final permitB = r.permit(b.account);
+      await r.logoutSource('a', remove: true);
+      expect(r.project().single.id, 'b');
+      expect(await r.credentials.read('a'), isNull);
+      expect(permitB.isValid, isTrue);
+    },
+  );
 }

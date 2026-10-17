@@ -1,11 +1,13 @@
-import '../helpers/region_access_fixture.dart';
+import 'dart:async';
+
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/emby/emby_client.dart';
@@ -66,13 +68,11 @@ void main() {
               address: 'http://127.0.0.1:${hosts[i].port}',
             ),
           ],
-          libraryIds: const ['movies'],
-          scopeKnown: true,
         ),
     ];
     final store = MemoryServerListStore(ServerListSnapshot(servers: saved));
     final r = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: store,
       credentials: MemoryCredentialStore({
         for (final s in saved)
@@ -138,10 +138,9 @@ void main() {
       }
       await request.response.close();
     });
-    final access = TestRegionAccessController(
-      verifier: await TestPinVerifier.create('1234'),
+    final access = TestServerAccessController(
+      passwords: const {'secret': '1234'},
     );
-    await access.unlock('1234');
     final r = SourceSessionRegistry(
       access: access,
       store: MemoryServerListStore(
@@ -151,15 +150,13 @@ void main() {
               id: 'secret',
               name: 'secret',
               username: 'user',
-              region: AccessRegion.private,
+              protectionRef: 'test:secret',
               lines: [
                 ServerLine(
                   id: 'line',
                   address: 'http://127.0.0.1:${host.port}',
                 ),
               ],
-              libraryIds: const ['movies'],
-              scopeKnown: true,
             ),
           ],
         ),
@@ -175,6 +172,7 @@ void main() {
     );
     addTearDown(r.dispose);
     await r.load();
+    expect(await access.unlock('secret', '1234'), isTrue);
     final session = await r.authenticate('secret');
     final stop = r.freezeStop(
       r.permit(session.account),
@@ -186,14 +184,19 @@ void main() {
         position: Duration(microseconds: (123) ~/ 10),
       ),
     );
-    RestrictedStopPermit? closing;
+    ServerStopPermit? closing;
+    final cleaned = Completer<void>();
     access.addCleanupHook((permit) async {
       closing = permit;
       await stop.reportStopped(permit);
+      cleaned.complete();
     });
-    await access.lock();
+    await access.lock('secret');
+    await cleaned.future;
+    await Future<void>.delayed(Duration.zero);
     expect(paths.where((p) => p.endsWith('/Stopped')), hasLength(1));
-    expect(session.client.hasSession, false);
+    await expectLater(session.client.getUser(), throwsA(isA<Exception>()));
+    expect((await r.credentials.read('secret'))!.accessToken, 'secret-token');
     await expectLater(stop.reportStopped(closing!), throwsStateError);
     expect(paths.where((p) => p.endsWith('/Stopped')), hasLength(1));
   });

@@ -199,8 +199,10 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
         )
       : null;
   @override
-  EmbyClient createDetached() =>
-      (withRequestGuard(() {}) as EmbyClient)..clearSession();
+  EmbyClient createDetached() => (withRequestGuard(() {}) as EmbyClient)
+    ..onSessionExpired = null
+    ..onRefreshSession = null
+    ..clearSession();
   @override
   ResolvedPlayback? resolvePlayback({
     required PlaybackInfo info,
@@ -314,6 +316,8 @@ class EmbyClient implements MediaServerClient, MediaFavorites {
     );
     final guarded = EmbyClient(device: device, dio: dio)
       .._requestGuard = check
+      ..onSessionExpired = onSessionExpired
+      ..onRefreshSession = onRefreshSession
       ..setUserAgent(customUserAgent);
     if (hasSession) {
       guarded.attachSession(

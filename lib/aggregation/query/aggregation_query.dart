@@ -37,12 +37,10 @@ enum QuerySummary {
   allFailed,
 }
 
-/// Null serverIds means this region's participating services. An empty set
-/// deliberately selects nothing. Library selections are always intersected
-/// with the registry, never used to widen its authority.
+/// Null serverIds means all currently accessible servers. An empty set
+/// deliberately selects nothing. Library IDs are query filters, never authority.
 class QueryScope {
   QueryScope({
-    required this.region,
     Set<String>? serverIds,
     Map<String, Set<String>> libraries = const {},
     this.mode = QueryMode.browse,
@@ -73,7 +71,6 @@ class QueryScope {
       throw ArgumentError('Unsupported loaded-set sort: $sortBy');
     }
   }
-  final AccessRegion region;
   final Set<String>? serverIds;
   final Map<String, Set<String>> libraries;
   final QueryMode mode;
@@ -204,19 +201,14 @@ class AggregationQueryController extends ChangeNotifier {
 
   bool _selected(QuerySourceKey key) {
     final scope = _scope;
-    if (scope == null || !registry.access.allows(scope.region)) return false;
-    return registry
-        .project(scope.region)
-        .any(
-          (s) =>
-              s.id == key.serverId &&
-              s.participates &&
-              s.scopeKnown &&
-              s.libraryIds.contains(key.libraryId) &&
-              (scope.serverIds == null || scope.serverIds!.contains(s.id)) &&
-              (!scope.libraries.containsKey(s.id) ||
-                  scope.libraries[s.id]!.contains(key.libraryId)),
-        );
+    if (scope == null || !registry.access.allows(key.serverId)) return false;
+    return registry.project().any(
+      (s) =>
+          s.id == key.serverId &&
+          (scope.serverIds == null || scope.serverIds!.contains(s.id)) &&
+          (!scope.libraries.containsKey(s.id) ||
+              scope.libraries[s.id]!.contains(key.libraryId)),
+    );
   }
 
   void _sanitize() {
@@ -318,18 +310,13 @@ class AggregationQueryController extends ChangeNotifier {
     final scope = _scope;
     if (scope == null) return const [];
     return List.unmodifiable(
-      history
-          .records(scope.region)
-          .where(
-            (r) =>
-                !r.played &&
-                _selected(
-                  QuerySourceKey(
-                    r.source.account.configuredServerId,
-                    r.libraryId,
-                  ),
-                ),
-          ),
+      history.records().where(
+        (r) =>
+            !r.played &&
+            _selected(
+              QuerySourceKey(r.source.account.configuredServerId, r.libraryId),
+            ),
+      ),
     );
   }
 
@@ -339,7 +326,6 @@ class AggregationQueryController extends ChangeNotifier {
   }) {
     _sanitize();
     return history.resolveResume(
-      region: _scope!.region,
       index: _index,
       anchor: reference,
       remote: remote.where(
@@ -381,7 +367,7 @@ class AggregationQueryController extends ChangeNotifier {
   }
 
   /// Resets results, counts, errors and anchor synchronously before first await.
-  Future<void> start(QueryScope scope) {
+  Future<void> start(QueryScope scope) async {
     _revision++;
     _scope = scope;
     anchor = null;
@@ -390,30 +376,62 @@ class AggregationQueryController extends ChangeNotifier {
     _index.removeWhere((_) => true);
     _indexDirty = false;
     _sortedWorks = null;
-    if (registry.access.allows(scope.region) &&
-        !(scope.mode == QueryMode.search && scope.keyword.trim().isEmpty)) {
-      for (final server in registry.project(scope.region)) {
-        if (!server.participates ||
-            !server.scopeKnown ||
-            (scope.serverIds != null &&
-                !scope.serverIds!.contains(server.id))) {
-          continue;
-        }
-        for (final library in server.libraryIds) {
-          if (scope.libraries.containsKey(server.id) &&
-              !scope.libraries[server.id]!.contains(library)) {
-            continue;
-          }
-          final key = QuerySourceKey(server.id, library);
-          _states[key] = SourceQueryState(key);
-        }
-      }
-    }
     final revision = _revision;
-    final states = _states.values.toList();
+    final targets = registry
+        .project()
+        .where(
+          (server) =>
+              registry.access.allows(server.id) &&
+              (scope.serverIds == null ||
+                  scope.serverIds!.contains(server.id)) &&
+              !(scope.mode == QueryMode.search && scope.keyword.trim().isEmpty),
+        )
+        .toList();
+    for (final server in targets) {
+      final key = QuerySourceKey(server.id, '');
+      _states[key] = SourceQueryState(key)..status = SourceQueryStatus.loading;
+    }
     notifyListeners();
-    if (_disposed || revision != _revision) return Future.value();
-    return Future.wait(states.map(_load)).then((_) {});
+    if (_disposed || revision != _revision) return;
+    await Future.wait(
+      targets.map((server) async {
+        final discovery = QuerySourceKey(server.id, '');
+        bool current() =>
+            !_disposed &&
+            revision == _revision &&
+            registry.access.allows(server.id);
+        try {
+          if (!current()) return;
+          final session = await registry.ensureSession(server.id);
+          if (!current()) return;
+          final permit = registry.permit(session.account);
+          final views = await permit
+              .dispatch((client) => client.getViews())
+              .timeout(timeout);
+          if (!current() || !permit.isValid) return;
+          _states.remove(discovery);
+          final states = <SourceQueryState>[];
+          for (final view in views) {
+            if (scope.libraries.containsKey(server.id) &&
+                !scope.libraries[server.id]!.contains(view.id)) {
+              continue;
+            }
+            final key = QuerySourceKey(server.id, view.id);
+            final state = SourceQueryState(key);
+            _states[key] = state;
+            states.add(state);
+          }
+          notifyListeners();
+          if (!current()) return;
+          await Future.wait(states.map(_load));
+        } catch (error) {
+          if (!current()) return;
+          _states[discovery] = SourceQueryState(discovery)
+            ..status = classifyQueryFailure(error);
+          notifyListeners();
+        }
+      }),
+    );
   }
 
   /// Reuse an already-authorized independent registry session (for detail
@@ -421,7 +439,7 @@ class AggregationQueryController extends ChangeNotifier {
   void useAccount(SourceAccount account, {required String libraryId}) {
     final permit = permitForAccount(registry, account, libraryId: libraryId);
     if (permit == null || !permit.isValid) {
-      throw StateError('Source outside allowed scope');
+      throw StateError('Source access revoked');
     }
     _accounts[account.configuredServerId] = account;
   }
@@ -438,11 +456,7 @@ class AggregationQueryController extends ChangeNotifier {
     }
     final pending = _authenticating[id];
     if (pending != null) return pending;
-    final future = registry.acquireAccount(
-      id,
-      region: _scope!.region,
-      libraryId: library,
-    );
+    final future = registry.acquireAccount(id, libraryId: library);
     _authenticating[id] = future;
     try {
       final account = await future;
@@ -592,15 +606,14 @@ class AggregationQueryController extends ChangeNotifier {
   }
 
   void _revoked() {
-    if (_scope?.region != AccessRegion.private) return;
-    _revision++;
-    _states.clear();
-    _accounts.clear();
-    _authenticating.clear();
-    anchor = null;
-    _index.removeWhere((_) => true);
-    _indexDirty = false;
-    _sortedWorks = null;
+    _states.removeWhere((key, _) => !registry.access.allows(key.serverId));
+    _accounts.removeWhere((id, _) => !registry.access.allows(id));
+    _authenticating.removeWhere((id, _) => !registry.access.allows(id));
+    if (anchor != null &&
+        !registry.access.allows(anchor!.account.configuredServerId)) {
+      anchor = null;
+    }
+    _rebuild();
     if (!_disposed) notifyListeners();
   }
 

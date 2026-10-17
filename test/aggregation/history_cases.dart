@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:dio/dio.dart';
 
@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/aggregation/identity/media_identity.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -28,6 +28,8 @@ class _Client extends EmbyClient {
           version: '1',
         ),
       );
+  @override
+  Future<void> logout() async => clearSession();
   @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async =>
       PublicServerInfo(id: baseUrl.host, serverName: baseUrl.host);
@@ -50,20 +52,17 @@ class _FailingStore extends MemoryHistoryStore {
   }
 }
 
-SavedServer _server(String id, {AccessRegion region = AccessRegion.ordinary}) =>
-    SavedServer(
-      id: id,
-      name: id,
-      username: 'user',
-      region: region,
-      lines: [ServerLine(id: 'line', address: 'https://$id')],
-      libraryIds: const ['library'],
-      scopeKnown: true,
-    );
+SavedServer _server(String id, {bool protected = false}) => SavedServer(
+  id: id,
+  name: id,
+  username: 'user',
+  protectionRef: protected ? 'test:$id' : null,
+  lines: [ServerLine(id: 'line', address: 'https://$id')],
+);
 
 class _Fixture {
   _Fixture(this.access, this.registry, this.writer, this.a, this.b);
-  final RegionAccessController access;
+  final ServerAccessController access;
   final SourceSessionRegistry registry;
   HistoryWriter writer;
   final SourceAccount a;
@@ -120,21 +119,16 @@ class _Fixture {
 }
 
 Future<_Fixture> _fixture({HistoryStore? store, bool privateB = false}) async {
-  final access = TestRegionAccessController();
-  if (privateB) {
-    await access.setPin('1234', '1234', (_) async {});
-    expect(await access.unlock('1234'), isTrue);
-  }
+  final access = TestServerAccessController(
+    passwords: {if (privateB) 'b': '1234'},
+  );
   final registry = SourceSessionRegistry(
     access: access,
     store: MemoryServerListStore(
       ServerListSnapshot(
         servers: [
           _server('a'),
-          _server(
-            'b',
-            region: privateB ? AccessRegion.private : AccessRegion.ordinary,
-          ),
+          _server('b', protected: privateB),
         ],
       ),
     ),
@@ -149,6 +143,7 @@ Future<_Fixture> _fixture({HistoryStore? store, bool privateB = false}) async {
     createClient: _Client.new,
   );
   await registry.load();
+  if (privateB) expect(await access.unlock('b', '1234'), isTrue);
   final a = (await registry.authenticate('a')).account;
   final b = (await registry.authenticate('b')).account;
   final writer = await HistoryWriter.open(
@@ -183,82 +178,67 @@ Future<WatchRecord?> _observe(
 void main() {
   test('a locked private playback permit cannot save preference', () async {
     final f = await _fixture(privateB: true);
-    final permit = f.registry.permit(
-      f.b,
-      libraryId: 'library',
-      sessionOnly: true,
-    );
+    final permit = f.registry.permit(f.b, libraryId: 'library');
     await f.writer.savePreference(f.pref(f.b), playbackPermit: permit);
-    await f.access.lock();
+    await f.access.lock('b');
     await expectLater(
       f.writer.savePreference(f.pref(f.b), playbackPermit: permit),
       throwsStateError,
     );
   });
 
-  test('local preference uses its live playback permit without widening aggregation', () async {
-    final f = await _fixture();
-    await f.registry.configureScope('a', participates: false, libraryIds: {});
-    final preference = f.pref(f.a);
-    final permit = f.registry.permit(
-      f.a,
-      libraryId: 'library',
-      sessionOnly: true,
-    );
-    await expectLater(f.writer.savePreference(preference), throwsStateError);
-    await f.writer.savePreference(preference, playbackPermit: permit);
-    final local = f.writer.resolvePreference(
-      owner: preference.owner,
-      region: AccessRegion.ordinary,
-      candidates: [f.candidate(f.a)],
-      playbackPermit: permit,
-    );
-    expect(local.failure, isNull);
-    expect(local.selected!.source, preference.target);
-    final aggregated = f.writer.resolvePreference(
-      owner: preference.owner,
-      region: AccessRegion.ordinary,
-      candidates: [f.candidate(f.a)],
-    );
-    expect(aggregated.failure, PreferenceFailure.notParticipating);
-    expect(aggregated.allowedCandidates, isEmpty);
-    for (final wrong in [
-      f.registry.permit(f.b, libraryId: 'library', sessionOnly: true),
-      f.registry.permit(f.a, libraryId: 'other-library', sessionOnly: true),
-      f.registry.permit(f.a, sessionOnly: true),
-    ]) {
+  test(
+    'preferences from every authorized library need no participation setup',
+    () async {
+      final f = await _fixture();
+      final preference = f.pref(f.a);
+      final permit = f.registry.permit(f.a, libraryId: 'library');
+      await f.writer.savePreference(preference);
+      await f.writer.savePreference(preference, playbackPermit: permit);
+      expect(
+        f.writer
+            .resolvePreference(
+              owner: preference.owner,
+              candidates: [f.candidate(f.a)],
+            )
+            .selected!
+            .source,
+        preference.target,
+      );
+      for (final wrong in [
+        f.registry.permit(f.b, libraryId: 'library'),
+        f.registry.permit(f.a, libraryId: 'other-library'),
+        f.registry.permit(f.a),
+      ]) {
+        await expectLater(
+          f.writer.savePreference(preference, playbackPermit: wrong),
+          throwsStateError,
+        );
+      }
+      await f.registry.logoutSource('a');
       await expectLater(
-        f.writer.savePreference(preference, playbackPermit: wrong),
+        f.writer.savePreference(preference, playbackPermit: permit),
         throwsStateError,
       );
-    }
-    await f.registry.configureScope(
-      'a',
-      participates: true,
-      libraryIds: {'other'},
-    );
-    await expectLater(
-      f.writer.savePreference(preference, playbackPermit: permit),
-      throwsStateError,
-    );
-  });
+    },
+  );
 
   test('actual local observation commits before failed report; reports only actual source', () async {
     final f = await _fixture();
     final s = await f.begin(f.a);
     expect(await _observe(f, s, 0, 20, playing: false), isNull);
-    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    expect(f.writer.records(), isEmpty);
     final record = (await _observe(f, s, 1, 30))!;
     var requests = 0;
     await f.writer.synchronize(record, (client, actual) async {
       requests++;
       expect(client.userId, f.a.userId);
       expect(actual.source.account, f.a);
-      expect(f.writer.records(AccessRegion.ordinary).single.positionTicks, 30);
+      expect(f.writer.records().single.positionTicks, 30);
       throw StateError('remote failed');
     });
     expect(requests, 1);
-    final saved = f.writer.records(AccessRegion.ordinary).single;
+    final saved = f.writer.records().single;
     expect(saved.remoteStatus, RemoteSyncStatus.failed);
     expect(saved.positionTicks, 30);
     expect(saved.timeline.edition, 'cut');
@@ -279,7 +259,7 @@ void main() {
       await _observe(f, current, 0, 10);
       f.writer.endSession(current);
       expect(await _observe(f, current, 1, 20), isNull);
-      final records = f.writer.records(AccessRegion.ordinary);
+      final records = f.writer.records();
       expect(records.first.source.account, f.b);
       expect(records.last.positionTicks, 100);
     },
@@ -299,10 +279,7 @@ void main() {
     await _observe(f, s, 2, 20);
     gate.complete();
     await syncing;
-    expect(
-      f.writer.records(AccessRegion.ordinary).single.remoteStatus,
-      RemoteSyncStatus.pending,
-    );
+    expect(f.writer.records().single.remoteStatus, RemoteSyncStatus.pending);
   });
 
   test(
@@ -323,7 +300,7 @@ void main() {
       gate.complete();
       await old;
       expect(
-        f.writer.records(AccessRegion.ordinary).single.remoteStatus,
+        f.writer.records().single.remoteStatus,
         RemoteSyncStatus.succeeded,
       );
     },
@@ -341,11 +318,7 @@ void main() {
       final anchor = f.source(f.a, version: null);
       expect(
         f.writer
-            .resolveResume(
-              region: AccessRegion.ordinary,
-              index: index,
-              anchor: anchor,
-            )
+            .resolveResume(index: index, anchor: anchor)
             .local!
             .source
             .account,
@@ -361,17 +334,13 @@ void main() {
       ]);
       expect(
         f.writer
-            .resolveResume(
-              region: AccessRegion.ordinary,
-              index: index,
-              anchor: anchor,
-            )
+            .resolveResume(index: index, anchor: anchor)
             .local!
             .source
             .account,
         f.a,
       );
-      expect(f.writer.records(AccessRegion.ordinary), hasLength(2));
+      expect(f.writer.records(), hasLength(2));
       // No record for a newly split source that has never been observed.
       final c = f.source(f.a, item: 'new', version: null);
       index.upsert([
@@ -383,13 +352,7 @@ void main() {
         ),
       ]);
       expect(
-        f.writer
-            .resolveResume(
-              region: AccessRegion.ordinary,
-              index: index,
-              anchor: c,
-            )
-            .kind,
+        f.writer.resolveResume(index: index, anchor: c).kind,
         ResumeKind.empty,
       );
     },
@@ -412,7 +375,6 @@ void main() {
     );
     ResumeChoice resolve(List<RemoteWatch> candidates) =>
         f.writer.resolveResume(
-          region: AccessRegion.ordinary,
           index: f.index(),
           anchor: f.source(f.a, version: null),
           remote: candidates,
@@ -448,7 +410,7 @@ void main() {
     await f.writer.close();
     f.writer = await HistoryWriter.open(registry: f.registry, store: store);
     expect(f.writer.sessionById(session.id), isNull);
-    final saved = f.writer.records(AccessRegion.ordinary).single;
+    final saved = f.writer.records().single;
     expect(saved.source, record.source);
     expect(saved.remoteStatus, RemoteSyncStatus.failed);
     expect(saved.timeline.durationTicks, 1000);
@@ -472,7 +434,7 @@ void main() {
         _observe(f, s, 2, 20),
         throwsA(isA<FileSystemException>()),
       );
-      expect(f.writer.records(AccessRegion.ordinary).single, same(first));
+      expect(f.writer.records().single, same(first));
       store.fail = false;
       final next = (await _observe(f, s, 2, 20))!;
       expect(next.localOrder, first.localOrder + 1);
@@ -480,32 +442,29 @@ void main() {
   );
 
   test(
-    'preference validates registry scope and never silently picks first source',
+    'a locked preferred server never silently selects an allowed alternative',
     () async {
-      final f = await _fixture();
+      final f = await _fixture(privateB: true);
       final owner = f.source(f.a, version: null);
-      await f.writer.savePreference(f.pref(f.a));
+      await f.writer.savePreference(
+        SourcePreference(
+          owner: owner,
+          target: f.source(f.b),
+          libraryId: 'library',
+        ),
+      );
       PreferenceResolution resolve() => f.writer.resolvePreference(
         owner: owner,
-        region: AccessRegion.ordinary,
         candidates: [f.candidate(f.a), f.candidate(f.b)],
       );
-      expect(resolve().selected!.source.account, f.a);
-      await f.registry.configureScope(
-        'a',
-        participates: false,
-        libraryIds: {'library'},
-      );
-      final invalid = resolve();
-      expect(invalid.failure, PreferenceFailure.notParticipating);
-      expect(invalid.selected, isNull);
-      expect(invalid.allowedCandidates.single.source.account, f.b);
-      await f.registry.configureScope(
-        'a',
-        participates: true,
-        libraryIds: {'other'},
-      );
-      expect(resolve().failure, PreferenceFailure.libraryExcluded);
+      expect(resolve().selected!.source.account, f.b);
+      await f.access.lock('b');
+      expect(resolve().failure, PreferenceFailure.serverLocked);
+      expect(resolve().selected, isNull);
+      expect(resolve().allowedCandidates.single.source.account, f.a);
+      await f.access.unlock('b', '1234');
+      await f.registry.authenticate('b');
+      expect(resolve().selected!.source.account, f.b);
     },
   );
 
@@ -513,8 +472,8 @@ void main() {
     final f = await _fixture();
     final owner = f.source(f.a, version: null);
     await f.writer.savePreference(f.pref(f.a));
-    final snapshot = await f.registry.ordinaryStore.load();
-    await f.registry.ordinaryStore.save(
+    final snapshot = await f.registry.configurationStore.load();
+    await f.registry.configurationStore.save(
       ServerListSnapshot(
         servers: [
           for (final server in snapshot.servers)
@@ -532,45 +491,48 @@ void main() {
     );
     PreferenceResolution resolve() => f.writer.resolvePreference(
       owner: owner,
-      region: AccessRegion.ordinary,
       candidates: [f.candidate(f.a), f.candidate(f.b)],
     );
     expect(resolve().failure, PreferenceFailure.lineRemoved);
     expect(resolve().selected, isNull);
     await f.writer.savePreference(f.pref(f.a, line: 'replacement'));
-    final commit = await f.registry.beginOrdinaryCredentials('a');
-    await f.registry.commitOrdinaryCredentials(commit, null);
+    final commit = await f.registry.beginCredentials('a');
+    await f.registry.commitCredentials(commit, null);
     expect(resolve().failure, PreferenceFailure.accountUnavailable);
     expect(resolve().allowedCandidates.single.source.account, f.b);
   });
 
-  test(
-    'preference persistence survives restart and rejects cross-region writes',
-    () async {
-      final f = await _fixture(privateB: true);
-      await f.writer.savePreference(f.pref(f.a));
-      final store = f.writer.store;
-      await f.writer.close();
-      f.writer = await HistoryWriter.open(registry: f.registry, store: store);
-      final resolved = f.writer.resolvePreference(
+  test('preference persistence survives restart and preserves explicitly chosen source', () async {
+    final f = await _fixture(privateB: true);
+    await f.writer.savePreference(f.pref(f.a));
+    final store = f.writer.store;
+    await f.writer.close();
+    f.writer = await HistoryWriter.open(registry: f.registry, store: store);
+    final resolved = f.writer.resolvePreference(
+      owner: f.source(f.a, version: null),
+      candidates: [f.candidate(f.a)],
+    );
+    expect(resolved.failure, isNull);
+    expect(resolved.preference!.settings.audioLanguage, 'zh');
+    await f.writer.savePreference(
+      SourcePreference(
         owner: f.source(f.a, version: null),
-        region: AccessRegion.ordinary,
-        candidates: [f.candidate(f.a)],
-      );
-      expect(resolved.failure, isNull);
-      expect(resolved.preference!.settings.audioLanguage, 'zh');
-      await expectLater(
-        f.writer.savePreference(
-          SourcePreference(
+        target: f.source(f.b),
+        libraryId: 'library',
+      ),
+    );
+    expect(
+      f.writer
+          .resolvePreference(
             owner: f.source(f.a, version: null),
-            target: f.source(f.b),
-            libraryId: 'library',
-          ),
-        ),
-        throwsArgumentError,
-      );
-    },
-  );
+            candidates: [f.candidate(f.a), f.candidate(f.b)],
+          )
+          .selected!
+          .source
+          .account,
+      f.b,
+    );
+  });
 
   test(
     'unknown storage versions are rejected without overwriting the file',
@@ -624,7 +586,6 @@ void main() {
       f.writer
           .resolvePreference(
             owner: owner,
-            region: AccessRegion.ordinary,
             candidates: [next],
             nextEpisode: true,
           )
@@ -633,7 +594,6 @@ void main() {
     );
     final result = f.writer.resolvePreference(
       owner: owner,
-      region: AccessRegion.ordinary,
       candidates: [next],
       nextEpisode: true,
       episodeLookups: lookups,
@@ -644,7 +604,6 @@ void main() {
       f.writer
           .resolvePreference(
             owner: owner,
-            region: AccessRegion.ordinary,
             candidates: [PreferenceCandidate(next.source, 'library')],
             nextEpisode: true,
             episodeLookups: lookups,
@@ -653,86 +612,94 @@ void main() {
       PreferenceFailure.versionUncertain,
     );
     expect(
-      f.writer
-          .resolvePreference(
-            owner: owner,
-            region: AccessRegion.ordinary,
-            candidates: [next],
-          )
-          .failure,
+      f.writer.resolvePreference(owner: owner, candidates: [next]).failure,
       PreferenceFailure.targetMissing,
     );
   });
 
-  test('ordinary projection never includes unlocked private records, preferences or remote', () async {
-    final f = await _fixture(privateB: true);
-    final s = await f.begin(f.b);
-    await _observe(f, s, 0, 10);
-    await f.writer.savePreference(f.pref(f.b));
-    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-    expect(f.writer.records(AccessRegion.private), hasLength(1));
-    final result = f.writer.resolvePreference(
-      owner: f.source(f.b, version: null),
-      region: AccessRegion.ordinary,
-      candidates: [f.candidate(f.b)],
-    );
-    expect(result.failure, PreferenceFailure.wrongRegion);
-    expect(result.preference, isNull);
-    expect(result.allowedCandidates, isEmpty);
-  });
+  test(
+    'unlocked server records and preferences join the single aggregation',
+    () async {
+      final f = await _fixture(privateB: true);
+      final session = await f.begin(f.b);
+      await _observe(f, session, 0, 10);
+      await f.writer.savePreference(f.pref(f.b));
+      expect(f.writer.records().single.source.account, f.b);
+      final result = f.writer.resolvePreference(
+        owner: f.source(f.b, version: null),
+        candidates: [f.candidate(f.b)],
+      );
+      expect(result.failure, isNull);
+      expect(result.selected!.source.account, f.b);
+    },
+  );
 
-  test('lock revokes sessions and clears preferences; unlocking does not resurrect them', () async {
-    final f = await _fixture(privateB: true);
-    final s = await f.begin(f.b);
-    await _observe(f, s, 0, 10);
-    await f.writer.savePreference(f.pref(f.b));
-    await f.access.lock();
-    expect(await _observe(f, s, 1, 50), isNull);
-    expect(f.writer.records(AccessRegion.private), isEmpty);
-    final locked = f.writer.resolvePreference(
-      owner: f.source(f.b, version: null),
-      region: AccessRegion.private,
-      candidates: [f.candidate(f.b)],
-    );
-    expect(locked.failure, PreferenceFailure.regionLocked);
-    expect(locked.preference, isNull);
-    expect(await f.access.unlock('1234'), isTrue);
-    await f.registry.authenticate('b');
-    expect(
-      f.writer
-          .resolvePreference(
-            owner: f.source(f.b, version: null),
-            region: AccessRegion.private,
-            candidates: [f.candidate(f.b)],
-          )
-          .failure,
-      PreferenceFailure.notConfigured,
-    );
-    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-  });
+  test(
+    'lock hides records and preferences but unlock restores persisted history',
+    () async {
+      final f = await _fixture(privateB: true);
+      final session = await f.begin(f.b);
+      await _observe(f, session, 0, 10);
+      await f.writer.savePreference(f.pref(f.b));
+      final before = await f.writer.store.read();
+      await f.access.lock('b');
+      expect(await _observe(f, session, 1, 50), isNull);
+      expect(f.writer.records(), isEmpty);
+      expect(
+        f.writer
+            .resolvePreference(
+              owner: f.source(f.b, version: null),
+              candidates: [f.candidate(f.b)],
+            )
+            .failure,
+        PreferenceFailure.serverLocked,
+      );
+      expect(await f.writer.store.read(), before);
+      expect(await f.access.unlock('b', '1234'), isTrue);
+      await f.registry.authenticate('b');
+      expect(
+        f.writer
+            .resolvePreference(
+              owner: f.source(f.b, version: null),
+              candidates: [f.candidate(f.b)],
+            )
+            .failure,
+        isNull,
+      );
+      expect(f.writer.records().single.positionTicks, 10);
+      expect(
+        await _observe(f, session, 2, 60),
+        isNull,
+        reason: 'Unlock never revives an old playback permit',
+      );
+    },
+  );
 
-  test('service migration purges actual records and preferences before membership change', () async {
+  test('enabling entry password retains records and preferences for the same account', () async {
     final f = await _fixture();
-    await f.access.setPin('1234', '1234', (_) async {});
-    await f.access.unlock('1234');
-    final s = await f.begin(f.a);
-    await _observe(f, s, 0, 20);
+    final session = await f.begin(f.a);
+    await _observe(f, session, 0, 20);
     await f.writer.savePreference(f.pref(f.a));
-    await f.registry.move('a', AccessRegion.private);
-    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
-    expect(await _observe(f, s, 1, 40), isNull);
-    await f.registry.move('a', AccessRegion.ordinary);
+    await f.access.setPassword(
+      'a',
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          f.registry.persistProtectionReference('a', ref),
+    );
+    expect(f.writer.records(), isEmpty);
+    expect(await _observe(f, session, 1, 40), isNull);
+    await f.access.unlock('a', '1234');
     await f.registry.authenticate('a');
-    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    expect(f.writer.records().single.positionTicks, 20);
     expect(
       f.writer
           .resolvePreference(
             owner: f.source(f.a, version: null),
-            region: AccessRegion.ordinary,
             candidates: [f.candidate(f.a)],
           )
           .failure,
-      PreferenceFailure.notConfigured,
+      isNull,
     );
   });
 
@@ -758,7 +725,6 @@ void main() {
       void checkResolution() {
         final result = f.writer.resolvePreference(
           owner: candidate.source.item,
-          region: AccessRegion.ordinary,
           candidates: [candidate],
         );
         expect(result.failure, isNull);
@@ -769,7 +735,6 @@ void main() {
         expect(result.preference!.settings.audioStreamIndex, isNull);
         final missing = f.writer.resolvePreference(
           owner: candidate.source.item,
-          region: AccessRegion.ordinary,
           candidates: [f.candidate(f.a, version: 'other')],
         );
         expect(missing.failure, PreferenceFailure.targetMissing);
@@ -809,7 +774,6 @@ void main() {
         );
         final result = f.writer.resolvePreference(
           owner: candidate.source.item,
-          region: AccessRegion.ordinary,
           candidates: [candidate],
         );
         expect(result.failure, PreferenceFailure.notConfigured);
@@ -840,19 +804,16 @@ void main() {
       final candidate = f.candidate(f.a);
       for (final account in [
         SourceAccount(
-          region: f.a.region,
           configuredServerId: f.a.configuredServerId,
           verifiedServerId: '',
           userId: f.a.userId,
         ),
         SourceAccount(
-          region: f.a.region,
           configuredServerId: f.a.configuredServerId,
           verifiedServerId: 'different-server',
           userId: f.a.userId,
         ),
         SourceAccount(
-          region: f.a.region,
           configuredServerId: f.a.configuredServerId,
           verifiedServerId: f.a.verifiedServerId,
           userId: '',
@@ -871,7 +832,6 @@ void main() {
           f.writer
               .resolvePreference(
                 owner: candidate.source.item,
-                region: AccessRegion.ordinary,
                 candidates: [candidate],
               )
               .failure,
@@ -928,10 +888,14 @@ void main() {
       ),
       isNull,
     );
-    await f.access.setPin('1234', '1234', (_) async {});
-    await f.access.unlock('1234');
-    await f.registry.move('a', AccessRegion.private);
-    await f.registry.move('a', AccessRegion.ordinary);
+    await f.access.setPassword(
+      'a',
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          f.registry.persistProtectionReference('a', ref),
+    );
+    await f.access.unlock('a', '1234');
     await f.registry.authenticate('a');
     await f.writer.close();
     f.writer = await HistoryWriter.open(
@@ -959,37 +923,45 @@ void main() {
     final observing = _observe(f, s, 1, 80);
     final rejected = expectLater(observing, throwsStateError);
     await started;
-    final locking = f.access.lock();
-    expect(f.writer.records(AccessRegion.private), isEmpty);
+    final locking = f.access.lock('b');
+    expect(f.writer.records(), isEmpty);
     store.gate!.complete();
     await rejected;
     await locking;
     expect(f.writer.sessionById(s.id), isNull);
   });
 
-  test('failed lock cleanup still evicts preference in memory and on next locked restart', () async {
+  test('lock keeps preferences even when history storage is temporarily unwritable', () async {
     final store = _FailingStore();
     final f = await _fixture(store: store, privateB: true);
     await f.writer.savePreference(f.pref(f.b));
     store.fail = true;
-    await f.access.lock();
-    expect(await f.access.unlock('1234'), isTrue);
-    await f.registry.authenticate('b');
+    await f.access.lock('b');
     expect(
       f.writer
           .resolvePreference(
             owner: f.source(f.b, version: null),
-            region: AccessRegion.private,
             candidates: [f.candidate(f.b)],
           )
           .preference,
       isNull,
     );
+    expect(await f.access.unlock('b', '1234'), isTrue);
+    await f.registry.authenticate('b');
+    expect(
+      f.writer
+          .resolvePreference(
+            owner: f.source(f.b, version: null),
+            candidates: [f.candidate(f.b)],
+          )
+          .preference,
+      isNotNull,
+    );
     store.fail = false;
-    await f.access.lock();
+    await f.access.lock('b');
     await f.writer.close();
     f.writer = await HistoryWriter.open(registry: f.registry, store: store);
-    expect(f.writer.records(AccessRegion.ordinary), isEmpty);
+    expect(f.writer.records(), isEmpty);
   });
 
   test(
@@ -1014,7 +986,7 @@ void main() {
         registry: f.registry,
         store: await FileHistoryStore.open(file),
       );
-      expect(f.writer.records(AccessRegion.ordinary).single.positionTicks, 88);
+      expect(f.writer.records().single.positionTicks, 88);
       expect(await File('${file.path}.next').exists(), isFalse);
     },
   );

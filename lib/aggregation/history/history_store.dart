@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../auth/server_configuration_migration.dart';
+
 /// Only the application main process opens this store. Playback processes send
 /// events to its HistoryWriter; they must never open the history file.
 abstract interface class HistoryStore {
@@ -49,7 +51,20 @@ class FileHistoryStore implements HistoryStore {
     try {
       lease = await File('$path.lock').open(mode: FileMode.append);
       await lease.lock(FileLock.exclusive);
-      return FileHistoryStore._(File(path), lease);
+      final store = FileHistoryStore._(File(path), lease);
+      final value = await store.read();
+      if (value != null && value['sourceIdentityVersion'] != 2) {
+        final migrated = const ServerSourceMapping([]).migrateHistory(value);
+        final backup = File('$path.pre-source-v2');
+        if (!await backup.exists()) {
+          await backup.writeAsString(
+            await store.file.readAsString(),
+            flush: true,
+          );
+        }
+        await store.replace(migrated);
+      }
+      return store;
     } catch (_) {
       await lease?.close();
       _openPaths.remove(path);

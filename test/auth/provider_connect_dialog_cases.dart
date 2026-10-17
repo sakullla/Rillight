@@ -4,7 +4,6 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
 import '../helpers/settle.dart';
-import '../helpers/region_access_fixture.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart' hide testWidgets;
@@ -14,7 +13,6 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/provider_connect_controller.dart';
 import 'package:rillight/auth/provider_connect_dialog.dart';
-import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/server_paste_draft.dart';
 import 'package:rillight/library/library_filter_panel.dart';
 import 'package:rillight/library/shelf_sort.dart';
@@ -86,9 +84,7 @@ void main() {
   testWidgets('selecting Child hides Owner resources before Home exchange', (
     tester,
   ) async {
-    final auth = AuthController.memory(
-      regionAccess: TestRegionAccessController(),
-    );
+    final auth = AuthController.memory();
     Widget app() => CupertinoTestApp(
       localizationsDelegates: [
         ...[
@@ -265,15 +261,9 @@ void main() {
   );
 
   testWidgets(
-    'private lock closes the TV editor and its authorization dialog',
+    'TV back cancels the text editor and authorization without saving a server',
     (tester) async {
-      final auth = AuthController.memory(
-        regionAccess: TestRegionAccessController(),
-      );
-      await tester.runAsync(() async {
-        await auth.setPrivatePin('1234', '1234');
-        await auth.regionAccess.unlock('1234');
-      });
+      final auth = AuthController.memory();
       await tester.pumpWidget(
         PresentationScope(
           environment: PresentationEnvironment.tv,
@@ -289,11 +279,7 @@ void main() {
             home: Builder(
               builder: (context) => CupertinoPageScaffold(
                 child: ui.AppButton(
-                  onPressed: () => showProviderConnect(
-                    context,
-                    auth,
-                    region: AccessRegion.private,
-                  ),
+                  onPressed: () => showProviderConnect(context, auth),
                   child: const Text('open'),
                 ),
               ),
@@ -315,9 +301,12 @@ void main() {
         find.byKey(const Key('tv-input-editor')),
         'private-name',
       );
-      final locking = auth.regionAccess.lock();
+      Navigator.of(tester.element(find.byKey(const Key('tv-input-editor'))))
+          .pop();
       await settle(tester);
-      await locking;
+      await tester.tap(find.byKey(const Key('provider-cancel')));
+      await settle(tester);
+      expect(auth.savedServers, isEmpty);
       expect(find.byType(ProviderConnectDialog), findsNothing);
       expect(find.byKey(const Key('tv-input-editor')), findsNothing);
       expect(find.text('private-name'), findsNothing);
@@ -334,9 +323,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final auth = AuthController.memory(
-      regionAccess: TestRegionAccessController(),
-    );
+    final auth = AuthController.memory();
     await tester.pumpWidget(
       CupertinoTestApp(
         localizationsDelegates: [
@@ -372,9 +359,7 @@ void main() {
   testWidgets('TV uses remote inputs instead of inline keyboard fields', (
     tester,
   ) async {
-    final auth = AuthController.memory(
-      regionAccess: TestRegionAccessController(),
-    );
+    final auth = AuthController.memory();
     await tester.pumpWidget(
       PresentationScope(
         environment: PresentationEnvironment.tv,

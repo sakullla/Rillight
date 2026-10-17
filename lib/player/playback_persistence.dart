@@ -2,7 +2,7 @@ import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/playback.dart';
 
 import '../aggregation/history/history_models.dart'
-    show encodeSource, decodeSource;
+    show encodeSource, decodeAuthorizedSource;
 import '../aggregation/identity/media_identity.dart' show SourceReference;
 
 const int kLegacyTicksPerSecond = 10000000;
@@ -54,7 +54,7 @@ class PlaybackSessionSnapshot {
     this.serviceType = MediaServerType.emby,
     this.source,
     this.libraryId,
-    this.regionGeneration,
+    this.accessGeneration,
     this.cleanupOnly = false,
     this.pendingCleanups = const [],
   });
@@ -70,7 +70,7 @@ class PlaybackSessionSnapshot {
   final PlayMethod playMethod;
   final SourceReference? source;
   final String? libraryId;
-  final int? regionGeneration;
+  final int? accessGeneration;
 
   /// A prepared resource existed, but playback had not started. Recovery must
   /// release it without writing a watched/progress event.
@@ -104,7 +104,7 @@ class PlaybackSessionSnapshot {
       serviceType: serviceType,
       source: source,
       libraryId: libraryId,
-      regionGeneration: regionGeneration,
+      accessGeneration: accessGeneration,
       cleanupOnly: cleanupOnly ?? this.cleanupOnly,
       pendingCleanups: List.unmodifiable(pending),
     );
@@ -127,7 +127,7 @@ class PlaybackSessionSnapshot {
       'timestamp': timestamp.toUtc().toIso8601String(),
       if (source != null) 'source': encodeSource(source!),
       if (libraryId != null) 'libraryId': libraryId,
-      if (regionGeneration != null) 'regionGeneration': regionGeneration,
+      if (accessGeneration != null) 'accessGeneration': accessGeneration,
       if (cleanupOnly) 'cleanupOnly': true,
       if (pending.isNotEmpty)
         'pendingCleanups': [for (final value in pending) value.toJson()],
@@ -136,6 +136,13 @@ class PlaybackSessionSnapshot {
 
   /// 缺少任一会话标识字段时返回 null(视为无效快照)。
   static PlaybackSessionSnapshot? fromJson(Map<String, dynamic> json) {
+    // Legacy history can be migrated, but an old process lease cannot acquire
+    // authority in the new per-server access model.
+    if (json.containsKey('regionGeneration') ||
+        (json['source'] is Map &&
+            (json['source'] as Map).containsKey('region'))) {
+      return null;
+    }
     final rawPending = json['pendingCleanups'];
     if (rawPending != null &&
         (rawPending is! List || rawPending.length > maxPendingCleanups)) {
@@ -189,7 +196,9 @@ class PlaybackSessionSnapshot {
         DateTime.tryParse(json['timestamp']?.toString() ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
     final source = json['source'] is Map
-        ? decodeSource(Map<String, dynamic>.from(json['source'] as Map))
+        ? decodeAuthorizedSource(
+            Map<String, dynamic>.from(json['source'] as Map),
+          )
         : null;
     if (source != null && source.account.serviceType != serviceType) {
       return null;
@@ -208,7 +217,7 @@ class PlaybackSessionSnapshot {
       timestamp: timestamp,
       source: source,
       libraryId: json['libraryId'] as String?,
-      regionGeneration: json['regionGeneration'] as int?,
+      accessGeneration: json['accessGeneration'] as int?,
       cleanupOnly: json['cleanupOnly'] == true,
       pendingCleanups: List.unmodifiable(pending),
     );

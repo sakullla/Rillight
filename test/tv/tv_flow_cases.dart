@@ -209,7 +209,9 @@ void main() {
     expect(
       focusedWithin(target),
       isTrue,
-      reason: 'Focused ${focusedLabel(tester)}, not concrete title $title',
+      reason:
+          'Focused ${focusedLabel(tester)}, not concrete title $title; '
+          '${tester.widgetList<Text>(find.byType(Text)).map((text) => text.data).join(' | ')}',
     );
   }
 
@@ -390,7 +392,6 @@ void main() {
       final account = (await tester.runAsync(
         () => registry.acquireAccount(
           app.auth.session!.server.id,
-          region: AccessRegion.ordinary,
           libraryId: 'view-movies',
         ),
       ))!;
@@ -403,7 +404,7 @@ void main() {
           itemId: 'view-movies',
           source: SourceReference(account: account, itemId: 'view-movies'),
           libraryId: 'view-movies',
-          regionGeneration: permit.regionGeneration,
+          accessGeneration: permit.accessGeneration,
         ),
       );
       await settle(tester);

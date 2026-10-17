@@ -135,7 +135,10 @@ void main() {
         expect(control.spawnedArguments, hasLength(1));
         expect(control.startupPayloads.single, isNotNull);
         expect(host.current!.source, isNull);
-        expect(auth.session!.server.scopeKnown, isFalse);
+        expect(
+          auth.session!.server.toJson().containsKey('scopeKnown'),
+          isFalse,
+        );
         await auth.logout();
         await host.close();
         expect(control.alive, isEmpty);

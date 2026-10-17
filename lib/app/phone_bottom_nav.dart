@@ -4,6 +4,19 @@ import 'package:rillight/app/phone_nav_style.dart';
 import 'package:rillight/app/widgets/liquid_glass.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
+enum PhoneDestination {
+  home,
+  aggregation,
+  search;
+
+  /// Old index 1 was the removed library hub. Persist semantic IDs from now on.
+  static PhoneDestination restore(Object? value) => switch (value) {
+    'aggregation' || 2 => aggregation,
+    'search' || 3 => search,
+    _ => home,
+  };
+}
+
 /// 悬浮导航盖住内容时，滚动区底部要留出系统手势条、间距、导航本身和溶入带。
 /// 贴底时沿用 Scaffold 已经算进 [MediaQuery.padding] 的高度。
 double phoneScrollClearance(BuildContext context) {
@@ -16,7 +29,7 @@ double phoneScrollClearance(BuildContext context) {
       AppMobileNav.fadeHeight;
 }
 
-/// 手机底部四个目的地:首页、媒体库、聚合、搜索。悬浮时离开窗口边缘并盖在内容上；贴底时铺满宽度。
+/// 手机底部三个目的地:首页、聚合、搜索。悬浮时离开窗口边缘并盖在内容上；贴底时铺满宽度。
 class PhoneBottomNav extends StatelessWidget {
   const PhoneBottomNav({
     super.key,
@@ -61,11 +74,6 @@ class PhoneBottomNav extends StatelessWidget {
                 icon: const Icon(AppIcons.home, fill: AppIcons.outline),
                 activeIcon: const Icon(AppIcons.home, fill: AppIcons.filled),
                 label: l.home,
-              ),
-              BottomNavigationBarItem(
-                icon: const Icon(AppIcons.library, fill: AppIcons.outline),
-                activeIcon: const Icon(AppIcons.library, fill: AppIcons.filled),
-                label: l.libraries,
               ),
               BottomNavigationBarItem(
                 icon: const Icon(AppIcons.aggregation, fill: AppIcons.outline),

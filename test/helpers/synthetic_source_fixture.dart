@@ -1,4 +1,4 @@
-import 'region_access_fixture.dart';
+import 'server_access_fixture.dart';
 
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -13,8 +13,8 @@ import 'package:rillight/player/playback_runtime.dart';
 
 import '../emby/fake_emby_server.dart';
 
-/// Full-app fixtures explicitly declare their synthetic libraries and use
-/// independent registry clients. This never changes production unknown scope.
+/// Full-app fixtures use independent registry clients and real per-server access.
+/// Library IDs describe the synthetic dataset, never an authorization scope.
 class SyntheticSourceAuth extends AuthController {
   SyntheticSourceAuth._({
     required super.client,
@@ -35,7 +35,7 @@ class SyntheticSourceAuth extends AuthController {
     MediaServerClient client() =>
         EmbyClient(device: device, dio: dioForFakeEmby(adapter));
     final sources = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: store,
       credentials: credentials,
       createClient: client,
@@ -68,18 +68,6 @@ class SyntheticSourceAuth extends AuthController {
       preserveSessionOnFailure: preserveSessionOnFailure,
       serviceType: serviceType,
     );
-    if (result && session != null) {
-      final server = sources
-          .project(AccessRegion.ordinary)
-          .firstWhere((s) => s.id == session!.server.id);
-      if (!server.scopeKnown) {
-        await sources.configureScope(
-          server.id,
-          participates: true,
-          libraryIds: libraryIds,
-        );
-      }
-    }
     return result;
   }
 

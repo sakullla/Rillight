@@ -18,13 +18,7 @@ import 'credential_store.dart';
 import 'server_list_store.dart';
 import 'source_sessions.dart';
 
-enum ProviderConnectStage {
-  credentials,
-  authorization,
-  resources,
-  libraries,
-  done,
-}
+enum ProviderConnectStage { credentials, authorization, resources, done }
 
 /// Shared candidate authorization for desktop, phone and remote controls.
 /// Successful authorization enters content directly, without a scope step.
@@ -32,7 +26,6 @@ class ProviderConnectController extends ChangeNotifier {
   ProviderConnectController({
     required this.auth,
     this.existing,
-    this.region = AccessRegion.ordinary,
     String? userAgent,
     this.pollInterval,
   }) : type = existing?.serviceType ?? MediaServerType.emby,
@@ -40,7 +33,6 @@ class ProviderConnectController extends ChangeNotifier {
 
   final AuthController auth;
   final SavedServer? existing;
-  final AccessRegion region;
   final Duration? pollInterval;
   MediaServerType type;
   String userAgent;
@@ -61,9 +53,8 @@ class ProviderConnectController extends ChangeNotifier {
   CloudAccount? account;
   List<HomeUser> users = [];
   List<AuthorizedServerResource> resources = [];
-  Map<String, String> libraries = {};
-  final Set<String> selectedLibraries = {};
   String? sourceId;
+  bool _activateOnCommit = false;
   SourceAuthorization? _authorization;
   PlexAuthentication? _plex;
   MediaServerClient? _client;
@@ -76,7 +67,7 @@ class ProviderConnectController extends ChangeNotifier {
   }
 
   void _guard(int epoch) {
-    if (_disposed || epoch != _epoch || !auth.regionAccess.allows(region)) {
+    if (_disposed || epoch != _epoch) {
       throw StateError('Authorization revoked');
     }
   }
@@ -105,7 +96,6 @@ class ProviderConnectController extends ChangeNotifier {
     _authorization?.cancel();
     final authorization = await auth.sources.beginAuthorization(
       serviceType: type,
-      region: region,
       configuredServerId: existing?.id,
     );
     if (_disposed || epoch != _epoch) {
@@ -330,7 +320,6 @@ class ProviderConnectController extends ChangeNotifier {
       nickname: _submittedName ?? _configured?.nickname,
       userAgent: normalizeUserAgent(userAgent),
       username: resource.user.name,
-      region: region,
       serviceType: type,
       lines: lines,
       activeLineId: selectedLine.id,
@@ -384,7 +373,6 @@ class ProviderConnectController extends ChangeNotifier {
         name: info.serverName,
         username: session.user.name,
         serviceType: type,
-        region: region,
         authorizationMethod: method,
         verifiedServerId: info.id,
         nickname: _submittedName ?? _configured?.nickname,
@@ -432,6 +420,8 @@ class ProviderConnectController extends ChangeNotifier {
       }
     }
     server = server.copyWith(lines: lines);
+    _activateOnCommit =
+        existing == null || auth.session?.server.id == server.id;
     await auth.sources.commitAuthorization(
       _authorization!,
       server: server,
@@ -441,7 +431,7 @@ class ProviderConnectController extends ChangeNotifier {
           : null,
       persistCandidate: _pendingCloud?.commit,
       rollbackCandidate: _pendingCloud?.rollback,
-      remember: region == AccessRegion.ordinary,
+      remember: _activateOnCommit,
     );
     _guard(epoch);
     sourceId = server.id;
@@ -452,7 +442,7 @@ class ProviderConnectController extends ChangeNotifier {
     _guard(epoch);
     await auth.refreshServers();
     _guard(epoch);
-    if (region == AccessRegion.ordinary) {
+    if (_activateOnCommit) {
       await auth.activateCommittedSource(sourceId!, guard: () => _guard(epoch));
       _guard(epoch);
       if (auth.session?.server.id != sourceId) {
@@ -462,8 +452,6 @@ class ProviderConnectController extends ChangeNotifier {
     stage = ProviderConnectStage.done;
   }
 
-  // Kept for old presentation consumers until the new form replaces them.
-  Future<void> retryLibraries() => Future.value();
   Future<void> finish() =>
       stage == ProviderConnectStage.done || sourceId == null
       ? Future.value()
@@ -487,8 +475,6 @@ class ProviderConnectController extends ChangeNotifier {
     account = null;
     resources = [];
     users = [];
-    libraries = {};
-    selectedLibraries.clear();
     sourceId = null;
     failure = null;
     authorizationStatus = null;

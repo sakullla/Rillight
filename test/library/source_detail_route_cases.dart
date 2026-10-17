@@ -4,7 +4,7 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -42,21 +42,32 @@ import 'package:rillight/player/player_host_command.dart';
 class _ImageDisk implements MediaImageDiskStore {
   final reads = <String>[];
   final writes = <String>[];
+  final bytes = <String, Uint8List>{};
+  final removals = <String>[];
+  int clears = 0;
   @override
   Future<Uint8List?> read(String key) async {
     reads.add(key);
-    return null;
+    return bytes[key];
   }
 
   @override
   Future<void> write(String key, Uint8List bytes) async {
     writes.add(key);
+    this.bytes[key] = Uint8List.fromList(bytes);
   }
 
   @override
-  Future<void> remove(String key) async {}
+  Future<void> remove(String key) async {
+    removals.add(key);
+    bytes.remove(key);
+  }
+
   @override
-  Future<void> clear() async {}
+  Future<void> clear() async {
+    clears++;
+    bytes.clear();
+  }
 }
 
 class _Transport implements HttpClientAdapter {
@@ -150,8 +161,6 @@ void main() {
                 id: id,
                 name: id,
                 username: 'synthetic',
-                libraryIds: const ['library'],
-                scopeKnown: true,
                 lines: [ServerLine(id: 'line', address: 'https://$id')],
               ),
           ],
@@ -166,7 +175,7 @@ void main() {
           ),
       });
       final registry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: store,
         credentials: credentials,
         createClient: client,
@@ -249,7 +258,10 @@ void main() {
                 data: AppUiTheme.of(context).brightness == Brightness.dark
                     ? ui.AppUiTheme.dark()
                     : ui.AppUiTheme.light(),
-                child: child ?? const SizedBox.shrink(),
+                child: PresentationScope(
+                  environment: PresentationEnvironment.desktop,
+                  child: child ?? const SizedBox.shrink(),
+                ),
               ),
             ),
           ),
@@ -275,7 +287,7 @@ void main() {
         (router.state.extra as PlayerHostOpenItemCommand).libraryId,
         'season-no-parent',
       );
-      expect(auth.session?.server.id, 'a');
+      expect(auth.session?.server.id, 'b');
       await host.close();
       await pointer.moveTo(tester.getCenter(find.byType(PosterCard)));
       await settle(tester);
@@ -297,7 +309,7 @@ void main() {
     },
   );
   cases.testWidgets(
-    'private B gate keeps poster and chapters off disk and evicts only B on lock',
+    'protected B gate retains disk bytes but revokes visible images and late chapter requests on lock',
     (tester) async {
       final cache = MediaImageCache.instance;
       final disk = _ImageDisk();
@@ -321,11 +333,7 @@ void main() {
         ),
         dio: Dio()..httpClientAdapter = transport,
       );
-      final access = TestRegionAccessController();
-      await tester.runAsync(() async {
-        await access.setPin('1234', '1234', (_) async {});
-        expect(await access.unlock('1234'), isTrue);
-      });
+      final access = TestServerAccessController(passwords: {'b': '1234'});
       final store = MemoryServerListStore(
         ServerListSnapshot(
           lastServerId: 'a',
@@ -335,11 +343,7 @@ void main() {
                 id: server,
                 name: server,
                 username: 'synthetic',
-                region: server == 'b'
-                    ? AccessRegion.private
-                    : AccessRegion.ordinary,
-                libraryIds: const ['library'],
-                scopeKnown: true,
+                protectionRef: server == 'b' ? 'test:b' : null,
                 lines: [ServerLine(id: 'line', address: 'https://$server')],
               ),
           ],
@@ -360,8 +364,6 @@ void main() {
         createClient: client,
       );
       await tester.runAsync(registry.load);
-      final b = (await tester.runAsync(() => registry.authenticate('b')))!
-          .account;
       final auth = AuthController(
         client: client(),
         credentials: credentials,
@@ -369,6 +371,10 @@ void main() {
         sources: registry,
       );
       await tester.runAsync(auth.restore);
+      expect(await tester.runAsync(() => access.unlock('b', '1234')), isTrue);
+      await tester.runAsync(() => auth.switchTo('b'));
+      final b = (await tester.runAsync(() => registry.authenticate('b')))!
+          .account;
       final permit = registry.permit(b, libraryId: 'library');
       late BuildContext detailContext;
       final showLatePoster = ValueNotifier(false);
@@ -392,7 +398,7 @@ void main() {
                 itemId: 'movie',
                 source: SourceReference(account: b, itemId: 'movie'),
                 libraryId: 'library',
-                regionGeneration: permit.regionGeneration,
+                accessGeneration: permit.accessGeneration,
               ),
               child: Builder(
                 builder: (context) {
@@ -436,7 +442,10 @@ void main() {
             data: AppUiTheme.of(context).brightness == Brightness.dark
                 ? ui.AppUiTheme.dark()
                 : ui.AppUiTheme.light(),
-            child: child ?? const SizedBox.shrink(),
+            child: PresentationScope(
+              environment: PresentationEnvironment.desktop,
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
         ),
       );
@@ -465,13 +474,13 @@ void main() {
       await settle(tester);
       expect(
         disk.reads,
-        isEmpty,
-        reason: 'private probes and load must never read disk',
+        isNotEmpty,
+        reason: 'Unlocked content may use its existing persistent cache',
       );
       expect(
         disk.writes,
-        isEmpty,
-        reason: 'private posters and chapters must never write disk',
+        isNotEmpty,
+        reason: 'Entry protection does not disable persistent caching',
       );
       final scope = tester
           .widget<DetailSourceScope>(find.byType(DetailSourceScope))
@@ -499,8 +508,6 @@ void main() {
         );
         await precacheImage(MemoryImage(ordinary), detailContext);
       });
-      final ordinaryWrites = disk.writes.length;
-      final ordinaryReads = disk.reads.length;
       transport.imageBarrier = Completer<void>();
       showLatePoster.value = true;
       await settle(tester);
@@ -558,7 +565,10 @@ void main() {
         ),
         isNotEmpty,
       );
-      await access.lock();
+      final writesBeforeLock = disk.writes.length;
+      final readsBeforeLock = disk.reads.length;
+      final persistedKeys = disk.bytes.keys.toSet();
+      await access.lock('b');
       await settle(tester);
       expect(find.byType(DetailSourceScope), findsNothing);
       expect(find.byType(Image), findsNothing);
@@ -611,8 +621,11 @@ void main() {
         everyElement(isNull),
       );
       await settle(tester);
-      expect(disk.writes.length, ordinaryWrites);
-      expect(disk.reads.length, ordinaryReads);
+      expect(disk.writes.length, writesBeforeLock);
+      expect(disk.reads.length, readsBeforeLock);
+      expect(disk.bytes.keys.toSet(), persistedKeys);
+      expect(disk.removals, isEmpty);
+      expect(disk.clears, 0);
       expect(
         transport.requests.length,
         dispatchedBeforeLock,
@@ -639,7 +652,8 @@ void main() {
         ),
         isNull,
       );
-      expect(auth.session!.server.id, 'a');
+      expect(auth.isLoggedIn, isFalse);
+      expect(await credentials.read('b'), isNotNull);
       await tester.pumpWidget(const SizedBox.shrink());
       auth.dispose();
     },
@@ -653,7 +667,7 @@ void main() {
   ]) {
     for (final id in ['same-id', 'different-b-id', 'episode-no-parent']) {
       cases.testWidgets(
-        '${environment.presentation.name} Auth A receives B detail $id without naked-ID fallback',
+        '${environment.presentation.name} entering B detail $id selects B without naked-ID fallback',
         (tester) async {
           tester.view.physicalSize = const Size(1440, 1000);
           tester.view.devicePixelRatio = 1;
@@ -684,8 +698,6 @@ void main() {
                     id: server,
                     name: server,
                     username: 'synthetic',
-                    libraryIds: const ['library'],
-                    scopeKnown: true,
                     lines: [ServerLine(id: 'line', address: 'https://$server')],
                   ),
               ],
@@ -700,7 +712,7 @@ void main() {
               ),
           });
           final registry = SourceSessionRegistry(
-            access: TestRegionAccessController(),
+            access: TestServerAccessController(),
             store: store,
             credentials: credentials,
             createClient: client,
@@ -728,7 +740,7 @@ void main() {
               itemId: id,
               source: SourceReference(account: b, itemId: id),
               libraryId: 'library',
-              regionGeneration: permit.regionGeneration,
+              accessGeneration: permit.accessGeneration,
             ),
           );
           await tester.runAsync(
@@ -737,9 +749,9 @@ void main() {
           await settle(tester);
           expect(find.byType(DetailSourceScope), findsOneWidget);
           expect(find.text('b-$id-detail'), findsWidgets);
-          expect(auth.session!.server.id, 'a');
+          expect(auth.session?.server.id, 'b');
           // Source-local cards remain usable, but unadapted bare-ID shelf
-          // expansion must not leave this scope and request selected Auth A.
+          // expansion must not escape the explicit B source provenance.
           if (environment.isDesktop && id != 'episode-no-parent') {
             final similarShelf = tester.widget<MediaShelf>(
               find.byWidgetPredicate(
@@ -791,7 +803,7 @@ void main() {
               itemId: 'mismatch',
               source: SourceReference(account: b, itemId: id),
               libraryId: 'library',
-              regionGeneration: permit.regionGeneration,
+              accessGeneration: permit.accessGeneration,
             ),
           );
           await settle(tester);
@@ -810,7 +822,7 @@ void main() {
               itemId: 'denied',
               source: SourceReference(account: b, itemId: 'denied'),
               libraryId: 'library',
-              regionGeneration: permit.regionGeneration + 1,
+              accessGeneration: permit.accessGeneration + 1,
             ),
           );
           await tester.runAsync(
@@ -838,7 +850,7 @@ void main() {
             extra: PlayerHostOpenItemCommand(
               itemId: 'parent-only',
               source: SourceReference(account: b, itemId: 'parent-only'),
-              regionGeneration: permit.regionGeneration,
+              accessGeneration: permit.accessGeneration,
             ),
           );
           await tester.runAsync(
@@ -868,7 +880,7 @@ void main() {
               itemId: id,
               source: SourceReference(account: b, itemId: id),
               libraryId: 'library',
-              regionGeneration: permit.regionGeneration,
+              accessGeneration: permit.accessGeneration,
             ),
           );
           await tester.pump();
@@ -877,10 +889,12 @@ void main() {
           );
           await settle(tester);
           expect(find.byType(DetailSourceScope), findsOneWidget);
-          await registry.configureScope(
+          await registry.access.setPassword(
             'b',
-            participates: false,
-            libraryIds: {},
+            '1234',
+            '1234',
+            persistReference: (ref) =>
+                registry.persistProtectionReference('b', ref),
           );
           await settle(tester);
           expect(find.byType(DetailSourceScope), findsNothing);
@@ -935,8 +949,6 @@ void main() {
                 id: server,
                 name: server,
                 username: 'synthetic',
-                libraryIds: const ['library'],
-                scopeKnown: true,
                 lines: [ServerLine(id: 'line', address: 'https://$server')],
               ),
           ],
@@ -951,7 +963,7 @@ void main() {
           ),
       });
       final registry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: store,
         credentials: credentials,
         createClient: client,
@@ -984,7 +996,7 @@ void main() {
             itemId: itemId,
             source: SourceReference(account: account, itemId: itemId),
             libraryId: 'library',
-            regionGeneration: permit.regionGeneration,
+            accessGeneration: permit.accessGeneration,
           );
       router.go(
         AppRoutes.item('movie', showComparison: false),
@@ -1022,7 +1034,7 @@ void main() {
           itemId: 'similar',
           source: SourceReference(account: account, itemId: 'similar'),
           libraryId: 'movie',
-          regionGeneration: permit.regionGeneration,
+          accessGeneration: permit.accessGeneration,
         ),
       );
       await tester.runAsync(

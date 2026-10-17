@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 
@@ -61,7 +61,7 @@ void main() {
       EmbyClient client() =>
           EmbyClient(device: device, dio: dioForFakeEmby(adapter));
       final auth = AuthController(
-        regionAccess: TestRegionAccessController(),
+        serverAccess: TestServerAccessController(),
         client: client(),
         credentials: MemoryCredentialStore(),
         servers: MemoryServerListStore(),
@@ -74,7 +74,7 @@ void main() {
       try {
         await controller.password(fake.baseUrl.toString(), 'alice', 'wrong');
         expect(controller.failure, MediaServerFailureKind.invalidCredentials);
-        expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+        expect(auth.sources.project(), isEmpty);
         await controller.password(
           fake.baseUrl.toString(),
           'alice',
@@ -82,7 +82,6 @@ void main() {
         );
         expect(controller.failure, isNull);
         expect(controller.stage, ProviderConnectStage.done);
-        expect(controller.libraries, isEmpty);
         await controller.finish();
         expect(controller.failure, isNull);
         expect(auth.session?.server.verifiedServerId, fake.serverId);
@@ -101,10 +100,7 @@ void main() {
     setUp(() async {
       fake = JellyfinFakeServer();
       await fake.start();
-      auth = AuthController.memory(
-        regionAccess: TestRegionAccessController(),
-        client: JellyfinClient(device: device),
-      );
+      auth = AuthController.memory(client: JellyfinClient(device: device));
       controller = ProviderConnectController(
         pollInterval: const Duration(milliseconds: 10),
         auth: auth,
@@ -124,17 +120,19 @@ void main() {
         expect(controller.failure, isNull);
         expect(controller.stage, ProviderConnectStage.done);
         expect(
-          auth.sources.project(AccessRegion.ordinary).single.scopeKnown,
+          auth.sources.project().single.toJson().containsKey('scopeKnown'),
           isFalse,
         );
-        expect(controller.selectedLibraries, isEmpty);
-        controller.selectedLibraries.addAll(controller.libraries.keys);
+
         await controller.finish();
         expect(controller.failure, isNull);
         expect(controller.stage, ProviderConnectStage.done);
         expect(auth.client.serviceType, MediaServerType.jellyfin);
         expect(auth.session!.userId, 'alice-id');
-        expect(auth.savedServers.single.libraryIds, isEmpty);
+        expect(
+          auth.savedServers.single.toJson().containsKey('libraryIds'),
+          isFalse,
+        );
       },
     );
 
@@ -180,7 +178,7 @@ void main() {
       () async {
         await controller.password(fake.url.toString(), 'alice', 'bad');
         expect(controller.failure, MediaServerFailureKind.invalidCredentials);
-        expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+        expect(auth.sources.project(), isEmpty);
         fake.quickEnabled = false;
         await controller.authorize(fake.url.toString());
         expect(controller.failure, MediaServerFailureKind.unsupported);
@@ -202,7 +200,7 @@ void main() {
       controller.reset();
       delayed.complete();
       await login;
-      expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+      expect(auth.sources.project(), isEmpty);
       expect(controller.stage, ProviderConnectStage.credentials);
     });
 
@@ -219,20 +217,17 @@ void main() {
         );
         expect(controller.failure, isNull);
         expect(
-          auth.sources.project(AccessRegion.ordinary).single.serviceType,
+          auth.sources.project().single.serviceType,
           MediaServerType.jellyfin,
         );
       },
     );
 
-    test('locking private region discards delayed authentication', () async {
-      await auth.setPrivatePin('1234', '1234');
-      expect(await auth.regionAccess.unlock('1234'), isTrue);
+    test('cancelled server addition discards delayed authentication', () async {
       controller.dispose();
       controller = ProviderConnectController(
         pollInterval: const Duration(milliseconds: 10),
         auth: auth,
-        region: AccessRegion.private,
       )..reset(MediaServerType.jellyfin);
       final delayed = Completer<void>();
       fake.delay = delayed;
@@ -243,10 +238,10 @@ void main() {
         'password',
       );
       await fake.arrived!.future;
-      await auth.regionAccess.lock();
+      controller.reset(MediaServerType.jellyfin);
       delayed.complete();
       await login;
-      expect(auth.sources.project(AccessRegion.private), isEmpty);
+      expect(auth.sources.project(), isEmpty);
       expect(auth.savedServers, isEmpty);
       expect(controller.stage, ProviderConnectStage.credentials);
     });
@@ -258,7 +253,7 @@ void main() {
         auth.dispose();
         final store = DelayedServerStore();
         auth = AuthController(
-          regionAccess: TestRegionAccessController(),
+          serverAccess: TestServerAccessController(),
           client: JellyfinClient(device: device),
           credentials: MemoryCredentialStore(),
           servers: store,
@@ -300,7 +295,7 @@ void main() {
         deleteCredential: cloud.deleteCredential,
       );
       final auth = AuthController(
-        regionAccess: TestRegionAccessController(),
+        serverAccess: TestServerAccessController(),
         client: PlexClient(device: device),
         credentials: credentials,
         servers: MemoryServerListStore(),
@@ -319,7 +314,7 @@ void main() {
               controller.failure != null,
         );
         expect(controller.failure, isNull);
-        expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+        expect(auth.sources.project(), isEmpty);
         expect(
           await cloud.readCredential(controller.account!.credentialRef),
           isNull,
@@ -332,9 +327,12 @@ void main() {
           ownerResource.connections.first,
         );
         expect(controller.failure, isNull);
-        controller.selectedLibraries.addAll(controller.libraries.keys);
+
         await controller.finish();
-        expect(auth.savedServers.single.libraryIds, isEmpty);
+        expect(
+          auth.savedServers.single.toJson().containsKey('libraryIds'),
+          isFalse,
+        );
         final browse = BrowseController(
           auth: auth,
           cache: CatalogCache(),
@@ -391,12 +389,11 @@ void main() {
         await controller.selectResource(resource, resource.connections.first);
         expect(controller.failure, isNull);
         expect(controller.stage, ProviderConnectStage.done);
-        expect(controller.selectedLibraries, isEmpty);
         expect(
-          auth.sources.project(AccessRegion.ordinary).single.scopeKnown,
+          auth.sources.project().single.toJson().containsKey('scopeKnown'),
           isFalse,
         );
-        controller.selectedLibraries.addAll(controller.libraries.keys);
+
         await controller.finish();
         expect(controller.failure, isNull);
         expect(auth.session!.userId, home.id);

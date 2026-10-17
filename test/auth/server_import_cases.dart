@@ -1,6 +1,6 @@
 import 'package:rillight/media_server/capabilities.dart';
 
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/media_server/device.dart';
@@ -10,7 +10,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/auth/server_import_models.dart';
 import 'package:rillight/auth/server_import_service.dart';
 import 'package:rillight/auth/server_list_store.dart';
@@ -139,13 +139,13 @@ ServerImportDraft draft(
 void main() {
   late ImportStore store;
   late ImportCredentials credentials;
-  late RegionAccessController access;
+  late ServerAccessController access;
   late SourceSessionRegistry sources;
   late List<ImportClient> clients;
   setUp(() async {
     store = ImportStore();
     credentials = ImportCredentials();
-    access = TestRegionAccessController();
+    access = TestServerAccessController();
     clients = [];
     sources = SourceSessionRegistry(
       access: access,
@@ -161,7 +161,6 @@ void main() {
   });
   tearDown(() {
     sources.dispose();
-    access.dispose();
   });
 
   test(
@@ -247,8 +246,8 @@ void main() {
       for (final server in imported) {
         expect(server.id, isNot('remote'));
         expect(server.verifiedServerId, isNull);
-        expect(server.libraryIds, isEmpty);
-        expect(server.scopeKnown, isFalse);
+        expect(server.toJson().containsKey('scopeKnown'), isFalse);
+        expect(server.toJson().containsKey('libraryIds'), isFalse);
       }
       expect(
         (await auth.importServers([draft('alice'), draft('bob')]))
@@ -275,13 +274,10 @@ void main() {
       expect(first.client.accessToken, 'token-alice');
       expect(second.client.accessToken, 'token-bob');
       expect(first.client, isNot(same(second.client)));
+      expect(sources.project().every((s) => !s.identityPending), isTrue);
       expect(
-        sources.project(AccessRegion.ordinary).every((s) => !s.identityPending),
+        sources.permit(first.account, libraryId: 'movies').isValid,
         isTrue,
-      );
-      expect(
-        () => sources.permit(first.account, libraryId: 'movies'),
-        throwsStateError,
       );
     },
   );
@@ -332,11 +328,8 @@ void main() {
         throwsA(anything),
       );
     }
-    expect(sources.project(AccessRegion.ordinary).length, 2);
-    expect(
-      sources.project(AccessRegion.ordinary).every((s) => s.identityPending),
-      isTrue,
-    );
+    expect(sources.project().length, 2);
+    expect(sources.project().every((s) => s.identityPending), isTrue);
   });
 
   for (final credentialFailure in [true, false]) {
@@ -353,46 +346,42 @@ void main() {
         expect(result.items.last.status, ServerImportStatus.added);
         expect(await credentials.read(credentials.written.first), isNull);
         expect((await store.load()).servers.single.username, 'success');
-        expect(
-          sources.project(AccessRegion.ordinary).single.username,
-          'success',
-        );
+        expect(sources.project().single.username, 'success');
       },
     );
   }
 
-  test('private records never pass through the ordinary projection', () async {
-    final rejected = await sources.importServers([
-      draft('private', isPrivate: true),
-    ]);
-    expect(rejected.items.single.status, ServerImportStatus.skipped);
-    expect(credentials.written, isEmpty);
-    await access.setPin('1234', '1234', (_) async {});
-    await access.unlock('1234');
-    final added = await sources.importServers([
-      draft('private', isPrivate: true),
-    ], region: AccessRegion.private);
-    expect(added.items.single.status, ServerImportStatus.added);
-    expect(sources.project(AccessRegion.ordinary), isEmpty);
-    expect(sources.project(AccessRegion.private).length, 1);
-    await access.lock();
-    expect(sources.project(AccessRegion.private), isEmpty);
-    expect(
-      (await sources.importServers([
+  test(
+    'legacy private import without its verifier never downgrades protection',
+    () async {
+      final rejected = await sources.importServers([
         draft('private', isPrivate: true),
-      ], region: AccessRegion.private)).items.single.reason,
-      ServerImportReason.privateAccessRequired,
-    );
-  });
+      ]);
+      expect(rejected.items.single.status, ServerImportStatus.skipped);
+      expect(
+        rejected.items.single.reason,
+        ServerImportReason.privateAccessRequired,
+      );
+      expect(credentials.written, isEmpty);
+      expect(sources.project(), isEmpty);
+    },
+  );
 
   for (final duringCredentials in [true, false]) {
     test(
-      'lock during ${duringCredentials ? 'credential' : 'configuration'} IO revokes import and rolls back',
+      'locking an existing server during ${duringCredentials ? 'credential' : 'configuration'} import IO cannot unlock it or cancel an unrelated addition',
       () async {
-        await access.setPin('1234', '1234', (_) async {});
-        await access.unlock('1234');
-        final started = Completer<void>();
-        final release = Completer<void>();
+        final first = await sources.importServers([draft('existing')]);
+        final id = first.items.single.serverId!;
+        await access.setPassword(
+          id,
+          '1234',
+          '1234',
+          persistReference: (ref) =>
+              sources.persistProtectionReference(id, ref),
+        );
+        await access.unlock(id, '1234');
+        final started = Completer<void>(), release = Completer<void>();
         if (duringCredentials) {
           credentials.started = started;
           credentials.gate = release;
@@ -400,18 +389,15 @@ void main() {
           store.started = started;
           store.gate = release;
         }
-        final pending = sources.importServers([
-          draft('private', isPrivate: true),
-        ], region: AccessRegion.private);
+        final pending = sources.importServers([draft('new-account')]);
         await started.future;
-        expect(sources.project(AccessRegion.private), isEmpty);
-        final locking = access.lock();
+        await access.lock(id);
         release.complete();
         final result = await pending;
-        await locking;
-        expect(result.items.single.reason, ServerImportReason.accessRevoked);
-        expect((await store.load()).servers, isEmpty);
-        expect(await credentials.read(credentials.written.single), isNull);
+        expect(result.items.single.status, ServerImportStatus.added);
+        expect(access.allows(id), isFalse);
+        expect(sources.project(), hasLength(2));
+        expect(await credentials.read(id), isNotNull);
       },
     );
   }
@@ -492,7 +478,7 @@ void main() {
     await auth.switchTo(result.items.first.serverId!);
     expect(auth.session!.userId, 'user-alice');
     final first = await sources.ensureSession(result.items.first.serverId!);
-    final permit = sources.permit(first.account, sessionOnly: true);
+    final permit = sources.permit(first.account);
     await auth.switchTo(result.items.last.serverId!);
     expect(auth.session!.userId, 'user-bob');
     expect(permit.isValid, isTrue);
@@ -553,7 +539,7 @@ void main() {
     final result = await sources.importServers([draft('', password: false)]);
     final id = result.items.single.serverId!;
     await sources.login(id, 'alice', 'synthetic');
-    final saved = sources.project(AccessRegion.ordinary).single;
+    final saved = sources.project().single;
     expect(saved.id, id);
     expect(saved.username, 'alice');
     expect(saved.identityPending, isFalse);
@@ -576,11 +562,13 @@ void main() {
         ..started = started,
     );
     await sources.load();
-    await sources.ordinaryStore.load();
+    await sources.configurationStore.load();
     final pending = sources.ensureSession(id);
     final rejected = expectLater(pending, throwsStateError);
     await started.future;
-    await sources.ordinaryStore.save(const ServerListSnapshot(servers: []));
+    await sources.configurationStore.save(
+      const ServerListSnapshot(servers: []),
+    );
     gate.complete();
     await rejected;
     expect((await store.load()).servers, isEmpty);

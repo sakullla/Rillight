@@ -14,7 +14,6 @@ import 'package:rillight/player/buffered_ranges_track.dart';
 import '../helpers/cupertino_test_app.dart';
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
-import '../helpers/region_access_fixture.dart';
 
 import 'dart:async';
 
@@ -26,7 +25,7 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_shell.dart';
-import 'package:rillight/app/phone_libraries_tab.dart';
+import 'package:rillight/auth/server_selection_page.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/routes.dart';
 import 'package:rillight/app/presentation_environment.dart';
@@ -1041,7 +1040,7 @@ void main() {
   );
 
   cases.testWidgets(
-    'search tab has no back button and system back returns home; mine opens private',
+    'search tab has no back button and system back returns home; mine opens servers',
     (tester) async {
       final server = FakeEmbyServer();
       final (app, _) = await start(tester, server);
@@ -1097,15 +1096,12 @@ void main() {
       expect(find.byKey(PhoneMinePage.changePasswordKey), findsOneWidget);
       expect(find.text('连接其他服务器'), findsOneWidget);
       expect(find.text('退出登录'), findsOneWidget);
-      expect(find.byKey(PhoneMinePage.privateKey), findsOneWidget);
-      await tester.runAsync(() async {
-        await app.auth.setPrivatePin('1234', '1234');
-        await app.auth.regionAccess.unlock('1234');
-      });
-      await tester.ensureVisible(find.byKey(PhoneMinePage.privateKey));
-      await tester.tap(find.byKey(PhoneMinePage.privateKey));
+      expect(find.byKey(const Key('phone-mine-private')), findsNothing);
+      await tester.ensureVisible(find.byKey(PhoneMinePage.lineKey));
+      await tester.tap(find.byKey(PhoneMinePage.lineKey));
       await settle(tester);
-      expect(app.router.state.uri.path, '/private');
+      expect(find.byType(ServerSelectionPage), findsOneWidget);
+      expect(find.byKey(const Key('server-search')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -1143,16 +1139,9 @@ void main() {
       expect(find.text('所选范围没有匹配作品'), findsOneWidget);
       expect(find.widgetWithText(AppButton, '添加服务器'), findsNothing);
       expect(find.text('所选来源全部失败，请逐来源重试'), findsNothing);
-      // Declare a real synthetic library before testing an allowed but
-      // unsupported stream; empty/unknown scope must never bypass the gate.
+      // Declare a real synthetic library before testing an unsupported stream;
+      // playback still verifies that the item belongs to this server.
       server.views.add(defaultCatalogViews().first);
-      await tester.runAsync(
-        () => app.auth.sources.configureScope(
-          app.auth.session!.server.id,
-          participates: true,
-          libraryIds: {'view-movies'},
-        ),
-      );
       server.items.add(
         FakeEmbyItem(
           id: 'unsupported',
@@ -1273,9 +1262,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final auth = AuthController.memory(
-        regionAccess: TestRegionAccessController(),
-      );
+      final auth = AuthController.memory();
       final catalog = _ScriptedCatalog(auth);
       addTearDown(catalog.dispose);
       addTearDown(auth.dispose);
@@ -1387,54 +1374,13 @@ void main() {
       await tester.tap(retry);
       await tester.pump();
 
-      // 片库 tab 有自己的骨架与空/失败文案,不与首页混用。
-      catalog.edit((page) {
-        page.librariesLoading = false;
-        page.librariesError = null;
-        page.libraries = const [];
-      });
-      await pumpTab(const PhoneLibrariesTab());
-      expect(find.byKey(MobileLoadingPlaceholder.librariesKey), findsNothing);
-      expect(find.text('暂无内容'), findsOneWidget);
-      expect(find.text('加载失败'), findsNothing);
-      final libraryBlocks = tester
-          .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
-          .toList();
-      expect(libraryBlocks, isEmpty);
-
-      catalog.edit((page) {
-        page.librariesLoading = true;
-      });
-      await tester.pump();
-      expect(find.byKey(MobileLoadingPlaceholder.librariesKey), findsOneWidget);
-      expect(find.text('暂无内容'), findsNothing);
-      final tiles = tester
-          .widgetList<SkeletonBlock>(find.byType(SkeletonBlock))
-          .toList();
-      expect(tiles.length, greaterThanOrEqualTo(8));
-      expect(
-        tiles.where((block) => (block.height ?? 0) > 40).length,
-        greaterThanOrEqualTo(4),
-      );
-      expect(tiles.where((block) => block.height == 14).length, 4);
-
-      catalog.edit((page) {
-        page.librariesLoading = false;
-        page.librariesError = const MediaServerException(
-          MediaServerFailureKind.unknown,
-        );
-      });
-      await tester.pump();
-      expect(find.text('加载失败'), findsOneWidget);
-      expect(find.text('暂无内容'), findsNothing);
-      expect(find.text('重试'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
   cases.testWidgets(
-    'split home, libraries and mine keep navigation, back and keyboard inset',
+    'home aggregation search and mine keep navigation, back and keyboard inset',
     (tester) async {
       final server = FakeEmbyServer();
       final (app, _) = await start(tester, server);
@@ -1444,7 +1390,7 @@ void main() {
             .widget<CupertinoTabBar>(find.byType(CupertinoTabBar))
             .items
             .length,
-        4,
+        3,
       );
       expect(find.text('我的'), findsNothing);
       await tester.tap(find.byKey(const Key('mobile-shell-mine-entry')));
@@ -1504,49 +1450,43 @@ void main() {
   );
 
   cases.testWidgets(
-    'libraries tab lists every library with shortcuts that open shelves',
+    'phone has three stable tabs; legacy library entry returns home and library browsing remains',
     (tester) async {
       final server = FakeEmbyServer();
       final (app, _) = await start(tester, server);
       await login(tester, server);
-      await tester.tap(
+      final tabs = tester.widget<CupertinoTabBar>(find.byType(CupertinoTabBar));
+      expect(tabs.items.map((item) => item.label), ['首页', '聚合', '搜索']);
+      expect(
         find.descendant(
           of: find.byType(CupertinoTabBar),
           matching: find.text('媒体库'),
         ),
+        findsNothing,
       );
+      app.router.go('/library');
       await settle(tester);
-      expect(tester.widget<Text>(find.byKey(MobileShell.titleKey)).data, '媒体库');
-      expect(find.byType(PhoneLibrariesTab), findsOneWidget);
-      expect(find.text('我的媒体库'), findsOneWidget);
-      final libraries = CatalogScope.of(
-        tester.element(find.byType(PhoneLibrariesTab)),
-      ).libraries;
-      expect(libraries, isNotEmpty);
-      for (final library in libraries.take(2)) {
-        expect(
-          find.byKey(Key('phone-library-block-${library.id}')),
-          findsOneWidget,
-        );
-      }
-      await tester.tap(
-        find.byKey(Key('phone-library-block-${libraries.first.id}')),
-      );
+      expect(app.router.state.uri.path, AppRoutes.home);
+      expect(find.byType(PhoneHome), findsOneWidget);
+      final library = find.byKey(const Key('phone-home-library-view-movies'));
+      await Scrollable.ensureVisible(tester.element(library), alignment: .5);
+      await settle(tester);
+      await tester.tap(library);
       await settle(tester);
       expect(find.byType(MobileLibraryPage), findsOneWidget);
-      await tester.binding.handlePopRoute();
-      await settle(tester);
-      expect(find.byType(PhoneLibrariesTab), findsOneWidget);
-      await tester.tap(
-        find.byKey(PhoneLibrariesTab.shortcutKey('latest-movies')),
-      );
-      await settle(tester);
       expect(
-        app.router.routerDelegate.currentConfiguration.last.matchedLocation,
-        AppRoutes.shelfLatestMovies,
+        tester.widget<MobileLibraryPage>(find.byType(MobileLibraryPage)).viewId,
+        'view-movies',
       );
       await tester.binding.handlePopRoute();
       await settle(tester);
+      expect(find.byType(PhoneHome), findsOneWidget);
+      await tester.tap(find.text('聚合').last);
+      await settle(tester);
+      expect(find.byType(AggregationPage), findsOneWidget);
+      await tester.tap(find.text('搜索').last);
+      await settle(tester);
+      expect(find.byKey(const Key('aggregation-keyword')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -1700,14 +1640,8 @@ void main() {
       );
       await tester.tap(pill);
       await settle(tester);
-      expect(find.text('服务器管理'), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byType(PhoneTopBar),
-          matching: find.text('服务器管理'),
-        ),
-        findsOneWidget,
-      );
+      expect(find.byType(ServerSelectionPage), findsOneWidget);
+      expect(find.byKey(const Key('server-search')), findsOneWidget);
       expect(find.textContaining('emby.test:8096'), findsWidgets);
       expect(tester.takeException(), isNull);
     },

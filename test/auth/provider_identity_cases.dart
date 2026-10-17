@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:rillight/auth/auth_controller.dart';
 
@@ -23,7 +23,35 @@ import 'package:rillight/media_server/media_server_client.dart';
 
 // This is an authority-contract fake, not an Emby-derived protocol adapter.
 class IdentityClient extends MediaServerClient {
-  IdentityClient(this.serviceType, {this.gate, this.returnedUser});
+  IdentityClient(
+    this.serviceType, {
+    this.gate,
+    this.returnedUser,
+    this.requestGuard,
+  });
+  final void Function()? requestGuard;
+  @override
+  MediaServerClient withRequestGuard(void Function() guard) {
+    final copy = IdentityClient(
+      serviceType,
+      gate: gate,
+      returnedUser: returnedUser,
+      requestGuard: () {
+        requestGuard?.call();
+        guard();
+      },
+    );
+    if (hasSession) {
+      copy.attachSession(
+        baseUrl: baseUrl!,
+        accessToken: accessToken!,
+        userId: userId!,
+        userAgent: customUserAgent,
+      );
+    }
+    return copy;
+  }
+
   @override
   final MediaServerType serviceType;
   final Completer<void>? gate;
@@ -69,7 +97,9 @@ class IdentityClient extends MediaServerClient {
       const PublicServerInfo(id: 'same-remote', serverName: 'same-name');
   @override
   Future<MediaUser> getUser({CancelToken? cancelToken}) async {
+    requestGuard?.call();
     await gate?.future;
+    requestGuard?.call();
     return MediaUser(id: returnedUser ?? userId!, name: 'same-name');
   }
 
@@ -85,7 +115,7 @@ class IdentityClient extends MediaServerClient {
 SavedServer source(
   String id,
   MediaServerType type, {
-  AccessRegion region = AccessRegion.ordinary,
+  bool protected = false,
   String? home,
   String? cloud,
 }) => SavedServer(
@@ -93,14 +123,12 @@ SavedServer source(
   name: 'same-name',
   username: 'same-name',
   serviceType: type,
-  region: region,
+  protectionRef: protected ? 'test:$id' : null,
   verifiedServerId: 'same-remote',
   homeUserId: home,
   cloudAccountId: cloud == null ? null : 'cloud-account',
   cloudCredentialRef: cloud,
   resourceCredentialRef: cloud == null ? null : 'resource-$id-$home',
-  libraryIds: const ['library'],
-  scopeKnown: true,
   lines: const [ServerLine(id: 'line', address: 'https://server.test/prefix')],
 );
 StoredCredentials credential(SavedServer server, {String user = 'same-user'}) =>
@@ -122,7 +150,7 @@ void main() {
     final restored = SavedServer.fromJson(old);
     expect(restored.serviceType, MediaServerType.emby);
     expect(restored.id, 'legacy-id');
-    expect(restored.libraryIds, ['library']);
+    expect(restored.toJson().containsKey('libraryIds'), isFalse);
     final ref = decodeSource({
       'region': 'ordinary',
       'server': 'legacy-id',
@@ -134,7 +162,6 @@ void main() {
     expect(ref.account.serviceType, MediaServerType.emby);
     final distinct = SourceReference(
       account: SourceAccount(
-        region: AccessRegion.ordinary,
         serviceType: MediaServerType.plex,
         configuredServerId: 'legacy-id',
         verifiedServerId: 'same-remote',
@@ -244,13 +271,13 @@ void main() {
   );
 
   test(
-    'all three providers isolate identical remote IDs and sessionOnly scope',
+    'all three providers isolate identical remote IDs without library opt-in',
     () async {
       final saved = [
         for (final type in MediaServerType.values) source(type.name, type),
       ];
       final registry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: MemoryServerListStore(ServerListSnapshot(servers: saved)),
         credentials: MemoryCredentialStore({
           for (final s in saved) s.id: credential(s),
@@ -270,24 +297,24 @@ void main() {
         hasLength(3),
       );
       final old = registry.permit(sessions.last.account);
-      await registry.configureScope(
-        saved.last.id,
-        participates: false,
-        libraryIds: {},
-      );
-      expect(old.isValid, isFalse);
+      expect(old.isValid, isTrue);
       expect(
-        registry.permit(sessions.last.account, sessionOnly: true).isValid,
+        registry
+            .permit(sessions.last.account, libraryId: 'new-library')
+            .isValid,
         isTrue,
       );
+      await registry.logoutSource(saved.last.id);
+      expect(old.isValid, isFalse);
       expect(() => registry.permit(sessions.last.account), throwsStateError);
+      expect(registry.permit(sessions.first.account).isValid, isTrue);
     },
   );
 
   test('provider mismatch rejects legacy factory and mismatched stored credentials', () async {
     final saved = source('jelly', MediaServerType.jellyfin);
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
       credentials: MemoryCredentialStore({'jelly': credential(saved)}),
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -320,7 +347,7 @@ void main() {
       'accessToken': 'cloud-token',
     });
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(ServerListSnapshot(servers: [a, b])),
       credentials: credentials,
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -334,11 +361,10 @@ void main() {
     final siblingPermit = registry.permit(sibling.account);
     final attempt = await registry.beginAuthorization(
       serviceType: MediaServerType.plex,
-      region: AccessRegion.ordinary,
       configuredServerId: 'a',
     );
     expect(parentPermit.isValid, isTrue);
-    expect(await registry.ensureSession('a'), same(parent));
+    expect((await registry.ensureSession('a')).account, parent.account);
     final child = source(
       'a',
       MediaServerType.plex,
@@ -353,11 +379,8 @@ void main() {
     expect(session.account.homeUserId, 'child');
     expect(parentPermit.isValid, isFalse);
     expect(
-      registry
-          .project(AccessRegion.ordinary)
-          .firstWhere((s) => s.id == 'a')
-          .libraryIds,
-      isEmpty,
+      registry.project().firstWhere((s) => s.id == 'a').homeUserId,
+      'child',
     );
     expect(siblingPermit.isValid, isTrue);
     await registry.logoutSource('a', remove: true);
@@ -366,7 +389,6 @@ void main() {
     expect(await credentials.read('a'), isNull);
     final pendingImport = await registry.beginAuthorization(
       serviceType: MediaServerType.plex,
-      region: AccessRegion.ordinary,
     );
     await registry.disconnectCloudAccount('shared', cloud);
     expect(pendingImport.isValid, isFalse);
@@ -375,60 +397,55 @@ void main() {
     expect(await cloud.readCredential('shared'), isNull);
   });
 
-  test('private lock and cancelled attempts discard late verified user and polling results', () async {
-    final access = TestRegionAccessController();
-    await access.setPin('1234', '1234', (_) async {});
-    await access.unlock('1234');
-    final gate = Completer<void>();
-    final credentials = MemoryCredentialStore();
-    final store = MemoryServerListStore();
-    final registry = SourceSessionRegistry(
-      access: access,
-      store: store,
-      credentials: credentials,
-      createClient: () => IdentityClient(MediaServerType.emby),
-      createProviderClient: (type) => IdentityClient(type, gate: gate),
-    );
-    addTearDown(registry.dispose);
-    final attempt = await registry.beginAuthorization(
-      serviceType: MediaServerType.jellyfin,
-      region: AccessRegion.private,
-    );
-    final saved = source(
-      attempt.id,
-      MediaServerType.jellyfin,
-      region: AccessRegion.private,
-    );
-    final commit = registry.commitAuthorization(
-      attempt,
-      server: saved,
-      value: credential(saved),
-    );
-    final rejected = expectLater(commit, throwsStateError);
-    await access.lock();
-    gate.complete();
-    await rejected;
-    expect((await store.load()).servers, isEmpty);
-    expect(await credentials.read(attempt.id), isNull);
-    expect(registry.project(AccessRegion.private), isEmpty);
-    final ordinary = await registry.beginAuthorization(
-      serviceType: MediaServerType.plex,
-      region: AccessRegion.ordinary,
-    );
-    final poll = PendingAttempt();
-    final pending = ordinary.poll(poll);
-    final cancelled = expectLater(pending, throwsStateError);
-    ordinary.cancel();
-    poll.gate.complete(AuthorizationStatus.authorized);
-    await cancelled;
-  });
+  test(
+    'cancelled attempts discard late verified user and polling results',
+    () async {
+      final access = TestServerAccessController();
+      final gate = Completer<void>();
+      final credentials = MemoryCredentialStore();
+      final store = MemoryServerListStore();
+      final registry = SourceSessionRegistry(
+        access: access,
+        store: store,
+        credentials: credentials,
+        createClient: () => IdentityClient(MediaServerType.emby),
+        createProviderClient: (type) => IdentityClient(type, gate: gate),
+      );
+      addTearDown(registry.dispose);
+      final attempt = await registry.beginAuthorization(
+        serviceType: MediaServerType.jellyfin,
+      );
+      final saved = source(attempt.id, MediaServerType.jellyfin);
+      final commit = registry.commitAuthorization(
+        attempt,
+        server: saved,
+        value: credential(saved),
+      );
+      final rejected = expectLater(commit, throwsStateError);
+      attempt.cancel();
+      gate.complete();
+      await rejected;
+      expect((await store.load()).servers, isEmpty);
+      expect(await credentials.read(attempt.id), isNull);
+      expect(registry.project(), isEmpty);
+      final ordinary = await registry.beginAuthorization(
+        serviceType: MediaServerType.plex,
+      );
+      final poll = PendingAttempt();
+      final pending = ordinary.poll(poll);
+      final cancelled = expectLater(pending, throwsStateError);
+      ordinary.cancel();
+      poll.gate.complete(AuthorizationStatus.authorized);
+      await cancelled;
+    },
+  );
 
   test(
     'wrong effective user cannot commit an authorized-looking grant',
     () async {
       final store = MemoryServerListStore();
       final registry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: store,
         credentials: MemoryCredentialStore(),
         createClient: () => IdentityClient(MediaServerType.emby),
@@ -438,7 +455,6 @@ void main() {
       addTearDown(registry.dispose);
       final attempt = await registry.beginAuthorization(
         serviceType: MediaServerType.plex,
-        region: AccessRegion.ordinary,
       );
       final saved = source(attempt.id, MediaServerType.plex);
       await expectLater(
@@ -457,7 +473,7 @@ void main() {
     'unknown legacy preferences never bind to a new Plex item with the same ID',
     () async {
       final registry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: MemoryServerListStore(),
         credentials: MemoryCredentialStore(),
         createClient: () => IdentityClient(MediaServerType.emby),
@@ -471,7 +487,6 @@ void main() {
       addTearDown(writer.close);
       final source = SourceReference(
         account: const SourceAccount(
-          region: AccessRegion.ordinary,
           serviceType: MediaServerType.plex,
           configuredServerId: 'new',
           verifiedServerId: 'same-remote',
@@ -502,7 +517,7 @@ void main() {
     final store = RejectingStore(ServerListSnapshot(servers: [old]));
     final credentials = MemoryCredentialStore({'a': credential(old)});
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: store,
       credentials: credentials,
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -513,7 +528,6 @@ void main() {
     final permit = registry.permit((await registry.authenticate('a')).account);
     final attempt = await registry.beginAuthorization(
       serviceType: MediaServerType.plex,
-      region: AccessRegion.ordinary,
       configuredServerId: 'a',
     );
     final child = source(
@@ -581,10 +595,6 @@ void main() {
   );
 
   final invalidFields = <String, Object?>{
-    'region': 'privat',
-    'participates': 'true',
-    'scopeKnown': 1,
-    'libraryIds': ['library', 42],
     'activeLineId': 'missing',
     'lines': [
       const ServerLine(id: 'line', address: 'https://server.test').toJson(),
@@ -597,11 +607,7 @@ void main() {
       () async {
         final dir = await Directory.systemTemp.createTemp('invalid-source');
         addTearDown(() => dir.delete(recursive: true));
-        final record = source(
-          'private',
-          MediaServerType.emby,
-          region: AccessRegion.private,
-        ).toJson();
+        final record = source('private', MediaServerType.emby).toJson();
         record[invalid.key] = invalid.value;
         final raw = jsonEncode({
           'version': 3,
@@ -616,16 +622,6 @@ void main() {
           throwsFormatException,
         );
         expect(await file.readAsString(), raw);
-      },
-    );
-  }
-  for (final region in [null, 42, true]) {
-    test(
-      'non-string region $region is rejected instead of becoming ordinary',
-      () {
-        final record = source('private', MediaServerType.emby).toJson()
-          ..['region'] = region;
-        expect(() => SavedServer.fromJson(record), throwsFormatException);
       },
     );
   }
@@ -714,7 +710,7 @@ void main() {
       },
     );
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
       credentials: open(),
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -722,9 +718,9 @@ void main() {
     addTearDown(registry.dispose);
     await registry.load();
     final permit = registry.permit((await registry.authenticate('a')).account);
-    final commit = await registry.beginOrdinaryCredentials('a');
+    final commit = await registry.beginCredentials('a');
     await expectLater(
-      registry.commitOrdinaryCredentials(commit, null),
+      registry.commitCredentials(commit, null),
       throwsA(isA<CredentialRevocationException>()),
     );
     expect(permit.isValid, isFalse);
@@ -732,10 +728,8 @@ void main() {
     await expectLater(registry.ensureSession('a'), throwsStateError);
   });
 
-  test('membership revocation during credential deletion restores only the still-owned source', () async {
-    final access = TestRegionAccessController();
-    await access.setPin('1234', '1234', (_) async {});
-    await access.unlock('1234');
+  test('password revocation during credential deletion cannot revive the previous grant', () async {
+    final access = TestServerAccessController();
     final saved = source('a', MediaServerType.emby);
     final credentials = GatedDeletion({'a': credential(saved)});
     final registry = SourceSessionRegistry(
@@ -746,22 +740,23 @@ void main() {
     );
     addTearDown(registry.dispose);
     await registry.load();
-    final pending = registry.commitOrdinaryCredentials(
-      await registry.beginOrdinaryCredentials('a'),
+    final pending = registry.commitCredentials(
+      await registry.beginCredentials('a'),
       null,
     );
-    final rejected = expectLater(pending, throwsStateError);
     await credentials.started.future;
-    final moving = registry.move('a', AccessRegion.private);
-    credentials.release.complete();
-    await rejected;
-    await moving;
-    expect(
-      (await credentials.read('a'))!.accessToken,
-      credential(saved).accessToken,
+    final moving = access.setPassword(
+      'a',
+      '1234',
+      '1234',
+      persistReference: (ref) => registry.persistProtectionReference('a', ref),
     );
-    expect(registry.project(AccessRegion.ordinary), isEmpty);
-    expect(registry.project(AccessRegion.private).single.id, 'a');
+    credentials.release.complete();
+    await pending;
+    await moving;
+    expect(await credentials.read('a'), isNull);
+    expect(access.allows('a'), isFalse);
+    expect(registry.project().single.id, 'a');
   });
 
   test('identity verification rejection and late response cannot establish or restore a Plex session', () async {
@@ -775,7 +770,7 @@ void main() {
     final started = Completer<void>();
     var reject = true;
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(ServerListSnapshot(servers: [saved])),
       credentials: MemoryCredentialStore({'a': credential(saved)}),
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -817,7 +812,7 @@ void main() {
       final credentials = MemoryCredentialStore({'a': credential(saved)});
       var verifications = 0;
       final registry = SourceSessionRegistry(
-        access: TestRegionAccessController(),
+        access: TestServerAccessController(),
         store: store,
         credentials: credentials,
         createClient: () => IdentityClient(MediaServerType.emby),
@@ -864,7 +859,7 @@ void main() {
       ServerListSnapshot(servers: [saved], lastServerId: 'a'),
     );
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: store,
       credentials: credentials,
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -912,7 +907,7 @@ void main() {
           ServerListSnapshot(servers: [a, b], lastServerId: 'a'),
         );
         final registry = SourceSessionRegistry(
-          access: TestRegionAccessController(),
+          access: TestServerAccessController(),
           store: store,
           credentials: credentials,
           createClient: () => IdentityClient(MediaServerType.emby),
@@ -971,7 +966,7 @@ void main() {
     final started = Completer<void>();
     final store = MemoryServerListStore();
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: store,
       credentials: MemoryCredentialStore(),
       createClient: () => IdentityClient(MediaServerType.emby),
@@ -984,7 +979,6 @@ void main() {
     addTearDown(registry.dispose);
     final attempt = await registry.beginAuthorization(
       serviceType: MediaServerType.plex,
-      region: AccessRegion.ordinary,
     );
     final saved = source(attempt.id, MediaServerType.plex);
     final pending = registry.commitAuthorization(

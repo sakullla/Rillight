@@ -11,10 +11,6 @@ void main() {
     caseEntrypoints['aggregation/history_cases.dart']!,
   );
   group(
-    'aggregation/playback_switch_test.dart',
-    caseEntrypoints['aggregation/playback_switch_cases.dart']!,
-  );
-  group(
     'aggregation/query_test.dart',
     caseEntrypoints['aggregation/query_cases.dart']!,
   );
@@ -23,64 +19,68 @@ void main() {
     caseEntrypoints['aggregation/server_sections_cases.dart']!,
   );
   group(
+    'aggregation/work_index_regression_test.dart',
+    caseEntrypoints['aggregation/work_index_regression_cases.dart']!,
+  );
+  group(
     'auth/playback_cleanup_authority_test.dart',
     caseEntrypoints['auth/playback_cleanup_authority_cases.dart']!,
   );
   group(
-    'auth/provider_line_boundaries_test.dart',
-    caseEntrypoints['auth/provider_line_boundaries_cases.dart']!,
+    'auth/provider_session_ownership_test.dart',
+    caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
+  );
+  group(
+    'auth/server_access_test.dart',
+    caseEntrypoints['auth/server_access_cases.dart']!,
   );
   group(
     'auth/server_import_test.dart',
     caseEntrypoints['auth/server_import_cases.dart']!,
   );
   group(
+    'auth/source_sessions_test.dart',
+    caseEntrypoints['auth/source_sessions_cases.dart']!,
+  );
+  group(
     'catalog/catalog_cache_test.dart',
     caseEntrypoints['catalog/catalog_cache_cases.dart']!,
   );
   group(
-    'catalog/emby_catalog_client_test.dart',
-    caseEntrypoints['catalog/emby_catalog_client_cases.dart']!,
+    'catalog/detail_controller_test.dart',
+    caseEntrypoints['catalog/detail_controller_cases.dart']!,
   );
   group(
     'emby/emby_url_test.dart',
     caseEntrypoints['emby/emby_url_cases.dart']!,
   );
   group(
-    'emby/media_source_format_test.dart',
-    caseEntrypoints['emby/media_source_format_cases.dart']!,
-  );
-  group(
-    'helpers/synthetic_mailbox_test.dart',
-    caseEntrypoints['helpers/synthetic_mailbox_cases.dart']!,
-  );
-  group(
-    'library/item_format_test.dart',
-    caseEntrypoints['library/item_format_cases.dart']!,
+    'emby/video_preview_test.dart',
+    caseEntrypoints['emby/video_preview_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 2]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#1']!,
   );
   group(
-    'player/catalog_preference_negotiation_test.dart',
-    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
+    'player/cache/range_lease_index_test.dart',
+    caseEntrypoints['player/cache/range_lease_index_cases.dart']!,
+  );
+  group(
+    'player/danmaku/danmaku_hash_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_hash_cases.dart']!,
   );
   group(
     'player/danmaku/danmaku_layout_test.dart',
     caseEntrypoints['player/danmaku/danmaku_layout_cases.dart']!,
   );
   group(
-    'player/playback_check_in_test.dart',
-    caseEntrypoints['player/playback_check_in_cases.dart']!,
-  );
-  group(
     'player/playback_http_proxy_test.dart [part 3]',
     caseEntrypoints['player/playback_http_proxy_cases.dart#2']!,
   );
   group(
-    'player/playback_metadata_test.dart',
-    caseEntrypoints['player/playback_metadata_cases.dart']!,
+    'player/player_host_command_test.dart',
+    caseEntrypoints['player/player_host_command_cases.dart']!,
   );
   group(
     'player/player_process_protocol_test.dart',
@@ -91,12 +91,12 @@ void main() {
     caseEntrypoints['player/player_settings_cases.dart']!,
   );
   group(
-    'player/provider_failed_preparation_recovery_test.dart',
-    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
+    'player/provider_process_boundary_test.dart',
+    caseEntrypoints['player/provider_process_boundary_cases.dart']!,
   );
   group(
-    'player/provider_scoped_preference_test.dart',
-    caseEntrypoints['player/provider_scoped_preference_cases.dart']!,
+    'player/provider_transport_test.dart',
+    caseEntrypoints['player/provider_transport_cases.dart']!,
   );
   group(
     'player/response_read_ahead_test.dart [part 2]',

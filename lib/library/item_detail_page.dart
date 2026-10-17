@@ -957,7 +957,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           itemId: itemId,
           source: request.source,
           libraryId: request.libraryId,
-          regionGeneration: request.regionGeneration,
+          accessGeneration: request.accessGeneration,
           autoResume: !fromBeginning && startPosition == null,
           mediaSourceId: _item?.id == itemId && _pickedMediaSource
               ? _mediaSourceId

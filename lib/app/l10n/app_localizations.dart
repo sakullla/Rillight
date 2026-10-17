@@ -355,7 +355,7 @@ abstract class AppLocalizations {
   /// No description provided for @aggregationAllSources.
   ///
   /// In zh, this message translates to:
-  /// **'全部普通来源'**
+  /// **'全部服务器'**
   String get aggregationAllSources;
 
   /// No description provided for @aggregationAllTypes.
@@ -2971,8 +2971,20 @@ abstract class AppLocalizations {
   /// Explains that the home editor does not change the libraries tab.
   ///
   /// In zh, this message translates to:
-  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'**
+  /// **'按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。'**
   String get phoneHomeEditHint;
+
+  /// No description provided for @configurationUpgradeFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'配置升级未完成，原始配置已保留。'**
+  String get configurationUpgradeFailed;
+
+  /// No description provided for @configurationRecoveryHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。'**
+  String get configurationRecoveryHint;
 
   /// Home section label for the featured carousel.
   ///
@@ -5061,6 +5073,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'继续'**
   String get serversContinue;
+
+  /// No description provided for @serversEntryPlaybackImpact.
+  ///
+  /// In zh, this message translates to:
+  /// **'进入另一台服务器后，当前播放将结束，原服务器会重新锁定。'**
+  String get serversEntryPlaybackImpact;
 
   /// No description provided for @serversBusy.
   ///

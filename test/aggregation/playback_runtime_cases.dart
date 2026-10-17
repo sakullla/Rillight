@@ -4,7 +4,7 @@ import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:dio/dio.dart';
 import 'package:rillight/player/playback_persistence.dart';
@@ -68,6 +68,7 @@ class _Client extends EmbyClient {
         ),
       );
   final List<PlaybackReport> reports;
+  void Function()? _requestGuard;
   final bool trackChoices;
   final progressReports = <PlaybackReport>[];
   bool failProgress = false;
@@ -85,18 +86,36 @@ class _Client extends EmbyClient {
   @override
   MediaServerClient withRequestGuard(void Function() guard) {
     final probe = _Client(reports, trackChoices: trackChoices)
-      ..catalogVersions = catalogVersions;
+      ..catalogVersions = catalogVersions
+      ..failProgress = failProgress
+      ..failStopped = failStopped
+      ..failPublic = failPublic
+      ..offerNext = offerNext
+      ..playbackGate = playbackGate
+      .._requestGuard = () {
+        _requestGuard?.call();
+        guard();
+      };
     probe.attachSession(
       baseUrl: baseUrl!,
       accessToken: accessToken!,
       userId: userId!,
       userAgent: customUserAgent,
     );
+    probe.onSessionExpired = onSessionExpired;
+    probe.onRefreshSession = onRefreshSession;
     return probe;
   }
 
   @override
+  Future<void> logout() async => clearSession();
+
+  @override
+  Future<List<MediaItem>> getViews() async => [await getItem('library')];
+
+  @override
   Future<PublicServerInfo> getPublicInfo(Uri baseUrl) async {
+    _requestGuard?.call();
     if (failPublic) throw StateError('synthetic offline');
     return PublicServerInfo(
       id: baseUrl.host == 'wrong'
@@ -109,14 +128,18 @@ class _Client extends EmbyClient {
   }
 
   @override
-  Future<MediaUser> getUser({CancelToken? cancelToken}) async =>
-      MediaUser(id: userId!, name: 'test');
+  Future<MediaUser> getUser({CancelToken? cancelToken}) async {
+    _requestGuard?.call();
+    return MediaUser(id: userId!, name: 'test');
+  }
+
   @override
   Future<MediaItem> getItem(
     String id, {
     String? fields,
     CancelToken? cancelToken,
   }) async {
+    _requestGuard?.call();
     itemRequests.add(id);
     allItemRequests.add(id);
     return decodeEmbyMediaItem({
@@ -166,8 +189,10 @@ class _Client extends EmbyClient {
     PlaybackCapabilities? capabilities,
     bool forceTranscode = false,
   }) async {
+    _requestGuard?.call();
     playbackRequests++;
     await playbackGate;
+    _requestGuard?.call();
     return decodeEmbyPlaybackInfo({
       'PlaySessionId': 'play-${baseUrl!.host}-$itemId',
       'MediaSources': [
@@ -205,23 +230,32 @@ class _Client extends EmbyClient {
   }
 
   @override
-  Future<MediaItem?> getNextEpisode(MediaItem current) async =>
-      offerNext ? getItem('episode2') : null;
+  Future<MediaItem?> getNextEpisode(MediaItem current) async {
+    _requestGuard?.call();
+    return offerNext ? getItem('episode2') : null;
+  }
+
   @override
   Future<void> markPlayed(String itemId) async {
+    _requestGuard?.call();
     if (failStopped) throw StateError('synthetic played failure');
   }
 
   @override
-  Future<void> reportPlaying(PlaybackReport report) async {}
+  Future<void> reportPlaying(PlaybackReport report) async {
+    _requestGuard?.call();
+  }
+
   @override
   Future<void> reportProgress(PlaybackReport report) async {
+    _requestGuard?.call();
     progressReports.add(report);
     if (failProgress) throw StateError('synthetic report failure');
   }
 
   @override
   Future<void> reportStopped(PlaybackReport report) async {
+    _requestGuard?.call();
     reports.add(report);
     if (failStopped) throw StateError('synthetic stop failure');
   }
@@ -424,7 +458,6 @@ void main() {
     bool private = false,
     String itemId = 'movie',
     String libraryId = 'library',
-    bool scopeKnown = true,
     bool selectedEntry = false,
     bool trackChoices = false,
     String? preferredSource,
@@ -434,11 +467,9 @@ void main() {
     reports = [];
     cleanupFails = false;
     _Client.allItemRequests.clear();
-    final access = TestRegionAccessController();
-    if (private) {
-      await access.setPin('1234', '1234', (_) async {});
-      await access.unlock('1234');
-    }
+    final access = TestServerAccessController(
+      passwords: {if (private) 'a': '1234', if (private) 'b': '1234'},
+    );
     final store = MemoryServerListStore(
       ServerListSnapshot(
         lastServerId: 'a',
@@ -447,9 +478,8 @@ void main() {
             id: 'a',
             name: 'a',
             username: 'test',
-            region: private ? AccessRegion.private : AccessRegion.ordinary,
-            libraryIds: const ['library'],
-            scopeKnown: scopeKnown,
+            protectionRef: private ? 'test:a' : null,
+            activeLineId: 'line',
             lines: const [
               ServerLine(id: 'line', address: 'https://a'),
               ServerLine(id: 'wrong', address: 'https://wrong'),
@@ -460,9 +490,8 @@ void main() {
             id: 'b',
             name: 'b',
             username: 'test',
-            region: private ? AccessRegion.private : AccessRegion.ordinary,
-            libraryIds: const ['library'],
-            scopeKnown: true,
+            protectionRef: private ? 'test:b' : null,
+            activeLineId: 'line',
             lines: const [ServerLine(id: 'line', address: 'https://b')],
           ),
         ],
@@ -489,9 +518,13 @@ void main() {
             ..failStopped = cleanupFails,
     );
     await registry.load();
+    if (private) {
+      await access.unlock('a', '1234');
+      await access.unlock('b', '1234');
+    }
     account = (await registry.authenticate('a')).account;
     auth = AuthController(
-      regionAccess: TestRegionAccessController(),
+      serverAccess: access,
       client: _Client(reports),
       credentials: credentials,
       servers: store,
@@ -517,13 +550,14 @@ void main() {
       settingsStore: MemoryPlayerSettingsStore(),
       progressInterval: const Duration(milliseconds: 30),
       openRequest: selectedEntry
-          ? null
+          ? PlayerOpenRequest(
+              itemId: itemId,
+              accessGeneration: access.generation('a'),
+            )
           : PlayerOpenRequest(
               itemId: itemId,
               libraryId: libraryId,
-              regionGeneration: registry
-                  .permit(account, sessionOnly: true)
-                  .regionGeneration,
+              accessGeneration: registry.permit(account).accessGeneration,
               source: SourceReference(account: account, itemId: itemId),
             ),
     );
@@ -596,7 +630,7 @@ void main() {
         openRequest: PlayerOpenRequest(
           itemId: 'movie',
           libraryId: 'library',
-          regionGeneration: runtime.registry.permit(account).regionGeneration,
+          accessGeneration: runtime.registry.permit(account).accessGeneration,
           source: SourceReference(account: account, itemId: 'movie'),
         ),
       );
@@ -649,7 +683,7 @@ void main() {
       final beforeInvalid = reports.length;
       for (final edit in [
         {'userId': 'wrong'},
-        {'libraryId': 'wrong'},
+        {'libraryId': ''},
       ]) {
         final invalid = PlaybackSessionSnapshot.fromJson({
           ...snapshot.toJson(),
@@ -658,10 +692,10 @@ void main() {
         expect(await runtime.recoverSnapshot(invalid), isFalse);
       }
       expect(reports.length, beforeInvalid);
-      await auth.regionAccess.lock();
+      await auth.serverAccess.lock('a');
       final count = reports.length;
       expect(await runtime.recoverSnapshot(snapshot), isFalse);
-      await auth.regionAccess.unlock('1234');
+      await auth.serverAccess.unlock('a', '1234');
       expect(await runtime.recoverSnapshot(snapshot), isFalse);
       expect(reports.length, count);
     },
@@ -690,8 +724,7 @@ void main() {
           await setup(widgetTester: tester);
           await auth.restore();
           await tester.runAsync(() async {
-            await auth.regionAccess.setPin('1234', '1234', (_) async {});
-            await auth.regionAccess.unlock('1234');
+            // Protection is enabled later while the other source is playing.
           });
           final router = createAppRouter(auth: auth, environment: environment);
           backend = _Backend();
@@ -700,7 +733,7 @@ void main() {
             itemId: 'movie',
             source: SourceReference(account: account, itemId: 'movie'),
             libraryId: 'library',
-            regionGeneration: runtime.registry.permit(account).regionGeneration,
+            accessGeneration: runtime.registry.permit(account).accessGeneration,
           );
           tester.view.physicalSize = environment.isTv
               ? const Size(1920, 1080)
@@ -744,7 +777,7 @@ void main() {
               itemId: 'movie',
               source: request.source,
               libraryId: 'library',
-              regionGeneration: request.regionGeneration,
+              accessGeneration: request.accessGeneration,
             ),
           );
           await drain();
@@ -797,7 +830,13 @@ void main() {
           await drain();
           expect(c.activeOrigin!.source.account, b);
           await tester.runAsync(
-            () => runtime.registry.move('a', AccessRegion.private),
+            () => auth.serverAccess.setPassword(
+              'a',
+              '1234',
+              '1234',
+              persistReference: (ref) =>
+                  runtime.registry.persistProtectionReference('a', ref),
+            ),
           );
           await drain();
           expect(c.permissionRevoked, isFalse);
@@ -816,16 +855,9 @@ void main() {
           );
           await drain();
           expect(c.position, const Duration(seconds: 12));
+          expect(runtime.history.records().single.source.account, b);
           expect(
-            runtime.history
-                .records(AccessRegion.ordinary)
-                .single
-                .source
-                .account,
-            b,
-          );
-          expect(
-            runtime.history.records(AccessRegion.ordinary).single.positionTicks,
+            runtime.history.records().single.positionTicks,
             12 * kLegacyTicksPerSecond,
           );
           expect(c.client.baseUrl!.host, 'b');
@@ -839,13 +871,7 @@ void main() {
             12 * kLegacyTicksPerSecond,
           );
           final progressCount = bClient.progressReports.length;
-          await tester.runAsync(
-            () => runtime.registry.configureScope(
-              'b',
-              participates: false,
-              libraryIds: {},
-            ),
-          );
+          await tester.runAsync(() => runtime.registry.logoutSource('b'));
           backend.emitEvent(
             VideoEventKind.position,
             const Duration(seconds: 99),
@@ -853,7 +879,7 @@ void main() {
           await drain();
           expect(c.permissionRevoked, isTrue);
           expect(c.activeOrigin, isNull);
-          expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
+          expect(runtime.history.records(), isEmpty);
           expect(bClient.progressReports.length, progressCount);
           expect(find.byType(MobilePlayerPage), findsNothing);
           expect(find.byType(TvPlayerPage), findsNothing);
@@ -928,10 +954,7 @@ void main() {
       }
       expect(controller.client.baseUrl?.host, 'mirror');
       expect(backend.openedStart, const Duration(seconds: 9));
-      expect(
-        auth.sources.project(AccessRegion.ordinary).first.activeLineId,
-        'line',
-      );
+      expect(auth.sources.project().first.activeLineId, 'line');
       controller.dispose();
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpWidget(const SizedBox.shrink());
@@ -942,35 +965,28 @@ void main() {
     await setup();
     await controller.start();
     expect(controller.error, isNull);
-    expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
+    expect(runtime.history.records(), isEmpty);
     expect(controller.activeMediaSourceId, isNull);
     (controller.client as _Client).failProgress = true;
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 5));
-    await _eventually(
-      () => runtime.history.records(AccessRegion.ordinary).isNotEmpty,
-    );
+    await _eventually(() => runtime.history.records().isNotEmpty);
     expect(controller.activeMediaSourceId, 'v');
     expect(
-      runtime.history.records(AccessRegion.ordinary).single.positionTicks,
+      runtime.history.records().single.positionTicks,
       5 * kLegacyTicksPerSecond,
     );
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 8));
     await Future<void>.delayed(Duration.zero);
     await controller.close();
     expect(
-      runtime.history.records(AccessRegion.ordinary).single.positionTicks,
+      runtime.history.records().single.positionTicks,
       8 * kLegacyTicksPerSecond,
     );
     expect(reports.last.itemId, 'movie');
   });
 
-  cases.test('aggregation item plays from the server session when its library is not checked', () async {
+  cases.test('aggregation item plays from the server session when its library needs no participation selection', () async {
     await setup();
-    await runtime.registry.configureScope(
-      'a',
-      participates: true,
-      libraryIds: {},
-    );
     final origin = await runtime.resolve(
       PlayerOpenRequest(
         itemId: 'movie',
@@ -978,14 +994,14 @@ void main() {
         source: SourceReference(account: account, itemId: 'movie'),
       ),
     );
-    expect(origin.permit.sessionOnly, isTrue);
+    expect(origin.permit.isValid, isTrue);
     expect(origin.libraryId, 'library');
     expect(
       (await origin.permit.dispatch((client) => client.getItem('movie'))).id,
       'movie',
     );
     final session = await runtime.begin(origin, 'v');
-    expect(session.permit.sessionOnly, isTrue);
+    expect(session.permit.isValid, isTrue);
   });
 
   cases.test(
@@ -1007,33 +1023,29 @@ void main() {
           runtime.registry,
           account,
           libraryId: 'library',
-          regionGeneration: null,
+          accessGeneration: null,
         ),
         isTrue,
       );
     },
   );
 
-  for (final scope in ['empty', 'excluded', 'disabled', 'unknown']) {
+  for (final protected in [false, true]) {
     cases.test(
-      'selected home playback ignores $scope aggregation scope',
+      'selected home playback needs only server authorization protected=$protected',
       () async {
-        await setup(scopeKnown: scope != 'unknown', selectedEntry: true);
+        await setup(private: protected, selectedEntry: true);
         await auth.restore();
-        if (scope != 'unknown') {
-          await runtime.registry.configureScope(
-            'a',
-            participates: scope != 'disabled',
-            libraryIds: scope == 'excluded' ? {'other-library'} : {},
-          );
-        }
         expect(auth.isLoggedIn, isTrue);
         final origin = await runtime.resolve(
-          const PlayerOpenRequest(itemId: 'movie'),
+          PlayerOpenRequest(
+            itemId: 'movie',
+            accessGeneration: auth.serverAccess.generation('a'),
+          ),
         );
         expect(origin.source.account, account);
         expect(origin.libraryId, 'library');
-        expect(origin.permit.sessionOnly, isTrue);
+        expect(origin.permit.isValid, isTrue);
         final session = await runtime.begin(origin, 'v');
         expect(session.permit.isValid, isTrue);
         // Android can display frames while optional subtitle restoration is
@@ -1068,7 +1080,7 @@ void main() {
         await controller.start();
         expect(controller.error, isNull);
         final first = controller.origin!;
-        expect(first.permit.sessionOnly, isTrue);
+        expect(first.permit.isValid, isTrue);
         final next = await first.client.getItem('episode-next-season');
         await controller.playEpisode(next);
         expect(controller.itemId, next.id);
@@ -1081,7 +1093,7 @@ void main() {
           throwsStateError,
         );
         if (private) {
-          await runtime.registry.access.lock();
+          await runtime.registry.access.lock('a');
           final count = _Client.allItemRequests.length;
           await expectLater(
             runtime.resolveItem(first, next.id),
@@ -1125,13 +1137,13 @@ void main() {
       await setup(private: true);
       final generation = runtime.registry
           .permit(account, libraryId: 'library')
-          .regionGeneration;
+          .accessGeneration;
       expect(
         localSessionAllowsRoute(
           runtime.registry,
           account,
           libraryId: 'view-not-checked',
-          regionGeneration: generation,
+          accessGeneration: generation,
         ),
         isTrue,
       );
@@ -1140,17 +1152,17 @@ void main() {
           runtime.registry,
           account,
           libraryId: 'library',
-          regionGeneration: generation + 1,
+          accessGeneration: generation + 1,
         ),
         isFalse,
       );
-      await runtime.registry.access.lock();
+      await runtime.registry.access.lock('a');
       expect(
         localSessionAllowsRoute(
           runtime.registry,
           account,
           libraryId: 'library',
-          regionGeneration: generation,
+          accessGeneration: generation,
         ),
         isFalse,
       );
@@ -1218,7 +1230,7 @@ void main() {
                 : null,
           ),
         );
-        expect(origin.libraryId, 'library');
+        expect(origin.libraryId, explicitSource ? 'library' : 'season');
         expect(origin.work.itemId, 'series');
         expect(origin.source.account, account);
       },
@@ -1261,10 +1273,7 @@ void main() {
           (await auth.sources.credentials.read('a'))?.accessToken,
           credentials?.accessToken,
         );
-        expect(
-          auth.sources.project(AccessRegion.ordinary).first.activeLineId,
-          'line',
-        );
+        expect(auth.sources.project().first.activeLineId, 'line');
       }
       await controller.togglePlay();
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
@@ -1301,10 +1310,7 @@ void main() {
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
     await _eventually(() => controller.activeLineId == 'mirror');
     expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
-    expect(
-      auth.sources.project(AccessRegion.ordinary).first.activeLineId,
-      'line',
-    );
+    expect(auth.sources.project().first.activeLineId, 'line');
     final remembered = runtime.preference(
       controller.origin!,
       controller.item!,
@@ -1327,10 +1333,7 @@ void main() {
     expect(controller.client, same(original));
     expect(controller.client.baseUrl?.host, 'a');
     expect(backend.openedStart, const Duration(seconds: 12));
-    expect(
-      auth.sources.project(AccessRegion.ordinary).first.activeLineId,
-      'line',
-    );
+    expect(auth.sources.project().first.activeLineId, 'line');
   });
 
   cases.test('in-process line switch restores the shared address when stop or dispose fails', () async {
@@ -1472,7 +1475,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 40));
     final snapshot = await snapshots.read();
     expect(snapshot, isNotNull);
-    await auth.regionAccess.lock();
+    await auth.serverAccess.lock('a');
     expect(controller.resolved, isNull);
     expect(controller.activeOrigin, isNull);
     expect(controller.activeMediaSourceId, isNull);
@@ -1483,12 +1486,8 @@ void main() {
     );
     expect(await snapshots.read(), isNull);
     expect(await runtime.recoverSnapshot(snapshot!), isFalse);
-    await auth.regionAccess.unlock('1234');
-    await runtime.registry.acquireAccount(
-      'a',
-      region: AccessRegion.private,
-      libraryId: 'library',
-    );
+    await auth.serverAccess.unlock('a', '1234');
+    await runtime.registry.acquireAccount('a', libraryId: 'library');
     expect(await runtime.recoverSnapshot(snapshot), isFalse);
     final count = reports.length;
     await expectLater(controller.restoreOriginalSource(), throwsStateError);
@@ -1543,29 +1542,22 @@ void main() {
     },
   );
 
-  cases.test(
-    'delayed capabilities cannot dispatch PlaybackInfo after scope revocation',
-    () async {
-      final delayed = _CapabilitiesBackend()..delayNextProfile();
-      await setup(videoBackend: delayed);
-      final starting = controller.start();
-      await delayed.entered.future;
-      final client = controller.client as _Client;
-      final count = client.playbackRequests;
-      await runtime.registry.configureScope(
-        'a',
-        participates: true,
-        libraryIds: const {},
-      );
-      delayed.gate!.complete(const PlaybackCapabilities());
-      await starting;
-      expect(client.playbackRequests, count);
-    },
-  );
+  cases.test('delayed capabilities cannot dispatch PlaybackInfo after account revocation', () async {
+    final delayed = _CapabilitiesBackend()..delayNextProfile();
+    await setup(videoBackend: delayed);
+    final starting = controller.start();
+    await delayed.entered.future;
+    final client = controller.client as _Client;
+    final count = client.playbackRequests;
+    await runtime.registry.logoutSource('a');
+    delayed.gate!.complete(const PlaybackCapabilities());
+    await starting;
+    expect(client.playbackRequests, count);
+  });
 
   for (final prefix in [false, true]) {
     cases.test(
-      'delayed ${prefix ? 'next prefix' : 'URL renewal'} has zero dispatch after scope removal',
+      'delayed ${prefix ? 'next prefix' : 'URL renewal'} has zero dispatch after account logout',
       () async {
         final delayed = _CapabilitiesBackend();
         await setup(
@@ -1587,11 +1579,7 @@ void main() {
         }
         await delayed.entered.future.timeout(const Duration(seconds: 2));
         final count = client.playbackRequests;
-        await runtime.registry.configureScope(
-          'a',
-          participates: true,
-          libraryIds: const {},
-        );
+        await runtime.registry.logoutSource('a');
         delayed.gate!.complete(const PlaybackCapabilities());
         await Future<void>.delayed(const Duration(milliseconds: 30));
         expect(client.playbackRequests, count);
@@ -1607,7 +1595,7 @@ void main() {
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 119));
     await _eventually(() => controller.activeMediaSourceId != null);
     await controller.playEpisode(await controller.client.getItem('episode2'));
-    expect(runtime.history.records(account.region).single.played, isTrue);
+    expect(runtime.history.records().single.played, isTrue);
     expect(controller.itemId, 'episode2');
     expect(controller.loading, isFalse);
     expect(backend.openedPaused, isFalse);
@@ -1623,7 +1611,7 @@ void main() {
       backend.emitEvent(VideoEventKind.completed, true);
       await _eventually(() => controller.playbackEnded);
       await controller.close();
-      final record = runtime.history.records(AccessRegion.ordinary).single;
+      final record = runtime.history.records().single;
       expect(record.positionTicks, 120 * kLegacyTicksPerSecond);
       expect(record.played, isTrue);
       final query = AggregationQueryController(
@@ -1645,11 +1633,9 @@ void main() {
     final freshReports = <PlaybackReport>[];
     var failCleanup = true;
     final freshRegistry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: MemoryServerListStore(
-        ServerListSnapshot(
-          servers: runtime.registry.project(AccessRegion.ordinary),
-        ),
+        ServerListSnapshot(servers: runtime.registry.project()),
       ),
       credentials: MemoryCredentialStore({
         'a': const StoredCredentials(
@@ -1664,7 +1650,7 @@ void main() {
     );
     await freshRegistry.load();
     final freshAuth = AuthController(
-      regionAccess: TestRegionAccessController(),
+      serverAccess: freshRegistry.access,
       client: _Client(freshReports),
       sources: freshRegistry,
       credentials: MemoryCredentialStore(),
@@ -1688,14 +1674,7 @@ void main() {
       throwsStateError,
     );
     expect(await store.read(), isNotNull);
-    expect(
-      freshRegistry.sessionAccount(
-        'a',
-        region: AccessRegion.ordinary,
-        libraryId: 'library',
-      ),
-      isNull,
-    );
+    expect(freshRegistry.sessionAccount('a', libraryId: 'library'), isNull);
     await expectLater(
       recoverAndroidSession(freshAuth.client, store, runtime: fresh),
       throwsStateError,
@@ -1707,39 +1686,30 @@ void main() {
       isTrue,
     );
     expect(await store.read(), isNull);
-    expect(
-      freshRegistry.sessionAccount(
-        'a',
-        region: AccessRegion.ordinary,
-        libraryId: 'library',
-      ),
-      isNull,
-    );
+    expect(freshRegistry.sessionAccount('a', libraryId: 'library'), isNull);
     expect(
       freshReports.last.position.inMicroseconds * 10,
       saved.position.inMicroseconds * 10,
     );
   });
 
-  cases.test('fresh private registry rejects prior snapshot without acquisition even after unlock', () async {
+  cases.test('fresh protected registry rejects prior snapshot before and after normal login', () async {
     await setup(private: true);
     await controller.start();
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
     await _eventually(() => controller.activeMediaSourceId != null);
     await Future<void>.delayed(const Duration(milliseconds: 40));
     final saved = (await snapshots.read())!;
-    final access = TestRegionAccessController();
-    await access.setPin('1234', '1234', (_) async {});
-    await access.unlock('1234');
+    final access = TestServerAccessController(
+      passwords: const {'a': '1234', 'b': '1234'},
+    );
     var acquisitions = 0;
     final registry = SourceSessionRegistry(
       access: access,
       store: MemoryServerListStore(
-        ServerListSnapshot(
-          servers: runtime.registry.project(AccessRegion.private),
-        ),
+        ServerListSnapshot(servers: runtime.registry.project()),
       ),
-      credentials: MemoryCredentialStore(),
+      credentials: runtime.registry.credentials,
       createClient: () {
         acquisitions++;
         return _Client([]);
@@ -1747,10 +1717,10 @@ void main() {
     );
     await registry.load();
     final freshAuth = AuthController(
-      regionAccess: TestRegionAccessController(),
+      serverAccess: registry.access,
       client: _Client([]),
       sources: registry,
-      credentials: MemoryCredentialStore(),
+      credentials: runtime.registry.credentials,
       servers: MemoryServerListStore(),
     );
     final fresh = PlaybackRuntime(
@@ -1772,6 +1742,25 @@ void main() {
     );
     expect(await store.read(), isNull);
     expect(acquisitions, 0);
+    expect(await access.unlock('a', '1234'), isTrue);
+    await registry.authenticate('a');
+    expect(
+      registry.sessionAccount('a', libraryId: 'library'),
+      saved.source!.account,
+    );
+    expect(access.generation('a'), isNot(saved.accessGeneration));
+    final acquired = acquisitions;
+    await store.write(saved);
+    expect(
+      await recoverAndroidSession(freshAuth.client, store, runtime: fresh),
+      isFalse,
+    );
+    expect(
+      acquisitions,
+      acquired,
+      reason: 'Old generation must not reacquire a cleanup client',
+    );
+    expect(await store.read(), isNull);
   });
 
   for (final acceptNext in [true, false]) {
@@ -1779,7 +1768,6 @@ void main() {
       'real helper next episode waits for verification ($acceptNext) and drains close',
       (tester) async {
         const account = SourceAccount(
-          region: AccessRegion.ordinary,
           configuredServerId: 'a',
           verifiedServerId: 'a',
           userId: 'user',
@@ -1805,7 +1793,7 @@ void main() {
               userId: 'user',
               device: helperClient.device,
               protocol: protocol,
-              regionGeneration: 0,
+              accessGeneration: 0,
             ),
             client: helperClient,
             bindings: PlayerBindings(
@@ -1981,11 +1969,7 @@ void main() {
   }
 
   Future<SourceComparison> candidate() async {
-    final b = await runtime.registry.acquireAccount(
-      'b',
-      region: account.region,
-      libraryId: 'library',
-    );
+    final b = await runtime.registry.acquireAccount('b', libraryId: 'library');
     final reference = SourceReference(account: b, itemId: 'movie-b');
     final item = await runtime.registry
         .permit(b, libraryId: 'library')
@@ -1996,18 +1980,13 @@ void main() {
     );
   }
 
-  cases.test('confirmed switch keeps a live session when the target library is not checked', () async {
+  cases.test('confirmed switch keeps a live session when the target library needs no participation selection', () async {
     await setup();
     await controller.start();
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
     await _eventually(() => controller.activeMediaSourceId != null);
     final original = controller.origin;
     final comparison = await candidate();
-    await runtime.registry.configureScope(
-      'b',
-      participates: true,
-      libraryIds: {},
-    );
     await controller.switchConfirmedSource(comparison, 'v2');
     expect(controller.trackFailure, isNull);
     expect(controller.switchConfirmation, isNotNull);
@@ -2029,10 +2008,7 @@ void main() {
     );
     expect(controller.error, isNotNull);
     expect(controller.activeOrigin, same(original));
-    expect(
-      runtime.history.records(account.region).single.source.account,
-      account,
-    );
+    expect(runtime.history.records().single.source.account, account);
     expect(reports.single.playSessionId, 'play-a-movie');
     await controller.restoreOriginalSource();
     expect(controller.origin, same(original));
@@ -2052,24 +2028,19 @@ void main() {
         SwitchResumeChoice.currentPosition,
       );
       expect(controller.activeOrigin?.source.account, account);
-      expect(runtime.history.records(account.region), hasLength(1));
+      expect(runtime.history.records(), hasLength(1));
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 11));
-      await _eventually(
-        () => runtime.history.records(account.region).length == 2,
-      );
+      await _eventually(() => runtime.history.records().length == 2);
       expect(controller.activeOrigin?.source.account.configuredServerId, 'b');
       await controller.close();
       expect(reports.map((r) => r.playSessionId), [
         'play-a-movie',
         'play-b-movie-b',
       ]);
-      expect(
-        runtime.history
-            .records(account.region)
-            .map((r) => r.source.itemId)
-            .toSet(),
-        {'movie', 'movie-b'},
-      );
+      expect(runtime.history.records().map((r) => r.source.itemId).toSet(), {
+        'movie',
+        'movie-b',
+      });
     },
   );
 
@@ -2085,7 +2056,7 @@ void main() {
       SwitchResumeChoice.currentPosition,
     );
     await entered.future;
-    final locking = auth.regionAccess.lock();
+    final locking = auth.serverAccess.lock('b');
     backend.openGate!.complete();
     await Future.wait([locking, switching]);
     expect(backend.isPlaying, isFalse);
@@ -2093,19 +2064,18 @@ void main() {
     expect(controller.switchConfirmation, isNull);
     expect(await snapshots.read(), isNull);
     await expectLater(controller.restoreOriginalSource(), throwsStateError);
-    expect(runtime.history.records(AccessRegion.ordinary), isEmpty);
+    expect(
+      runtime.history.records().single.source.account.configuredServerId,
+      'a',
+    );
   });
 
-  cases.test('scope removal stops ordinary native session and forbids restore and snapshot dispatch', () async {
+  cases.test('account logout stops ordinary native session and forbids restore and snapshot dispatch', () async {
     await setup();
     await controller.start();
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 10));
     await _eventually(() => controller.activeMediaSourceId != null);
-    await runtime.registry.configureScope(
-      'a',
-      participates: false,
-      libraryIds: {'library'},
-    );
+    await runtime.registry.logoutSource('a');
     await _eventually(() => !backend.isPlaying);
     expect(controller.permissionRevoked, isTrue);
     expect(controller.activeOrigin, isNull);
@@ -2285,12 +2255,17 @@ void main() {
           await tester.runAsync(() => Future<void>.delayed(Duration.zero));
         }
         expect(backend.stopEntered, isTrue);
-        await runtime.registry.configureScope(
-          'b',
-          participates: false,
-          libraryIds: {},
-        );
+        var loggedOut = false;
+        final logout = runtime.registry
+            .logoutSource('b')
+            .then((_) => loggedOut = true);
         backend.stopGate!.complete();
+        for (var i = 0; i < 60 && !loggedOut; i++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+        }
+        expect(loggedOut, isTrue);
+        await logout;
         for (
           var i = 0;
           i < 60 &&
@@ -2374,7 +2349,7 @@ void main() {
         ipc.exit(ipc.lastPid);
         await _eventually(() => routed != null);
         expect(routed!.source!.account, b);
-        expect(routed!.regionGeneration, command.regionGeneration);
+        expect(routed!.accessGeneration, command.accessGeneration);
       },
     );
   }
@@ -2392,11 +2367,7 @@ void main() {
     await _eventually(
       () => ipc.calls.any((c) => c.startsWith('requestClose:')),
     );
-    await runtime.registry.configureScope(
-      'a',
-      participates: false,
-      libraryIds: {},
-    );
+    await runtime.registry.logoutSource('a');
     ipc.requestCloseHold!.complete();
     await closing;
     expect(routed, isFalse);
@@ -2413,7 +2384,7 @@ void main() {
     'observationSequence': sequence,
     'generation':
         generation ??
-        runtime.registry.permit(account, libraryId: 'library').regionGeneration,
+        runtime.registry.permit(account, libraryId: 'library').accessGeneration,
     'source': encodeSource(
       SourceReference(account: account, itemId: 'movie', mediaSourceId: 'v'),
     ),
@@ -2436,7 +2407,7 @@ void main() {
         'source': encodeSource(controller.openRequest!.source!),
         'generation': PlayerWindowLaunch.fromArguments(
           ipc.spawnedArguments.single,
-        ).regionGeneration,
+        ).accessGeneration,
       };
       ipc.command = {
         ...envelope,
@@ -2478,7 +2449,7 @@ void main() {
     ipc.event = event(ipc, 1);
     await _eventually(() => ipc.receipt != null);
     expect(ipc.receipt!['accepted'], isTrue);
-    expect(runtime.history.records(account.region), hasLength(1));
+    expect(runtime.history.records(), hasLength(1));
     ipc.receipt = null;
     ipc.event = event(ipc, 1);
     await _eventually(() => ipc.receipt != null);
@@ -2487,12 +2458,12 @@ void main() {
     ipc.event = event(ipc, 2, generation: -1);
     await _eventually(() => ipc.receipt != null);
     expect(ipc.receipt!['accepted'], isFalse);
-    expect(runtime.history.records(account.region).single.eventSequence, 1);
+    expect(runtime.history.records().single.eventSequence, 1);
     ipc.receipt = null;
     ipc.event = event(ipc, 3)..['played'] = true;
     await _eventually(() => ipc.receipt != null);
     expect(ipc.receipt!['accepted'], isTrue);
-    expect(runtime.history.records(account.region).single.played, isTrue);
+    expect(runtime.history.records().single.played, isTrue);
   });
 
   cases.test('desktop slow observation verification acknowledges pending and keeps heartbeat alive', () async {
@@ -2514,7 +2485,7 @@ void main() {
       gate.complete();
       await _eventually(() => ipc.receipt != null);
       expect(ipc.receipt!['accepted'], isTrue);
-      expect(runtime.history.records(account.region), hasLength(1));
+      expect(runtime.history.records(), hasLength(1));
     } finally {
       if (!gate.isCompleted) gate.complete();
       owner.playbackGate = null;
@@ -2595,7 +2566,7 @@ void main() {
         'sequence': sequence,
         'generation': runtime.registry
             .permit(account, libraryId: 'library')
-            .regionGeneration,
+            .accessGeneration,
         'item': 'movie',
         'version': 'v',
         'succeeded': succeeded,
@@ -2603,7 +2574,7 @@ void main() {
       ipc.reportOutcome = outcome(1, false);
       await _eventually(
         () =>
-            runtime.history.records(account.region).single.remoteStatus ==
+            runtime.history.records().single.remoteStatus ==
             RemoteSyncStatus.failed,
       );
       ipc.receipt = null;
@@ -2612,13 +2583,13 @@ void main() {
       ipc.reportOutcome = outcome(1, true);
       await _eventually(() => ipc.reportOutcome == null);
       expect(
-        runtime.history.records(account.region).single.remoteStatus,
+        runtime.history.records().single.remoteStatus,
         RemoteSyncStatus.pending,
       );
       ipc.reportOutcome = outcome(2, true);
       await _eventually(
         () =>
-            runtime.history.records(account.region).single.remoteStatus ==
+            runtime.history.records().single.remoteStatus ==
             RemoteSyncStatus.succeeded,
       );
     },
@@ -2633,7 +2604,7 @@ void main() {
       'source': encodeSource(controller.openRequest!.source!),
       'generation': PlayerWindowLaunch.fromArguments(
         ipc.spawnedArguments.single,
-      ).regionGeneration,
+      ).accessGeneration,
     };
     ipc.command = {
       ...envelope,
@@ -2728,7 +2699,7 @@ void main() {
             final envelope = {
               'pid': originalPid,
               'source': encodeSource(controller.openRequest!.source!),
-              'generation': host.current!.regionGeneration,
+              'generation': host.current!.accessGeneration,
             };
             ipc.command = {
               ...envelope,
@@ -2769,13 +2740,7 @@ void main() {
           final button = find.byKey(const Key('desktop-restore-original'));
           expect(tester.widget<AppButton>(button).onPressed, isNotNull);
           if (revokeOriginal) {
-            await tester.runAsync(
-              () => runtime.registry.configureScope(
-                'a',
-                participates: false,
-                libraryIds: {'library'},
-              ),
-            );
+            await tester.runAsync(() => runtime.registry.logoutSource('a'));
             await settle(tester);
             expect(find.text('原来源访问许可已失效，无法恢复。'), findsOneWidget);
             expect(tester.widget<AppButton>(button).onPressed, isNull);
@@ -2821,7 +2786,7 @@ void main() {
     final envelope = {
       'pid': ipc.lastPid,
       'source': encodeSource(controller.openRequest!.source!),
-      'generation': host.current!.regionGeneration,
+      'generation': host.current!.accessGeneration,
     };
     ipc.command = {
       ...envelope,
@@ -2846,9 +2811,7 @@ void main() {
       'choice': 'currentPosition',
     };
     await _eventually(() => ipc.spawnedArguments.length == 2);
-    final locking = auth.regionAccess.lock(
-      budget: const Duration(milliseconds: 100),
-    );
+    final locking = auth.serverAccess.lock('a');
     expect(host.switchFailure, isNull);
     expect(host.canRestoreOriginal, isFalse);
     ipc.spawnHold!.complete();
@@ -2856,7 +2819,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 30));
     expect(host.switchFailure, isNull);
     expect(host.current, isNull);
-    await auth.regionAccess.unlock('1234');
+    await auth.serverAccess.unlock('a', '1234');
     await expectLater(host.restoreOriginalSource(), throwsStateError);
     expect(ipc.spawnedArguments, hasLength(2));
     expect(reports, isEmpty);
@@ -2868,7 +2831,7 @@ void main() {
       await setup(private: true);
       final ipc = _IpcControl();
       final host = await desktop(ipc);
-      await auth.regionAccess.lock(budget: const Duration(milliseconds: 100));
+      await auth.serverAccess.lock('a');
       await _eventually(() => ipc.alive.isEmpty);
       expect(ipc.revoked, isTrue);
       expect(host.current, isNull);

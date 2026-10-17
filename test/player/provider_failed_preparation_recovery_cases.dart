@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:convert';
 
@@ -69,7 +69,6 @@ void main() {
         userId: '1',
       );
     const account = SourceAccount(
-      region: AccessRegion.ordinary,
       configuredServerId: 'source',
       verifiedServerId: 'server-a',
       userId: '1',
@@ -130,8 +129,6 @@ void main() {
             username: 'Owner',
             serviceType: MediaServerType.plex,
             verifiedServerId: 'server-a',
-            scopeKnown: true,
-            libraryIds: const ['section:1'],
             lines: [ServerLine(id: 'line', address: fake.url.toString())],
           ),
         ],
@@ -146,7 +143,7 @@ void main() {
       ),
     });
     final registry = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: servers,
       credentials: credentials,
       createClient: () => PlexClient(device: device),
@@ -191,13 +188,6 @@ void main() {
       ),
       isTrue,
     );
-    expect(
-      registry.sessionAccount(
-        'source',
-        region: AccessRegion.ordinary,
-        libraryId: 'section:1',
-      ),
-      isNull,
-    );
+    expect(registry.sessionAccount('source', libraryId: 'section:1'), isNull);
   });
 }

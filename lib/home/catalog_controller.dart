@@ -236,7 +236,7 @@ class CatalogController extends ChangeNotifier {
       serverId: session.server.id,
       userId: session.userId,
       serviceType: session.server.serviceType,
-      region: session.server.region,
+
       verifiedServerId: session.server.verifiedServerId,
       cloudAccountId: session.server.cloudAccountId,
       homeUserId: session.server.homeUserId,

@@ -219,9 +219,17 @@ class ServerConfigurationMigration {
       } else {
         await _replace(backup, original);
       }
+      final legacyRegions = <String, String>{};
+      for (final raw in decoded['servers'] as List) {
+        final region = raw['region'] ?? 'ordinary';
+        if (region != 'ordinary' && region != 'private') {
+          throw const FormatException('Invalid legacy access region');
+        }
+        legacyRegions[raw['id'] as String] = region as String;
+      }
       final ordered = [
-        ...snapshot.servers.where((s) => s.region == AccessRegion.ordinary),
-        ...snapshot.servers.where((s) => s.region == AccessRegion.private),
+        ...snapshot.servers.where((s) => legacyRegions[s.id] != 'private'),
+        ...snapshot.servers.where((s) => legacyRegions[s.id] == 'private'),
       ];
       final sources = <Map<String, dynamic>>[];
       final targetServers = <Map<String, dynamic>>[];
@@ -236,7 +244,7 @@ class ServerConfigurationMigration {
         sources.add({
           'server': server.id,
           'serviceType': server.serviceType.name,
-          'legacyRegion': server.region.name,
+          'legacyRegion': legacyRegions[server.id],
           'verifiedServer': server.expectedServerId,
           'user': credential?.userId,
           'cloudAccountId': server.cloudAccountId,
@@ -253,7 +261,7 @@ class ServerConfigurationMigration {
           server
               .copyWith(
                 lineSelection: LineSelection.fixed(active),
-                protectionRef: server.region == AccessRegion.private
+                protectionRef: legacyRegions[server.id] == 'private'
                     ? 'migrated-v4:${server.id}'
                     : server.protectionRef,
               )

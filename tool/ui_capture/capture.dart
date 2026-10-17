@@ -14,7 +14,7 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/tv_appearance_picker.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/source_sessions.dart';
-import 'package:rillight/auth/region_access.dart';
+import 'package:rillight/auth/server_access.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/player/playback_runtime.dart';
 import 'package:rillight/auth/credential_store.dart';
@@ -166,7 +166,7 @@ void main() {
         final providers = CaptureProviders(adapter, credentials);
         final servers = MemoryServerListStore();
         final sources = SourceSessionRegistry(
-          access: RegionAccessController(),
+          access: ServerAccessController(store: MemoryServerAccessStore()),
           store: servers,
           credentials: credentials,
           createProviderClient: providers.create,
@@ -221,20 +221,10 @@ void main() {
             password: 'correct-horse',
           );
           final firstId = auth.session!.server.id;
-          await sources.configureScope(
-            firstId,
-            participates: true,
-            libraryIds: {'view-movies', 'view-tv'},
-          );
           await auth.connect(
             address: mirror.baseUrl.toString(),
             username: 'alice',
             password: 'correct-horse',
-          );
-          await sources.configureScope(
-            auth.session!.server.id,
-            participates: true,
-            libraryIds: {'view-movies', 'view-tv'},
           );
           await auth.switchTo(firstId);
           await auth.addLine(firstId, backup.baseUrl.toString());

@@ -111,7 +111,7 @@ class _PersonWorksPageState extends State<PersonWorksPage> {
           itemId: item.id,
         ),
         libraryId: parent.isNotEmpty ? parent : origin.libraryId,
-        regionGeneration: origin.permit.regionGeneration,
+        accessGeneration: origin.permit.accessGeneration,
       ),
     );
   }

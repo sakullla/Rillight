@@ -1,5 +1,3 @@
-import '../auth/server_list_store.dart';
-
 import 'package:rillight/media_server/capabilities.dart';
 import 'package:rillight/media_server/serialization.dart';
 import 'package:rillight/emby/emby_codec.dart';
@@ -523,14 +521,12 @@ class CatalogCache {
     required String serverId,
     required String userId,
     MediaServerType serviceType = MediaServerType.emby,
-    AccessRegion region = AccessRegion.ordinary,
     String? verifiedServerId,
     String? cloudAccountId,
     String? homeUserId,
   }) {
     final identity = jsonEncode([
       serviceType.name,
-      region.name,
       serverId,
       verifiedServerId,
       userId,

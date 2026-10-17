@@ -1,5 +1,10 @@
 import 'dart:async';
 
+import 'package:go_router/go_router.dart';
+
+import '../app/routes.dart';
+import '../player/player_bindings.dart';
+
 import '../app/l10n/app_localizations.dart';
 import '../app/ui/ui.dart';
 import '../app/ui/app_icons.dart';
@@ -20,6 +25,7 @@ Future<void> showServerSelection(
   BuildContext context, {
   required AuthController auth,
   bool phone = false,
+  String? initialServerId,
   Future<void> Function()? onEntered,
   Future<void> Function()? onLineChanged,
 }) => showAppDialog<void>(
@@ -28,6 +34,7 @@ Future<void> showServerSelection(
   builder: (_) => ServerSelectionPage(
     auth: auth,
     phone: phone,
+    initialServerId: initialServerId,
     onEntered: onEntered,
     onLineChanged: onLineChanged,
   ),
@@ -44,11 +51,15 @@ class ServerSelectionPage extends StatefulWidget {
     super.key,
     required this.auth,
     this.phone = false,
+    this.routePage = false,
+    this.initialServerId,
     this.onEntered,
     this.onLineChanged,
   });
   final AuthController auth;
   final bool phone;
+  final bool routePage;
+  final String? initialServerId;
   final Future<void> Function()? onEntered, onLineChanged;
   @override
   State<ServerSelectionPage> createState() => ServerSelectionPageState();
@@ -83,6 +94,14 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
       await widget.auth.refreshAuthorization(server.id);
     }
     if (mounted) setState(() => ready = true);
+    final initial = widget.auth.savedServers
+        .where((server) => server.id == widget.initialServerId)
+        .firstOrNull;
+    if (mounted && initial != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(enter(initial));
+      });
+    }
   }
 
   @override
@@ -112,7 +131,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
   void returnToList() {
     cancelEntry();
     if (step == 'list') {
-      Navigator.of(context).pop();
+      closeSelection();
       return;
     }
     final id = target?.id;
@@ -153,8 +172,16 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
 
   Future<void> finishEntry() async {
     final onEntered = widget.onEntered;
-    Navigator.of(context).pop();
+    closeSelection();
     await onEntered?.call();
+  }
+
+  void closeSelection() {
+    if (widget.routePage) {
+      GoRouter.of(context).go(AppRoutes.home);
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   void open(SavedServer server, String next) {
@@ -169,8 +196,34 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
     SavedServer server, {
     String next = 'enter',
     String? suppliedPassword,
+    bool playbackConfirmed = false,
   }) async {
     final l = AppLocalizations.of(context);
+    final current = widget.auth.session?.server.id;
+    final bindings = PlayerScope.of(context);
+    if (next == 'enter' &&
+        suppliedPassword == null &&
+        !playbackConfirmed &&
+        current != null &&
+        current != server.id &&
+        widget.auth.serverAccess.isProtected(current) &&
+        (bindings.runtime?.hasPlaybackFor(current) == true ||
+            (bindings.windowHost?.playbackOccupied == true &&
+                (bindings.windowHost?.current?.source == null ||
+                    bindings
+                            .windowHost
+                            ?.current
+                            ?.source
+                            ?.account
+                            .configuredServerId ==
+                        current)))) {
+      cancelEntry();
+      setState(() {
+        target = server;
+        step = 'confirm-entry';
+      });
+      return;
+    }
     cancelEntry();
     final revision = entryRevision;
     var passwordRejected = false;
@@ -201,10 +254,12 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
 
       Future<bool> connect(void Function() guard) async {
         guard();
-        await widget.auth.switchTo(server.id, guard: guard);
+        final prepared = await widget.auth.prepareServerEntry(
+          server.id,
+          guard: guard,
+        );
         guard();
-        return widget.auth.session?.server.id == server.id &&
-            widget.auth.failure == null;
+        return prepared;
       }
 
       Future<void> navigate(String value) async {
@@ -357,7 +412,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           server: target!,
           onBack: returnToList,
           onSaved: returnToList,
-          onSignedOut: () => Navigator.of(context).pop(),
+          onSignedOut: closeSelection,
         );
       } else if (step == 'lines') {
         content = ServerLineSelector(
@@ -380,7 +435,7 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
           onImport: () {
             // Replace this flow before opening the existing file-import route.
             final outer = Navigator.of(context).context;
-            Navigator.of(context).pop();
+            closeSelection();
             unawaited(showBackupImportFlow(outer, auth: widget.auth));
           },
         );
@@ -393,6 +448,26 @@ class ServerSelectionPageState extends State<ServerSelectionPage> {
             existing: target,
             inline: true,
             onConnected: () => enter(widget.auth.sources.server(target!.id)),
+          ),
+        );
+      } else if (step == 'confirm-entry') {
+        content = ServerFlowFrame(
+          title: target!.displayName,
+          onBack: back,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(l.serversEntryPlaybackImpact),
+              const SizedBox(height: 24),
+              AppButton(
+                key: const Key('server-entry-continue'),
+                onPressed: () => enter(target!, playbackConfirmed: true),
+                variant: AppButtonVariant.filled,
+                child: Text(l.serversContinue),
+              ),
+              const SizedBox(height: 12),
+              AppButton(onPressed: back, child: Text(l.serversCancel)),
+            ],
           ),
         );
       } else if (step == 'unlock') {

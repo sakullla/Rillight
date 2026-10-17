@@ -1,3 +1,9 @@
+import '../auth/auth_scope.dart';
+import 'l10n/app_localizations.dart';
+import '../auth/server_selection_page.dart';
+import '../auth/tv_server_selection_page.dart';
+import '../auth/server_content_entry.dart';
+
 import 'package:rillight/app/ui/ui.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/player_host_command.dart';
@@ -10,7 +16,6 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/auth/android_connect_page.dart';
 import 'package:rillight/app/settings/settings_page.dart';
 import 'package:rillight/auth/auth_controller.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/connect_page.dart';
 import 'package:rillight/home/catalog_shell.dart';
 import 'package:rillight/home/home_page.dart';
@@ -70,8 +75,14 @@ GoRouter createAppRouter({
     ),
     extraCodec: const SourceRouteExtraCodec(),
     observers: [_ConnectFlowObserver(auth)],
-    refreshListenable: Listenable.merge([auth, auth.regionAccess]),
+    refreshListenable: Listenable.merge([auth, auth.serverAccess]),
     redirect: (context, state) {
+      if (state.uri.path == '/private') return '/servers';
+      if (!environment.isDesktop &&
+          !environment.isTv &&
+          state.uri.path == '/library') {
+        return AppRoutes.home;
+      }
       final loggedIn = auth.isLoggedIn;
       final onConnect = state.matchedLocation == AppRoutes.connect;
       var authorizedPlayer = false;
@@ -108,39 +119,33 @@ GoRouter createAppRouter({
           auth.sources,
           request.source!.account,
           libraryId: request.libraryId,
-          regionGeneration: request.regionGeneration,
+          accessGeneration: request.accessGeneration,
         );
-      }
-      if (!loggedIn &&
-          !onConnect &&
-          !authorizedPlayer &&
-          !auth.presentingAuthorization) {
-        return AppRoutes.connect;
       }
       if (playerState.uri.path.startsWith('/play/') &&
           request is PlayerOpenRequest &&
           request.source != null &&
-          !authorizedPlayer) {
+          !authorizedPlayer &&
+          !localSessionAllowsRoute(
+            auth.sources,
+            request.source!.account,
+            libraryId: request.libraryId,
+            accessGeneration: request.accessGeneration,
+          )) {
+        // An explicit source extra carries an existing lease. Reject stale or
+        // forged intent before mounting; a fresh unsourced link uses entry UI.
         return environment.isDesktop ? AppRoutes.aggregation : AppRoutes.home;
+      }
+      if (!loggedIn &&
+          !onConnect &&
+          !authorizedPlayer &&
+          !auth.presentingAuthorization &&
+          auth.savedServers.isEmpty &&
+          state.uri.path != '/servers') {
+        return AppRoutes.connect;
       }
       if (loggedIn && onConnect && state.uri.queryParameters['add'] != '1') {
         return AppRoutes.home;
-      }
-      final command = state.extra;
-      if (!authorizedPlayer &&
-          command is PlayerHostOpenItemCommand &&
-          command.source != null &&
-          (AppRoutes.isItem(state.uri.path) ||
-              state.uri.path.startsWith('/shelf/') ||
-              AppRoutes.isPerson(state.uri.path))) {
-        if (!localSessionAllowsRoute(
-          auth.sources,
-          command.source!.account,
-          libraryId: command.libraryId,
-          regionGeneration: command.regionGeneration,
-        )) {
-          return environment.isDesktop ? AppRoutes.aggregation : AppRoutes.home;
-        }
       }
       return null;
     },
@@ -162,23 +167,12 @@ GoRouter createAppRouter({
             GoRoute(
               path: '/play/:itemId',
               pageBuilder: (context, state) {
-                final request = state.extra as PlayerOpenRequest?;
                 return PhoneMotion.fadeThroughPage(
                   context: context,
                   state: state,
                   child: AppUiTheme(
                     data: AppUiTheme.dark(),
-                    child: MobilePlayerPage(
-                      routeLeaseKey: state.pageKey,
-                      sourceRequest: request,
-                      itemId: state.pathParameters['itemId']!,
-                      mediaSourceId: request?.mediaSourceId,
-                      autoResume: request?.autoResume ?? true,
-                      audioStreamIndex: request?.audioStreamIndex,
-                      subtitleStreamIndex: request?.subtitleStreamIndex,
-                      secondarySubtitleStreamIndex:
-                          request?.secondarySubtitleStreamIndex,
-                    ),
+                    child: _gatedPlayer(auth, state, environment),
                   ),
                 );
               },
@@ -192,12 +186,15 @@ GoRouter createAppRouter({
               ),
             ),
             GoRoute(
-              path: '/private',
+              path: '/servers',
               pageBuilder: (context, state) => _routePage(
                 context,
                 state,
-                (context, state) =>
-                    const RegionAggregationGate(region: AccessRegion.private),
+                (context, state) => ServerSelectionPage(
+                  auth: auth,
+                  routePage: true,
+                  phone: !environment.isDesktop,
+                ),
                 environment,
               ),
             ),
@@ -245,6 +242,9 @@ GoRouter createAppRouter({
                 state: state,
                 child: ServerResumePage(
                   serverId: state.pathParameters['serverId']!,
+                  source: state.uri.queryParameters['section'] == 'favorites'
+                      ? 'favorites'
+                      : 'resume',
                 ),
               ),
             ),
@@ -315,12 +315,12 @@ GoRouter createAppRouter({
               ),
             ),
             GoRoute(
-              path: '/private',
+              path: '/servers',
               pageBuilder: (context, state) => _routePage(
                 context,
                 state,
                 (context, state) =>
-                    const RegionAggregationGate(region: AccessRegion.private),
+                    TvServerSelectionPage(auth: auth, routePage: true),
                 environment,
               ),
             ),
@@ -353,6 +353,9 @@ GoRouter createAppRouter({
                 state,
                 (context, state) => ServerResumePage(
                   serverId: state.pathParameters['serverId']!,
+                  source: state.uri.queryParameters['section'] == 'favorites'
+                      ? 'favorites'
+                      : 'resume',
                 ),
                 environment,
               ),
@@ -397,14 +400,7 @@ GoRouter createAppRouter({
               path: '/play/:itemId',
               pageBuilder: (context, state) =>
                   _routePage(context, state, (context, state) {
-                    final request = state.extra as PlayerOpenRequest?;
-                    return TvPlayerPage(
-                      routeLeaseKey: state.pageKey,
-                      sourceRequest: request,
-                      itemId: state.pathParameters['itemId']!,
-                      mediaSourceId: request?.mediaSourceId,
-                      autoResume: request?.autoResume ?? true,
-                    );
+                    return _gatedPlayer(auth, state, environment);
                   }, environment),
             ),
           ],
@@ -431,10 +427,14 @@ GoRouter createAppRouter({
                   _desktopPage(state, const HomePage()),
             ),
             GoRoute(
-              path: '/private',
+              path: '/servers',
               pageBuilder: (context, state) => _desktopPage(
                 state,
-                const RegionAggregationGate(region: AccessRegion.private),
+                ServerSelectionPage(
+                  auth: auth,
+                  routePage: true,
+                  phone: !environment.isDesktop,
+                ),
               ),
             ),
             GoRoute(
@@ -458,7 +458,12 @@ GoRouter createAppRouter({
               path: '/server/:serverId/resume',
               pageBuilder: (context, state) => _desktopPage(
                 state,
-                ServerResumePage(serverId: state.pathParameters['serverId']!),
+                ServerResumePage(
+                  serverId: state.pathParameters['serverId']!,
+                  source: state.uri.queryParameters['section'] == 'favorites'
+                      ? 'favorites'
+                      : 'resume',
+                ),
               ),
             ),
             GoRoute(
@@ -551,9 +556,9 @@ Widget _shelfPage(
     key: ValueKey((
       state.uri.toString(),
       command?.source,
-      command?.regionGeneration,
+      command?.accessGeneration,
     )),
-    region: command?.source?.account.region ?? AccessRegion.ordinary,
+
     sourceCommand: command,
     legacySelected: command == null,
     legacyLibraryId: command == null ? query['parentId'] : null,
@@ -580,7 +585,7 @@ Widget _shelfPage(
     key: ValueKey((
       state.uri.toString(),
       command.source,
-      command.regionGeneration,
+      command.accessGeneration,
     )),
     auth: auth,
     itemId: command.itemId,
@@ -602,18 +607,100 @@ Widget _personWorks(GoRouterState state) {
       ? state.extra as PlayerHostOpenItemCommand
       : null;
   final source = command?.source;
-  final libraryId = command?.libraryId?.trim() ?? '';
   if (source == null) return page;
-  return ServerSessionImages(
-    key: ValueKey((
-      state.uri.toString(),
-      source,
-      command?.regionGeneration,
-      libraryId,
-    )),
-    account: source.account,
-    libraryId: libraryId.isEmpty ? null : libraryId,
-    child: page,
+  return Builder(
+    builder: (context) => SourceDetailGate(
+      key: ValueKey((state.uri.toString(), source, command?.accessGeneration)),
+      auth: AuthScope.of(context),
+      itemId: command!.itemId,
+      command: command,
+      showComparison: false,
+      child: page,
+    ),
+  );
+}
+
+Widget _gatedPlayer(
+  AuthController auth,
+  GoRouterState state,
+  PresentationEnvironment environment,
+) {
+  final initial = state.extra is PlayerOpenRequest
+      ? state.extra as PlayerOpenRequest
+      : null;
+  final serverId =
+      initial?.source?.account.configuredServerId ?? auth.session?.server.id;
+  if (serverId == null) {
+    return ServerSelectionPage(
+      auth: auth,
+      routePage: true,
+      phone: !environment.isDesktop,
+    );
+  }
+  return Builder(
+    builder: (context) {
+      final runtime = PlayerScope.of(context).runtime;
+      final router = GoRouter.of(context);
+      bool activeContentAllowed() =>
+          runtime?.mountedPlayerOrigin(state.pageKey)?.permit.isValid == true;
+      void exitRevokedPlayer() {
+        if (router.state.pageKey == state.pageKey &&
+            router.state.uri.path.startsWith('/play/') &&
+            !activeContentAllowed()) {
+          router.go(AppRoutes.home, extra: null);
+        }
+      }
+
+      // Once mounted, a confirmed manual source switch owns the player's
+      // authority. Its immutable startup extra must not evict that new lease.
+      if (!activeContentAllowed() &&
+          (initial?.source != null || initial?.accessGeneration != null) &&
+          auth.serverAccess.isProtected(serverId) &&
+          initial?.accessGeneration != auth.serverAccess.generation(serverId)) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => exitRevokedPlayer(),
+        );
+        return Center(
+          child: Text(
+            AppLocalizations.of(context).aggregationUnavailableDetail,
+          ),
+        );
+      }
+      return ServerContentGate(
+        auth: auth,
+        serverId: serverId,
+        activeContentAllowed: activeContentAllowed,
+        onAccessRevoked: exitRevokedPlayer,
+        builder: (generation) {
+          final request = initial?.source != null
+              ? initial
+              : (initial ??
+                        PlayerOpenRequest(
+                          itemId: state.pathParameters['itemId']!,
+                        ))
+                    .withAccessGeneration(generation);
+          if (environment.isTv) {
+            return TvPlayerPage(
+              routeLeaseKey: state.pageKey,
+              sourceRequest: request,
+              itemId: state.pathParameters['itemId']!,
+              mediaSourceId: request?.mediaSourceId,
+              autoResume: request?.autoResume ?? true,
+            );
+          }
+          return MobilePlayerPage(
+            routeLeaseKey: state.pageKey,
+            sourceRequest: request,
+            itemId: state.pathParameters['itemId']!,
+            mediaSourceId: request?.mediaSourceId,
+            autoResume: request?.autoResume ?? true,
+            audioStreamIndex: request?.audioStreamIndex,
+            subtitleStreamIndex: request?.subtitleStreamIndex,
+            secondarySubtitleStreamIndex: request?.secondarySubtitleStreamIndex,
+          );
+        },
+      );
+    },
   );
 }
 
@@ -625,7 +712,7 @@ Widget _sourceDetail(AuthController auth, GoRouterState state, Widget child) {
     key: ValueKey((
       state.uri.toString(),
       command?.source,
-      command?.regionGeneration,
+      command?.accessGeneration,
     )),
     auth: auth,
     itemId: state.pathParameters['itemId']!,

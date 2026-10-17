@@ -20,7 +20,6 @@ import 'package:rillight/app/widgets/skeleton.dart';
 import 'package:rillight/app/widgets/scroll_viewport.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/auth_scope.dart';
-import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/player/playback_runtime.dart';
@@ -32,14 +31,13 @@ String _detailImageScope(PlaybackOrigin origin) => jsonEncode([
   origin.source.account.serviceType.name,
   origin.source.account.cloudAccountId,
   origin.source.account.homeUserId,
-  origin.source.account.region.name,
   origin.source.account.configuredServerId,
   origin.source.account.verifiedServerId,
   origin.source.account.userId,
   origin.libraryId,
-  origin.permit.regionGeneration,
+  origin.permit.accessGeneration,
   origin.permit.sessionRevision,
-  origin.permit.scopeRevision,
+  origin.permit.authorizationRevision,
   origin.client.baseUrl.toString(),
 ]);
 
@@ -53,12 +51,14 @@ bool _imageSourceIsValid(
   AuthController auth,
   String? accountScope,
 ) {
-  if (origin == null) return mediaImageAccountScope(auth) == accountScope;
+  if (origin == null) {
+    return accountScope != null && mediaImageAccountScope(auth) == accountScope;
+  }
   return origin.permit.isValid;
 }
 
 /// Cache policy is a consumer of the existing source permit, not an authority.
-/// Private bytes never enter the disk store (including probes and lazy writes).
+/// Persistent bytes remain account-isolated; every cache read needs a live permit.
 class MediaImageSourcePolicy extends ChangeNotifier {
   MediaImageSourcePolicy(PlaybackOrigin origin)
     : scope = _detailImageScope(origin),
@@ -68,7 +68,7 @@ class MediaImageSourcePolicy extends ChangeNotifier {
   final OperationPermit permit;
   bool _revoked = false;
   bool get isValid => !_revoked && permit.isValid;
-  bool get allowsDisk => permit.account.region != AccessRegion.private;
+  bool get allowsDisk => true;
 
   void revoke() {
     if (_revoked) return;
@@ -258,7 +258,8 @@ final _accountScopes = Expando<(String, String)>();
 
 String? mediaImageAccountScope(AuthController? auth) {
   final client = auth?.client;
-  if (client == null ||
+  if (auth?.session == null ||
+      client == null ||
       !client.hasSession ||
       client.userId?.isNotEmpty != true) {
     return null;
@@ -276,7 +277,6 @@ String? mediaImageAccountScope(AuthController? auth) {
     client.serviceType.name,
     server?.id,
     server?.verifiedServerId,
-    server?.region.name,
     server?.cloudAccountId,
     server?.homeUserId,
     endpoint.toString().replaceFirst(RegExp(r'/+$'), ''),
@@ -1185,7 +1185,7 @@ Future<Uint8List?> loadChapterImage(
   final scope = origin == null ? mediaImageAccountScope(auth) : policy?.scope;
   bool valid() => origin != null
       ? policy?.isValid == true
-      : mediaImageAccountScope(auth) == scope;
+      : scope != null && mediaImageAccountScope(auth) == scope;
   if (scope == null || !valid()) return null;
   final bytes = await MediaImageCache.instance.load(
     policy: policy,

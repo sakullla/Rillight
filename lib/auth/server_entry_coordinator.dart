@@ -5,10 +5,22 @@ import 'server_list_store.dart';
 /// must not navigate; only a successful, still-current connection publishes the
 /// unlock. Route adapters share this coordinator rather than unlocking eagerly.
 class ServerEntryCoordinator {
-  ServerEntryCoordinator(this.access);
+  ServerEntryCoordinator(
+    this.access, {
+    this.publishConnection,
+    this.cancelConnection,
+    this.preparePublication,
+  });
   final ServerAccessController access;
+  final void Function(String serverId)? publishConnection;
+  final void Function()? cancelConnection;
+  final Future<void> Function(String serverId, void Function() guard)?
+  preparePublication;
   int _revision = 0;
-  void cancel() => _revision++;
+  void cancel() {
+    _revision++;
+    cancelConnection?.call();
+  }
 
   Future<bool> enter<T>({
     required SavedServer server,
@@ -60,6 +72,7 @@ class ServerEntryCoordinator {
     }
 
     ServerUnlockCandidate? candidate;
+    var committed = false;
     try {
       await access.register(server);
       guard();
@@ -78,13 +91,32 @@ class ServerEntryCoordinator {
       guard();
       if (candidate != null && !candidate.isValid) return false;
       if (publishContentAccess) {
-        if (candidate != null && !access.commitUnlock(candidate)) return false;
-        access.didEnter(server.id);
+        void publicationGuard() {
+          guard();
+          if (candidate != null && !candidate.isValid) {
+            throw StateError('Entry authorization revoked');
+          }
+        }
+
+        await preparePublication?.call(server.id, publicationGuard);
+        guard();
+        if (candidate != null && !candidate.isValid) return false;
+        if (!access.commitEntry(
+          server.id,
+          candidate,
+          publishConnection: () => publishConnection?.call(server.id),
+        )) {
+          return false;
+        }
+        committed = true;
       }
       await navigate(destination);
       return true;
     } finally {
       candidate?.cancel();
+      if (publishContentAccess && !committed && revision == _revision) {
+        cancelConnection?.call();
+      }
     }
   }
 }

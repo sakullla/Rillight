@@ -2,6 +2,9 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/media_server/errors.dart';
 
 String embyFailureMessage(AppLocalizations l10n, MediaServerException error) {
+  if (error.kind == MediaServerFailureKind.invalidCredentials) {
+    return l10n.errorInvalidCredentials;
+  }
   final detail = error.detail?.trim();
   if (error.statusCode == 403 &&
       (detail == null || detail.isEmpty || detail == 'HTTP 403')) {

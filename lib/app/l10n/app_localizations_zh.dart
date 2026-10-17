@@ -142,7 +142,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aggregationAllowedSources => '全部允许来源';
 
   @override
-  String get aggregationAllSources => '全部普通来源';
+  String get aggregationAllSources => '全部服务器';
 
   @override
   String get aggregationAllTypes => '全部类型';
@@ -1514,7 +1514,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get phoneHomeEdit => '编辑首页';
 
   @override
-  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。';
+  String get phoneHomeEditHint => '按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。';
+
+  @override
+  String get configurationUpgradeFailed => '配置升级未完成，原始配置已保留。';
+
+  @override
+  String get configurationRecoveryHint =>
+      '请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。';
 
   @override
   String get phoneHomeSectionBanner => '轮播图';
@@ -2619,6 +2626,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get serversContinue => '继续';
+
+  @override
+  String get serversEntryPlaybackImpact => '进入另一台服务器后，当前播放将结束，原服务器会重新锁定。';
 
   @override
   String get serversBusy => '正在连接…';

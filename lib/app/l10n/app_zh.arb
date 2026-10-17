@@ -50,7 +50,7 @@
   "aggregationPrivateLocked": "私密区域已锁定，请先在服务管理中解锁",
   "aggregationUnavailableDetail": "此来源详情当前不可访问，请返回允许的来源范围",
   "aggregationAllowedSources": "全部允许来源",
-  "aggregationAllSources": "全部普通来源",
+  "aggregationAllSources": "全部服务器",
   "aggregationAllTypes": "全部类型",
   "aggregationAllWatching": "全部观看状态",
   "aggregationContinue": "继续观看",
@@ -1633,7 +1633,9 @@
   "@phoneHomeEdit": {
     "description": "Home-screen entry and title for reordering or hiding phone home rows."
   },
-  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。",
+  "phoneHomeEditHint": "按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。",
+  "configurationUpgradeFailed": "配置升级未完成，原始配置已保留。",
+  "configurationRecoveryHint": "请先重试。若仍失败，请保留配置目录中的原始文件、.pre-v4 备份与迁移记录，再恢复配置。",
   "@phoneHomeEditHint": {
     "description": "Explains that the home editor does not change the libraries tab."
   },
@@ -2396,6 +2398,7 @@
   "serversPasteName": "名称（可选）",
   "serversPastePreview": "确认服务器信息",
   "serversContinue": "继续",
+  "serversEntryPlaybackImpact": "进入另一台服务器后，当前播放将结束，原服务器会重新锁定。",
   "serversBusy": "正在连接…",
   "serversConnectionFailed": "连接失败，原连接已保留。请检查线路或重新登录。",
   "serversRetry": "重试",

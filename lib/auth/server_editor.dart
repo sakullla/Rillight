@@ -192,7 +192,7 @@ class ServerEditorState extends State<ServerEditor> {
           step = 'main';
         }),
       );
-    } else if (step == 'account') {
+    } else if (step == 'account' || step == 'homeAccount') {
       title = l.serversAccount;
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -201,6 +201,7 @@ class ServerEditorState extends State<ServerEditor> {
           const SizedBox(height: 20),
           ProviderConnectDialog(
             auth: widget.auth,
+            home: step == 'homeAccount',
             existing: widget.auth.sources.server(widget.server.id),
             inline: true,
             onConnected: () => setState(() => step = 'main'),
@@ -330,6 +331,15 @@ class ServerEditorState extends State<ServerEditor> {
                         : () => setState(() => step = 'account'),
                     child: Text(l.serversReauthorize),
                   ),
+                  if (widget.server.serviceType == MediaServerType.plex &&
+                      !needsLogin)
+                    AppButton(
+                      key: const Key('server-editor-home-account'),
+                      onPressed: busy
+                          ? null
+                          : () => setState(() => step = 'homeAccount'),
+                      child: Text(l.providerHomeManage),
+                    ),
                   if (widget.auth.session?.server.id == widget.server.id &&
                       widget
                           .auth

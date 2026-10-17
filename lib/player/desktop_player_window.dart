@@ -15,7 +15,7 @@ import '../library/episode_mapping_dialog.dart';
 import 'playback_resolver.dart';
 import '../aggregation/history/history_writer.dart';
 import 'player_settings.dart';
-import '../auth/region_access.dart';
+import '../auth/server_access.dart';
 
 import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/app/product.dart';
@@ -59,7 +59,7 @@ class PlayerWindowLaunch {
     required this.device,
     this.userAgent,
     this.protocol,
-    this.regionGeneration,
+    this.accessGeneration,
     this.preparedStartup = false,
     this.lines = const [],
     this.verifiedServerId,
@@ -74,7 +74,7 @@ class PlayerWindowLaunch {
   final ClientDeviceInfo device;
   final String? userAgent;
   final PlayerProcessProtocol? protocol;
-  final int? regionGeneration;
+  final int? accessGeneration;
   final bool preparedStartup;
   final List<ServerLine> lines;
   final String? verifiedServerId;
@@ -121,6 +121,9 @@ class PlayerWindowLaunch {
   }
 
   factory PlayerWindowLaunch.fromJson(Map<String, dynamic> json) {
+    if (json.containsKey('regionGeneration')) {
+      throw const FormatException('Obsolete player authorization');
+    }
     if (json['schema'] != null && json['schema'] != 2) {
       throw const FormatException('Unknown player launch schema');
     }
@@ -134,16 +137,20 @@ class PlayerWindowLaunch {
       request: PlayerOpenRequest(
         itemId: json['itemId'] as String? ?? '',
         source: json['source'] is Map
-            ? decodeSource(Map<String, dynamic>.from(json['source'] as Map))
+            ? decodeAuthorizedSource(
+                Map<String, dynamic>.from(json['source'] as Map),
+              )
             : null,
         work: json['work'] is Map
-            ? decodeSource(Map<String, dynamic>.from(json['work'] as Map))
+            ? decodeAuthorizedSource(
+                Map<String, dynamic>.from(json['work'] as Map),
+              )
             : null,
         libraryId: json['libraryId'] as String?,
         startPaused: json['startPaused'] == true,
         subtitleOff: json['subtitleOff'] == true,
         maxStreamingBitrate: json['maxStreamingBitrate'] as int?,
-        regionGeneration: json['regionGeneration'] as int?,
+        accessGeneration: json['accessGeneration'] as int?,
         autoResume: json['autoResume'] != false,
         mediaSourceId: json['mediaSourceId'] as String?,
         audioStreamIndex: json['audioStreamIndex'] is int
@@ -162,7 +169,7 @@ class PlayerWindowLaunch {
             ? json['secondarySubtitleStreamIndex'] as int
             : int.tryParse('${json['secondarySubtitleStreamIndex'] ?? ''}'),
       ),
-      regionGeneration: json['regionGeneration'] as int?,
+      accessGeneration: json['accessGeneration'] as int?,
       baseUrl: json['baseUrl'] as String? ?? '',
       accessToken: json['accessToken'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
@@ -200,7 +207,7 @@ class PlayerWindowLaunch {
       if (request.source != null) 'source': encodeSource(request.source!),
       if (request.work != null) 'work': encodeSource(request.work!),
       if (request.libraryId != null) 'libraryId': request.libraryId,
-      if (regionGeneration != null) 'regionGeneration': regionGeneration,
+      if (accessGeneration != null) 'accessGeneration': accessGeneration,
       if (preparedStartup) 'preparedStartup': true,
       ...?protocol?.fields,
       'itemId': request.itemId,
@@ -264,9 +271,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     this.watchInterval = const Duration(milliseconds: 400),
   }) : _control = processControl ?? createPlayerProcessControl() {
     auth.addListener(_onAuth);
-    auth.regionAccess.addRevocationHook(_revokePrivate);
-    auth.regionAccess.addCleanupHook(_closePrivate);
-    auth.regionAccess.addTerminationHook(_terminatePrivate);
+    auth.serverAccess.addRevocationHook(_revokePrivate);
+    auth.serverAccess.addCleanupHook(_closePrivate);
+    auth.serverAccess.addTerminationHook(_terminatePrivate);
     runtime?.registry.addMembershipCleanup(_membershipRevoked);
     runtime?.registry.addSourceRevocation(_sourceRevoked);
   }
@@ -432,6 +439,13 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           user: handoffUser,
           versions: versions,
         ).payload;
+        await runtime!.importLegacyPreferences(
+          origin,
+          item,
+          versions,
+          await (await openPlayerSettingsStore()).read(),
+        );
+        if (_disposed || revision != _requestRevision) return;
         final pref = runtime!.preference(origin, item, versions);
         final usePreference =
             request.mediaSourceId == null && pref.failure == null;
@@ -449,7 +463,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         final sources = versions.where((s) => s.id == version);
         final media = sources.length == 1 ? sources.single : null;
         final lines = runtime!.registry
-            .project(origin.source.account.region)
+            .project()
             .firstWhere((s) => s.id == origin.source.account.configuredServerId)
             .lines;
         if (usePreference &&
@@ -497,7 +511,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
             maxStreamingBitrate:
                 request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
-            regionGeneration: origin.permit.regionGeneration,
+            accessGeneration: origin.permit.accessGeneration,
           ),
           baseUrl: origin.client.baseUrl!.toString(),
           accessToken: origin.client.accessToken!,
@@ -505,7 +519,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           device: origin.client.device,
           serviceType: origin.client.serviceType,
           userAgent: origin.client.customUserAgent,
-          regionGeneration: origin.permit.regionGeneration,
+          accessGeneration: origin.permit.accessGeneration,
           lines: lines,
           verifiedServerId: origin.source.account.verifiedServerId,
           startupHandoff: handoff,
@@ -776,8 +790,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       // 库 id 和普通区代数可以和正在播放的来源不一致。私有区代数仍必须相同，
       // 失效的播放许可也不能把详情交回主窗口。
       final privateGenerationRejected =
-          account?.region == AccessRegion.private &&
-          command.regionGeneration != actual.permit.regionGeneration;
+          account != null &&
+          auth.serverAccess.isProtected(account.configuredServerId) &&
+          command.accessGeneration != actual.permit.accessGeneration;
       if (!actual.permit.isValid ||
           account != actual.source.account ||
           privateGenerationRejected ||
@@ -812,7 +827,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_privateRevoked ||
           snapshot.source == null ||
           snapshot.source!.account != _origin?.source.account ||
-          snapshot.regionGeneration != _origin?.permit.regionGeneration) {
+          snapshot.accessGeneration != _origin?.permit.accessGeneration) {
         if (snapshot.pendingCleanups.isEmpty) await store.delete();
         return;
       }
@@ -894,14 +909,16 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (sequence is! int ||
           sequence <= _lastIpcEvent ||
           event['pid'] != pid ||
-          event['generation'] != origin.permit.regionGeneration ||
+          event['generation'] != origin.permit.accessGeneration ||
           event['source'] is! Map ||
-          decodeSource(Map<String, dynamic>.from(event['source'] as Map))
-                  .account !=
+          decodeAuthorizedSource(
+                Map<String, dynamic>.from(event['source'] as Map),
+              ).account !=
               origin.source.account ||
           event['item'] !=
-              decodeSource(Map<String, dynamic>.from(event['source'] as Map))
-                  .itemId ||
+              decodeAuthorizedSource(
+                Map<String, dynamic>.from(event['source'] as Map),
+              ).itemId ||
           _privateRevoked) {
         throw StateError('Stale or foreign playback event');
       }
@@ -954,7 +971,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           Map<String, dynamic>.from(event['settings'] as Map),
         );
         final lines = runtime!.registry
-            .project(origin.source.account.region)
+            .project()
             .firstWhere((s) => s.id == origin.source.account.configuredServerId)
             .lines;
         final currentLines = lines.where(
@@ -1002,15 +1019,15 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (outcome == null ||
         !origin.permit.isValid ||
         outcome['pid'] != pid ||
-        outcome['generation'] != origin.permit.regionGeneration ||
+        outcome['generation'] != origin.permit.accessGeneration ||
         outcome['sequence'] != _lastObservationSequence ||
         outcome['item'] != session.source.itemId ||
         outcome['version'] != session.source.mediaSourceId) {
       return;
     }
-    final records = runtime!.history
-        .records(session.source.account.region)
-        .where((r) => r.sessionId == session.id && r.source == session.source);
+    final records = runtime!.history.records().where(
+      (r) => r.sessionId == session.id && r.source == session.source,
+    );
     if (records.length != 1) return;
     await runtime!.history.synchronize(records.single, (_, _) async {
       // The helper already dispatched the report. Never send it twice.
@@ -1040,11 +1057,14 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
             sequence <= _lastSwitchCommand ||
             _privateRevoked ||
             command['action'] != 'lock' ||
-            actual.source.account.region != AccessRegion.private ||
-            command['generation'] != actual.permit.regionGeneration ||
+            !auth.serverAccess.isProtected(
+              actual.source.account.configuredServerId,
+            ) ||
+            command['generation'] != actual.permit.accessGeneration ||
             command['source'] is! Map ||
-            decodeSource(Map<String, dynamic>.from(command['source'] as Map))
-                    .account !=
+            decodeAuthorizedSource(
+                  Map<String, dynamic>.from(command['source'] as Map),
+                ).account !=
                 actual.source.account) {
           throw StateError('Stale or unauthorized private lock');
         }
@@ -1058,7 +1078,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         'sequence': sequence,
         'accepted': accepted,
       });
-      if (accepted) await auth.regionAccess.lock();
+      if (accepted) {
+        await auth.serverAccess.lock(actual!.source.account.configuredServerId);
+      }
     } catch (_) {
       // Revocation may remove the endpoint while this read/reply is in flight.
     } finally {
@@ -1085,10 +1107,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           sequence <= _lastSwitchCommand ||
           pid != _pid ||
           command['pid'] != pid ||
-          command['generation'] != actual.permit.regionGeneration ||
+          command['generation'] != actual.permit.accessGeneration ||
           command['source'] is! Map ||
-          decodeSource(Map<String, dynamic>.from(command['source'] as Map))
-                  .account !=
+          decodeAuthorizedSource(
+                Map<String, dynamic>.from(command['source'] as Map),
+              ).account !=
               actual.source.account ||
           _privateRevoked) {
         throw StateError('Stale playback switch command');
@@ -1097,16 +1120,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       _lastSwitchCommand = sequence;
       switch (command['action']) {
         case 'lock':
-          if (actual.source.account.region != AccessRegion.private) {
+          if (!auth.serverAccess.isProtected(
+            actual.source.account.configuredServerId,
+          )) {
             throw StateError('Private playback required');
           }
-          commit = auth.regionAccess.lock;
+          commit = () async {
+            await auth.serverAccess.lock(
+              actual.source.account.configuredServerId,
+            );
+          };
         case 'catalogue':
-          final server = runtime!.registry
-              .project(actual.source.account.region)
-              .firstWhere(
-                (s) => s.id == actual.source.account.configuredServerId,
-              );
+          final server = runtime!.registry.project().firstWhere(
+            (s) => s.id == actual.source.account.configuredServerId,
+          );
           receipt['serverName'] = server.displayName;
           receipt['lines'] = [
             for (final line in server.lines)
@@ -1122,7 +1149,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           try {
             await query.start(
               origin: QueryItem(actual.work, actual.libraryId, dto),
-              scope: QueryScope(region: actual.source.account.region),
+              scope: QueryScope(),
             );
             actual.permit.requireValid();
             final current = await runtime!.resolveItem(
@@ -1133,7 +1160,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               (c) => c.getItem(current.source.itemId),
             );
             final mappedTarget = command['mapTarget'] is Map
-                ? decodeSource(
+                ? decodeAuthorizedSource(
                     Map<String, dynamic>.from(command['mapTarget'] as Map),
                   )
                 : null;
@@ -1195,7 +1222,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
                     source: targetRef,
                     work: candidate.source.reference.item,
                     libraryId: candidate.source.libraryId,
-                    regionGeneration: actual.permit.regionGeneration,
+                    accessGeneration: actual.permit.accessGeneration,
                   ),
                 );
                 final info = await target.permit.dispatch(
@@ -1254,17 +1281,17 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
               ? await runtime!.resolveLine(old, line, oldVersion)
               : await runtime!.resolve(
                   PlayerOpenRequest(
-                    itemId: decodeSource(
+                    itemId: decodeAuthorizedSource(
                       Map<String, dynamic>.from(command['target'] as Map),
                     ).itemId,
-                    source: decodeSource(
+                    source: decodeAuthorizedSource(
                       Map<String, dynamic>.from(command['target'] as Map),
                     ),
-                    work: decodeSource(
+                    work: decodeAuthorizedSource(
                       Map<String, dynamic>.from(command['work'] as Map),
                     ),
                     libraryId: command['library'] as String,
-                    regionGeneration: actual.permit.regionGeneration,
+                    accessGeneration: actual.permit.accessGeneration,
                   ),
                 );
           if (line == null) {
@@ -1435,12 +1462,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   }
 
   void _revokePrivate() {
-    if (_restoreSwitch?.origin.source.account.region == AccessRegion.private) {
+    if (_restoreSwitch?.origin.permit.isValid == false) {
       _restoreSwitch = null;
       switchFailure = null;
       notifyListeners();
     }
-    if (_origin?.source.account.region != AccessRegion.private) return;
+    if (_origin?.permit.isValid != false) return;
     _revokeWindow();
   }
 
@@ -1448,14 +1475,19 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     if (_restoreSwitch?.origin.source.account.configuredServerId != serverId) {
       return;
     }
-    final private =
-        _restoreSwitch!.origin.source.account.region == AccessRegion.private;
+    final private = auth.serverAccess.isProtected(
+      _restoreSwitch!.origin.source.account.configuredServerId,
+    );
     _restoreSwitch = null;
     if (private) switchFailure = null;
     notifyListeners();
   }
 
   void _sourceRevoked(String serverId) {
+    if (_origin?.permit.isValid == true &&
+        (_restoreSwitch == null || _restoreSwitch!.origin.permit.isValid)) {
+      return;
+    }
     _invalidateOriginal(serverId);
     if (_origin?.source.account.configuredServerId != serverId) return;
     _revokeWindow();
@@ -1482,16 +1514,20 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       unawaited(
         (control as PlayerHistoryProcessControl).revoke(
           _pid,
-          auth.regionAccess.generation,
+          auth.serverAccess.generation(
+            _origin?.source.account.configuredServerId ?? '',
+          ),
           reportStopped:
-              _origin?.source.account.region == AccessRegion.private &&
-              auth.regionAccess.state == PrivateAccessState.locking,
+              _origin != null &&
+              !auth.serverAccess.allows(
+                _origin!.source.account.configuredServerId,
+              ),
         ),
       );
     }
   }
 
-  Future<void> _closePrivate(RestrictedStopPermit permit) async {
+  Future<void> _closePrivate(ServerStopPermit permit) async {
     if (_privateRevoked) await close().timeout(closeTimeout + reportTimeout);
   }
 
@@ -1524,9 +1560,9 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     _requestRevision++;
     _control.cancelPendingSpawns(includePrepared: true);
     auth.removeListener(_onAuth);
-    auth.regionAccess.removeRevocationHook(_revokePrivate);
-    auth.regionAccess.removeCleanupHook(_closePrivate);
-    auth.regionAccess.removeTerminationHook(_terminatePrivate);
+    auth.serverAccess.removeRevocationHook(_revokePrivate);
+    auth.serverAccess.removeCleanupHook(_closePrivate);
+    auth.serverAccess.removeTerminationHook(_terminatePrivate);
     runtime?.registry.removeMembershipCleanup(_membershipRevoked);
     runtime?.registry.removeSourceRevocation(_sourceRevoked);
     unawaited(
@@ -1776,7 +1812,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     await endpoint.write(urgentLock ? 'lock-request' : 'switch-request', {
       ...command,
       'source': encodeSource(source),
-      'generation': _launch.regionGeneration,
+      'generation': _launch.accessGeneration,
       'sequence': sequence,
     });
     final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -1835,7 +1871,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
           mediaSourceId: report.mediaSourceId,
         ),
       ),
-      'generation': _launch.regionGeneration,
+      'generation': _launch.accessGeneration,
       'sequence': sequence,
       'observationSequence': observationSequence,
       'item': report.itemId,
@@ -1879,7 +1915,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     if (endpoint == null || _closing != null) return;
     await endpoint.write('watch-sync', {
       'sequence': sequence,
-      'generation': _launch.regionGeneration,
+      'generation': _launch.accessGeneration,
       'item': report.itemId,
       'version': report.mediaSourceId,
       'succeeded': succeeded,
@@ -1993,7 +2029,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                           ),
                     work: request.work,
                     libraryId: request.libraryId,
-                    regionGeneration: _launch.regionGeneration,
+                    accessGeneration: _launch.accessGeneration,
                   ),
                   baseUrl: _auth.client.baseUrl?.toString() ?? _launch.baseUrl,
                   accessToken: _auth.client.accessToken ?? _launch.accessToken,
@@ -2002,7 +2038,7 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
                   serviceType: _launch.serviceType,
                   userAgent: _auth.client.customUserAgent ?? _launch.userAgent,
                   protocol: _launch.protocol,
-                  regionGeneration: _launch.regionGeneration,
+                  accessGeneration: _launch.accessGeneration,
                   lines: _launch.lines,
                   verifiedServerId: _launch.verifiedServerId,
                 ),

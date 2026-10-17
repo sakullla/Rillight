@@ -25,6 +25,25 @@ class _FailingStore extends MemoryServerAccessStore {
 }
 
 void main() {
+  test('restarting with the same verifier never reissues the old access generation', () async {
+    final store = MemoryServerAccessStore();
+    final verifier = await ServerPasswordVerifier.create('local');
+    await store.write('saved-verifier', ServerAccessRecord.protected(verifier));
+    final server = _server('a', protection: 'saved-verifier');
+    final first = ServerAccessController(store: store);
+    final restarted = ServerAccessController(store: store);
+    addTearDown(first.dispose);
+    addTearDown(restarted.dispose);
+    await first.register(server);
+    await first.unlock('a', 'local');
+    final oldGeneration = first.generation('a');
+    await restarted.register(server);
+    expect(restarted.allows('a'), isFalse);
+    await restarted.unlock('a', 'local');
+    expect(restarted.generation('a'), isNot(oldGeneration));
+    expect(first.permit('a')!.belongsTo(restarted), isFalse);
+  });
+
   test('entry cancellation discards late password and preserves original destination', () async {
     final access = ServerAccessController(store: MemoryServerAccessStore());
     addTearDown(access.dispose);

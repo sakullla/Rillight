@@ -161,7 +161,7 @@ void main() {
       await addAlternate();
       final server = auth.savedServers.single;
       final session = await auth.sources.ensureSession(server.id);
-      final permit = auth.sources.permit(session.account, sessionOnly: true);
+      final permit = auth.sources.permit(session.account);
       final before = await store.file.readAsString();
       store.failAfterSave = true;
       await expectLater(
@@ -206,7 +206,7 @@ void main() {
     await addAlternate();
     final server = auth.savedServers.single;
     final session = await auth.sources.ensureSession(server.id);
-    final permit = auth.sources.permit(session.account, sessionOnly: true);
+    final permit = auth.sources.permit(session.account);
     final revision = auth.sources.configurationRevision;
     await auth.renameServer(server.id, 'Renamed');
     await auth.sources.reorderLines(
@@ -216,7 +216,11 @@ void main() {
     await auth.selectLine(server.id, const LineSelection.auto());
     expect(auth.sources.configurationRevision, greaterThan(revision));
     expect(permit.isValid, isTrue);
-    expect(await auth.sources.ensureSession(server.id), same(session));
+    final requestCount = adapter.requests.length;
+    final reused = await auth.sources.ensureSession(server.id);
+    expect(reused.account, session.account);
+    expect(reused.client.accessToken, session.client.accessToken);
+    expect(adapter.requests.length, requestCount);
     expect(auth.client.baseUrl, primary.baseUrl);
     expect(
       (await FileServerListStore(
@@ -244,7 +248,7 @@ void main() {
   test('reauthorization cancellation while saving keeps old permit usable and rolls back', () async {
     final server = auth.savedServers.single;
     final session = await auth.sources.ensureSession(server.id);
-    final permit = auth.sources.permit(session.account, sessionOnly: true);
+    final permit = auth.sources.permit(session.account);
     final old = await auth.credentials.read(server.id);
     final controller = ProviderConnectController(auth: auth, existing: server);
     addTearDown(controller.dispose);
@@ -279,7 +283,7 @@ void main() {
     () async {
       final server = auth.savedServers.single;
       final session = await auth.sources.ensureSession(server.id);
-      final permit = auth.sources.permit(session.account, sessionOnly: true);
+      final permit = auth.sources.permit(session.account);
       final old = auth.session;
       final controller = ProviderConnectController(
         auth: auth,
@@ -477,7 +481,6 @@ void main() {
     final value = (await auth.credentials.read(server.id))!;
     final attempt = await auth.sources.beginAuthorization(
       serviceType: server.serviceType,
-      region: server.region,
       configuredServerId: server.id,
     );
     adapter.gate = Completer<void>();
@@ -500,7 +503,6 @@ void main() {
     expect(merged.protectionRef, 'new-protection');
     final nextAttempt = await auth.sources.beginAuthorization(
       serviceType: server.serviceType,
-      region: server.region,
       configuredServerId: server.id,
     );
     adapter.gate = Completer<void>();
@@ -665,15 +667,13 @@ void main() {
     final server = auth.savedServers.single;
     final credential = (await auth.credentials.read(server.id))!;
     final session = await auth.sources.ensureSession(server.id);
-    final permit = auth.sources.permit(session.account, sessionOnly: true);
+    final permit = auth.sources.permit(session.account);
     final first = await auth.sources.beginAuthorization(
       serviceType: MediaServerType.emby,
-      region: AccessRegion.ordinary,
       configuredServerId: server.id,
     );
     final second = await auth.sources.beginAuthorization(
       serviceType: MediaServerType.emby,
-      region: AccessRegion.ordinary,
       configuredServerId: server.id,
     );
     expect(first.isValid, isFalse);

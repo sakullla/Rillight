@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
@@ -6,6 +7,20 @@ import 'server_access_store.dart';
 import 'server_list_store.dart';
 
 export 'server_access_store.dart';
+
+/// One bounded, stop-only authority after access to this server is revoked.
+class ServerStopPermit {
+  ServerStopPermit._(this.owner, this.serverId, this.previousGeneration);
+  final ServerAccessController owner;
+  final String serverId;
+  final int previousGeneration;
+  bool _valid = true;
+  bool get isValid => _valid;
+  bool belongsTo(ServerAccessController authority) =>
+      identical(owner, authority);
+}
+
+typedef ServerCleanup = Future<void> Function(ServerStopPermit permit);
 
 class ServerAccessPermit {
   ServerAccessPermit._(this._owner, this.serverId, this.generation);
@@ -53,8 +68,69 @@ class ServerAccessController extends ChangeNotifier {
   final DateTime Function() _clock;
   final Future<ServerPasswordVerifier> Function(String) _createVerifier;
   final Map<String, _Access> _entries = {};
-  int _epoch = 0;
+  // Persisted playback/route generations from another process cannot become
+  // valid merely because the same number of servers was registered again.
+  int _epoch = Random.secure().nextInt(1 << 30) * (1 << 20);
   bool _disposed = false;
+  final Set<VoidCallback> _revoke = {};
+  final Set<VoidCallback> _terminate = {};
+  final Set<ServerCleanup> _cleanup = {};
+  final Map<String, Future<void>> _closing = {};
+  String? _revokingServerId;
+  String? get revokingServerId => _revokingServerId;
+  void addRevocationHook(VoidCallback hook) => _revoke.add(hook);
+  void removeRevocationHook(VoidCallback hook) => _revoke.remove(hook);
+  void addTerminationHook(VoidCallback hook) => _terminate.add(hook);
+  void removeTerminationHook(VoidCallback hook) => _terminate.remove(hook);
+  void addCleanupHook(ServerCleanup hook) => _cleanup.add(hook);
+  void removeCleanupHook(ServerCleanup hook) => _cleanup.remove(hook);
+
+  void _revokeEntry(String id, _Access entry) {
+    final permit = ServerStopPermit._(this, id, entry.generation);
+    entry.unlocked = false;
+    entry.generation = ++_epoch;
+    _revokingServerId = id;
+    for (final hook in List.of(_revoke)) {
+      try {
+        hook();
+      } catch (_) {
+        /* Other consumers still revoke. */
+      }
+    }
+    _revokingServerId = null;
+    final closing = _close(permit);
+    _closing[id] = closing;
+    unawaited(
+      closing.whenComplete(() {
+        if (identical(_closing[id], closing)) _closing.remove(id);
+      }),
+    );
+  }
+
+  Future<void> _close(ServerStopPermit permit) async {
+    try {
+      await Future.wait(
+        List.of(_cleanup).map((hook) async {
+          try {
+            await hook(permit);
+          } catch (_) {
+            /* Bounded cleanup only. */
+          }
+        }),
+      ).timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      // Termination hooks close any remaining native resource.
+    } finally {
+      permit._valid = false;
+      for (final hook in List.of(_terminate)) {
+        try {
+          hook();
+        } catch (_) {
+          /* Continue cleanup. */
+        }
+      }
+    }
+  }
 
   /// Call before publishing content. Missing/corrupt records remain protected.
   Future<void> register(SavedServer server) async {
@@ -152,12 +228,12 @@ class ServerAccessController extends ChangeNotifier {
     return candidate != null && commitUnlock(candidate);
   }
 
-  void lock(String serverId) {
+  Future<void> lock(String serverId) async {
     final entry = _entries[serverId];
     if (entry == null) return;
-    entry.unlocked = false;
-    entry.generation = ++_epoch;
+    _revokeEntry(serverId, entry);
     _notify();
+    await _closing[serverId];
   }
 
   /// Invoke only after another server entry transaction has succeeded.
@@ -166,6 +242,38 @@ class ServerAccessController extends ChangeNotifier {
     for (final id in _entries.keys.toList()) {
       if (id != serverId && isProtected(id)) lock(id);
     }
+  }
+
+  /// Publish entry atomically: old content is revoked before new content can
+  /// be observed by listeners. Management verification never calls this.
+  bool commitEntry(
+    String serverId,
+    ServerUnlockCandidate? candidate, {
+    void Function()? publishConnection,
+  }) {
+    if (candidate != null &&
+        (!identical(candidate._owner, this) ||
+            candidate.serverId != serverId ||
+            !candidate.isValid)) {
+      return false;
+    }
+    if (_disposed || (candidate == null && !allows(serverId))) return false;
+    for (final entry in _entries.entries) {
+      if (entry.key != serverId &&
+          entry.value.record.enabled &&
+          entry.value.unlocked) {
+        _revokeEntry(entry.key, entry.value);
+      }
+    }
+    if (candidate != null) {
+      candidate._consumed = true;
+      final entry = _entries[serverId]!;
+      entry.unlocked = true;
+      entry.generation = ++_epoch;
+    }
+    publishConnection?.call();
+    _notify();
+    return true;
   }
 
   /// Returns the reference the configuration transaction must retain. UI/registry
@@ -246,8 +354,7 @@ class ServerAccessController extends ChangeNotifier {
       final previousReference = entry.reference;
       entry.reference = reference;
       entry.record = record;
-      entry.unlocked = false;
-      entry.generation = ++_epoch;
+      _revokeEntry(serverId, entry);
       _notify();
       if (previousReference != null) {
         try {

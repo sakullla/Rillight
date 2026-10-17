@@ -7,7 +7,6 @@ import 'package:rillight/app/l10n/app_localizations.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/backup_import/backup_import.dart';
 import 'package:rillight/auth/backup_import/backup_import_models.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_import_models.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -154,7 +153,6 @@ Future<BackupImportFlowOutcome> parseAndCommitBackup(
 Future<void> showBackupImportFlow(
   BuildContext context, {
   required AuthController auth,
-  AccessRegion region = AccessRegion.ordinary,
   AppFilePicker? picker,
   BackupImportLimits limits = const BackupImportLimits(),
 }) async {
@@ -192,7 +190,7 @@ Future<void> showBackupImportFlow(
     picked,
     keys: auth.backupImportKeys,
     limits: limits,
-    commit: (drafts) => auth.importServers(drafts, region: region),
+    commit: (drafts) => auth.importServers(drafts),
   );
   navigator.pop();
   await _showOutcome(navigator, outcome);

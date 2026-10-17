@@ -8,8 +8,6 @@ export 'line_selection.dart';
 import '../media_server/capabilities.dart';
 import '../media_server/authentication.dart';
 
-enum AccessRegion { ordinary, private }
-
 // Missing legacy fields have documented defaults. Explicit invalid values do
 // not: accepting them could expose a private source or destroy a saved line.
 String? _storedString(
@@ -169,10 +167,6 @@ class SavedServer {
     this.protectionRef,
     this.userAgent,
     this.nickname,
-    this.region = AccessRegion.ordinary,
-    this.participates = true,
-    this.libraryIds = const [],
-    this.scopeKnown = false,
     this.verifiedServerId,
     this.serviceType = MediaServerType.emby,
     this.authorizationMethod = AuthorizationMethod.password,
@@ -191,12 +185,7 @@ class SavedServer {
   final String? cloudAccountId;
   final String? homeUserId;
   final String? resourceCredentialRef;
-  final AccessRegion region;
-  final bool participates;
 
-  /// An unknown legacy scope is empty until explicitly discovered/selected.
-  final List<String> libraryIds;
-  final bool scopeKnown;
   final String? verifiedServerId;
 
   /// Legacy records used the remote ID as their key. Imported records have an
@@ -262,10 +251,6 @@ class SavedServer {
     'cloudAccountId': cloudAccountId,
     'homeUserId': homeUserId,
     'resourceCredentialRef': resourceCredentialRef,
-    'region': region.name,
-    'participates': participates,
-    'libraryIds': libraryIds,
-    'scopeKnown': scopeKnown,
     'verifiedServerId': verifiedServerId,
     'identityPending': identityPending,
     'checkedAt': checkedAt?.toIso8601String(),
@@ -281,11 +266,7 @@ class SavedServer {
   };
 
   /// The new format has no region or user-selected library authorization.
-  Map<String, dynamic> toConfigurationJson() => toJson()
-    ..remove('region')
-    ..remove('participates')
-    ..remove('libraryIds')
-    ..remove('scopeKnown');
+  Map<String, dynamic> toConfigurationJson() => toJson();
 
   factory SavedServer.fromJson(Map<String, dynamic> json) {
     final lines = <ServerLine>[];
@@ -365,15 +346,6 @@ class SavedServer {
       credentialRef: _storedString(json, 'credentialRef'),
       protectionRef: _storedString(json, 'protectionRef'),
       userAgent: _resolveUserAgent(json, resolvedActiveLineId),
-      region: _storedEnum(
-        json,
-        'region',
-        AccessRegion.values,
-        AccessRegion.ordinary,
-      ),
-      participates: _storedBool(json, 'participates', true),
-      libraryIds: List<String>.unmodifiable(rawLibraryIds.cast<String>()),
-      scopeKnown: _storedBool(json, 'scopeKnown', false),
       verifiedServerId: _storedString(json, 'verifiedServerId'),
       identityPending: _storedBool(json, 'identityPending', false),
       checkedAt: _storedDate(json, 'checkedAt'),
@@ -432,10 +404,6 @@ class SavedServer {
     bool clearProtection = false,
     String? userAgent,
     String? nickname,
-    AccessRegion? region,
-    bool? participates,
-    List<String>? libraryIds,
-    bool? scopeKnown,
     String? verifiedServerId,
     MediaServerType? serviceType,
     AuthorizationMethod? authorizationMethod,
@@ -462,10 +430,6 @@ class SavedServer {
           ? null
           : protectionRef ?? this.protectionRef,
       userAgent: userAgent ?? this.userAgent,
-      region: region ?? this.region,
-      participates: participates ?? this.participates,
-      libraryIds: List<String>.unmodifiable(libraryIds ?? this.libraryIds),
-      scopeKnown: scopeKnown ?? this.scopeKnown,
       verifiedServerId: verifiedServerId ?? this.verifiedServerId,
       serviceType: serviceType ?? this.serviceType,
       authorizationMethod: authorizationMethod ?? this.authorizationMethod,
@@ -577,21 +541,11 @@ class FileServerListStore implements ServerListStore {
       await load();
     }
     await file.parent.create(recursive: true);
-    // Activation is owned by ServerConfigurationMigration. Until then retain
-    // the existing format for consumers that still use the old access model.
-    final version =
-        await file.exists() &&
-            (jsonDecode(await file.readAsString()) as Map)['version'] == 4
-        ? 4
-        : 3;
     final payload = <String, dynamic>{
-      'version': version,
+      'version': 4,
       'lastServerId': snapshot.lastServerId,
       'servers': snapshot.servers
-          .map(
-            (server) =>
-                version == 4 ? server.toConfigurationJson() : server.toJson(),
-          )
+          .map((server) => server.toConfigurationJson())
           .toList(),
     };
     final ids = <String>{};

@@ -15,7 +15,6 @@ import 'package:rillight/auth/auth_scope.dart';
 import 'package:rillight/auth/change_password_dialog.dart';
 import 'package:rillight/auth/failure_message.dart';
 import 'package:rillight/auth/phone_server_manager.dart';
-import 'package:rillight/auth/session_actions.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 
@@ -39,7 +38,6 @@ class PhoneMinePage extends StatefulWidget {
 
   static const changePasswordKey = Key('phone-mine-change-password');
 
-  static const privateKey = Key('phone-mine-private');
   static const settingsKey = Key('phone-mine-settings');
 
   static Key rateKey(double rate) => Key('phone-mine-rate-$rate');
@@ -68,12 +66,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
         ),
       ),
     );
-  }
-
-  Future<void> _openPrivate() async {
-    if (await SessionActions.ensurePrivateAccess(context) && mounted) {
-      context.push('/private');
-    }
   }
 
   Widget _group(
@@ -302,12 +294,6 @@ class _PhoneMinePageState extends State<PhoneMinePage> {
                   icon: AppIcons.addCircle,
                   label: l10n.mobileAddServer,
                   onTap: () => context.push('${AppRoutes.connect}?add=1'),
-                ),
-                _MineTile(
-                  key: PhoneMinePage.privateKey,
-                  icon: AppIcons.shield,
-                  label: l10n.aggregationPrivate,
-                  onTap: _openPrivate,
                 ),
                 _MineTile(
                   key: PhoneMinePage.settingsKey,

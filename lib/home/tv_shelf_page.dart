@@ -130,6 +130,7 @@ class _TvShelfPageState extends State<TvShelfPage> {
   String _title(AppLocalizations l10n) {
     if (widget.title.isNotEmpty) return widget.title;
     return switch (widget.source) {
+      'favorites' => l10n.filterFavorite,
       'resume' => l10n.resumeRow,
       'nextup' => l10n.nextUpRow,
       'latest-movies' => l10n.latestMoviesRow,
@@ -143,6 +144,14 @@ class _TvShelfPageState extends State<TvShelfPage> {
     final sortable = client.supportsShelfSorting(widget.source);
     final sort = CatalogSort.initialFor(client.capabilities);
     return switch (widget.source) {
+      'favorites' => catalogItemsRequest(
+        userId: userId,
+        includeItemTypes: 'Movie,Series',
+        recursive: true,
+        limit: _pageSize,
+        startIndex: startIndex,
+        filters: const ['IsFavorite'],
+      ),
       'resume' => catalogResumeRequest(
         userId: userId,
         limit: _pageSize,

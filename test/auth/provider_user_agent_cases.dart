@@ -83,7 +83,6 @@ void main() {
           final resource = controller.resources.single;
           await controller.selectResource(resource, resource.connections.first);
           expect(controller.failure, isNull);
-          controller.selectedLibraries.addAll(controller.libraries.keys);
           await controller.finish();
           expect(controller.failure, isNull);
           expect(

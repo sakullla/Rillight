@@ -64,7 +64,6 @@ Future<bool?> showProviderConnect(
   BuildContext context,
   AuthController auth, {
   SavedServer? existing,
-  AccessRegion region = AccessRegion.ordinary,
   bool home = false,
   String? userAgent,
 }) async {
@@ -76,7 +75,6 @@ Future<bool?> showProviderConnect(
       builder: (_) => ProviderConnectDialog(
         auth: auth,
         existing: existing,
-        region: region,
         home: home,
         initialUserAgent: userAgent,
       ),
@@ -91,7 +89,6 @@ class ProviderConnectDialog extends StatefulWidget {
     super.key,
     required this.auth,
     this.existing,
-    this.region = AccessRegion.ordinary,
     this.home = false,
     this.initialUserAgent,
     this.initialType,
@@ -102,7 +99,6 @@ class ProviderConnectDialog extends StatefulWidget {
   });
   final AuthController auth;
   final SavedServer? existing;
-  final AccessRegion region;
   final bool home;
   final String? initialUserAgent;
   final MediaServerType? initialType;
@@ -133,7 +129,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     controller = ProviderConnectController(
       auth: widget.auth,
       existing: widget.existing,
-      region: widget.region,
       userAgent: widget.initialUserAgent,
     );
     controller.addListener(_completeWhenDone);
@@ -156,7 +151,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       password.text = draft.password;
     }
     userAgent.addListener(() => controller.userAgent = userAgent.text);
-    widget.auth.regionAccess.addListener(_accessChanged);
     if (widget.home) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(controller.restoreHome());
@@ -164,30 +158,8 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     }
   }
 
-  void _accessChanged() {
-    if (!widget.auth.regionAccess.allows(widget.region)) {
-      controller.reset();
-      address.clear();
-      username.clear();
-      password.clear();
-      pin.clear();
-      userAgent.clear();
-      if (mounted) {
-        final route = ModalRoute.of(context);
-        if (!widget.inline && route?.isActive == true) {
-          final navigator = Navigator.of(context);
-          // TV input editors are nested routes. Close them with their owner so
-          // locking cannot leave an editor displaying a private identity.
-          navigator.popUntil((candidate) => identical(candidate, route));
-          navigator.pop(false);
-        }
-      }
-    }
-  }
-
   @override
   void dispose() {
-    widget.auth.regionAccess.removeListener(_accessChanged);
     controller.removeListener(_completeWhenDone);
     controller.dispose();
     final release = _releasePresentation;
@@ -1077,131 +1049,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     ];
   }
 
-  List<Widget> _libraries(AppLocalizations l, ProviderConnectController c) {
-    final theme = AppUiTheme.of(context);
-    final scheme = theme.colorScheme;
-    final s = _tv ? TvDesign.scaleOf(context) : 1.0;
-    final all =
-        c.libraries.isNotEmpty &&
-        c.libraries.keys.every(c.selectedLibraries.contains);
-    void toggle(String id, bool selected) => setState(() {
-      selected ? c.selectedLibraries.add(id) : c.selectedLibraries.remove(id);
-    });
-    return [
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 32 * s,
-            height: 32 * s,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xff34c759).withValues(alpha: .18),
-            ),
-            child: Icon(
-              AppIcons.check,
-              fill: AppIcons.filled,
-              size: 20 * s,
-              color: const Color(0xff66bb6a),
-            ),
-          ),
-          SizedBox(width: 12 * s),
-          Expanded(
-            child: Text(
-              l.providerChooseLibraries,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ),
-        ],
-      ),
-      SizedBox(height: 12 * s),
-      if (c.libraries.isNotEmpty)
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${c.selectedLibraries.length}/${c.libraries.length}',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            _quiet(
-              all ? l.providerSelectNone : l.providerSelectAll,
-              c.busy
-                  ? null
-                  : () => setState(() {
-                      if (all) {
-                        c.selectedLibraries.clear();
-                      } else {
-                        c.selectedLibraries.addAll(c.libraries.keys);
-                      }
-                    }),
-              key: const Key('provider-libraries-all'),
-            ),
-          ],
-        ),
-      if (_tv)
-        for (final library in c.libraries.entries)
-          Padding(
-            padding: EdgeInsets.only(top: 6 * s),
-            child: TvAction(
-              variant: TvActionVariant.tile,
-              selected: c.selectedLibraries.contains(library.key),
-              onPressed: c.busy
-                  ? null
-                  : () => toggle(
-                      library.key,
-                      !c.selectedLibraries.contains(library.key),
-                    ),
-              leading: Icon(
-                AppIcons.checkbox,
-                fill: c.selectedLibraries.contains(library.key)
-                    ? AppIcons.filled
-                    : AppIcons.outline,
-              ),
-              child: Text(library.value),
-            ),
-          )
-      else if (c.libraries.isNotEmpty)
-        DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: .7),
-            ),
-          ),
-          child: Column(
-            children: [
-              for (final library in c.libraries.entries)
-                AppSwitchTile(
-                  title: Text(library.value),
-                  value: c.selectedLibraries.contains(library.key),
-                  onChanged: c.busy
-                      ? null
-                      : (selected) => toggle(library.key, selected == true),
-                ),
-            ],
-          ),
-        ),
-      if (c.libraries.isEmpty && !c.busy)
-        Text(
-          l.providerNoLibraries,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: _quiet(
-          l.sourceDiscoverLibraries,
-          c.busy ? null : c.retryLibraries,
-          icon: AppIcons.refresh,
-        ),
-      ),
-    ];
-  }
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
@@ -1261,8 +1108,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                       ..._authorization(l, c),
                     if (c.stage == ProviderConnectStage.resources)
                       ..._resources(l, c, resources),
-                    if (c.stage == ProviderConnectStage.libraries)
-                      ..._libraries(l, c),
                   ],
                 ),
               ),
@@ -1280,25 +1125,6 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
                         onPressed: () => Navigator.pop(context, false),
                         variant: AppButtonVariant.plain,
                         child: Text(l.cancelAction),
-                      ),
-              if (c.stage == ProviderConnectStage.libraries)
-                _tv
-                    ? TvAction(
-                        key: const Key('provider-finish'),
-                        emphasized: true,
-                        onPressed: c.busy ? null : _finish,
-                        child: Text(l.providerFinish),
-                      )
-                    : AppButton.icon(
-                        key: const Key('provider-finish'),
-                        onPressed: c.busy ? null : _finish,
-                        icon: const Icon(
-                          AppIcons.check,
-                          fill: AppIcons.filled,
-                          size: 18,
-                        ),
-                        label: Text(l.providerFinish),
-                        variant: AppButtonVariant.filled,
                       ),
             ],
           ),

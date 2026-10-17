@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 import 'dart:typed_data';
@@ -55,7 +55,7 @@ void main() {
       dio: dioForFakeEmby(adapter),
     );
     auth = AuthController(
-      regionAccess: TestRegionAccessController(),
+      serverAccess: TestServerAccessController(),
       client: client(),
       credentials: MemoryCredentialStore(),
       servers: MemoryServerListStore(),
@@ -65,18 +65,23 @@ void main() {
   tearDown(() => auth.dispose());
 
   Future<String> privateSource() async {
-    await auth.setPrivatePin('1234', '1234');
-    await auth.regionAccess.unlock('1234');
     final login = ProviderConnectController(
       pollInterval: const Duration(milliseconds: 10),
       auth: auth,
-      region: AccessRegion.private,
     );
     await login.password(primary.baseUrl.toString(), 'alice', 'correct-horse');
     expect(login.failure, isNull);
     await login.finish();
     final id = login.sourceId!;
     login.dispose();
+    await auth.serverAccess.setPassword(
+      id,
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          auth.sources.persistProtectionReference(id, ref),
+    );
+    await auth.serverAccess.unlock(id, '1234');
     return id;
   }
 
@@ -84,11 +89,7 @@ void main() {
     'private line rejects another server and preserves the configured address',
     () async {
       final id = await privateSource();
-      final original = auth.sources
-          .project(AccessRegion.private)
-          .single
-          .lines
-          .single;
+      final original = auth.sources.project().single.lines.single;
       await expectLater(
         auth.sources.setLineAddress(
           id,
@@ -98,10 +99,10 @@ void main() {
         throwsA(isA<Exception>()),
       );
       expect(
-        auth.sources.project(AccessRegion.private).single.lines.single.address,
+        auth.sources.project().single.lines.single.address,
         original.address,
       );
-      expect(auth.session, isNull);
+      expect(auth.sources.project().single.id, id);
     },
   );
 
@@ -116,14 +117,11 @@ void main() {
       );
       final checked = expectLater(pending, throwsStateError);
       await adapter.arrived.future;
-      await auth.regionAccess.lock();
+      await auth.serverAccess.lock(id);
       adapter.gate!.complete();
       await checked;
-      await auth.regionAccess.unlock('1234');
-      expect(
-        auth.sources.project(AccessRegion.private).single.lines,
-        hasLength(1),
-      );
+      await auth.serverAccess.unlock(id, '1234');
+      expect(auth.sources.project().single.lines, hasLength(1));
     },
   );
 
@@ -142,7 +140,7 @@ void main() {
     login.dispose();
     adapter.gate!.complete();
     await pending;
-    expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+    expect(auth.sources.project(), isEmpty);
     expect(auth.session, isNull);
     expect(auth.client.hasSession, isFalse);
   });

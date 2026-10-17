@@ -215,9 +215,6 @@ extension ProviderCaptures on CaptureSession {
         );
         await activate(find.byKey(const Key('provider-password-submit')));
       }
-      await _providerWait('provider-finish');
-      await save('provider-$name-libraries');
-      await activate(find.byKey(const Key('provider-finish')));
       for (
         var i = 0;
         i < 30 && find.byType(ProviderConnectDialog).evaluate().isNotEmpty;
@@ -227,6 +224,9 @@ extension ProviderCaptures on CaptureSession {
       }
       expect(find.byType(ProviderConnectDialog), findsNothing);
       expect(auth.client.serviceType, type);
+      app.router.go('/');
+      await advance(800);
+      await save('provider-$name-connected');
       if (!wants('player')) continue;
       final backend = newBackend();
       final id = switch (type) {

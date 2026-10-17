@@ -240,7 +240,6 @@ void main() {
     final account = await tester.runAsync(
       () => app.auth.sources.acquireAccount(
         app.auth.session!.server.id,
-        region: AccessRegion.ordinary,
         libraryId: libraryId,
       ),
     );
@@ -251,7 +250,7 @@ void main() {
         itemId: itemId,
         source: SourceReference(account: account, itemId: itemId),
         libraryId: libraryId,
-        regionGeneration: permit.regionGeneration,
+        accessGeneration: permit.accessGeneration,
       ),
     );
     await tester.pumpWidget(app);

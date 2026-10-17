@@ -275,6 +275,9 @@ void main() {
           personIds: const ['person-ada'],
         ),
       );
+      serverB.items.add(
+        FakeEmbyItem(id: 'person-ada', name: '艾达', type: 'Person'),
+      );
       final app = await _start(tester, [
         serverA,
         serverB,
@@ -293,11 +296,11 @@ void main() {
             itemId: itemId,
             source: SourceReference(account: account, itemId: itemId),
             libraryId: 'view-movies',
-            regionGeneration: permit.regionGeneration,
+            accessGeneration: permit.accessGeneration,
           );
       app.router.go(AppRoutes.item('only-b'), extra: command('only-b'));
       await _until(tester, find.text('只在乙服'));
-      expect(auth.session!.server.verifiedServerId, serverA.serverId);
+      expect(auth.session!.server.verifiedServerId, serverB.serverId);
       final aBefore = serverA.requests.length;
       serverB.itemsStatus = 500;
       app.router.push(
@@ -335,7 +338,7 @@ void main() {
       app.router.pop();
       await _until(tester, find.text('只在乙服'));
       expect(app.router.state.uri.path, '/item/only-b');
-      expect(auth.session!.server.verifiedServerId, serverA.serverId);
+      expect(auth.session!.server.verifiedServerId, serverB.serverId);
     },
     tags: const ['integration'],
   );
@@ -420,7 +423,14 @@ Future<void> _until(WidgetTester tester, Finder finder) async {
       return;
     }
   }
-  expect(finder, findsWidgets);
+  expect(
+    finder,
+    findsWidgets,
+    reason: tester
+        .widgetList<Text>(find.byType(Text))
+        .map((text) => text.data)
+        .join(' | '),
+  );
 }
 
 Future<void> _untilPath(

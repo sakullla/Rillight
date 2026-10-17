@@ -21,7 +21,6 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/auth/server_import_models.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
@@ -54,16 +53,22 @@ class AuthController extends ChangeNotifier {
     required this.credentials,
     required ServerListStore servers,
     SourceSessionRegistry? sources,
-    RegionAccessController? regionAccess,
     ServerAccessController? serverAccess,
-    this.persistPin,
     MediaServerClient Function(MediaServerType)? providerClientFactory,
     PlexAuthentication? plexAuthentication,
   }) : _client = client {
     this.serverAccess =
         serverAccess ??
+        sources?.access ??
         ServerAccessController(store: CredentialServerAccessStore(credentials));
-    serverEntry = ServerEntryCoordinator(this.serverAccess);
+    serverEntry = ServerEntryCoordinator(
+      this.serverAccess,
+      publishConnection: _publishEntry,
+      cancelConnection: _cancelEntry,
+      preparePublication: (id, guard) =>
+          this.sources.rememberSelection(id, guard: guard),
+    );
+    this.serverAccess.addListener(_accessChanged);
     _providerClientFactory =
         providerClientFactory ??
         (type) => type == client.serviceType
@@ -73,7 +78,7 @@ class AuthController extends ChangeNotifier {
     this.sources =
         sources ??
         SourceSessionRegistry(
-          access: regionAccess ?? RegionAccessController(),
+          access: this.serverAccess,
           store: servers,
           credentials: credentials,
           createClient: client.createDetached,
@@ -89,15 +94,12 @@ class AuthController extends ChangeNotifier {
             }
           },
         );
-    this.servers = this.sources.ordinaryStore;
+    this.servers = this.sources.configurationStore;
     this.sources.addMembershipCleanup(_clearSourceContribution);
     this.sources.addSourceRevocation(_sourceChanged);
   }
 
-  factory AuthController.memory({
-    MediaServerClient? client,
-    RegionAccessController? regionAccess,
-  }) {
+  factory AuthController.memory({MediaServerClient? client}) {
     return AuthController(
       client:
           client ??
@@ -111,12 +113,12 @@ class AuthController extends ChangeNotifier {
           ),
       credentials: MemoryCredentialStore(),
       servers: MemoryServerListStore(),
-      regionAccess: regionAccess,
     );
   }
 
   MediaServerClient _client;
   MediaServerClient? _guardedClient;
+  Object _contentOwner = Object();
   MediaServerClient get client => _guardedClient ?? _client;
   late final MediaServerClient Function(MediaServerType) _providerClientFactory;
   PlexAuthentication? _plexAuthentication;
@@ -190,6 +192,7 @@ class AuthController extends ChangeNotifier {
     if (_session?.server.id != id || _busy || _refreshingSelection) return;
     try {
       _selectionGuard?.call();
+      sources.requireContentAccess(id);
     } on StateError {
       _revokedSelectionId = id;
       _prefill = _session?.server;
@@ -231,11 +234,6 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  RegionAccessController get regionAccess => sources.access;
-  final Future<void> Function(PinVerifier)? persistPin;
-  Future<void> setPrivatePin(String pin, String confirmation) =>
-      regionAccess.setPin(pin, confirmation, persistPin ?? (_) async {});
-
   Future<void> _clearSourceContribution(
     SourceAccount? account,
     String id,
@@ -276,13 +274,16 @@ class AuthController extends ChangeNotifier {
   int _libraryCountsSeq = 0;
   bool _disposed = false;
 
-  AuthSession? get session => _session;
+  AuthSession? get session =>
+      _session != null && serverAccess.allows(_session!.server.id)
+      ? _session
+      : null;
   List<SavedServer> get savedServers => _savedServers;
   SavedServer? get prefill => _prefill;
   MediaServerException? get failure => _failure;
   LineSwitchFailure? get lineSwitchFailure => _lineSwitchFailure;
   bool get isBusy => _busy;
-  bool get isLoggedIn => _session != null;
+  bool get isLoggedIn => session != null;
 
   int _authorizationPresentations = 0;
   bool get presentingAuthorization => _authorizationPresentations > 0;
@@ -389,6 +390,11 @@ class AuthController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (!serverAccess.allows(last.id)) {
+      _prefill = last;
+      notifyListeners();
+      return;
+    }
     final stored = await credentials.read(last.id);
     if (!_ownsActivation(generation)) return;
     if (stored == null || stored.accessToken.isEmpty) {
@@ -436,7 +442,7 @@ class AuthController extends ChangeNotifier {
       final baseUrl = normalizeServerAddress(address);
       final info = await candidate.getPublicInfo(baseUrl);
       _requireActivation(generation);
-      await sources.requireOrdinaryIdentity(serviceType, info.id);
+      await sources.requireConfiguredIdentity(serviceType, info.id);
       final existing = _savedServers
           .where(
             (s) =>
@@ -464,7 +470,6 @@ class AuthController extends ChangeNotifier {
       }
       authorization = await sources.beginAuthorization(
         serviceType: serviceType,
-        region: AccessRegion.ordinary,
         configuredServerId: existing?.id,
       );
       authorization.requireServerIdentity(info.id);
@@ -541,7 +546,7 @@ class AuthController extends ChangeNotifier {
     CredentialCommit? credentialCommit;
     try {
       if (currentId != null) {
-        credentialCommit = await sources.beginOrdinaryCredentials(currentId);
+        credentialCommit = await sources.beginCredentials(currentId);
       }
       await selectedClient.logout();
     } on MediaServerException {
@@ -550,7 +555,11 @@ class AuthController extends ChangeNotifier {
       // The member may have moved before logout could capture authority.
     } finally {
       if (_ownsActivation(generation)) {
-        client.clearSession();
+        _client.clearSession();
+        _guardedClient?.clearSession();
+        _guardedClient = null;
+        _selectionGuard = null;
+        _contentOwner = Object();
         _session = null;
         _sessionOwner = null;
         _failure = null;
@@ -559,7 +568,7 @@ class AuthController extends ChangeNotifier {
       }
       if (credentialCommit != null) {
         try {
-          await sources.commitOrdinaryCredentials(credentialCommit, null);
+          await sources.commitCredentials(credentialCommit, null);
         } on CredentialRevocationException catch (error) {
           if (_ownsActivation(generation)) {
             _failure = MediaServerException(
@@ -575,6 +584,38 @@ class AuthController extends ChangeNotifier {
       _busy = false;
       notifyListeners();
     }
+  }
+
+  (String, void Function(), void Function())? _preparedEntry;
+  bool hasPreparedEntry(String id) => _preparedEntry?.$1 == id;
+  void _cancelEntry() {
+    _preparedEntry?.$3();
+    _preparedEntry = null;
+  }
+
+  void _publishEntry(String id) {
+    final candidate = _preparedEntry;
+    if (candidate == null || candidate.$1 != id) return;
+    _preparedEntry = null;
+    candidate.$2();
+    notifyListeners();
+  }
+
+  void _accessChanged() {
+    if (_disposed) return;
+    if (_session != null && !serverAccess.allows(_session!.server.id)) {
+      _sourceChanged(_session!.server.id);
+    }
+    notifyListeners();
+  }
+
+  Future<bool> prepareServerEntry(
+    String id, {
+    required void Function() guard,
+  }) async {
+    _cancelEntry();
+    await _switchTo(id, guard: guard, deferPublication: true);
+    return hasPreparedEntry(id) && failure == null;
   }
 
   Future<void> switchTo(
@@ -594,6 +635,7 @@ class AuthController extends ChangeNotifier {
     String? lineId,
     void Function()? guard,
     bool prepared = false,
+    bool deferPublication = false,
   }) async {
     guard?.call();
     final found = _serverById(serverId);
@@ -607,7 +649,7 @@ class AuthController extends ChangeNotifier {
     _refreshingSelection = true;
     try {
       if (found.identityPending) {
-        await sources.authenticate(serverId, lineId: lineId);
+        await sources.prepareAuthentication(serverId, lineId: lineId);
       }
       current();
       final stored = await credentials.read(serverId);
@@ -634,7 +676,8 @@ class AuthController extends ChangeNotifier {
         generation: generation,
         guard: guard,
         usePrepared: prepared || lineId != null,
-        remember: true,
+        deferPublication: deferPublication,
+        remember: !deferPublication,
       );
       await refreshServers();
       _lineSwitchFailure = null;
@@ -683,10 +726,9 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<ServerImportResult> importServers(
-    Iterable<ServerImportDraft> drafts, {
-    AccessRegion region = AccessRegion.ordinary,
-  }) async {
-    final result = await sources.importServers(drafts, region: region);
+    Iterable<ServerImportDraft> drafts,
+  ) async {
+    final result = await sources.importServers(drafts);
     await reloadSavedServers();
     return result;
   }
@@ -855,12 +897,9 @@ class AuthController extends ChangeNotifier {
     StoredCredentials? stored,
   ) async {
     if (_serverById(server.id) != null) return;
-    if (server.region != AccessRegion.ordinary) {
-      throw StateError('Cannot restore a private member in ordinary context');
-    }
-    final credentialCommit = await sources.beginOrdinaryCredentials(server.id);
+    final credentialCommit = await sources.beginCredentials(server.id);
     if (stored != null) {
-      await sources.commitOrdinaryCredentials(credentialCommit, stored);
+      await sources.commitCredentials(credentialCommit, stored);
     }
     await _upsertServer(server, remember: false);
     notifyListeners();
@@ -889,7 +928,7 @@ class AuthController extends ChangeNotifier {
     _passwordChangeFailure = null;
     notifyListeners();
     try {
-      final credentialCommit = await sources.beginOrdinaryCredentials(
+      final credentialCommit = await sources.beginCredentials(
         session.server.id,
       );
       await client.changePassword(
@@ -899,7 +938,7 @@ class AuthController extends ChangeNotifier {
         newPassword: newPassword,
       );
       final stored = await credentials.read(session.server.id);
-      await sources.commitOrdinaryCredentials(
+      await sources.commitCredentials(
         credentialCommit,
         StoredCredentials(
           accessToken: stored?.accessToken ?? session.accessToken,
@@ -1014,10 +1053,6 @@ class AuthController extends ChangeNotifier {
       credentialRef: existing?.credentialRef,
       protectionRef: existing?.protectionRef,
       userAgent: normalizedUa,
-      region: existing?.region ?? AccessRegion.ordinary,
-      participates: existing?.participates ?? true,
-      libraryIds: existing?.libraryIds ?? const [],
-      scopeKnown: existing?.scopeKnown ?? false,
       verifiedServerId:
           verifiedServerId ?? existing?.verifiedServerId ?? serverId,
       checkedAt: existing?.checkedAt,
@@ -1031,6 +1066,7 @@ class AuthController extends ChangeNotifier {
     void Function()? guard,
     int? generation,
     bool usePrepared = false,
+    bool deferPublication = false,
     bool remember = false,
   }) async {
     guard?.call();
@@ -1091,59 +1127,112 @@ class AuthController extends ChangeNotifier {
       guarded?.clearSession();
       rethrow;
     }
-    if (server.serviceType == MediaServerType.emby) {
-      // Keep Emby's refresh/retry owner and injected behavior, but only attach
-      // after the independent candidate and durable selection have succeeded.
-      final candidate = attached;
-      attached = _client.serviceType == MediaServerType.emby
-          ? _client
-          : sources.createCandidate(MediaServerType.emby);
-      attached.attachSession(
-        baseUrl: Uri.parse(server.baseUrl),
-        accessToken: stored.accessToken,
+    void publish() {
+      if (server.serviceType == MediaServerType.emby) {
+        // Keep Emby's refresh/retry owner and injected behavior, but only attach
+        // after the independent candidate and durable selection have succeeded.
+        final candidate = attached;
+        attached = _client.serviceType == MediaServerType.emby
+            ? _client
+            : sources.createCandidate(MediaServerType.emby);
+        attached.attachSession(
+          baseUrl: Uri.parse(server.baseUrl),
+          accessToken: stored.accessToken,
+          userId: stored.userId,
+          userAgent: server.normalizedUserAgent,
+        );
+        candidate.clearSession();
+      }
+      final retired = _client;
+      final retiredGuarded = _guardedClient;
+      if (!identical(retired, attached)) {
+        retired.onSessionExpired = null;
+        retired.onRefreshSession = null;
+        retired.clearSession();
+      }
+      retiredGuarded?.clearSession();
+      _client = attached;
+      if (_session?.server.id != server.id ||
+          _session?.userId != stored.userId) {
+        _contentOwner = Object();
+      }
+      final contentOwner = _contentOwner;
+      final accessGeneration = serverAccess.generation(server.id);
+      _guardedClient = attached.withRequestGuard(() {
+        if (!identical(_contentOwner, contentOwner) ||
+            _session?.server.id != server.id ||
+            _session?.userId != stored.userId ||
+            accessGeneration != serverAccess.generation(server.id)) {
+          throw StateError('Selected content session revoked');
+        }
+        _selectionGuard?.call();
+        sources.requireContentAccess(server.id);
+      });
+      _selectionGuard = sourceGuard;
+      _revokedSelectionId = null;
+      final session = AuthSession(
+        server: server,
         userId: stored.userId,
-        userAgent: server.normalizedUserAgent,
+        username: stored.username,
+        accessToken: stored.accessToken,
       );
-      candidate.clearSession();
-    }
-    final retired = _client;
-    final retiredGuarded = _guardedClient;
-    if (!identical(retired, attached)) {
-      retired.onSessionExpired = null;
-      retired.onRefreshSession = null;
-      retired.clearSession();
-    }
-    retiredGuarded?.clearSession();
-    _client = attached;
-    _guardedClient = guarded;
-    _selectionGuard = sourceGuard;
-    _revokedSelectionId = null;
-    final session = AuthSession(
-      server: server,
-      userId: stored.userId,
-      username: stored.username,
-      accessToken: stored.accessToken,
-    );
-    _session = session;
-    final owner = Object();
-    _sessionOwner = owner;
-    bool ownsSession() =>
-        !_disposed &&
-        identical(_sessionOwner, owner) &&
-        identical(_client, attached) &&
-        _isSameSession(session);
-    void expired() {
-      if (ownsSession()) _onSessionExpired();
+      _session = session;
+      final owner = Object();
+      _sessionOwner = owner;
+      bool ownsSession() =>
+          !_disposed &&
+          identical(_sessionOwner, owner) &&
+          identical(_client, attached) &&
+          _isSameSession(session);
+      void expired() {
+        if (ownsSession()) _onSessionExpired();
+      }
+
+      Future<bool> refresh() => ownsSession()
+          ? _refreshSession(session, attached, ownsSession)
+          : Future.value(false);
+      attached.onSessionExpired = expired;
+      attached.onRefreshSession = refresh;
+      final published = _guardedClient!;
+      published.onSessionExpired = expired;
+      published.onRefreshSession = () async {
+        if (!await refresh()) return false;
+        final renewed = _session;
+        if (!identical(_contentOwner, contentOwner) ||
+            renewed == null ||
+            renewed.server.id != server.id ||
+            renewed.userId != stored.userId ||
+            !serverAccess.allows(server.id)) {
+          return false;
+        }
+        // The request that triggered renewal retries on its original facade.
+        // Its guard still checks the active selection and local entry lease.
+        published.attachSession(
+          baseUrl: Uri.parse(renewed.server.baseUrl),
+          accessToken: renewed.accessToken,
+          userId: renewed.userId,
+          userAgent: renewed.server.normalizedUserAgent,
+        );
+        return true;
+      };
+      guarded?.onSessionExpired = expired;
+      guarded?.onRefreshSession = refresh;
+      if (serverAccess.allows(server.id)) unawaited(loadLibraryCounts());
     }
 
-    Future<bool> refresh() => ownsSession()
-        ? _refreshSession(session, attached, ownsSession)
-        : Future.value(false);
-    attached.onSessionExpired = expired;
-    attached.onRefreshSession = refresh;
-    guarded?.onSessionExpired = expired;
-    guarded?.onRefreshSession = refresh;
-    unawaited(loadLibraryCounts());
+    if (deferPublication) {
+      _preparedEntry = (
+        server.id,
+        publish,
+        () {
+          attached.clearSession();
+          guarded?.clearSession();
+        },
+      );
+    } else {
+      sources.requireContentAccess(server.id);
+      serverAccess.commitEntry(server.id, null, publishConnection: publish);
+    }
   }
 
   SavedServer? _serverById(String id) {
@@ -1178,7 +1267,7 @@ class AuthController extends ChangeNotifier {
     bool current() => ownsSession() && _ownsActivation(generation);
     if (!current()) return false;
     try {
-      final credentialCommit = await sources.beginOrdinaryCredentials(
+      final credentialCommit = await sources.beginCredentials(
         session.server.id,
       );
       final stored = await credentials.read(session.server.id);
@@ -1218,7 +1307,7 @@ class AuthController extends ChangeNotifier {
       }
       _refreshingSelection = true;
       try {
-        await sources.commitOrdinaryCredentials(credentialCommit, next);
+        await sources.commitCredentials(credentialCommit, next);
         if (!current()) return false;
         await _activate(
           session.server,
@@ -1270,6 +1359,8 @@ class AuthController extends ChangeNotifier {
     serverEntry.cancel();
     serverAccess.dispose();
     _disposed = true;
+    serverAccess.removeListener(_accessChanged);
+    _cancelEntry();
     _activationGeneration++;
     _client.clearSession();
     _guardedClient?.clearSession();

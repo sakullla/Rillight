@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_access.dart';
+import 'package:rillight/auth/region_access.dart' show PinVerifier;
 import 'package:rillight/auth/server_configuration_migration.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/media_server/capabilities.dart';

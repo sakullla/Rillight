@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
@@ -48,12 +50,14 @@ class ServerSectionSlice {
   }
 }
 
-/// 一台已登录普通服务器的三段数据。
+/// 一台服务器的三段数据与安全状态。
 class ServerSections {
   const ServerSections({
     required this.serverId,
     required this.serverName,
     this.account,
+    this.locked = false,
+    this.needsLogin = false,
     this.continueWatching = const ServerSectionSlice(),
     this.favorites = const ServerSectionSlice(),
     this.libraries = const ServerSectionSlice(),
@@ -62,6 +66,7 @@ class ServerSections {
   final String serverId;
   final String serverName;
   final SourceAccount? account;
+  final bool locked, needsLogin;
   final ServerSectionSlice continueWatching;
   final ServerSectionSlice favorites;
   final ServerSectionSlice libraries;
@@ -73,13 +78,16 @@ class ServerSections {
 
   ServerSections copyWith({
     SourceAccount? account,
+    String? serverName,
     ServerSectionSlice? continueWatching,
     ServerSectionSlice? favorites,
     ServerSectionSlice? libraries,
   }) {
     return ServerSections(
       serverId: serverId,
-      serverName: serverName,
+      serverName: serverName ?? this.serverName,
+      locked: locked,
+      needsLogin: needsLogin,
       account: account ?? this.account,
       continueWatching: continueWatching ?? this.continueWatching,
       favorites: favorites ?? this.favorites,
@@ -88,12 +96,80 @@ class ServerSections {
   }
 }
 
-/// 按已登录普通服务器分别取继续播放、收藏和电影剧集库。
+/// 按已保存服务器分别取继续播放、收藏和电影剧集库。
 ///
-/// 不读取 participates、scopeKnown 或 libraryIds。某一台或其中一段失败时，
+/// 每台服务器独立取得当前账号的真实可见内容。某一台或其中一段失败时，
 /// 其它服务器已有结果保留，[retry] 只重拉这一台。
 class ServerSectionsLoader extends ChangeNotifier {
-  ServerSectionsLoader({required this.registry});
+  ServerSectionsLoader({required this.registry}) {
+    registry.addSourceRevocation(_changed);
+    registry.access.addListener(_accessChanged);
+  }
+  final Map<String, OperationPermit> _permits = {};
+  final Set<String> _inFlight = {};
+  final Set<String> _scheduled = {};
+  final Set<String> _reloadAfterFlight = {};
+  bool _started = false;
+  void _accessChanged() {
+    for (final server in registry.project()) {
+      _changed(server.id);
+    }
+  }
+
+  void _changed(String id) {
+    if (_disposed || !_started) return;
+    final targets = registry.project();
+    _order = targets.map((s) => s.id).toList();
+    _servers = _servers.where((s) => _order.contains(s.serverId)).toList();
+    final server = targets.where((s) => s.id == id).firstOrNull;
+    if (server == null) {
+      _notify();
+      return;
+    }
+    final old = _servers.where((s) => s.serverId == id).firstOrNull;
+    if (!registry.access.allows(id)) {
+      _attempt[id] = (_attempt[id] ?? 0) + 1;
+      _permits.remove(id);
+      _replace(
+        ServerSections(
+          serverId: id,
+          serverName: server.displayName,
+          locked: true,
+        ),
+      );
+    } else if (old != null &&
+        !old.locked &&
+        (_permits[id]?.isValid == true ||
+            (_permits[id] == null && _inFlight.contains(id)))) {
+      _replace(old.copyWith(serverName: server.displayName));
+    } else if (_inFlight.contains(id)) {
+      _reloadAfterFlight.add(id);
+      _replace(
+        ServerSections(
+          serverId: id,
+          serverName: server.displayName,
+          continueWatching: const ServerSectionSlice(loading: true),
+          favorites: const ServerSectionSlice(loading: true),
+          libraries: const ServerSectionSlice(loading: true),
+        ),
+      );
+    } else if (_scheduled.add(id)) {
+      _replace(
+        ServerSections(
+          serverId: id,
+          serverName: server.displayName,
+          continueWatching: const ServerSectionSlice(loading: true),
+          favorites: const ServerSectionSlice(loading: true),
+          libraries: const ServerSectionSlice(loading: true),
+        ),
+      );
+      scheduleMicrotask(() {
+        _scheduled.remove(id);
+        if (!_disposed) unawaited(retry(id));
+      });
+    }
+    _notify();
+  }
 
   final SourceSessionRegistry registry;
 
@@ -106,22 +182,39 @@ class ServerSectionsLoader extends ChangeNotifier {
 
   List<ServerSections> get servers => _servers;
 
-  /// 重新拉取当前全部已登录普通服务器。未登录的不占结果。
+  /// 重新拉取服务器分组；未登录和锁定条目保留安全占位。
   Future<void> load() async {
     if (_disposed) {
       return;
     }
+    _started = true;
     final generation = ++_generation;
     await registry.load();
     if (_disposed || generation != _generation) {
       return;
     }
-    final targets = registry.project(AccessRegion.ordinary);
+    final targets = registry.project();
     _order = [for (final server in targets) server.id];
     _attempt
       ..clear()
       ..addEntries(targets.map((server) => MapEntry(server.id, 0)));
-    _servers = const [];
+    _servers = [
+      for (final server in targets)
+        ServerSections(
+          serverId: server.id,
+          serverName: server.displayName,
+          locked: !registry.access.allows(server.id),
+          continueWatching: ServerSectionSlice(
+            loading: registry.access.allows(server.id),
+          ),
+          favorites: ServerSectionSlice(
+            loading: registry.access.allows(server.id),
+          ),
+          libraries: ServerSectionSlice(
+            loading: registry.access.allows(server.id),
+          ),
+        ),
+    ];
     loading = true;
     _notify();
     // Bound fan-out across servers; each server still loads its three slices
@@ -151,7 +244,7 @@ class ServerSectionsLoader extends ChangeNotifier {
     }
     final generation = _generation;
     final server = registry
-        .project(AccessRegion.ordinary)
+        .project()
         .where((item) => item.id == serverId)
         .firstOrNull;
     if (server == null) {
@@ -164,16 +257,42 @@ class ServerSectionsLoader extends ChangeNotifier {
   }
 
   Future<void> _publish(SavedServer server, int generation, int attempt) async {
+    if (!registry.access.allows(server.id)) return;
+    _inFlight.add(server.id);
+    try {
+      await _publishContent(server, generation, attempt);
+    } finally {
+      _inFlight.remove(server.id);
+      if (_reloadAfterFlight.remove(server.id) &&
+          !_disposed &&
+          registry.access.allows(server.id)) {
+        unawaited(retry(server.id));
+      }
+    }
+  }
+
+  Future<void> _publishContent(
+    SavedServer server,
+    int generation,
+    int attempt,
+  ) async {
     final SourceSession session;
     try {
       session = await registry.ensureSession(server.id);
     } catch (error) {
       if (!_current(generation, server.id, attempt)) return;
-      if (error is StateError && error.message == 'Login required') {
-        _servers = List.unmodifiable([
-          for (final item in _servers)
-            if (item.serverId != server.id) item,
-        ]);
+      if (!registry.access.allows(server.id)) return;
+      if (error is StateError && error.message == 'Login required' ||
+          error is MediaServerException &&
+              (error.kind == MediaServerFailureKind.sessionExpired ||
+                  error.kind == MediaServerFailureKind.invalidCredentials)) {
+        _replace(
+          ServerSections(
+            serverId: server.id,
+            serverName: server.displayName,
+            needsLogin: true,
+          ),
+        );
       } else {
         _replace(_failed(server, error));
       }
@@ -181,6 +300,9 @@ class ServerSectionsLoader extends ChangeNotifier {
       return;
     }
     if (!_current(generation, server.id, attempt)) return;
+    final permit = registry.permit(session.account);
+    _permits[server.id] = permit;
+    final client = session.client.withRequestGuard(permit.requireValid);
     var result =
         _servers.where((item) => item.serverId == server.id).firstOrNull ??
         ServerSections(
@@ -190,24 +312,31 @@ class ServerSectionsLoader extends ChangeNotifier {
           favorites: const ServerSectionSlice(loading: true),
           libraries: const ServerSectionSlice(loading: true),
         );
-    result = result.copyWith(account: session.account);
+    result = ServerSections(
+      serverId: server.id,
+      serverName: server.displayName,
+      account: session.account,
+      continueWatching: const ServerSectionSlice(loading: true),
+      favorites: const ServerSectionSlice(loading: true),
+      libraries: const ServerSectionSlice(loading: true),
+    );
     _replace(result);
     _notify();
     void publish(ServerSections Function(ServerSections) update) {
-      if (!_current(generation, server.id, attempt)) return;
+      if (!_current(generation, server.id, attempt) || !permit.isValid) return;
       result = update(result);
       _replace(result);
       _notify();
     }
 
     await Future.wait([
-      _continueWatching(session.client).then((slice) {
+      _continueWatching(client).then((slice) {
         publish((current) => current.copyWith(continueWatching: slice));
       }),
-      _favorites(session.client).then((slice) {
+      _favorites(client).then((slice) {
         publish((current) => current.copyWith(favorites: slice));
       }),
-      _libraries(session.client).then((slice) {
+      _libraries(client).then((slice) {
         publish((current) => current.copyWith(libraries: slice));
       }),
     ]);
@@ -384,7 +513,10 @@ class ServerSectionsLoader extends ChangeNotifier {
   }
 
   bool _current(int generation, String serverId, int attempt) =>
-      !_disposed && generation == _generation && _attempt[serverId] == attempt;
+      !_disposed &&
+      generation == _generation &&
+      _attempt[serverId] == attempt &&
+      registry.access.allows(serverId);
 
   void _notify() {
     if (_disposed) {
@@ -395,6 +527,8 @@ class ServerSectionsLoader extends ChangeNotifier {
 
   @override
   void dispose() {
+    registry.removeSourceRevocation(_changed);
+    registry.access.removeListener(_accessChanged);
     _disposed = true;
     _generation++;
     super.dispose();

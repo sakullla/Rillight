@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -91,7 +91,9 @@ class _CatalogAdapter implements HttpClientAdapter {
     final path = options.uri.path;
     var status = 200;
     Object payload = <String, dynamic>{};
-    if (options.method == 'GET' && path.endsWith('/Items/movie')) {
+    if (options.method == 'GET' && path.endsWith('/System/Info/Public')) {
+      payload = {'Id': 'server', 'ServerName': 'Catalog fixture'};
+    } else if (options.method == 'GET' && path.endsWith('/Items/movie')) {
       movieRequests++;
       // Let runtime establish membership first; fail controller catalog loading.
       if (failStartupCatalog && movieRequests >= 2) {
@@ -169,8 +171,6 @@ Future<({PlayerController player, FakeVideoBackend backend})> _player(
           username: 'Viewer',
           serviceType: type,
           verifiedServerId: 'server',
-          scopeKnown: true,
-          libraryIds: const ['library'],
           lines: const [
             ServerLine(id: 'line', address: 'https://catalog.test'),
           ],
@@ -187,7 +187,7 @@ Future<({PlayerController player, FakeVideoBackend backend})> _player(
     ),
   });
   final registry = SourceSessionRegistry(
-    access: TestRegionAccessController(),
+    access: TestServerAccessController(),
     store: servers,
     credentials: credentials,
     createClient: createClient,

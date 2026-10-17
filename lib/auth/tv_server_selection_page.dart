@@ -19,12 +19,14 @@ import 'tv_server_flow_frame.dart';
 Future<void> showTvServerSelection(
   BuildContext context, {
   required AuthController auth,
+  String? initialServerId,
   Future<void> Function()? onEntered,
   Future<void> Function()? onLineChanged,
 }) => Navigator.of(context).push<void>(
   CupertinoPageRoute(
     builder: (_) => TvServerSelectionPage(
       auth: auth,
+      initialServerId: initialServerId,
       onEntered: onEntered,
       onLineChanged: onLineChanged,
     ),
@@ -37,6 +39,8 @@ class TvServerSelectionPage extends ServerSelectionPage {
   const TvServerSelectionPage({
     super.key,
     required super.auth,
+    super.initialServerId,
+    super.routePage,
     super.onEntered,
     super.onLineChanged,
   });
@@ -96,7 +100,7 @@ class _TvServerSelectionState extends ServerSelectionPageState {
           server: target!,
           onBack: returnToList,
           onSaved: returnToList,
-          onSignedOut: () => Navigator.of(context).pop(),
+          onSignedOut: closeSelection,
         );
       } else if (step == 'lines') {
         content = TvLineSelectionPage(
@@ -104,6 +108,26 @@ class _TvServerSelectionState extends ServerSelectionPageState {
           serverId: target!.id,
           onBack: back,
           onChanged: widget.onLineChanged,
+        );
+      } else if (step == 'confirm-entry') {
+        content = TvServerFlowFrame(
+          title: target!.displayName,
+          onBack: back,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(l.serversEntryPlaybackImpact),
+              const SizedBox(height: 24),
+              TvAction(
+                key: const Key('server-entry-continue'),
+                autofocus: true,
+                onPressed: () => enter(target!, playbackConfirmed: true),
+                child: Text(l.serversContinue),
+              ),
+              const SizedBox(height: 16),
+              TvAction(onPressed: back, child: Text(l.serversCancel)),
+            ],
+          ),
         );
       } else if (step == 'unlock') {
         content = TvServerFlowFrame(
@@ -128,7 +152,7 @@ class _TvServerSelectionState extends ServerSelectionPageState {
           },
           onImport: () {
             final outer = Navigator.of(context).context;
-            Navigator.of(context).pop();
+            closeSelection();
             unawaited(showBackupImportFlow(outer, auth: widget.auth));
           },
         );

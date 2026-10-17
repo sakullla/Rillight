@@ -1,4 +1,4 @@
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -280,7 +280,7 @@ void main() {
     final savedStore = MemoryServerListStore();
     final credentialStore = MemoryCredentialStore();
     SourceSessionRegistry registry() => SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: savedStore,
       credentials: credentialStore,
       createClient: () => PlexClient(device: device),
@@ -304,7 +304,6 @@ void main() {
     Future<SourceSession> commit(String token) async {
       final attempt = await sourceRegistry.beginAuthorization(
         serviceType: MediaServerType.plex,
-        region: AccessRegion.ordinary,
       );
       final server = SavedServer(
         id: attempt.id,

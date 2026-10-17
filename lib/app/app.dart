@@ -425,7 +425,7 @@ class _PlayerWindowLayer extends StatelessWidget {
                                     AuthScope.of(context).sources,
                                     account,
                                     libraryId: command?.libraryId,
-                                    regionGeneration: command?.regionGeneration,
+                                    accessGeneration: command?.accessGeneration,
                                   );
                               unawaited(() async {
                                 await host.close();

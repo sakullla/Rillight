@@ -18,7 +18,6 @@ import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/app/mobile_chrome.dart';
 import 'package:rillight/app/mobile_motion.dart';
 import 'package:rillight/app/mobile_widgets.dart';
-import 'package:rillight/app/phone_libraries_tab.dart';
 import 'package:rillight/app/phone_mine_page.dart';
 import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/app/router.dart';
@@ -118,17 +117,24 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
+      final backup = FakeEmbyServer(
+        serverId: server.serverId,
+        baseUrl: Uri.parse('http://backup.test:8096'),
+      );
+      final dio = dioForFakeEmby(FakeEmbyAdapter([server, backup]));
       final controller =
           auth ??
           AuthController.memory(
-            client: EmbyClient(
-              device: _connectDevice,
-              dio: dioForFakeEmby(FakeEmbyAdapter([server])),
-            ),
+            client: EmbyClient(device: _connectDevice, dio: dio),
           );
       if (auth == null) {
         addTearDown(controller.dispose);
       }
+      // The two addresses expose one server's credentials, including tokens
+      // minted through detached clients that intentionally omit interceptors.
+      controller.addListener(
+        () => backup.issuedTokens.addAll(server.issuedTokens),
+      );
       await tester.pumpWidget(_harness(controller, generation: generation));
       await settle(tester);
       return controller;
@@ -153,6 +159,12 @@ void main() {
       await tester.ensureVisible(finder);
       await settle(tester);
       await tester.tap(finder);
+      for (var frame = 0; frame < 12; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
       await settle(tester);
     }
 
@@ -226,44 +238,48 @@ void main() {
       tags: ['integration'],
     );
 
-    cases.testWidgets(
-      'connection failure stays on the page and can be retried',
-      (tester) async {
-        final auth = await pumpConnect(tester);
-        await enterCredentials(
-          tester,
-          address: 'ftp://files.test',
-          username: 'alice',
-          password: 'correct-horse',
-        );
-        await tap(tester, find.byKey(_submit));
+    cases.testWidgets('connection failure stays on the page and can be retried', (
+      tester,
+    ) async {
+      final auth = await pumpConnect(tester);
+      await enterCredentials(
+        tester,
+        address: 'ftp://files.test',
+        username: 'alice',
+        password: 'correct-horse',
+      );
+      await tap(tester, find.byKey(_submit));
 
-        expect(auth.isLoggedIn, isFalse);
-        expect(find.byType(AndroidConnectPage), findsOneWidget);
-        expect(find.text('请输入有效的服务器地址'), findsOneWidget);
-        expect(find.text('重试'), findsOneWidget);
-        expect(find.textContaining('MediaServerException'), findsNothing);
+      expect(auth.isLoggedIn, isFalse);
+      expect(find.byType(AndroidConnectPage), findsOneWidget);
+      expect(find.text('请输入有效的服务器地址'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+      expect(find.textContaining('MediaServerException'), findsNothing);
 
-        await tester.enterText(find.byKey(_address), server.baseUrl.toString());
-        await tester.enterText(find.byKey(_password), 'wrong');
-        await tap(tester, find.byKey(_submit));
+      await tester.enterText(find.byKey(_address), server.baseUrl.toString());
+      await tester.enterText(find.byKey(_password), 'wrong');
+      await tap(tester, find.byKey(_submit));
 
-        expect(auth.isLoggedIn, isFalse);
-        expect(find.byType(AndroidConnectPage), findsOneWidget);
-        expect(find.text('HTTP 401: invalid credentials'), findsOneWidget);
-        expect(find.text('重试'), findsOneWidget);
-        expect(find.text('请输入有效的服务器地址'), findsNothing);
-        expect(textOf(tester, _password), 'wrong');
+      expect(auth.isLoggedIn, isFalse);
+      expect(find.byType(AndroidConnectPage), findsOneWidget);
+      expect(auth.failure?.kind, MediaServerFailureKind.invalidCredentials);
+      expect(
+        find.text('用户名或密码错误'),
+        findsOneWidget,
+        reason:
+            'Authentication failure must use a readable recovery message: ${auth.failure}',
+      );
+      expect(find.text('重试'), findsOneWidget);
+      expect(find.text('请输入有效的服务器地址'), findsNothing);
+      expect(textOf(tester, _password), 'wrong');
 
-        await tester.enterText(find.byKey(_password), 'correct-horse');
-        await tap(tester, find.byKey(_submit));
+      await tester.enterText(find.byKey(_password), 'correct-horse');
+      await tap(tester, find.byKey(_submit));
 
-        expect(auth.isLoggedIn, isTrue);
-        expect(find.text('重试'), findsNothing);
-        expect(tester.takeException(), isNull);
-      },
-      tags: ['integration'],
-    );
+      expect(auth.isLoggedIn, isTrue);
+      expect(find.text('重试'), findsNothing);
+      expect(tester.takeException(), isNull);
+    }, tags: ['integration']);
 
     cases.testWidgets(
       'unsubmitted password is empty after the page is recreated',
@@ -467,7 +483,7 @@ void main() {
         expect(find.byKey(const Key('phone-home-edit-page')), findsOneWidget);
         expect(find.text('轮播图'), findsOneWidget);
         expect(
-          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。媒体库页仍会列出全部媒体库。'),
+          find.text('按住左侧手柄拖动排序。关闭的行会归到「未显示」。仍可从首页进入媒体库。'),
           findsOneWidget,
         );
 
@@ -2373,24 +2389,15 @@ void main() {
     cases.testWidgets('genre filter appears only when the server has genres', (
       tester,
     ) async {
-      final harness = await _start(tester);
-      harness.dio.interceptors.add(
-        InterceptorsWrapper(
-          onResponse: (response, handler) {
-            final data = response.data;
-            if (data is Map) {
-              final items = data['Items'];
-              if (items is List) {
-                for (final raw in items) {
-                  if (raw is Map && raw['Type'] == 'Movie') {
-                    raw['Genres'] = <String>['SciFi'];
-                  }
-                }
-              }
-            }
-            handler.next(response);
-          },
-        ),
+      final harness = await _start(
+        tester,
+        prepare: (server) {
+          for (final item in server.items.where(
+            (item) => item.type == 'Movie',
+          )) {
+            item.genres = ['SciFi'];
+          }
+        },
       );
       await _openMovies(tester);
       await _openFilters(tester);
@@ -3544,7 +3551,7 @@ String _lastItemsQuery(FakeEmbyServer server) {
 }
 
 Future<void> _openMovies(WidgetTester tester) async {
-  await tester.tap(find.byKey(const Key('phone-library-block-view-movies')));
+  await tester.tap(find.byKey(const Key('phone-home-library-view-movies')));
   await settle(tester);
 }
 
@@ -3607,10 +3614,7 @@ Future<_Harness> _start(
   final router = GoRouter(
     initialLocation: '/',
     routes: [
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const PhoneLibrariesTab(),
-      ),
+      GoRoute(path: '/', builder: (context, state) => const PhoneHome()),
       GoRoute(
         path: '/library/:viewId',
         builder: (context, state) =>

@@ -184,36 +184,37 @@ void main() {
     },
   );
 
-  test('selected session survives scope and pending authorization; logout revokes requests', () async {
-    await selectJellyfin();
-    final id = auth.session!.server.id;
-    await auth.sources.configureScope(id, participates: false, libraryIds: {});
-    expect(auth.isLoggedIn, isTrue);
-    expect((await auth.client.getItem('movie-1')).id, 'movie-1');
-    final old = auth.client;
-    final gate = Completer<void>();
-    jellyfin.delay = gate;
-    jellyfin.arrived = Completer<void>();
-    final request = old.getItem('movie-1');
-    await jellyfin.arrived!.future;
-    final attempt = await auth.sources.beginAuthorization(
-      serviceType: MediaServerType.jellyfin,
-      region: AccessRegion.ordinary,
-      configuredServerId: id,
-    );
-    expect(auth.isLoggedIn, isTrue);
-    gate.complete();
-    expect((await request).id, 'movie-1');
-    final revokedGate = Completer<void>();
-    jellyfin.delay = revokedGate;
-    jellyfin.arrived = Completer<void>();
-    final revoked = old.getItem('movie-1');
-    final rejection = expectLater(revoked, throwsA(anything));
-    await jellyfin.arrived!.future;
-    await auth.sources.logoutSource(id);
-    revokedGate.complete();
-    await rejection;
-    expect(attempt.isValid, isFalse);
-    expect(auth.isLoggedIn, isFalse);
-  });
+  test(
+    'selected session survives pending authorization; logout revokes requests',
+    () async {
+      await selectJellyfin();
+      final id = auth.session!.server.id;
+      expect(auth.isLoggedIn, isTrue);
+      expect((await auth.client.getItem('movie-1')).id, 'movie-1');
+      final old = auth.client;
+      final gate = Completer<void>();
+      jellyfin.delay = gate;
+      jellyfin.arrived = Completer<void>();
+      final request = old.getItem('movie-1');
+      await jellyfin.arrived!.future;
+      final attempt = await auth.sources.beginAuthorization(
+        serviceType: MediaServerType.jellyfin,
+        configuredServerId: id,
+      );
+      expect(auth.isLoggedIn, isTrue);
+      gate.complete();
+      expect((await request).id, 'movie-1');
+      final revokedGate = Completer<void>();
+      jellyfin.delay = revokedGate;
+      jellyfin.arrived = Completer<void>();
+      final revoked = old.getItem('movie-1');
+      final rejection = expectLater(revoked, throwsA(anything));
+      await jellyfin.arrived!.future;
+      await auth.sources.logoutSource(id);
+      revokedGate.complete();
+      await rejection;
+      expect(attempt.isValid, isFalse);
+      expect(auth.isLoggedIn, isFalse);
+    },
+  );
 }

@@ -14,12 +14,9 @@ void main() {
           WorkSource(
             reference: SourceReference(
               account: SourceAccount(
-                region: random.nextInt(4) == 0
-                    ? AccessRegion.private
-                    : AccessRegion.ordinary,
                 configuredServerId: 'server-${i % 3}',
                 verifiedServerId: 'verified-${i % 3}',
-                userId: 'u',
+                userId: 'u-${random.nextInt(4)}',
               ),
               itemId: 'item-${i ~/ 6}',
               mediaSourceId: i % 2 == 0 ? null : 'v${i % 3}',

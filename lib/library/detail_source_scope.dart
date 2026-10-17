@@ -1,3 +1,5 @@
+import '../auth/server_content_entry.dart';
+
 import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
@@ -85,7 +87,7 @@ class DetailSourceScope extends InheritedWidget {
       itemId: itemId,
       source: SourceReference(account: origin.source.account, itemId: itemId),
       libraryId: libraryId,
-      regionGeneration: origin.permit.regionGeneration,
+      accessGeneration: origin.permit.accessGeneration,
     );
   }
 
@@ -103,7 +105,7 @@ class DetailSourceScope extends InheritedWidget {
       seasonId: seasonId,
       source: SourceReference(account: origin.source.account, itemId: id),
       libraryId: sameWork ? origin.libraryId : null,
-      regionGeneration: origin.permit.regionGeneration,
+      accessGeneration: origin.permit.accessGeneration,
     );
   }
 
@@ -125,9 +127,49 @@ class DetailSourceScope extends InheritedWidget {
   }
 }
 
-class SourceDetailGate extends StatefulWidget {
+class SourceDetailGate extends StatelessWidget {
   const SourceDetailGate({
     super.key,
+    required this.auth,
+    required this.itemId,
+    required this.command,
+    required this.child,
+    this.showComparison = true,
+  });
+  final AuthController auth;
+  final String itemId;
+  final PlayerHostOpenItemCommand? command;
+  final Widget child;
+  final bool showComparison;
+  @override
+  Widget build(BuildContext context) {
+    final id =
+        command?.source?.account.configuredServerId ?? auth.session?.server.id;
+    if (id == null) return const SizedBox.shrink();
+    final generation = command?.accessGeneration;
+    if (command?.source != null &&
+        auth.serverAccess.isProtected(id) &&
+        generation != auth.serverAccess.generation(id)) {
+      return Center(
+        child: Text(AppLocalizations.of(context).aggregationUnavailableDetail),
+      );
+    }
+    return ServerContentGate(
+      auth: auth,
+      serverId: id,
+      builder: (generation) => _AuthorizedDetailGate(
+        auth: auth,
+        itemId: itemId,
+        showComparison: showComparison,
+        command: command,
+        child: child,
+      ),
+    );
+  }
+}
+
+class _AuthorizedDetailGate extends StatefulWidget {
+  const _AuthorizedDetailGate({
     required this.auth,
     required this.itemId,
     required this.command,
@@ -140,10 +182,10 @@ class SourceDetailGate extends StatefulWidget {
   final PlayerHostOpenItemCommand? command;
   final Widget child;
   @override
-  State<SourceDetailGate> createState() => _SourceDetailGateState();
+  State<_AuthorizedDetailGate> createState() => _SourceDetailGateState();
 }
 
-class _SourceDetailGateState extends State<SourceDetailGate> {
+class _SourceDetailGateState extends State<_AuthorizedDetailGate> {
   PlaybackOrigin? _origin;
   MediaImageSourcePolicy? _imagePolicy;
   bool _resolved = false;
@@ -163,7 +205,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
     super.initState();
     widget.auth.addListener(_changed);
     widget.auth.sources.addSourceRevocation(_revoked);
-    widget.auth.regionAccess.addListener(_changed);
+    widget.auth.serverAccess.addListener(_changed);
     _resolve();
   }
 
@@ -182,12 +224,16 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
         return;
       }
       final account = command.source!.account;
+      final session = await widget.auth.sources.ensureSession(
+        account.configuredServerId,
+      );
+      if (session.account != account) return;
       // 普通区只要求当前会话仍有效。私有区代数不对时停在这里，不取条目。
       if (!localSessionAllowsRoute(
         widget.auth.sources,
         account,
         libraryId: command.libraryId,
-        regionGeneration: command.regionGeneration,
+        accessGeneration: command.accessGeneration,
       )) {
         return;
       }
@@ -249,7 +295,8 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
   }
 
   void _revoked(String serverId) {
-    if (_origin?.source.account.configuredServerId == serverId) {
+    if (_origin?.source.account.configuredServerId == serverId &&
+        _origin?.permit.isValid == false) {
       _imagePolicy?.revoke();
       _origin = null;
       _changed();
@@ -261,7 +308,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
     final command = widget.command;
     final account = command?.source?.account;
     if (mounted && command != null && account != null) {
-      // 与 _resolve 相同：范围许可失败时，仍有效的 sessionOnly 许可继续视为有效。
+      // Recheck the same account and entry generation used by resolution.
       final valid = _permitStillAllows(command);
       if (!valid) {
         final desktop =
@@ -339,7 +386,7 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
     if (mounted) setState(() {});
   }
 
-  /// 范围未勾选时改用 sessionOnly。打开详情和之后的有效性检查都走这里。
+  /// Resolution and later route checks share one server access authority.
   OperationPermit? _permitFor(PlayerHostOpenItemCommand command) {
     final account = command.source?.account;
     if (account == null) return null;
@@ -357,17 +404,17 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       widget.auth.sources,
       account,
       libraryId: command.libraryId,
-      regionGeneration: command.regionGeneration,
+      accessGeneration: command.accessGeneration,
     );
   }
 
   @override
   void dispose() {
     // No gate may leave private bytes behind without a revocation listener.
-    if (_imagePolicy?.allowsDisk == false) _imagePolicy?.revoke();
+    _imagePolicy?.revoke();
     widget.auth.removeListener(_changed);
     widget.auth.sources.removeSourceRevocation(_revoked);
-    widget.auth.regionAccess.removeListener(_changed);
+    widget.auth.serverAccess.removeListener(_changed);
     super.dispose();
   }
 
@@ -376,7 +423,6 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
     final origin = _origin;
     if (_selectedEntry &&
         widget.auth.isLoggedIn &&
-        widget.auth.session?.server.region == AccessRegion.ordinary &&
         (widget.command == null || widget.command!.itemId == widget.itemId)) {
       // Renewed credentials must recreate controllers holding the old client.
       // Ordinary navigation follows the selected session; explicit source
@@ -388,8 +434,9 @@ class _SourceDetailGateState extends State<SourceDetailGate> {
       final l = AppLocalizations.of(context);
       return Center(
         child: Text(
-          widget.command?.source?.account.region == AccessRegion.private &&
-                  !widget.auth.regionAccess.allows(AccessRegion.private)
+          !widget.auth.serverAccess.allows(
+                widget.command?.source?.account.configuredServerId ?? '',
+              )
               ? l.aggregationPrivateLocked
               : l.aggregationUnavailableDetail,
         ),
@@ -503,7 +550,7 @@ class _ServerSessionImagesState extends State<ServerSessionImages> {
 
   @override
   void dispose() {
-    if (_imagePolicy?.allowsDisk == false) _imagePolicy?.revoke();
+    _imagePolicy?.revoke();
     super.dispose();
   }
 

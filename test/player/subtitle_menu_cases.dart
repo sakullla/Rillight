@@ -5,7 +5,6 @@ import 'package:rillight/app/ui/ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rillight/app/app.dart';
 import 'package:rillight/app/file_import.dart';
-import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_controller.dart';
@@ -88,7 +87,6 @@ void main() {
     final account = await tester.runAsync(
       () => app.auth.sources.acquireAccount(
         app.auth.session!.server.id,
-        region: AccessRegion.ordinary,
         libraryId: libraryId,
       ),
     );
@@ -99,7 +97,7 @@ void main() {
         itemId: itemId,
         source: SourceReference(account: account, itemId: itemId),
         libraryId: libraryId,
-        regionGeneration: permit.regionGeneration,
+        accessGeneration: permit.accessGeneration,
       ),
     );
     await tester.pumpWidget(app);

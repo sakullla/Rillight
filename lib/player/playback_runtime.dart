@@ -3,6 +3,11 @@ import 'package:rillight/media_server/media_server_client.dart';
 import 'package:rillight/media_server/errors.dart';
 
 import 'dart:io';
+import 'dart:convert';
+
+import 'player_settings.dart';
+import '../media_server/capabilities.dart';
+import '../media_server/server_address.dart';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -70,6 +75,12 @@ class PlaybackRuntime {
 
   bool hasMountedPlayer(Object request) => _mountedPlayers.containsKey(request);
 
+  bool hasPlaybackFor(String serverId) => _mountedPlayers.values.any((read) {
+    final origin = read();
+    return origin?.source.account.configuredServerId == serverId &&
+        origin?.permit.isValid == true;
+  });
+
   PlaybackOrigin? mountedPlayerOrigin(Object request) =>
       _mountedPlayers[request]?.call();
 
@@ -91,25 +102,18 @@ class PlaybackRuntime {
     );
   }
 
-  /// 范围许可。库未勾选时返回 null，调用方改用仍有效的服务器会话。
-  Future<(SourceAccount, OperationPermit)?> _scopedPlaybackPermit(
+  Future<(SourceAccount, OperationPermit)> _playbackPermit(
     SourceReference source,
     String library,
   ) async {
-    try {
-      final account = await registry.acquireAccount(
-        source.account.configuredServerId,
-        region: source.account.region,
-        libraryId: library,
-      );
-      if (account != source.account) {
-        throw StateError('Playback account changed');
-      }
-      return (account, registry.permit(account, libraryId: library));
-    } on StateError catch (error) {
-      if (error.message != 'Source outside allowed scope') rethrow;
-      return null;
+    final account = await registry.acquireAccount(
+      source.account.configuredServerId,
+      libraryId: library,
+    );
+    if (account != source.account) {
+      throw StateError('Playback account changed');
     }
+    return (account, registry.permit(account, libraryId: library));
   }
 
   Future<PlaybackOrigin> resolve(PlayerOpenRequest request) async {
@@ -118,41 +122,22 @@ class PlaybackRuntime {
     if (source == null) {
       final selected = auth.session;
       if (selected == null) throw StateError('No selected source');
-      if (selected.server.region == AccessRegion.private &&
-          request.regionGeneration != registry.access.generation) {
+      if (registry.access.isProtected(selected.server.id) &&
+          request.accessGeneration !=
+              registry.access.generation(selected.server.id)) {
         throw StateError('Private playback route generation was revoked');
       }
       // The selected server's login is independent of aggregation filters.
       final account = (await registry.ensureSession(selected.server.id))
           .account;
       if (!identical(auth.session, selected) ||
-          account.userId != selected.userId ||
-          account.region != selected.server.region) {
+          account.userId != selected.userId) {
         throw StateError('Playback account changed');
       }
-      final allowed = registry
-          .project(account.region)
-          .where(
-            (s) => s.id == selected.server.id && s.participates && s.scopeKnown,
-          )
-          .expand((s) => s.libraryIds)
-          .toSet();
-      final permit = registry.permit(account, sessionOnly: true);
+      final permit = registry.permit(account);
       var item = await permit.dispatch((c) => c.getItem(request.itemId));
       if (item.id != request.itemId) throw StateError('Source item mismatch');
       library = item.hierarchyParentId ?? item.id;
-      final visited = <String>{};
-      // Keep a real aggregation library when it is an ancestor, but an item
-      // outside that browse filter still belongs to this authenticated server.
-      while (allowed.isNotEmpty && !allowed.contains(item.id)) {
-        if (!visited.add(item.id) ||
-            item.hierarchyParentId == null ||
-            visited.length > 32) {
-          break;
-        }
-        item = await permit.dispatch((c) => c.getItem(item.hierarchyParentId!));
-      }
-      if (allowed.contains(item.id)) library = item.id;
       source = SourceReference(
         account: account,
         itemId: request.itemId,
@@ -163,28 +148,27 @@ class PlaybackRuntime {
       throw ArgumentError('Source and library must belong to playback item');
     }
     // Reject old decoded private intent before authentication/acquisition IO.
-    if (source.account.region == AccessRegion.private &&
-        request.regionGeneration != registry.access.generation) {
+    if (registry.access.isProtected(source.account.configuredServerId) &&
+        request.accessGeneration !=
+            registry.access.generation(source.account.configuredServerId)) {
       throw StateError('Private playback route generation was revoked');
     }
-    // 已勾选的库走范围许可。聚合视界也会打开尚未勾选的库，那种条目只要求
-    // 该服务器会话仍然有效，和详情门的 sessionOnly 是同一条规则。
-    final scoped = await _scopedPlaybackPermit(source, library);
-    final account = scoped?.$1 ?? source.account;
-    final permit =
-        scoped?.$2 ??
-        registry.permit(account, libraryId: library, sessionOnly: true);
+    final (account, permit) = await _playbackPermit(source, library);
     // A decoded route is still only a value reference. Unlocking must not
     // reacquire the authority of a pre-lock private playback intent.
-    if (account.region == AccessRegion.private &&
-        request.regionGeneration != permit.regionGeneration) {
+    if (registry.access.isProtected(account.configuredServerId) &&
+        request.accessGeneration != permit.accessGeneration) {
       throw StateError('Private playback route generation was revoked');
     }
     final item = await permit.dispatch((c) => c.getItem(source!.itemId));
     if (item.id != source.itemId) throw StateError('Source item mismatch');
     // A library id supplied by a route/IPC message is not membership proof.
-    final proofKey =
-        '${source.account.configuredServerId}|${source.itemId}|$library';
+    final proofKey = jsonEncode([
+      source.item.key,
+      library,
+      permit.sessionRevision,
+      permit.accessGeneration,
+    ]);
     final proof = _membershipProofs[proofKey];
     final proven =
         proof != null && DateTime.now().difference(proof) < _membershipProofTtl;
@@ -237,7 +221,7 @@ class PlaybackRuntime {
   }) async {
     origin.permit.requireValid();
     var library = origin.libraryId;
-    if (itemId != origin.source.itemId && origin.permit.sessionOnly) {
+    if (itemId != origin.source.itemId) {
       final item = await origin.permit.dispatch((c) => c.getItem(itemId));
       if (item.id != itemId) throw StateError('Source item mismatch');
       library = item.hierarchyParentId ?? item.id;
@@ -253,11 +237,82 @@ class PlaybackRuntime {
         work: origin.work,
         libraryId: library,
         mediaSourceId: mediaSourceId,
-        regionGeneration: origin.permit.regionGeneration,
+        accessGeneration: origin.permit.accessGeneration,
       ),
     );
     origin.permit.requireValid();
     return resolved;
+  }
+
+  /// Old item keys contain endpoint/user/item, not a provider or server ID.
+  /// Attribute only an exact, uniquely configured Emby account and version.
+  /// Unattributable series-only keys remain stored without being applied.
+  Future<void> importLegacyPreferences(
+    PlaybackOrigin origin,
+    MediaItem item,
+    List<PlaybackMediaSource> versions,
+    PlayerSettings settings,
+  ) async {
+    if (origin.source.account.serviceType != MediaServerType.emby ||
+        preference(origin, item, versions).failure !=
+            PreferenceFailure.notConfigured) {
+      return;
+    }
+    for (final entry in settings.itemPreferences.entries) {
+      Object? key;
+      try {
+        key = jsonDecode(entry.key);
+      } catch (_) {
+        continue;
+      }
+      if (key is! List ||
+          key.length != 3 ||
+          key[0] is! String ||
+          key[1] != origin.source.account.userId ||
+          key[2] != item.id) {
+        continue;
+      }
+      String address;
+      try {
+        address = normalizeServerAddress(key[0] as String).toString();
+      } catch (_) {
+        continue;
+      }
+      final matching = registry
+          .project()
+          .where(
+            (s) => s.lines.any(
+              (line) =>
+                  normalizeServerAddress(line.address).toString() == address,
+            ),
+          )
+          .toList();
+      if (matching.length != 1 ||
+          matching.single.id != origin.source.account.configuredServerId ||
+          matching.single.serviceType != MediaServerType.emby) {
+        continue;
+      }
+      final version = versions
+          .where((v) => v.id == entry.value.mediaSourceId)
+          .toList();
+      if (version.length != 1) continue;
+      origin.permit.requireValid();
+      await history.importAttributedPreference(
+        'item:${entry.key}',
+        SourcePreference(
+          owner: origin.work,
+          target: SourceReference(
+            account: origin.source.account,
+            itemId: item.id,
+            mediaSourceId: version.single.id,
+          ),
+          libraryId: origin.libraryId,
+          settings: entry.value,
+        ),
+        origin.permit,
+      );
+      return;
+    }
   }
 
   PreferenceResolution preference(
@@ -278,7 +333,7 @@ class PlaybackRuntime {
     );
     var result = history.resolvePreference(
       owner: origin.work,
-      region: origin.source.account.region,
+
       candidates: candidates,
       playbackPermit: origin.permit,
     );
@@ -292,7 +347,7 @@ class PlaybackRuntime {
         previous.target.itemId != item.id) {
       result = history.resolvePreference(
         owner: origin.work,
-        region: origin.source.account.region,
+
         candidates: candidates,
         playbackPermit: origin.permit,
         nextEpisode: true,
@@ -369,9 +424,9 @@ class PlaybackRuntime {
     Duration timeout = const Duration(seconds: 10),
   }) async {
     actual.permit.requireValid();
-    final server = registry
-        .project(actual.source.account.region)
-        .firstWhere((s) => s.id == actual.source.account.configuredServerId);
+    final server = registry.project().firstWhere(
+      (s) => s.id == actual.source.account.configuredServerId,
+    );
     final line = server.lines.firstWhere((l) => l.id == lineId);
     final independent =
         registry.createProviderClient?.call(server.serviceType) ??
@@ -460,33 +515,29 @@ class PlaybackRuntime {
         snapshot.position < Duration.zero) {
       return false;
     }
-    if (source.account.region == AccessRegion.private &&
-        (!registry.access.allows(AccessRegion.private) ||
-            snapshot.regionGeneration != registry.access.generation ||
+    if (registry.access.isProtected(source.account.configuredServerId) &&
+        (!registry.access.allows(source.account.configuredServerId) ||
+            snapshot.accessGeneration !=
+                registry.access.generation(source.account.configuredServerId) ||
             registry.sessionAccount(
                   source.account.configuredServerId,
-                  region: source.account.region,
+
                   libraryId: library,
                 ) !=
                 source.account)) {
       return false;
     }
-    return registry
-        .project(source.account.region)
-        .any(
-          (s) =>
-              s.id == source.account.configuredServerId &&
-              s.serviceType == source.account.serviceType &&
-              s.verifiedServerId == source.account.verifiedServerId &&
-              s.cloudAccountId == source.account.cloudAccountId &&
-              s.homeUserId == source.account.homeUserId &&
-              s.participates &&
-              s.scopeKnown &&
-              s.libraryIds.contains(library) &&
-              s.lines.any(
-                (l) => Uri.parse(l.address) == Uri.parse(snapshot.baseUrl),
-              ),
-        );
+    return registry.project().any(
+      (s) =>
+          s.id == source.account.configuredServerId &&
+          s.serviceType == source.account.serviceType &&
+          s.verifiedServerId == source.account.verifiedServerId &&
+          s.cloudAccountId == source.account.cloudAccountId &&
+          s.homeUserId == source.account.homeUserId &&
+          s.lines.any(
+            (l) => Uri.parse(l.address) == Uri.parse(snapshot.baseUrl),
+          ),
+    );
   }
 
   Future<bool> recoverSnapshot(
@@ -560,7 +611,7 @@ class PlaybackRuntime {
         snapshot.position < Duration.zero) {
       return false;
     }
-    // Reject permanent scope/generation removal without probing. A missing
+    // Reject removed accounts or revoked entry generations without probing. A missing
     // ordinary session after cold start does not require cloud authentication.
     if (!canRecoverSnapshot(snapshot)) return false;
     return registry.recoverPlayback(
@@ -568,7 +619,7 @@ class PlaybackRuntime {
       report: playbackReportFromSnapshot(snapshot),
       baseUrl: Uri.parse(snapshot.baseUrl),
       libraryId: library,
-      regionGeneration: snapshot.regionGeneration,
+      accessGeneration: snapshot.accessGeneration,
       cleanupOnly: snapshot.cleanupOnly,
     );
   }

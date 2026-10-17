@@ -1,7 +1,7 @@
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/case_shard.dart';
-import '../helpers/region_access_fixture.dart';
+import '../helpers/server_access_fixture.dart';
 
 import 'dart:async';
 
@@ -20,7 +20,6 @@ import 'package:rillight/app/presentation_environment.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:rillight/auth/auth_controller.dart';
 import 'package:rillight/auth/credential_store.dart';
-import 'package:rillight/auth/region_access.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/media_server_client.dart';
@@ -31,6 +30,7 @@ import 'package:rillight/app/tv_widgets.dart';
 import 'package:rillight/home/media_shelf.dart';
 import 'package:rillight/library/aggregation_page.dart';
 import 'package:rillight/library/server_library_page.dart';
+import 'package:rillight/library/shelf_grid_page.dart';
 import 'package:rillight/library/detail_source_scope.dart';
 import 'package:rillight/library/item_detail_page.dart';
 import 'package:rillight/library/library_page.dart';
@@ -60,7 +60,8 @@ import 'package:rillight/player/player_process_protocol.dart';
 import 'dart:convert';
 
 import 'package:rillight/library/tv_detail_page.dart';
-import 'package:rillight/auth/source_management.dart';
+import 'package:rillight/auth/server_selection_page.dart';
+import 'package:rillight/auth/tv_server_selection_page.dart';
 import 'package:rillight/player/source_switch_menu.dart';
 
 import '../emby/fake_emby_server.dart';
@@ -295,7 +296,6 @@ class _Fixture {
   late PlaybackRuntime runtime;
   late String aId, bId;
   Future<void> open({
-    bool configure = true,
     HistoryStore? historyStore,
     FakeEmbyAdapter? sourceAdapter,
   }) async {
@@ -312,13 +312,12 @@ class _Fixture {
       dio: dioForFakeEmby(adapter),
     );
     final sources = SourceSessionRegistry(
-      access: TestRegionAccessController(),
+      access: TestServerAccessController(),
       store: servers,
       credentials: credentials,
       createClient: client,
     );
     auth = AuthController(
-      regionAccess: TestRegionAccessController(),
       client: client(),
       credentials: credentials,
       servers: servers,
@@ -330,13 +329,6 @@ class _Fixture {
         username: 'alice',
         password: 'correct-horse',
       );
-      if (configure) {
-        await sources.configureScope(
-          auth.session!.server.id,
-          participates: true,
-          libraryIds: {'view-movies'},
-        );
-      }
       if (server == a) {
         aId = auth.session!.server.id;
       } else {
@@ -349,6 +341,17 @@ class _Fixture {
       store: historyStore ?? MemoryHistoryStore(),
     );
     runtime = PlaybackRuntime(auth: auth, history: history);
+  }
+
+  Future<void> protect(String id, {bool unlock = false}) async {
+    await auth.serverAccess.setPassword(
+      id,
+      '1234',
+      '1234',
+      persistReference: (ref) =>
+          auth.sources.persistProtectionReference(id, ref),
+    );
+    if (unlock) expect(await auth.serverAccess.unlock(id, '1234'), isTrue);
   }
 
   RillightApp app(
@@ -374,9 +377,11 @@ class _Fixture {
 }
 
 Future<void> _settle(WidgetTester tester) async {
-  for (var frame = 0; frame < 4; frame++) {
+  for (var frame = 0; frame < 12; frame++) {
     await tester.pump(const Duration(milliseconds: 240), EnginePhase.paint);
-    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
   }
   await tester.pump(Duration.zero, EnginePhase.sendSemanticsUpdate);
 }
@@ -437,11 +442,7 @@ Future<void> _openOwnedDetail(
   String libraryId = 'view-movies',
 }) async {
   final account = await tester.runAsync(
-    () => f.auth.sources.acquireAccount(
-      serverId,
-      region: AccessRegion.ordinary,
-      libraryId: libraryId,
-    ),
+    () => f.auth.sources.acquireAccount(serverId, libraryId: libraryId),
   );
   final permit = f.auth.sources.permit(account!, libraryId: libraryId);
   app.router.go(
@@ -450,7 +451,7 @@ Future<void> _openOwnedDetail(
       itemId: itemId,
       source: SourceReference(account: account, itemId: itemId),
       libraryId: libraryId,
-      regionGeneration: permit.regionGeneration,
+      accessGeneration: permit.accessGeneration,
     ),
   );
   await _settle(tester);
@@ -492,7 +493,7 @@ Future<SameSourceQueryController> _comparisons(
   );
   await comparison.start(
     origin: QueryItem(origin.work, origin.libraryId, dto),
-    scope: QueryScope(region: origin.source.account.region),
+    scope: QueryScope(),
   );
   return comparison;
 }
@@ -516,7 +517,7 @@ Future<void> _switchConfirmedServer(
         source: candidate.source.reference,
         work: candidate.source.reference.item,
         libraryId: candidate.source.libraryId,
-        regionGeneration: origin.permit.regionGeneration,
+        accessGeneration: origin.permit.accessGeneration,
       ),
     );
     final info = await target.permit.dispatch(
@@ -563,7 +564,7 @@ Future<void> _switchMappedEpisode(
         source: reference,
         work: candidate.source.reference.item,
         libraryId: candidate.source.libraryId,
-        regionGeneration: origin.permit.regionGeneration,
+        accessGeneration: origin.permit.accessGeneration,
       ),
     );
     final info = await target.permit.dispatch(
@@ -592,7 +593,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.b.items.first.backdropImageTags = ['b-one', 'b-two'];
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
@@ -634,9 +635,7 @@ void main() {
       await _settle(tester);
       expect(requested, isTrue);
       await tester.runAsync(() async {
-        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
-        await f.auth.regionAccess.unlock('1234');
-        await f.auth.sources.move(f.bId, AccessRegion.private);
+        await f.protect(f.bId);
       });
       chooser.complete(output.path);
       await _settle(tester);
@@ -660,7 +659,7 @@ void main() {
         isolateImageCache();
         final f = _Fixture();
         await tester.runAsync(f.open);
-        addTearDown(f.close);
+        addTearDown(() => _drive(tester, f.close()));
         final backup = FakeEmbyServer(
           serverId: 'a',
           serverName: '备用线路',
@@ -672,9 +671,7 @@ void main() {
         late SourceSession session;
         await tester.runAsync(() async {
           await f.auth.addLine(f.aId, backup.baseUrl.toString());
-          saved = f.auth.sources
-              .project(AccessRegion.ordinary)
-              .firstWhere((s) => s.id == f.aId);
+          saved = f.auth.sources.project().firstWhere((s) => s.id == f.aId);
           await f.auth.sources.renameLine(f.aId, saved.lines.last.id, '备用线路');
           session = await f.auth.sources.authenticate(f.aId);
         });
@@ -705,69 +702,32 @@ void main() {
           );
         }
         await _settle(tester);
-        final management = find.byKey(
-          const Key('aggregation-source-management'),
-        );
-        if (environment.isTv) {
-          expect(management, findsNothing);
-          showSourceManagement(tester.element(find.byType(AggregationPage)));
-        } else {
-          await tester.tap(management);
-        }
+        app.router.go('/servers');
         await _settle(tester);
-        expect(find.byType(SourceManagement), findsOneWidget);
-        final check = find.byKey(
-          Key('source-line-check-${f.aId}-${saved.lines.last.id}'),
-        );
-        await tester.scrollUntilVisible(
-          check,
-          120,
-          scrollable: find
-              .descendant(
-                of: find.byType(SourceManagement),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        );
-        await _settle(tester);
-        if (environment.isTv) {
-          final focus = find
-              .descendant(
-                of: check,
-                matching: find.byWidgetPredicate(
-                  (widget) => widget is Focus && widget.canRequestFocus,
-                ),
-              )
-              .first;
-          Focus.of(
-            tester.element(
-              find
-                  .descendant(of: focus, matching: find.byType(Semantics))
-                  .first,
-            ),
-          ).requestFocus();
-          await tester.pump();
-          await tester.sendKeyEvent(LogicalKeyboardKey.select);
-        } else {
-          await tester.tap(check);
-        }
-        await _settle(tester);
-        final updated = f.auth.sources
-            .project(AccessRegion.ordinary)
-            .firstWhere((s) => s.id == f.aId);
-        expect(updated.lines.last.checkStatus, 'available');
-        expect(updated.lines.last.checkedAt, isNotNull);
-        final tile = find.ancestor(
-          of: check,
-          matching: find.byType(ui.AppListTile),
-        );
         expect(
-          find.descendant(
-            of: tile,
-            matching: find.textContaining('available · '),
+          find.byType(
+            environment.isTv ? TvServerSelectionPage : ServerSelectionPage,
           ),
           findsOneWidget,
         );
+        await tester.tap(find.byKey(Key('server-lines-${f.aId}')));
+        await _settle(tester);
+        if (!environment.isTv) {
+          await tester.tap(
+            find.byKey(Key('server-line-details-${saved.lines.last.id}')),
+          );
+          await _settle(tester);
+        }
+        final check = find.byKey(
+          Key('server-line-check-${saved.lines.last.id}'),
+        );
+        await tester.ensureVisible(check);
+        await tester.tap(check);
+        await _settle(tester);
+        final updated = f.auth.sources.server(f.aId);
+        expect(updated.lines.last.checkStatus, 'available');
+        expect(updated.lines.last.checkedAt, isNotNull);
+        expect(find.textContaining('连接正常'), findsWidgets);
         expect(updated.activeLineId, saved.activeLineId);
         expect(
           f.auth.sources
@@ -790,12 +750,13 @@ void main() {
       tags: ['integration'],
     );
     cases.testWidgets(
-      '${environment.presentation.name} real management opens anonymous PIN gate and cancels without widening scope',
+      '${environment.presentation.name} protected entry cancellation preserves selection and success opens target home',
       (tester) async {
         isolateImageCache();
         final f = _Fixture();
-        await tester.runAsync(() => f.open(configure: false));
-        addTearDown(f.close);
+        await tester.runAsync(f.open);
+        await tester.runAsync(() => f.protect(f.bId));
+        addTearDown(() => _drive(tester, f.close()));
         tester.view.physicalSize = environment.isTv
             ? const Size(1920, 1080)
             : environment.isDesktop
@@ -807,30 +768,49 @@ void main() {
         final app = f.app(environment);
         await tester.pumpWidget(app);
         await _settle(tester);
-        app.router.go('/private');
+        app.router.go('/servers');
         await _settle(tester);
-        await tester.tap(find.text('解锁'));
+        await tester.tap(find.byKey(Key('server-enter-${f.bId}')));
         await _settle(tester);
-        expect(find.byType(PrivateAccessDialog), findsOneWidget);
-        await tester.enterText(find.byKey(const Key('private-pin')), '1234');
-        await tester.enterText(
-          find.byKey(const Key('private-pin-confirm')),
-          '5678',
+        expect(find.byKey(const Key('server-unlock-password')), findsOneWidget);
+        expect(f.auth.serverAccess.allows(f.bId), isFalse);
+        await tester.tap(
+          find.byKey(
+            Key(environment.isTv ? 'tv-server-back' : 'server-flow-back'),
+          ),
         );
-        await tester.tap(find.byKey(const Key('private-unlock')));
         await _settle(tester);
-        expect(find.byKey(const Key('private-pin-error')), findsOneWidget);
-        expect(f.auth.regionAccess.hasPin, isFalse);
-        await tester.tap(find.text('取消'));
-        await _settle(tester);
-        expect(find.byType(PrivateAccessDialog), findsNothing);
+        expect(find.byKey(const Key('server-unlock-password')), findsNothing);
+        expect(f.auth.serverAccess.allows(f.bId), isFalse);
+        expect(f.auth.session!.server.id, f.aId);
         expect(
-          f.auth.sources
-              .project(AccessRegion.ordinary)
-              .every((s) => !s.scopeKnown && s.libraryIds.isEmpty),
-          isTrue,
+          f.auth.sources.project().map((s) => s.id),
+          containsAll([f.aId, f.bId]),
         );
-        expect(f.auth.regionAccess.allows(AccessRegion.private), isFalse);
+        await tester.tap(find.byKey(Key('server-enter-${f.bId}')));
+        await _settle(tester);
+        if (environment.isTv) {
+          await tester.tap(find.byKey(const Key('server-unlock-password')));
+          await _settle(tester);
+          await tester.enterText(
+            find.byKey(const Key('tv-input-editor')),
+            '1234',
+          );
+          await tester.testTextInput.receiveAction(TextInputAction.done);
+          await _settle(tester);
+        } else {
+          await tester.enterText(
+            find.byKey(const Key('server-unlock-password')),
+            '1234',
+          );
+        }
+        await tester.tap(find.byKey(const Key('server-unlock-submit')));
+        await _settle(tester);
+        expect(f.auth.serverAccess.allows(f.bId), isTrue);
+        expect(f.auth.session!.server.id, f.bId);
+        expect(app.router.state.uri.path, '/');
+        expect(find.byType(ServerSelectionPage), findsNothing);
+        expect(find.byType(TvServerSelectionPage), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
         app.router.dispose();
       },
@@ -839,19 +819,14 @@ void main() {
   }
 
   cases.testWidgets(
-    'TV remote actual B detail and controller write seven seconds then migration rejects late observation',
+    'TV remote actual B detail and controller write seven seconds then protection rejects late observation',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(() async {
         await f.open();
-        await f.auth.sources.configureScope(
-          f.aId,
-          participates: false,
-          libraryIds: {'view-movies'},
-        );
       });
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -881,20 +856,17 @@ void main() {
       f.history.addListener(() => notifications++);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
       await _settle(tester);
-      final record = f.history.records(AccessRegion.ordinary).single;
+      final record = f.history.records().single;
       expect(record.source.account.configuredServerId, f.bId);
       expect(record.libraryId, 'view-movies');
       expect(record.positionTicks, 70000000);
       expect(notifications, greaterThan(0));
       expect(f.b.playbackEvents, isNotEmpty);
       expect(f.a.playbackEvents, isEmpty);
-      await tester.runAsync(() async {
-        await f.auth.setPrivatePin('1234', '1234');
-        await f.auth.regionAccess.unlock('1234');
-      });
+      await tester.runAsync(() async {});
       late Future<void> migration;
       await tester.runAsync(() async {
-        migration = f.auth.sources.move(f.bId, AccessRegion.private);
+        migration = f.protect(f.bId);
       });
       await _settle(tester);
       await tester.runAsync(() => migration);
@@ -902,13 +874,25 @@ void main() {
       expect(backend.isPlaying, isFalse);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
       await _settle(tester);
-      expect(f.history.records(AccessRegion.ordinary), isEmpty);
+      expect(f.history.records(), isEmpty);
+      final persisted = await tester.runAsync(f.history.store.read);
+      expect(
+        (persisted!['records'] as List).single['position'],
+        70000000,
+        reason: 'Lock hides history but must retain the committed progress; late frames cannot replace it',
+      );
+      expect(
+        await tester.runAsync(() => f.auth.serverAccess.unlock(f.bId, '1234')),
+        isTrue,
+      );
+      await tester.runAsync(() => f.auth.sources.ensureSession(f.bId));
+      expect(f.history.records().single.positionTicks, 70000000);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
   );
   cases.testWidgets(
-    'phone finds compares switches actual source records then private player menu locks and rejects late frames',
+    'phone manually switches actual source then server lock rejects late frames',
     (tester) async {
       final reportError = FlutterError.onError;
       FlutterError.onError = (details) {
@@ -919,7 +903,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -949,12 +933,7 @@ void main() {
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
       await _settle(tester);
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .single
-            .source
-            .account
-            .configuredServerId,
+        f.history.records().single.source.account.configuredServerId,
         f.bId,
       );
       expect(find.text('手动切换'), findsNothing);
@@ -973,13 +952,11 @@ void main() {
             'confirmation=${c.switchConfirmation} pending=${c.pendingMediaSourceId}',
       );
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .any(
-              (r) =>
-                  r.source.account.configuredServerId == f.aId &&
-                  r.positionTicks == 110000000,
-            ),
+        f.history.records().any(
+          (r) =>
+              r.source.account.configuredServerId == f.aId &&
+              r.positionTicks == 110000000,
+        ),
         isTrue,
       );
       // Changing the selected ordinary account must not retarget playback A.
@@ -989,13 +966,10 @@ void main() {
       expect(backend.isPlaying, isTrue);
       expect(c.activeOrigin!.source.account.configuredServerId, f.aId);
       debugPrint('T7 phone: ordinary selection preserves active A');
-      await tester.runAsync(() async {
-        await f.auth.setPrivatePin('1234', '1234');
-        await f.auth.regionAccess.unlock('1234');
-      });
+      await tester.runAsync(() async {});
       late Future<void> moving;
       await tester.runAsync(() async {
-        moving = f.auth.sources.move(f.aId, AccessRegion.private);
+        moving = f.protect(f.aId);
       });
       await _settle(tester);
       debugPrint('T7 phone: advancing A membership revocation');
@@ -1005,11 +979,14 @@ void main() {
       expect(backend.isPlaying, isFalse);
       expect(find.byType(PlaybackLineMenu), findsNothing);
       debugPrint('T7 phone: entering private A');
-      app.router.go('/private');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('合成作品'));
-      await tester.tap(find.text('合成作品'));
-      await _settle(tester);
+      await tester.runAsync(() => f.auth.serverAccess.unlock(f.aId, '1234'));
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
       await tester.ensureVisible(find.byKey(const Key('mobile-detail-play')));
       await tester.tap(find.byKey(const Key('mobile-detail-play')));
       await _settle(tester);
@@ -1019,20 +996,20 @@ void main() {
       final privatePlayer = tester
           .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
           .controller!;
-      await tester.runAsync(privatePlayer.lockPrivateRegion);
+      await tester.runAsync(privatePlayer.lockCurrentServer);
       debugPrint('T7 phone: lock tap dispatched');
       await _settle(tester);
       debugPrint('T7 phone: lock frame settled');
-      expect(f.auth.regionAccess.allows(AccessRegion.private), isFalse);
+      expect(f.auth.serverAccess.allows(f.aId), isFalse);
       expect(backend.isPlaying, isFalse);
       expect(find.byType(PlaybackLineMenu), findsNothing);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
       await _settle(tester);
       debugPrint('T7 phone: rejected late frame');
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .every((r) => r.source.account.configuredServerId != f.aId),
+        f.history.records().every(
+          (r) => r.source.account.configuredServerId != f.aId,
+        ),
         isTrue,
       );
       expect(tester.takeException(), isNull);
@@ -1040,12 +1017,12 @@ void main() {
     tags: ['integration'],
   );
   cases.testWidgets(
-    'phone B detail play dispatch reaches actual controller and same writer, migration stops late observations',
+    'phone B detail play dispatch reaches actual controller and same writer, protection stops late observations',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       final backend = FakeVideoBackend(duration: const Duration(seconds: 120));
       final app = f.app(PresentationEnvironment.phone, backend: backend);
       addTearDown(() async {
@@ -1080,21 +1057,18 @@ void main() {
       f.history.addListener(() => notifications++);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
       await _settle(tester);
-      final record = f.history.records(AccessRegion.ordinary).single;
+      final record = f.history.records().single;
       expect(record.source.account.configuredServerId, f.bId);
       expect(record.libraryId, 'view-movies');
       expect(record.positionTicks, 7 * 10000000);
       expect(notifications, greaterThan(0));
       expect(f.b.playbackEvents, isNotEmpty);
       expect(f.a.playbackEvents, isEmpty);
-      expect(f.auth.session!.server.id, f.aId);
-      await tester.runAsync(() async {
-        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
-        await f.auth.regionAccess.unlock('1234');
-      });
+      expect(f.auth.session!.server.id, f.bId);
+      await tester.runAsync(() async {});
       late Future<void> migration;
       await tester.runAsync(() async {
-        migration = f.auth.sources.move(f.bId, AccessRegion.private);
+        migration = f.protect(f.bId);
       });
       // Source revocation removes the route; allow its actual controller's
       // retirement/observation queue to run while membership cleanup awaits it.
@@ -1104,7 +1078,19 @@ void main() {
       expect(backend.isPlaying, isFalse);
       backend.emitEvent(VideoEventKind.position, const Duration(seconds: 9));
       await _settle(tester);
-      expect(f.history.records(AccessRegion.ordinary), isEmpty);
+      expect(f.history.records(), isEmpty);
+      final persisted = await tester.runAsync(f.history.store.read);
+      expect(
+        (persisted!['records'] as List).single['position'],
+        70000000,
+        reason: 'Lock hides history but must retain the committed progress; late frames cannot replace it',
+      );
+      expect(
+        await tester.runAsync(() => f.auth.serverAccess.unlock(f.bId, '1234')),
+        isTrue,
+      );
+      await tester.runAsync(() => f.auth.sources.ensureSession(f.bId));
+      expect(f.history.records().single.positionTicks, 70000000);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],
@@ -1115,7 +1101,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.a.items.add(
         FakeEmbyItem(
           id: 'zero-next',
@@ -1175,7 +1161,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.a.items.first.backdropImageTags = ['a-one', 'a-two'];
       f.b.items.first.backdropImageTags = ['b-one', 'b-two'];
       f.a.itemImageBytes = await tester.runAsync(
@@ -1286,13 +1272,7 @@ void main() {
         f.a.requests.where((r) => r.contains('/Images/Backdrop')).length,
         beforeA,
       );
-      await tester.runAsync(
-        () => f.auth.regionAccess.setPin('1234', '1234', (_) async {}),
-      );
-      await tester.runAsync(() => f.auth.regionAccess.unlock('1234'));
-      await tester.runAsync(
-        () => f.auth.sources.move(f.bId, AccessRegion.private),
-      );
+      await tester.runAsync(() => f.protect(f.bId));
       f.b.holdItemImage!.complete();
       await _settle(tester);
       expect(find.byType(ui.AppModalFrame), findsNothing);
@@ -1316,7 +1296,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -1357,8 +1337,8 @@ void main() {
       expect(find.byType(ui.AppChoiceChip), findsNothing);
       await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
       await _settle(tester);
-      expect(find.text('来源 A'), findsOneWidget);
-      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.text('来源 A'), findsWidgets);
+      expect(find.text('来源 B'), findsWidgets);
       expect(find.byType(ItemDetailPage), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -1372,7 +1352,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -1395,8 +1375,8 @@ void main() {
       await tester.enterText(input, '合成');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
-      expect(find.text('来源 A'), findsOneWidget);
-      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.text('来源 A'), findsWidgets);
+      expect(find.text('来源 B'), findsWidgets);
       expect(find.byType(ui.AppChoiceChip), findsNothing);
       expect(find.text('媒体库范围'), findsNothing);
       await tester.ensureVisible(find.text('合成作品').last);
@@ -1405,7 +1385,7 @@ void main() {
       await _settle(tester);
       expect(input, findsNothing);
       expect(find.byType(ItemDetailPage), findsOneWidget);
-      expect(f.auth.session!.server.id, f.aId);
+      expect(f.auth.session!.server.id, f.bId);
       app.router.pop();
       await _settle(tester);
       expect(find.text('继续播放'), findsWidgets);
@@ -1422,7 +1402,6 @@ void main() {
     addTearDown(f.close);
     final account = await f.auth.sources.acquireAccount(
       f.bId,
-      region: AccessRegion.ordinary,
       libraryId: 'view-movies',
     );
     final source = SourceReference(
@@ -1449,7 +1428,7 @@ void main() {
       throwsStateError,
     );
     expect(notifications, 0);
-    expect(f.history.records(AccessRegion.ordinary), isEmpty);
+    expect(f.history.records(), isEmpty);
     store.fail = false;
     expect(
       await f.history.observe(
@@ -1487,7 +1466,7 @@ void main() {
         ),
         isNull,
       );
-      expect(f.history.records(AccessRegion.ordinary).single.eventSequence, 2);
+      expect(f.history.records().single.eventSequence, 2);
       expect(notifications, 2);
     } finally {
       FlutterError.onError = previous;
@@ -1501,7 +1480,6 @@ void main() {
     addTearDown(f.close);
     final account = await f.auth.sources.acquireAccount(
       f.bId,
-      region: AccessRegion.ordinary,
       libraryId: 'view-movies',
     );
     final source = SourceReference(
@@ -1554,7 +1532,7 @@ void main() {
         isolateImageCache();
         final f = _Fixture();
         await tester.runAsync(f.open);
-        addTearDown(f.close);
+        addTearDown(() => _drive(tester, f.close()));
         f.b.viewsStatus = 503;
         tester.view.physicalSize = environment.isTv
             ? const Size(1920, 1080)
@@ -1584,14 +1562,14 @@ void main() {
         expect(find.text('继续播放'), findsWidgets);
         expect(find.text('收藏'), findsWidgets);
         expect(find.text('媒体库'), findsWidgets);
-        // 新聚合页头部恢复管理/私密入口;TV 走独立焦点路径,不渲染这两个键。
+        // 聚合保留服务器入口，旧私密区域入口已删除。
         expect(
           find.byKey(const Key('aggregation-source-management')),
           environment.isTv ? findsNothing : findsOneWidget,
         );
         expect(
           find.byKey(const Key('aggregation-private-entry')),
-          environment.isTv ? findsNothing : findsOneWidget,
+          findsNothing,
         );
         expect(find.text('查找同源'), findsNothing);
         expect(find.text('媒体库范围'), findsNothing);
@@ -1600,8 +1578,8 @@ void main() {
           find.byKey(const Key('aggregation-segment-libraries')),
         );
         await _settle(tester);
-        expect(find.text('来源 A'), findsOneWidget);
-        expect(find.text('来源 B'), findsOneWidget);
+        expect(find.text('来源 A'), findsWidgets);
+        expect(find.text('来源 B'), findsWidgets);
         expect(find.text('电影'), findsWidgets);
         final libraryImage = tester.widget<MediaImage>(
           find.byType(MediaImage).first,
@@ -1657,10 +1635,9 @@ void main() {
         f.b.viewsStatus = null;
         await tester.tap(find.text('重试'));
         await _settle(tester);
-        expect(find.text('来源 A'), findsOneWidget);
-        expect(find.text('来源 B'), findsOneWidget);
+        expect(find.text('来源 A'), findsWidgets);
+        expect(find.text('来源 B'), findsWidgets);
         expect(find.text('重试'), findsNothing);
-        final selected = f.auth.session!.server.id;
         await tester.tap(
           find.descendant(
             of: find.byKey(ValueKey('aggregation-server-${f.bId}')),
@@ -1668,8 +1645,18 @@ void main() {
           ),
         );
         await _settle(tester);
-        expect(find.byType(ServerLibraryPage), findsOneWidget);
-        expect(f.auth.session!.server.id, selected);
+        expect(
+          find.byType(
+            environment.isDesktop
+                ? LibraryPage
+                : environment.isTv
+                ? TvLibraryPage
+                : MobileLibraryPage,
+          ),
+          findsOneWidget,
+        );
+        expect(app.router.state.uri.path, '/library/view-movies');
+        expect(f.auth.session!.server.id, f.bId);
         expect(find.text('合成作品'), findsWidgets);
         app.router.go('/library/view-movies');
         await _settle(tester);
@@ -1683,17 +1670,16 @@ void main() {
   }
 
   cases.testWidgets(
-    'continue watching dispatches the T3 recorded B version and timeline without changing selected A',
+    'continue watching opens the recorded B version and timeline on server B',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       late SourceReference source;
       await tester.runAsync(() async {
         final account = await f.auth.sources.acquireAccount(
           f.bId,
-          region: AccessRegion.ordinary,
           libraryId: 'view-movies',
         );
         source = SourceReference(
@@ -1729,8 +1715,8 @@ void main() {
       await _settle(tester);
       app.router.go('/aggregation');
       await _settle(tester);
-      expect(find.text('来源 A'), findsOneWidget);
-      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.text('来源 A'), findsWidgets);
+      expect(find.text('来源 B'), findsWidgets);
       expect(
         tester
             .widgetList<PosterCard>(find.byType(PosterCard))
@@ -1761,7 +1747,7 @@ void main() {
         f.bId,
       );
       expect(host.current, isNull);
-      expect(f.auth.session!.server.id, f.aId);
+      expect(f.auth.session!.server.id, f.bId);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
       host.dispose();
@@ -1775,7 +1761,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.a.items.first.playbackPosition = Duration(
         microseconds: 150000000 ~/ 10,
       );
@@ -1813,8 +1799,123 @@ void main() {
             .configuredServerId,
         f.bId,
       );
-      expect(f.auth.session!.server.id, f.aId);
+      expect(f.auth.session!.server.id, f.bId);
       await tester.pumpWidget(const SizedBox.shrink());
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'same server route updates its library and cross-server route uses the new source',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      f.b.items.add(
+        FakeEmbyItem(
+          id: 'b-series',
+          name: '乙服剧集',
+          type: 'Series',
+          parentId: 'view-tv',
+        ),
+      );
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go(
+        '/server/${Uri.encodeComponent(f.bId)}/library/view-movies',
+      );
+      await _settle(tester);
+      expect(
+        tester.widget<ShelfGridPage>(find.byType(ShelfGridPage)).parentId,
+        'view-movies',
+      );
+      app.router.go('/server/${Uri.encodeComponent(f.bId)}/library/view-tv');
+      await _settle(tester);
+      expect(
+        tester.widget<ShelfGridPage>(find.byType(ShelfGridPage)).parentId,
+        'view-tv',
+      );
+      expect(find.text('乙服剧集'), findsOneWidget);
+      expect(f.auth.session!.server.id, f.bId);
+      app.router.go(
+        '/server/${Uri.encodeComponent(f.aId)}/library/view-movies',
+      );
+      await _settle(tester);
+      final grid = find.byType(ShelfGridPage);
+      expect(tester.widget<ShelfGridPage>(grid).parentId, 'view-movies');
+      expect(
+        DetailSourceScope.maybeOf(tester.element(grid))!
+            .source
+            .account
+            .configuredServerId,
+        f.aId,
+      );
+      expect(find.text('乙服剧集'), findsNothing);
+      expect(f.auth.session!.server.id, f.aId);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _settle(tester);
+      app.router.dispose();
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets(
+    'aggregation favorites more opens that server favorites and same route can return to resume',
+    (tester) async {
+      isolateImageCache();
+      final f = _Fixture();
+      f.a.items.first.favorite = true;
+      f.b.items.first.favorite = true;
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = f.app(PresentationEnvironment.desktop);
+      await tester.pumpWidget(app);
+      await _settle(tester);
+      app.router.go('/aggregation');
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('aggregation-segment-favorites')));
+      await _settle(tester);
+      final row = find.byKey(ValueKey('aggregation-server-${f.bId}'));
+      final more = find.descendant(of: row, matching: find.text('更多'));
+      await Scrollable.ensureVisible(tester.element(more), alignment: .5);
+      await _settle(tester);
+      final beforeB = f.b.requests.length;
+      await tester.tap(more);
+      await _settle(tester);
+      expect(app.router.state.uri.queryParameters['section'], 'favorites');
+      final grid = find.byType(ShelfGridPage);
+      expect(tester.widget<ShelfGridPage>(grid).source, 'favorites');
+      expect(
+        DetailSourceScope.maybeOf(tester.element(grid))!
+            .source
+            .account
+            .configuredServerId,
+        f.bId,
+      );
+      expect(
+        f.b.requests
+            .skip(beforeB)
+            .any((request) => request.contains('IsFavorite')),
+        isTrue,
+      );
+      expect(f.auth.session!.server.id, f.bId);
+      app.router.go('/server/${Uri.encodeComponent(f.bId)}/resume');
+      await _settle(tester);
+      expect(
+        tester.widget<ShelfGridPage>(find.byType(ShelfGridPage)).source,
+        'resume',
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _settle(tester);
       app.router.dispose();
     },
     tags: ['integration'],
@@ -1826,7 +1927,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -1850,12 +1951,12 @@ void main() {
     PresentationEnvironment.tv,
   ]) {
     cases.testWidgets(
-      'ordinary catalog and playback ignore aggregation scope ${environment.presentation.name}',
+      'catalog and playback are available without participation setup ${environment.presentation.name}',
       (tester) async {
         isolateImageCache();
         final f = _Fixture();
-        await tester.runAsync(() => f.open(configure: false));
-        addTearDown(f.close);
+        await tester.runAsync(f.open);
+        addTearDown(() => _drive(tester, f.close()));
         tester.view.physicalSize = environment.isDesktop || environment.isTv
             ? const Size(1440, 900)
             : const Size(412, 915);
@@ -1906,9 +2007,9 @@ void main() {
           expect(backend.isPlaying, isTrue);
         }
         expect(
-          f.auth.sources
-              .project(AccessRegion.ordinary)
-              .every((s) => !s.scopeKnown),
+          f.auth.sources.project().every(
+            (s) => f.auth.serverAccess.allows(s.id),
+          ),
           isTrue,
         );
         expect(tester.takeException(), isNull);
@@ -1929,8 +2030,8 @@ void main() {
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
-      await tester.runAsync(() => f.open(configure: false));
-      addTearDown(f.close);
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -1944,9 +2045,7 @@ void main() {
         isNotEmpty,
       );
       expect(
-        f.auth.sources
-            .project(AccessRegion.ordinary)
-            .every((s) => !s.scopeKnown),
+        f.auth.sources.project().every((s) => f.auth.serverAccess.allows(s.id)),
         isTrue,
       );
       await tester.pumpWidget(const SizedBox.shrink());
@@ -1961,7 +2060,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.b.items.first.overview = 'B实际来源正文';
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
@@ -1978,7 +2077,8 @@ void main() {
         tester.element(find.byType(ItemDetailPage)),
       );
       expect(origin!.source.account.configuredServerId, f.bId);
-      expect(f.auth.session!.server.id, f.aId);
+      expect(f.auth.session!.server.id, f.bId);
+      await tester.runAsync(() => f.auth.switchTo(f.aId));
       app.router.go('/item/shared-id');
       await _settle(tester);
       expect(
@@ -1998,7 +2098,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.b.items = [
         FakeEmbyItem(
           id: 'candidate',
@@ -2037,7 +2137,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.a.items = [
         _Series(),
         FakeEmbyItem(
@@ -2051,24 +2151,11 @@ void main() {
         ),
       ];
       f.b.items = [_Series()];
-      await tester.runAsync(() async {
-        for (final id in [f.aId, f.bId]) {
-          await f.auth.sources.configureScope(
-            id,
-            participates: true,
-            libraryIds: {'view-tv'},
-          );
-        }
-      });
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
       final account = await tester.runAsync(
-        () => f.auth.sources.acquireAccount(
-          f.aId,
-          region: AccessRegion.ordinary,
-          libraryId: 'view-tv',
-        ),
+        () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
       );
       app.router.go(
         '/item/episode',
@@ -2076,9 +2163,9 @@ void main() {
           itemId: 'episode',
           source: SourceReference(account: account!, itemId: 'episode'),
           libraryId: 'view-tv',
-          regionGeneration: f.auth.sources
+          accessGeneration: f.auth.sources
               .permit(account, libraryId: 'view-tv')
-              .regionGeneration,
+              .accessGeneration,
         ),
       );
       await _settle(tester);
@@ -2097,40 +2184,83 @@ void main() {
   );
 
   cases.testWidgets(
-    'private route lock removes page semantics and unlocked private is excluded from ordinary sources',
+    'protected server keeps its aggregation row while lock removes its content and image access',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
-      await tester.runAsync(() async {
-        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
-        await f.auth.regionAccess.unlock('1234');
-        await f.auth.sources.rename(f.bId, '私密来源名');
-        await f.auth.sources.move(f.bId, AccessRegion.private);
-      });
+      addTearDown(() => _drive(tester, f.close()));
+      await tester.runAsync(() => f.protect(f.bId, unlock: true));
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/private');
-      await _settle(tester);
-      expect(find.text('私密来源名'), findsOneWidget);
-      final imagePolicy = DetailSourceScope.imagePolicyOf(
-        tester.element(find.byType(MediaImage).first),
-      )!;
-      expect(imagePolicy.allowsDisk, isFalse);
-      expect(imagePolicy.permit.account.configuredServerId, f.bId);
-      expect(imagePolicy.isValid, isTrue);
-      await tester.runAsync(() => f.auth.regionAccess.lock());
-      await _settle(tester);
-      expect(find.byType(AggregationPage), findsNothing);
-      expect(imagePolicy.isValid, isFalse);
-      expect(find.text('私密来源名'), findsNothing);
-      expect(find.textContaining('私密区域已锁定'), findsOneWidget);
       app.router.go('/aggregation');
       await _settle(tester);
-      expect(find.text('私密来源名'), findsNothing);
-      expect(find.byKey(ValueKey('aggregation-source-${f.bId}')), findsNothing);
+      await tester.tap(find.byKey(const Key('aggregation-segment-libraries')));
+      await _settle(tester);
+      final row = find.byKey(ValueKey('aggregation-server-${f.bId}'));
+      expect(row, findsOneWidget);
+      final image = find
+          .descendant(of: row, matching: find.byType(MediaImage))
+          .first;
+      final policy = DetailSourceScope.imagePolicyOf(tester.element(image))!;
+      expect(policy.allowsDisk, isTrue);
+      expect(policy.permit.account.configuredServerId, f.bId);
+      expect(policy.isValid, isTrue);
+      await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
+      await _settle(tester);
+      expect(find.byType(AggregationPage), findsOneWidget);
+      expect(row, findsOneWidget);
+      expect(
+        find.descendant(of: row, matching: find.text('来源 B')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text('已锁定')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.byType(MediaImage)),
+        findsNothing,
+      );
+      expect(policy.isValid, isFalse);
+      expect(
+        find.byKey(ValueKey('aggregation-server-${f.aId}')),
+        findsOneWidget,
+      );
+      expect(f.auth.session!.server.id, f.aId);
+      final requestsWhileLocked = f.b.requests.length;
+      await _settle(tester);
+      expect(
+        f.b.requests.length,
+        requestsWhileLocked,
+        reason: 'A locked aggregation row must not fetch content or images',
+      );
+      await tester.tap(find.descendant(of: row, matching: find.text('进入服务器')));
+      await _settle(tester);
+      expect(find.byKey(const Key('server-unlock-password')), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('server-unlock-password')),
+        '1234',
+      );
+      await tester.tap(find.byKey(const Key('server-unlock-submit')));
+      await _settle(tester);
+      expect(f.auth.session!.server.id, f.bId);
+      expect(f.auth.serverAccess.allows(f.bId), isTrue);
+      expect(
+        find.descendant(of: row, matching: find.byType(MediaImage)),
+        findsWidgets,
+      );
+      app.router.go('/library/view-movies');
+      await _settle(tester);
+      expect(find.byType(LibraryPage), findsOneWidget);
+      app.router.go('/aggregation');
+      await _settle(tester);
+      expect(f.auth.serverAccess.allows(f.bId), isTrue);
+      expect(find.byKey(const Key('server-unlock-password')), findsNothing);
+      await tester.runAsync(() => f.auth.switchTo(f.aId));
+      await _settle(tester);
+      expect(f.auth.serverAccess.allows(f.bId), isFalse);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
     },
@@ -2138,34 +2268,33 @@ void main() {
   );
 
   cases.testWidgets(
-    'lock clears a private detail and comparison overlay plus deep route extras/history',
+    'lock clears a protected detail and comparison overlay plus deep route extras/history',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       await tester.runAsync(() async {
-        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
-        await f.auth.regionAccess.unlock('1234');
         await f.auth.sources.rename(f.bId, '私密来源名');
-        await f.auth.sources.move(f.bId, AccessRegion.private);
+        await f.protect(f.bId, unlock: true);
       });
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/private');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('合成作品'));
-      await tester.pump();
-      await tester.tap(find.text('合成作品'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       await tester.tap(find.widgetWithText(ui.AppButton, '查找同源'));
       await _settle(tester);
       expect(find.byType(ui.AppDialog), findsOneWidget);
-      await tester.runAsync(() => f.auth.regionAccess.lock());
+      await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
       await _settle(tester);
       expect(find.byType(ui.AppDialog), findsNothing);
-      expect(find.textContaining('私密来源名'), findsNothing);
+      expect(find.byType(ItemDetailPage), findsNothing);
       expect(
         app.router.routeInformationProvider.value.uri.path,
         '/aggregation',
@@ -2184,9 +2313,9 @@ void main() {
         app.router.routeInformationProvider.value.uri.path,
         '/aggregation',
       );
-      await tester.runAsync(() => f.auth.regionAccess.unlock('1234'));
+      await tester.runAsync(() => f.auth.serverAccess.unlock(f.bId, '1234'));
       await _settle(tester);
-      expect(find.textContaining('私密来源名'), findsNothing);
+      expect(find.byType(ItemDetailPage), findsNothing);
       expect(find.byType(ItemDetailPage), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -2199,7 +2328,7 @@ void main() {
     PresentationEnvironment.tv,
   ]) {
     cases.testWidgets(
-      '${environment.presentation.name} actual private menu locks during stalled preflight and rejects late receipt',
+      '${environment.presentation.name} server lock during stalled preflight and rejects late receipt',
       (tester) async {
         isolateImageCache();
         final f = _Fixture();
@@ -2213,9 +2342,7 @@ void main() {
           if (!adapter.gate.isCompleted) adapter.gate.complete();
         });
         await tester.runAsync(() async {
-          await f.auth.setPrivatePin('1234', '1234');
-          await f.auth.regionAccess.unlock('1234');
-          await f.auth.sources.move(f.bId, AccessRegion.private);
+          await f.protect(f.bId, unlock: true);
         });
         tester.view.physicalSize = environment.isTv
             ? const Size(1920, 1080)
@@ -2224,11 +2351,7 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final b = (await tester.runAsync(
-          () => f.auth.sources.acquireAccount(
-            f.bId,
-            region: AccessRegion.private,
-            libraryId: 'view-movies',
-          ),
+          () => f.auth.sources.acquireAccount(f.bId, libraryId: 'view-movies'),
         ))!;
         final backend = FakeVideoBackend(
           duration: const Duration(seconds: 120),
@@ -2248,7 +2371,7 @@ void main() {
               itemId: 'shared-id',
               source: SourceReference(account: b, itemId: 'shared-id'),
               libraryId: 'view-movies',
-              regionGeneration: f.auth.sources.permit(b).regionGeneration,
+              accessGeneration: f.auth.sources.permit(b).accessGeneration,
             ),
           ),
         );
@@ -2256,12 +2379,7 @@ void main() {
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 7));
         await _settle(tester);
         expect(
-          f.history
-              .records(AccessRegion.private)
-              .single
-              .source
-              .account
-              .configuredServerId,
+          f.history.records().single.source.account.configuredServerId,
           f.bId,
         );
         expect(find.byKey(const Key('player-playback-lines')), findsNothing);
@@ -2285,10 +2403,10 @@ void main() {
         }
         expect(adapter.entered, isTrue);
         expect(adapter.gate.isCompleted, isFalse);
-        unawaited(c.lockPrivateRegion());
+        unawaited(c.lockCurrentServer());
         for (
           var frame = 0;
-          frame < 100 && f.auth.regionAccess.state != PrivateAccessState.locked;
+          frame < 100 && f.auth.serverAccess.allows(f.bId);
           frame++
         ) {
           await tester.pump(const Duration(milliseconds: 100));
@@ -2296,7 +2414,7 @@ void main() {
             () => Future<void>.delayed(const Duration(milliseconds: 10)),
           );
         }
-        expect(f.auth.regionAccess.state, PrivateAccessState.locked);
+        expect(f.auth.serverAccess.allows(f.bId), isFalse);
         expect(
           adapter.gate.isCompleted,
           isFalse,
@@ -2312,8 +2430,8 @@ void main() {
         await _settle(tester);
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
         await _settle(tester);
-        expect(f.history.records(AccessRegion.private), isEmpty);
-        expect(find.textContaining('来源 B'), findsNothing);
+        expect(f.history.records(), isEmpty);
+        expect(find.byType(DetailSourceScope), findsNothing);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
         await _settle(tester);
@@ -2375,15 +2493,6 @@ void main() {
         ]);
         await tester.runAsync(f.open);
         addTearDown(() async => _finishRevocation(tester, f.close()));
-        await tester.runAsync(() async {
-          for (final id in [f.aId, f.bId]) {
-            await f.auth.sources.configureScope(
-              id,
-              participates: true,
-              libraryIds: {'view-tv'},
-            );
-          }
-        });
         tester.view.physicalSize = environment.isTv
             ? const Size(1920, 1080)
             : const Size(412, 900);
@@ -2391,11 +2500,7 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final a = (await tester.runAsync(
-          () => f.auth.sources.acquireAccount(
-            f.aId,
-            region: AccessRegion.ordinary,
-            libraryId: 'view-tv',
-          ),
+          () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-tv'),
         ))!;
         final backend = FakeVideoBackend(
           duration: const Duration(seconds: 120),
@@ -2415,7 +2520,7 @@ void main() {
               itemId: 'episode-a-2',
               source: SourceReference(account: a, itemId: 'episode-a-2'),
               libraryId: 'view-tv',
-              regionGeneration: f.auth.sources.permit(a).regionGeneration,
+              accessGeneration: f.auth.sources.permit(a).accessGeneration,
             ),
           ),
         );
@@ -2436,15 +2541,13 @@ void main() {
         expect(c.origin!.source.itemId, 'episode-b-2');
         expect(c.origin!.source.account.configuredServerId, f.bId);
         expect(
-          f.history
-              .records(AccessRegion.ordinary)
-              .every((r) => r.source.itemId != 'episode-b-2'),
+          f.history.records().every((r) => r.source.itemId != 'episode-b-2'),
           isTrue,
         );
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 11));
         await _settle(tester);
         expect(c.activeMediaSourceId, 'episode-b-2');
-        final receipt = f.history.records(AccessRegion.ordinary).first;
+        final receipt = f.history.records().first;
         expect(receipt.source.itemId, 'episode-b-2');
         expect(receipt.source.mediaSourceId, 'episode-b-2');
         expect(receipt.source.account.configuredServerId, f.bId);
@@ -2473,8 +2576,6 @@ void main() {
         final f = _Fixture();
         await tester.runAsync(f.open);
         await tester.runAsync(() async {
-          await f.auth.setPrivatePin('1234', '1234');
-          await f.auth.regionAccess.unlock('1234');
           await f.auth.switchTo(f.bId);
         });
         tester.view.physicalSize = environment.isTv
@@ -2484,18 +2585,10 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         final a = (await tester.runAsync(
-          () => f.auth.sources.acquireAccount(
-            f.aId,
-            region: AccessRegion.ordinary,
-            libraryId: 'view-movies',
-          ),
+          () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-movies'),
         ))!;
         final b = (await tester.runAsync(
-          () => f.auth.sources.acquireAccount(
-            f.bId,
-            region: AccessRegion.ordinary,
-            libraryId: 'view-movies',
-          ),
+          () => f.auth.sources.acquireAccount(f.bId, libraryId: 'view-movies'),
         ))!;
         final backend = FakeVideoBackend(
           duration: const Duration(seconds: 120),
@@ -2528,7 +2621,7 @@ void main() {
               itemId: 'shared-id',
               source: SourceReference(account: b, itemId: 'shared-id'),
               libraryId: 'view-movies',
-              regionGeneration: f.auth.sources.permit(b).regionGeneration,
+              accessGeneration: f.auth.sources.permit(b).accessGeneration,
             ),
           ),
         );
@@ -2540,7 +2633,7 @@ void main() {
               itemId: 'shared-id',
               source: SourceReference(account: a, itemId: 'shared-id'),
               libraryId: 'view-movies',
-              regionGeneration: f.auth.sources.permit(a).regionGeneration,
+              accessGeneration: f.auth.sources.permit(a).accessGeneration,
             ),
           ),
         );
@@ -2549,24 +2642,19 @@ void main() {
         await _settle(tester);
         expect(backend.isPlaying, isTrue);
         expect(
-          f.history
-              .records(AccessRegion.ordinary)
-              .single
-              .source
-              .account
-              .configuredServerId,
+          f.history.records().single.source.account.configuredServerId,
           f.aId,
         );
         late Future<void> moving;
         await tester.runAsync(() async {
-          moving = f.auth.sources.move(f.bId, AccessRegion.private);
+          moving = f.protect(f.bId);
         });
         await _finishRevocation(tester, moving);
         await _settle(tester);
         expect(
           f.auth.isLoggedIn,
-          isFalse,
-          reason: 'Selected B was revoked, not actual A',
+          isTrue,
+          reason: 'Entering playback selected A; revoking covered B must preserve A',
         );
         expect(app.router.state.uri.path, '/play/shared-id');
         expect(backend.isPlaying, isTrue);
@@ -2576,7 +2664,7 @@ void main() {
         );
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 11));
         await _settle(tester);
-        final record = f.history.records(AccessRegion.ordinary).single;
+        final record = f.history.records().single;
         expect(record.source.account.configuredServerId, f.aId);
         expect(record.positionTicks, 110000000);
         expect(
@@ -2590,19 +2678,17 @@ void main() {
         // The selected-auth exception must not authorize revoked actual A.
         late Future<void> revokingA;
         await tester.runAsync(() async {
-          revokingA = f.auth.sources.configureScope(
-            f.aId,
-            participates: false,
-            libraryIds: {'view-movies'},
-          );
+          revokingA = f.protect(f.aId);
         });
         await _finishRevocation(tester, revokingA);
         await _settle(tester);
         expect(backend.isPlaying, isFalse);
-        expect(app.router.state.uri.path, '/connect');
+        expect(app.router.state.uri.path.startsWith('/play/'), isFalse);
+        expect(find.byType(MobilePlayerPage), findsNothing);
+        expect(find.byType(TvPlayerPage), findsNothing);
         backend.emitEvent(VideoEventKind.position, const Duration(seconds: 29));
         await _settle(tester);
-        expect(f.history.records(AccessRegion.ordinary), isEmpty);
+        expect(f.history.records(), isEmpty);
         expect(tester.takeException(), isNull);
       },
       tags: ['integration'],
@@ -2615,7 +2701,7 @@ void main() {
     PresentationEnvironment.tv,
   ]) {
     cases.testWidgets(
-      '${environment.presentation.name} decoded private extras cannot revive after lock unlock or forged account restore',
+      '${environment.presentation.name} decoded protected extras cannot revive after lock unlock or forged account restore',
       (tester) async {
         isolateImageCache();
         tester.view.physicalSize = environment.isTv
@@ -2628,26 +2714,20 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final f = _Fixture();
         await tester.runAsync(f.open);
-        addTearDown(f.close);
+        addTearDown(() => _drive(tester, f.close()));
         await tester.runAsync(() async {
-          await f.auth.setPrivatePin('1234', '1234');
-          await f.auth.regionAccess.unlock('1234');
           await f.auth.sources.rename(f.bId, '私密不可恢复名');
-          await f.auth.sources.move(f.bId, AccessRegion.private);
+          await f.protect(f.bId, unlock: true);
         });
         final account = (await tester.runAsync(
-          () => f.auth.sources.acquireAccount(
-            f.bId,
-            region: AccessRegion.private,
-            libraryId: 'view-movies',
-          ),
+          () => f.auth.sources.acquireAccount(f.bId, libraryId: 'view-movies'),
         ))!;
         final source = SourceReference(
           account: account,
           itemId: 'shared-id',
           mediaSourceId: 'private-version',
         );
-        final generation = f.auth.sources.permit(account).regionGeneration;
+        final generation = f.auth.sources.permit(account).accessGeneration;
         const codec = SourceRouteExtraCodec();
         Object? restore(Object? extra) =>
             codec.decode(jsonDecode(jsonEncode(codec.encode(extra))));
@@ -2656,7 +2736,7 @@ void main() {
             itemId: 'shared-id',
             source: source.item,
             libraryId: 'view-movies',
-            regionGeneration: generation,
+            accessGeneration: generation,
           ),
         ) as PlayerHostOpenItemCommand;
         final request = restore(
@@ -2664,7 +2744,7 @@ void main() {
             itemId: 'shared-id',
             source: source,
             libraryId: 'view-movies',
-            regionGeneration: generation,
+            accessGeneration: generation,
             mediaSourceId: 'private-version',
             startPosition: Duration(microseconds: 70000000 ~/ 10),
           ),
@@ -2676,12 +2756,12 @@ void main() {
         app.router.go('/item/shared-id', extra: detail);
         await _settle(tester);
         expect(find.byType(SourceDetailGate), findsOneWidget);
-        await tester.runAsync(() => f.auth.regionAccess.lock());
+        await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
         await _settle(tester);
         expect(app.router.canPop(), isFalse);
         expect(app.router.routerDelegate.currentConfiguration.extra, isNull);
-        expect(find.textContaining('私密不可恢复名'), findsNothing);
-        await tester.runAsync(() => f.auth.regionAccess.unlock('1234'));
+        expect(find.byType(ItemDetailPage), findsNothing);
+        await tester.runAsync(() => f.auth.serverAccess.unlock(f.bId, '1234'));
         await _settle(tester);
         final before = f.b.requests.length;
         Object? rejected;
@@ -2701,7 +2781,7 @@ void main() {
         );
         app.router.go('/item/shared-id', extra: detail);
         await _settle(tester);
-        expect(find.byType(SourceDetailGate), findsNothing);
+        expect(find.byType(DetailSourceScope), findsNothing);
         app.router.go('/play/shared-id', extra: request);
         await _settle(tester);
         expect(app.router.state.uri.path.startsWith('/play/'), isFalse);
@@ -2711,7 +2791,6 @@ void main() {
             itemId: 'shared-id',
             source: SourceReference(
               account: SourceAccount(
-                region: AccessRegion.private,
                 configuredServerId: account.configuredServerId,
                 verifiedServerId: 'forged-server',
                 userId: account.userId,
@@ -2719,7 +2798,7 @@ void main() {
               itemId: 'shared-id',
             ),
             libraryId: 'view-movies',
-            regionGeneration: f.auth.regionAccess.generation,
+            accessGeneration: f.auth.serverAccess.generation(f.bId),
           ),
         ) as PlayerOpenRequest;
         app.router.go('/play/shared-id', extra: forged);
@@ -2731,8 +2810,8 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
         await _settle(tester);
-        expect(find.textContaining('私密不可恢复名'), findsNothing);
-        expect(find.byType(SourceDetailGate), findsNothing);
+        expect(find.byType(ItemDetailPage), findsNothing);
+        expect(find.byType(DetailSourceScope), findsNothing);
         expect(backend.openCount, 0);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
@@ -2748,21 +2827,20 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       await tester.runAsync(() async {
-        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
-        await f.auth.regionAccess.unlock('1234');
-        await f.auth.sources.move(f.bId, AccessRegion.private);
+        await f.protect(f.bId, unlock: true);
       });
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
-      app.router.go('/private');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('合成作品'));
-      await tester.pump();
-      await tester.tap(find.text('合成作品'));
-      await _settle(tester);
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.bId,
+        itemId: 'shared-id',
+      );
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(
         DetailSourceScope.maybeOf(tester.element(find.byType(ItemDetailPage)))!
@@ -2772,18 +2850,14 @@ void main() {
         f.bId,
       );
       final account = (await tester.runAsync(
-        () => f.auth.sources.acquireAccount(
-          f.aId,
-          region: AccessRegion.ordinary,
-          libraryId: 'view-movies',
-        ),
+        () => f.auth.sources.acquireAccount(f.aId, libraryId: 'view-movies'),
       ))!;
-      await tester.runAsync(() => f.auth.regionAccess.lock());
+      await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
       final command = PlayerHostOpenItemCommand(
         itemId: 'shared-id',
         source: SourceReference(account: account, itemId: 'shared-id'),
         libraryId: 'view-movies',
-        regionGeneration: f.auth.sources.permit(account).regionGeneration,
+        accessGeneration: f.auth.sources.permit(account).accessGeneration,
       );
       // No frame between revocation and this explicit new navigation.
       app.router.go('/item/shared-id', extra: command);
@@ -2791,7 +2865,13 @@ void main() {
       expect(app.router.state.uri.path, '/item/shared-id');
       expect(
         app.router.routerDelegate.currentConfiguration.extra,
-        same(command),
+        isA<PlayerHostOpenItemCommand>()
+            .having((c) => c.source, 'source', command.source)
+            .having(
+              (c) => c.accessGeneration,
+              'generation',
+              command.accessGeneration,
+            ),
       );
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(
@@ -2809,12 +2889,12 @@ void main() {
   );
 
   cases.testWidgets(
-    'real desktop optional single service search clears old scope and ordinary projection hides unlocked private membership',
+    'desktop search keeps its draft while protected server content is revoked',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       final app = f.app(PresentationEnvironment.desktop);
       await tester.pumpWidget(app);
       await _settle(tester);
@@ -2843,16 +2923,32 @@ void main() {
       );
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await _settle(tester);
-      expect(find.text('来源 A'), findsOneWidget);
-      expect(find.text('来源 B'), findsOneWidget);
+      expect(find.text('来源 A'), findsWidgets);
+      expect(find.text('来源 B'), findsWidgets);
       await tester.runAsync(() async {
-        await f.auth.regionAccess.setPin('1234', '1234', (_) async {});
-        await f.auth.regionAccess.unlock('1234');
         await f.auth.sources.rename(f.bId, '秘密名称地址');
-        await f.auth.sources.move(f.bId, AccessRegion.private);
+        await f.protect(f.bId);
       });
       await _settle(tester);
-      expect(find.textContaining('秘密名称地址'), findsNothing);
+      final lockedRow = find.byKey(ValueKey('aggregation-search-${f.bId}'));
+      expect(
+        find.descendant(of: lockedRow, matching: find.byType(MediaImage)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: lockedRow, matching: find.byType(PosterCard)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('aggregation-search-${f.aId}')),
+          matching: find.byType(PosterCard),
+        ),
+        findsWidgets,
+      );
+      final lockedRequests = f.b.requests.length;
+      await _settle(tester);
+      expect(f.b.requests.length, lockedRequests);
       expect(find.byKey(ValueKey('aggregation-source-${f.bId}')), findsNothing);
       expect(
         tester
@@ -2863,11 +2959,11 @@ void main() {
             .text,
         '合成',
       );
-      expect(find.text('来源 A'), findsOneWidget);
-      expect(find.text('来源 B'), findsNothing);
-      await tester.runAsync(() => f.auth.regionAccess.lock());
+      expect(find.text('来源 A'), findsWidgets);
+      expect(find.byType(ItemDetailPage), findsNothing);
+      await tester.runAsync(() => f.auth.serverAccess.lock(f.bId));
       await _settle(tester);
-      expect(find.text('来源 A'), findsOneWidget);
+      expect(find.text('来源 A'), findsWidgets);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -2881,7 +2977,7 @@ void main() {
     isolateImageCache();
     final f = _Fixture();
     await tester.runAsync(f.open);
-    addTearDown(f.close);
+    addTearDown(() => _drive(tester, f.close()));
     final app = f.app(PresentationEnvironment.desktop);
     await tester.pumpWidget(app);
     await _settle(tester);
@@ -2934,7 +3030,7 @@ void main() {
     await tester.tap(find.byKey(const Key('aggregation-search-filters')));
     await _settle(tester);
     expect(find.byType(ui.AppChoiceChip), findsNothing);
-    expect(find.text('来源 A'), findsOneWidget);
+    expect(find.text('来源 A'), findsWidgets);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     app.router.dispose();
@@ -2946,7 +3042,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       f.a.items.first
         ..playbackPosition = Duration(microseconds: (100) ~/ 10)
         ..primaryImageTag = 'a-poster';
@@ -3053,12 +3149,12 @@ void main() {
   );
 
   cases.testWidgets(
-    'unscoped server detail stays open after auth and region notifications',
+    'server detail stays open after unrelated selection and metadata notifications',
     (tester) async {
       isolateImageCache();
       final f = _Fixture();
-      await tester.runAsync(() => f.open(configure: false));
-      addTearDown(f.close);
+      await tester.runAsync(f.open);
+      addTearDown(() => _drive(tester, f.close()));
       f.b.items.first
         ..playbackPosition = Duration(microseconds: (200) ~/ 10)
         ..primaryImageTag = 'b-poster';
@@ -3118,12 +3214,12 @@ void main() {
       await _settle(tester);
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(app.router.state.uri.path, '/item/shared-id');
-      await tester.runAsync(() => f.auth.setPrivatePin('1234', '1234'));
+      await tester.runAsync(() => f.auth.sources.rename(f.aId, '来源 A 已重命名'));
       await _settle(tester);
       expect(find.byType(ItemDetailPage), findsOneWidget);
       expect(app.router.state.uri.path, '/item/shared-id');
       expect(find.byType(SourceComparisonAction), findsNothing);
-      expect(f.auth.session!.server.id, f.aId);
+      expect(f.auth.session!.server.id, f.bId);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       app.router.dispose();
@@ -3137,7 +3233,7 @@ void main() {
       isolateImageCache();
       final f = _Fixture();
       await tester.runAsync(f.open);
-      addTearDown(f.close);
+      addTearDown(() => _drive(tester, f.close()));
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -3258,7 +3354,7 @@ void main() {
     isolateImageCache();
     final f = _Fixture();
     await tester.runAsync(f.open);
-    addTearDown(f.close);
+    addTearDown(() => _drive(tester, f.close()));
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -3369,7 +3465,7 @@ void desktopProcessMain() {
       await tester.tap(play);
       final positions = <int>[];
       f.history.addListener(() {
-        final records = f.history.records(AccessRegion.ordinary);
+        final records = f.history.records();
         if (records.isNotEmpty) positions.add(records.first.positionTicks);
       });
       for (var i = 0; i < 3800; i++) {
@@ -3385,7 +3481,7 @@ void desktopProcessMain() {
         reason: control.output.toString(),
       );
       expect(positions, contains(70000000), reason: control.output.toString());
-      final record = f.history.records(AccessRegion.ordinary).single;
+      final record = f.history.records().single;
       expect(record.libraryId, 'view-movies');
       final pid = control.activePids.single;
       await tester.runAsync(() async {
@@ -3437,19 +3533,17 @@ void desktopProcessMain() {
         reason: control.output.toString(),
       );
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .any(
-              (r) =>
-                  r.source.account.configuredServerId == f.bId &&
-                  r.positionTicks == 110000000,
-            ),
+        f.history.records().any(
+          (r) =>
+              r.source.account.configuredServerId == f.bId &&
+              r.positionTicks == 110000000,
+        ),
         isTrue,
       );
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .every((r) => r.source.account.configuredServerId != f.aId),
+        f.history.records().every(
+          (r) => r.source.account.configuredServerId != f.aId,
+        ),
         isTrue,
       );
       late Future<void> closingPlayback;
@@ -3463,13 +3557,10 @@ void desktopProcessMain() {
         );
       }
       await tester.runAsync(() => closingPlayback);
-      await tester.runAsync(() async {
-        await f.auth.setPrivatePin('1234', '1234');
-        await f.auth.regionAccess.unlock('1234');
-      });
+      await tester.runAsync(() async {});
       late Future<void> moving;
       await tester.runAsync(() async {
-        moving = f.auth.sources.move(f.aId, AccessRegion.private);
+        moving = f.protect(f.aId);
       });
       for (var i = 0; i < 120; i++) {
         await tester.pump(const Duration(milliseconds: 50));
@@ -3482,18 +3573,20 @@ void desktopProcessMain() {
       expect(host.current, isNull);
       expect(control.activePids, isEmpty);
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .every((r) => r.source.account.configuredServerId != f.aId),
+        f.history.records().every(
+          (r) => r.source.account.configuredServerId != f.aId,
+        ),
         isTrue,
       );
       await tester.runAsync(() => f.auth.switchTo(f.bId));
-      app.router.go('/private');
-      await _settle(tester);
-      await tester.ensureVisible(find.text('合成作品'));
-      await tester.pump();
-      await tester.tap(find.text('合成作品'));
-      await _settle(tester);
+      await tester.runAsync(() => f.auth.serverAccess.unlock(f.aId, '1234'));
+      await _openOwnedDetail(
+        tester,
+        f,
+        app,
+        serverId: f.aId,
+        itemId: 'shared-id',
+      );
       await tester.ensureVisible(find.widgetWithText(ui.AppButton, '播放').first);
       await tester.tap(find.widgetWithText(ui.AppButton, '播放').first);
       // Include the helper's native asset/Flutter compilation budget, then
@@ -3506,13 +3599,14 @@ void desktopProcessMain() {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 30)),
         );
-        if (f.history
-            .records(AccessRegion.private)
-            .any((r) => r.positionTicks == 70000000)) {
+        if (f.history.records().any((r) => r.positionTicks == 70000000)) {
           break;
         }
       }
-      final privateRecords = f.history.records(AccessRegion.private);
+      final privateRecords = f.history
+          .records()
+          .where((r) => r.source.account.configuredServerId == f.aId)
+          .toList();
       expect(privateRecords, isNotEmpty, reason: control.output.toString());
       final privateRecord = privateRecords.first;
       expect(
@@ -3540,7 +3634,7 @@ void desktopProcessMain() {
       final lockSource = encodeSource(privateRecord.source);
       final invalidLocks = <Map<String, dynamic>>[
         {'pid': privatePid + 1},
-        {'generation': f.auth.regionAccess.generation - 1},
+        {'generation': f.auth.serverAccess.generation(f.aId) - 1},
         {'sequence': -1},
         {'action': 'inspect'},
         for (final field in ['server', 'verifiedServer', 'user'])
@@ -3548,7 +3642,7 @@ void desktopProcessMain() {
             'source': {...lockSource, field: 'forged-$field'},
           },
         {
-          'source': {...lockSource, 'region': 'ordinary'},
+          'source': {...lockSource, 'provider': 'plex'},
         },
       ];
       for (var index = 0; index < invalidLocks.length; index++) {
@@ -3557,7 +3651,7 @@ void desktopProcessMain() {
           'pid': privatePid,
           'sequence': 1000 + index,
           'action': 'lock',
-          'generation': f.auth.regionAccess.generation,
+          'generation': f.auth.serverAccess.generation(f.aId),
           'source': lockSource,
           ...invalidLocks[index],
         };
@@ -3582,7 +3676,7 @@ void desktopProcessMain() {
         }
         expect(receipt?['sequence'], command['sequence']);
         expect(receipt?['accepted'], isFalse, reason: 'Invalid lock $index');
-        expect(f.auth.regionAccess.allows(AccessRegion.private), isTrue);
+        expect(f.auth.serverAccess.allows(f.aId), isTrue);
         expect(host.current?.source?.account, privateRecord.source.account);
         expect(blockedAdapter.gate.isCompleted, isFalse);
       }
@@ -3596,14 +3690,14 @@ void desktopProcessMain() {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 30)),
         );
-        if (!f.auth.regionAccess.allows(AccessRegion.private) &&
+        if (!f.auth.serverAccess.allows(f.aId) &&
             host.current == null &&
             control.activePids.isEmpty) {
           break;
         }
       }
       expect(
-        f.auth.regionAccess.allows(AccessRegion.private),
+        f.auth.serverAccess.allows(f.aId),
         isFalse,
         reason: control.output.toString(),
       );
@@ -3616,7 +3710,12 @@ void desktopProcessMain() {
       );
       blockedAdapter.gate.complete();
       await _settle(tester);
-      expect(f.history.records(AccessRegion.private), isEmpty);
+      expect(
+        f.history.records().where(
+          (r) => r.source.account.configuredServerId == f.aId,
+        ),
+        isEmpty,
+      );
       final lateRecord = await tester.runAsync(
         () => f.history.observe(
           session: oldToken,
@@ -3634,9 +3733,9 @@ void desktopProcessMain() {
       await tester.pump(const Duration(seconds: 4));
       await _settle(tester);
       expect(
-        f.history
-            .records(AccessRegion.ordinary)
-            .every((r) => r.source.account.configuredServerId != f.aId),
+        f.history.records().every(
+          (r) => r.source.account.configuredServerId != f.aId,
+        ),
         isTrue,
       );
       expect(tester.takeException(), isNull);

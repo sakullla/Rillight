@@ -125,15 +125,12 @@ class SameSourceQueryController extends ChangeNotifier {
   }
 
   Future<void> start({required QueryItem origin, required QueryScope scope}) {
-    if (origin.reference.account.region != scope.region) {
-      throw ArgumentError('Cross-region comparison rejected');
-    }
     final permit = permitForAccount(
       query.registry,
       origin.reference.account,
       libraryId: origin.libraryId,
     );
-    if (permit == null) throw StateError('Source outside allowed scope');
+    if (permit == null) throw StateError('Source access revoked');
     permit.requireValid();
     // Avoid replacing the origin's session when its service is also selected.
     query.useAccount(origin.reference.account, libraryId: origin.libraryId);
@@ -144,7 +141,6 @@ class SameSourceQueryController extends ChangeNotifier {
     _attempts.clear();
     return query.start(
       QueryScope(
-        region: scope.region,
         serverIds: scope.serverIds,
         libraries: scope.libraries,
         pageSize: scope.pageSize,
@@ -207,7 +203,7 @@ class SameSourceQueryController extends ChangeNotifier {
         target.reference.account,
         libraryId: target.libraryId,
       );
-      if (permit == null) throw StateError('Source outside allowed scope');
+      if (permit == null) throw StateError('Source access revoked');
       while (true) {
         if (!owns()) return;
         final page = await permit

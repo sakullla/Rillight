@@ -5,7 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../../auth/region_access.dart';
+import '../../auth/server_access.dart';
 import '../../auth/source_sessions.dart';
 import '../../player/player_settings.dart';
 import '../identity/media_identity.dart';
@@ -111,13 +111,6 @@ class HistoryWriter implements Listenable {
           (json['legacyConsumed'] as List).cast<String>(),
         );
       }
-      // Restart never resurrects private preferences from an interrupted lock.
-      if (!registry.access.allows(AccessRegion.private)) {
-        await writer._removeWhere(
-          (account) => account.region == AccessRegion.private,
-          records: false,
-        );
-      }
       return writer;
     } catch (_) {
       writer._detach();
@@ -142,6 +135,7 @@ class HistoryWriter implements Listenable {
     int? sessions,
   }) => {
     'version': 1,
+    'sourceIdentityVersion': 2,
     'revision': _revision + 1,
     'order': order ?? _order,
     'sessions': sessions ?? _sessionCounter,
@@ -215,21 +209,7 @@ class HistoryWriter implements Listenable {
         'Actual version, source-specific work and library required',
       );
     }
-    // 未勾选库的显式播放没有范围许可。会话仍有效时照常记这条观看，
-    // 聚合历史列表会按范围把它滤掉。
-    OperationPermit? scoped;
-    try {
-      scoped = registry.permit(source.account, libraryId: libraryId);
-    } on StateError catch (error) {
-      if (error.message != 'Source outside allowed scope') rethrow;
-    }
-    final permit =
-        scoped ??
-        registry.permit(
-          source.account,
-          libraryId: libraryId,
-          sessionOnly: true,
-        );
+    final permit = registry.permit(source.account, libraryId: libraryId);
     permit.requireValid();
     await _commit(sessions: _sessionCounter + 1);
     permit.requireValid();
@@ -332,8 +312,8 @@ class HistoryWriter implements Listenable {
     });
   }
 
-  bool _allows(SourceReference source, String libraryId, AccessRegion region) {
-    if (source.account.region != region || libraryId.isEmpty) return false;
+  bool _allows(SourceReference source, String libraryId) {
+    if (libraryId.isEmpty) return false;
     try {
       return registry.permit(source.account, libraryId: libraryId).isValid;
     } on StateError {
@@ -341,32 +321,29 @@ class HistoryWriter implements Listenable {
     }
   }
 
-  List<WatchRecord> records(AccessRegion region) => List.unmodifiable(
-    _records.values
-        .where((r) => _allows(r.source, r.libraryId, region))
-        .toList()
+  List<WatchRecord> records() => List.unmodifiable(
+    _records.values.where((r) => _allows(r.source, r.libraryId)).toList()
       ..sort((a, b) => b.localOrder.compareTo(a.localOrder)),
   );
 
   ResumeChoice resolveResume({
-    required AccessRegion region,
     required WorkIndex index,
     required SourceReference anchor,
     Iterable<RemoteWatch> remote = const [],
   }) {
-    if (anchor.account.region != region || !registry.access.allows(region)) {
+    if (!registry.access.allows(anchor.account.configuredServerId)) {
       return const ResumeChoice(ResumeKind.empty);
     }
     final group = index.groupFor(anchor);
     if (group == null) return const ResumeChoice(ResumeKind.empty);
-    final local = records(region)
+    final local = records()
         .where((r) => identical(index.groupFor(r.work), group))
         .firstOrNull;
     if (local != null) return ResumeChoice(ResumeKind.local, local: local);
     final candidates = remote
         .where(
           (r) =>
-              _allows(r.source, r.libraryId, region) &&
+              _allows(r.source, r.libraryId) &&
               r.work.account == r.source.account &&
               identical(index.groupFor(r.work), group),
         )
@@ -397,9 +374,6 @@ class HistoryWriter implements Listenable {
     SourcePreference preference, {
     OperationPermit? playbackPermit,
   }) => _enqueue(() async {
-    if (preference.owner.account.region != preference.target.account.region) {
-      throw ArgumentError('Preference cannot cross regions');
-    }
     if (playbackPermit != null &&
         (!registry.accepts(playbackPermit) ||
             playbackPermit.account != preference.owner.account ||
@@ -407,8 +381,7 @@ class HistoryWriter implements Listenable {
             playbackPermit.libraryId != preference.libraryId)) {
       throw StateError('Playback preference permit mismatch');
     }
-    // Explicit playback can use a library excluded from aggregation. Its
-    // existing item/library permit remains the authority for local memory.
+    // Keep the active item's original authority for local playback memory.
     final ownerPermit =
         playbackPermit ?? registry.permit(preference.owner.account);
     final permit =
@@ -421,7 +394,7 @@ class HistoryWriter implements Listenable {
     permit.requireValid();
     if (preference.lineId != null &&
         !registry
-            .project(preference.target.account.region)
+            .project()
             .firstWhere(
               (s) => s.id == preference.target.account.configuredServerId,
             )
@@ -429,12 +402,12 @@ class HistoryWriter implements Listenable {
             .any((l) => l.id == preference.lineId)) {
       throw ArgumentError('Unknown preferred line');
     }
+    final previous = Map<String, SourcePreference>.of(_preferences);
     await _commit(
       preferences: {..._preferences, preference.owner.key: preference},
     );
     if (!ownerPermit.isValid || !permit.isValid) {
-      _preferences.remove(preference.owner.key);
-      _revokedPreferenceKeys.add(preference.owner.key);
+      await _commit(preferences: previous);
       throw StateError('Preference operation revoked');
     }
     _revokedPreferenceKeys.remove(preference.owner.key);
@@ -442,17 +415,15 @@ class HistoryWriter implements Listenable {
   });
 
   PreferenceFailure? _failure(
-    SourcePreference pref,
-    AccessRegion region, {
+    SourcePreference pref, {
     OperationPermit? playbackPermit,
   }) {
-    if (!registry.access.allows(region)) return PreferenceFailure.regionLocked;
-    if (pref.owner.account.region != region ||
-        pref.target.account.region != region) {
-      return PreferenceFailure.wrongRegion;
+    if (!registry.access.allows(pref.owner.account.configuredServerId) ||
+        !registry.access.allows(pref.target.account.configuredServerId)) {
+      return PreferenceFailure.serverLocked;
     }
     final server = registry
-        .project(region)
+        .project()
         .where((s) => s.id == pref.target.account.configuredServerId)
         .firstOrNull;
     if (server == null) return PreferenceFailure.serverRemoved;
@@ -462,22 +433,13 @@ class HistoryWriter implements Listenable {
         playbackPermit.account == pref.owner.account &&
         playbackPermit.account == pref.target.account &&
         playbackPermit.libraryId == pref.libraryId;
-    if (!localPlayback && !server.participates) {
-      return PreferenceFailure.notParticipating;
-    }
-    if (!localPlayback && !server.scopeKnown) {
-      return PreferenceFailure.unknownScope;
-    }
-    if (!localPlayback && !server.libraryIds.contains(pref.libraryId)) {
-      return PreferenceFailure.libraryExcluded;
-    }
     try {
       (localPlayback ? playbackPermit : registry.permit(pref.owner.account))
           .requireValid();
     } on StateError {
       return PreferenceFailure.accountUnavailable;
     }
-    if (!localPlayback && !_allows(pref.target, pref.libraryId, region)) {
+    if (!localPlayback && !_allows(pref.target, pref.libraryId)) {
       return PreferenceFailure.accountUnavailable;
     }
     if (pref.lineId != null && !server.lines.any((l) => l.id == pref.lineId)) {
@@ -492,7 +454,6 @@ class HistoryWriter implements Listenable {
   /// Labels align a version, never the previous episode's mediaSourceId.
   PreferenceResolution resolvePreference({
     required SourceReference owner,
-    required AccessRegion region,
     required Iterable<PreferenceCandidate> candidates,
     bool nextEpisode = false,
     Map<SourceAccount, EpisodeLookup> episodeLookups = const {},
@@ -503,7 +464,6 @@ class HistoryWriter implements Listenable {
         playbackPermit != null &&
         playbackPermit.account == owner.account &&
         playbackPermit.account == candidate.source.account &&
-        playbackPermit.account.region == region &&
         playbackPermit.libraryId == candidate.libraryId;
 
     bool confirmedEpisode(PreferenceCandidate candidate) {
@@ -517,20 +477,18 @@ class HistoryWriter implements Listenable {
         (c) =>
             c.source.mediaSourceId != null &&
             (!nextEpisode || confirmedEpisode(c)) &&
-            (localPlayback(c) || _allows(c.source, c.libraryId, region)),
+            (localPlayback(c) || _allows(c.source, c.libraryId)),
       ),
     );
-    final pref =
-        owner.account.region == region && registry.access.allows(region)
+    final pref = registry.access.allows(owner.account.configuredServerId)
         ? _preferences[owner.key]
         : null;
-    PreferenceFailure? failure = !registry.access.allows(region)
-        ? PreferenceFailure.regionLocked
-        : owner.account.region != region
-        ? PreferenceFailure.wrongRegion
+    PreferenceFailure? failure =
+        !registry.access.allows(owner.account.configuredServerId)
+        ? PreferenceFailure.serverLocked
         : pref == null
         ? PreferenceFailure.notConfigured
-        : _failure(pref, region, playbackPermit: playbackPermit);
+        : _failure(pref, playbackPermit: playbackPermit);
     PreferenceCandidate? selected;
     if (failure == null && pref != null) {
       final matching = allowed
@@ -559,10 +517,38 @@ class HistoryWriter implements Listenable {
   }
 
   /// Exact complete concrete-version references are required for attribution.
+  Future<void> importAttributedPreference(
+    String legacyKey,
+    SourcePreference preference,
+    OperationPermit permit,
+  ) => _enqueue(() async {
+    permit.requireValid();
+    if (_legacyConsumed.contains(legacyKey) ||
+        _preferences.containsKey(preference.owner.key)) {
+      return;
+    }
+    if (permit.account != preference.owner.account ||
+        permit.account != preference.target.account ||
+        preference.target.mediaSourceId == null) {
+      throw StateError('Legacy attribution mismatch');
+    }
+    final previous = Map<String, SourcePreference>.of(_preferences);
+    final consumed = Set<String>.of(_legacyConsumed);
+    await _commit(
+      preferences: {...previous, preference.owner.key: preference},
+      consumed: {...consumed, legacyKey},
+    );
+    if (!permit.isValid) {
+      await _commit(preferences: previous, consumed: consumed);
+      throw StateError('Legacy attribution revoked');
+    }
+  });
+
+  /// Exact complete concrete-version references are required for attribution.
   /// A unique item alone is insufficient: normal resolution needs an exact
   /// target version. Multiple versions remain ambiguous, regardless of labels.
   /// inventoryComplete attests that the importer checked every configured
-  /// account/region (including private); partial queries/locked views are false.
+  /// account (including locked servers); partial queries/locked views are false.
   /// Ambiguous ids remain unapplied. A persisted consumed id prevents an old
   /// PlayerSettings entry from reviving after migration, lock or restart.
   Future<PreferenceFailure?> migrateLegacy({
@@ -601,6 +587,8 @@ class HistoryWriter implements Listenable {
     // Keep the verified version for this item, not for a new episode.
     // Track indices are discarded; nextEpisode resolution only uses explicit
     // language/version labels and a freshly confirmed episode reference.
+    final previous = Map<String, SourcePreference>.of(_preferences);
+    final consumed = Set<String>.of(_legacyConsumed);
     await _commit(
       preferences: {
         ..._preferences,
@@ -609,26 +597,19 @@ class HistoryWriter implements Listenable {
       consumed: {..._legacyConsumed, seriesId},
     );
     if (!permit.isValid) {
-      _preferences.remove(pref.owner.key);
-      _revokedPreferenceKeys.add(pref.owner.key);
+      await _commit(preferences: previous, consumed: consumed);
       throw StateError('Legacy preference operation revoked');
     }
     return null;
   });
 
   void _revokePrivate() {
-    if (_active?.source.account.region == AccessRegion.private) _active = null;
-    for (final pref in _preferences.values) {
-      if (pref.owner.account.region == AccessRegion.private ||
-          pref.target.account.region == AccessRegion.private) {
-        _revokedPreferenceKeys.add(pref.owner.key);
-      }
-    }
-    _preferences.removeWhere((key, _) => _revokedPreferenceKeys.contains(key));
+    if (_active?.permit.isValid == false) _active = null;
+    _notifyCommitted();
   }
 
-  Future<void> _lockCleanup(RestrictedStopPermit _) =>
-      _removeWhere((a) => a.region == AccessRegion.private, records: false);
+  // Locking removes access, never persistent records or preferences.
+  Future<void> _lockCleanup(ServerStopPermit _) async {}
   Future<void> _membershipCleanup(SourceAccount? _, String serverId) {
     if (_active?.source.account.configuredServerId == serverId ||
         _active?.work.account.configuredServerId == serverId) {

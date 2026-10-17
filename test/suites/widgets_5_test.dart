@@ -11,10 +11,6 @@ void main() {
     caseEntrypoints['app/browsing_polish_cases.dart']!,
   );
   group(
-    'auth/change_password_test.dart',
-    caseEntrypoints['auth/change_password_cases.dart']!,
-  );
-  group(
     'home/hero_artwork_test.dart',
     caseEntrypoints['home/hero_artwork_cases.dart']!,
   );
@@ -23,18 +19,25 @@ void main() {
     caseEntrypoints['home/hero_carousel_cases.dart']!,
   );
   group(
-    'home/shelf_hover_clip_test.dart',
-    caseEntrypoints['home/shelf_hover_clip_cases.dart']!,
+    'library/episode_list_scroll_test.dart',
+    caseEntrypoints['library/episode_list_scroll_cases.dart']!,
+  );
+  group(
+    'library/person_works_test.dart',
+    caseEntrypoints['library/person_works_cases.dart']!,
   );
   group(
     'mobile/mobile_flow_test.dart [part 4]',
     caseEntrypoints['mobile/mobile_flow_cases.dart#3']!,
   );
   group(
-    'player/player_cache_status_test.dart',
-    caseEntrypoints['player/player_cache_status_cases.dart']!,
+    'mobile/phone_player_interaction_test.dart',
+    caseEntrypoints['mobile/phone_player_interaction_cases.dart']!,
   );
-  group('tv/tv_focus_test.dart', caseEntrypoints['tv/tv_focus_cases.dart']!);
+  group(
+    'player/buffer_snapshot_test.dart',
+    caseEntrypoints['player/buffer_snapshot_cases.dart']!,
+  );
   group(
     'widgets/app_hover_card_test.dart',
     caseEntrypoints['widgets/app_hover_card_cases.dart']!,

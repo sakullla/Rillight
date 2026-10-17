@@ -114,27 +114,50 @@ extension PageCaptures on CaptureSession {
       }
       await advance(1200);
       await save('aggregation-ready');
-      // TV 聚合页是分段 + 卡片行的新版本,没有来源管理与私密区入口。
-      if (platform != 'tv') {
-        await tap(const Key('aggregation-source-management'));
-        await save('aggregation-management');
-        await activate(find.widgetWithText(AppListTile, '私密区域'));
-        await save('aggregation-pin-setup');
-        await tester.enterText(find.byKey(const Key('private-pin')), '1234');
-        await tester.enterText(
-          find.byKey(const Key('private-pin-confirm')),
-          '5678',
+      if (['aggregation-locked', 'aggregation-unlock'].any(shouldCapture)) {
+        final protected = auth.savedServers.last;
+        await tester.runAsync(() async {
+          await auth.serverAccess.setPassword(
+            protected.id,
+            'capture-entry',
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(protected.id, ref),
+          );
+          await auth.refreshServers();
+        });
+        await advance(600);
+        await save('aggregation-locked');
+        await activate(
+          find.descendant(
+            of: find.byKey(ValueKey('aggregation-server-${protected.id}')),
+            matching: find.text('进入服务器'),
+          ),
         );
-        await tap(const Key('private-unlock'));
-        await save('aggregation-pin-error');
-        await tap(const Key('private-pin-cancel'));
-        await tap(const Key('source-management-close'));
+        await advance(400);
+        await save('aggregation-unlock');
+        Navigator.of(
+          tester.element(find.byKey(const Key('server-unlock-password'))),
+        ).pop();
+        await advance(350);
+        await tester.runAsync(() async {
+          await auth.serverAccess.disablePassword(
+            protected.id,
+            'capture-entry',
+            persistReference: (ref) =>
+                auth.sources.persistProtectionReference(protected.id, ref),
+          );
+          await auth.refreshServers();
+        });
+        await advance(900);
+      }
+      if (platform != 'tv') {
         await tap(const Key('aggregation-segment-favorites'));
         await save('aggregation-segment-favorites');
         await tap(const Key('aggregation-segment-libraries'));
         await save('aggregation-segment-libraries');
         // 来源裁剪/同源比较只在旧版跨服务器聚合页上,从命令路由进入。
-        final sources = auth.sources.project(AccessRegion.ordinary);
+        final sources = auth.sources.project();
         final account = (await tester.runAsync(
           () async =>
               (await auth.sources.authenticate(sources.first.id)).account,
@@ -145,11 +168,13 @@ extension PageCaptures on CaptureSession {
             itemId: 'movie-up',
             source: SourceReference(account: account, itemId: 'movie-up'),
             libraryId: 'view-movies',
-            regionGeneration: auth.regionAccess.generation,
+            accessGeneration: auth.serverAccess.generation(
+              account.configuredServerId,
+            ),
           ),
         );
         await advance(1200);
-        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
+        await activate(find.widgetWithText(AppChoiceChip, '全部服务器'));
         await advance(600);
         await activate(
           find.byKey(ValueKey('aggregation-source-${sources.last.id}')),
@@ -159,16 +184,30 @@ extension PageCaptures on CaptureSession {
         await activate(
           find.byKey(ValueKey('aggregation-source-${sources.first.id}')),
         );
-        await save('aggregation-empty-scope');
-        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
+        await save('aggregation-filter-empty');
+        await activate(find.widgetWithText(AppChoiceChip, '全部服务器'));
         await advance(900);
-        await activate(find.widgetWithText(AppButton, '查找同源 · 2').first);
+        final comparison = find.widgetWithText(AppButton, '查找同源 · 2');
+        for (var step = 0; step < 20 && comparison.evaluate().isEmpty; step++) {
+          await tester.drag(
+            find
+                .descendant(
+                  of: find.byKey(const PageStorageKey('aggregation')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+            const Offset(0, -240),
+          );
+          await advance(150);
+        }
+        expect(comparison, findsWidgets);
+        await activate(comparison.first);
         await advance(900);
         await save('aggregation-comparison');
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await advance(350);
         adapter.failAggregationMirror = true;
-        await activate(find.widgetWithText(AppChoiceChip, '全部普通来源'));
+        await activate(find.widgetWithText(AppChoiceChip, '全部服务器'));
         await advance(1000);
         await save('aggregation-partial-failure');
         adapter.failAggregationMirror = false;
@@ -186,6 +225,12 @@ extension PageCaptures on CaptureSession {
           app.router.go('/aggregation');
           await advance(900);
         }
+        await tap(const Key('aggregation-segment-continue'));
+      } else {
+        await tap(const Key('aggregation-segment-favorites'));
+        await save('aggregation-segment-favorites');
+        await tap(const Key('aggregation-segment-libraries'));
+        await save('aggregation-segment-libraries');
         await tap(const Key('aggregation-segment-continue'));
       }
       if (platform == 'desktop') {
@@ -254,16 +299,23 @@ extension PageCaptures on CaptureSession {
         await save('home-customize');
         app.router.pop();
         await advance(400);
-        // 手机「媒体库」标签页:快速入口与全部媒体库磁贴。
-        await activate(
-          find.descendant(
-            of: find.byType(CupertinoTabBar),
-            matching: find.text('媒体库'),
-          ),
+        // 单库入口保留在首页的媒体库横排。
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('phone-home-library-view-movies')),
+          320,
+          scrollable: find.byType(Scrollable).first,
         );
+        await Scrollable.ensureVisible(
+          tester.element(
+            find.byKey(const Key('phone-home-library-view-movies')),
+          ),
+          alignment: .25,
+        );
+        await advance(300);
         await save('library-list');
       } else {
         await tap(const ValueKey('tv-nav-1'));
+        await tap(const Key('aggregation-segment-libraries'));
         await save('library-list');
       }
     }

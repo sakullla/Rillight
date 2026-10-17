@@ -30,7 +30,7 @@ import 'player_bindings.dart'
         PlaybackReportOutcomeSink;
 import 'player_window_host.dart';
 import '../auth/auth_controller.dart';
-import '../auth/region_access.dart';
+import '../auth/server_access.dart';
 import '../auth/server_list_store.dart';
 import '../aggregation/history/history_writer.dart';
 import '../aggregation/identity/media_identity.dart';
@@ -753,10 +753,10 @@ class PlayerController extends ChangeNotifier {
             ),
       libraryId:
           target?.libraryId ?? origin?.libraryId ?? openRequest?.libraryId,
-      regionGeneration:
-          target?.permit.regionGeneration ??
-          origin?.permit.regionGeneration ??
-          openRequest?.regionGeneration,
+      accessGeneration:
+          target?.permit.accessGeneration ??
+          origin?.permit.accessGeneration ??
+          openRequest?.accessGeneration,
     );
     _cleanupSnapshots[lease] = snapshot;
     await _enqueueSnapshot(() async {
@@ -851,8 +851,8 @@ class PlayerController extends ChangeNotifier {
               mediaSourceId: source.id,
             ),
       libraryId: origin?.libraryId ?? openRequest?.libraryId,
-      regionGeneration:
-          origin?.permit.regionGeneration ?? openRequest?.regionGeneration,
+      accessGeneration:
+          origin?.permit.accessGeneration ?? openRequest?.accessGeneration,
     );
     _cleanupSnapshots[info.resources!] = snapshot;
     await _enqueueSnapshot(() async {
@@ -913,7 +913,7 @@ class PlayerController extends ChangeNotifier {
         origin = resolvedOrigin;
         client = resolvedOrigin.client;
         final lines = runtime!.registry
-            .project(resolvedOrigin.source.account.region)
+            .project()
             .firstWhere(
               (s) => s.id == resolvedOrigin.source.account.configuredServerId,
             )
@@ -1642,7 +1642,7 @@ class PlayerController extends ChangeNotifier {
         seasonId: item?.seasonId,
         source: SourceReference(account: actual.source.account, itemId: id),
         libraryId: actual.libraryId,
-        regionGeneration: actual.permit.regionGeneration,
+        accessGeneration: actual.permit.accessGeneration,
       );
     }
     final request = openRequest;
@@ -1652,7 +1652,7 @@ class PlayerController extends ChangeNotifier {
       seasonId: item?.seasonId,
       source: SourceReference(account: request!.source!.account, itemId: id),
       libraryId: request.libraryId,
-      regionGeneration: request.regionGeneration,
+      accessGeneration: request.accessGeneration,
     );
   }
 
@@ -2568,7 +2568,7 @@ class PlayerController extends ChangeNotifier {
       if (_disposed || _revoked || !identical(origin, actual)) return;
       if (nextOrigin.client.baseUrl != actual.client.baseUrl) {
         final lines = runtime!.registry
-            .project(actual.source.account.region)
+            .project()
             .firstWhere((s) => s.id == actual.source.account.configuredServerId)
             .lines;
         final line = lines.singleWhere(
@@ -3679,7 +3679,7 @@ class PlayerController extends ChangeNotifier {
         work: candidate.source.reference.item,
         libraryId: candidate.source.libraryId,
         mediaSourceId: version,
-        regionGeneration: permit.regionGeneration,
+        accessGeneration: permit.accessGeneration,
       ),
     );
     await runtime!.requireEquivalent(
@@ -3697,15 +3697,19 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Identity is checked anonymously before attaching credentials to a line.
-  Future<void> lockPrivateRegion() async {
+  Future<void> lockCurrentServer() async {
     if (runtime != null &&
-        origin?.source.account.region == AccessRegion.private) {
-      await runtime!.registry.access.lock();
+        origin != null &&
+        runtime?.registry.access.isProtected(
+              origin!.source.account.configuredServerId,
+            ) ==
+            true) {
+      await runtime!.registry.access.lock(
+        origin!.source.account.configuredServerId,
+      );
       return;
     }
-    if (switchDispatcher != null &&
-        openRequest?.source?.account.region == AccessRegion.private &&
-        !_revoked) {
+    if (switchDispatcher != null && openRequest?.source != null && !_revoked) {
       await switchDispatcher!({'action': 'lock'});
       return;
     }
@@ -3729,9 +3733,7 @@ class PlayerController extends ChangeNotifier {
     final actual = origin;
     final playback = runtime;
     if (playback != null && actual != null) {
-      for (final server in playback.registry.project(
-        actual.source.account.region,
-      )) {
+      for (final server in playback.registry.project()) {
         if (server.id == actual.source.account.configuredServerId) {
           return server.lines;
         }
@@ -4139,9 +4141,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   String? _lineFor(PlaybackOrigin source) {
-    for (final server in runtime!.registry.project(
-      source.source.account.region,
-    )) {
+    for (final server in runtime!.registry.project()) {
       if (server.id != source.source.account.configuredServerId) continue;
       for (final line in server.lines) {
         if (Uri.parse(line.address) == source.client.baseUrl) return line.id;
@@ -4741,6 +4741,13 @@ class PlayerController extends ChangeNotifier {
       }
       mediaSources = sources;
       if (runtime != null && origin != null) {
+        await runtime!.importLegacyPreferences(
+          origin!,
+          item!,
+          sources,
+          await (await _settings()).read(),
+        );
+        if (!_accepts(operation)) return;
         preferenceResolution = runtime!.preference(origin!, item!, sources);
       }
       final preference = preferenceResolution;
@@ -5789,7 +5796,12 @@ class PlayerController extends ChangeNotifier {
       report: report,
       resources: resolved?.resources,
       permit: origin?.permit,
-      frozenStop: origin?.source.account.region == AccessRegion.private
+      frozenStop:
+          origin != null &&
+              runtime?.registry.access.isProtected(
+                    origin!.source.account.configuredServerId,
+                  ) ==
+                  true
           ? runtime!.registry.freezeStop(
               origin!.permit,
               report,
@@ -5849,9 +5861,9 @@ class PlayerController extends ChangeNotifier {
       var record = session.lastRecord;
       if (runtime != null && record != null) {
         final order = record.localOrder;
-        final current = runtime!.history
-            .records(record.source.account.region)
-            .where((r) => r.localOrder == order);
+        final current = runtime!.history.records().where(
+          (r) => r.localOrder == order,
+        );
         record = current.length == 1 ? current.single : null;
       }
       sent = true;
@@ -6112,8 +6124,8 @@ class PlayerController extends ChangeNotifier {
               mediaSourceId: report.mediaSourceId,
             ),
       libraryId: origin?.libraryId ?? openRequest?.libraryId,
-      regionGeneration:
-          origin?.permit.regionGeneration ?? openRequest?.regionGeneration,
+      accessGeneration:
+          origin?.permit.accessGeneration ?? openRequest?.accessGeneration,
     );
     return _enqueueSnapshot(() async {
       if (ownsSnapshot()) {
@@ -6259,10 +6271,10 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _revokeSource() {
-    if (origin?.source.account.region != AccessRegion.private &&
-        openRequest?.source?.account.region != AccessRegion.private) {
-      return;
-    }
+    final id =
+        origin?.source.account.configuredServerId ??
+        openRequest?.source?.account.configuredServerId;
+    if (id == null || runtime?.registry.access.revokingServerId != id) return;
     _revokePlayback();
   }
 
@@ -6284,6 +6296,10 @@ class PlayerController extends ChangeNotifier {
   }
 
   void _sourceRevoked(String serverId) {
+    if (origin?.permit.isValid == true &&
+        (_switchTarget == null || _switchTarget!.permit.isValid)) {
+      return;
+    }
     if (origin?.source.account.configuredServerId != serverId &&
         _switchTarget?.source.account.configuredServerId != serverId) {
       return;
@@ -6367,8 +6383,12 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _closeRevokedSource(RestrictedStopPermit permit) async {
-    if (!_revoked) return;
+  Future<void> _closeRevokedSource(ServerStopPermit permit) async {
+    if (!_revoked ||
+        _revokedSession?.frozenStop?.account.configuredServerId !=
+            permit.serverId) {
+      return;
+    }
     final session = _revokedSession;
     _revokedSession = null;
     final stopped = session?.frozenStop?.reportStopped(permit);
@@ -6955,10 +6975,7 @@ class PlayerController extends ChangeNotifier {
   if (sessionServer != null && matches(sessionServer)) {
     server = sessionServer;
   } else {
-    final found = [
-      ...auth.sources.project(AccessRegion.ordinary),
-      ...auth.sources.project(AccessRegion.private),
-    ].where(matches).toList();
+    final found = [...auth.sources.project()].where(matches).toList();
     if (found.length == 1) server = found.single;
   }
   if (server == null) return null;

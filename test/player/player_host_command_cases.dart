@@ -32,7 +32,6 @@ void main() {
     () async {
       const source = SourceReference(
         account: SourceAccount(
-          region: AccessRegion.private,
           configuredServerId: 'b-config',
           verifiedServerId: 'b-verified',
           userId: 'b-user',
@@ -44,7 +43,7 @@ void main() {
         seasonId: 'b-season',
         source: source,
         libraryId: 'b-library',
-        regionGeneration: 42,
+        accessGeneration: 42,
       );
       await PlayerHostOpenItem.write(
         command.itemId,
@@ -58,7 +57,7 @@ void main() {
       ))!;
       expect(received.source, source);
       expect(received.libraryId, 'b-library');
-      expect(received.regionGeneration, 42);
+      expect(received.accessGeneration, 42);
       expect(received.seasonId, 'b-season');
     },
   );
@@ -76,7 +75,7 @@ void main() {
       await protocol.write('open-item', {
         'itemId': 'same-series',
         'libraryId': 'b-library',
-        'regionGeneration': 42,
+        'accessGeneration': 42,
       });
       expect(
         await PlayerHostOpenItem.consume(protocol: protocol, expectedPid: pid),

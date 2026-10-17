@@ -1,5 +1,4 @@
 import 'server_selection_page.dart';
-import 'source_management.dart';
 
 import 'package:rillight/app/ui/ui.dart';
 import 'package:go_router/go_router.dart';
@@ -17,15 +16,6 @@ class SessionActions extends StatelessWidget {
 
   static const serverMenuKey = Key('session-current-server');
 
-  /// 未解锁时打开现有 PIN 对话框。已经允许，或对话框解锁成功时返回 true。
-  static Future<bool> ensurePrivateAccess(BuildContext context) async {
-    final auth = AuthScope.of(context);
-    if (!auth.regionAccess.allows(AccessRegion.private)) {
-      await showPrivateAccess(context, auth);
-    }
-    return context.mounted && auth.regionAccess.allows(AccessRegion.private);
-  }
-
   @override
   Widget build(BuildContext context) {
     final auth = AuthScope.maybeOf(context);
@@ -36,17 +26,20 @@ class SessionActions extends StatelessWidget {
     return ListenableBuilder(
       listenable: auth,
       builder: (context, _) {
-        if (!auth.isLoggedIn) {
+        if (!auth.isLoggedIn && auth.savedServers.isEmpty) {
           return const SizedBox.shrink();
         }
         final l10n = AppLocalizations.of(context);
-        final server = auth.session!.server;
+        final server = auth.session?.server;
+        final compact = MediaQuery.sizeOf(context).width < 800;
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SettingsAction(),
             AppTooltip(
-              message: '${_chipLabel(server)}\n${l10n.serversTitle}',
+              message: server == null
+                  ? l10n.serversTitle
+                  : '${_chipLabel(server)}\n${l10n.serversTitle}',
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 180),
                 child: AppButton(
@@ -61,18 +54,20 @@ class SessionActions extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(AppIcons.library, size: 18),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          MediaQuery.sizeOf(context).width < 1100
-                              ? l10n.serversTitle
-                              : server.displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      if (!compact) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            MediaQuery.sizeOf(context).width < 1100
+                                ? l10n.serversTitle
+                                : server?.displayName ?? l10n.serversTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(AppIcons.chevronDown, size: 16),
+                        const SizedBox(width: 4),
+                        const Icon(AppIcons.chevronDown, size: 16),
+                      ],
                     ],
                   ),
                 ),
