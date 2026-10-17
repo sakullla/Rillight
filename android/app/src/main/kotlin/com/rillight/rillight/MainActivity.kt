@@ -10,6 +10,19 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var updateInstaller: UpdateInstaller? = null
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (updateInstaller?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        updateInstaller?.dispose()
+        updateInstaller = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun onUserLeaveHint() {
         com.rillight.player.RillightCorePlayerPlugin.userLeave(this)
         super.onUserLeaveHint()
@@ -30,6 +43,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        updateInstaller = UpdateInstaller(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.rillight/environment")
             .setMethodCallHandler { call, result ->
                 if (call.method == "nightMode") {

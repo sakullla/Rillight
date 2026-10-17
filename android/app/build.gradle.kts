@@ -105,6 +105,10 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    implementation("androidx.core:core:1.17.0")
+}
+
 // Ship the pinned native core's notices with each APK. The source manifest and
 // license texts remain in packages/rillight_player; this task stages exact
 // copies as Android assets without maintaining a second tracked copy.
