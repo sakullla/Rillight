@@ -1,3 +1,6 @@
+import 'package:rillight/aggregation/history/history_writer.dart';
+import 'package:rillight/player/playback_runtime.dart';
+
 import '../helpers/case_shard.dart';
 import '../helpers/settle.dart';
 
@@ -120,10 +123,17 @@ void main() {
   }
 
   Future<AuthController> login(FakeEmbyServer server) async {
+    final alias = FakeEmbyServer(
+      serverId: server.serverId,
+      serverName: server.serverName,
+      baseUrl: Uri.parse('https://mirror.example:8443'),
+      views: server.views,
+      items: server.items,
+    );
     final auth = AuthController(
       client: EmbyClient(
         device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+        dio: dioForFakeEmby(FakeEmbyAdapter([server, alias])),
       ),
       credentials: MemoryCredentialStore(),
       servers: MemoryServerListStore(),
@@ -133,6 +143,7 @@ void main() {
       username: 'alice',
       password: 'correct-horse',
     );
+    alias.issuedTokens.addAll(server.issuedTokens);
     return auth;
   }
 
@@ -151,6 +162,7 @@ void main() {
     Size size = const Size(800, 360),
     Duration? mediaDuration,
     bool lightApp = false,
+    bool withRuntime = false,
     Future<void> Function(AuthController auth)? prepareAuth,
   }) async {
     final server = FakeEmbyServer();
@@ -162,6 +174,32 @@ void main() {
     final video = backend ?? FakeVideoBackend();
     if (mediaDuration != null) video.duration = mediaDuration;
     addTearDown(auth!.dispose);
+    final history = withRuntime
+        ? await tester.runAsync(
+            () => HistoryWriter.open(
+              registry: auth.sources,
+              store: MemoryHistoryStore(),
+            ),
+          )
+        : null;
+    if (history != null) {
+      addTearDown(() async {
+        var closed = false;
+        final closing = history.close().then((_) => closed = true);
+        for (var frame = 0; frame < 80 && !closed; frame++) {
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
+        expect(
+          closed,
+          isTrue,
+          reason: 'History must drain after the player unmounts',
+        );
+        await closing;
+      });
+    }
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 4));
@@ -176,6 +214,9 @@ void main() {
         controller: auth,
         child: PlayerScope(
           bindings: PlayerBindings(
+            runtime: history == null
+                ? null
+                : PlaybackRuntime(auth: auth, history: history),
             createBackend: () => video,
             settingsStore: settings ?? MemoryPlayerSettingsStore(),
             snapshotStore: MemoryPlaybackSessionSnapshotStore(),
@@ -223,16 +264,34 @@ void main() {
       final page = find.byType(MobilePlayerPage);
       if (page.evaluate().isNotEmpty) {
         final current = tester.state<MobilePlayerPageState>(page).controller;
-        if (current != null && !current.loading) {
+        if (current != null &&
+            !current.loading &&
+            (!withRuntime ||
+                current.activeLineId != null ||
+                current.error != null)) {
           ready = current;
           break;
         }
       }
       await tester.pump(const Duration(milliseconds: 20));
+      if (withRuntime) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
     }
     final route = ModalRoute.of(tester.element(find.byType(MobilePlayerPage)))!;
     await tester.pump(route.transitionDuration);
-    if (ready == null || ready.loading) fail('player did not become ready');
+    if (ready == null || ready.loading) {
+      final current = tester
+          .state<MobilePlayerPageState>(find.byType(MobilePlayerPage))
+          .controller!;
+      fail(
+        'player did not become ready: loading=${current.loading}; '
+        'line=${current.activeLineId}; failure=${current.playbackLineFailure}; '
+        'load=${current.loadFailure}; disconnect=${current.disconnectDetail}',
+      );
+    }
     return ready;
   }
 
@@ -2399,7 +2458,7 @@ void main() {
       backend: _FailOpenBackend(),
       wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
     );
-    expect(find.text('无法播放'), findsOneWidget);
+    expect(find.text('连接尚未恢复'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
     expect(find.textContaining('Bad state:'), findsNothing);
     await tester.tap(find.byKey(const Key('mobile-player-lock')));
@@ -2422,6 +2481,10 @@ void main() {
       tester,
       itemId: 'movie-inception',
       backend: backend,
+      prepareAuth: (auth) => auth.selectLine(
+        auth.session!.server.id,
+        LineSelection.fixed(auth.session!.server.activeLineId!),
+      ),
       wakeLock: PhonePlaybackWakeLock(toggle: (_) async {}),
     );
     expect(current.error, isNotNull);
@@ -2460,14 +2523,167 @@ void main() {
       find.byKey(const Key('mobile-player-byte-cache-track')),
       findsNothing,
     );
-    expect(find.byType(BufferedRangesTrack), findsOneWidget);
     for (var i = 0; i < 30 && current.loading; i++) {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(current.error, isNull);
+    expect(find.byType(BufferedRangesTrack), findsOneWidget);
     expect(backend.attempts, 2);
     await closePlayer(tester);
   }, tags: ['integration']);
+
+  cases.testWidgets(
+    'phone single line still offers automatic mode without reopening healthy playback',
+    (tester) async {
+      final backend = FakeVideoBackend();
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        withRuntime: true,
+        prepareAuth: (auth) async {
+          final server = auth.session!.server;
+          await auth.selectLine(
+            server.id,
+            LineSelection.fixed(server.activeLineId!),
+          );
+        },
+      );
+      expect(current.playbackLineSelection.isAutomatic, isFalse);
+      backend.emitEvent(VideoEventKind.position, const Duration(seconds: 4));
+      await tester.pump();
+      final opens = backend.openCount;
+      await tester.tap(find.byKey(const Key('mobile-player-more')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.ensureVisible(
+        find.byKey(const Key('player-playback-lines')),
+      );
+      await tester.tap(find.byKey(const Key('player-playback-lines')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(current.playbackLines, hasLength(1));
+      expect(find.byKey(const Key('playback-line-auto')), findsOneWidget);
+      expect(find.byKey(const Key('playback-line-actual')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('playback-line-auto')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(current.playbackLineSelection.isAutomatic, isTrue);
+      expect(
+        current.runtime!.registry
+            .server(current.origin!.source.account.configuredServerId)
+            .lineSelection
+            .isAutomatic,
+        isTrue,
+      );
+      expect(backend.openCount, opens);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
+
+  cases.testWidgets('phone automatic first playback reaches the video backend', (
+    tester,
+  ) async {
+    late FakeEmbyServer fixture;
+    final backend = FakeVideoBackend();
+    final current = await showPlayer(
+      tester,
+      itemId: 'movie-up',
+      backend: backend,
+      withRuntime: true,
+      prepare: (server) => fixture = server,
+    );
+    expect(
+      current.error,
+      isNull,
+      reason:
+          'line=${current.playbackLineFailure}; load=${current.loadFailure}; '
+          'disconnect=${current.disconnectDetail}; requests=${fixture.requests}',
+    );
+    expect(backend.openCount, 1);
+    expect(current.playbackLineSelection.isAutomatic, isTrue);
+    await closePlayer(tester);
+  }, tags: ['integration']);
+
+  cases.testWidgets(
+    'phone back cancels line recovery while the video surface stays mounted',
+    (tester) async {
+      final backend = _RecoveryGateBackend();
+      final current = await showPlayer(
+        tester,
+        itemId: 'movie-inception',
+        backend: backend,
+        withRuntime: true,
+        prepareAuth: (auth) async {
+          final server = auth.session!.server;
+          await auth.selectLine(
+            server.id,
+            LineSelection.fixed(server.activeLineId!),
+          );
+        },
+      );
+      expect(current.isPlaying, isTrue);
+      await current.selectPlaybackLine(const LineSelection.auto());
+      final surface = tester.element(
+        find.byKey(_RecoveryGateBackend.surfaceKey),
+      );
+      final gate = Completer<void>();
+      backend.openGate = gate;
+      backend.emitEvent(VideoEventKind.error, 'Connection reset by peer');
+      for (var frame = 0; frame < 40 && !backend.waiting; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+      expect(
+        backend.waiting,
+        isTrue,
+        reason:
+            'recovering=${current.isRecovering}, disconnected=${current.disconnected}, mode=${current.playbackLineSelection.toJson()}, failure=${current.playbackLineFailure}, confirmation=${current.switchConfirmation != null}, phase=${current.state.phase}',
+      );
+      expect(current.isRecovering, isTrue);
+      expect(
+        find
+            .byKey(const Key('playback-recovery-cancel'))
+            .hitTestable(at: const Alignment(0, .9)),
+        findsOneWidget,
+      );
+      expect(
+        tester.element(find.byKey(_RecoveryGateBackend.surfaceKey)),
+        same(surface),
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(current.isRecovering, isFalse);
+      expect(find.byType(MobilePlayerPage), findsOneWidget);
+      expect(
+        tester.element(find.byKey(_RecoveryGateBackend.surfaceKey)),
+        same(surface),
+      );
+      backend.openGate = null;
+      gate.complete();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+      expect(current.isPlaying, isFalse);
+      expect(
+        find.byKey(const Key('playback-recovery-retry')).hitTestable(),
+        findsOneWidget,
+      );
+      await closePlayer(tester);
+    },
+    tags: ['integration'],
+  );
 
   cases.testWidgets('phone line sheet lists only this server', (tester) async {
     final backend = FakeVideoBackend();
@@ -2492,6 +2708,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('线路'), findsOneWidget);
     expect(find.text('立即锁定'), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('player-playback-lines')));
     await tester.tap(find.byKey(const Key('player-playback-lines')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
@@ -2865,3 +3082,22 @@ final cases = CaseShard(4, defaultSemantics: true);
 
 void mainShard(int part, int expectedParts) =>
     cases.register(part, main, expectedParts: expectedParts);
+
+class _RecoveryGateBackend extends FakeVideoBackend {
+  static const surfaceKey = Key('recovery-test-video-surface');
+  Completer<void>? openGate;
+  bool waiting = false;
+
+  @override
+  Future<void> open(VideoOpenRequest request) async {
+    final gate = openGate;
+    if (gate != null) {
+      waiting = true;
+      await gate.future;
+    }
+    await super.open(request);
+  }
+
+  @override
+  Widget buildView({Key? key}) => const SizedBox.expand(key: surfaceKey);
+}

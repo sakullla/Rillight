@@ -69,6 +69,10 @@ class PlayerProcessProtocol {
       'switch-reply',
       'lock-request',
       'lock-reply',
+      'line-selection',
+      'line-selection-result',
+      'line-cancel',
+      'line-cancel-result',
     }.contains(kind)) {
       throw ArgumentError.value(kind, 'kind');
     }

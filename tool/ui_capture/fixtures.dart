@@ -546,9 +546,19 @@ class CaptureBackend extends FakeVideoBackend
 
   CaptureBackend() : super(duration: const Duration(minutes: 96));
   Completer<void>? openGate;
+  bool rejectAllOpens = false;
+  int rejectNextOpens = 0;
 
   @override
   Future<void> open(VideoOpenRequest request) async {
+    if (rejectAllOpens || rejectNextOpens > 0) {
+      if (rejectNextOpens > 0) rejectNextOpens--;
+      throw DioException(
+        requestOptions: RequestOptions(path: request.url.toString()),
+        type: DioExceptionType.connectionError,
+        message: 'Synthetic connection reset',
+      );
+    }
     if (openGate != null) await openGate!.future;
     await super.open(request);
   }

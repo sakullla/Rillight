@@ -9,6 +9,7 @@ import 'package:rillight/media_server/resources.dart';
 import 'cache/cache_limits.dart';
 import 'cache/session_byte_cache.dart';
 import 'playback_http_proxy.dart';
+import 'playback_recovery_coordinator.dart';
 
 /// Owns one playback transport on a dedicated isolate. Only sealed loopback
 /// URLs cross this boundary; credentials and cache state stay in the worker.
@@ -49,6 +50,30 @@ class PlaybackTransportSession {
         pending.completeError(StateError(message[2].toString()));
       }
     });
+  }
+
+  PlaybackRecoveryBudget? _recoveryBudget;
+  Timer? _recoveryDeadline;
+  set recoveryBudget(PlaybackRecoveryBudget? value) {
+    _recoveryDeadline?.cancel();
+    _recoveryBudget = value;
+    if (_closed) return;
+    // Include time queued in the worker's command port in the deadline.
+    final deadline = value == null
+        ? null
+        : DateTime.now().add(value.remaining).microsecondsSinceEpoch;
+    unawaited(
+      _request('recoveryBudget', deadline).catchError((Object _) => null),
+    );
+    if (value == null) return;
+    void cancel() {
+      if (!_closed && identical(_recoveryBudget, value)) {
+        unawaited(_request('recoveryCancel').catchError((Object _) => null));
+      }
+    }
+
+    _recoveryDeadline = Timer(value.remaining, cancel);
+    unawaited(value.cancelled.then((_) => cancel()));
   }
 
   final Isolate _isolate;
@@ -233,6 +258,7 @@ class PlaybackTransportSession {
   }
 
   Future<void> close() async {
+    _recoveryDeadline?.cancel();
     if (_closed) {
       _inbox.close();
       _isolate.kill(priority: Isolate.immediate);
@@ -347,6 +373,19 @@ Future<void> _serveTransport(List<Object?> arguments) async {
       try {
         Object? result;
         switch (operation) {
+          case 'recoveryBudget':
+            final deadline = message[2] as int?;
+            proxy.recoveryBudget = deadline == null
+                ? null
+                : PlaybackRecoveryBudget(
+                    total: Duration(
+                      microseconds:
+                          deadline - DateTime.now().microsecondsSinceEpoch,
+                    ),
+                  );
+          case 'recoveryCancel':
+            proxy.recoveryBudget?.cancel();
+            proxy.cancelPendingReads();
           case 'register':
             final value = message[2] as List;
             result = proxy

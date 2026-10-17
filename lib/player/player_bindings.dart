@@ -49,6 +49,10 @@ class PlayerBindings {
     this.sourceOpenResult,
     this.startupData,
     this.playbackLineSnapshot,
+    this.playbackLineSelectionSnapshot,
+    this.recoveryDeadlineUtc,
+    this.recoveryAttemptDeadlineUtc,
+    this.recoveryAttemptedLineIds = const [],
     this.verifiedPlaybackServerId,
   });
 
@@ -67,6 +71,10 @@ class PlayerBindings {
   /// Desktop playback process reads this snapshot. Null means the page
   /// resolves lines from the signed-in server list.
   final List<ServerLine>? playbackLineSnapshot;
+  final LineSelection? playbackLineSelectionSnapshot;
+  final DateTime? recoveryDeadlineUtc;
+  final DateTime? recoveryAttemptDeadlineUtc;
+  final List<String> recoveryAttemptedLineIds;
   final String? verifiedPlaybackServerId;
 
   /// 会话快照存储;为 null 时 [PlayerController] 使用当前进程 pid 命名的

@@ -1,3 +1,6 @@
+import 'playback_line_recovery_ui.dart';
+import 'source_switch_menu.dart';
+
 import 'dart:async';
 
 import 'package:rillight/app/ui/ui.dart';
@@ -326,10 +329,15 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
     _display = widget.displayControl ?? MethodChannelPhoneDisplayControl();
     final matched = serverMatchingPlayback(auth, auth.client.baseUrl);
     final created = PlayerController(
-      runtime: widget.sourceRequest?.source == null ? null : bindings.runtime,
+      runtime: bindings.runtime,
+      recoveryDeadlineUtc: bindings.recoveryDeadlineUtc,
+      recoveryAttemptDeadlineUtc: bindings.recoveryAttemptDeadlineUtc,
+      recoveryAttemptedLineIds: bindings.recoveryAttemptedLineIds,
       openRequest: widget.sourceRequest,
       routeLeaseKey: widget.routeLeaseKey,
       client: auth.client,
+      initialLineSelection:
+          bindings.playbackLineSelectionSnapshot ?? matched?.lineSelection,
       playbackLineSnapshot: matched?.lines ?? const [],
       verifiedPlaybackServerId: matched?.verifiedServerId,
       itemId: widget.itemId,
@@ -770,6 +778,12 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
   }
 
   Widget _centerStatus(BuildContext context, PlayerController c) {
+    if (playbackNeedsLineStatus(c)) {
+      return PlayerLineStatus(
+        controller: c,
+        onChooseLines: () => unawaited(showPlaybackLineSheet(context, c)),
+      );
+    }
     final l = AppLocalizations.of(context);
     final theme = AppUiTheme.of(context);
     final scheme = theme.colorScheme;
@@ -853,6 +867,10 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
         if (popped) return;
         if (_interaction.locked) {
           _interaction.revealUnlock();
+        } else if (c.switchConfirmation != null) {
+          unawaited(c.confirmMediaSourceSwitch(SwitchResumeChoice.cancel));
+        } else if (c.isRecovering) {
+          c.cancelLineRecovery();
         } else {
           _close();
         }
@@ -889,7 +907,9 @@ class MobilePlayerPageState extends State<MobilePlayerPage>
                   ListenableBuilder(
                     listenable: Listenable.merge([c, _interaction]),
                     builder: (context, _) {
-                      final visible = _interaction.controlsVisibleFor(c);
+                      final visible =
+                          _interaction.controlsVisibleFor(c) ||
+                          (!_interaction.locked && playbackNeedsLineStatus(c));
                       // Hidden controls sit at opacity 0 behind IgnorePointer.
                       // Reusing the same widget skips rebuilding and laying
                       // out the whole overlay on every playback tick (5 Hz for

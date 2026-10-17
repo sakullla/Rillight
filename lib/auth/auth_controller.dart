@@ -234,6 +234,35 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  /// Registry has committed the same account's verified live playback line.
+  /// Publishing this projection performs no additional fallible persistence IO.
+  void publishPlaybackConnection(String id, MediaServerClient connected) {
+    _savedServers = sources.project();
+    final selected = _session;
+    if (selected?.server.id == id) {
+      final server = sources.server(id);
+      _client.attachSession(
+        baseUrl: connected.baseUrl!,
+        accessToken: connected.accessToken!,
+        userId: connected.userId!,
+        userAgent: connected.customUserAgent,
+      );
+      _guardedClient?.attachSession(
+        baseUrl: connected.baseUrl!,
+        accessToken: connected.accessToken!,
+        userId: connected.userId!,
+        userAgent: connected.customUserAgent,
+      );
+      _session = AuthSession(
+        server: server,
+        userId: selected!.userId,
+        username: selected.username,
+        accessToken: selected.accessToken,
+      );
+    }
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> _clearSourceContribution(
     SourceAccount? account,
     String id,

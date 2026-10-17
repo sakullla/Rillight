@@ -249,23 +249,20 @@ void main() {
   );
 
   cases.test(
-    'untagged foreground 403 retires the old stream and retries serially',
+    'untagged foreground 403 preserves permission failure without retry',
     () async {
       final fixture = await _Direct.open(refuseSecond: true);
       try {
         final first = await fixture.read();
         expect(await first.moveNext(), isTrue);
-        final next = await fixture.read(start: 12 * _mib);
-        var position = 12 * _mib;
-        while (await next.moveNext()) {
-          position = _verify(next.current, position);
-        }
-        expect(position, fixture.length);
-        expect(fixture.requests, 3);
-        expect(fixture.proxy.diagnostics['serialUpstream'], isTrue);
-        expect(fixture.proxy.diagnostics['authenticationStatus'], isNull);
+        final request = await fixture.client.getUrl(fixture.uri);
+        request.headers.set('range', 'bytes=${12 * _mib}-');
+        final response = await request.close();
+        expect(response.statusCode, 403);
+        await response.drain<void>();
+        expect(fixture.requests, 2);
+        expect(fixture.proxy.diagnostics['authenticationStatus'], 403);
         await first.cancel();
-        await next.cancel();
       } finally {
         await fixture.close();
       }

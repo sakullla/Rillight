@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:rillight/app/ui/ui.dart';
 
 import 'playback_runtime.dart';
+import 'playback_recovery_coordinator.dart';
 import '../aggregation/query/same_source_query.dart';
 import '../aggregation/query/aggregation_query.dart';
 import '../library/episode_mapping_dialog.dart';
@@ -65,8 +66,12 @@ class PlayerWindowLaunch {
     this.preparedStartup = false,
     this.entryPending = false,
     this.lines = const [],
+    this.lineSelection,
     this.verifiedServerId,
     this.startupHandoff,
+    this.recoveryDeadlineUtc,
+    this.recoveryAttemptDeadlineUtc,
+    this.recoveryAttemptedLineIds = const [],
   });
 
   final PlayerOpenRequest request;
@@ -81,7 +86,11 @@ class PlayerWindowLaunch {
   final bool preparedStartup;
   final bool entryPending;
   final List<ServerLine> lines;
+  final LineSelection? lineSelection;
   final String? verifiedServerId;
+  final DateTime? recoveryDeadlineUtc;
+  final DateTime? recoveryAttemptDeadlineUtc;
+  final List<String> recoveryAttemptedLineIds;
 
   /// Negotiated metadata the parent already holds (item, user, versions).
   /// Embedded in the launch document so the child skips its serial discovery
@@ -111,6 +120,7 @@ class PlayerWindowLaunch {
       userAgent: client.customUserAgent,
       preparedStartup: preparedStartup,
       lines: matched?.lines ?? const [],
+      lineSelection: matched?.lineSelection,
       verifiedServerId: matched?.verifiedServerId,
     );
   }
@@ -181,6 +191,19 @@ class PlayerWindowLaunch {
       preparedStartup: json['preparedStartup'] == true,
       entryPending: json['entryPending'] == true,
       verifiedServerId: json['verifiedServerId'] as String?,
+      recoveryDeadlineUtc: json['recoveryDeadlineUtc'] == null
+          ? null
+          : DateTime.parse(json['recoveryDeadlineUtc'] as String).toUtc(),
+      recoveryAttemptDeadlineUtc: json['recoveryAttemptDeadlineUtc'] == null
+          ? null
+          : DateTime.parse(json['recoveryAttemptDeadlineUtc'] as String)
+                .toUtc(),
+      recoveryAttemptedLineIds:
+          (json['recoveryAttemptedLineIds'] as List? ?? const [])
+              .cast<String>(),
+      lineSelection: json['lineSelection'] == null
+          ? null
+          : LineSelection.fromJson(json['lineSelection']),
       lines: [
         for (final item in json['lines'] as List? ?? const [])
           if (item is Map) ServerLine.fromJson(Map<String, dynamic>.from(item)),
@@ -209,6 +232,13 @@ class PlayerWindowLaunch {
   Map<String, dynamic> toJson() {
     return {
       'businessId': businessId,
+      if (recoveryDeadlineUtc != null)
+        'recoveryDeadlineUtc': recoveryDeadlineUtc!.toIso8601String(),
+      if (recoveryAttemptDeadlineUtc != null)
+        'recoveryAttemptDeadlineUtc': recoveryAttemptDeadlineUtc!
+            .toIso8601String(),
+      if (recoveryAttemptedLineIds.isNotEmpty)
+        'recoveryAttemptedLineIds': recoveryAttemptedLineIds,
       if (request.source != null) 'source': encodeSource(request.source!),
       if (request.work != null) 'work': encodeSource(request.work!),
       if (request.libraryId != null) 'libraryId': request.libraryId,
@@ -238,6 +268,7 @@ class PlayerWindowLaunch {
       'userId': userId,
       if (startupHandoff != null) 'startupHandoff': startupHandoff,
       if (verifiedServerId != null) 'verifiedServerId': verifiedServerId,
+      if (lineSelection != null) 'lineSelection': lineSelection!.toJson(),
       if (lines.isNotEmpty) 'lines': [for (final line in lines) line.toJson()],
       if (userAgent != null) 'userAgent': userAgent,
       'clientName': device.clientName,
@@ -284,6 +315,67 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     auth.serverAccess.addTerminationHook(_terminatePrivate);
     runtime?.registry.addMembershipCleanup(_membershipRevoked);
     runtime?.registry.addSourceRevocation(_sourceRevoked);
+    runtime?.registerLinePlayer(
+      this,
+      () => _pid == 0 || _disposed || _privateRevoked
+          ? null
+          : _origin?.source.account.configuredServerId,
+      _selectLiveLine,
+    );
+  }
+
+  int _lineSelectionSequence = 0;
+  Future<void> _selectLiveLine(
+    LineSelection selection,
+    void Function() guard,
+  ) async {
+    final control = _control;
+    if (control is! PlayerLineProcessControl) {
+      throw StateError('Live player line selection unavailable');
+    }
+    final ipc = control as PlayerLineProcessControl;
+    final pid = _pid;
+    final actual = _origin!;
+    final sequence = ++_lineSelectionSequence;
+    void current() {
+      guard();
+      actual.permit.requireValid();
+      if (_disposed ||
+          _privateRevoked ||
+          _pid != pid ||
+          sequence != _lineSelectionSequence) {
+        throw StateError('Line selection cancelled');
+      }
+    }
+
+    current();
+    final deadline = DateTime.now().toUtc().add(const Duration(seconds: 45));
+    await ipc.requestLineSelection(pid, {
+      'deadlineUtc': deadline.toIso8601String(),
+      'sequence': sequence,
+      'selection': selection.toJson(),
+      'generation': actual.permit.accessGeneration,
+    });
+    try {
+      while (DateTime.now().isBefore(deadline)) {
+        current();
+        final result = await ipc.lineSelectionResult(pid);
+        if (result?['sequence'] == sequence) {
+          if (result?['accepted'] != true) {
+            throw StateError('Playback line was not saved');
+          }
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+      }
+      throw TimeoutException('Playback line selection timed out');
+    } catch (_) {
+      await ipc.requestLineSelection(pid, {
+        'sequence': sequence,
+        'cancel': true,
+      });
+      rethrow;
+    }
   }
 
   final AuthController auth;
@@ -341,10 +433,12 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
   var _disposed = false;
   var _epoch = 0;
   var _requestRevision = 0;
+  PlaybackRecoveryBudget? _openingRecoveryBudget;
   int _activeRevision = 0;
   bool _watchBusy = false;
   bool _heartbeatBusy = false;
   bool _urgentLockBusy = false;
+  bool _lineCancellationBusy = false;
   String? _authIdentity;
   PlayerStartupPreparation? _startupPreparation;
   bool _opening = false;
@@ -396,6 +490,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     PlaybackOrigin? prepared,
     ServerEntryTicket? entry,
   }) {
+    _openingRecoveryBudget?.cancel();
+    _openingRecoveryBudget = null;
     final revision = ++_requestRevision;
     _opening = true;
     if (!_disposed) notifyListeners();
@@ -404,148 +500,218 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed || revision != _requestRevision) return;
       late PlayerWindowLaunch launch;
       PlaybackOrigin? resolvedOrigin;
-      Map<String, dynamic>? handoff;
-      if (runtime != null && request.source != null) {
-        final origin = prepared ?? await runtime!.resolve(request);
-        origin.permit.requireValid();
-        if (_disposed || revision != _requestRevision) return;
-        resolvedOrigin = origin;
-        // The child needs the user record for stream preferences; overlap it
-        // with version negotiation instead of the child re-fetching serially.
-        final userFuture = origin.permit
-            .dispatch((_) => origin.client.getUser())
-            .then<MediaUser?>((value) => value, onError: (Object _) => null);
-        final item = prepared == null && origin.resolvedItem != null
-            ? origin.resolvedItem!
-            : await origin.permit.dispatch(
-                (_) => origin.client.getItem(request.itemId),
-              );
-        final sourceClient = origin.client;
-        var versions = sourceClient is PlaybackMetadataProvider
-            ? await origin.permit.dispatch(
-                (_) => (sourceClient as PlaybackMetadataProvider)
-                    .getPlaybackSources(
-                      itemId: request.itemId,
-                      position:
-                          request.startPosition ??
-                          (request.autoResume
-                              ? item.resumePosition
-                              : Duration.zero),
-                    ),
-              )
-            : playbackSourcesFromItem(item);
-        // Emby/Jellyfin detail metadata already contains the versions. Only
-        // legacy responses without that metadata need discovery negotiation.
-        // The child owns the final negotiated session and selected tracks.
-        if (versions.isEmpty && sourceClient is! PlaybackMetadataProvider) {
-          final info = await origin.permit.dispatch(
-            (_) => sourceClient.getPlaybackInfo(itemId: request.itemId),
-          );
-          versions = info.mediaSources;
-          await info.resources?.release();
-        }
-        // Hand the negotiated metadata to the child: it skips its own serial
-        // item/user/source discovery and only runs PlaybackInfo for tracks.
-        MediaUser? handoffUser;
-        try {
-          handoffUser = await userFuture;
-        } catch (_) {}
-        if (_disposed || revision != _requestRevision) return;
-        handoff = await PlayerStartupPreparation.handoff(
-          userId: origin.source.account.userId,
-          itemId: request.itemId,
-          item: item,
-          user: handoffUser,
-          versions: versions,
-        ).payload;
-        if (entry == null) {
-          await runtime!.importLegacyPreferences(
-            origin,
-            item,
-            versions,
-            await (await openPlayerSettingsStore()).read(),
-          );
-        }
-        if (_disposed || revision != _requestRevision) return;
-        final pref = runtime!.preference(origin, item, versions);
-        final usePreference =
-            request.mediaSourceId == null && pref.failure == null;
-        if (request.mediaSourceId == null &&
-            pref.failure != null &&
-            pref.failure != PreferenceFailure.notConfigured) {
-          throw StateError(
-            'Source preference requires selection: ${pref.failure}',
-          );
-        }
-        final settings = usePreference ? pref.preference?.settings : null;
-        final version =
-            request.mediaSourceId ??
-            (usePreference ? pref.selected?.source.mediaSourceId : null);
-        final sources = versions.where((s) => s.id == version);
-        final media = sources.length == 1 ? sources.single : null;
-        final lines = runtime!.registry
-            .project()
-            .firstWhere((s) => s.id == origin.source.account.configuredServerId)
-            .lines;
-        if (usePreference &&
-            pref.preference?.lineId != null &&
-            !lines.any(
-              (l) =>
-                  l.id == pref.preference!.lineId &&
-                  Uri.parse(l.address) == origin.client.baseUrl,
-            )) {
-          throw StateError('Saved line requires explicit switch');
-        }
-        launch = PlayerWindowLaunch(
-          request: PlayerOpenRequest(
+      PlaybackRecoveryBudget? recovery;
+      final attemptedLines = <String>[];
+      if (runtime != null) {
+        Future<PlayerWindowLaunch> prepareLaunch(
+          PlaybackOrigin origin,
+          PlaybackRecoveryBudget? window,
+        ) async {
+          void current() {
+            window?.check();
+            origin.permit.requireValid();
+            if (_disposed || revision != _requestRevision) {
+              throw const PlaybackRecoveryCancelled();
+            }
+          }
+
+          current();
+          // The child needs the user record for stream preferences; overlap it
+          // with version negotiation instead of the child re-fetching serially.
+          final userFuture = origin.permit
+              .dispatch((_) => origin.client.getUser())
+              .then<MediaUser?>((value) => value, onError: (Object _) => null);
+          final item = prepared == null && origin.resolvedItem != null
+              ? origin.resolvedItem!
+              : await origin.permit.dispatch(
+                  (_) => origin.client.getItem(request.itemId),
+                );
+          final sourceClient = origin.client;
+          var versions = sourceClient is PlaybackMetadataProvider
+              ? await origin.permit.dispatch(
+                  (_) => (sourceClient as PlaybackMetadataProvider)
+                      .getPlaybackSources(
+                        itemId: request.itemId,
+                        position:
+                            request.startPosition ??
+                            (request.autoResume
+                                ? item.resumePosition
+                                : Duration.zero),
+                      ),
+                )
+              : playbackSourcesFromItem(item);
+          // Emby/Jellyfin detail metadata already contains the versions. Only
+          // legacy responses without that metadata need discovery negotiation.
+          // The child owns the final negotiated session and selected tracks.
+          if (versions.isEmpty && sourceClient is! PlaybackMetadataProvider) {
+            final info = await origin.permit.dispatch(
+              (_) => sourceClient.getPlaybackInfo(itemId: request.itemId),
+            );
+            versions = info.mediaSources;
+            await info.resources?.release();
+          }
+          // Hand the negotiated metadata to the child: it skips its own serial
+          // item/user/source discovery and only runs PlaybackInfo for tracks.
+          MediaUser? handoffUser;
+          try {
+            handoffUser = await userFuture;
+          } catch (_) {}
+          current();
+          final handoff = await PlayerStartupPreparation.handoff(
+            userId: origin.source.account.userId,
             itemId: request.itemId,
-            autoResume: request.autoResume,
-            source: origin.source,
-            work: origin.work,
-            libraryId: origin.libraryId,
-            mediaSourceId: version,
-            audioStreamIndex:
-                request.audioStreamIndex ??
-                (media == null
-                    ? null
-                    : matchPreferredStreamIndex(
-                        streams: media.audioStreams,
-                        preferredIndex: settings?.mediaSourceId == media.id
-                            ? settings?.audioStreamIndex
-                            : null,
-                        exactIndex: settings?.mediaSourceId == media.id,
-                        language: settings?.audioLanguage,
-                        title: settings?.audioTitle,
-                      )),
-            subtitleStreamIndex:
-                request.subtitleStreamIndex ??
-                (media == null
-                    ? null
-                    : matchPreferredStreamIndex(
-                        streams: media.subtitleStreams,
-                        language: settings?.subtitleLanguage,
-                        title: settings?.subtitleTitle,
-                      )),
-            startPosition: request.startPosition,
-            startPaused: request.startPaused,
-            secondarySubtitleStreamIndex: request.secondarySubtitleStreamIndex,
-            subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
-            maxStreamingBitrate:
-                request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
+            item: item,
+            user: handoffUser,
+            versions: versions,
+          ).payload;
+          if (entry == null) {
+            await runtime!.importLegacyPreferences(
+              origin,
+              item,
+              versions,
+              await (await openPlayerSettingsStore()).read(),
+            );
+          }
+          current();
+          final pref = runtime!.preference(origin, item, versions);
+          final usePreference =
+              request.mediaSourceId == null && pref.failure == null;
+          if (request.mediaSourceId == null &&
+              pref.failure != null &&
+              pref.failure != PreferenceFailure.notConfigured) {
+            throw StateError(
+              'Source preference requires selection: ${pref.failure}',
+            );
+          }
+          final settings = usePreference ? pref.preference?.settings : null;
+          final version =
+              request.mediaSourceId ??
+              (usePreference ? pref.selected?.source.mediaSourceId : null);
+          final sources = versions.where((s) => s.id == version);
+          final media = sources.length == 1 ? sources.single : null;
+          final saved = runtime!.registry.server(
+            origin.source.account.configuredServerId,
+          );
+          final lines = saved.lines;
+          return PlayerWindowLaunch(
+            request: PlayerOpenRequest(
+              itemId: request.itemId,
+              autoResume: request.autoResume,
+              source: origin.source,
+              work: origin.work,
+              libraryId: origin.libraryId,
+              mediaSourceId: version,
+              audioStreamIndex:
+                  request.audioStreamIndex ??
+                  (media == null
+                      ? null
+                      : matchPreferredStreamIndex(
+                          streams: media.audioStreams,
+                          preferredIndex: settings?.mediaSourceId == media.id
+                              ? settings?.audioStreamIndex
+                              : null,
+                          exactIndex: settings?.mediaSourceId == media.id,
+                          language: settings?.audioLanguage,
+                          title: settings?.audioTitle,
+                        )),
+              subtitleStreamIndex:
+                  request.subtitleStreamIndex ??
+                  (media == null
+                      ? null
+                      : matchPreferredStreamIndex(
+                          streams: media.subtitleStreams,
+                          language: settings?.subtitleLanguage,
+                          title: settings?.subtitleTitle,
+                        )),
+              startPosition: request.startPosition,
+              startPaused: request.startPaused,
+              secondarySubtitleStreamIndex:
+                  request.secondarySubtitleStreamIndex,
+              subtitleOff: request.subtitleOff || settings?.subtitleOff == true,
+              maxStreamingBitrate:
+                  request.maxStreamingBitrate ?? settings?.maxStreamingBitrate,
+              accessGeneration: origin.permit.accessGeneration,
+            ),
+            baseUrl: origin.client.baseUrl!.toString(),
+            accessToken: origin.client.accessToken!,
+            userId: origin.source.account.userId,
+            device: origin.client.device,
+            serviceType: origin.client.serviceType,
+            userAgent: origin.client.customUserAgent,
             accessGeneration: origin.permit.accessGeneration,
-          ),
-          baseUrl: origin.client.baseUrl!.toString(),
-          accessToken: origin.client.accessToken!,
-          userId: origin.source.account.userId,
-          device: origin.client.device,
-          serviceType: origin.client.serviceType,
-          userAgent: origin.client.customUserAgent,
-          accessGeneration: origin.permit.accessGeneration,
-          lines: lines,
-          verifiedServerId: origin.source.account.verifiedServerId,
-          startupHandoff: handoff,
-          entryPending: entry != null,
-        );
+            lines: lines,
+            lineSelection: runtime!.registry
+                .server(origin.source.account.configuredServerId)
+                .lineSelection,
+            verifiedServerId: origin.source.account.verifiedServerId,
+            startupHandoff: handoff,
+            entryPending: entry != null,
+            recoveryDeadlineUtc: recovery == null
+                ? null
+                : DateTime.now().toUtc().add(recovery.remaining),
+            recoveryAttemptDeadlineUtc: window == null
+                ? null
+                : DateTime.now().toUtc().add(window.remaining),
+            recoveryAttemptedLineIds: List.unmodifiable(attemptedLines),
+          );
+        }
+
+        final serverId =
+            request.source?.account.configuredServerId ??
+            auth.session?.server.id;
+        final saved = serverId == null
+            ? null
+            : runtime!.registry.server(serverId);
+        if (prepared == null &&
+            entry == null &&
+            saved?.lineSelection.isAutomatic == true) {
+          recovery = PlaybackRecoveryBudget();
+          _openingRecoveryBudget = recovery;
+          final original = saved!.activeLine;
+          if (original == null) {
+            throw StateError('Playback active line unavailable');
+          }
+          PlaybackRecoveryCandidate candidate(ServerLine line, bool first) =>
+              PlaybackRecoveryCandidate(line.id, (window) async {
+                final result = await window.run(() async {
+                  final origin = first
+                      ? await runtime!.resolve(request)
+                      : await runtime!.resolveInitialLine(
+                          request,
+                          line.id,
+                          window.remaining,
+                        );
+                  window.check();
+                  final preparedLaunch = await prepareLaunch(origin, window);
+                  window.check();
+                  return (origin, preparedLaunch);
+                });
+                window.check();
+                if (_disposed || revision != _requestRevision) {
+                  throw const PlaybackRecoveryCancelled();
+                }
+                resolvedOrigin = result.$1;
+                launch = result.$2;
+                return true;
+              });
+          final result = await PlaybackRecoveryCoordinator().run(
+            original: candidate(original, true),
+            candidates: [
+              for (final line in saved.lines)
+                if (line.id != original.id) candidate(line, false),
+            ],
+            lastSuccessfulLineId: saved.lastSuccessfulLineId,
+            budget: recovery,
+            onAttempt: (line, _) => attemptedLines.add(line),
+          );
+          if (result.status != PlaybackRecoveryStatus.succeeded) {
+            throw result.error ??
+                StateError('Playback metadata recovery exhausted');
+          }
+        } else {
+          resolvedOrigin = prepared ?? await runtime!.resolve(request);
+          launch = await prepareLaunch(resolvedOrigin, null);
+        }
       } else {
         launch = PlayerWindowLaunch.fromAuth(
           auth: auth,
@@ -565,7 +731,11 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
           ? PlayerStartupPreparation(auth.client, request.itemId)
           : null;
       try {
-        await stopping;
+        if (recovery == null) {
+          await stopping;
+        } else {
+          await recovery.run(() => stopping);
+        }
         if (_disposed || revision != _requestRevision) {
           preparation?.cancel();
           return;
@@ -579,11 +749,38 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
         _lastSwitchCommand = -1;
         _lastObservationSequence = null;
         _privateRevoked = false;
-        final pid = await _control.spawn(
+        recovery?.check();
+        if (launch.recoveryAttemptDeadlineUtc != null &&
+            !launch.recoveryAttemptDeadlineUtc!.isAfter(
+              DateTime.now().toUtc(),
+            )) {
+          throw TimeoutException('Playback candidate budget exhausted');
+        }
+        var abandonedSpawn = false;
+        final spawning = _control.spawn(
           executable: Platform.resolvedExecutable,
           arguments: launch.toArguments(),
           startup: preparation?.payload,
         );
+        unawaited(
+          spawning.then((latePid) async {
+            if (!abandonedSpawn) return;
+            await _control.kill(latePid);
+            await _control.release(latePid);
+          }, onError: (Object _) {}),
+        );
+        final pid = recovery == null
+            ? await spawning
+            : await recovery.run(
+                () => spawning,
+                limit: launch.recoveryAttemptDeadlineUtc?.difference(
+                  DateTime.now().toUtc(),
+                ),
+                onCancel: () {
+                  abandonedSpawn = true;
+                  _control.cancelPendingSpawns();
+                },
+              );
         if (_disposed ||
             revision != _requestRevision ||
             (_origin != null
@@ -678,6 +875,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> close() {
+    _openingRecoveryBudget?.cancel();
     _pendingEntry?.cancel();
     _pendingEntry = null;
     _switchEntry?.cancel();
@@ -697,6 +895,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   Future<void> forceClose() async {
+    _openingRecoveryBudget?.cancel();
     _pendingEntry?.cancel();
     _pendingEntry = null;
     _switchEntry?.cancel();
@@ -743,6 +942,7 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       if (_disposed) return;
       // This mailbox bypasses a potentially stalled catalogue/preflight watch.
       if (!_urgentLockBusy) unawaited(_consumeUrgentLock(pid));
+      if (!_lineCancellationBusy) unawaited(_consumeLineCancellation(pid));
       // Server verification may outlast the child's heartbeat deadline. Keep
       // liveness independent of the serialized observation/command queue.
       if (!_heartbeatBusy) {
@@ -1158,6 +1358,48 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
     }
   }
 
+  // A cancelled/failed child open must invalidate a save even while the
+  // ordinary switch watcher is awaiting that save or its server verification.
+  Future<void> _consumeLineCancellation(int pid) async {
+    final control = _control;
+    if (_lineCancellationBusy || control is! PlayerLineProcessControl) return;
+    final ipc = control as PlayerLineProcessControl;
+    _lineCancellationBusy = true;
+    try {
+      final command = await ipc.consumeLineCancellation(pid);
+      if (command == null) return;
+      final actual = _origin;
+      final sequence = command['sequence'];
+      var accepted = false;
+      if (actual != null &&
+          runtime != null &&
+          pid == _pid &&
+          command['pid'] == pid &&
+          sequence is int &&
+          sequence > _lastSwitchCommand &&
+          !_privateRevoked &&
+          command['action'] == 'cancelLine' &&
+          command['generation'] == actual.permit.accessGeneration &&
+          command['source'] is Map &&
+          decodeAuthorizedSource(
+                Map<String, dynamic>.from(command['source'] as Map),
+              ).account ==
+              actual.source.account &&
+          actual.permit.isValid) {
+        _lastSwitchCommand = sequence;
+        accepted = true;
+      }
+      await ipc.replyLineCancellation(pid, {
+        'sequence': sequence,
+        'accepted': accepted,
+      });
+    } catch (_) {
+      // Endpoint retirement or malformed commands cannot authorize a commit.
+    } finally {
+      _lineCancellationBusy = false;
+    }
+  }
+
   Future<void> _consumeSwitchCommand(int pid) async {
     final control = _control;
     final actual = _origin;
@@ -1189,6 +1431,45 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
       actual.permit.requireValid();
       _lastSwitchCommand = sequence;
       switch (command['action']) {
+        case 'cancelLine':
+          break;
+        case 'commitLine':
+          final line = command['line'] as String;
+          final selection = LineSelection.fromJson(command['selection']);
+          final deadline = DateTime.tryParse(
+            command['deadlineUtc'] as String? ?? '',
+          );
+          void current() {
+            actual.permit.requireValid();
+            if (deadline == null ||
+                !deadline.isAfter(DateTime.now().toUtc()) ||
+                _disposed ||
+                _privateRevoked ||
+                _pid != pid ||
+                _lastSwitchCommand != sequence ||
+                !identical(_origin, actual)) {
+              throw StateError('Line commit expired');
+            }
+          }
+          current();
+          Duration remaining() => deadline!.difference(DateTime.now().toUtc());
+          final target = await runtime!
+              .resolveLine(
+                actual,
+                line,
+                command['version'] as String?,
+                timeout: remaining(),
+              )
+              .timeout(remaining());
+          current();
+          await _observationTail.timeout(remaining());
+          current();
+          await runtime!.commitLine(target, line, selection, current);
+          current();
+          _origin = target;
+          _authIdentity = _currentAuthIdentity;
+          receipt['selection'] = selection.toJson();
+
         case 'opened':
           final entry = _pendingEntry;
           if (entry == null ||
@@ -1699,6 +1980,8 @@ class DesktopPlayerWindowHost extends PlayerWindowHost {
 
   @override
   void dispose() {
+    _openingRecoveryBudget?.cancel();
+    runtime?.unregisterLinePlayer(this);
     _pendingEntry?.cancel();
     _pendingEntry = null;
     _entryOpenTimer?.cancel();
@@ -1803,6 +2086,8 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
   var _playerKey = GlobalKey<PlayerPageState>();
   Future<void>? _closing;
   Timer? _commands;
+  int _lineCommandSequence = 0;
+  int _cancelledLineCommand = 0;
   bool _readingCommand = false;
   int _ipcSequence = 0;
   int _launchRevision = 0;
@@ -1842,6 +2127,49 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
       unawaited(() async {
         try {
           final endpoint = _launch.protocol;
+          final lineCommand = await endpoint?.read('line-selection');
+          final lineSequence = lineCommand?['sequence'];
+          if (lineSequence is int &&
+              lineCommand?['cancel'] == true &&
+              lineSequence == _lineCommandSequence &&
+              lineSequence != _cancelledLineCommand) {
+            _cancelledLineCommand = lineSequence;
+            _playerKey.currentState?.controller?.cancelLineRecovery();
+          } else if (lineSequence is int &&
+              lineSequence > _lineCommandSequence &&
+              lineCommand?['cancel'] != true) {
+            _lineCommandSequence = lineSequence;
+            unawaited(() async {
+              var accepted = false;
+              try {
+                if (lineCommand?['generation'] != _launch.accessGeneration) {
+                  throw StateError('Line request permission expired');
+                }
+                final controller = _playerKey.currentState?.controller;
+                if (controller == null) throw StateError('Player unavailable');
+                await controller.selectPlaybackLine(
+                  LineSelection.fromJson(lineCommand!['selection']),
+                  deadlineUtc: DateTime.tryParse(
+                    lineCommand['deadlineUtc'] as String? ?? '',
+                  ),
+                  guard: () {
+                    if (_closing != null ||
+                        _lineCommandSequence != lineSequence ||
+                        _cancelledLineCommand == lineSequence) {
+                      throw StateError('Line request cancelled');
+                    }
+                  },
+                );
+                accepted = controller.switchConfirmation == null;
+              } catch (_) {
+                /* Child keeps the actionable failure/selection UI. */
+              }
+              await endpoint?.write('line-selection-result', {
+                'sequence': lineSequence,
+                'accepted': accepted,
+              });
+            }());
+          }
           final revoked = await endpoint?.read('revoke');
           if (revoked != null) {
             await _playerKey.currentState?.controller?.revokeFromHost(
@@ -1958,17 +2286,36 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
     }
     final sequence = ++_ipcSequence;
     final urgentLock = command['action'] == 'lock';
-    await endpoint.write(urgentLock ? 'lock-request' : 'switch-request', {
+    final cancelLine = command['action'] == 'cancelLine';
+    final requestMailbox = urgentLock
+        ? 'lock-request'
+        : cancelLine
+        ? 'line-cancel'
+        : 'switch-request';
+    final replyMailbox = urgentLock
+        ? 'lock-reply'
+        : cancelLine
+        ? 'line-cancel-result'
+        : 'switch-reply';
+    await endpoint.write(requestMailbox, {
       ...command,
       'source': encodeSource(source),
       'generation': _launch.accessGeneration,
       'sequence': sequence,
     });
-    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    final ordinaryDeadline = DateTime.now().toUtc().add(
+      const Duration(seconds: 30),
+    );
+    final requestedDeadline = DateTime.tryParse(
+      command['deadlineUtc'] as String? ?? '',
+    );
+    final deadline =
+        requestedDeadline != null &&
+            requestedDeadline.isBefore(ordinaryDeadline)
+        ? requestedDeadline
+        : ordinaryDeadline;
     while (DateTime.now().isBefore(deadline) && _closing == null) {
-      final reply = await endpoint.read(
-        urgentLock ? 'lock-reply' : 'switch-reply',
-      );
+      final reply = await endpoint.read(replyMailbox);
       if (reply?['sequence'] == sequence) {
         if (reply?['accepted'] != true) throw StateError('${reply?['error']}');
         return reply!;
@@ -2139,6 +2486,10 @@ class _PlayerWindowAppState extends State<PlayerWindowApp> with WindowListener {
               ? null
               : _dispatchSwitch,
           startupData: _startup,
+          playbackLineSelectionSnapshot: _launch.lineSelection,
+          recoveryDeadlineUtc: _launch.recoveryDeadlineUtc,
+          recoveryAttemptDeadlineUtc: _launch.recoveryAttemptDeadlineUtc,
+          recoveryAttemptedLineIds: _launch.recoveryAttemptedLineIds,
           snapshotStore:
               widget._bindings?.snapshotStore ??
               (_launch.protocol == null

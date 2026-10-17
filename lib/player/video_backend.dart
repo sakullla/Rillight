@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../media_server/resources.dart';
+import 'playback_recovery_coordinator.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
@@ -57,6 +58,10 @@ class VideoOpenRequest {
 }
 
 /// Optional backend contract; existing desktop and fake defaults are unchanged.
+abstract interface class VideoBackendRecoveryBudget {
+  set recoveryBudget(PlaybackRecoveryBudget? value);
+}
+
 abstract interface class VideoBackendCapabilities {
   Future<PlaybackCapabilities> playbackCapabilities(int maxStreamingBitrate);
 }

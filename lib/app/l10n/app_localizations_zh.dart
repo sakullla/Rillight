@@ -2731,4 +2731,60 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get comparisonPasswordPrompt => '验证后查找这台服务器中的对应影片。';
+
+  @override
+  String get playbackReconnecting => '正在重新连接…';
+
+  @override
+  String get playbackTryingAlternative => '正在尝试备用线路…';
+
+  @override
+  String get playbackRecoveryStopped => '连接尚未恢复';
+
+  @override
+  String get playbackRecoveryPositionKept => '观看位置已保留，你可以重试或选择其他线路。';
+
+  @override
+  String get playbackChooseLine => '选择线路';
+
+  @override
+  String get playbackLineFailureHint => '线路未切换成功。请重试或选择其他线路。';
+
+  @override
+  String get playbackSwitchNeedsChoice => '继续前，请确认播放选择';
+
+  @override
+  String get playbackPositionUnavailable => '这个版本无法从原观看位置继续。可以从头播放，或取消切换。';
+
+  @override
+  String get playbackTimelineUncertain => '两个版本的时长或片段可能不同，请确认是否沿用原观看位置。';
+
+  @override
+  String get playbackAudioUnavailable => '原音轨不可用，请选择其他音轨。';
+
+  @override
+  String get playbackSubtitleUnavailable => '原字幕不可用，请选择其他字幕，或明确关闭字幕。';
+
+  @override
+  String get playbackUseDefaultAudio => '使用此版本的默认音轨';
+
+  @override
+  String get playbackContinueWithoutSubtitles => '关闭字幕继续';
+
+  @override
+  String get playbackStartFromBeginning => '从头播放';
+
+  @override
+  String get playbackContinueAtPosition => '沿用原观看位置';
+
+  @override
+  String get playbackLinePending => '正在连接，成功后才会保存选择';
+
+  @override
+  String get playbackLineFixed => '固定线路';
+
+  @override
+  String playbackLineActual(String line) {
+    return '正在使用：$line';
+  }
 }

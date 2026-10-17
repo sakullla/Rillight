@@ -44,6 +44,13 @@ abstract interface class PlayerUrgentLockProcessControl {
   Future<void> replyLockCommand(int pid, Map<String, dynamic> receipt);
 }
 
+abstract interface class PlayerLineProcessControl {
+  Future<void> requestLineSelection(int pid, Map<String, dynamic> command);
+  Future<Map<String, dynamic>?> lineSelectionResult(int pid);
+  Future<Map<String, dynamic>?> consumeLineCancellation(int pid);
+  Future<void> replyLineCancellation(int pid, Map<String, dynamic> receipt);
+}
+
 class PlayerProcessStartupException implements Exception {
   PlayerProcessStartupException(this.pid, this.cause);
   final int pid;
@@ -68,6 +75,7 @@ abstract class DesktopPlayerProcessControl
     implements
         PlayerProcessControl,
         PlayerHistoryProcessControl,
+        PlayerLineProcessControl,
         PlayerUrgentLockProcessControl {
   DesktopPlayerProcessControl({
     this.pollInterval = const Duration(milliseconds: 100),
@@ -77,6 +85,26 @@ abstract class DesktopPlayerProcessControl
   final Duration pollInterval;
   final Duration startupTimeout;
   final Map<int, PlayerProcessProtocol> _endpoints = {};
+
+  @override
+  Future<void> requestLineSelection(
+    int pid,
+    Map<String, dynamic> command,
+  ) async => _endpoints[pid]?.write('line-selection', command);
+
+  @override
+  Future<Map<String, dynamic>?> lineSelectionResult(int pid) async =>
+      _endpoints[pid]?.read('line-selection-result');
+
+  @override
+  Future<Map<String, dynamic>?> consumeLineCancellation(int pid) async =>
+      _endpoints[pid]?.read('line-cancel');
+
+  @override
+  Future<void> replyLineCancellation(
+    int pid,
+    Map<String, dynamic> receipt,
+  ) async => _endpoints[pid]?.write('line-cancel-result', receipt);
   final Map<int, Future<void>> _releases = {};
   int _generation = 0;
   int _preparationGeneration = 0;

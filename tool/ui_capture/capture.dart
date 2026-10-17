@@ -50,6 +50,7 @@ import 'package:rillight/auth/provider_identity.dart';
 
 import 'danmaku.dart';
 import 'updates.dart';
+import 'player_lines.dart';
 import '../../test/app/update_ui_fixture.dart';
 
 import 'package:rillight/app/updates/update_platform_contract.dart';
@@ -439,6 +440,7 @@ void main() {
             await capture.tap(PlayerKeys.resumeFromStart);
           }
           await capture.save('player-controls');
+          await capture.playerLineStates(backend, backup, remote);
           expect(backend.openCount, greaterThan(0));
           backend.emitEvent(
             VideoEventKind.bufferSnapshot,
@@ -792,7 +794,10 @@ void main() {
             }
           }
         }
-        if (capture.wants('login') || capture.wants('player')) {
+        if ((capture.wants('login') || capture.wants('player')) &&
+            CaptureSession.knownStates
+                .where((state) => state.startsWith('provider-'))
+                .any(capture.shouldCapture)) {
           await capture.providerPages(
             app,
             auth,

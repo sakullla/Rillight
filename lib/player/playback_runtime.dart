@@ -9,6 +9,7 @@ import 'dart:io';
 import 'dart:convert';
 
 import 'player_settings.dart';
+import 'playback_recovery_coordinator.dart';
 import '../media_server/capabilities.dart';
 import '../media_server/server_address.dart';
 
@@ -45,7 +46,9 @@ class PlaybackOrigin {
 /// Created only by the application bootstrap, never by the player helper.
 /// All embedded players and desktop IPC share this one history owner.
 class PlaybackRuntime {
-  PlaybackRuntime({required this.auth, required this.history});
+  PlaybackRuntime({required this.auth, required this.history}) {
+    auth.playbackLineSelection = _selectPlaybackLine;
+  }
   final AuthController auth;
   final HistoryWriter history;
   SourceSessionRegistry get registry => auth.sources;
@@ -53,6 +56,55 @@ class PlaybackRuntime {
   // Navigator page keys bind a mounted route instance, not decoded intent.
   // Imperative routes retain their page key across extra-codec refreshes.
   final Map<Object, PlaybackOrigin? Function()> _mountedPlayers = {};
+  final Map<
+    Object,
+    ({
+      String? Function() server,
+      Future<void> Function(LineSelection, void Function()) select,
+    })
+  >
+  _linePlayers = {};
+
+  void registerLinePlayer(
+    Object key,
+    String? Function() server,
+    Future<void> Function(LineSelection, void Function()) select,
+  ) => _linePlayers[key] = (server: server, select: select);
+
+  void unregisterLinePlayer(Object key) => _linePlayers.remove(key);
+
+  Future<void> _selectPlaybackLine(
+    String id,
+    LineSelection selection,
+    void Function() guard,
+  ) async {
+    for (final player in _linePlayers.values.toList().reversed) {
+      if (player.server() == id) {
+        await player.select(selection, guard);
+        return;
+      }
+    }
+    await auth.selectLine(id, selection, guard: guard);
+  }
+
+  Future<void> commitLine(
+    PlaybackOrigin target,
+    String lineId,
+    LineSelection selection,
+    void Function() guard,
+  ) async {
+    await registry.commitPlaybackLine(
+      permit: target.permit,
+      client: target.client,
+      lineId: lineId,
+      selection: selection,
+      guard: guard,
+    );
+    auth.publishPlaybackConnection(
+      target.source.account.configuredServerId,
+      target.client,
+    );
+  }
 
   /// Verified item→library memberships. Proving membership walks ancestors
   /// serially (up to 32 GETs); re-opens of the same item must not pay that
@@ -151,6 +203,7 @@ class PlaybackRuntime {
   Future<PlaybackOrigin> resolve(
     PlayerOpenRequest request, {
     ServerEntryTicket? entry,
+    PlaybackOrigin? connection,
   }) async {
     SourceReference? source = request.source;
     String? library = request.libraryId;
@@ -179,7 +232,9 @@ class PlaybackRuntime {
         throw StateError('Playback account changed');
       }
       final permit = registry.permit(account);
-      var item = await permit.dispatch((c) => c.getItem(request.itemId));
+      var item = await permit.dispatch(
+        (c) => (connection?.client ?? c).getItem(request.itemId),
+      );
       if (item.id != request.itemId) throw StateError('Source item mismatch');
       library = item.hierarchyParentId ?? item.id;
       source = SourceReference(
@@ -203,13 +258,18 @@ class PlaybackRuntime {
       library,
       entry: entry,
     );
+    if (connection != null && connection.source.account != account) {
+      throw StateError('Playback connection account mismatch');
+    }
     // A decoded route is still only a value reference. Unlocking must not
     // reacquire the authority of a pre-lock private playback intent.
     if (registry.access.isProtected(account.configuredServerId) &&
         request.accessGeneration != permit.accessGeneration) {
       throw StateError('Private playback route generation was revoked');
     }
-    final item = await permit.dispatch((c) => c.getItem(source!.itemId));
+    final item = await permit.dispatch(
+      (c) => (connection?.client ?? c).getItem(source!.itemId),
+    );
     if (item.id != source.itemId) throw StateError('Source item mismatch');
     // A library id supplied by a route/IPC message is not membership proof.
     final proofKey = jsonEncode([
@@ -233,7 +293,7 @@ class PlaybackRuntime {
           );
         }
         ancestor = await permit.dispatch(
-          (c) => c.getItem(ancestor.hierarchyParentId!),
+          (c) => (connection?.client ?? c).getItem(ancestor.hierarchyParentId!),
         );
       }
       _rememberMembership(proofKey);
@@ -249,7 +309,7 @@ class PlaybackRuntime {
         work.itemId != (item.isEpisode ? item.seriesId : item.id)) {
       throw StateError('Concrete episode has no confirmed series anchor');
     }
-    final client = await permit.dispatch((c) async => c);
+    final client = await permit.dispatch((c) async => connection?.client ?? c);
     return PlaybackOrigin(
       source: source,
       work: work.item,
@@ -258,6 +318,44 @@ class PlaybackRuntime {
       client: client,
       resolvedItem: item,
     );
+  }
+
+  /// First-open recovery verifies the candidate before using it for the same
+  /// full item/library membership proof used by an ordinary launch.
+  Future<PlaybackOrigin> resolveInitialLine(
+    PlayerOpenRequest request,
+    String lineId,
+    Duration timeout,
+  ) async {
+    final id =
+        request.source?.account.configuredServerId ?? auth.session?.server.id;
+    if (id == null) throw StateError('Playback source unavailable');
+    final session = await registry.ensureSession(id);
+    if (request.source != null && request.source!.account != session.account) {
+      throw StateError('Playback account changed');
+    }
+    final permit = registry.permit(session.account);
+    final source =
+        request.source ??
+        SourceReference(
+          account: session.account,
+          itemId: request.itemId,
+          mediaSourceId: request.mediaSourceId,
+        );
+    final seed = PlaybackOrigin(
+      source: source,
+      work: request.work ?? source.item,
+      libraryId: request.libraryId ?? request.itemId,
+      permit: permit,
+      client: session.client,
+    );
+    final connection = await resolveLine(
+      seed,
+      lineId,
+      request.mediaSourceId,
+      timeout: timeout,
+    );
+    return resolve(request, connection: connection);
   }
 
   /// A local playback boundary may be a season rather than a library. Rebase
@@ -482,13 +580,17 @@ class PlaybackRuntime {
         registry.createProviderClient?.call(server.serviceType) ??
         registry.createClient();
     if (independent.serviceType != server.serviceType) {
-      throw StateError('Line provider identity mismatch');
+      throw const MediaServerException(
+        MediaServerFailureKind.incompatibleServer,
+      );
     }
     final address = Uri.parse(line.address);
     final identity = await independent.getPublicInfo(address).timeout(timeout);
     actual.permit.requireValid();
     if (identity.id != actual.source.account.verifiedServerId) {
-      throw StateError('Line ServerId mismatch');
+      throw const MediaServerException(
+        MediaServerFailureKind.incompatibleServer,
+      );
     }
     independent.attachSession(
       baseUrl: address,
@@ -507,20 +609,26 @@ class PlaybackRuntime {
           .dispatch((_) => independent.getUser())
           .timeout(timeout);
       if (user.id != actual.source.account.userId) {
-        throw StateError('Line account mismatch');
+        throw const MediaServerException(
+          MediaServerFailureKind.invalidCredentials,
+        );
       }
       final item = await actual.permit
           .dispatch((_) => independent.getItem(actual.source.itemId))
           .timeout(timeout);
       if (item.id != actual.source.itemId) {
-        throw StateError('Line item mismatch');
+        throw const MediaServerException(
+          MediaServerFailureKind.incompatibleServer,
+        );
       }
       // Validate advertised versions without opening a disposable remote
       // playback. The actual controller owns negotiation and its cleanup lease.
       if (version != null &&
           item.mediaSources.isNotEmpty &&
           !item.mediaSources.any((s) => s.id == version)) {
-        throw StateError('Line actual version missing');
+        throw const PlaybackRecoveryFailure(
+          PlaybackRecoveryFailureKind.needsSelection,
+        );
       }
       return PlaybackOrigin(
         source: SourceReference(

@@ -5271,6 +5271,114 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'验证后查找这台服务器中的对应影片。'**
   String get comparisonPasswordPrompt;
+
+  /// No description provided for @playbackReconnecting.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在重新连接…'**
+  String get playbackReconnecting;
+
+  /// No description provided for @playbackTryingAlternative.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在尝试备用线路…'**
+  String get playbackTryingAlternative;
+
+  /// No description provided for @playbackRecoveryStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接尚未恢复'**
+  String get playbackRecoveryStopped;
+
+  /// No description provided for @playbackRecoveryPositionKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'观看位置已保留，你可以重试或选择其他线路。'**
+  String get playbackRecoveryPositionKept;
+
+  /// No description provided for @playbackChooseLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择线路'**
+  String get playbackChooseLine;
+
+  /// No description provided for @playbackLineFailureHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'线路未切换成功。请重试或选择其他线路。'**
+  String get playbackLineFailureHint;
+
+  /// No description provided for @playbackSwitchNeedsChoice.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续前，请确认播放选择'**
+  String get playbackSwitchNeedsChoice;
+
+  /// No description provided for @playbackPositionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本无法从原观看位置继续。可以从头播放，或取消切换。'**
+  String get playbackPositionUnavailable;
+
+  /// No description provided for @playbackTimelineUncertain.
+  ///
+  /// In zh, this message translates to:
+  /// **'两个版本的时长或片段可能不同，请确认是否沿用原观看位置。'**
+  String get playbackTimelineUncertain;
+
+  /// No description provided for @playbackAudioUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'原音轨不可用，请选择其他音轨。'**
+  String get playbackAudioUnavailable;
+
+  /// No description provided for @playbackSubtitleUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'原字幕不可用，请选择其他字幕，或明确关闭字幕。'**
+  String get playbackSubtitleUnavailable;
+
+  /// No description provided for @playbackUseDefaultAudio.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用此版本的默认音轨'**
+  String get playbackUseDefaultAudio;
+
+  /// No description provided for @playbackContinueWithoutSubtitles.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭字幕继续'**
+  String get playbackContinueWithoutSubtitles;
+
+  /// No description provided for @playbackStartFromBeginning.
+  ///
+  /// In zh, this message translates to:
+  /// **'从头播放'**
+  String get playbackStartFromBeginning;
+
+  /// No description provided for @playbackContinueAtPosition.
+  ///
+  /// In zh, this message translates to:
+  /// **'沿用原观看位置'**
+  String get playbackContinueAtPosition;
+
+  /// No description provided for @playbackLinePending.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接，成功后才会保存选择'**
+  String get playbackLinePending;
+
+  /// No description provided for @playbackLineFixed.
+  ///
+  /// In zh, this message translates to:
+  /// **'固定线路'**
+  String get playbackLineFixed;
+
+  /// No description provided for @playbackLineActual.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在使用：{line}'**
+  String playbackLineActual(String line);
 }
 
 class _AppLocalizationsDelegate

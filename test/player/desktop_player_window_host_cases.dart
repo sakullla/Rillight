@@ -23,6 +23,7 @@ import 'package:rillight/player/player_bindings.dart';
 import 'package:rillight/player/player_host_command.dart';
 import 'package:rillight/player/player_window_host.dart';
 import 'package:rillight/player/playback_runtime.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/aggregation/history/history_writer.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -131,10 +132,17 @@ void main() {
         snapshotStoreForPid: storeFor,
       );
       try {
-        await host.open(const PlayerOpenRequest(itemId: 'movie-1'));
+        await host.open(const PlayerOpenRequest(itemId: 'movie-up'));
         expect(control.spawnedArguments, hasLength(1));
-        expect(control.startupPayloads.single, isNotNull);
-        expect(host.current!.source, isNull);
+        expect(control.startupPayloads.single, isNull);
+        expect(host.current!.source, isNotNull);
+        final launch = PlayerWindowLaunch.fromArguments(
+          control.spawnedArguments.single,
+        );
+        expect(launch.startupHandoff, isNotNull);
+        expect(launch.accessGeneration, isNotNull);
+        expect(launch.recoveryDeadlineUtc, isNotNull);
+        expect(launch.recoveryAttemptDeadlineUtc, isNotNull);
         expect(
           auth.session!.server.toJson().containsKey('scopeKnown'),
           isFalse,
@@ -143,6 +151,105 @@ void main() {
         await host.close();
         expect(control.alive, isEmpty);
       } finally {
+        await host.forceClose();
+        host.dispose();
+        await history.close();
+        auth.dispose();
+      }
+    },
+  );
+
+  test('ordinary host metadata failure tries same-server backup within inherited deadline', () async {
+    final auth = await loggedInAuth();
+    final alternate = FakeEmbyServer(
+      baseUrl: Uri.parse('http://backup.test:8096'),
+    );
+    alternate.issuedTokens.addAll(server.issuedTokens);
+    adapter.add(alternate);
+    expect(
+      await auth.addLine(auth.session!.server.id, alternate.baseUrl.toString()),
+      isTrue,
+    );
+    final history = await HistoryWriter.open(
+      registry: auth.sources,
+      store: MemoryHistoryStore(),
+    );
+    final host = DesktopPlayerWindowHost(
+      auth: auth,
+      runtime: PlaybackRuntime(auth: auth, history: history),
+      processControl: control,
+      snapshotStoreForPid: storeFor,
+    );
+    final gate = server.holdItemGet = Completer<void>();
+    server.itemStatus = 503;
+    final before = DateTime.now().toUtc();
+    try {
+      final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      gate.complete();
+      await opening;
+      final launch = PlayerWindowLaunch.fromArguments(
+        control.spawnedArguments.single,
+      );
+      expect(Uri.parse(launch.baseUrl).host, 'backup.test');
+      expect(
+        launch.request.source!.account.configuredServerId,
+        auth.session!.server.id,
+      );
+      expect(launch.recoveryAttemptedLineIds, hasLength(2));
+      expect(
+        launch.recoveryDeadlineUtc!.difference(before),
+        lessThanOrEqualTo(const Duration(milliseconds: 45020)),
+      );
+      expect(
+        launch.recoveryDeadlineUtc!.difference(DateTime.now().toUtc()),
+        lessThan(const Duration(milliseconds: 44950)),
+      );
+      expect(
+        launch.recoveryAttemptDeadlineUtc!.difference(DateTime.now().toUtc()),
+        lessThanOrEqualTo(const Duration(seconds: 8)),
+      );
+      // Metadata preparation alone never persists a successful playback line.
+      expect(auth.client.baseUrl, server.baseUrl);
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      await host.forceClose();
+      host.dispose();
+      await history.close();
+      auth.dispose();
+    }
+  });
+
+  test(
+    'closing ordinary metadata recovery invalidates late work before spawn',
+    () async {
+      final auth = await loggedInAuth();
+      final history = await HistoryWriter.open(
+        registry: auth.sources,
+        store: MemoryHistoryStore(),
+      );
+      final host = DesktopPlayerWindowHost(
+        auth: auth,
+        runtime: PlaybackRuntime(auth: auth, history: history),
+        processControl: control,
+        snapshotStoreForPid: storeFor,
+      );
+      final gate = server.holdItemGet = Completer<void>();
+      try {
+        final opening = host.open(const PlayerOpenRequest(itemId: 'movie-up'));
+        final rejected = expectLater(
+          opening,
+          throwsA(isA<PlaybackRecoveryCancelled>()),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        await host.close();
+        await rejected;
+        gate.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(control.spawnedArguments, isEmpty);
+        expect(host.current, isNull);
+      } finally {
+        if (!gate.isCompleted) gate.complete();
         await host.forceClose();
         host.dispose();
         await history.close();

@@ -53,6 +53,15 @@ void main() {
         FakeMediaSource(id: 'alternate', name: 'HDR60 alternate'),
       ];
     }
+    final alias = extraLine == null
+        ? null
+        : FakeEmbyServer(
+            serverId: server.serverId,
+            serverName: server.serverName,
+            baseUrl: Uri.parse(extraLine),
+            views: server.views,
+            items: server.items,
+          );
     final auth = AuthController.memory(
       client: EmbyClient(
         device: const ClientDeviceInfo(
@@ -61,7 +70,7 @@ void main() {
           deviceId: 'tv-controls',
           version: '1',
         ),
-        dio: dioForFakeEmby(FakeEmbyAdapter([server])),
+        dio: dioForFakeEmby(FakeEmbyAdapter([server, ?alias])),
       ),
     );
     await tester.runAsync(
@@ -71,6 +80,13 @@ void main() {
         password: 'correct-horse',
       ),
     );
+    await tester.runAsync(
+      () => auth.selectLine(
+        auth.session!.server.id,
+        LineSelection.fixed(auth.session!.server.activeLineId!),
+      ),
+    );
+    alias?.issuedTokens.addAll(server.issuedTokens);
     if (extraLine != null) {
       final line = extraLine;
       await tester.runAsync(() => auth.addLine(auth.session!.server.id, line));
@@ -621,10 +637,30 @@ void main() {
     await settle(tester);
     await key(tester, LogicalKeyboardKey.arrowDown);
     expect(focused(tester, 'tv-player-toggle'), isTrue);
-    expect(find.byKey(const Key('player-playback-lines')), findsNothing);
+    expect(find.byKey(const Key('player-playback-lines')), findsOneWidget);
     expect(find.text('手动切换'), findsNothing);
-    for (final entry in ['tracks', 'quality', 'source', 'skip', 'speed']) {
+    for (final entry in [
+      'tracks',
+      'quality',
+      'lines',
+      'source',
+      'skip',
+      'speed',
+    ]) {
       await key(tester, LogicalKeyboardKey.arrowRight);
+      if (entry == 'lines') {
+        expect(focused(tester, 'player-playback-lines'), isTrue);
+        final origin = FocusManager.instance.primaryFocus;
+        await key(tester, LogicalKeyboardKey.select);
+        expect(find.byType(PlaybackLineMenu), findsOneWidget);
+        expect(find.byKey(const Key('playback-line-auto')), findsOneWidget);
+        expect(c.controlsPinned, isTrue);
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(FocusManager.instance.primaryFocus, same(origin));
+        expect(c.controlsPinned, isFalse);
+        continue;
+      }
       expect(focused(tester, 'tv-player-$entry'), isTrue);
       final origin = FocusManager.instance.primaryFocus;
       await key(tester, LogicalKeyboardKey.select);
@@ -816,7 +852,7 @@ void main() {
       await settle(tester);
       expect(c.disconnected, isTrue);
       expect(
-        focused(tester, 'tv-player-retry'),
+        focused(tester, 'playback-recovery-retry'),
         isTrue,
         reason: '${FocusManager.instance.primaryFocus}',
       );

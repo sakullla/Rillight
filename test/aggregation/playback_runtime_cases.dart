@@ -45,6 +45,7 @@ import 'package:rillight/auth/credential_store.dart';
 import 'package:rillight/auth/server_list_store.dart';
 import 'package:rillight/auth/source_sessions.dart';
 import 'package:rillight/media_server/media_server_client.dart';
+import 'package:rillight/media_server/errors.dart';
 import 'package:rillight/emby/emby_client.dart';
 import 'package:rillight/media_server/device.dart';
 import 'package:rillight/media_server/playback.dart';
@@ -994,17 +995,18 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('playback-line-line')));
       await settle(tester);
       expect(controller.client.baseUrl?.host, 'a');
-      await tester.tap(find.byKey(const Key('player-playback-lines')));
-      await settle(tester);
       await tester.tap(find.byKey(const ValueKey('playback-line-mirror')));
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 50));
         await tester.runAsync(() => Future<void>.delayed(Duration.zero));
-        if (controller.client.baseUrl?.host == 'mirror') break;
+        if (controller.activeLineId == 'mirror' &&
+            controller.pendingLineId == null) {
+          break;
+        }
       }
       expect(controller.client.baseUrl?.host, 'mirror');
       expect(backend.openedStart, const Duration(seconds: 9));
-      expect(auth.sources.project().first.activeLineId, 'line');
+      expect(auth.sources.project().first.activeLineId, 'mirror');
       controller.dispose();
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpWidget(const SizedBox.shrink());
@@ -1347,26 +1349,30 @@ void main() {
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 12));
     await _eventually(() => controller.activeMediaSourceId != null);
     final original = controller.origin;
-    await expectLater(controller.switchLine('wrong'), throwsStateError);
+    await expectLater(
+      controller.switchLine('wrong'),
+      throwsA(isA<MediaServerException>()),
+    );
     expect(controller.origin, same(original));
     await controller.togglePlay();
     await controller.switchLine('mirror');
     expect(controller.client.baseUrl?.host, 'mirror');
     expect(backend.openedStart, const Duration(seconds: 12));
     expect(backend.openedPaused, isTrue);
-    expect(controller.activeOrigin, same(original));
-    expect(controller.pendingLineId, 'mirror');
+    expect(controller.activeOrigin!.source, original!.source);
+    expect(controller.activeOrigin!.permit, same(original.permit));
+    expect(controller.pendingLineId, isNull);
     await controller.togglePlay();
     backend.emitEvent(VideoEventKind.position, const Duration(seconds: 13));
-    await _eventually(() => controller.activeLineId == 'mirror');
-    expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
-    expect(auth.sources.project().first.activeLineId, 'line');
-    final remembered = runtime.preference(
-      controller.origin!,
-      controller.item!,
-      controller.mediaSources,
+    await _eventually(
+      () => controller.activeOrigin?.client.baseUrl?.host == 'mirror',
     );
-    expect(remembered.preference?.lineId, isNot('mirror'));
+    expect(controller.activeOrigin?.client.baseUrl?.host, 'mirror');
+    expect(auth.sources.project().first.activeLineId, 'mirror');
+    expect(
+      auth.sources.project().first.lineSelection,
+      LineSelection.fixed('mirror'),
+    );
   });
 
   cases.test('line open failure continues on the original line', () async {
@@ -1377,7 +1383,7 @@ void main() {
     await controller.togglePlay();
     final original = controller.client;
     backend.failNextOpen = true;
-    await controller.switchLine('mirror');
+    await expectLater(controller.switchLine('mirror'), throwsA(anything));
     expect(controller.playbackLineFailure, isNotNull);
     expect(controller.state.phase, isNot(PlaybackPhase.failed));
     expect(controller.client, same(original));
@@ -1386,7 +1392,7 @@ void main() {
     expect(auth.sources.project().first.activeLineId, 'line');
   });
 
-  cases.test('in-process line switch restores the shared address when stop or dispose fails', () async {
+  cases.test('persisted line switch never mutates shared client when stop or dispose fails', () async {
     for (final failure in ['stop', 'dispose']) {
       final reports = <PlaybackReport>[];
       final client = _Client(reports);
@@ -1410,11 +1416,16 @@ void main() {
           ServerLine(id: 'mirror', address: 'https://mirror'),
         ],
         verifiedPlaybackServerId: 'a',
+        switchDispatcher: (command) async {
+          expect(command['action'], 'commitLine');
+          return <String, dynamic>{};
+        },
       );
       try {
         await playing.start();
         await playing.switchLine('mirror');
-        expect(client.baseUrl?.host, 'mirror');
+        expect(playing.client.baseUrl?.host, 'mirror');
+        expect(client.baseUrl?.host, 'a');
         if (failure == 'stop') {
           video.failStop = true;
         } else {
@@ -1434,53 +1445,55 @@ void main() {
     }
   });
 
-  cases.test(
-    'in-process line switch restores the shared address when close stop hangs',
-    () async {
-      final reports = <PlaybackReport>[];
-      final client = _Client(reports);
-      client.attachSession(
-        baseUrl: Uri.parse('https://a'),
-        accessToken: 'token',
-        userId: 'user',
-        userAgent: 'Rillight',
-      );
-      final video = _Backend();
-      final playing = PlayerController(
-        client: client,
-        itemId: 'movie',
-        backend: video,
-        window: PlayerWindow(),
-        settingsStore: MemoryPlayerSettingsStore(),
-        snapshotStore: MemoryPlaybackSessionSnapshotStore(),
-        progressInterval: const Duration(milliseconds: 30),
-        disposeTimeout: const Duration(milliseconds: 50),
-        playbackLineSnapshot: const [
-          ServerLine(id: 'line', address: 'https://a'),
-          ServerLine(id: 'mirror', address: 'https://mirror'),
-        ],
-        verifiedPlaybackServerId: 'a',
-      );
+  cases.test('persisted line switch leaves shared client untouched when close stop hangs', () async {
+    final reports = <PlaybackReport>[];
+    final client = _Client(reports);
+    client.attachSession(
+      baseUrl: Uri.parse('https://a'),
+      accessToken: 'token',
+      userId: 'user',
+      userAgent: 'Rillight',
+    );
+    final video = _Backend();
+    final playing = PlayerController(
+      client: client,
+      itemId: 'movie',
+      backend: video,
+      window: PlayerWindow(),
+      settingsStore: MemoryPlayerSettingsStore(),
+      snapshotStore: MemoryPlaybackSessionSnapshotStore(),
+      progressInterval: const Duration(milliseconds: 30),
+      disposeTimeout: const Duration(milliseconds: 50),
+      playbackLineSnapshot: const [
+        ServerLine(id: 'line', address: 'https://a'),
+        ServerLine(id: 'mirror', address: 'https://mirror'),
+      ],
+      verifiedPlaybackServerId: 'a',
+      switchDispatcher: (command) async {
+        expect(command['action'], 'commitLine');
+        return <String, dynamic>{};
+      },
+    );
+    try {
+      await playing.start();
+      await playing.switchLine('mirror');
+      expect(playing.client.baseUrl?.host, 'mirror');
+      expect(client.baseUrl?.host, 'a');
+      video.hangStop = const Duration(milliseconds: 150);
+      await playing.close();
+      expect(video.stopFinished, isFalse);
+      expect(client.baseUrl?.host, 'a');
+      expect(client.accessToken, 'token');
+      expect(client.userId, 'user');
+      expect(client.customUserAgent, 'Rillight');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    } finally {
       try {
-        await playing.start();
-        await playing.switchLine('mirror');
-        expect(client.baseUrl?.host, 'mirror');
-        video.hangStop = const Duration(milliseconds: 150);
-        await playing.close();
-        expect(video.stopFinished, isFalse);
-        expect(client.baseUrl?.host, 'a');
-        expect(client.accessToken, 'token');
-        expect(client.userId, 'user');
-        expect(client.customUserAgent, 'Rillight');
-        await Future<void>.delayed(const Duration(milliseconds: 150));
-      } finally {
-        try {
-          await playing.disposeAsync();
-        } catch (_) {}
-        playing.dispose();
-      }
-    },
-  );
+        await playing.disposeAsync();
+      } catch (_) {}
+      playing.dispose();
+    }
+  });
 
   cases.test(
     'playback line label uses a nickname, otherwise host and port',

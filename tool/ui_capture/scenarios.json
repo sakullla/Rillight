@@ -1,5 +1,90 @@
 [
 {
+  "id": "player-lines-auto-landscape",
+  "feature": "player",
+  "platforms": [
+    "phone"
+  ]
+},
+{
+  "id": "player-line-reconnecting-landscape",
+  "feature": "player",
+  "platforms": [
+    "phone"
+  ]
+},
+{
+  "id": "player-line-confirmation-landscape",
+  "feature": "player",
+  "platforms": [
+    "phone"
+  ]
+},
+{ "id": "player-line-confirmation", "feature": "player", "platforms": ["desktop", "phone", "tv"] },
+{
+  "id": "player-lines-auto",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-lines-fixed",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-lines-pending",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-reconnecting",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-recovery-cancelled",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-recovered",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
+  "id": "player-line-recovery-failed",
+  "feature": "player",
+  "platforms": [
+    "desktop",
+    "phone",
+    "tv"
+  ]
+},
+{
   "id": "entry-comparison-locked",
   "feature": "entry",
   "platforms": [

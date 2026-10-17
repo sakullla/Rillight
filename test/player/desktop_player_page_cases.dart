@@ -84,6 +84,12 @@ void main() {
         password: 'correct-horse',
       ),
     );
+    await tester.runAsync(
+      () => auth.selectLine(
+        auth.session!.server.id,
+        LineSelection.fixed(auth.session!.server.activeLineId!),
+      ),
+    );
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(() async {
@@ -269,6 +275,11 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.byKey(const Key('player-byte-cache-track')), findsNothing);
+      for (var i = 0; i < 40 && current.loading; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(current.error, isNull);
+      expect(backend.attempts, 2);
       expect(find.byType(BufferedRangesTrack), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {

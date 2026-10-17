@@ -14,6 +14,7 @@ import 'package:rillight/player/cache/cache_limits.dart';
 import 'package:rillight/player/rillight_video_backend.dart';
 import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/player/player_settings.dart';
+import 'package:rillight/player/playback_recovery_coordinator.dart';
 import 'package:rillight/player/video_backend.dart';
 import 'package:rillight_player/rillight_player.dart';
 
@@ -454,7 +455,7 @@ void main() {
 
   for (final interrupted in [false, true]) {
     cases.test(
-      'network recovery restores settings and respects interruption=$interrupted',
+      'network failure delegates recovery without reopening interruption=$interrupted',
       () async {
         final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         upstream.listen((request) async {
@@ -494,27 +495,14 @@ void main() {
         expect(response.statusCode, HttpStatus.serviceUnavailable);
         await response.drain<void>();
         final finished = backend.events
-            .firstWhere(
-              (event) =>
-                  event.kind == VideoEventKind.buffering &&
-                  event.value == false,
-            )
-            .timeout(const Duration(seconds: 8));
+            .firstWhere((event) => event.kind == VideoEventKind.error)
+            .timeout(const Duration(seconds: 2));
         if (interrupted) first.emit('interruption', 'audioFocus');
         first.emit('error', 'synthetic network failure');
-        await finished;
-        expect(recovered.request!.paused, isTrue);
-        expect(
-          recovered.commands,
-          containsAllInOrder([
-            'audio',
-            'volume',
-            'rate',
-            if (!interrupted) 'play',
-          ]),
-        );
-        if (interrupted) expect(recovered.commands, isNot(contains('play')));
-        expect((await backend.diagnostics())['playbackActive'], !interrupted);
+        expect((await finished).value, 'synthetic network failure');
+        expect(creates, 1);
+        expect(recovered.request, isNull);
+        expect(recovered.commands, isEmpty);
       },
     );
   }
@@ -1030,7 +1018,12 @@ void main() {
       expect(backend.lastFailure, isNull);
     },
   );
-  for (final status in [HttpStatus.ok, HttpStatus.unauthorized]) {
+  for (final status in [
+    HttpStatus.ok,
+    HttpStatus.unauthorized,
+    HttpStatus.forbidden,
+    HttpStatus.tooManyRequests,
+  ]) {
     cases.test(
       'transport reports HTTP $status before the core finishes opening',
       () async {
@@ -1040,6 +1033,7 @@ void main() {
         upstream.listen((request) async {
           receivedUa = request.headers.value('user-agent');
           request.response.statusCode = status;
+          if (status == 429) request.response.headers.set('retry-after', '90');
           request.response.add(List<int>.filled(1024, 7));
           await request.response.close();
         });
@@ -1056,8 +1050,15 @@ void main() {
           (event) => status == HttpStatus.ok
               ? event.kind == VideoEventKind.cacheSpeed &&
                     (event.value as num) > 0
-              : event.kind == VideoEventKind.authenticationRequired &&
-                    event.value == status,
+              : status == 401
+              ? event.kind == VideoEventKind.authenticationRequired &&
+                    event.value == status
+              : event.kind == VideoEventKind.error &&
+                    event.value is PlaybackRecoveryFailure &&
+                    (event.value as PlaybackRecoveryFailure).kind ==
+                        (status == 403
+                            ? PlaybackRecoveryFailureKind.forbidden
+                            : PlaybackRecoveryFailureKind.rateLimited),
         );
         final opening = backend.open(
           VideoOpenRequest(

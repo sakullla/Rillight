@@ -1,3 +1,5 @@
+import 'package:rillight/player/playback_line_recovery_ui.dart';
+import 'package:rillight/media_server/playback.dart';
 import 'package:rillight/app/ui/app_icons.dart';
 import 'package:rillight/player/buffered_ranges_track.dart';
 
@@ -90,6 +92,169 @@ class _FailOneOpenBackend extends FakeVideoBackend {
 
 void main() {
   setUp(isolateImageCache);
+  Widget recoveryHarness(Widget child) => CupertinoApp(
+    locale: const Locale('zh'),
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: [
+      AppLocalizations.delegate,
+      ...GlobalCupertinoLocalizations.delegates,
+    ],
+    home: CupertinoPageScaffold(child: Center(child: child)),
+  );
+
+  testWidgets(
+    'line confirmation requires explicit missing track choices and never offers invalid resume',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const plan = PlaybackSwitchPlan(
+        sourceId: 'target',
+        positionTicks: 900000000,
+        paused: true,
+        maxStreamingBitrate: 8000000,
+        targetRuntimeTicks: 800000000,
+        timelineConfirmed: false,
+        audioIndex: null,
+        subtitleIndex: null,
+        audioNeedsChoice: true,
+        subtitleNeedsChoice: true,
+        audioChoices: [
+          MediaStreamInfo(index: 7, type: 'Audio', displayTitle: '中文音轨'),
+        ],
+        subtitleChoices: [
+          MediaStreamInfo(index: 9, type: 'Subtitle', displayTitle: '中文字幕'),
+        ],
+      );
+      final choices = <SwitchResumeChoice>[];
+      int? selectedAudio;
+      var turnedOff = false;
+      await tester.pumpWidget(
+        recoveryHarness(
+          PlaybackSwitchConfirmation(
+            plan: plan,
+            onConfirm:
+                (
+                  choice, {
+                  audioIndex,
+                  subtitleIndex,
+                  acceptDefaultAudio = false,
+                  turnSubtitlesOff = false,
+                }) async {
+                  choices.add(choice);
+                  selectedAudio = audioIndex;
+                  turnedOff = turnSubtitlesOff;
+                },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('playback-confirm-resume')), findsNothing);
+      expect(find.textContaining('原音轨不可用'), findsOneWidget);
+      expect(find.textContaining('原字幕不可用'), findsOneWidget);
+      final begin = find.byKey(const Key('playback-confirm-beginning'));
+      expect(tester.widget<AppButton>(begin).onPressed, isNull);
+      expect(choices, isEmpty);
+      await tester.tap(find.byKey(const Key('playback-confirm-audio-7')));
+      await tester.pump();
+      expect(tester.widget<AppButton>(begin).onPressed, isNull);
+      await tester.tap(find.byKey(const Key('playback-confirm-subtitles-off')));
+      await tester.pump();
+      await tester.ensureVisible(begin);
+      await tester.tap(begin);
+      await tester.pump();
+      expect(choices, [SwitchResumeChoice.beginning]);
+      expect(selectedAudio, 7);
+      expect(turnedOff, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'line confirmation can cancel uncertain timeline without changing tracks or position',
+    (tester) async {
+      const plan = PlaybackSwitchPlan(
+        sourceId: 'target',
+        positionTicks: 100000000,
+        paused: false,
+        maxStreamingBitrate: 8000000,
+        targetRuntimeTicks: 800000000,
+        timelineConfirmed: false,
+        audioIndex: 1,
+        subtitleIndex: null,
+        audioNeedsChoice: false,
+        subtitleNeedsChoice: false,
+        audioChoices: [],
+        subtitleChoices: [],
+      );
+      final choices = <SwitchResumeChoice>[];
+      await tester.pumpWidget(
+        recoveryHarness(
+          PlaybackSwitchConfirmation(
+            plan: plan,
+            onConfirm:
+                (
+                  choice, {
+                  audioIndex,
+                  subtitleIndex,
+                  acceptDefaultAudio = false,
+                  turnSubtitlesOff = false,
+                }) async {
+                  choices.add(choice);
+                },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.textContaining('时长或片段可能不同'), findsOneWidget);
+      expect(find.byKey(const Key('playback-confirm-resume')), findsOneWidget);
+      expect(choices, isEmpty);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(choices, [SwitchResumeChoice.cancel]);
+    },
+  );
+
+  testWidgets(
+    'line recovery provides visible cancel and chooser on small phone and TV canvas',
+    (tester) async {
+      for (final size in [
+        const Size(360, 800),
+        const Size(800, 360),
+        const Size(960, 540),
+      ]) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        var cancels = 0, selections = 0;
+        await tester.pumpWidget(
+          recoveryHarness(
+            PlaybackLineRecoveryPanel(
+              recovering: true,
+              tryingAlternative: true,
+              lineName: '备用线路 · 一个用于检查换行的较长名称',
+              onCancel: () => cancels++,
+              onChooseLines: () => selections++,
+              onRetry: () {},
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(find.text('正在尝试备用线路…'), findsOneWidget);
+        final choose = find.byKey(const Key('playback-recovery-lines'));
+        expect(choose.hitTestable(), findsOneWidget);
+        await tester.tap(choose);
+        await tester.tap(find.byKey(const Key('playback-recovery-cancel')));
+        expect(selections, 1);
+        expect(cancels, 1);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    },
+  );
+
   late RillightApp app;
   late FakeEmbyServer server;
   late FakeEmbyAdapter adapter;

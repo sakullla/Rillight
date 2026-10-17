@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'playback_recovery_coordinator.dart';
 import 'cache/http_cache_policy.dart';
 import 'cache/hls_cache_index.dart';
 import 'cache/hls_fmp4_probe.dart';
@@ -49,10 +50,12 @@ class PlaybackHttpProxy {
     this.verifiedSnapshotTtl,
     this.integrityRecheck,
     this._waitForRetry,
+    PlaybackRecoveryBudget? budget,
   ) : _secret = List.generate(
         24,
         (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join() {
+    recoveryBudget = budget;
     _cacheReady = pendingCache?.then((value) => _cache = value);
     _cacheReady?.ignore();
     _client.autoUncompress = true;
@@ -60,6 +63,45 @@ class PlaybackHttpProxy {
     _client.maxConnectionsPerHost = _maxRequests + 4;
     _client.connectionTimeout = const Duration(seconds: 15);
     _server.listen((request) => unawaited(_serve(request)));
+  }
+
+  PlaybackRecoveryBudget? _recoveryBudget;
+  Timer? _recoveryDeadline;
+  PlaybackRecoveryBudget? get recoveryBudget => _recoveryBudget;
+  set recoveryBudget(PlaybackRecoveryBudget? value) {
+    _recoveryDeadline?.cancel();
+    _recoveryBudget = value;
+    if (value == null) return;
+    void expire() {
+      if (identical(_recoveryBudget, value)) cancelPendingReads();
+    }
+
+    _recoveryDeadline = Timer(value.remaining, expire);
+    unawaited(value.cancelled.then((_) => expire()));
+  }
+
+  Duration _recoveryRemaining(_ProxyRead read) {
+    final external = _recoveryBudget;
+    external?.check();
+    final local = read.recoveryBudget ??= PlaybackRecoveryBudget(
+      total: const Duration(seconds: 5),
+    );
+    local.check();
+    return external == null || local.remaining < external.remaining
+        ? local.remaining
+        : external.remaining;
+  }
+
+  Duration _requestTimeout(Duration configured, _ProxyRead read) {
+    _recoveryBudget?.check();
+    var result = configured < const Duration(seconds: 5)
+        ? configured
+        : const Duration(seconds: 5);
+    final external = _recoveryBudget?.remaining;
+    final local = read.recoveryBudget?.remaining;
+    if (external != null && external < result) result = external;
+    if (local != null && local < result) result = local;
+    return result;
   }
 
   final HttpServer _server;
@@ -203,7 +245,9 @@ class PlaybackHttpProxy {
   int? _lastUpstreamPhaseElapsedMs;
   int _mediaHeaderTimeouts = 0;
   int _mediaResponseHeaders = 0;
+  DateTime? _retryAfterDeadline;
   int? _authenticationStatus;
+  String? _terminalRecoveryFailure;
   int? _prefetchAuthenticationStatus;
   int _inFlight = 0;
   int _inFlightPeak = 0;
@@ -509,7 +553,14 @@ class PlaybackHttpProxy {
       'lastUpstreamPhase': _lastUpstreamPhase,
       'lastUpstreamFailureKind': _lastUpstreamFailureKind,
       'lastUpstreamPhaseElapsedMs': _lastUpstreamPhaseElapsedMs,
+      'retryAfterMs': _retryAfterDeadline == null
+          ? null
+          : max(
+              0,
+              _retryAfterDeadline!.difference(DateTime.now()).inMilliseconds,
+            ),
       'authenticationStatus': _authenticationStatus,
+      'terminalRecoveryFailure': _terminalRecoveryFailure,
       'prefetchAuthenticationStatus': _prefetchAuthenticationStatus,
       'hlsResourceExpiries': _hlsResourceExpiries,
       'upstreamFailures': [
@@ -637,6 +688,7 @@ class PlaybackHttpProxy {
     Duration verifiedSnapshotTtl = const Duration(seconds: 5),
     Duration integrityRecheck = const Duration(seconds: 2),
     Future<void> Function(Duration)? waitForRetry,
+    PlaybackRecoveryBudget? recoveryBudget,
   }) async => PlaybackHttpProxy._(
     await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
     origin,
@@ -664,6 +716,7 @@ class PlaybackHttpProxy {
     verifiedSnapshotTtl,
     integrityRecheck,
     waitForRetry ?? _retryTimer,
+    recoveryBudget,
   );
 
   static Future<void> _retryTimer(Duration duration) =>
@@ -1783,7 +1836,7 @@ class PlaybackHttpProxy {
   static Duration? _retryAfter(String? value) {
     if (value == null) return null;
     final seconds = int.tryParse(value);
-    if (seconds != null) return Duration(seconds: seconds.clamp(0, 120));
+    if (seconds != null) return Duration(seconds: max(0, seconds));
     try {
       final delay = HttpDate.parse(value).difference(DateTime.now());
       return delay < Duration.zero ? Duration.zero : delay;
@@ -1799,8 +1852,7 @@ class PlaybackHttpProxy {
     Duration? retryAfter,
     bool fastFailover = false,
   }) async {
-    final elapsed = DateTime.now().difference(started);
-    final remaining = const Duration(seconds: 120) - elapsed;
+    final remaining = _recoveryRemaining(read);
     final seconds = min(15, 1 << attempt);
     final jitter = Random().nextInt(201) - 100;
     final base = fastFailover
@@ -1814,7 +1866,10 @@ class PlaybackHttpProxy {
     if (remaining <= Duration.zero || delay > remaining) {
       throw const _MediaRecoveryExhausted();
     }
-    await Future.any([_waitForRetry(delay), read.cancelledFuture]);
+    await Future.any([_waitForRetry(delay), read.cancelledFuture])
+        .timeout(remaining);
+    _recoveryBudget?.check();
+    read.recoveryBudget?.check();
     read.check();
   }
 
@@ -1827,6 +1882,8 @@ class PlaybackHttpProxy {
     required Map<String, String?> overrides,
     bool reportAuthentication = true,
   }) async {
+    _recoveryBudget?.check();
+    read.recoveryBudget?.check();
     read.releaseUnconsumedResponse();
     void Function()? resumeReadAhead;
     var yieldedMediaTransfer = false;
@@ -1852,7 +1909,7 @@ class PlaybackHttpProxy {
         final request = await _observeUpstream(
           'connect',
           () => opening.timeout(
-            const Duration(seconds: 15),
+            _requestTimeout(const Duration(seconds: 5), read),
             onTimeout: () {
               unawaited(
                 opening.then<void>(
@@ -1891,11 +1948,13 @@ class PlaybackHttpProxy {
           request.headers.set(header.key, header.value);
         }
         // A fast range says nothing about the next cold range or LB node.
-        // Real media responses can take 30+ seconds to send headers and then
-        // transfer at full speed. Keep a bounded budget without learning a
-        // shorter deadline from one healthy response.
+        // The recovery deadline caps every cold header wait; successful ranges
+        // never grant a new retry window.
         final media = _roles[read.resourceKey] == PlaybackResourceRole.media;
-        final headerDeadline = media ? mediaHeaderTimeout : otherHeaderTimeout;
+        final headerDeadline = _requestTimeout(
+          media ? mediaHeaderTimeout : otherHeaderTimeout,
+          read,
+        );
         final response = await _observeUpstream(
           'headers',
           () => request.close().timeout(
@@ -1919,7 +1978,7 @@ class PlaybackHttpProxy {
         // 403 still follows the normal authentication path.
         if (!read.readAheadProducer &&
             !_serialUpstream &&
-            const [403, 409, 429, 503].contains(response.statusCode) &&
+            const [409, 429, 503].contains(response.statusCode) &&
             (yieldedMediaTransfer ||
                 (_readAhead?.diagnostics['readAheadConcurrentTransfers']
                             as int? ??
@@ -1947,31 +2006,13 @@ class PlaybackHttpProxy {
           _recoveryAttempts++;
           continue;
         }
-        // A just-completed stream can still hold the origin's lease briefly.
-        // This also affects the first request after switching sources: the new
-        // transport has no representation yet. Retry one foreground media GET
-        // on a fresh connection before publishing the refusal as an auth error.
-        // Cache gap probes and their foreground fallback share this budget.
-        if (response.statusCode == HttpStatus.forbidden &&
-            (method ?? incoming.method) == 'GET' &&
-            _roles[read.resourceKey] == PlaybackResourceRole.media &&
-            (!read.readAheadProducer ||
-                _representations[read.resourceKey]?.rangeSupported == true) &&
-            _readAhead?.hasParallelTransfers != true &&
-            read.claimRefusalRetry()) {
-          await _retireRejectedResponse(response, read);
-          for (final previous in read.requests.toList()) {
-            previous.abort();
-          }
-          read.requests.clear();
-          await _backoff(
-            0,
-            DateTime.now(),
-            read,
-            retryAfter: _retryAfter(response.headers.value('retry-after')),
-          );
-          _recoveryAttempts++;
-          continue;
+        // A bare 403 is not evidence of an expired URL. Only the provider's
+        // coordinator may classify and refresh a temporary playback URL.
+        if (response.statusCode == HttpStatus.tooManyRequests) {
+          final delay = _retryAfter(response.headers.value('retry-after'));
+          _retryAfterDeadline = delay == null
+              ? null
+              : DateTime.now().add(delay);
         }
         _lastUpstreamStatus = response.statusCode;
         final role = _roles[read.resourceKey];
@@ -2012,6 +2053,13 @@ class PlaybackHttpProxy {
         return (response, url);
       }
       throw StateError('Too many media redirects');
+    } on TlsException {
+      if (reportAuthentication &&
+          _roles[read.resourceKey] != PlaybackResourceRole.subtitle &&
+          incoming.headers.value('x-rillight-prefetch') != '1') {
+        _terminalRecoveryFailure = 'certificate';
+      }
+      rethrow;
     } finally {
       resumeReadAhead?.call();
     }
@@ -2979,29 +3027,6 @@ class PlaybackHttpProxy {
                     if (response.statusCode == HttpStatus.unauthorized ||
                         response.statusCode == HttpStatus.forbidden) {
                       _prefetchAuthenticationStatus = response.statusCode;
-                      // A future range can be temporarily rate-limited even
-                      // while current media is valid. Retry optional prefetch
-                      // with bounded backoff; actual foreground demand still
-                      // receives the authentication failure immediately.
-                      if (response.statusCode == HttpStatus.forbidden &&
-                          ahead?.diagnostics['readAheadReaderWaiting'] !=
-                              true &&
-                          attempt < 5) {
-                        for (final request in producer.requests.toList()) {
-                          request.abort();
-                        }
-                        producer.requests.clear();
-                        await _backoff(
-                          attempt,
-                          started,
-                          producer,
-                          retryAfter: _retryAfter(
-                            response.headers.value('retry-after'),
-                          ),
-                        );
-                        _recoveryAttempts++;
-                        continue;
-                      }
                       // An optional future range may be rejected while the
                       // player is still consuming valid cached bytes. Preserve
                       // those bytes and surface authentication only on demand.
@@ -3744,6 +3769,7 @@ class PlaybackHttpProxy {
     var acquired = false;
     var served = false;
     try {
+      _recoveryBudget?.check();
       _retireSupersededNativeRead(incoming, read);
       final prefetch = incoming.headers.value('x-rillight-prefetch') == '1';
       if (!prefetch) {
@@ -4116,9 +4142,7 @@ class PlaybackHttpProxy {
                 retryAfter: prefixRetryAfter,
               );
               prefixRetryAfter = null;
-              final remaining =
-                  const Duration(seconds: 120) -
-                  DateTime.now().difference(started);
+              final remaining = _recoveryRemaining(read);
               if (remaining <= Duration.zero) {
                 throw StateError('Media recovery budget exhausted');
               }
@@ -4561,9 +4585,7 @@ class PlaybackHttpProxy {
                         retryAfter: retryAfter,
                       );
                       retryAfter = null;
-                      final remaining =
-                          const Duration(seconds: 120) -
-                          DateTime.now().difference(started);
+                      final remaining = _recoveryRemaining(bodyRead);
                       if (remaining <= Duration.zero) {
                         throw StateError('Media recovery budget exhausted');
                       }
@@ -5142,6 +5164,7 @@ class PlaybackHttpProxy {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _recoveryDeadline?.cancel();
     cancelPendingReads();
     await Future.wait(
       _segmentPrefetchJobs.values.map((job) => job.task).toList(),
@@ -5273,6 +5296,17 @@ class _ProxyRead {
   _ProxyRead({this.seekGeneration = 0, this.refusalParent});
   final int seekGeneration;
   final _ProxyRead? refusalParent;
+  PlaybackRecoveryBudget? _localRecoveryBudget;
+  PlaybackRecoveryBudget? get recoveryBudget =>
+      refusalParent?.recoveryBudget ?? _localRecoveryBudget;
+  set recoveryBudget(PlaybackRecoveryBudget? value) {
+    if (refusalParent != null) {
+      refusalParent!.recoveryBudget = value;
+    } else {
+      _localRecoveryBudget = value;
+    }
+  }
+
   bool _refusalRetried = false;
   bool claimRefusalRetry() {
     if (refusalParent != null) return refusalParent!.claimRefusalRetry();

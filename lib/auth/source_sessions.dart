@@ -1612,6 +1612,78 @@ class SourceSessionRegistry {
     guard: guard,
   );
 
+  /// Publishes an already verified playback connection without revoking the
+  /// account lease. The caller owns native open and compensates a failed save.
+  Future<void> commitPlaybackLine({
+    required OperationPermit permit,
+    required MediaServerClient client,
+    required String lineId,
+    required LineSelection selection,
+    required void Function() guard,
+  }) async {
+    final id = permit.account.configuredServerId;
+    final original = _allowed(id);
+    void current() {
+      guard();
+      permit.requireValid();
+      final server = _allowed(id);
+      if (server.lines.length != original.lines.length ||
+          jsonEncode(server.lines.map((l) => l.toJson()).toList()) !=
+              jsonEncode(original.lines.map((l) => l.toJson()).toList()) ||
+          server.lineSelection != original.lineSelection ||
+          server.activeLineId != original.activeLineId ||
+          client.userId != permit.account.userId ||
+          client.serviceType != permit.account.serviceType ||
+          !server.lines.any(
+            (l) => l.id == lineId && Uri.parse(l.address) == client.baseUrl,
+          ) ||
+          (selection.fixedLineId != null && selection.fixedLineId != lineId)) {
+        throw StateError('Playback line transaction expired');
+      }
+    }
+
+    current();
+    await _enqueue(() async {
+      current();
+      final previous = ServerListSnapshot(
+        servers: _servers,
+        lastServerId: _lastServerId,
+      );
+      final next = _servers
+          .map(
+            (s) => s.id == id
+                ? s.copyWith(
+                    activeLineId: lineId,
+                    lineSelection: selection,
+                    lastSuccessfulLineId: lineId,
+                  )
+                : s,
+          )
+          .toList();
+      try {
+        await store.save(
+          ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+        );
+        current();
+      } catch (_) {
+        await store.save(previous);
+        rethrow;
+      }
+      // The commit point has no further asynchronous work. Access protection
+      // did not change, so there is no need to re-register or revoke its lease.
+      _servers = next;
+      _configurationRevision++;
+      final session = _sessions[id]!;
+      session.client.attachSession(
+        baseUrl: client.baseUrl!,
+        accessToken: client.accessToken!,
+        userId: client.userId!,
+        userAgent: client.customUserAgent,
+      );
+      _notifySourceChange(id);
+    });
+  }
+
   Future<void> rememberSelection(String id, {void Function()? guard}) async {
     guard?.call();
     if (_lastServerId == id) return;
