@@ -2,6 +2,7 @@
 const caseModules = <String>[
   'aggregation/access_boundary_cases.dart',
   'aggregation/history_cases.dart',
+  'aggregation/history_store_cases.dart',
   'aggregation/identity_cases.dart',
   'aggregation/playback_runtime_cases.dart',
   'aggregation/playback_switch_cases.dart',
@@ -41,6 +42,8 @@ const caseModules = <String>[
   'auth/provider_selection_cases.dart',
   'auth/provider_session_ownership_cases.dart',
   'auth/provider_user_agent_cases.dart',
+  'auth/server_access_cases.dart',
+  'auth/server_configuration_migration_cases.dart',
   'auth/server_import_cases.dart',
   'auth/server_list_store_cases.dart',
   'auth/server_management_cases.dart',
