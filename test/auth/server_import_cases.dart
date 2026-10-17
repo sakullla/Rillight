@@ -223,6 +223,7 @@ void main() {
       final session = auth.session;
       final remembered = (await store.load()).lastServerId;
       final requests = active.requests;
+      final createdClients = clients.length;
       final result = await auth.importServers([
         draft('alice'),
         draft('alice', address: 'https://EXAMPLE.test:443/proxy/'),
@@ -237,7 +238,7 @@ void main() {
       ]);
       expect(identical(auth.session, session), isTrue);
       expect(active.requests, requests);
-      expect(clients, isEmpty);
+      expect(clients.length, createdClients);
       expect((await store.load()).lastServerId, remembered);
       final imported = auth.savedServers.where(
         (server) => server.identityPending,

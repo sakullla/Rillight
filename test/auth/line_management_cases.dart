@@ -1,5 +1,7 @@
 import '../helpers/cupertino_test_app.dart';
 
+import 'package:dio/dio.dart';
+
 import 'package:rillight/app/ui/ui.dart' as ui;
 
 import '../helpers/widget_harness.dart';
@@ -30,6 +32,28 @@ import 'package:rillight/player/video_backend.dart';
 
 import '../emby/fake_emby_server.dart';
 import '../helpers/image_cache_fixture.dart';
+
+// These endpoints represent one server, so they share its issued tokens.
+class _SameServerAdapter extends FakeEmbyAdapter {
+  _SameServerAdapter(this.endpoints) : super(endpoints);
+  final List<FakeEmbyServer> endpoints;
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? stream,
+    Future<void>? cancelled,
+  ) {
+    for (final server in endpoints) {
+      server.issuedTokens.addAll(
+        endpoints
+            .where((s) => s.serverId == server.serverId)
+            .expand((s) => s.issuedTokens)
+            .toList(),
+      );
+    }
+    return super.fetch(options, stream, cancelled);
+  }
+}
 
 const _device = ClientDeviceInfo(
   clientName: '灯川 Rillight',
@@ -63,7 +87,7 @@ void main() {
       final auth = AuthController(
         client: EmbyClient(
           device: _device,
-          dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan, wan3])),
+          dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3])),
         ),
         credentials: MemoryCredentialStore(),
         servers: servers,
@@ -120,7 +144,7 @@ void main() {
     final auth = AuthController.memory(
       client: EmbyClient(
         device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan])),
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
       ),
     );
     addTearDown(auth.dispose);
@@ -174,7 +198,7 @@ void main() {
       final auth = AuthController.memory(
         client: EmbyClient(
           device: _device,
-          dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan, wan3])),
+          dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3])),
         ),
       );
       addTearDown(auth.dispose);
@@ -227,7 +251,7 @@ void main() {
       final auth = AuthController(
         client: EmbyClient(
           device: _device,
-          dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan, wan3])),
+          dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3])),
         ),
         credentials: MemoryCredentialStore(),
         servers: servers,
@@ -282,7 +306,7 @@ void main() {
     final auth = AuthController.memory(
       client: EmbyClient(
         device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan])),
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
       ),
     );
     addTearDown(auth.dispose);
@@ -342,7 +366,7 @@ void main() {
     final auth = AuthController(
       client: EmbyClient(
         device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan])),
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
       ),
       credentials: MemoryCredentialStore(),
       servers: servers,
@@ -723,7 +747,7 @@ void main() {
     final auth = AuthController.memory(
       client: EmbyClient(
         device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan, wan3, wan4])),
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3, wan4])),
       ),
     );
     addTearDown(auth.dispose);
@@ -887,7 +911,7 @@ void main() {
     final auth = AuthController.memory(
       client: EmbyClient(
         device: _device,
-        dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan, wan3])),
+        dio: dioForFakeEmby(_SameServerAdapter([lan, wan, wan3])),
       ),
     );
     await tester.runAsync(() async {
@@ -1016,7 +1040,7 @@ void main() {
       final auth = AuthController.memory(
         client: EmbyClient(
           device: _device,
-          dio: dioForFakeEmby(FakeEmbyAdapter([lan, wan])),
+          dio: dioForFakeEmby(_SameServerAdapter([lan, wan])),
         ),
       );
       addTearDown(auth.dispose);
@@ -1085,12 +1109,12 @@ void main() {
       await settle(tester);
 
       // 原线路与会话保持,失败原因在设置面板内可见。
-      expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+      expect(auth.lineSwitchFailure?.detail, '无法连接该线路，请检查连接或重新登录');
       expect(auth.client.baseUrl, wan.baseUrl);
       expect(auth.session?.server.activeLine?.address, wan.baseUrl.toString());
       expect(find.byKey(const Key('tv-line-switch-failure')), findsOneWidget);
       expect(find.textContaining('切换线路失败'), findsOneWidget);
-      expect(find.textContaining('HTTP 500: upstream timeout'), findsOneWidget);
+      expect(find.textContaining('无法连接该线路，请检查连接或重新登录'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     tags: ['integration'],

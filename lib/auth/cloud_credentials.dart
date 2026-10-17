@@ -82,3 +82,43 @@ class CloudCredentialStore {
   Future<void> write(String ref, StoredCloudCredentials value) =>
       writeCredential(ref, value.toJson());
 }
+
+/// A single authorization's private overlay. Discovery/cancellation never
+/// publishes persistent tokens; registry commit owns flushing and rollback.
+class PendingCloudCredentials {
+  PendingCloudCredentials(this.store);
+  final CloudCredentialStore store;
+  final Map<String, Map<String, dynamic>?> _values = {};
+  final Map<String, Map<String, dynamic>?> _previous = {};
+  Future<Map<String, dynamic>?> read(String ref) async =>
+      _values.containsKey(ref) ? _values[ref] : store.readCredential(ref);
+  Future<void> write(String ref, Map<String, dynamic> value) async {
+    _values[ref] = Map.of(value);
+  }
+
+  Future<void> delete(String ref) async {
+    _values[ref] = null;
+  }
+
+  Future<void> commit() async {
+    for (final entry in _values.entries) {
+      _previous[entry.key] = await store.readCredential(entry.key);
+      if (entry.value == null) {
+        await store.deleteCredential(entry.key);
+      } else {
+        await store.writeCredential(entry.key, entry.value!);
+      }
+    }
+  }
+
+  Future<void> rollback() async {
+    for (final entry in _previous.entries) {
+      if (entry.value == null) {
+        await store.deleteCredential(entry.key);
+      } else {
+        await store.writeCredential(entry.key, entry.value!);
+      }
+    }
+    _previous.clear();
+  }
+}

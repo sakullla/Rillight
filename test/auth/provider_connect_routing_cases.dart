@@ -51,7 +51,7 @@ Dio _dio() {
 void main() {
   setUp(isolateImageCache);
   testWidgets(
-    'selected Plex Home authorization survives real app login redirect',
+    'Plex Home keeps owner until commit and cancellation keeps the selected account',
     (tester) async {
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1;
@@ -197,25 +197,10 @@ void main() {
           () => Future<void>.delayed(const Duration(milliseconds: 100)),
         );
         await tester.pump(const Duration(milliseconds: 100));
-        expect(
-          auth.session,
-          isNull,
-          reason: 'Old owner authority is revoked before Home IO',
-        );
-        expect(oldPermit.isValid, isFalse);
-        expect(oldClient.accessToken, isNull);
-        expect(auth.client.accessToken, isNull);
-        await expectLater(
-          oldPermit.dispatch((client) => client.getViews()),
-          throwsStateError,
-        );
-        expect(catalog.resume.items, isEmpty);
-        expect(catalog.nextUp.items, isEmpty);
-        expect(catalog.latestMovies.items, isEmpty);
-        expect(catalog.latestSeries.items, isEmpty);
-        expect(catalog.libraries, isEmpty);
-        expect(find.text('Synthetic film'), findsNothing);
-        expect(find.text('Other film'), findsNothing);
+        expect(auth.session?.userId, '1');
+        expect(oldPermit.isValid, isTrue);
+        expect(oldClient.accessToken, 'owner-resource');
+        expect(catalog.latestMovies.items, isNotEmpty);
 
         expect(
           find.byType(ProviderConnectDialog),
@@ -266,8 +251,8 @@ void main() {
         await waitUntil(
           () => find.byKey(const Key('provider-error')).evaluate().isNotEmpty,
         );
-        expect(auth.session, isNull);
-        expect(oldPermit.isValid, isFalse);
+        expect(auth.session?.userId, '1');
+        expect(oldPermit.isValid, isTrue);
         expect(
           find.descendant(
             of: find.byType(ProviderConnectDialog),
@@ -317,23 +302,22 @@ void main() {
         );
         await waitUntil(
           () =>
-              find.byKey(const Key('provider-finish')).evaluate().isNotEmpty &&
-              find.byType(ui.AppLoadingBar).evaluate().isEmpty,
-        );
-        await tester.tap(find.byKey(const Key('provider-finish')));
-        await waitUntil(
-          () =>
               auth.session?.userId == '2' &&
               find.byType(ProviderConnectDialog).evaluate().isEmpty,
         );
         await settle(tester);
         expect(auth.session?.accessToken, 'child-resource');
+        expect(oldPermit.isValid, isFalse);
+        expect(oldClient.accessToken, isNull);
+        await expectLater(
+          oldPermit.dispatch((client) => client.getViews()),
+          throwsStateError,
+        );
         expect(
           auth.sources.project(AccessRegion.ordinary).single.libraryIds,
           isEmpty,
         );
-        // Opening Home again revokes Child immediately; cancelling leaves the
-        // ordinary selected session empty and allows the login redirect.
+        // Cancelling another Home selection preserves the committed child.
         await tester.ensureVisible(find.text('切换 Plex Home 用户'));
         await tester.tap(find.text('切换 Plex Home 用户'));
         await waitUntil(
@@ -349,11 +333,11 @@ void main() {
           ),
           findsNothing,
         );
-        expect(find.byType(ui.AppDialog), findsNothing);
-        expect(auth.session, isNull);
+        expect(find.byType(SourceManagement), findsOneWidget);
+        expect(auth.session?.userId, '2');
         expect(
           app.router.routeInformationProvider.value.uri.path,
-          AppRoutes.connect,
+          isNot(AppRoutes.connect),
         );
       } finally {
         if (!homeGate.isCompleted) homeGate.complete();

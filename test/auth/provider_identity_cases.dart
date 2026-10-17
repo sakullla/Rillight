@@ -297,7 +297,7 @@ void main() {
     await expectLater(registry.ensureSession('jelly'), throwsStateError);
   });
 
-  test('Home replacement revokes immediately, clears selected libraries, and retains shared cloud', () async {
+  test('Home replacement revokes only after successful commit and retains shared cloud', () async {
     final a = source(
       'a',
       MediaServerType.plex,
@@ -337,8 +337,8 @@ void main() {
       region: AccessRegion.ordinary,
       configuredServerId: 'a',
     );
-    expect(parentPermit.isValid, isFalse);
-    await expectLater(registry.ensureSession('a'), throwsStateError);
+    expect(parentPermit.isValid, isTrue);
+    expect(await registry.ensureSession('a'), same(parent));
     final child = source(
       'a',
       MediaServerType.plex,
@@ -351,6 +351,7 @@ void main() {
       value: credential(child, user: 'child-user'),
     );
     expect(session.account.homeUserId, 'child');
+    expect(parentPermit.isValid, isFalse);
     expect(
       registry
           .project(AccessRegion.ordinary)
@@ -491,7 +492,7 @@ void main() {
     },
   );
 
-  test('failed identity persistence retains credentials and configuration but cannot revive old permits', () async {
+  test('failed identity persistence retains credentials configuration and live old permits', () async {
     final old = source(
       'a',
       MediaServerType.plex,
@@ -530,7 +531,7 @@ void main() {
       ),
       throwsStateError,
     );
-    expect(permit.isValid, isFalse);
+    expect(permit.isValid, isTrue);
     expect((await credentials.read('a'))!.homeUserId, 'parent');
     expect((await store.load()).servers.single.homeUserId, 'parent');
     expect(attempt.isValid, isFalse);

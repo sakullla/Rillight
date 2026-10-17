@@ -161,7 +161,7 @@ void main() {
     },
   );
 
-  test('selected session survives aggregation scope but Home/relogin authority revokes pending requests', () async {
+  test('selected session survives scope and pending authorization; logout revokes requests', () async {
     await selectJellyfin();
     final id = auth.session!.server.id;
     await auth.sources.configureScope(id, participates: false, libraryIds: {});
@@ -172,16 +172,25 @@ void main() {
     jellyfin.delay = gate;
     jellyfin.arrived = Completer<void>();
     final request = old.getItem('movie-1');
-    final rejection = expectLater(request, throwsA(anything));
     await jellyfin.arrived!.future;
     final attempt = await auth.sources.beginAuthorization(
       serviceType: MediaServerType.jellyfin,
       region: AccessRegion.ordinary,
       configuredServerId: id,
     );
-    expect(auth.isLoggedIn, isFalse);
+    expect(auth.isLoggedIn, isTrue);
     gate.complete();
+    expect((await request).id, 'movie-1');
+    final revokedGate = Completer<void>();
+    jellyfin.delay = revokedGate;
+    jellyfin.arrived = Completer<void>();
+    final revoked = old.getItem('movie-1');
+    final rejection = expectLater(revoked, throwsA(anything));
+    await jellyfin.arrived!.future;
+    await auth.sources.logoutSource(id);
+    revokedGate.complete();
     await rejection;
-    attempt.cancel();
+    expect(attempt.isValid, isFalse);
+    expect(auth.isLoggedIn, isFalse);
   });
 }

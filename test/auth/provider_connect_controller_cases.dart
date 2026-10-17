@@ -81,8 +81,8 @@ void main() {
           'correct-horse',
         );
         expect(controller.failure, isNull);
-        expect(controller.stage, ProviderConnectStage.libraries);
-        expect(controller.libraries, isNotEmpty);
+        expect(controller.stage, ProviderConnectStage.done);
+        expect(controller.libraries, isEmpty);
         await controller.finish();
         expect(controller.failure, isNull);
         expect(auth.session?.server.verifiedServerId, fake.serverId);
@@ -118,11 +118,11 @@ void main() {
     });
 
     test(
-      'password commit waits for explicit scope then activates Jellyfin',
+      'password commit directly activates Jellyfin without a library scope',
       () async {
         await controller.password(fake.url.toString(), 'alice', 'password');
         expect(controller.failure, isNull);
-        expect(controller.stage, ProviderConnectStage.libraries);
+        expect(controller.stage, ProviderConnectStage.done);
         expect(
           auth.sources.project(AccessRegion.ordinary).single.scopeKnown,
           isFalse,
@@ -134,7 +134,7 @@ void main() {
         expect(controller.stage, ProviderConnectStage.done);
         expect(auth.client.serviceType, MediaServerType.jellyfin);
         expect(auth.session!.userId, 'alice-id');
-        expect(auth.savedServers.single.libraryIds, isNotEmpty);
+        expect(auth.savedServers.single.libraryIds, isEmpty);
       },
     );
 
@@ -148,7 +148,7 @@ void main() {
         await controller.authorize(fake.url.toString());
         expect(controller.failure, MediaServerFailureKind.unsupported);
         await controller.password(fake.url.toString(), 'alice', 'password');
-        expect(controller.stage, ProviderConnectStage.libraries);
+        expect(controller.stage, ProviderConnectStage.done);
       },
     );
 
@@ -177,7 +177,7 @@ void main() {
         expect(controller.attempt!.code, isNotEmpty);
         await waitFor(
           () =>
-              controller.stage == ProviderConnectStage.libraries ||
+              controller.stage == ProviderConnectStage.done ||
               controller.failure != null,
         );
         expect(controller.failure, isNull);
@@ -214,32 +214,37 @@ void main() {
       expect(controller.stage, ProviderConnectStage.credentials);
     });
 
-    test('cancel during scope save cannot activate the source later', () async {
-      controller.dispose();
-      auth.dispose();
-      final store = DelayedServerStore();
-      auth = AuthController(
-        regionAccess: TestRegionAccessController(),
-        client: JellyfinClient(device: device),
-        credentials: MemoryCredentialStore(),
-        servers: store,
-      );
-      controller = ProviderConnectController(
-        pollInterval: const Duration(milliseconds: 10),
-        auth: auth,
-      )..reset(MediaServerType.jellyfin);
-      await controller.password(fake.url.toString(), 'alice', 'password');
-      expect(controller.failure, isNull);
-      store.gate = Completer<void>();
-      store.entered = Completer<void>();
-      final finishing = controller.finish();
-      await store.entered!.future;
-      controller.reset();
-      store.gate!.complete();
-      await finishing;
-      expect(auth.session, isNull);
-      expect(controller.stage, ProviderConnectStage.credentials);
-    });
+    test(
+      'cancel during authorization save rolls back and cannot activate later',
+      () async {
+        controller.dispose();
+        auth.dispose();
+        final store = DelayedServerStore();
+        auth = AuthController(
+          regionAccess: TestRegionAccessController(),
+          client: JellyfinClient(device: device),
+          credentials: MemoryCredentialStore(),
+          servers: store,
+        );
+        controller = ProviderConnectController(
+          pollInterval: const Duration(milliseconds: 10),
+          auth: auth,
+        )..reset(MediaServerType.jellyfin);
+        store.gate = Completer<void>();
+        store.entered = Completer<void>();
+        final finishing = controller.password(
+          fake.url.toString(),
+          'alice',
+          'password',
+        );
+        await store.entered!.future;
+        controller.reset();
+        store.gate!.complete();
+        await finishing;
+        expect(auth.session, isNull);
+        expect(controller.stage, ProviderConnectStage.credentials);
+      },
+    );
   });
 
   test(
@@ -278,6 +283,12 @@ void main() {
         );
         expect(controller.failure, isNull);
         expect(auth.sources.project(AccessRegion.ordinary), isEmpty);
+        expect(
+          await cloud.readCredential(controller.account!.credentialRef),
+          isNull,
+          reason:
+              'Discovery stays in the candidate overlay until resource commit',
+        );
         final ownerResource = controller.resources.single;
         await controller.selectResource(
           ownerResource,
@@ -286,7 +297,7 @@ void main() {
         expect(controller.failure, isNull);
         controller.selectedLibraries.addAll(controller.libraries.keys);
         await controller.finish();
-        expect(auth.savedServers.single.libraryIds, isNotEmpty);
+        expect(auth.savedServers.single.libraryIds, isEmpty);
         final browse = BrowseController(
           auth: auth,
           cache: CatalogCache(),
@@ -323,7 +334,7 @@ void main() {
         await controller.restoreHome();
         expect(controller.failure, isNull);
         expect(controller.resources, isEmpty);
-        expect(auth.session, isNull);
+        expect(auth.session!.userId, isNotEmpty);
         final home = controller.users.last;
         await controller.selectHome(home, 'bad');
         expect(controller.failure, MediaServerFailureKind.forbidden);
@@ -334,7 +345,7 @@ void main() {
         expect(resource.homeUserId, home.id);
         await controller.selectResource(resource, resource.connections.first);
         expect(controller.failure, isNull);
-        expect(controller.stage, ProviderConnectStage.libraries);
+        expect(controller.stage, ProviderConnectStage.done);
         expect(controller.selectedLibraries, isEmpty);
         expect(
           auth.sources.project(AccessRegion.ordinary).single.scopeKnown,

@@ -105,7 +105,7 @@ void main() {
 
       expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
       expect(find.byType(AppErrorView), findsOneWidget);
-      expect(find.text('HTTP 401: invalid credentials'), findsOneWidget);
+      expect(find.text('HTTP 401'), findsOneWidget);
       expect(auth.isLoggedIn, isFalse);
 
       await tester.enterText(
@@ -224,7 +224,8 @@ void main() {
 
     expect(find.byKey(ConnectFormKeys.submit), findsOneWidget);
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.text('HTTP 403: 该线路已被禁用'), findsOneWidget);
+    expect(find.text('HTTP 403: 服务器或访问防护拒绝了请求，请检查地址或线路后重试'), findsOneWidget);
+    expect(find.textContaining('该线路已被禁用'), findsNothing);
     expect(find.text('连接失败'), findsNothing);
     expect(auth.isLoggedIn, isFalse);
     expect(auth.client.baseUrl, isNull);

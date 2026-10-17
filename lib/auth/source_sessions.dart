@@ -113,7 +113,13 @@ class SourceAuthorization {
 }
 
 class SourceSession {
-  SourceSession._(this.account, this.client, this.revision);
+  SourceSession._(
+    this.account,
+    this.client,
+    this.revision, {
+    this.verified = false,
+  });
+  final bool verified;
   final SourceAccount account;
   final MediaServerClient client;
   final int revision;
@@ -222,7 +228,8 @@ enum ManualCheckStatus {
 }
 
 class ManualCheckResult {
-  const ManualCheckResult(this.status, this.checkedAt);
+  const ManualCheckResult(this.status, this.checkedAt, {this.failureKind});
+  final MediaServerFailureKind? failureKind;
   final ManualCheckStatus status;
   final DateTime checkedAt;
 }
@@ -286,6 +293,7 @@ class SourceSessionRegistry {
   final Map<String, int> _scopes = {};
   final Set<String> _transitioning = {};
   final Set<String> _credentialChanges = {};
+  final Set<String> _candidateCommits = {};
   final Set<String> _cloudDisconnects = {};
   int _cloudRevision = 0;
   final Set<MembershipCleanup> _migrationHooks = {};
@@ -415,6 +423,21 @@ class SourceSessionRegistry {
   }
 
   int _revision = 0;
+  int _configurationRevision = 0;
+  int get configurationRevision => _configurationRevision;
+  SavedServer server(String id) => _allowed(id);
+  MediaServerClient createCandidate(MediaServerType type) => _clientFor(type);
+  String? connectedLineId(String id) {
+    final current = _sessions[id]?.client.baseUrl?.toString();
+    return _servers
+        .where((s) => s.id == id)
+        .firstOrNull
+        ?.lines
+        .where((l) => l.address == current)
+        .firstOrNull
+        ?.id;
+  }
+
   final Map<String, int> _authAttempts = {};
   final Map<String, SourceAuthorization> _pendingAuthorizations = {};
   final Map<String, Future<SourceSession>> _sessionAcquisitions = {};
@@ -422,7 +445,6 @@ class SourceSessionRegistry {
 
   void _requireCurrent(SavedServer server, int scope, int generation) {
     if (_cloudDisconnects.contains(server.cloudCredentialRef) ||
-        _pendingAuthorizations.containsKey(server.id) ||
         _credentialChanges.contains(server.id) ||
         (_scopes[server.id] ?? 0) != scope ||
         _allowed(server.id).region != server.region ||
@@ -611,6 +633,8 @@ class SourceSessionRegistry {
             );
             guard();
             _servers = next;
+            _configurationRevision++;
+            _notifySourceChange(id);
             results.add(result(ServerImportStatus.added, id: id));
           } catch (error) {
             var rollbackFailed = false;
@@ -722,12 +746,11 @@ class SourceSessionRegistry {
     }
     if (_cloudDisconnects.contains(existing?.cloudCredentialRef) ||
         _transitioning.contains(id) ||
-        _credentialChanges.contains(id)) {
+        (_credentialChanges.contains(id) || _candidateCommits.contains(id))) {
       throw StateError('Source changing');
     }
-    // A Home switch/relogin revokes the old user immediately, before PIN IO.
-    _sessions.remove(id)?.client.clearSession();
-    _invalidate(id);
+    // Preparing another account must not revoke the still usable session.
+    _scopes.putIfAbsent(id, () => 0);
     final attempt = (_authAttempts[id] ?? 0) + 1;
     _authAttempts[id] = attempt;
     final authorization = SourceAuthorization._(
@@ -762,6 +785,10 @@ class SourceSessionRegistry {
     SourceAuthorization authorization, {
     required SavedServer server,
     required StoredCredentials value,
+    SessionIdentityVerifier? candidateVerifier,
+    Future<void> Function()? persistCandidate,
+    Future<void> Function()? rollbackCandidate,
+    bool remember = false,
   }) async {
     void guard() {
       authorization.requireValid();
@@ -794,12 +821,53 @@ class SourceSessionRegistry {
         userId: value.userId,
         userAgent: server.userAgent,
       );
-      await sessionIdentityVerifier?.call(server, value, client);
+      await (candidateVerifier ?? sessionIdentityVerifier)?.call(
+        server,
+        value,
+        client,
+      );
       guard();
       final user = await client.getUser();
       guard();
       if (user.id != value.userId) {
         throw StateError('Account identity mismatch');
+      }
+      final addresses = <String>{};
+      for (final line in server.lines) {
+        final uri = normalizeServerAddress(line.address);
+        if (!addresses.add(uri.toString())) throw StateError('Duplicate line');
+        if (line.id == server.activeLine?.id) continue;
+        final probe = _clientFor(server.serviceType);
+        try {
+          probe.setUserAgent(server.userAgent);
+          final info = await probe.getPublicInfo(uri);
+          guard();
+          if (info.id != server.verifiedServerId) {
+            throw const MediaServerException(
+              MediaServerFailureKind.incompatibleServer,
+            );
+          }
+          probe.attachSession(
+            baseUrl: uri,
+            accessToken: value.accessToken,
+            userId: value.userId,
+            userAgent: server.userAgent,
+          );
+          await (candidateVerifier ?? sessionIdentityVerifier)?.call(
+            server,
+            value,
+            probe,
+          );
+          guard();
+          if ((await probe.getUser()).id != value.userId) {
+            throw const MediaServerException(
+              MediaServerFailureKind.invalidCredentials,
+            );
+          }
+          guard();
+        } finally {
+          probe.clearSession();
+        }
       }
       await _enqueue(() async {
         guard();
@@ -826,42 +894,50 @@ class SourceSessionRegistry {
           participates: old?.participates ?? server.participates,
         );
         var savedConfig = false;
-        _credentialChanges.add(server.id);
+        _candidateCommits.add(server.id);
         try {
+          await persistCandidate?.call();
+          guard();
           await credentials.write(server.id, value);
           guard();
           final next = [
-            for (final s in _servers)
-              if (s.id != server.id) s,
-            saved,
+            for (final s in _servers) s.id == server.id ? saved : s,
+            if (old == null) saved,
           ];
-          await store.save(
-            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
-          );
           savedConfig = true;
+          await store.save(
+            ServerListSnapshot(
+              servers: next,
+              lastServerId: remember ? server.id : _lastServerId,
+            ),
+          );
           guard();
           _servers = next;
+          if (remember) _lastServerId = server.id;
+          _configurationRevision++;
         } catch (_) {
-          if (savedConfig) {
-            await store.save(
-              ServerListSnapshot(
-                servers: previousServers,
-                lastServerId: _lastServerId,
+          // Attempt every compensation even when one backing store fails.
+          await Future.wait<void>([
+            if (savedConfig)
+              store.save(
+                ServerListSnapshot(
+                  servers: previousServers,
+                  lastServerId: _lastServerId,
+                ),
               ),
-            );
-          }
-          if (previous == null) {
-            await credentials.delete(server.id);
-          } else {
-            await credentials.write(server.id, previous);
-          }
+            if (rollbackCandidate != null) rollbackCandidate(),
+            previous == null
+                ? credentials.delete(server.id)
+                : credentials.write(server.id, previous),
+          ]);
           rethrow;
         } finally {
-          _credentialChanges.remove(server.id);
+          _candidateCommits.remove(server.id);
         }
       });
       guard();
       authorization.cancel();
+      _invalidate(server.id);
       final session = SourceSession._(
         SourceAccount(
           serviceType: server.serviceType,
@@ -874,6 +950,7 @@ class SourceSessionRegistry {
         ),
         client,
         ++_revision,
+        verified: true,
       );
       _sessions.remove(server.id)?.client.clearSession();
       _sessions[server.id] = session;
@@ -895,7 +972,10 @@ class SourceSessionRegistry {
 
   /// Source logout never deletes a cloud grant shared with another source.
   Future<void> logoutSource(String id, {bool remove = false}) async {
-    final server = _allowed(id);
+    if (remove && !_servers.any((s) => s.id == id)) return;
+    final server = remove
+        ? _servers.firstWhere((s) => s.id == id)
+        : _allowed(id);
     _pendingAuthorizations.remove(id)?.cancel();
     _invalidate(id);
     _authAttempts[id] = (_authAttempts[id] ?? 0) + 1;
@@ -916,6 +996,7 @@ class SourceSessionRegistry {
             ),
           );
           _servers = next;
+          _configurationRevision++;
           if (_lastServerId == id) _lastServerId = null;
         }
       });
@@ -1094,13 +1175,26 @@ class SourceSessionRegistry {
     bool replaceLast = false,
   }) => _enqueue(() async {
     final next = change();
-    await store.save(
-      ServerListSnapshot(
-        servers: next,
-        lastServerId: replaceLast ? lastServerId : _lastServerId,
-      ),
+    final previous = ServerListSnapshot(
+      servers: _servers,
+      lastServerId: _lastServerId,
     );
+    try {
+      await store.save(
+        ServerListSnapshot(
+          servers: next,
+          lastServerId: replaceLast ? lastServerId : _lastServerId,
+        ),
+      );
+    } catch (_) {
+      await store.save(previous);
+      rethrow;
+    }
     _servers = next;
+    _configurationRevision++;
+    for (final server in next) {
+      if (!_transitioning.contains(server.id)) _notifySourceChange(server.id);
+    }
     if (replaceLast) _lastServerId = lastServerId;
   });
 
@@ -1228,128 +1322,312 @@ class SourceSessionRegistry {
     });
   }
 
-  /// Region-aware management of addresses. A line is never admitted as another
-  /// server, and Plex must also prove that this exact resource connection is
-  /// present in the effective user's live discovery response.
-  Future<void> setLineAddress(
-    String id,
-    String address, {
-    String? lineId,
-  }) async {
-    final server = _allowed(id);
-    final scope = _scopes[id] ?? 0;
-    final generation = access.generation;
-    final uri = normalizeServerAddress(address);
-    final target = lineId == null
-        ? null
-        : server.lines.where((line) => line.id == lineId).firstOrNull;
-    if (lineId != null && target == null) throw StateError('Unknown line');
-    if (server.lines.any(
-      (line) => line.address == uri.toString() && line.id != lineId,
-    )) {
-      throw StateError('Duplicate line');
-    }
-    if (target?.address == uri.toString()) return;
+  /// Anonymous identity first, account material only after identity matches.
+  Future<MediaServerClient> _prepareLine(
+    SavedServer server,
+    ServerLine line,
+    void Function() guard,
+  ) async {
     final probe = _clientFor(server.serviceType);
     try {
       probe.setUserAgent(server.userAgent);
-      final info = await probe.getPublicInfo(uri);
-      _requireCurrent(server, scope, generation);
-      if (info.id != (server.verifiedServerId ?? server.id)) {
+      final info = await probe.getPublicInfo(
+        normalizeServerAddress(line.address),
+      );
+      guard();
+      if (server.expectedServerId == null ||
+          info.id != server.expectedServerId) {
         throw const MediaServerException(
-          MediaServerFailureKind.forbidden,
+          MediaServerFailureKind.incompatibleServer,
           detail: '线路返回的服务器身份与当前服务器不一致',
         );
       }
-      if (server.serviceType == MediaServerType.plex) {
-        final value = await credentials.read(id);
-        _requireCurrent(server, scope, generation);
-        if (value == null || !_credentialsMatch(server, value)) {
+      final value = await credentials.read(server.id);
+      guard();
+      if (value != null) {
+        if (!_credentialsMatch(server, value)) {
           throw const MediaServerException(
             MediaServerFailureKind.sessionExpired,
           );
         }
         probe.attachSession(
-          baseUrl: uri,
+          baseUrl: normalizeServerAddress(line.address),
           accessToken: value.accessToken,
           userId: value.userId,
           userAgent: server.userAgent,
         );
         await sessionIdentityVerifier?.call(server, value, probe);
-        await probe.getUser();
-        _requireCurrent(server, scope, generation);
+        guard();
+        final user = await probe.getUser();
+        guard();
+        if (user.id != value.userId) {
+          throw const MediaServerException(
+            MediaServerFailureKind.invalidCredentials,
+          );
+        }
+      } else if (server.serviceType == MediaServerType.plex) {
+        throw const MediaServerException(MediaServerFailureKind.sessionExpired);
       }
-    } finally {
+      return probe;
+    } catch (_) {
       probe.clearSession();
+      rethrow;
     }
-    final active = target?.id == server.activeLine?.id;
-    if (active) {
-      _sessions.remove(id)?.client.clearSession();
-      _invalidate(id);
-    }
-    final nextScope = _scopes[id] ?? 0;
-    await _update(id, (current) {
-      _requireCurrent(server, nextScope, generation);
-      if (target != null &&
-          !current.lines.any(
-            (line) => line.id == target.id && line.address == target.address,
-          )) {
-        throw StateError('Line changed');
-      }
-      return current.copyWith(
-        lines: [
-          for (final line in current.lines)
-            line.id == lineId
-                ? line.copyWith(
-                    address: uri.toString(),
-                    checkStatus: 'unknown',
-                    checkedAt: null,
-                  )
-                : line,
-          if (lineId == null)
-            ServerLine(id: generateLineId(), address: uri.toString()),
-        ],
-      );
-    });
-    _notifySourceChange(id);
   }
 
-  Future<void> removeLine(String id, String lineId) async {
-    final server = _allowed(id);
-    final target = server.lines.where((line) => line.id == lineId).firstOrNull;
-    if (target == null) throw StateError('Unknown line');
-    if (server.lines.length <= 1) throw StateError('Cannot remove last line');
-    final active = server.activeLine?.id == lineId;
-    if (active) {
-      final remaining = server.lines.firstWhere((line) => line.id != lineId);
-      final result = await check(id, lineId: remaining.id);
-      if (result.status != ManualCheckStatus.available &&
-          result.status != ManualCheckStatus.needsLogin) {
-        throw const MediaServerException(
-          MediaServerFailureKind.forbidden,
-          detail: '无法核验剩余线路',
-        );
-      }
-    }
-    if (active) {
-      _sessions.remove(id)?.client.clearSession();
-      _invalidate(id);
-    }
+  /// Shared transaction. Failed prepare/save preserves the original client.
+  Future<void> _editLines(
+    String id,
+    SavedServer Function(SavedServer) edit, {
+    void Function()? guard,
+  }) async {
+    final original = _allowed(id);
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
-    await _update(id, (current) {
-      _requireCurrent(server, scope, generation);
-      final remaining = current.lines
-          .where((line) => line.id != lineId)
-          .toList();
-      if (remaining.isEmpty) throw StateError('Cannot remove last line');
-      return current.copyWith(
-        lines: remaining,
-        activeLineId: active ? remaining.first.id : current.activeLineId,
-      );
-    });
-    _notifySourceChange(id);
+    void current() {
+      guard?.call();
+      _requireCurrent(original, scope, generation);
+      final latest = _allowed(id);
+      if (jsonEncode(latest.lines.map((l) => l.toJson()).toList()) !=
+              jsonEncode(original.lines.map((l) => l.toJson()).toList()) ||
+          latest.activeLineId != original.activeLineId ||
+          latest.lineSelection != original.lineSelection ||
+          latest.userAgent != original.userAgent) {
+        throw StateError('Lines changed; retry the edit');
+      }
+    }
+
+    final candidate = edit(original);
+    if (candidate.lines.isEmpty) throw StateError('Cannot remove last line');
+    final addresses = candidate.lines.map(
+      (l) => normalizeServerAddress(l.address).toString(),
+    );
+    if (addresses.toSet().length != candidate.lines.length) {
+      throw StateError('Duplicate line');
+    }
+    final active = candidate.activeLine;
+    if (active == null ||
+        !candidate.lines.any((l) => l.id == candidate.activeLineId) ||
+        (candidate.lineSelection.fixedLineId != null &&
+            !candidate.lines.any(
+              (l) => l.id == candidate.lineSelection.fixedLineId,
+            ))) {
+      throw StateError('Unknown selected line');
+    }
+    final connectionChanged =
+        candidate.baseUrl != original.baseUrl ||
+        candidate.normalizedUserAgent != original.normalizedUserAgent;
+    final prepared = <MediaServerClient>[];
+    MediaServerClient? replacement;
+    try {
+      for (final line in candidate.lines) {
+        if (original.lines.any(
+              (old) => old.id == line.id && old.address == line.address,
+            ) &&
+            !(connectionChanged && line.id == active.id)) {
+          continue;
+        }
+        final probe = await _prepareLine(candidate, line, current);
+        prepared.add(probe);
+        if (line.id == active.id) replacement = probe;
+      }
+      current();
+      await _enqueue(() async {
+        current();
+        final previous = ServerListSnapshot(
+          servers: _servers,
+          lastServerId: _lastServerId,
+        );
+        final latest = _allowed(id).copyWith(
+          lines: candidate.lines,
+          activeLineId: candidate.activeLineId,
+          lineSelection: candidate.lineSelection,
+          lastSuccessfulLineId: candidate.lastSuccessfulLineId,
+          nickname: candidate.nickname != original.nickname
+              ? candidate.nickname
+              : _allowed(id).nickname,
+          iconId: candidate.iconId != original.iconId
+              ? candidate.iconId
+              : _allowed(id).iconId,
+          userAgent: candidate.userAgent,
+        );
+        final next = _servers.map((s) => s.id == id ? latest : s).toList();
+        try {
+          await store.save(
+            ServerListSnapshot(servers: next, lastServerId: _lastServerId),
+          );
+          current();
+        } catch (_) {
+          await store.save(previous);
+          rethrow;
+        }
+        _servers = next;
+        _configurationRevision++;
+      });
+      if (connectionChanged) {
+        _sessions.remove(id)?.client.clearSession();
+        _invalidate(id);
+        final value = replacement;
+        if (value != null && value.hasSession) {
+          _sessions[id] = SourceSession._(
+            SourceAccount(
+              configuredServerId: id,
+              verifiedServerId: candidate.expectedServerId!,
+              userId: value.userId!,
+              serviceType: candidate.serviceType,
+              region: candidate.region,
+              cloudAccountId: candidate.cloudAccountId,
+              homeUserId: candidate.homeUserId,
+            ),
+            value,
+            ++_revision,
+            verified: true,
+          );
+          prepared.remove(value);
+          value.onSessionExpired = () {
+            if (identical(_sessions[id]?.client, value)) {
+              _sessions.remove(id);
+              _invalidate(id);
+            }
+            value.clearSession();
+          };
+        }
+      }
+      _notifySourceChange(id);
+    } finally {
+      for (final probe in prepared) {
+        probe.clearSession();
+      }
+    }
   }
+
+  /// One concentrated editor save, including verified line edits. The caller's
+  /// draft is untouched on failure; only this operation publishes changes.
+  Future<void> saveConfiguration(
+    String id, {
+    required String nickname,
+    String? iconId,
+    required String userAgent,
+    required List<ServerLine> lines,
+    LineSelection? lineSelection,
+  }) => _editLines(id, (server) {
+    if (userAgent.contains(RegExp(r'[\r\n]'))) {
+      throw ArgumentError('Invalid user agent');
+    }
+    final normalized = [
+      for (final line in lines)
+        line.copyWith(address: normalizeServerAddress(line.address).toString()),
+    ];
+    if (normalized.map((l) => l.id).toSet().length != normalized.length) {
+      throw StateError('Duplicate line');
+    }
+    final activeId = normalized.any((l) => l.id == server.activeLineId)
+        ? server.activeLineId
+        : normalized.firstOrNull?.id;
+    final selection =
+        lineSelection ??
+        (server.lineSelection.isAutomatic
+            ? const LineSelection.auto()
+            : LineSelection.fixed(activeId ?? ''));
+    return server.copyWith(
+      nickname: nickname.trim(),
+      iconId: iconId,
+      userAgent: userAgent.trim(),
+      lines: normalized,
+      activeLineId: selection.fixedLineId ?? activeId,
+      lineSelection: selection,
+      lastSuccessfulLineId:
+          normalized.any((l) => l.id == server.lastSuccessfulLineId)
+          ? server.lastSuccessfulLineId
+          : activeId,
+    );
+  });
+
+  Future<void> persistProtectionReference(String id, String? reference) =>
+      _update(
+        id,
+        (server) => server.copyWith(
+          protectionRef: reference,
+          clearProtection: reference == null,
+        ),
+      );
+
+  Future<void> setLineAddress(String id, String address, {String? lineId}) =>
+      _editLines(id, (server) {
+        final uri = normalizeServerAddress(address).toString();
+        if (lineId != null && !server.lines.any((l) => l.id == lineId)) {
+          throw StateError('Unknown line');
+        }
+        return server.copyWith(
+          lines: [
+            for (final line in server.lines)
+              line.id == lineId
+                  ? line.copyWith(
+                      address: uri,
+                      checkStatus: 'unknown',
+                      checkedAt: null,
+                    )
+                  : line,
+            if (lineId == null) ServerLine(id: generateLineId(), address: uri),
+          ],
+        );
+      });
+
+  Future<void> removeLine(String id, String lineId) => _editLines(id, (server) {
+    if (!server.lines.any((l) => l.id == lineId)) {
+      throw StateError('Unknown line');
+    }
+    final remaining = server.lines.where((l) => l.id != lineId).toList();
+    if (remaining.isEmpty) throw StateError('Cannot remove last line');
+    final activeId = server.activeLineId == lineId
+        ? remaining.first.id
+        : server.activeLineId;
+    return server.copyWith(
+      lines: remaining,
+      activeLineId: activeId,
+      lineSelection: server.lineSelection.fixedLineId == lineId
+          ? LineSelection.fixed(activeId!)
+          : server.lineSelection,
+      lastSuccessfulLineId: server.lastSuccessfulLineId == lineId
+          ? activeId
+          : server.lastSuccessfulLineId,
+    );
+  });
+
+  Future<void> selectLine(
+    String id,
+    LineSelection selection, {
+    void Function()? guard,
+  }) => _editLines(
+    id,
+    (server) => server.copyWith(
+      activeLineId: selection.fixedLineId ?? server.activeLineId,
+      lineSelection: selection,
+      lastSuccessfulLineId: selection.fixedLineId ?? server.activeLineId,
+    ),
+    guard: guard,
+  );
+
+  Future<void> rememberSelection(String id) => _lastServerId == id
+      ? Future.value()
+      : _commit(
+          () {
+            _allowed(id);
+            return List.of(_servers);
+          },
+          replaceLast: true,
+          lastServerId: id,
+        );
+
+  Future<void> reorderServers(List<String> ids) => _commit(() {
+    final byId = {for (final s in _servers) s.id: s};
+    if (ids.length != byId.length ||
+        ids.toSet().length != byId.length ||
+        !ids.every(byId.containsKey)) {
+      throw ArgumentError('Invalid server order');
+    }
+    return ids.map((id) => byId[id]!).toList();
+  });
 
   Future<void> reorderLines(String id, List<String> ids) async {
     final server = _allowed(id);
@@ -1544,6 +1822,11 @@ class SourceSessionRegistry {
   /// 内存里已有同一令牌的会话则复用，不再请求公开信息或重新登录。
   Future<SourceSession> ensureSession(String id) async {
     final server = _allowed(id);
+    if (_candidateCommits.contains(id)) {
+      final existing = _sessions[id];
+      if (existing != null) return existing;
+      throw StateError('Source authorization is committing');
+    }
     final scope = _scopes[id] ?? 0;
     final generation = access.generation;
     _requireCurrent(server, scope, generation);
@@ -1661,6 +1944,22 @@ class SourceSessionRegistry {
       client.clearSession();
       rethrow;
     }
+  }
+
+  /// Reuse a just-committed proof without a second network phase after durable
+  /// selection. This clone keeps the provider's proof and transport isolated.
+  MediaServerClient? verifiedClient(String id, StoredCredentials value) {
+    final server = _allowed(id);
+    final session = _sessions[id];
+    if (session == null ||
+        !session.verified ||
+        session.client.baseUrl?.toString() != server.baseUrl ||
+        session.client.accessToken != value.accessToken ||
+        session.account.userId != value.userId ||
+        !_credentialsMatch(server, value)) {
+      return null;
+    }
+    return session.client.withRequestGuard(selectedSessionGuard(id));
   }
 
   /// Verify a selected-source client without registering a second authority.
@@ -1845,6 +2144,7 @@ class SourceSessionRegistry {
         ),
         client,
         ++_revision,
+        verified: true,
       );
       _sessions.remove(id)?.client.clearSession();
       _sessions[id] = session;
@@ -1955,6 +2255,7 @@ class SourceSessionRegistry {
     }
 
     var status = ManualCheckStatus.unknown;
+    MediaServerFailureKind? failureKind;
     try {
       status = await (() async {
         final info = await client.getPublicInfo(Uri.parse(line.address));
@@ -1983,8 +2284,10 @@ class SourceSessionRegistry {
             : ManualCheckStatus.needsLogin;
       })().timeout(timeout);
     } on TimeoutException {
+      failureKind = MediaServerFailureKind.timeout;
       status = ManualCheckStatus.timeout;
     } on MediaServerException catch (error) {
+      failureKind = error.kind;
       status = switch (error.kind) {
         MediaServerFailureKind.timeout => ManualCheckStatus.timeout,
         MediaServerFailureKind.sessionExpired ||
@@ -2007,7 +2310,11 @@ class SourceSessionRegistry {
             generation != access.generation)) {
       throw StateError('Check revoked');
     }
-    final result = ManualCheckResult(status, DateTime.now());
+    final result = ManualCheckResult(
+      status,
+      DateTime.now(),
+      failureKind: failureKind,
+    );
     await _update(id, (current) {
       _requireCurrent(server, scope, generation);
       if (_checkAttempts[checkKey] != attempt) {

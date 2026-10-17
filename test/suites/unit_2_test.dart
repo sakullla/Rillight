@@ -11,48 +11,52 @@ void main() {
     caseEntrypoints['aggregation/identity_cases.dart']!,
   );
   group(
-    'auth/provider_line_boundaries_test.dart',
-    caseEntrypoints['auth/provider_line_boundaries_cases.dart']!,
+    'auth/provider_connect_controller_test.dart',
+    caseEntrypoints['auth/provider_connect_controller_cases.dart']!,
   );
   group(
-    'auth/provider_selection_test.dart',
-    caseEntrypoints['auth/provider_selection_cases.dart']!,
+    'auth/server_mutation_test.dart',
+    caseEntrypoints['auth/server_mutation_cases.dart']!,
   );
   group(
-    'auth/provider_session_ownership_test.dart',
-    caseEntrypoints['auth/provider_session_ownership_cases.dart']!,
-  );
-  group(
-    'auth/server_access_test.dart',
-    caseEntrypoints['auth/server_access_cases.dart']!,
-  );
-  group(
-    'auth/server_configuration_migration_test.dart',
-    caseEntrypoints['auth/server_configuration_migration_cases.dart']!,
-  );
-  group(
-    'emby/emby_item_image_test.dart',
-    caseEntrypoints['emby/emby_item_image_cases.dart']!,
+    'catalog/detail_controller_test.dart',
+    caseEntrypoints['catalog/detail_controller_cases.dart']!,
   );
   group(
     'helpers/synthetic_mailbox_test.dart',
     caseEntrypoints['helpers/synthetic_mailbox_cases.dart']!,
   );
   group(
-    'media_server/contract_test.dart',
-    caseEntrypoints['media_server/contract_cases.dart']!,
+    'library/item_format_test.dart',
+    caseEntrypoints['library/item_format_cases.dart']!,
   );
   group(
     'player/cache/cache_contract_test.dart [part 3]',
     caseEntrypoints['player/cache/cache_contract_cases.dart#2']!,
   );
   group(
-    'player/cache/directory_inventory_test.dart',
-    caseEntrypoints['player/cache/directory_inventory_cases.dart']!,
+    'player/cache/proxy_progressive_timeline_test.dart',
+    caseEntrypoints['player/cache/proxy_progressive_timeline_cases.dart']!,
+  );
+  group(
+    'player/catalog_preference_negotiation_test.dart',
+    caseEntrypoints['player/catalog_preference_negotiation_cases.dart']!,
   );
   group(
     'player/danmaku/dandanplay_client_test.dart',
     caseEntrypoints['player/danmaku/dandanplay_client_cases.dart']!,
+  );
+  group(
+    'player/danmaku/danmaku_timeline_test.dart',
+    caseEntrypoints['player/danmaku/danmaku_timeline_cases.dart']!,
+  );
+  group(
+    'player/emby_playback_client_test.dart',
+    caseEntrypoints['player/emby_playback_client_cases.dart']!,
+  );
+  group(
+    'player/next_episode_prefix_authorization_test.dart',
+    caseEntrypoints['player/next_episode_prefix_authorization_cases.dart']!,
   );
   group(
     'player/playback_check_in_test.dart',
@@ -63,12 +67,8 @@ void main() {
     caseEntrypoints['player/playback_http_proxy_cases.dart#0']!,
   );
   group(
-    'player/playback_metadata_test.dart',
-    caseEntrypoints['player/playback_metadata_cases.dart']!,
-  );
-  group(
-    'player/player_host_command_test.dart',
-    caseEntrypoints['player/player_host_command_cases.dart']!,
+    'player/playback_session_snapshot_test.dart',
+    caseEntrypoints['player/playback_session_snapshot_cases.dart']!,
   );
   group(
     'player/player_process_control_test.dart',
@@ -79,15 +79,19 @@ void main() {
     caseEntrypoints['player/player_startup_cases.dart']!,
   );
   group(
+    'player/provider_failed_preparation_recovery_test.dart',
+    caseEntrypoints['player/provider_failed_preparation_recovery_cases.dart']!,
+  );
+  group(
+    'player/provider_scoped_preference_test.dart',
+    caseEntrypoints['player/provider_scoped_preference_cases.dart']!,
+  );
+  group(
+    'player/provider_transport_test.dart',
+    caseEntrypoints['player/provider_transport_cases.dart']!,
+  );
+  group(
     'player/rillight_video_backend_test.dart [part 3]',
     caseEntrypoints['player/rillight_video_backend_cases.dart#2']!,
-  );
-  group(
-    'player/subtitle_slots_test.dart',
-    caseEntrypoints['player/subtitle_slots_cases.dart']!,
-  );
-  group(
-    'plex/plex_review_regression_test.dart',
-    caseEntrypoints['plex/plex_review_regression_cases.dart']!,
   );
 }

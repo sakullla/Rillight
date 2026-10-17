@@ -118,6 +118,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       pin = TextEditingController();
   HomeUser? homeUser;
   bool _passwordVisible = false;
+  bool _completionScheduled = false;
   VoidCallback? _releasePresentation;
   @override
   void initState() {
@@ -128,6 +129,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
       region: widget.region,
       userAgent: widget.initialUserAgent,
     );
+    controller.addListener(_completeWhenDone);
     if (widget.initialType != null && widget.existing == null) {
       controller.type = widget.initialType!;
     }
@@ -170,6 +172,7 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
   @override
   void dispose() {
     widget.auth.regionAccess.removeListener(_accessChanged);
+    controller.removeListener(_completeWhenDone);
     controller.dispose();
     final release = _releasePresentation;
     if (release != null) {
@@ -181,6 +184,19 @@ class _ProviderConnectDialogState extends State<ProviderConnectDialog> {
     password.dispose();
     pin.dispose();
     super.dispose();
+  }
+
+  void _completeWhenDone() {
+    if (!mounted ||
+        _completionScheduled ||
+        controller.busy ||
+        controller.stage != ProviderConnectStage.done) {
+      return;
+    }
+    _completionScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && controller.stage == ProviderConnectStage.done) _finish();
+    });
   }
 
   Future<void> _finish() async {

@@ -26,7 +26,10 @@ Uri normalizeServerAddress(String input) {
 
   try {
     final parsed = Uri.parse(trimmed);
-    if (parsed.host.isEmpty ||
+    if (parsed.userInfo.isNotEmpty ||
+        parsed.hasQuery ||
+        parsed.hasFragment ||
+        parsed.host.isEmpty ||
         (parsed.scheme != 'http' && parsed.scheme != 'https')) {
       throw const MediaServerException(MediaServerFailureKind.invalidAddress);
     }

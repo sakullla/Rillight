@@ -111,6 +111,12 @@ void main() {
       username: 'alice',
       password: 'correct-horse',
     );
+    for (final host in ['xn--fsqu00a.example', 'xn--bcher-kva.example']) {
+      adapter.add(
+        FakeEmbyServer(baseUrl: Uri.parse('https://$host'))
+          ..issuedTokens.addAll(server.issuedTokens),
+      );
+    }
     expect(
       await auth.addLine(
         configuredSourceId(auth, server.serverId),
@@ -435,7 +441,7 @@ void main() {
       expect(auth.client.baseUrl, isNull);
       expect(auth.savedServers.single.lines, hasLength(2));
       expect(auth.savedServers.single.activeLineId, wanLineId);
-      expect(auth.failure?.detail, 'HTTP 403: 该线路已被禁用');
+      expect(auth.failure?.detail, 'HTTP 403');
     },
   );
 
@@ -505,10 +511,10 @@ void main() {
       expect(auth.client.baseUrl, wan.baseUrl);
       expect(auth.savedServers.single.activeLineId, wanLineId);
       expect(auth.prefill, isNull);
-      expect(auth.failure, isNull);
+      expect(auth.failure, isNotNull);
       expect(auth.lineSwitchFailure, isNotNull);
       expect(auth.lineSwitchFailure?.address, server.baseUrl.toString());
-      expect(auth.lineSwitchFailure?.detail, 'HTTP 500: upstream timeout');
+      expect(auth.lineSwitchFailure?.detail, '无法连接该线路，请检查连接或重新登录');
     },
   );
 
@@ -516,7 +522,7 @@ void main() {
     'switching to a line with a different server id keeps line and session',
     () async {
       final impostor = FakeEmbyServer(
-        serverId: 'server-id-impostor',
+        serverId: server.serverId,
         serverName: '伪装服务器',
         baseUrl: Uri.parse('http://emby-impostor.test:8096'),
       );
@@ -527,7 +533,9 @@ void main() {
         username: 'alice',
         password: 'correct-horse',
       );
+      impostor.issuedTokens.addAll(server.issuedTokens);
       await auth.appendLines([impostor.baseUrl.toString()]);
+      impostor.serverId = 'server-id-impostor';
       final lineId = auth.savedServers.single.activeLineId;
       final impostorLine = auth.savedServers.single.lines.firstWhere(
         (line) => line.address == impostor.baseUrl.toString(),
@@ -544,7 +552,7 @@ void main() {
       expect(auth.client.baseUrl, server.baseUrl);
       expect(auth.savedServers.single.activeLineId, lineId);
       expect(auth.prefill, isNull);
-      expect(auth.failure, isNull);
+      expect(auth.failure, isNotNull);
       expect(auth.lineSwitchFailure, isNotNull);
       expect(auth.lineSwitchFailure?.detail, '线路返回的服务器身份与当前服务器不一致');
       // The failure state is UI-readable and specific to the target line.

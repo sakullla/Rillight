@@ -66,6 +66,8 @@ void main() {
         await login.finish();
         login.dispose();
       });
+      secondary.issuedTokens.addAll(primary.issuedTokens);
+      third.issuedTokens.addAll(primary.issuedTokens);
       await tester.pumpWidget(
         CupertinoTestApp(
           localizationsDelegates: [
